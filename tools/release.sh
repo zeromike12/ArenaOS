@@ -71,24 +71,81 @@ echo "== staged in $REL =="
 
 if [[ "$MODE" == "--publish" ]]; then
     echo "== publishing to GitHub =="
+    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+    BUNDLE="arenaos-${TAG}-qemu-x86_64.tar.gz"
+    RAW_URL="https://github.com/zeromike12/ArenaOS/raw/refs/heads/${BRANCH}/releases/${TAG}/${BUNDLE}"
     NOTES="$(mktemp)"
     {
         cat "$REL/RELEASE-NOTES.txt"
         echo
-        echo "Assets: arena-esp.img (boot disk), edk2-x86_64-code.fd +"
-        echo "ovmf-vars-template.img (tested EDK2 firmware pair), RUNNING.md"
-        echo "(how to boot), sha256sums.txt."
+        echo "Run bundle: ${BUNDLE} — arena-esp.img (boot disk),"
+        echo "edk2-x86_64-code.fd + ovmf-vars-template.img (tested EDK2"
+        echo "firmware pair), RUNNING.md (how to boot), sha256sums.txt."
     } > "$NOTES"
+
+    # Create the release first, then upload assets one by one: if one
+    # upload dies the release (and the other assets) survive.
     gh release create "$TAG" \
         --repo zeromike12/ArenaOS \
-        --target "$(git rev-parse --abbrev-ref HEAD)" \
+        --target "$BRANCH" \
         --title "$TITLE" \
-        --notes-file "$NOTES" \
-        "$REL/arena-esp.img" \
-        "$REL/edk2-x86_64-code.fd" \
-        "$REL/ovmf-vars-template.img" \
-        "$REL/RUNNING.md" \
-        "$REL/sha256sums.txt"
+        --notes-file "$NOTES"
+
+    assets_ok=1
+    for f in arena-esp.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt; do
+        gh release upload "$TAG" "$REL/$f" --repo zeromike12/ArenaOS --clobber \
+            || assets_ok=0
+    done
+
+    if (( ! assets_ok )); then
+        # Fallback (needed e.g. in sandboxes where uploads.github.com is
+        # unreachable): ship the identical bundle through the repo itself
+        # and point the release notes at it. Verify the bundle boots from
+        # an extracted copy before publishing it — no untested artifacts.
+        echo "== asset upload failed — falling back to in-repo bundle =="
+        mkdir -p "releases/$TAG"
+        ( cd "$REL" && tar czf "../releases/$TAG/$BUNDLE" \
+            arena-esp.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt )
+        ( cd "releases/$TAG" && sha256sum "$BUNDLE" > "$BUNDLE.sha256" )
+        verify_dir="$(mktemp -d)"
+        tar xzf "releases/$TAG/$BUNDLE" -C "$verify_dir"
+        ( cd "$verify_dir" && sha256sum -c sha256sums.txt )
+        eval "$(cd "$REPO_ROOT" && python3 - <<'EOF'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("tools").resolve()))
+import arena_env
+print(f"QEMU=({' '.join(repr(x) for x in arena_env.qemu_cmd() + arena_env.qemu_data_args())})")
+EOF
+)"
+        ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
+          timeout 120 "${QEMU[@]}" \
+            -M q35 -m 512M -cpu qemu64,+nx \
+            -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
+            -drive if=pflash,format=raw,file=ovmf-vars.img \
+            -drive format=raw,file=arena-esp.img \
+            -display none -serial file:verify-serial.log -no-reboot )
+        grep -aqF 'RESULT PASS' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
+            || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
+        rm -rf "$verify_dir"
+        git add "releases/$TAG"
+        git commit -m "release $TAG: in-repo QEMU run bundle (asset uploads blocked)"
+        git push origin "$BRANCH"
+        {
+            cat "$NOTES"
+            echo
+            echo "**Asset uploads to uploads.github.com failed from the build"
+            "environment; the identical run bundle is delivered through the"
+            "repo instead:**"
+            echo
+            echo "- Download: $RAW_URL"
+            echo "- Checksum: ${RAW_URL}.sha256"
+            echo "- Details:  releases/$TAG/README.md"
+        } > "$NOTES.fallback"
+        gh release edit "$TAG" --repo zeromike12/ArenaOS --notes-file "$NOTES.fallback"
+        rm -f "$NOTES.fallback"
+    fi
     rm -f "$NOTES"
     echo "== published: https://github.com/zeromike12/ArenaOS/releases/tag/$TAG =="
 fi

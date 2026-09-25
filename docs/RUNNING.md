@@ -13,11 +13,26 @@ verified against. This page explains how to boot it on your own machine.
   * Fedora: `sudo dnf install qemu-system-x86-core`
   * Arch: `sudo pacman -S qemu-full`
   * macOS: `brew install qemu`
-* The release assets (download from the release page, e.g. with `gh`):
+* The release artifacts. Normally they are attached to the GitHub
+  release itself:
 
 ```sh
 gh release download v0.2.0 --repo zeromike12/ArenaOS
 ```
+
+  The build environment cannot reach GitHub's asset-upload endpoint
+  (`uploads.github.com`), so releases additionally ship the **identical
+  bundle through the repository** under `releases/<tag>/` — download the
+  tarball, check its sha256, extract, and you have the same five files:
+
+```sh
+curl -LO https://github.com/zeromike12/ArenaOS/raw/refs/heads/arena/01a0d6fd-arenaos/releases/v0.2.0/arenaos-v0.2.0-qemu-x86_64.tar.gz
+sha256sum -c arenaos-v0.2.0-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-v0.2.0-qemu-x86_64.tar.gz
+```
+
+  (Each release's notes link its own bundle; after a branch merge the
+  same path works under `raw/refs/heads/main/...`.)
 
 | Asset | What it is |
 |---|---|
