@@ -59,7 +59,7 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       tests (divide-by-zero and bad-address #PF delivered, diagnosed, and
       *recovered*). Harness: `tools/test_m2.py`; markers `tss_installed`,
       `exc_de_recovered`, `exc_pf_recovered`.
-- [ ] 2.1b regression note: recovery taught two hardware lessons, both now
+- [x] 2.1b regression note: recovery taught two hardware lessons, both now
       encoded as tests/comments — LTR requires the TSS descriptor type
       *available* (0x9; LTR itself sets busy), and an exception handler that
       can return must treat every caller-saved register as live.
@@ -88,9 +88,14 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       host-side unit tests for the allocator logic + in-guest stress test.
       DONE: arena-heap core crate (host suite 10/10 incl. model-checked
       stress) + boot glue (ADR-0009); guards always on; m2 14/14.
-- 2.6 **Synchronization**: spinlocks (ticket or queued, decided by ADR when
+- [x] 2.6 **Synchronization**: spinlocks (ticket or queued, decided by ADR when
       SMP lands — single-core correctness first), critical-section helpers,
       lock debugging (owner tracking in debug builds).
+      DONE: arena-sync crate (host suite 6/6 incl. 4-thread
+      contention + recursion #[should_panic]), without_interrupts
+      irqsave/irqrestore, heap lock-wrapped, crit_section proves zero
+      interrupts cross a 25ms section on real PIT hardware (ADR-0010);
+      m2 16/16.
 - 2.7 **Boot split**: boot stage → `ExitBootServices()` → kernel proper
       entry with boot-info record; boot stage and kernel become separate
       crates; reboot-stability test loop (100 clean boots).

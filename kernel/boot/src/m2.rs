@@ -25,8 +25,10 @@ use crate::drivers::pit;
 use crate::frames;
 use crate::heap;
 use crate::log::{self, log_error as error, log_info as info};
+use crate::sync::without_interrupts;
 use crate::timekeeping;
 use arena_heap::HeapError;
+use arena_sync::Spinlock;
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
@@ -48,6 +50,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("heap_basics", test_heap_basics),
     ("heap_guards", test_heap_guards),
     ("heap_stress", test_heap_stress),
+    ("crit_section", test_crit_section),
+    ("spinlock_basics", test_spinlock_basics),
 ];
 
 /// Fault sites: minimal assembly that (1) records its own resume address
@@ -834,6 +838,155 @@ fn test_heap_stress() -> Result<(), &'static str> {
         heap::chunk_count(),
         heap::bytes_reserved() / 1024,
         heap::alloc_count() - base_count
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// M2.6 — synchronization: irqsave critical sections + spinlock
+// ---------------------------------------------------------------------------
+
+/// Lock exercised by `spinlock_basics`; also nests around a heap alloc to
+/// prove the (since-M2.6 lock-wrapped) heap cooperates with outer locks.
+static TEST_LOCK: Spinlock<u64> = Spinlock::new(0, || 0);
+
+/// Critical sections must do what they claim on *real* interrupt hardware:
+/// with IF=1 the PIT tick flows (vector 32, absorb stub, EOI — the M2.2
+/// chain), and `without_interrupts` freezes it completely even when
+/// entered with IF=1, then restores the exact saved RFLAGS (IF back on)
+/// so ticks resume. Also checks save/restore nesting semantics and that
+/// the boot contract (IF=0 between tests) holds on entry.
+fn test_crit_section() -> Result<(), &'static str> {
+    if crate::sync::interrupts_enabled() {
+        return Err("boot contract violated: IF=1 on test entry");
+    }
+    // 1. Save/restore round-trip: sti, restore saved (IF=0) → IF off again.
+    let saved = crate::arch::x86_64::read_flags();
+    crate::arch::x86_64::sti();
+    if !crate::sync::interrupts_enabled() {
+        return Err("sti did not set IF");
+    }
+    // SAFETY: `saved` came from read_flags in this same context, unmutated.
+    unsafe { crate::arch::x86_64::restore_flags(saved) };
+    if crate::sync::interrupts_enabled() {
+        return Err("restore_flags did not reinstate the saved IF=0");
+    }
+    // 2. Delivery window: with IF=1, ticks must arrive (bounded wait).
+    let t0 = idt::absorbed_irq_count();
+    let w0 = timekeeping::now_us();
+    // SAFETY: bounded IF window, cli on every exit path below; absorb stub
+    // EOIs both controllers (M1/M2.2 proofs).
+    crate::arch::x86_64::sti();
+    while idt::absorbed_irq_count() - t0 < 2 && timekeeping::now_us() - w0 < 500_000 {
+        core::hint::spin_loop();
+    }
+    crate::arch::x86_64::cli();
+    let delivered = idt::absorbed_irq_count() - t0;
+    if delivered < 2 {
+        return Err("no interrupt delivery with IF=1 (freeze test would be vacuous)");
+    }
+    // 3. Freeze: enter the helper with IF=1 and idle 25 ms (>2 tick
+    //    periods at 100 Hz) — not one interrupt may cross the section.
+    let c0 = idt::absorbed_irq_count();
+    // SAFETY: bounded IF window; the helper itself is the mask under test.
+    crate::arch::x86_64::sti();
+    let (inside_delta, masked_inside) = without_interrupts(|| {
+        let start = timekeeping::now_us();
+        let a = idt::absorbed_irq_count();
+        while timekeeping::now_us() - start < 25_000 {
+            core::hint::spin_loop();
+        }
+        (
+            idt::absorbed_irq_count() - a,
+            !crate::sync::interrupts_enabled(),
+        )
+    });
+    // Helper restored IF=1 (it was entered with IF=1) — re-mask per the
+    // boot contract before evaluating.
+    let restored_if_on = crate::sync::interrupts_enabled();
+    crate::arch::x86_64::cli();
+    if !masked_inside {
+        return Err("IF was not cleared inside without_interrupts");
+    }
+    if inside_delta != 0 {
+        return Err("interrupts crossed the critical section");
+    }
+    if !restored_if_on {
+        return Err("without_interrupts did not restore the entry IF=1");
+    }
+    let _ = c0;
+    // 4. Resume: after the section, delivery must restart (EOI discipline
+    //    intact — a missed EOI would wedge the LAPIC here).
+    let r0 = idt::absorbed_irq_count();
+    let w1 = timekeeping::now_us();
+    // SAFETY: bounded IF window; cli on every exit path.
+    crate::arch::x86_64::sti();
+    while idt::absorbed_irq_count() == r0 && timekeeping::now_us() - w1 < 200_000 {
+        core::hint::spin_loop();
+    }
+    crate::arch::x86_64::cli();
+    if idt::absorbed_irq_count() == r0 {
+        return Err("interrupts did not resume after the critical section");
+    }
+    info!(
+        "m2",
+        "crit_section: {delivered} ticks delivered, 0 crossed a 25ms section entered with IF=1, resumed, RFLAGS exact"
+    );
+    Ok(())
+}
+
+/// Spinlock state machine, observed in-guest: uncontended acquire, the
+/// lock reports held + owner token, try_lock refuses while held, guard
+/// drop releases and clears the owner, values persist, and the heap
+/// (itself lock-wrapped since M2.6) works while an outer lock is held.
+/// Real *contention* is proven on the host (arena-sync suite: four
+/// parallel threads, non-atomic counter, exact total) — single-CPU boot
+/// cannot generate it honestly, and we do not pretend otherwise.
+fn test_spinlock_basics() -> Result<(), &'static str> {
+    if TEST_LOCK.is_locked() || TEST_LOCK.owner_token().is_some() {
+        return Err("fresh static lock reports held");
+    }
+    {
+        let mut guard = TEST_LOCK.lock();
+        if !TEST_LOCK.is_locked() {
+            return Err("is_locked false while guard is live");
+        }
+        if TEST_LOCK.owner_token() != Some(0) {
+            return Err("owner token not recorded on acquire");
+        }
+        if TEST_LOCK.try_lock().is_some() {
+            return Err("try_lock succeeded while held");
+        }
+        *guard += 41;
+    }
+    if TEST_LOCK.is_locked() || TEST_LOCK.owner_token().is_some() {
+        return Err("guard drop did not release/clear owner");
+    }
+    if TEST_LOCK.try_lock().is_none() {
+        return Err("try_lock failed on a free lock");
+    }
+    *TEST_LOCK.lock() += 1;
+    if *TEST_LOCK.lock() != 42 {
+        return Err("protected value not preserved across lock cycles");
+    }
+    // Nested: outer test lock held across a heap alloc/free (the heap's
+    // own spinlock must acquire cleanly underneath — lock ordering with
+    // distinct locks, no recursion anywhere).
+    let layout = heap_layout(64, 16)?;
+    let ptr = {
+        let _outer = TEST_LOCK.lock();
+        heap::alloc(layout).ok_or("heap alloc under outer lock failed")?
+    };
+    // SAFETY: ptr is a live allocation from our own heap.
+    unsafe { heap::free(ptr).map_err(|_| "free under-lock alloc was rejected")? };
+    // Critical section + lock composition (the ADR-0010 pattern).
+    let value = without_interrupts(|| *TEST_LOCK.lock());
+    if value != 42 {
+        return Err("value changed unexpectedly under composition");
+    }
+    info!(
+        "m2",
+        "spinlock_basics: acquire/try_lock/drop/owner exact; heap cooperates under outer lock"
     );
     Ok(())
 }

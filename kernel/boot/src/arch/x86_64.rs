@@ -30,6 +30,39 @@ pub fn sti() {
     unsafe { core::arch::asm!("sti", options(nostack, preserves_flags, nomem)) };
 }
 
+/// RFLAGS bit 9 — Interrupt Enable Flag (SDM Vol. 1 §3.4.3).
+pub const RFLAGS_IF: u64 = 1 << 9;
+
+/// Read RFLAGS (pushfq/pop). The IF bit records whether interrupts were
+/// enabled at the call site — the "save" half of irqsave/irqrestore.
+pub fn read_flags() -> u64 {
+    let flags: u64;
+    // SAFETY: pushfq/pop are unprivileged, side-effect-free flag reads;
+    // the push/pop pair is stack-balanced and leaves flags untouched.
+    unsafe {
+        core::arch::asm!("pushfq", "pop {flags}", flags = out(reg) flags, options(preserves_flags))
+    };
+    flags
+}
+
+/// Restore a full RFLAGS value (push/popfq) — the "restore" half of
+/// irqsave/irqrestore: IF is re-enabled exactly when the saved value had
+/// it set, never unconditionally (`sti` on exit would be wrong when the
+/// critical section was entered with interrupts already masked).
+///
+/// # Safety
+/// `flags` must come from [`read_flags`] in a context compatible with the
+/// current one — popfq overwrites the whole flags register.
+pub unsafe fn restore_flags(flags: u64) {
+    // SAFETY: caller contract; push/popfq is stack-balanced.
+    unsafe { core::arch::asm!("push {flags}", "popfq", flags = in(reg) flags) };
+}
+
+/// Whether IF is currently set.
+pub fn interrupts_enabled() -> bool {
+    read_flags() & RFLAGS_IF != 0
+}
+
 /// x86 I/O port write (8-bit).
 ///
 /// # Safety

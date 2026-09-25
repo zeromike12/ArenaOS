@@ -30,7 +30,15 @@ their own `#[cfg(test)]` suites — fast, deterministic, and they can use
 
 ```
 cd kernel && cargo test -p arena-heap --lib --target x86_64-unknown-linux-gnu
+cd kernel && cargo test -p arena-sync --lib --target x86_64-unknown-linux-gnu
 ```
+
+The sync suite runs on real host threads (four-way contention with
+non-atomic increments, recursion `#[should_panic]`) — parallel behavior
+the single-CPU guest cannot honestly generate; the guest proves the lock
+*state machine* and the irqsave freeze on real PIT-tick hardware
+(`crit_section`: zero interrupts may cross a 25 ms section entered with
+IF=1, delivery must resume after).
 
 (`--lib` because the offline toolchain has no `rustdoc`; these crates have
 no doctests.) `tools/run_tests.sh` runs the host suites *and* every

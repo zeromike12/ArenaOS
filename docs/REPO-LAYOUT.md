@@ -17,7 +17,8 @@ ArenaOS/
 │   ├── Cargo.toml          ← workspace root (members grow per milestone)
 │   ├── .cargo/config.toml  ← default target = x86_64-unknown-uefi
 │   ├── libs/               ← machine-independent kernel logic (host-testable)
-│   │   └── heap/           ← arena-heap: allocator core + host suite (M2.5)
+│   │   ├── heap/           ← arena-heap: allocator core + host suite (M2.5)
+│   │   └── sync/           ← arena-sync: spinlock + owner tracking, host threads (M2.6)
 │   └── boot/               ← Milestone 1: boot stage = UEFI application
 │       └── src/
 │           ├── main.rs     ← efi_main entry, boot orchestration

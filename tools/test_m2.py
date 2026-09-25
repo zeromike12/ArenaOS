@@ -47,6 +47,14 @@ Current coverage:
   * heap_stress       — 60x32 xorshift alloc/free with tag verification,
                         exact accounting restoration, 16KiB coalescing
                         proof, ns/op timing.
+  M2.6 — synchronization (16 total):
+  * crit_section      — irqsave/irqrestore on real hardware: ticks flow
+                        with IF=1, zero cross a 25ms without_interrupts
+                        section entered with IF=1, delivery resumes,
+                        RFLAGS restored exactly.
+  * spinlock_basics   — held/owner/try_lock/drop state machine; heap
+                        alloc/free under an outer lock (contention itself
+                        is host-proven: arena-sync 4-thread suite).
   * frame_allocator   — bitmap allocator manages exactly the clipped
                         conventional regions; unique in-region frames;
                         pattern round-trip through real RAM; exact free
@@ -78,6 +86,8 @@ EXPECTED_TESTS = [
     "heap_basics",
     "heap_guards",
     "heap_stress",
+    "crit_section",
+    "spinlock_basics",
 ]
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ Rules:
 | [0007](0007-frame-allocator.md) | Physical frame allocator — flat bitmap over conventional memory | accepted |
 | [0008](0008-kernel-address-space.md) | Kernel address space — dual-view paging with per-section W^X | accepted |
 | [0009](0009-kernel-heap.md) | Kernel heap — host-tested free-list core, frame-backed chunks, always-on guards | accepted |
+| [0010](0010-synchronization-primitives.md) | Synchronization — spinlock with owner tracking, irqsave critical sections | accepted |
 
 ## Template
 

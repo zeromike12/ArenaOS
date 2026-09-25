@@ -5,6 +5,7 @@
 //! not migrate past the boot stage without an ADR (the M3+ kernel gets
 //! real locks; see M2.6).
 
+use crate::arch::x86_64;
 use core::cell::UnsafeCell;
 
 /// Boot-time single-writer cell.
@@ -25,3 +26,25 @@ impl<T> SyncCell<T> {
     }
 }
 unsafe impl<T> Sync for SyncCell<T> {}
+
+/// Run `f` with interrupts masked — irqsave/irqrestore critical section
+/// (ADR-0010). On exit the *exact* saved RFLAGS are restored, so IF is
+/// re-enabled only if it was set on entry; nesting is therefore correct.
+///
+/// If `f` panics the restore is skipped, which is fine: the panic path
+/// halts the machine anyway (panic.rs).
+pub(crate) fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+    let saved = x86_64::read_flags();
+    x86_64::cli();
+    let result = f();
+    // SAFETY: `saved` was produced by read_flags in this same context,
+    // moments ago, with no flag mutations in between (cli only cleared IF,
+    // and popfq reinstates the full saved value).
+    unsafe { x86_64::restore_flags(saved) };
+    result
+}
+
+/// Whether interrupts are currently enabled (IF flag).
+pub(crate) fn interrupts_enabled() -> bool {
+    x86_64::interrupts_enabled()
+}

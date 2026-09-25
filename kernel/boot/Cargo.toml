@@ -9,6 +9,7 @@ description = "ArenaOS boot stage — Milestone 1 kernel image (UEFI application
 # Zero third-party crates in the OS image (ADR-0004); workspace-internal
 # crates only:
 arena-heap = { path = "../libs/heap" }
+arena-sync = { path = "../libs/sync" }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

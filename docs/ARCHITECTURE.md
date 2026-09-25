@@ -179,6 +179,29 @@ against a `BTreeMap` reference model (ADR-0009).
 - Measured in guest: 1920 ops in 1.27 ms (~661 ns/op under TCG with
   guards), accounting exact to the byte.
 
+### Synchronization (M2.6) — `kernel/libs/sync` + irqsave helpers
+
+`arena-sync` (second `kernel/libs/` crate, host-tested) provides
+`Spinlock<T>`: test-and-set CAS loop + RAII guard (release-on-drop only —
+"forgotten unlock" is unrepresentable), `try_lock`, and **owner tracking**:
+each lock records the acquiring executor's token (constant BSP id at
+boot); `lock()` debug-asserts on recursive acquisition (located panic
+instead of silent self-deadlock), and `owner_token()`/`is_locked()` serve
+diagnostics. Host suite proves real parallel behavior (4 threads × 50k
+non-atomic increments → exact 200k; recursion `#[should_panic]`); the
+guest proves the state machine single-core honestly (ADR-0010). Ticket/
+queued variants are a scheduled ADR when SMP lands.
+
+Interrupt control stays an explicit, composed layer:
+`arch::x86_64::{read_flags, restore_flags, cli, sti}` and
+`sync::without_interrupts(f)` — full-RFLAGS irqsave/irqrestore, so IF is
+re-enabled *only* when it was set on entry (nesting-safe). The spinlock
+never masks interrupts internally. Boot posture unchanged: IF=0 except
+bounded tested windows; the PIT tick still flows through the IDT's
+absorb-and-EOI stub for vectors 32..255. The M2.5 heap is now
+lock-wrapped (`Spinlock<Heap<…>>`), discharging ADR-0009's promise; all
+heap tests re-pass through the lock.
+
 ### Timekeeping (M2.2)
 
 The monotonic clock is the TSC; the *meaning* of a microsecond comes from
