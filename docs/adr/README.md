@@ -24,6 +24,7 @@ Rules:
 | [0005](0005-testing-strategy.md) | Testing: automated QEMU boot tests with machine-checkable serial markers | Accepted |
 | [0006](0006-abi-philosophy.md) | Kernel/user ABI philosophy: capability invocation | Accepted (direction; register-level detail due at M4) |
 | [0007](0007-frame-allocator.md) | Physical frame allocator — flat bitmap over conventional memory | accepted |
+| [0008](0008-kernel-address-space.md) | Kernel address space — dual-view paging with per-section W^X | accepted |
 
 ## Template
 

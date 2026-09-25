@@ -5,6 +5,7 @@
 pub mod faults;
 pub mod gdt;
 pub mod idt;
+pub mod paging;
 pub mod tss;
 
 use core::arch::x86_64::__cpuid;
@@ -122,8 +123,51 @@ pub fn read_efer() -> u64 {
 
 /// CR0 bit masks — SDM Vol. 3 §2.5. (Only the bits M1 verifies; the rest
 /// join when a subsystem reads them.)
+/// Write CR0 (SDM Vol. 3 §2.5).
+///
+/// # Safety
+/// Caller must preserve required long-mode bits (PG, PE, NE, ET, MP) and
+/// understand the effect of every changed bit — paging-mode transitions are
+/// serialization points.
+pub unsafe fn write_cr0(v: u64) {
+    // SAFETY: forwarded to caller contract.
+    unsafe { core::arch::asm!("mov cr0, {}", in(reg) v, options(nostack, preserves_flags)) };
+}
+
+/// Write CR3 (SDM Vol. 3 §4.1.2) — switches the active page-table root and
+/// invalidates non-global TLB entries.
+///
+/// # Safety
+/// `v` must point at a valid, fully populated PML4 for the currently
+/// executing address space, or the next memory access faults.
+pub unsafe fn write_cr3(v: u64) {
+    // SAFETY: forwarded to caller contract.
+    unsafe { core::arch::asm!("mov cr3, {}", in(reg) v, options(nostack, preserves_flags)) };
+}
+
+/// Write EFER (SDM Vol. 4 §2.2.1).
+///
+/// # Safety
+/// Caller must preserve LME/LMA/SCE and understand every changed bit (NXE
+/// changes the meaning of PTE bit 63 for all subsequent translations).
+pub unsafe fn write_efer(v: u64) {
+    // SAFETY: EFER MSR 0xC0000080; WRMSR consumes EDX:EAX with the MSR in
+    // ECX; forwarded to caller contract.
+    unsafe {
+        core::arch::asm!(
+            "mov ecx, 0xC0000080",
+            "wrmsr",
+            in("eax") v as u32,
+            in("edx") (v >> 32) as u32,
+            out("ecx") _,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
 pub mod cr0 {
     pub const PE: u64 = 1 << 0; // Protection Enable
+    pub const WP: u64 = 1 << 16; // Write Protect (ring-0 writes honor RO pages)
     pub const PG: u64 = 1 << 31; // Paging
 }
 
@@ -136,6 +180,7 @@ pub mod cr4 {
 pub mod efer {
     pub const LME: u64 = 1 << 8; // Long Mode Enable
     pub const LMA: u64 = 1 << 10; // Long Mode Active
+    pub const NXE: u64 = 1 << 11; // No-Execute Enable (PTE bit 63)
 }
 
 /// Raw CPUID leaf result.

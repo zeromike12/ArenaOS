@@ -26,6 +26,18 @@ Current coverage:
                         IDT→absorb-stub at the programmed 100 Hz (bounds
                         generous for TCG).
   M2.3 — physical memory:
+  M2.4 — virtual memory (11 total):
+  * vm_address_space  — our PML4 is live in CR3; CR0.WP + EFER.NXE on; the
+                        higher-half alias (phys + 0xFFFFFFFF80000000)
+                        round-trips data both directions; a CALL through the
+                        higher-half alias of a .text address executes and
+                        returns the probe magic.
+  * vm_write_protect  — ring-0 write through the higher-half alias of our
+                        RO .text faults: #PF, CR2 = target VA,
+                        ec = present+write (CR0.WP binds the kernel itself).
+  * vm_nx             — instruction fetch through the higher-half alias of
+                        an RW+NX data page faults: #PF, CR2 = target VA,
+                        ec = present+instruction-fetch (EFER.NXE honored).
   * frame_allocator   — bitmap allocator manages exactly the clipped
                         conventional regions; unique in-region frames;
                         pattern round-trip through real RAM; exact free
@@ -51,6 +63,9 @@ EXPECTED_TESTS = [
     "clock_monotonic",
     "tick_rate",
     "frame_allocator",
+    "vm_address_space",
+    "vm_write_protect",
+    "vm_nx",
 ]
 
 if __name__ == "__main__":

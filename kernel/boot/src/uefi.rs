@@ -101,8 +101,42 @@ pub struct BootServices {
         descriptor_size: *mut usize,
         descriptor_version: *mut u32,
     ) -> Status,
+    // Slots 5..=16 — the UEFI 2.10 §7.3 table order. NOTE: CloseEvent and
+    // CheckEvent (slots 11/12) are long-standing boot services that are
+    // easy to misremember as absent; omitting them shifts HandleProtocol
+    // from its true slot 16 onto ReinstallProtocolInterface (slot 14),
+    // which answers every protocol query with a plausible-looking
+    // EFI_NOT_FOUND. Verified against EDK2's DxeCore mBootServices table
+    // and this firmware's own HeaderSize (376 = 24 + 44 slots).
+    pub allocate_pool: usize,
+    pub free_pool: usize,
+    pub create_event: usize,
+    pub set_timer: usize,
+    pub wait_for_event: usize,
+    pub signal_event: usize,
+    pub close_event: usize,
+    pub check_event: usize,
+    pub install_protocol_interface: usize,
+    pub reinstall_protocol_interface: usize,
+    pub uninstall_protocol_interface: usize,
+    /// EFI_HANDLE_PROTOCOL — UEFI 2.10 §7.3 (table slot 16).
+    pub handle_protocol: unsafe extern "efiapi" fn(
+        handle: usize,
+        protocol: *const Guid,
+        interface: *mut usize,
+    ) -> Status,
+    // Later slots (Reserved at 17 through CreateEventEx at 43) are not
+    // consumed at M2; add them typed, in spec order, when they are needed.
 }
-const _: () = assert!(core::mem::size_of::<BootServices>() == 24 + 40);
+const _: () = assert!(core::mem::size_of::<BootServices>() == 24 + 17 * 8);
+
+impl BootServices {
+    /// The table's own claimed spec revision (this firmware reports 0x20046,
+    /// the 2.70-era encoding (2 << 16) | 70).
+    pub fn spec_revision(&self) -> u32 {
+        self.hdr.revision
+    }
+}
 
 /// EFI_MEMORY_DESCRIPTOR — UEFI 2.10 §7.2.10 (Table 18). 40 bytes, v1.
 /// Firmware may pad descriptors (GetMemoryMap reports the actual stride in
@@ -259,5 +293,76 @@ pub fn reset_shutdown() {
             let rt = &*(*st).runtime_services;
             (rt.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
         }
+    }
+}
+
+/// EFI_GUID — UEFI 2.10 §2.2 (mixed-endian layout, 16 bytes).
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Guid(pub u32, pub u16, pub u16, pub [u8; 8]);
+const _: () = assert!(core::mem::size_of::<Guid>() == 16);
+
+/// gEfiLoadedImageProtocolGuid — UEFI 2.10 §9.1.
+pub const LOADED_IMAGE_PROTOCOL_GUID: Guid = Guid(
+    0x5B1B_31A1,
+    0x9562,
+    0x11D2,
+    [0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+);
+
+/// EFI_LOADED_IMAGE_PROTOCOL — UEFI 2.10 §9.1 (fields up to ImageSize; the
+/// rest is opaque to us). Offsets are spec-mandated and asserted below —
+/// this is how paging (M2.4) learns where firmware loaded our image.
+#[repr(C)]
+pub struct LoadedImageProtocol {
+    pub revision: u32,
+    _pad0: u32,
+    pub parent_handle: usize,
+    pub system_table: usize,
+    pub device_handle: usize,
+    pub file_path: usize,
+    pub reserved: usize,
+    pub load_options_size: u32,
+    _pad1: u32,
+    pub load_options: usize,
+    /// Where the image lives in physical memory (identity-mapped pre-EBS).
+    pub image_base: usize,
+    /// In-memory size including headers and all sections (.bss included).
+    pub image_size: u64,
+    // ImageCodeType/ImageDataType/Unload follow; not consumed at M2.
+}
+const _: () = assert!(core::mem::offset_of!(LoadedImageProtocol, image_base) == 64);
+const _: () = assert!(core::mem::offset_of!(LoadedImageProtocol, image_size) == 72);
+
+/// Query the Loaded Image Protocol for our own image: (base, size).
+/// None if firmware or the handle is not what we expect — callers treat a
+/// missing answer as a hard error (no guessing where we are loaded).
+pub fn loaded_image_info(image_handle: usize) -> Option<(u64, u64)> {
+    // SAFETY: single-CPU boot context; `boot_services()` was captured from
+    // the live system table at entry; the handle is the one firmware passed
+    // to `efi_main`; HandleProtocol writes one pointer-sized output.
+    unsafe {
+        let boot = boot_services()?;
+        let mut interface = 0usize;
+        let status =
+            (boot.handle_protocol)(image_handle, &LOADED_IMAGE_PROTOCOL_GUID, &mut interface);
+        if status != EFI_SUCCESS || interface == 0 {
+            crate::log::log_warn!(
+                "uefi",
+                "loaded_image_info: handle_protocol status={status:#x} interface={interface:#x} handle={image_handle:#x}"
+            );
+            return None;
+        }
+        let li = interface as *const LoadedImageProtocol;
+        let base = (*li).image_base as u64;
+        let size = (*li).image_size;
+        if base == 0 || size == 0 || !base.is_multiple_of(4096) {
+            crate::log::log_warn!(
+                "uefi",
+                "loaded_image_info: implausible base={base:#x} size={size:#x}"
+            );
+            return None;
+        }
+        Some((base, size))
     }
 }

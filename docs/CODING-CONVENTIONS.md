@@ -46,6 +46,21 @@
   `// UEFI 2.10 §8.2, EFI_MEMORY_DESCRIPTOR`, `// SDM Vol. 3 §6.11, IDT`.
 - `#[repr(C)]` for every ABI struct + static size/offset assertions:
   `const _: () = assert!(core::mem::size_of::<MemoryDescriptor>() == 48);`
+- **UEFI table structs must match the spec slot order exactly.** Do not
+  write EFI_BOOT_SERVICES fields from memory: CloseEvent/CheckEvent
+  (slots 11/12) are easy to forget, and omitting them shifts
+  HandleProtocol from slot 16 onto ReinstallProtocolInterface — which
+  answers every query with a plausible EFI_NOT_FOUND (cost a full debug
+  cycle in M2.4; see ADR-0008). Cross-check new table entries against
+  EDK2's DxeCore `mBootServices` initializer and the table's HeaderSize
+  (376 bytes = 24 + 44 slots on our reference OVMF).
+- **Higher-half addresses: never constant-fold `symbol + KERNEL_OFFSET`.**
+  The boot image is a non-PIE PE; LLVM materializes such link-time
+  constants as 32-bit RIP-relative `lea`, silently wrapping the addend
+  (M2.4: a folded call target lost its upper 32 bits → #PF at
+  0x9dd11120). Compute them as
+  `black_box(symbol_addr as u64) + KERNEL_OFFSET` so the offset is a
+  runtime 64-bit add. The `vm_*` tests are the regression net.
 
 ## Logging
 

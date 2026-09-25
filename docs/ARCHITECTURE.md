@@ -124,6 +124,33 @@ hot-path benchmark). The allocator is single-CPU by boot contract; the
 kernel proper replaces the mutation discipline (not necessarily the layout)
 once locks (M2.6) and SMP structures (M3) exist.
 
+### Virtual memory (M2.4)
+
+The boot stage installs its own 4-level page tables (`paging.rs`,
+ADR-0008) and switches CR3 in place — no trampoline, because the identity
+view keeps every executing address valid across the switch. Two views coexist
+until ExitBootServices (M2.7):
+
+* **identity** `[0, 4 GiB)` — every firmware-described region, RW+X. The
+  permissive flags are a documented firmware-compatibility carve-out:
+  EDK2 executes from memory the map labels Reserved/BootServicesData, and
+  firmware (up to the final `ResetSystem`) must keep running. The LAPIC
+  MMIO page is mapped explicitly from IA32_APIC_BASE — it is absent from
+  the UEFI memory map but the EOI path writes it.
+* **kernel direct map** `VA = phys + 0xFFFF_FFFF_8000_0000`, first 2 GiB,
+  RW+NX — the kernel's permanent view and the address space habit the
+  kernel proper inherits.
+
+Our image window is re-mapped at 4 KiB granularity in *both* views, per PE
+section (base/size from the Loaded Image Protocol, bounds from our own PE
+headers): `.text` R+X, `.rdata` RO+NX, rest RW+NX. CR0.WP is set, so RO
+binds ring 0 itself; EFER.NXE is asserted. The M2 tests prove all three
+enforcement paths with recovered faults: a ring-0 write to the RO `.text`
+alias (#PF ec=present+write), an instruction fetch through the NX data
+alias (#PF ec=present+I/D), and a *call* through the higher-half alias of
+`.text` that executes and returns. Bulk mappings use 2 MiB pages; the
+window splits huge pages where needed. Total cost at boot: 8 frames.
+
 ### Timekeeping (M2.2)
 
 The monotonic clock is the TSC; the *meaning* of a microsecond comes from

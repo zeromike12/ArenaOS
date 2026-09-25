@@ -39,7 +39,7 @@ use log::{log_error as error, log_info as info, log_warn as warn};
 /// linker args).
 #[unsafe(no_mangle)]
 pub extern "efiapi" fn efi_main(
-    _image_handle: usize,
+    image_handle: usize,
     system_table: *const uefi::SystemTable,
 ) -> usize {
     // --- Step 1: establish CPU state -------------------------------------
@@ -90,6 +90,16 @@ pub extern "efiapi" fn efi_main(
         x86_64::read_efer()
     );
 
+    // SAFETY: system table captured above; read-only table diagnostics.
+    if let Some(bs) = unsafe { uefi::boot_services() } {
+        info!(
+            "boot",
+            "uefi: boot services rev={:#x} hdr_size={:#x}",
+            bs.spec_revision(),
+            bs.hdr.header_size
+        );
+    }
+
     // Replace the firmware's GDT with ours (ADR-0003 step 1). The M1 test
     // suite independently verifies this via sgdt read-back.
     // SAFETY: ring 0, interrupts disabled, image identity-mapped by firmware
@@ -134,19 +144,22 @@ pub extern "efiapi" fn efi_main(
     // Done once here for production consumers (frame allocator, later the
     // ExitBootServices map-key replay); the M1 test suite re-captures
     // independently as part of its assertions.
-    match bootinfo::capture() {
-        Ok(summary) => info!(
-            "boot",
-            "bootinfo: captured {} regions (map_key={:#x}, conventional={}MiB)",
-            summary.region_count,
-            summary.map_key,
-            summary.conventional_mib()
-        ),
+    let summary = match bootinfo::capture() {
+        Ok(summary) => {
+            info!(
+                "boot",
+                "bootinfo: captured {} regions (map_key={:#x}, conventional={}MiB)",
+                summary.region_count,
+                summary.map_key,
+                summary.conventional_mib()
+            );
+            summary
+        }
         Err(status) => {
             error!("boot", "memory map capture failed: status={status:#x}");
             halt::halt_machine("memory map capture failed");
         }
-    }
+    };
 
     // --- Step 3: verified diagnostics -------------------------------------
     info!("m1", "running milestone-1 self-tests");
@@ -175,6 +188,21 @@ pub extern "efiapi" fn efi_main(
         frames::total_frames(),
         frames::free_frames() * 4096 / (1024 * 1024)
     );
+
+    // --- Step 3.7: kernel address space (M2.4) ------------------------------
+    // Install our own PML4 (ADR-0008): identity view of every described
+    // region (firmware keeps running under it until M2.7 tears it down),
+    // higher-half direct map at KERNEL_OFFSET, our image window mapped per
+    // PE section (.text R+X, .rdata RO, rest RW+NX), CR0.WP + EFER.NXE
+    // enforced. The identity view keeps every executing address valid
+    // across the CR3 switch, so boot simply continues.
+    // SAFETY: ring 0, interrupts off, frame allocator live, `summary` is
+    // from the capture above, `image_handle` is firmware's own handle for
+    // this image.
+    if let Err(reason) = unsafe { x86_64::paging::init(image_handle, &summary) } {
+        error!("boot", "paging init failed: {reason}");
+        halt::halt_machine("paging init failed");
+    }
 
     let (passed2, total2) = m2::run_all();
 

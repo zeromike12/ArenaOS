@@ -17,7 +17,9 @@
 //! injection protocol (`arch/x86_64/faults.rs`). Later M2 steps append
 //! their tests here.
 
-use crate::arch::x86_64::{faults, gdt, idt, tss};
+use crate::arch::x86_64::{
+    cr0, efer, faults, gdt, idt, paging, read_cr0, read_cr3, read_efer, tss,
+};
 use crate::bootinfo;
 use crate::drivers::pit;
 use crate::frames;
@@ -36,6 +38,9 @@ const TESTS: &[(&str, TestFn)] = &[
     ("clock_monotonic", test_clock_monotonic),
     ("tick_rate", test_tick_rate),
     ("frame_allocator", test_frame_allocator),
+    ("vm_address_space", test_vm_address_space),
+    ("vm_write_protect", test_vm_write_protect),
+    ("vm_nx", test_vm_nx),
 ];
 
 /// Fault sites: minimal assembly that (1) records its own resume address
@@ -68,18 +73,43 @@ mod fault_sites {
         }
     }
 
-    /// #PF: 8-byte write to `addr` (caller guarantees it is unmapped).
+    /// #PF: 8-byte write to `addr` — caller guarantees the write faults
+    /// (address unmapped, or mapped read-only with CR0.WP=1).
     ///
     /// # Safety
     /// Call only with `faults::arm(14)` in effect; see `divide_by_zero`.
-    pub unsafe fn write_unmapped(addr: u64) {
-        // SAFETY: as `divide_by_zero`; `addr` validity is the caller's
-        // contract (unmapped → guaranteed #PF, never silent success).
+    pub unsafe fn write_to(addr: u64) {
+        // SAFETY: as `divide_by_zero`; faulting is the caller's contract
+        // (unmapped or RO → guaranteed #PF, never silent success).
         unsafe {
             core::arch::asm!(
                 "lea rax, [rip + 2f]",
                 "mov [rip + {resume}], rax",
                 "mov [{addr}], rax", // #PF — handler resumes execution at 2:
+                "2:",
+                addr = in(reg) addr,
+                resume = sym crate::arch::x86_64::faults::RESUME,
+                out("rax") _,
+                options(nostack),
+            );
+        }
+    }
+
+    /// #PF: instruction fetch at `addr` via `jmp` — caller guarantees the
+    /// page is mapped NX, so the *first fetch* faults before any
+    /// instruction is decoded. `jmp` (not `call`) keeps RSP untouched, so
+    /// the resume path returns to a balanced stack.
+    ///
+    /// # Safety
+    /// Call only with `faults::arm(14)` in effect; see `divide_by_zero`.
+    pub unsafe fn execute_at(addr: u64) {
+        // SAFETY: as `write_to`; the faulting fetch is the point of the call.
+        unsafe {
+            core::arch::asm!(
+                "lea rax, [rip + 2f]",
+                "mov [rip + {resume}], rax",
+                "mov rax, {addr}",
+                "jmp rax", // #PF (I/D) — handler resumes execution at 2:
                 "2:",
                 addr = in(reg) addr,
                 resume = sym crate::arch::x86_64::faults::RESUME,
@@ -143,7 +173,7 @@ fn test_exc_de_recovered() -> Result<(), &'static str> {
 fn test_exc_pf_recovered() -> Result<(), &'static str> {
     faults::arm(14);
     // SAFETY: armed above; UNMAPPED_CANONICAL_ADDR is unmapped by invariant.
-    unsafe { fault_sites::write_unmapped(UNMAPPED_CANONICAL_ADDR) };
+    unsafe { fault_sites::write_to(UNMAPPED_CANONICAL_ADDR) };
     let obs = faults::observed();
     faults::disarm();
     info!(
@@ -374,15 +404,20 @@ fn test_frame_allocator() -> Result<(), &'static str> {
     if frames::total_frames() != expected {
         return Err("managed frame count disagrees with the memory map");
     }
-    if frames::free_frames() != expected {
-        return Err("allocator booted with managed frames already used");
+    // Boot infrastructure legitimately owns frames before this test runs
+    // (M2.4 page tables are allocated from here). Bound the pre-test
+    // consumption instead of demanding zero.
+    let in_use = expected - frames::free_frames();
+    if in_use > 64 {
+        return Err("implausible frame consumption before the test ran");
     }
     info!(
         "m2",
-        "frame_allocator: managing {} frames ({} MiB) from {} conventional regions",
+        "frame_allocator: managing {} frames ({} MiB) from {} conventional regions; {} frames owned by boot infrastructure (page tables)",
         frames::total_frames(),
         frames::total_frames() * 4096 / (1024 * 1024),
-        bootinfo::usable_region_count()
+        bootinfo::usable_region_count(),
+        in_use
     );
 
     // (2) Alloc a batch: unique, aligned, in-region, and real writable RAM.
@@ -474,6 +509,147 @@ fn test_frame_allocator() -> Result<(), &'static str> {
         "frame_allocator: stress 200x64 OK; benchmark 2048 alloc+free in {dt_us}us (~{} ns/op)",
         dt_us * 1000 / 2048
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// M2.4 — kernel address space: higher-half alias, CR0.WP + EFER.NXE, W^X
+// ---------------------------------------------------------------------------
+
+/// Magic returned by the .text probe — proves the higher-half *call* really
+/// executed our code rather than returning a plausible default.
+const VM_PROBE_MAGIC: u64 = 0x2464_A0FF_EE00_5A5A;
+
+/// .text probe: its ADDRESS is the subject (a known byte sequence inside the
+/// R+X window); the body just returns the magic.
+#[inline(never)]
+fn vm_probe_fn() -> u64 {
+    core::hint::black_box(VM_PROBE_MAGIC)
+}
+
+/// .data/.bss probe: an RW+NX page target for the execute-fault test and a
+/// round-trip cell for the alias test. Accessed only through raw volatile
+/// pointers at known addresses — no references, no aliasing rules bent.
+static VM_PROBE_DATA: crate::sync::SyncCell<u64> = crate::sync::SyncCell::new(0);
+
+/// The installed address space must be live and correct: CR3 is our PML4,
+/// WP+NXE are on, the higher-half alias reads/writes the same physical
+/// bytes as the identity address (both directions), and a call *through*
+/// the higher-half alias of a .text address executes and returns.
+fn test_vm_address_space() -> Result<(), &'static str> {
+    let cr3 = paging::cr3_phys();
+    let live = read_cr3();
+    info!("m2", "vm_address_space: cr3={live:#x} (ours {cr3:#x})");
+    if cr3 == 0 || live & 0x000F_FFFF_FFFF_F000 != cr3 {
+        return Err("live CR3 does not match the PML4 paging::init installed");
+    }
+    if read_cr0() & cr0::WP == 0 {
+        return Err("CR0.WP is not set — ring-0 writes would ignore RO pages");
+    }
+    if read_efer() & efer::NXE == 0 {
+        return Err("EFER.NXE is not set — PTE bit 63 would be ignored");
+    }
+
+    // black_box the symbol-derived base BEFORE adding KERNEL_OFFSET.
+    // Constant-folding `symbol + 0xFFFF_FFFF_8000_0000` lets LLVM emit a
+    // 32-bit RIP-relative materialization whose addend silently wraps —
+    // the higher half must be computed by a runtime 64-bit add. (This bit
+    // us for real: see ADR-0008 "compiler hazards".)
+    let ident = core::hint::black_box(core::ptr::addr_of!(VM_PROBE_DATA) as u64);
+    let high = ident + paging::KERNEL_OFFSET;
+    if paging::direct_map_to_phys(high) != Some(ident) {
+        return Err("direct_map_to_phys disagrees with KERNEL_OFFSET arithmetic");
+    }
+    // SAFETY: both addresses denote the same mapped, owned static (identity
+    // and direct-map views of one frame); volatile to defeat caching;
+    // single-CPU boot context, IF=0.
+    unsafe {
+        (high as *mut u64).write_volatile(0xDEAD_BEEF_0000_0001);
+        if (ident as *const u64).read_volatile() != 0xDEAD_BEEF_0000_0001 {
+            return Err("higher-half write not visible at the identity address");
+        }
+        (ident as *mut u64).write_volatile(0x0BAD_F00D_0000_0002);
+        if (high as *const u64).read_volatile() != 0x0BAD_F00D_0000_0002 {
+            return Err("identity write not visible at the higher-half address");
+        }
+    }
+
+    // Execute through the higher-half alias of a .text address.
+    let fn_base = core::hint::black_box(vm_probe_fn as *const () as u64);
+    let fn_high = fn_base + paging::KERNEL_OFFSET;
+    // SAFETY: fn_high is the direct-map alias of vm_probe_fn's address —
+    // mapped R+X by construction (the test then proves it by running it).
+    // black_box keeps the call indirect (see comment above the fold trap).
+    let probe: fn() -> u64 = unsafe { core::mem::transmute(core::hint::black_box(fn_high)) };
+    let got = probe();
+    info!(
+        "m2",
+        "vm_address_space: alias round-trip OK; higher-half call at {fn_high:#x} returned {got:#x}"
+    );
+    if got != VM_PROBE_MAGIC {
+        return Err("higher-half call to the .text probe returned the wrong magic");
+    }
+    Ok(())
+}
+
+/// W^X, write side: a ring-0 write through the higher-half alias of our own
+/// .text must fault — the page is R+X and CR0.WP makes RO bind for the
+/// kernel itself. Expected: #PF, CR2 = faulting VA, ec = present+write.
+fn test_vm_write_protect() -> Result<(), &'static str> {
+    let text_va = core::hint::black_box(vm_probe_fn as *const () as u64) + paging::KERNEL_OFFSET;
+    faults::arm(14);
+    // SAFETY: armed above; text_va is mapped read-only — write faults by
+    // construction (that is the assertion).
+    unsafe { fault_sites::write_to(text_va) };
+    let obs = faults::observed();
+    faults::disarm();
+    info!(
+        "m2",
+        "vm_write_protect: write to RO .text at {text_va:#x}: vector={:#x} ec={:#x} cr2={:#x}",
+        obs.vector,
+        obs.error_code,
+        obs.cr2
+    );
+    if !obs.valid || obs.vector != 14 {
+        return Err("ring-0 write to RO .text did not raise #PF (is CR0.WP honored?)");
+    }
+    if obs.cr2 != text_va {
+        return Err("CR2 does not name the RO text address we wrote");
+    }
+    if obs.error_code & 0b1_1111 != 0b0_0011 {
+        return Err("error code is not present+write for a ring-0 RO write");
+    }
+    Ok(())
+}
+
+/// W^X, execute side: an instruction fetch through the higher-half alias of
+/// a .data/.bss page must fault before decoding anything. Expected: #PF,
+/// CR2 = faulting VA, ec = present + instruction-fetch (I/D bit).
+fn test_vm_nx() -> Result<(), &'static str> {
+    let data_va =
+        core::hint::black_box(core::ptr::addr_of!(VM_PROBE_DATA) as u64) + paging::KERNEL_OFFSET;
+    faults::arm(14);
+    // SAFETY: armed above; data_va is mapped RW+NX — the first fetch faults
+    // by construction; `jmp` leaves RSP balanced for the resume.
+    unsafe { fault_sites::execute_at(data_va) };
+    let obs = faults::observed();
+    faults::disarm();
+    info!(
+        "m2",
+        "vm_nx: fetch at NX data page {data_va:#x}: vector={:#x} ec={:#x} cr2={:#x}",
+        obs.vector,
+        obs.error_code,
+        obs.cr2
+    );
+    if !obs.valid || obs.vector != 14 {
+        return Err("instruction fetch from an NX page did not raise #PF");
+    }
+    if obs.cr2 != data_va {
+        return Err("CR2 does not name the NX data address we fetched");
+    }
+    if obs.error_code & 0b1_1111 != 0b1_0001 {
+        return Err("error code is not present+instruction-fetch for an NX violation");
+    }
     Ok(())
 }
 

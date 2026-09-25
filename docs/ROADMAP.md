@@ -75,9 +75,15 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       regions structurally unallocatable; stress test with integrity checks
       (uniqueness, in-region, RAM round-trip, exact accounting, double-free
       rejection, contiguous runs); marker `frame_allocator`.
-- 2.4 **Virtual memory**: kernel page tables (PML4), higher-half kernel
-      mapping, NX/W^X enforcement, CR0.WP on; identity-map teardown after
-      transition; test: mapping permissions violations trap correctly.
+- [x] 2.4 **Virtual memory**: own PML4, dual view (ADR-0008) — identity for
+      firmware compat (RW+X carve-out, torn down at EBS/M2.7) + higher-half
+      direct map (RW+NX); image window per PE section (.text R+X, .rdata
+      RO) via Loaded Image Protocol; CR0.WP + EFER.NXE enforced and
+      *tested*: ring-0 write to RO .text → #PF ec=0x3, NX data fetch →
+      #PF ec=0x11, higher-half call executes (markers `vm_address_space`,
+      `vm_write_protect`, `vm_nx`). UEFI gotcha paid for in blood:
+      HandleProtocol is slot 16 (CloseEvent/CheckEvent are slots 11/12).
+
 - 2.5 **Kernel heap**: typed allocator over frames; debug poisoning/redzones;
       host-side unit tests for the allocator logic + in-guest stress test.
 - 2.6 **Synchronization**: spinlocks (ticket or queued, decided by ADR when
