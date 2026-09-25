@@ -18,7 +18,9 @@
 //! their tests here.
 
 use crate::arch::x86_64::{faults, gdt, idt, tss};
+use crate::bootinfo;
 use crate::drivers::pit;
+use crate::frames;
 use crate::log::{self, log_error as error, log_info as info};
 use crate::timekeeping;
 
@@ -33,6 +35,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("tsc_frequency", test_tsc_frequency),
     ("clock_monotonic", test_clock_monotonic),
     ("tick_rate", test_tick_rate),
+    ("frame_allocator", test_frame_allocator),
 ];
 
 /// Fault sites: minimal assembly that (1) records its own resume address
@@ -327,6 +330,150 @@ fn test_tick_rate() -> Result<(), &'static str> {
     if avg_us < expect_us / 2 || avg_us > expect_us * 4 {
         return Err("average tick period outside plausible bounds");
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// M2.3 — physical memory: the frame allocator
+// ---------------------------------------------------------------------------
+
+/// Is `base` inside one of the captured conventional regions? Independent
+/// check for the test side (the allocator itself never consults regions
+/// after init — its bitmap *is* the region set).
+fn in_conventional(base: u64) -> bool {
+    (0..bootinfo::usable_region_count()).any(|i| {
+        let r = bootinfo::usable_region(i);
+        base >= r.base && base < r.base + r.pages * 4096
+    })
+}
+
+/// The allocator must manage exactly the clipped conventional regions, and
+/// alloc/free must stay honest under stress: unique in-region frame bases,
+/// real writable RAM (pattern round-trip), exact free-count accounting,
+/// double-free rejection, contiguous runs, and a measured throughput
+/// benchmark (the "small benchmark" of ADR-0007, logged for the record).
+fn test_frame_allocator() -> Result<(), &'static str> {
+    if !frames::ready() {
+        return Err("allocator was not initialized at boot");
+    }
+    if bootinfo::usable_region_overflow() != 0 {
+        return Err("conventional regions exceeded the storage cap");
+    }
+
+    // (1) Coverage: managed total must equal the independently recomputed
+    // clipped-region frame count (same policy, separately derived here).
+    let mut expected = 0u64;
+    for i in 0..bootinfo::usable_region_count() {
+        let r = bootinfo::usable_region(i);
+        let start = r.base.max(frames::RESERVE_BELOW).div_ceil(4096) * 4096;
+        let end = (r.base + r.pages * 4096).min(frames::PHYS_LIMIT) / 4096 * 4096;
+        if end > start {
+            expected += (end - start) / 4096;
+        }
+    }
+    if frames::total_frames() != expected {
+        return Err("managed frame count disagrees with the memory map");
+    }
+    if frames::free_frames() != expected {
+        return Err("allocator booted with managed frames already used");
+    }
+    info!(
+        "m2",
+        "frame_allocator: managing {} frames ({} MiB) from {} conventional regions",
+        frames::total_frames(),
+        frames::total_frames() * 4096 / (1024 * 1024),
+        bootinfo::usable_region_count()
+    );
+
+    // (2) Alloc a batch: unique, aligned, in-region, and real writable RAM.
+    const N: usize = 256;
+    let mut held = [0u64; N];
+    let free_before = frames::free_frames();
+    for slot in held.iter_mut() {
+        *slot = frames::alloc().ok_or("allocator exhausted early")?;
+    }
+    if frames::free_frames() != free_before - N as u64 {
+        return Err("free count drifted during batch alloc");
+    }
+    for (i, &b) in held.iter().enumerate() {
+        if b % 4096 != 0 || !in_conventional(b) {
+            return Err("frame outside managed conventional memory or misaligned");
+        }
+        if held[..i].contains(&b) {
+            return Err("duplicate frame handed out");
+        }
+        // SAFETY: b is an allocated conventional frame, identity-mapped by
+        // firmware (pre-ExitBootServices), exclusively ours right now.
+        unsafe {
+            (b as *mut u64).write(b ^ 0x5A5A_A5A5_5A5A_A5A5);
+            if (b as *const u64).read() != b ^ 0x5A5A_A5A5_5A5A_A5A5 {
+                return Err("frame content did not round-trip (not real RAM?)");
+            }
+        }
+    }
+
+    // (3) Double-free must be rejected; freeing all must restore accounting.
+    frames::free(held[0]).map_err(|_| "legitimate free rejected")?;
+    if frames::free(held[0]).is_ok() {
+        return Err("double free was accepted");
+    }
+    for &b in held.iter().skip(1) {
+        frames::free(b).map_err(|_| "legitimate free rejected")?;
+    }
+    if frames::free_frames() != free_before {
+        return Err("free count not restored after free-all");
+    }
+
+    // (4) Contiguous run: 16 frames, pattern across the whole span.
+    let c = frames::alloc_contiguous(16).ok_or("contiguous alloc failed")?;
+    if c % 4096 != 0 || !in_conventional(c) || !in_conventional(c + 15 * 4096) {
+        frames::free_contiguous(c, 16).ok();
+        return Err("contiguous run outside managed memory");
+    }
+    for k in 0..16u64 {
+        // SAFETY: allocated contiguous run, identity-mapped, exclusively ours.
+        unsafe { ((c + k * 4096) as *mut u64).write(!k) };
+    }
+    for k in 0..16u64 {
+        // SAFETY: plain read-back of the writes above.
+        if unsafe { ((c + k * 4096) as *const u64).read() } != !k {
+            return Err("contiguous run content did not round-trip");
+        }
+    }
+    frames::free_contiguous(c, 16).map_err(|_| "contiguous free rejected")?;
+    if frames::free_frames() != free_before {
+        return Err("free count not restored after contiguous run");
+    }
+
+    // (5) Stress: 200 interleaved alloc/free rounds with exact accounting.
+    let mut buf = [0u64; 64];
+    for _round in 0..200 {
+        for slot in buf.iter_mut() {
+            *slot = frames::alloc().ok_or("stress alloc failed")?;
+        }
+        for k in (0..64).step_by(2) {
+            frames::free(buf[k]).map_err(|_| "stress free rejected")?;
+        }
+        for k in (1..64).step_by(2) {
+            frames::free(buf[k]).map_err(|_| "stress free rejected")?;
+        }
+        if frames::free_frames() != free_before {
+            return Err("stress round leaked or lost frames");
+        }
+    }
+
+    // (6) Benchmark (ADR-0007 evidence): hot-path alloc+free throughput.
+    let t0 = timekeeping::now_ticks();
+    for _ in 0..2048 {
+        let f = frames::alloc().ok_or("benchmark alloc failed")?;
+        frames::free(f).map_err(|_| "benchmark free rejected")?;
+    }
+    let dt_us = timekeeping::ticks_to_us(timekeeping::now_ticks() - t0);
+    info!(
+        "m2",
+        "frame_allocator: stress 200x64 OK; benchmark 2048 alloc+free in {dt_us}us (~{} ns/op)",
+        dt_us * 1000 / 2048
+    );
     Ok(())
 }
 

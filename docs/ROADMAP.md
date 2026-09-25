@@ -69,9 +69,12 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       (boot halts on implausible/disagreeing calibration); monotonic
       `now_us()` clock; kernel tick left running at 100 Hz mode 3; markers
       `pit_oneshot`, `tsc_frequency`, `clock_monotonic`, `tick_rate`.
-- 2.3 **Physical memory**: frame allocator from the boot-info map (bitmap or
-      buddy — decided by small benchmark + ADR); UEFI runtime regions
-      preserved; allocation/free stress test with integrity checks.
+- [x] 2.3 **Physical memory**: flat-bitmap frame allocator over the
+      captured conventional regions (ADR-0007, decided with the in-guest
+      benchmark the test logs: ~100 ns/op hot path); runtime/reserved
+      regions structurally unallocatable; stress test with integrity checks
+      (uniqueness, in-region, RAM round-trip, exact accounting, double-free
+      rejection, contiguous runs); marker `frame_allocator`.
 - 2.4 **Virtual memory**: kernel page tables (PML4), higher-half kernel
       mapping, NX/W^X enforcement, CR0.WP on; identity-map teardown after
       transition; test: mapping permissions violations trap correctly.

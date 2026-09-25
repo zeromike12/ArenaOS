@@ -23,6 +23,7 @@ Rules:
 | [0004](0004-no-third-party-runtime-crates.md) | Zero third-party runtime crates; own UEFI bindings | Accepted |
 | [0005](0005-testing-strategy.md) | Testing: automated QEMU boot tests with machine-checkable serial markers | Accepted |
 | [0006](0006-abi-philosophy.md) | Kernel/user ABI philosophy: capability invocation | Accepted (direction; register-level detail due at M4) |
+| [0007](0007-frame-allocator.md) | Physical frame allocator — flat bitmap over conventional memory | accepted |
 
 ## Template
 

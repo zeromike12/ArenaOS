@@ -109,6 +109,21 @@ code (ADR-0004). During Milestone 1 the boot stage *is* the whole kernel —
 one binary; the split into boot stage + kernel proper arrives with paging in
 Milestone 2.
 
+### Physical memory (M2.3)
+
+One gateway to physical memory: `frames.rs`, a flat bitmap (one bit per
+4 KiB frame over [0, 4 GiB), ADR-0007) punched out of the captured UEFI
+map's *conventional* regions — runtime services, ACPI NVS, reserved/MMIO,
+and firmware memory are structurally unallocatable, not filtered at alloc
+time. Frames below 1 MiB stay reserved (legacy structures). Checked error
+semantics: double frees and out-of-span frees are rejected, exhaustion is
+reported, and the M2 test proves the managed set equals the map exactly
+(recomputed independently), then stresses it (uniqueness, real-RAM pattern
+round-trips, 200-round alloc/free accounting, contiguous runs, ~100 ns/op
+hot-path benchmark). The allocator is single-CPU by boot contract; the
+kernel proper replaces the mutation discipline (not necessarily the layout)
+once locks (M2.6) and SMP structures (M3) exist.
+
 ### Timekeeping (M2.2)
 
 The monotonic clock is the TSC; the *meaning* of a microsecond comes from

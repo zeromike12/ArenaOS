@@ -21,11 +21,13 @@
 mod arch;
 mod bootinfo;
 mod drivers;
+mod frames;
 mod halt;
 mod log;
 mod m1;
 mod m2;
 mod panic;
+mod sync;
 mod timekeeping;
 mod uefi;
 
@@ -128,6 +130,24 @@ pub extern "efiapi" fn efi_main(
         arch::x86_64::idt::expected_idt().0
     );
 
+    // --- Step 2.5: capture the firmware memory map (boot-info seed) --------
+    // Done once here for production consumers (frame allocator, later the
+    // ExitBootServices map-key replay); the M1 test suite re-captures
+    // independently as part of its assertions.
+    match bootinfo::capture() {
+        Ok(summary) => info!(
+            "boot",
+            "bootinfo: captured {} regions (map_key={:#x}, conventional={}MiB)",
+            summary.region_count,
+            summary.map_key,
+            summary.conventional_mib()
+        ),
+        Err(status) => {
+            error!("boot", "memory map capture failed: status={status:#x}");
+            halt::halt_machine("memory map capture failed");
+        }
+    }
+
     // --- Step 3: verified diagnostics -------------------------------------
     info!("m1", "running milestone-1 self-tests");
     let (passed, total) = m1::run_all();
@@ -142,6 +162,19 @@ pub extern "efiapi" fn efi_main(
         error!("boot", "timekeeping init failed: {reason}");
         halt::halt_machine("timekeeping init failed");
     }
+
+    // --- Step 3.6: physical memory ownership (M2.3) -------------------------
+    // Build the frame allocator from the captured conventional regions.
+    if let Err(reason) = frames::init() {
+        error!("boot", "frame allocator init failed: {reason}");
+        halt::halt_machine("frame allocator init failed");
+    }
+    info!(
+        "boot",
+        "frames: managing {} frames ({} MiB free)",
+        frames::total_frames(),
+        frames::free_frames() * 4096 / (1024 * 1024)
+    );
 
     let (passed2, total2) = m2::run_all();
 

@@ -25,6 +25,13 @@ Current coverage:
   * tick_rate         — 10 timer interrupts flow through PIT→IOAPIC→LAPIC→
                         IDT→absorb-stub at the programmed 100 Hz (bounds
                         generous for TCG).
+  M2.3 — physical memory:
+  * frame_allocator   — bitmap allocator manages exactly the clipped
+                        conventional regions; unique in-region frames;
+                        pattern round-trip through real RAM; exact free
+                        accounting; double-free rejection; 16-frame
+                        contiguous run; 200-round stress; ns/op benchmark
+                        (ADR-0007 evidence).
 
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
@@ -43,6 +50,7 @@ EXPECTED_TESTS = [
     "tsc_frequency",
     "clock_monotonic",
     "tick_rate",
+    "frame_allocator",
 ]
 
 if __name__ == "__main__":

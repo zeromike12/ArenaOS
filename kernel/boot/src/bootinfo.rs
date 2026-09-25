@@ -10,6 +10,7 @@
 
 use core::cell::UnsafeCell;
 
+use crate::sync::SyncCell;
 use crate::uefi::{self, EFI_BUFFER_TOO_SMALL, EFI_SUCCESS, MemoryDescriptor, Status};
 
 /// Status sentinel for "boot stage invoked without a captured system table"
@@ -37,6 +38,55 @@ impl AlignedBuf {
 }
 
 static MAP_BUF: AlignedBuf = AlignedBuf(UnsafeCell::new([0u8; MAP_BUF_BYTES]));
+
+/// One conventional-memory region, kept for the frame allocator (M2.3) and
+/// later boot-info consumers. Only EfiConventionalMemory qualifies; runtime/
+/// reserved/reclaimable spans are deliberately absent from this list.
+#[derive(Clone, Copy, Debug)]
+pub struct Region {
+    pub base: u64,
+    pub pages: u64,
+}
+
+/// QEMU/OVMF at 512M reports a couple dozen conventional regions; 64 is
+/// headroom. Overflow does not corrupt — extra regions are counted in
+/// [`usable_region_overflow()`] and reported, and the M2 test fails loudly
+/// if any were dropped.
+const REGION_CAP: usize = 64;
+
+struct RegionStore(UnsafeCell<[Region; REGION_CAP]>);
+unsafe impl Sync for RegionStore {}
+static REGIONS: RegionStore =
+    RegionStore(UnsafeCell::new([Region { base: 0, pages: 0 }; REGION_CAP]));
+static REGION_COUNT: SyncCell<usize> = SyncCell::new(0);
+static REGION_OVERFLOW: SyncCell<usize> = SyncCell::new(0);
+
+// SAFETY CONTRACT for the region statics: as `MAP_BUF` — single-CPU,
+// interrupts-off boot context; written only by `capture()`.
+
+/// Number of stored conventional regions (valid after [`capture()`]).
+pub fn usable_region_count() -> usize {
+    unsafe { *REGION_COUNT.get() }
+}
+
+/// Conventional region `i`; returns an empty region if `i` is out of range
+/// (callers iterate `0..usable_region_count()`).
+pub fn usable_region(i: usize) -> Region {
+    // SAFETY: contract above; copy-out of one small struct.
+    unsafe {
+        if i < *REGION_COUNT.get() {
+            (*REGIONS.0.get())[i]
+        } else {
+            Region { base: 0, pages: 0 }
+        }
+    }
+}
+
+/// Conventional regions that did not fit [`REGION_CAP`] during the last
+/// capture (0 in practice; the M2 test asserts it stays 0).
+pub fn usable_region_overflow() -> usize {
+    unsafe { *REGION_OVERFLOW.get() }
+}
 
 /// Classified summary of the firmware memory map.
 #[derive(Clone, Copy, Debug)]
@@ -129,7 +179,27 @@ pub fn capture() -> Result<MemoryMapSummary, Status> {
             return Err(status);
         }
 
-        Ok(classify(buf, map_size, map_key, desc_size, desc_version))
+        let summary = classify(buf, map_size, map_key, desc_size, desc_version);
+
+        // Store the conventional regions for the frame allocator (M2.3).
+        *REGION_COUNT.get() = 0;
+        *REGION_OVERFLOW.get() = 0;
+        for_each_region(&summary, |d| {
+            if d.memory_type == crate::uefi::memory_type::CONVENTIONAL && d.number_of_pages > 0 {
+                let n = *REGION_COUNT.get();
+                if n < REGION_CAP {
+                    (*REGIONS.0.get())[n] = Region {
+                        base: d.physical_start,
+                        pages: d.number_of_pages,
+                    };
+                    *REGION_COUNT.get() = n + 1;
+                } else {
+                    *REGION_OVERFLOW.get() += 1;
+                }
+            }
+        });
+
+        Ok(summary)
     }
 }
 
