@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["boot"]
+
+# Notes:
+# - Panic strategy is `abort`, forced by the bare-metal target specs
+#   (x86_64-unknown-uefi / -none). We intentionally do NOT set panic in
+#   [profile.*] so future host-side unit tests of arch-independent crates
+#   can still unwind.
+# - Zero external dependencies everywhere (docs/adr/0004).

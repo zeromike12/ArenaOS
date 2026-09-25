@@ -1,0 +1,14 @@
+# Generated artifacts — never commit
+build/
+kernel/target/
+*.img
+*.efi
+*.pdb
+*.log
+target/
+
+# Editor/OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/

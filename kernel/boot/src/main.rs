@@ -1,0 +1,137 @@
+//! ArenaOS boot stage — Milestone 1.
+//!
+//! This binary *is* the kernel image at M1: a UEFI application
+//! (`EFI/BOOT/BOOTX64.EFI`) that firmware loads in 64-bit long mode. It
+//! follows the boot contract from ADR-0003:
+//!
+//! 1. Establish CPU state: interrupts off, own GDT (far-jump CS reload).
+//! 2. Initialize runtime support: polled 16550 serial console, structured
+//!    logging, panic diagnostics.
+//! 3. Produce verified diagnostics: CPU identity/state, firmware identity,
+//!    real UEFI memory-map parsing — each checked by the M1 self-test suite.
+//! 4. Halt safely: UEFI `ResetSystem(EfiResetShutdown)`.
+//!
+//! At M2.7 this crate splits into boot stage + kernel proper; until then,
+//! per the roadmap, it is the smallest bootable kernel that honestly
+//! demonstrates each capability.
+
+#![no_std]
+#![no_main]
+
+mod arch;
+mod bootinfo;
+mod drivers;
+mod halt;
+mod log;
+mod m1;
+mod panic;
+mod uefi;
+
+use arch::x86_64::{self, gdt};
+use log::{log_info as info, log_warn as warn};
+
+/// UEFI image entry point (UEFI 2.10 §2.1 EFI_IMAGE_ENTRY_POINT; win64/
+/// efiapi ABI on x86_64, entry symbol fixed to `efi_main` by our target's
+/// linker args).
+#[unsafe(no_mangle)]
+pub extern "efiapi" fn efi_main(
+    _image_handle: usize,
+    system_table: *const uefi::SystemTable,
+) -> usize {
+    // --- Step 1: establish CPU state -------------------------------------
+    x86_64::cli();
+
+    // Capture the firmware interface *first*: the panic handler's safe-halt
+    // path depends on it, and everything below can (hypothetically) fail.
+    uefi::init(system_table);
+
+    // --- Step 2: runtime support -----------------------------------------
+    // SAFETY: we are the only code running (single CPU, interrupts off);
+    // COM1 programming follows the driver's port-I/O contract.
+    unsafe { drivers::serial::init() };
+
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    info!(
+        "boot",
+        "ArenaOS boot stage v{} ({profile} build, x86_64-unknown-uefi) — milestone 1",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    // Firmware identity (real UCS-2 string from the EFI system table).
+    // SAFETY: uefi::init() ran above with firmware's live system table.
+    unsafe {
+        if let Some((vendor, revision)) = uefi::firmware_info() {
+            info!(
+                "boot",
+                "firmware: vendor=\"{vendor}\" revision={revision:#x}"
+            );
+        } else {
+            warn!("boot", "firmware: system table pointer was null (!)");
+        }
+    }
+
+    // CPU identity and architectural state, read back from the CPU itself.
+    let cpu = x86_64::cpu_info();
+    info!("boot", "cpu: {cpu}");
+    info!(
+        "boot",
+        "cpustate: cr0={:#x} cr3={:#x} cr4={:#x} efer={:#x}",
+        x86_64::read_cr0(),
+        x86_64::read_cr3(),
+        x86_64::read_cr4(),
+        x86_64::read_efer()
+    );
+
+    // Replace the firmware's GDT with ours (ADR-0003 step 1). The M1 test
+    // suite independently verifies this via sgdt read-back.
+    // SAFETY: ring 0, interrupts disabled, image identity-mapped by firmware
+    // — exactly the contract of gdt::load().
+    unsafe { gdt::load() };
+    info!(
+        "boot",
+        "gdt: installed own GDT (base={:#x}, code_sel={:#x}, data_sel={:#x})",
+        gdt::expected_gdt().0,
+        gdt::KERNEL_CODE_SELECTOR,
+        gdt::KERNEL_DATA_SELECTOR
+    );
+
+    // The IDT must change hands together with the GDT: EDK2 re-enables
+    // interrupts inside boot-service calls (TPL restore = `sti`), and its
+    // gates reference firmware selectors absent from our GDT (see idt.rs
+    // header for the triple-fault post-mortem). Our M1 IDT: exceptions get
+    // full serial diagnostics + safe halt; external interrupts are absorbed
+    // with 8259 + LAPIC EOI until M2 replaces them with real dispatch.
+    // SAFETY: ring 0, IF=0, installed immediately after the GDT swap and
+    // before the first firmware call — idt::init()'s contract.
+    unsafe { arch::x86_64::idt::init() };
+    info!(
+        "boot",
+        "idt: installed own IDT (base={:#x}, 256 vectors: 0-31 diagnostics+halt, 32-255 absorb+EOI)",
+        arch::x86_64::idt::expected_idt().0
+    );
+
+    // --- Step 3: verified diagnostics -------------------------------------
+    info!("m1", "running milestone-1 self-tests");
+    let (passed, total) = m1::run_all();
+
+    // --- Step 4: halt safely ------------------------------------------------
+    info!(
+        "boot",
+        "milestone 1 finished ({passed}/{total}); halting via UEFI ResetSystem(shutdown)"
+    );
+    uefi::reset_shutdown();
+
+    // reset_shutdown() only returns if the firmware hand-off failed. Fall
+    // back to parking the CPU: interrupts are off, so HLT is permanent.
+    // SAFETY: CLI+HLT loop, single CPU, nothing else runnable.
+    unsafe {
+        x86_64::cli();
+        loop {
+            core::arch::asm!("hlt", options(nostack, nomem, preserves_flags));
+        }
+    }
+}
