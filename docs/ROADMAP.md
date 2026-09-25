@@ -38,19 +38,31 @@ Kernel image boots under QEMU/OVMF and produces *verified* diagnostics.
       read-back via `sgdt`, u128 arithmetic through `compiler_builtins`
 - [x] UEFI memory map parsed and classified (conventional / reclaimable /
       runtime / reserved, largest free region, map key captured)
+- [x] Own IDT: exception stubs with full serial diagnostics + safe halt,
+      external-interrupt absorb stub (8259 **and** LAPIC EOI — see the
+      ARCHITECTURE handoff findings), live-gate audit as a self-test
+- [x] Real hardware interrupt test: PIT ticks absorbed through our IDT,
+      full deliver → absorb → EOI → re-deliver cycle required (2 ticks)
 - [x] Safe halt via UEFI `ResetSystem(EfiResetShutdown)`
 - [x] Automated test: `tools/test_m1.py` — build → fresh ESP → QEMU/EDK2 →
       serial marker assertions → clean-exit check
-- **Exit criteria (all machine-checked):** `m1: RESULT PASS (6/6)` on serial,
+- **Exit criteria (all machine-checked):** `m1: RESULT PASS (8/8)` on serial,
   QEMU exits cleanly (code 0) under `-no-reboot`, no `PANIC` marker.
 
-## Milestone 2 — Kernel foundations
+## Milestone 2 — Kernel foundations 🔨
 
 Each step boots and adds markers (`m2:test:...`), previous tests re-run.
 
-- 2.1 **Interrupts & exceptions**: IDT, exception handlers with diagnostic
-      dump (vector, error code, RIP/CS/RSP, CR2 for #PF); deliberate-fault
-      tests (divide-by-zero, bad-address #PF handled).
+- [x] 2.1 **Interrupts & exceptions**: TSS with IST1 fault stack (#DF/NMI/
+      #MC), exception path preserving the full interrupted context, CR2 in
+      #PF diagnostics, controlled fault-injection protocol, deliberate-fault
+      tests (divide-by-zero and bad-address #PF delivered, diagnosed, and
+      *recovered*). Harness: `tools/test_m2.py`; markers `tss_installed`,
+      `exc_de_recovered`, `exc_pf_recovered`.
+- [ ] 2.1b regression note: recovery taught two hardware lessons, both now
+      encoded as tests/comments — LTR requires the TSS descriptor type
+      *available* (0x9; LTR itself sets busy), and an exception handler that
+      can return must treat every caller-saved register as live.
 - 2.2 **Timers**: PIT in one-shot/periodic mode for calibration; TSC
       frequency measurement; monotonic clock source; timer interrupt ticks
       counted and reported.

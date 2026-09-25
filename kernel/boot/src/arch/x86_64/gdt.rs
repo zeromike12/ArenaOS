@@ -3,8 +3,9 @@
 //! UEFI leaves us with *its* GDT, whose layout is firmware-specific. We
 //! install a known-good 64-bit GDT so the kernel controls its own segment
 //! selectors — a prerequisite for the ring-0/ring-3 split in Milestone 3
-//! (user entries and a TSS join this table then; the kernel selectors below
-//! are chosen so they stay stable when the table grows).
+//! (user entries join this table then; the TSS descriptor already does in
+//! M2.1, slots 3–4, selector 0x18 — the kernel selectors below are chosen
+//! so they stay stable as the table grows).
 //!
 //! References: SDM Vol. 3 §3.4.5 (segment descriptors), §6.2.3 (GDT),
 //! §6.8 (loading GDTR), §6.14 (64-bit mode segment behavior: base/limit are
@@ -25,17 +26,36 @@ const GDT_KERNEL_DATA: u64 = 0x00CF_9200_0000_FFFF;
 
 pub const KERNEL_CODE_SELECTOR: u16 = 0x08;
 pub const KERNEL_DATA_SELECTOR: u16 = 0x10;
+/// 16-byte TSS system-segment descriptor (GDT slots 3–4), filled and loaded
+/// by `tss::init()` in M2.1.
+pub const TSS_SELECTOR: u16 = 0x18;
 
-/// The boot GDT itself. Immutable; `sgdt` read-back in the M1 test suite
-/// verifies the CPU actually accepted it.
+/// The boot GDT itself. Slots 0–2 are fixed at build time; slots 3–4 are
+/// the TSS descriptor pair, written by `set_tss_descriptor` during
+/// `tss::init()` (live-table write is safe: slot unused until `ltr`, IF=0,
+/// single CPU). `sgdt` read-back in the M1 test suite verifies the CPU
+/// actually accepted the table.
 #[repr(C, align(16))]
 struct Gdt {
-    entries: [u64; 3],
+    entries: [u64; 5],
 }
 
-static GDT: Gdt = Gdt {
-    entries: [GDT_NULL, GDT_KERNEL_CODE, GDT_KERNEL_DATA],
-};
+static GDT: SyncCell<Gdt> = SyncCell::new(Gdt {
+    entries: [GDT_NULL, GDT_KERNEL_CODE, GDT_KERNEL_DATA, 0, 0],
+});
+
+/// Write the 16-byte TSS system-segment descriptor into GDT slots 3–4.
+///
+/// # Safety
+/// Our GDT must be live, interrupts disabled, single CPU (the only caller
+/// is `tss::init()` before any IST gate can fire).
+pub unsafe fn set_tss_descriptor(lo: u64, hi: u64) {
+    unsafe {
+        let gdt = GDT.get();
+        core::ptr::addr_of_mut!((*gdt).entries[3]).write(lo);
+        core::ptr::addr_of_mut!((*gdt).entries[4]).write(hi);
+    }
+}
 
 /// GDTR image: 16-bit limit + 64-bit base, packed to exactly 10 bytes
 /// (SDM Vol. 3 §6.14.1 — SGDT/LGDT operand format).
@@ -66,7 +86,7 @@ pub unsafe fn load() {
         // Single writer, pre-concurrency — see SyncCell contract.
         GDT_DESCRIPTOR.get().write(GdtDescriptor {
             limit: (core::mem::size_of::<Gdt>() - 1) as u16,
-            base: core::ptr::addr_of!(GDT) as u64,
+            base: GDT.get() as u64,
         });
 
         // LGDT from the 10-byte descriptor image.
@@ -117,8 +137,5 @@ pub fn read_gdtr() -> (u64 /*base*/, u16 /*limit*/) {
 /// What `sgdt` should report after `load()` — the M1 test compares against
 /// this instead of trusting `load()` blindly.
 pub fn expected_gdt() -> (u64, u16) {
-    (
-        core::ptr::addr_of!(GDT) as u64,
-        (core::mem::size_of::<Gdt>() - 1) as u16,
-    )
+    (GDT.get() as u64, (core::mem::size_of::<Gdt>() - 1) as u16)
 }

@@ -29,16 +29,36 @@ Every milestone emits machine-checkable lines:
 ```
 m1:test:<name>: PASS
 m1:test:<name>: FAIL (<reason>)
-m1: RESULT PASS (6/6)
-m1: RESULT FAIL (4/6)
+m1: RESULT PASS (8/8)
+m1: RESULT FAIL (6/8)
+m2:test:<name>: PASS                        ← same grammar per milestone
+m2: RESULT PASS (3/3)
 [arena PANIC <file>:<line>] <message>       ← any panic fails the run
 ```
 
-The harness (`tools/test_m<N>.py`) requires: all expected test names present
-with PASS, RESULT line PASS, no PANIC anywhere, QEMU exits by itself (the
-kernel calls UEFI `ResetSystem(EfiResetShutdown)`; `-no-reboot` makes QEMU
-exit 0) within the timeout. A timeout means hang; a nonzero QEMU exit means
-crash/reset-loop — distinct diagnoses.
+The harness (`tools/test_m<N>.py`, a thin wrapper over the shared pipeline in
+`tools/mtest.py`) requires: all expected test names present with PASS, RESULT
+line PASS *and covering exactly the expected test count*, no PANIC anywhere,
+QEMU exits by itself (the kernel calls UEFI `ResetSystem(EfiResetShutdown)`;
+`-no-reboot` makes QEMU exit 0) within the timeout. A timeout means hang; a
+nonzero QEMU exit means crash/reset-loop — distinct diagnoses. All milestone
+harnesses run against the same image in one boot: the kernel executes every
+milestone suite in order, so M1 markers prove the older guarantees still hold
+while M2 code is present.
+
+### Exception-path testing (M2.1+)
+
+Exception tests use *real* faulting instructions (divide-by-zero, writes to
+unmapped memory) and must survive them: the suite arms an expected vector
+(`arch/x86_64/faults.rs`), the fault site records its own resume address,
+the handler verifies/recovers, and the test asserts the **measured** delivery
+(vector, error code, CR2) — never the expectation. Unarmed faults still take
+the full diagnostics-and-halt path, so injection cannot mask real bugs.
+
+**Standing invariant:** `0x0000_6000_0000_0000` (m2.rs
+`UNMAPPED_CANONICAL_ADDR`) must remain unmapped in *every* address space this
+project ever builds — firmware's, the M2.4 kernel tables, and any later user
+address space. It is the #PF test's faulting address.
 
 ## Determinism
 

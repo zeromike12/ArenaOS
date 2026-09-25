@@ -131,6 +131,20 @@ it will read `IA32_APIC_BASE`, keep the LAPIC as the delivery path (per-CPU
 timer/IPI later), and either fully reprogram or permanently disable the
 legacy PIC.
 
+Since M2.1 the exception side is complete enough to *survive*: a 64-bit TSS
+provides IST1 (a dedicated 16 KiB fault stack) for the exceptions that must
+work even with a broken stack (#DF, NMI, #MC); the common exception entry
+preserves the entire interrupted context (all caller-saved registers saved
+around the Rust handler, which is an ordinary ABI-conformant function); #PF
+diagnostics include CR2; and the test suite can arm *expected* faults and
+resume from them (see `docs/TESTING.md` §exception-path testing). Two
+hardware facts learned while building this, now regression-guarded: `ltr`
+requires the TSS descriptor type to be *available* (0x9 — LTR sets the busy
+bit itself; presenting 0xB is a #GP), and before our IDT is live the firmware
+IDT is still active, so early-boot faults cascade silently — the TSS/IDT
+install order matters (TSS first, then IDT, both before the first firmware
+call).
+
 Fallback plans documented: if UEFI diversity becomes painful, a thin
 multiboot2/BIOS path could be added *under the same boot-info contract* —
 the kernel proper never knows who produced the boot-info record.

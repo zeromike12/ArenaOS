@@ -1,4 +1,4 @@
-//! ArenaOS boot stage — Milestone 1.
+//! ArenaOS boot stage — Milestones 1–2.
 //!
 //! This binary *is* the kernel image at M1: a UEFI application
 //! (`EFI/BOOT/BOOTX64.EFI`) that firmware loads in 64-bit long mode. It
@@ -24,10 +24,11 @@ mod drivers;
 mod halt;
 mod log;
 mod m1;
+mod m2;
 mod panic;
 mod uefi;
 
-use arch::x86_64::{self, gdt};
+use arch::x86_64::{self, gdt, tss};
 use log::{log_info as info, log_warn as warn};
 
 /// UEFI image entry point (UEFI 2.10 §2.1 EFI_IMAGE_ENTRY_POINT; win64/
@@ -57,7 +58,7 @@ pub extern "efiapi" fn efi_main(
     };
     info!(
         "boot",
-        "ArenaOS boot stage v{} ({profile} build, x86_64-unknown-uefi) — milestone 1",
+        "ArenaOS boot stage v{} ({profile} build, x86_64-unknown-uefi) — milestones 1–2",
         env!("CARGO_PKG_VERSION")
     );
 
@@ -93,10 +94,22 @@ pub extern "efiapi" fn efi_main(
     unsafe { gdt::load() };
     info!(
         "boot",
-        "gdt: installed own GDT (base={:#x}, code_sel={:#x}, data_sel={:#x})",
+        "gdt: installed own GDT (base={:#x}, code_sel={:#x}, data_sel={:#x}, tss_sel={:#x})",
         gdt::expected_gdt().0,
         gdt::KERNEL_CODE_SELECTOR,
-        gdt::KERNEL_DATA_SELECTOR
+        gdt::KERNEL_DATA_SELECTOR,
+        gdt::TSS_SELECTOR
+    );
+
+    // TSS (M2.1): IST stacks for the exceptions that must survive a broken
+    // stack (#DF/NMI/#MC → dedicated 16 KiB fault stack). Must be live
+    // before the IDT goes in, since those gates carry IST=1.
+    // SAFETY: ring 0, IF=0, our GDT is live — tss::init()'s contract.
+    unsafe { tss::init() };
+    info!(
+        "boot",
+        "tss: installed (IST1 fault stack top={:#x})",
+        tss::ist1_stack_top()
     );
 
     // The IDT must change hands together with the GDT: EDK2 re-enables
@@ -117,11 +130,12 @@ pub extern "efiapi" fn efi_main(
     // --- Step 3: verified diagnostics -------------------------------------
     info!("m1", "running milestone-1 self-tests");
     let (passed, total) = m1::run_all();
+    let (passed2, total2) = m2::run_all();
 
     // --- Step 4: halt safely ------------------------------------------------
     info!(
         "boot",
-        "milestone 1 finished ({passed}/{total}); halting via UEFI ResetSystem(shutdown)"
+        "milestones finished (m1 {passed}/{total}, m2 {passed2}/{total2}); halting via UEFI ResetSystem(shutdown)"
     );
     uefi::reset_shutdown();
 

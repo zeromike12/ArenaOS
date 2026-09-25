@@ -2,8 +2,10 @@
 //! under `arch/`). x86-64 CPU state access: control registers, MSRs, CPUID,
 //! port I/O.
 
+pub mod faults;
 pub mod gdt;
 pub mod idt;
+pub mod tss;
 
 use core::arch::x86_64::__cpuid;
 use core::cell::UnsafeCell;
@@ -78,6 +80,17 @@ pub fn read_cr0() -> u64 {
     unsafe {
         core::arch::asm!("mov {}, cr0", out(reg) v, options(nostack, preserves_flags, nomem))
     };
+    v
+}
+
+/// CR2 — last linear address that caused a #PF (SDM Vol. 3 §4.7). Read by
+/// the exception handler so page-fault diagnostics can name the address.
+pub fn read_cr2() -> u64 {
+    let v: u64;
+    // SAFETY: reading CR2 has no side effects; ring 0 long mode.
+    unsafe {
+        core::arch::asm!("mov {}, cr2", out(reg) v, options(nostack, nomem, preserves_flags));
+    }
     v
 }
 

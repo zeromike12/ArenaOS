@@ -12,3 +12,7 @@ target/
 *.swp
 .idea/
 .vscode/
+
+# Python bytecode noise
+__pycache__/
+*.pyc

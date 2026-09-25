@@ -10,10 +10,12 @@
 //! respect to interrupts (they are: we run IF=0 outside firmware calls, and
 //! our own gates are in place before the first firmware call).
 //!
-//! M1 policy (deliberately minimal, upgraded in M2): vectors 0..31 get
-//! diagnostic stubs that log the vector, error code, and interrupted context
-//! over serial, then halt the machine (ADR-0005: crashes must produce useful
-//! diagnostics). Vectors 32..255 share one absorb-and-EOI stub: external
+//! Policy: vectors 0..31 get diagnostic stubs that log the vector, error
+//! code, and interrupted context (plus CR2 for #PF) over serial, then halt
+//! the machine (ADR-0005: crashes must produce useful diagnostics). Since
+//! M2.1 a fault *armed as expected* by the test suite (`faults` module) is
+//! instead recorded and recovered from — that is how the M2 suite proves
+//! delivery, diagnosis, and resumption without dying. Vectors 32..255 share one absorb-and-EOI stub: external
 //! interrupts arriving while we still borrow the firmware's devices are
 //! acknowledged (8259 PIC EOI *and* LAPIC EOI — EDK2 runs this platform in
 //! IOAPIC→LAPIC mode with the 8259s masked and unprogrammed; see the stub
@@ -26,10 +28,14 @@
 //!
 //! ABI notes: `x86-interrupt` is not stable Rust, so the stubs are written
 //! with `global_asm!` and hand off to Rust via the target's win64/"C" ABI.
-//! Stack alignment audit (win64 requires RSP ≡ 0 mod 16 at `call`):
-//!   hardware pushes SS/RSP/RFLAGS/CS/RIP (5×8) from a 16-aligned RSP
-//!   → RSP ≡ 8; error code (real or our dummy) + vector push (2×8)
-//!   → RSP ≡ 8; `sub rsp, 40` → RSP ≡ 0 ✓ at the call below.
+//! The interrupted RSP has *no* guaranteed alignment (the fault can hit any
+//! instruction), so `exception_common` frames itself with RBP, saves all
+//! caller-saved registers (the interrupted code may hold live values in
+//! them — the handler is free to clobber them per ABI), and forces
+//! RSP ≡ 0 mod 16 (`and rsp, -16`) before the `call`. The handler is an
+//! ordinary `extern "C"` fn and may return (fault-recovery path), so the
+//! stub unwinds exactly (`lea rsp, [rbp-72]`), restores the registers, and
+//! `iretq`s whatever the (possibly rewritten) frame says.
 
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -129,17 +135,45 @@ global_asm!(
     "iretq",
     // ---- common exception path --------------------------------------------
     // Stack here: [vector][error_code][RIP][CS][RFLAGS][RSP][SS]
-    // Hand (vector, error_code, &frame) to Rust in rcx/rdx/r8 (win64 ABI),
-    // with 40 bytes carved for shadow space + alignment (audit at top).
+    // Hand (vector, error_code, &mut frame) to Rust in rcx/rdx/r8 (win64
+    // ABI). The handler is an ordinary Rust fn, so it may clobber ALL
+    // caller-saved registers — and the interrupted code may legitimately
+    // hold live values in any of them (an exception can land on any
+    // instruction). So the stub saves/restores rax,rcx,rdx,rsi,rdi,r8-r11
+    // around the call; callee-saved registers are the handler's job per
+    // ABI. RBP frames the stub: exact unwind via `lea rsp,[rbp-72]` (skips
+    // the alignment slack), and the handler can rewrite frame.rip (fault
+    // recovery) without losing our way back. Alignment audit in header.
     ".p2align 4",
     "exception_common:",
-    "mov rcx, [rsp]",
-    "mov rdx, [rsp + 8]",
-    "lea r8, [rsp + 16]",
-    "sub rsp, 40",
+    "push rbp",
+    "mov rbp, rsp",
+    "push rax",
+    "push rcx",
+    "push rdx",
+    "push rsi",
+    "push rdi",
+    "push r8",
+    "push r9",
+    "push r10",
+    "push r11",
+    "and rsp, -16",
+    "sub rsp, 32",
+    "mov rcx, [rbp + 8]",
+    "mov rdx, [rbp + 16]",
+    "lea r8, [rbp + 24]",
     "call {handler}",
-    // The handler never returns; these are a belt-and-braces unwind.
-    "add rsp, 40",
+    "lea rsp, [rbp - 72]",
+    "pop r11",
+    "pop r10",
+    "pop r9",
+    "pop r8",
+    "pop rdi",
+    "pop rsi",
+    "pop rdx",
+    "pop rcx",
+    "pop rax",
+    "pop rbp",
     "add rsp, 16",
     "iretq",
     timer_count = sym TIMER_IRQ_COUNT,
@@ -157,23 +191,41 @@ pub struct InterruptStackFrame {
     pub ss: u64,
 }
 
-/// Rust half of the common exception path (see asm above). Never returns:
-/// prints full diagnostics, then halts the machine (ADR-0005).
+/// Rust half of the common exception path (see asm above). Either recovers a
+/// fault the test suite armed as expected (`faults` module: record what was
+/// observed, resume the test at its recorded address) or — the production
+/// path — prints full diagnostics and halts the machine (ADR-0005).
 extern "C" fn arena_exception_handler(
     vector: u64,
     error_code: u64,
-    frame: *const InterruptStackFrame,
-) -> ! {
+    frame: *mut InterruptStackFrame,
+) {
+    // #PF puts the faulting linear address in CR2; capture it before
+    // anything (logging, recovery bookkeeping) can fault again and clobber.
+    let cr2 = if vector == 14 { super::read_cr2() } else { 0 };
+
+    // Controlled fault injection (M2.1): armed expectation matching this
+    // vector → record the measured delivery and resume the test. Everything
+    // else falls through to diagnostics + halt.
+    if let Some(resume) = super::faults::take_expected(vector) {
+        super::faults::record(vector, error_code, cr2);
+        // SAFETY: `frame` points at the hardware-pushed values on the live
+        // stub stack; rewriting RIP is exactly the documented recovery
+        // contract, and `resume` came from the fault site itself.
+        unsafe { (*frame).rip = resume };
+        return;
+    }
+
     // SAFETY: `frame` points at the hardware-pushed values directly above
     // the still-live stub stack; we are on the interrupted stack, single CPU,
-    // and the values are plain reads. (If the fault was a stack fault, these
-    // reads may re-fault — accepted at M1; M2 installs IST stacks for #DF/#SS.)
+    // and the values are plain reads. Stack faults (#DF/#SS-class) re-faulting
+    // here are covered by the IST1 stacks installed in M2.1 for #DF/NMI/#MC.
     let (rip, cs, rflags, rsp, ss) = unsafe {
         let f = &*frame;
         (f.rip, f.cs, f.rflags, f.rsp, f.ss)
     };
     crate::log::write_marker(format_args!(
-        "[arena PANIC fault] vector={vector:#04x} ({}) error_code={error_code:#x} rip={rip:#x} cs={cs:#x} rflags={rflags:#x} rsp={rsp:#x} ss={ss:#x}",
+        "[arena PANIC fault] vector={vector:#04x} ({}) error_code={error_code:#x} rip={rip:#x} cs={cs:#x} rflags={rflags:#x} rsp={rsp:#x} ss={ss:#x} cr2={cr2:#x}",
         vector_name(vector),
     ));
     crate::halt::halt_machine("cpu exception")
@@ -284,11 +336,21 @@ fn irq_stub_addr() -> u64 {
     core::ptr::addr_of!(arena_irq_ignore_stub) as u64
 }
 
-fn make_gate(handler: u64) -> IdtGate {
+/// IST index per vector (SDM Vol. 3 §6.14.5): the exceptions that must
+/// survive a corrupted/unmapped stack run on the dedicated IST1 stack from
+/// `tss.rs`. 0 = no stack switch (normal behavior).
+pub const fn ist_for(vector: usize) -> u8 {
+    match vector {
+        2 | 8 | 18 => 1, // NMI, #DF, #MC
+        _ => 0,
+    }
+}
+
+fn make_gate(handler: u64, ist: u8) -> IdtGate {
     IdtGate {
         offset_low: (handler & 0xFFFF) as u16,
         selector: super::gdt::KERNEL_CODE_SELECTOR,
-        ist: 0,
+        ist,
         type_attr: GATE_INT64_PRESENT,
         offset_mid: ((handler >> 16) & 0xFFFF) as u16,
         offset_high: (handler >> 32) as u32,
@@ -315,7 +377,7 @@ pub unsafe fn init() {
             };
             // Write through the raw pointer; IdtGate is packed, so assign
             // the whole struct rather than borrowing fields.
-            core::ptr::write(&mut (*idt)[vector], make_gate(handler));
+            core::ptr::write(&mut (*idt)[vector], make_gate(handler, ist_for(vector)));
         }
         IDT_DESCRIPTOR.get().write(IdtDescriptor {
             limit: (core::mem::size_of::<[IdtGate; NUM_VECTORS]>() - 1) as u16,
@@ -328,8 +390,8 @@ pub unsafe fn init() {
 
 /// Audit the live IDT (located via `sidt`): count gates whose selector,
 /// attribute/IST bytes, or handler offset deviate from the intended encoding
-/// (KERNEL_CODE_SELECTOR, GATE_INT64_PRESENT, IST=0, offset = the stub for
-/// that vector). Returns (bad_selectors, bad_attrs, bad_offsets). Used by the
+/// (KERNEL_CODE_SELECTOR, GATE_INT64_PRESENT, IST = `ist_for(vector)`,
+/// offset = the stub for that vector). Returns (bad_selectors, bad_attrs, bad_offsets). Used by the
 /// M1 suite as independent evidence that the table the CPU will walk is the
 /// table we meant to build.
 pub fn audit_gates() -> (usize, usize, usize) {
@@ -355,7 +417,7 @@ pub fn audit_gates() -> (usize, usize, usize) {
         if sel != super::gdt::KERNEL_CODE_SELECTOR as u64 {
             bad_sel += 1;
         }
-        if attrs != GATE_INT64_PRESENT as u64 || ist_byte != 0 {
+        if attrs != GATE_INT64_PRESENT as u64 || ist_byte != u64::from(ist_for(v)) {
             bad_attr += 1;
         }
         if offset != want {
