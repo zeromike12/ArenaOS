@@ -17,17 +17,17 @@
 //! injection protocol (`arch/x86_64/faults.rs`). Later M2 steps append
 //! their tests here.
 
-use crate::arch::x86_64::{
+use crate::bootinfo;
+use arena_heap::HeapError;
+use arena_kernel::arch::x86_64::{
     cr0, efer, faults, gdt, idt, paging, read_cr0, read_cr3, read_efer, tss,
 };
-use crate::bootinfo;
-use crate::drivers::pit;
-use crate::frames;
-use crate::heap;
-use crate::log::{self, log_error as error, log_info as info};
-use crate::sync::without_interrupts;
-use crate::timekeeping;
-use arena_heap::HeapError;
+use arena_kernel::drivers::pit;
+use arena_kernel::frames;
+use arena_kernel::heap;
+use arena_kernel::log::{self, log_error as error, log_info as info};
+use arena_kernel::sync::without_interrupts;
+use arena_kernel::timekeeping;
 use arena_sync::Spinlock;
 use core::alloc::Layout;
 use core::ptr::NonNull;
@@ -77,7 +77,7 @@ mod fault_sites {
                 "xor ecx, ecx",
                 "div ecx", // #DE — handler resumes execution at 2:
                 "2:",
-                resume = sym crate::arch::x86_64::faults::RESUME,
+                resume = sym arena_kernel::arch::x86_64::faults::RESUME,
                 out("rax") _, out("rcx") _, out("rdx") _,
                 options(nostack),
             );
@@ -99,7 +99,7 @@ mod fault_sites {
                 "mov [{addr}], rax", // #PF — handler resumes execution at 2:
                 "2:",
                 addr = in(reg) addr,
-                resume = sym crate::arch::x86_64::faults::RESUME,
+                resume = sym arena_kernel::arch::x86_64::faults::RESUME,
                 out("rax") _,
                 options(nostack),
             );
@@ -123,7 +123,7 @@ mod fault_sites {
                 "jmp rax", // #PF (I/D) — handler resumes execution at 2:
                 "2:",
                 addr = in(reg) addr,
-                resume = sym crate::arch::x86_64::faults::RESUME,
+                resume = sym arena_kernel::arch::x86_64::faults::RESUME,
                 out("rax") _,
                 options(nostack),
             );
@@ -342,7 +342,7 @@ fn test_tick_rate() -> Result<(), &'static str> {
     let t0 = timekeeping::now_us();
     // SAFETY: IF window is bounded by the cap below and re-masked on every
     // exit path; single CPU; absorb stub EOIs both controllers (M1 proof).
-    crate::arch::x86_64::sti();
+    arena_kernel::arch::x86_64::sti();
     let mut ticks;
     loop {
         ticks = idt::absorbed_irq_count() - before;
@@ -352,7 +352,7 @@ fn test_tick_rate() -> Result<(), &'static str> {
         core::hint::spin_loop();
     }
     let t1 = timekeeping::now_us();
-    crate::arch::x86_64::cli();
+    arena_kernel::arch::x86_64::cli();
 
     let window_us = t1 - t0;
     let avg_us = window_us.checked_div(ticks).unwrap_or(u64::MAX);
@@ -541,7 +541,7 @@ fn vm_probe_fn() -> u64 {
 /// .data/.bss probe: an RW+NX page target for the execute-fault test and a
 /// round-trip cell for the alias test. Accessed only through raw volatile
 /// pointers at known addresses — no references, no aliasing rules bent.
-static VM_PROBE_DATA: crate::sync::SyncCell<u64> = crate::sync::SyncCell::new(0);
+static VM_PROBE_DATA: arena_kernel::sync::SyncCell<u64> = arena_kernel::sync::SyncCell::new(0);
 
 /// The installed address space must be live and correct: CR3 is our PML4,
 /// WP+NXE are on, the higher-half alias reads/writes the same physical
@@ -857,18 +857,18 @@ static TEST_LOCK: Spinlock<u64> = Spinlock::new(0, || 0);
 /// so ticks resume. Also checks save/restore nesting semantics and that
 /// the boot contract (IF=0 between tests) holds on entry.
 fn test_crit_section() -> Result<(), &'static str> {
-    if crate::sync::interrupts_enabled() {
+    if arena_kernel::sync::interrupts_enabled() {
         return Err("boot contract violated: IF=1 on test entry");
     }
     // 1. Save/restore round-trip: sti, restore saved (IF=0) → IF off again.
-    let saved = crate::arch::x86_64::read_flags();
-    crate::arch::x86_64::sti();
-    if !crate::sync::interrupts_enabled() {
+    let saved = arena_kernel::arch::x86_64::read_flags();
+    arena_kernel::arch::x86_64::sti();
+    if !arena_kernel::sync::interrupts_enabled() {
         return Err("sti did not set IF");
     }
     // SAFETY: `saved` came from read_flags in this same context, unmutated.
-    unsafe { crate::arch::x86_64::restore_flags(saved) };
-    if crate::sync::interrupts_enabled() {
+    unsafe { arena_kernel::arch::x86_64::restore_flags(saved) };
+    if arena_kernel::sync::interrupts_enabled() {
         return Err("restore_flags did not reinstate the saved IF=0");
     }
     // 2. Delivery window: with IF=1, ticks must arrive (bounded wait).
@@ -876,11 +876,11 @@ fn test_crit_section() -> Result<(), &'static str> {
     let w0 = timekeeping::now_us();
     // SAFETY: bounded IF window, cli on every exit path below; absorb stub
     // EOIs both controllers (M1/M2.2 proofs).
-    crate::arch::x86_64::sti();
+    arena_kernel::arch::x86_64::sti();
     while idt::absorbed_irq_count() - t0 < 2 && timekeeping::now_us() - w0 < 500_000 {
         core::hint::spin_loop();
     }
-    crate::arch::x86_64::cli();
+    arena_kernel::arch::x86_64::cli();
     let delivered = idt::absorbed_irq_count() - t0;
     if delivered < 2 {
         return Err("no interrupt delivery with IF=1 (freeze test would be vacuous)");
@@ -889,7 +889,7 @@ fn test_crit_section() -> Result<(), &'static str> {
     //    periods at 100 Hz) — not one interrupt may cross the section.
     let c0 = idt::absorbed_irq_count();
     // SAFETY: bounded IF window; the helper itself is the mask under test.
-    crate::arch::x86_64::sti();
+    arena_kernel::arch::x86_64::sti();
     let (inside_delta, masked_inside) = without_interrupts(|| {
         let start = timekeeping::now_us();
         let a = idt::absorbed_irq_count();
@@ -898,13 +898,13 @@ fn test_crit_section() -> Result<(), &'static str> {
         }
         (
             idt::absorbed_irq_count() - a,
-            !crate::sync::interrupts_enabled(),
+            !arena_kernel::sync::interrupts_enabled(),
         )
     });
     // Helper restored IF=1 (it was entered with IF=1) — re-mask per the
     // boot contract before evaluating.
-    let restored_if_on = crate::sync::interrupts_enabled();
-    crate::arch::x86_64::cli();
+    let restored_if_on = arena_kernel::sync::interrupts_enabled();
+    arena_kernel::arch::x86_64::cli();
     if !masked_inside {
         return Err("IF was not cleared inside without_interrupts");
     }
@@ -920,11 +920,11 @@ fn test_crit_section() -> Result<(), &'static str> {
     let r0 = idt::absorbed_irq_count();
     let w1 = timekeeping::now_us();
     // SAFETY: bounded IF window; cli on every exit path.
-    crate::arch::x86_64::sti();
+    arena_kernel::arch::x86_64::sti();
     while idt::absorbed_irq_count() == r0 && timekeeping::now_us() - w1 < 200_000 {
         core::hint::spin_loop();
     }
-    crate::arch::x86_64::cli();
+    arena_kernel::arch::x86_64::cli();
     if idt::absorbed_irq_count() == r0 {
         return Err("interrupts did not resume after the critical section");
     }

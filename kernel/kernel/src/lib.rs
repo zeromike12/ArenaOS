@@ -1,0 +1,25 @@
+//! ArenaOS kernel proper (M2.7 split, ADR-0011).
+//!
+//! Everything machine-level lives here: CPU/arch state, interrupt and
+//! exception machinery, device drivers owned by the kernel (serial
+//! console, PIT), physical frame allocation, the heap glue, logging,
+//! timekeeping, and the terminal halt path. The boot stage (a UEFI
+//! application in `kernel/boot`) initializes firmware-facing pieces and
+//! hands over through the plain-data record in [`handoff`]; this crate
+//! never sees a UEFI type or calls a boot service.
+//!
+//! Subsystem contracts are documented per-module; the boot contract
+//! (single CPU, IF=0 outside bounded tested windows) applies until the
+//! kernel entry sequence says otherwise.
+
+#![no_std]
+
+pub mod arch;
+pub mod drivers;
+pub mod frames;
+pub mod halt;
+pub mod handoff;
+pub mod heap;
+pub mod log;
+pub mod sync;
+pub mod timekeeping;

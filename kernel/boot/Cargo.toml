@@ -8,6 +8,7 @@ description = "ArenaOS boot stage — Milestone 1 kernel image (UEFI application
 [dependencies]
 # Zero third-party crates in the OS image (ADR-0004); workspace-internal
 # crates only:
+arena-kernel = { path = "../kernel" }
 arena-heap = { path = "../libs/heap" }
 arena-sync = { path = "../libs/sync" }
 

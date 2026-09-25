@@ -29,7 +29,7 @@
 
 use core::cell::UnsafeCell;
 
-use crate::bootinfo;
+use crate::handoff;
 use crate::sync::SyncCell;
 
 pub const FRAME_BYTES: u64 = 4096;
@@ -62,7 +62,7 @@ static READY: SyncCell<bool> = SyncCell::new(false);
 // calls, no allocation happens across firmware calls — see SyncCell docs.
 
 /// Build the allocator from the captured memory map's conventional regions.
-/// Must run after `bootinfo::capture()`. Fails loudly if nothing usable was
+/// Must run after the boot stage filled the handoff record. Fails loudly if nothing usable was
 /// captured — a kernel with no memory is not a kernel.
 pub fn init() -> Result<(), &'static str> {
     // SAFETY: sequential boot init, single writer (contract above).
@@ -77,12 +77,17 @@ pub fn init() -> Result<(), &'static str> {
         *TOTAL.get() = 0;
         *FREE.get() = 0;
 
-        let regions = bootinfo::usable_region_count();
+        let regions = handoff::region_count();
         if regions == 0 {
-            return Err("no conventional regions captured (bootinfo not captured?)");
+            return Err("handoff record has no memory regions (boot stage did not fill it?)");
         }
         for i in 0..regions {
-            let r = bootinfo::usable_region(i);
+            let Some(r) = handoff::region(i) else {
+                continue;
+            };
+            if r.kind != handoff::KIND_CONVENTIONAL {
+                continue;
+            }
             // Clip the region to the managed span, frame-aligning inward so
             // partial frames at either edge are never handed out.
             let start = r.base.max(RESERVE_BELOW).div_ceil(FRAME_BYTES) * FRAME_BYTES;

@@ -7,12 +7,21 @@ name = "arena-boot"
 version = "0.1.0"
 dependencies = [
  "arena-heap",
+ "arena-kernel",
  "arena-sync",
 ]
 
 [[package]]
 name = "arena-heap"
 version = "0.1.0"
+
+[[package]]
+name = "arena-kernel"
+version = "0.1.0"
+dependencies = [
+ "arena-heap",
+ "arena-sync",
+]
 
 [[package]]
 name = "arena-sync"

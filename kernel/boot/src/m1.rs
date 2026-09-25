@@ -11,10 +11,10 @@
 //! m1: RESULT PASS (p/t)   |   m1: RESULT FAIL (p/t)
 //! ```
 
-use crate::arch::x86_64::{self, cr0, cr4, efer, gdt};
 use crate::bootinfo;
-use crate::drivers::serial;
-use crate::log::{self, log_error as error, log_info as info};
+use arena_kernel::arch::x86_64::{self, cr0, cr4, efer, gdt};
+use arena_kernel::drivers::serial;
+use arena_kernel::log::{self, log_error as error, log_info as info};
 
 type TestFn = fn() -> Result<(), &'static str>;
 

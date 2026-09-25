@@ -50,24 +50,27 @@ pub fn write_marker(args: core::fmt::Arguments<'_>) {
     let _ = writeln!(console, "{}", args);
 }
 
+#[macro_export]
 macro_rules! log_info {
     ($module:expr, $($arg:tt)*) => {
         $crate::log::write($crate::log::Level::Info, $module, format_args!($($arg)*))
     };
 }
 
+#[macro_export]
 macro_rules! log_warn {
     ($module:expr, $($arg:tt)*) => {
         $crate::log::write($crate::log::Level::Warn, $module, format_args!($($arg)*))
     };
 }
 
+#[macro_export]
 macro_rules! log_error {
     ($module:expr, $($arg:tt)*) => {
         $crate::log::write($crate::log::Level::Error, $module, format_args!($($arg)*))
     };
 }
 
-pub(crate) use log_error;
-pub(crate) use log_info;
-pub(crate) use log_warn;
+pub use log_error;
+pub use log_info;
+pub use log_warn;

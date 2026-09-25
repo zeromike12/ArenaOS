@@ -40,10 +40,9 @@
 //! view keeps firmware alive rather than being minimal.
 
 use super::{cr0, efer, read_cr0, read_cr3, read_efer, write_cr0, write_cr3, write_efer};
-use crate::bootinfo;
 use crate::frames;
+use crate::handoff;
 use crate::log::log_info as info;
-use crate::uefi;
 
 /// VA = phys + KERNEL_OFFSET in the kernel direct map (top 2 GiB).
 pub const KERNEL_OFFSET: u64 = 0xFFFF_FFFF_8000_0000;
@@ -105,21 +104,22 @@ const MAX_SECTIONS: usize = 12;
 
 /// Build the kernel address space and switch to it.
 ///
-/// `image_handle` is the handle firmware passed to `efi_main`; it yields the
-/// loaded-image base/size, whose PE section table yields per-section
-/// permissions. `summary` must be from the most recent `bootinfo::capture()`.
+/// `image` is the loaded-image layout from the handoff record (base/size as
+/// firmware reported them); its PE section table yields per-section
+/// permissions. The memory-map regions must already be in the handoff
+/// record (`handoff::region_count() > 0`).
 ///
 /// After success, CR3 points at our tables; the identity view keeps every
 /// currently-executing address valid, so the caller simply continues.
 ///
 /// # Safety
-/// Ring 0, IF=0, frame allocator initialized, memory map freshly captured.
-pub unsafe fn init(
-    image_handle: usize,
-    summary: &bootinfo::MemoryMapSummary,
-) -> Result<(), &'static str> {
-    let (img_base, img_size) = uefi::loaded_image_info(image_handle)
-        .ok_or("Loaded Image Protocol did not report our image")?;
+/// Ring 0, IF=0, frame allocator initialized, handoff record filled.
+pub unsafe fn init(image: &handoff::ImageLayout) -> Result<(), &'static str> {
+    let img_base = image.base;
+    let img_size = image.size;
+    if img_base == 0 || img_size == 0 {
+        return Err("handoff image layout is empty");
+    }
     let img_end = img_base + img_size;
 
     // PE section table → permission windows inside the image.
@@ -132,20 +132,23 @@ pub unsafe fn init(
     let pml4 = new_table().ok_or("out of frames for page tables")?;
 
     // Both views, built from the same region walk.
-    // SAFETY: summary describes the live captured map; region bounds drive
-    // only table writes into frames we own; IF=0, single CPU.
+    // SAFETY: the handoff record describes the live captured map; region
+    // bounds drive only table writes into frames we own; IF=0, single CPU.
     unsafe {
         *SKIPPED_HIGH_REGIONS.get() = 0;
-        bootinfo::for_each_region(summary, |d| {
-            let base = d.physical_start;
-            let size = d.number_of_pages * PAGE;
+        for i in 0..handoff::region_count() {
+            let Some(r) = handoff::region(i) else {
+                continue;
+            };
+            let base = r.base;
+            let size = r.pages * PAGE;
             if size == 0 {
-                return;
+                continue;
             }
             if base > u64::from(u32::MAX) {
                 // Above 4 GiB: skipped at M2 (module header), counted loudly.
                 *SKIPPED_HIGH_REGIONS.get() += 1;
-                return;
+                continue;
             }
             let end = (base + size).min(u64::from(u32::MAX) + 1);
             // Identity view: RW+X like firmware's own tables (module
@@ -164,7 +167,7 @@ pub unsafe fn init(
                     flags_for(Perm::Rw),
                 );
             }
-        });
+        }
 
         // LAPIC MMIO: absent from the memory map (GCD MMIO, not memory),
         // mandatory for the EOI path. Located from IA32_APIC_BASE, not

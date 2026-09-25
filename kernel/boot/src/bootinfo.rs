@@ -10,8 +10,8 @@
 
 use core::cell::UnsafeCell;
 
-use crate::sync::SyncCell;
 use crate::uefi::{self, EFI_BUFFER_TOO_SMALL, EFI_SUCCESS, MemoryDescriptor, Status};
+use arena_kernel::sync::SyncCell;
 
 /// Status sentinel for "boot stage invoked without a captured system table"
 /// (a programming error; the M1 test would report it as a capture failure).
@@ -173,7 +173,7 @@ pub fn capture() -> Result<MemoryMapSummary, Status> {
         // EDK2 restores TPL_APPLICATION on the way out of every boot
         // service, which means `sti`. M1 invariant: IF=0 in our code; our
         // IDT absorbs whatever fires during the call itself.
-        crate::arch::x86_64::cli();
+        arena_kernel::arch::x86_64::cli();
 
         if status != EFI_SUCCESS {
             return Err(status);
@@ -197,6 +197,20 @@ pub fn capture() -> Result<MemoryMapSummary, Status> {
                     *REGION_OVERFLOW.get() += 1;
                 }
             }
+        });
+
+        // Fill the kernel handoff record (M2.7, ADR-0011): EVERY region
+        // (not only conventional) plus this call's map key. Kernel-side
+        // consumers (frame allocator, paging) read the record, never this
+        // module — firmware types stop at this boundary.
+        arena_kernel::handoff::begin_map(map_key as u64);
+        for_each_region(&summary, |d| {
+            arena_kernel::handoff::push_region(arena_kernel::handoff::Region {
+                kind: d.memory_type,
+                base: d.physical_start,
+                pages: d.number_of_pages,
+                attribute: d.attribute,
+            });
         });
 
         Ok(summary)

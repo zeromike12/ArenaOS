@@ -79,9 +79,6 @@ pub struct RuntimeServices {
 }
 const _: () = assert!(core::mem::size_of::<RuntimeServices>() == 24 + 88);
 
-/// EFI_RESET_TYPE (UEFI 2.10 §8.6.11): 0=Cold, 1=Warm, 2=Shutdown, ...
-pub const EFI_RESET_SHUTDOWN: u32 = 2;
-
 /// EFI_BOOT_SERVICES — UEFI 2.10 §7.2 (Table 14).
 /// Typed through `get_memory_map` (the 5th function). Everything after it is
 /// declared as opaque placeholders to keep the struct layout honest about
@@ -249,6 +246,7 @@ static SYSTEM_TABLE: AtomicUsize = AtomicUsize::new(0);
 /// other work.
 pub fn init(system_table: *const SystemTable) {
     SYSTEM_TABLE.store(system_table as usize, Ordering::Release);
+    deposit_reset_fn();
 }
 
 fn system_table() -> Option<*const SystemTable> {
@@ -283,15 +281,18 @@ pub unsafe fn boot_services() -> Option<&'static BootServices> {
 
 /// Halt the machine via UEFI ResetSystem(EfiResetShutdown).
 ///
-/// Returns only if the system table was never captured (panic-before-init) or
-/// firmware misbehaves; callers must have a fallback (see `panic.rs`).
-pub fn reset_shutdown() {
-    // SAFETY: we call this single-CPU, boot-services-active; ResetSystem is
-    // legal at any time per UEFI 2.10 §8.6.11 and does not return on success.
+/// Hand the kernel's halt path the runtime `ResetSystem` entry point
+/// (handoff ABI, ADR-0011): runtime services survive `ExitBootServices`,
+/// so this is the one firmware function the kernel proper may call.
+fn deposit_reset_fn() {
+    // SAFETY: called from `init` with firmware's live system table;
+    // `set_reset_system`'s contract is exactly this typed field's address.
     unsafe {
         if let Some(st) = system_table() {
             let rt = &*(*st).runtime_services;
-            (rt.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
+            #[allow(clippy::fn_to_numeric_cast_with_truncation)]
+            let ptr = rt.reset_system as usize as u64;
+            arena_kernel::halt::set_reset_system(ptr);
         }
     }
 }
@@ -347,7 +348,7 @@ pub fn loaded_image_info(image_handle: usize) -> Option<(u64, u64)> {
         let status =
             (boot.handle_protocol)(image_handle, &LOADED_IMAGE_PROTOCOL_GUID, &mut interface);
         if status != EFI_SUCCESS || interface == 0 {
-            crate::log::log_warn!(
+            arena_kernel::log::log_warn!(
                 "uefi",
                 "loaded_image_info: handle_protocol status={status:#x} interface={interface:#x} handle={image_handle:#x}"
             );
@@ -357,7 +358,7 @@ pub fn loaded_image_info(image_handle: usize) -> Option<(u64, u64)> {
         let base = (*li).image_base as u64;
         let size = (*li).image_size;
         if base == 0 || size == 0 || !base.is_multiple_of(4096) {
-            crate::log::log_warn!(
+            arena_kernel::log::log_warn!(
                 "uefi",
                 "loaded_image_info: implausible base={base:#x} size={size:#x}"
             );

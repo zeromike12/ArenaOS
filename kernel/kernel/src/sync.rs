@@ -15,13 +15,13 @@ use core::cell::UnsafeCell;
 /// Each cell has exactly one writer during sequential init, before any
 /// concurrency exists. SMP-era code must use real synchronization — this
 /// type must not migrate past the boot stage without an ADR.
-pub(crate) struct SyncCell<T>(UnsafeCell<T>);
+pub struct SyncCell<T>(UnsafeCell<T>);
 
 impl<T> SyncCell<T> {
-    pub(crate) const fn new(value: T) -> Self {
+    pub const fn new(value: T) -> Self {
         Self(UnsafeCell::new(value))
     }
-    pub(crate) const fn get(&self) -> *mut T {
+    pub const fn get(&self) -> *mut T {
         self.0.get()
     }
 }
@@ -33,7 +33,7 @@ unsafe impl<T> Sync for SyncCell<T> {}
 ///
 /// If `f` panics the restore is skipped, which is fine: the panic path
 /// halts the machine anyway (panic.rs).
-pub(crate) fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+pub fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
     let saved = x86_64::read_flags();
     x86_64::cli();
     let result = f();
@@ -45,6 +45,6 @@ pub(crate) fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Whether interrupts are currently enabled (IF flag).
-pub(crate) fn interrupts_enabled() -> bool {
+pub fn interrupts_enabled() -> bool {
     x86_64::interrupts_enabled()
 }

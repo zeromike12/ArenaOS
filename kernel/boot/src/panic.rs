@@ -3,16 +3,15 @@
 //! Contract (ADR-0005): any panic emits a machine-checkable
 //! `[arena PANIC file:line] message` marker on serial before the machine is
 //! halted, so the test harness fails the run even if the panic happened after
-//! some tests already passed. Halting uses UEFI `ResetSystem(Shutdown)` —
-//! the same safe-halt path as normal completion (ADR-0003). If the firmware
-//! pointer was never captured (panic before `uefi::init`), we fall back to
-//! CLI+HLT forever: with interrupts disabled, HLT parks the CPU without
-//! risking a spurious-wakeup loop.
+//! some tests already passed. Halting delegates to the kernel's terminal
+//! path (`arena_kernel::halt`): UEFI `ResetSystem(Shutdown)` — the same
+//! safe halt as normal completion (ADR-0003) — with a CLI+HLT park loop as
+//! the fallback when the firmware pointer was never deposited.
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
-use crate::drivers::serial::SerialConsole;
+use arena_kernel::drivers::serial::SerialConsole;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -37,17 +36,8 @@ fn panic(info: &PanicInfo) -> ! {
         }
     }
 
-    // Try a clean firmware shutdown; fall back to park-the-CPU.
-    crate::uefi::reset_shutdown();
-
-    // reset_shutdown returns only if firmware hand-off failed (e.g., panic
-    // before the system table was captured).
-    // SAFETY: CLI keeps interrupts off; HLT with IF=0 parks the CPU
-    // permanently. Single-CPU boot context (ADR-0003), nothing else runs.
-    unsafe {
-        core::arch::asm!("cli");
-        loop {
-            core::arch::asm!("hlt", options(nostack, nomem, preserves_flags));
-        }
-    }
+    // Clean firmware shutdown; the kernel halt path falls back to a
+    // CLI+HLT park loop if the runtime pointer was never deposited
+    // (panic before uefi::init) — either way this never returns.
+    arena_kernel::halt::reset_shutdown()
 }

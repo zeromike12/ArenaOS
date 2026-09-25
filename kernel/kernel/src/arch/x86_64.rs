@@ -11,7 +11,7 @@ pub mod tss;
 use core::arch::x86_64::__cpuid;
 use core::fmt;
 
-pub(crate) use crate::sync::SyncCell;
+pub use crate::sync::SyncCell;
 
 /// Disable maskable interrupts (CLI). Safe: at boot we own the CPU; UEFI
 /// requires single-CPU execution and we keep interrupts off until the kernel

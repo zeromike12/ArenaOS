@@ -18,22 +18,15 @@
 #![no_std]
 #![no_main]
 
-mod arch;
 mod bootinfo;
-mod drivers;
-mod frames;
-mod halt;
-mod heap;
-mod log;
 mod m1;
 mod m2;
 mod panic;
-mod sync;
-mod timekeeping;
 mod uefi;
 
-use arch::x86_64::{self, gdt, tss};
-use log::{log_error as error, log_info as info, log_warn as warn};
+use arena_kernel::arch::x86_64::{self, gdt, tss};
+use arena_kernel::log::{log_error as error, log_info as info, log_warn as warn};
+use arena_kernel::{frames, halt, heap, timekeeping};
 
 /// UEFI image entry point (UEFI 2.10 §2.1 EFI_IMAGE_ENTRY_POINT; win64/
 /// efiapi ABI on x86_64, entry symbol fixed to `efi_main` by our target's
@@ -53,7 +46,7 @@ pub extern "efiapi" fn efi_main(
     // --- Step 2: runtime support -----------------------------------------
     // SAFETY: we are the only code running (single CPU, interrupts off);
     // COM1 programming follows the driver's port-I/O contract.
-    unsafe { drivers::serial::init() };
+    unsafe { arena_kernel::drivers::serial::init() };
 
     let profile = if cfg!(debug_assertions) {
         "debug"
@@ -134,18 +127,18 @@ pub extern "efiapi" fn efi_main(
     // with 8259 + LAPIC EOI until M2 replaces them with real dispatch.
     // SAFETY: ring 0, IF=0, installed immediately after the GDT swap and
     // before the first firmware call — idt::init()'s contract.
-    unsafe { arch::x86_64::idt::init() };
+    unsafe { x86_64::idt::init() };
     info!(
         "boot",
         "idt: installed own IDT (base={:#x}, 256 vectors: 0-31 diagnostics+halt, 32-255 absorb+EOI)",
-        arch::x86_64::idt::expected_idt().0
+        x86_64::idt::expected_idt().0
     );
 
     // --- Step 2.5: capture the firmware memory map (boot-info seed) --------
     // Done once here for production consumers (frame allocator, later the
     // ExitBootServices map-key replay); the M1 test suite re-captures
     // independently as part of its assertions.
-    let summary = match bootinfo::capture() {
+    let _summary = match bootinfo::capture() {
         Ok(summary) => {
             info!(
                 "boot",
@@ -197,10 +190,24 @@ pub extern "efiapi" fn efi_main(
     // PE section (.text R+X, .rdata RO, rest RW+NX), CR0.WP + EFER.NXE
     // enforced. The identity view keeps every executing address valid
     // across the CR3 switch, so boot simply continues.
-    // SAFETY: ring 0, interrupts off, frame allocator live, `summary` is
-    // from the capture above, `image_handle` is firmware's own handle for
-    // this image.
-    if let Err(reason) = unsafe { x86_64::paging::init(image_handle, &summary) } {
+    // Since M2.7 the kernel crate never touches UEFI: the boot stage
+    // resolves the Loaded Image Protocol here and deposits plain data
+    // (base/size) into the handoff record; paging parses the PE section
+    // table from those facts.
+    let layout = match uefi::loaded_image_info(image_handle) {
+        Some((base, size)) => {
+            let l = arena_kernel::handoff::ImageLayout { base, size };
+            arena_kernel::handoff::set_image_layout(l);
+            l
+        }
+        None => {
+            error!("boot", "Loaded Image Protocol did not report our image");
+            halt::halt_machine("no loaded-image information");
+        }
+    };
+    // SAFETY: ring 0, interrupts off, frame allocator live, handoff record
+    // filled by the capture above and the image layout just deposited.
+    if let Err(reason) = unsafe { x86_64::paging::init(&layout) } {
         error!("boot", "paging init failed: {reason}");
         halt::halt_machine("paging init failed");
     }
@@ -217,15 +224,5 @@ pub extern "efiapi" fn efi_main(
         "boot",
         "milestones finished (m1 {passed}/{total}, m2 {passed2}/{total2}); halting via UEFI ResetSystem(shutdown)"
     );
-    uefi::reset_shutdown();
-
-    // reset_shutdown() only returns if the firmware hand-off failed. Fall
-    // back to parking the CPU: interrupts are off, so HLT is permanent.
-    // SAFETY: CLI+HLT loop, single CPU, nothing else runnable.
-    unsafe {
-        x86_64::cli();
-        loop {
-            core::arch::asm!("hlt", options(nostack, nomem, preserves_flags));
-        }
-    }
+    halt::reset_shutdown();
 }
