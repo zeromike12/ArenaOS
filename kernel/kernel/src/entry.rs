@@ -143,6 +143,12 @@ pub fn switch_trampoline_addr() -> u64 {
 /// kernel-view alias, on the lifted stack, under kernel-only tables.
 /// Never returns — the machine shuts down via runtime services.
 pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
+    // The trampoline just switched CR3 to the kernel-only view: from this
+    // instruction on, the identity alias of RAM is GONE, and page-table
+    // accesses must go through the kernel-view alias (paging::table_ptr).
+    // SAFETY: called exactly once, after the CR3 switch, ring 0, IF=0.
+    unsafe { x86_64::paging::note_identity_torn_down() };
+
     // --- record validation: a real ABI check, not ceremony ---------------
     if boot_info.magic != BOOTINFO_MAGIC
         || boot_info.version != BOOTINFO_VERSION
@@ -283,6 +289,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         error!("kernel", "scheduler init failed: {reason}");
         crate::halt::halt_machine("scheduler init failed");
     }
+
+    // --- M3.3: the ring-3 boundary (ADR-0014) -----------------------------
+    // syscall/sysret MSRs, STAR selectors, SFMASK, KERNEL_GS_BASE scratch,
+    // SMEP/SMAP when the CPU has them — every write verified by read-back
+    // inside init (a control MSR that did not take is a dead boundary).
+    // SAFETY: ring 0, IF=0, our GDT (with the ring-3 pair) and scheduler
+    // are live; the image is at its final kernel-view addresses.
+    if let Err(reason) = unsafe { x86_64::syscall::init() } {
+        error!("kernel", "syscall boundary init failed: {reason}");
+        crate::halt::halt_machine("syscall boundary init failed");
+    }
+
     if !crate::m3::run_suite() {
         crate::halt::halt_machine("milestone 3 suite failed");
     }

@@ -56,6 +56,10 @@ const THREAD_STACK_BYTES: u64 = (THREAD_STACK_FRAMES * 4096) as u64;
 /// Bottom-of-stack canary ("ARENASTK"), checked on every switch-away.
 const STACK_CANARY: u64 = 0x4152_454E_4153_544B;
 
+/// Per-thread user regions the syscall dispatcher validates against
+/// (code / data / stack / spare — ADR-0014).
+pub const USER_REGIONS_MAX: usize = 4;
+
 /// M3.1 stacks come from the direct map's first 2 GiB (ADR-0008); a frame
 /// beyond that has no kernel-view alias yet, so `spawn` refuses it rather
 /// than hand back an unmapped stack. (512 MiB reference VM: all
@@ -80,6 +84,17 @@ pub struct KThread {
     /// Stack base *physical* address (0 = not owned: the bootstrap thread).
     stack_base: u64,
     stack_frames: usize,
+    /// CR3 (PML4 PHYS) of this thread's address space (M3.3, ADR-0014);
+    /// 0 = leave CR3 alone at switch-in (the bootstrap thread). Kernel
+    /// threads carry the kernel-view PML4; process threads carry their
+    /// process's own (kernel half cloned, user half private).
+    cr3: u64,
+    /// Registered user-memory regions ((lo, hi) page-granular pairs;
+    /// (0,0) = slot unused) — the syscall dispatcher validates every
+    /// user pointer against exactly these (ADR-0014). Kernel-only
+    /// threads leave them zeroed, so any user-pointer syscall from them
+    /// is rejected.
+    regions: [(u64, u64); USER_REGIONS_MAX],
 }
 
 /// Fixed-capacity FIFO of slot indices (one CPU's round-robin ready ring).
@@ -185,6 +200,8 @@ pub fn init() -> Result<(), &'static str> {
             arg: 0,
             stack_base: 0,
             stack_frames: 0,
+            cr3: 0, // leave CR3 alone: the bootstrap never leaves the kernel view
+            regions: [(0, 0); USER_REGIONS_MAX],
         });
         // SAFETY: same discipline; fresh scheduler, known values.
         unsafe {
@@ -236,6 +253,8 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
                 arg,
                 stack_base: phys,
                 stack_frames: THREAD_STACK_FRAMES,
+                cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
+                regions: [(0, 0); USER_REGIONS_MAX],
             });
             (*CTX.get())[idx] = rsp0;
             let cpu = &mut (*CPUS.get())[this_cpu()];
@@ -358,6 +377,25 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
         // the countdown when a yield found the ring empty and no switch
         // happens — the current thread simply gets a new slice).
         cpu.remaining = cpu.slice;
+        // M3.3 (ADR-0014): the ring-3→ring-0 entry stack pair (TSS RSP0 +
+        // the syscall stub's GS scratch) and the address space always
+        // describe the thread about to run. Written together, here, so
+        // they can never disagree; safe before the actual switch because
+        // the switch itself only touches kernel-half memory (thread
+        // stacks live in the direct map; the save slots live in the
+        // image — both present in every address space we build).
+        let nt = threads[next].expect("ready slot vanished"); // Copy
+        if nt.stack_frames > 0 {
+            let top = nt.stack_base.wrapping_add(KERNEL_OFFSET) + THREAD_STACK_BYTES;
+            crate::arch::x86_64::tss::set_rsp0(top);
+            crate::arch::x86_64::syscall::set_cpu_kernel_stack(top);
+        }
+        if nt.cr3 != 0 {
+            let live = crate::arch::x86_64::read_cr3();
+            if live != nt.cr3 {
+                crate::arch::x86_64::write_cr3(nt.cr3);
+            }
+        }
         Some(Plan {
             save: (CTX.get() as *mut u64).add(cur),
             restore: (*CTX.get())[next],
@@ -467,4 +505,95 @@ pub fn current_stack_range() -> (u64, u64) {
             (base, base + THREAD_STACK_BYTES)
         }
     })
+}
+
+// ---- M3.3: user-thread plumbing (ADR-0014) ---------------------------------
+
+/// Kernel stack top of the current thread (one past the last byte — the
+/// value TSS RSP0 and the syscall scratch carry); `None` for the
+/// bootstrap thread, whose stack the scheduler does not own.
+pub fn current_kernel_stack_top() -> Option<u64> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let t = (*THREADS.get())[cur].expect("current thread vanished");
+            if t.stack_frames == 0 {
+                return None;
+            }
+            Some(t.stack_base.wrapping_add(KERNEL_OFFSET) + THREAD_STACK_BYTES)
+        }
+    })
+}
+
+/// Kernel stack top of the thread with `id`, while it exists (test
+/// evidence for the RSP0 programming; `None` when no live thread has it).
+pub fn thread_stack_top(id: u64) -> Option<u64> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            for t in (*THREADS.get()).iter().flatten() {
+                if t.id == id && t.stack_frames > 0 {
+                    return Some(t.stack_base.wrapping_add(KERNEL_OFFSET) + THREAD_STACK_BYTES);
+                }
+            }
+            None
+        }
+    })
+}
+
+/// Id of the thread running on this CPU.
+pub fn current_thread_id() -> u64 {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            (*THREADS.get())[cur].expect("current thread vanished").id
+        }
+    })
+}
+
+/// The current thread's registered user regions (copy-out; zeros in the
+/// unused slots). The syscall dispatcher validates user pointers against
+/// exactly this table.
+pub fn current_user_regions() -> [(u64, u64); USER_REGIONS_MAX] {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            (*THREADS.get())[cur]
+                .expect("current thread vanished")
+                .regions
+        }
+    })
+}
+
+/// Register the current thread's user regions (page-granular `(lo, hi)`
+/// pairs, at most [`USER_REGIONS_MAX`], zeros fill the rest). Call with
+/// IF=0 before `enter_user` (or at process-thread creation).
+pub fn set_current_user_regions(regions: &[(u64, u64)]) -> Result<(), &'static str> {
+    if regions.len() > USER_REGIONS_MAX {
+        return Err("too many user regions");
+    }
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0; as_mut() — expect-assign on a
+        // Copy place would write to a temporary (CODING-CONVENTIONS).
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let t = (*THREADS.get())[cur]
+                .as_mut()
+                .expect("current thread vanished");
+            t.regions = [(0, 0); USER_REGIONS_MAX];
+            for (i, r) in regions.iter().enumerate() {
+                t.regions[i] = *r;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Terminate the current thread from kernel context — the SYS_EXIT door
+/// into the normal zombie/reap path (ADR-0014). Diverges like `exit_now`.
+pub fn terminate() -> ! {
+    exit_now()
 }

@@ -49,6 +49,30 @@ Current coverage:
                               never trip the anti-hang guard, and timer
                               rotations are observed alongside yields —
                               cooperative and preemptive triggers compose.
+  M3.3 — ring-3 boundary (ADR-0014; hand-assembled user payloads execute
+  at CPL 3 and cross via the syscall MSRs; QEMU recipe gains +smep,+smap
+  so the enforcement paths are exercised, not just compiled):
+  * user_ring3_syscall      — GDT ring-3 pair + STAR/LSTAR/SFMASK/EFER.SCE
+                              read-backs; a payload whose privileged `cli`
+                              faults #GP and resumes (impossible at CPL 0),
+                              whose invalid syscall number is rejected with
+                              -1 *observed in ring 3*, whose SYS_WRITE
+                              bytes are verified in a kernel-side buffer,
+                              and whose SYS_EXIT(42) reaps through the
+                              scheduler; SMAP: bare kernel read of a user
+                              page → recovered #PF with CR2 asserted;
+                              TSS RSP0 names the user thread's kernel
+                              stack top; user-page map/run/unmap/free with
+                              exact frame accounting.
+  * user_ring3_interrupted  — a ring-3 spin loop (flag-gated, anti-hang
+                              bounded) runs under armed preemption: timer
+                              ticks land in user mode through RSP0, the
+                              tick hook rotates the user thread mid-spin
+                              and resumes it back into ring 3, a kernel
+                              write into the process's own data page
+                              releases the spin, and SYS_WRITE+SYS_EXIT(7)
+                              verify afterwards — interrupts, preemption,
+                              and shared memory all compose with ring 3.
 
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
@@ -67,6 +91,8 @@ EXPECTED_TESTS = [
     "thread_churn_accounting",
     "preempt_rotation",
     "preempt_coexist",
+    "user_ring3_syscall",
+    "user_ring3_interrupted",
 ]
 
 if __name__ == "__main__":

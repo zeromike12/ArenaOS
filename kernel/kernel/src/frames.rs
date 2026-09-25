@@ -23,6 +23,14 @@
 //! * Double free / freeing an unmanaged address is a checked error, not a
 //!   silent corruption — the allocator is the one component allowed to be
 //!   paranoid about everything above it.
+//! * Every public mutator runs inside `without_interrupts` (ADR-0014):
+//!   since preemption (M3.2) thread bodies allocate at IF=1, and the
+//!   scheduler *frees* stacks from interrupt context (deferred reap) — a
+//!   tick landing between a bitmap read and write would corrupt the
+//!   allocator. None of these operations block, so the masked windows are
+//!   bounded and deadlock-free. Single-CPU remains the assumption until
+//!   SMP (M5); the irqsave discipline is exactly what a per-CPU or locked
+//!   allocator will replace (ADR-0007 revisit trigger).
 //!
 //! The core bit logic is written as pure operations on the bitmap slice so
 //! it can move to a host-testable crate wholesale at the M2.7 boot split.
@@ -43,9 +51,10 @@ const WORDS: usize = FRAME_COUNT / 64; // 16384
 /// Frames starting here are managed; below stays permanently reserved.
 pub const RESERVE_BELOW: u64 = 1 << 20;
 
-/// Bitmap storage. SAFETY CONTRACT: as `SyncCell` — single-CPU, serialized
-/// boot context; the M3+ kernel replaces this with a properly synchronized
-/// (or per-CPU) allocator; nothing here survives the boot split unchanged.
+/// Bitmap storage. SAFETY CONTRACT: as `SyncCell` — single-CPU, and every
+/// mutator enters through an irqsave wrapper (module header), so the
+/// bitmap is only ever touched with IF=0; the SMP-era allocator replaces
+/// this wholesale (ADR-0007 revisit trigger).
 struct Bitmap(UnsafeCell<[u64; WORDS]>);
 unsafe impl Sync for Bitmap {}
 static BITMAP: Bitmap = Bitmap(UnsafeCell::new([0u64; WORDS]));
@@ -115,7 +124,12 @@ pub fn init() -> Result<(), &'static str> {
 /// Allocate one physical frame. Returns its base address (4 KiB aligned by
 /// construction), or None when the managed memory is exhausted.
 pub fn alloc() -> Option<u64> {
-    // SAFETY: single-CPU serialized context (module contract).
+    crate::sync::without_interrupts(alloc_irq0)
+}
+
+/// [`alloc`] body; IF=0 guaranteed by the wrapper (module contract).
+fn alloc_irq0() -> Option<u64> {
+    // SAFETY: single-CPU, IF=0 via the irqsave wrapper.
     unsafe {
         if !*READY.get() {
             return None;
@@ -147,7 +161,12 @@ pub fn free(base: u64) -> Result<(), &'static str> {
     if !base.is_multiple_of(FRAME_BYTES) || base >= PHYS_LIMIT {
         return Err("free: address not a managed frame base");
     }
-    // SAFETY: single-CPU serialized context (module contract).
+    crate::sync::without_interrupts(|| free_irq0(base))
+}
+
+/// [`free`] body after the range check; IF=0 via the wrapper.
+fn free_irq0(base: u64) -> Result<(), &'static str> {
+    // SAFETY: single-CPU, IF=0 via the irqsave wrapper.
     unsafe {
         if !*READY.get() {
             return Err("free: allocator not initialized");
@@ -171,7 +190,12 @@ pub fn free(base: u64) -> Result<(), &'static str> {
 /// Allocate `n` physically contiguous frames (n ≥ 1). Linear scan from the
 /// hint frame, wrapping once — documented scope note in the module header.
 pub fn alloc_contiguous(n: usize) -> Option<u64> {
-    // SAFETY: single-CPU serialized context (module contract).
+    crate::sync::without_interrupts(|| alloc_contiguous_irq0(n))
+}
+
+/// [`alloc_contiguous`] body; IF=0 via the wrapper.
+fn alloc_contiguous_irq0(n: usize) -> Option<u64> {
+    // SAFETY: single-CPU, IF=0 via the irqsave wrapper.
     unsafe {
         if !*READY.get() || n == 0 || n as u64 > total_frames() || n > FRAME_COUNT {
             return None;
@@ -220,11 +244,15 @@ pub fn alloc_contiguous(n: usize) -> Option<u64> {
 }
 
 /// Free a contiguous run previously returned by [`alloc_contiguous`].
+/// One irqsave section for the whole run (nested `free` wrappers are
+/// flag-restoring and therefore harmless inside it).
 pub fn free_contiguous(base: u64, n: usize) -> Result<(), &'static str> {
-    for k in 0..n as u64 {
-        free(base + k * FRAME_BYTES)?;
-    }
-    Ok(())
+    crate::sync::without_interrupts(|| {
+        for k in 0..n as u64 {
+            free(base + k * FRAME_BYTES)?;
+        }
+        Ok(())
+    })
 }
 
 /// Frames under management (constant after `init()`).

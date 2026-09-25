@@ -40,7 +40,7 @@ VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
-RESULT_LINE_M3='m3: RESULT PASS (7/7)'
+RESULT_LINE_M3='m3: RESULT PASS (9/9)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -51,7 +51,7 @@ for i in $(seq 1 "$N"); do
     rm -f "$SERIAL"
     rc=0
     timeout "$BOOT_TIMEOUT" "${QEMU[@]}" \
-        -M q35 -m 512M -cpu qemu64,+nx \
+        -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$VARS" \
         -drive format=raw,file="$ESP" \

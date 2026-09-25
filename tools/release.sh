@@ -133,7 +133,7 @@ gh api repos/zeromike12/ArenaOS/git/blobs/${blob_sha} \\
 tar xzf ${BUNDLE}
 cp ovmf-vars-template.img ovmf-vars.img     # fresh NVRAM per boot
 qemu-system-x86_64 \\
-    -M q35 -m 512M -cpu qemu64,+nx \\
+    -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \\
     -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \\
     -drive if=pflash,format=raw,file=ovmf-vars.img \\
     -drive format=raw,file=arena-esp.img \\
@@ -159,7 +159,7 @@ EOF
 )"
         ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
           timeout 120 "${QEMU[@]}" \
-            -M q35 -m 512M -cpu qemu64,+nx \
+            -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
             -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
             -drive if=pflash,format=raw,file=ovmf-vars.img \
             -drive format=raw,file=arena-esp.img \

@@ -7,6 +7,7 @@ pub mod faults;
 pub mod gdt;
 pub mod idt;
 pub mod paging;
+pub mod syscall;
 pub mod tss;
 
 use core::arch::x86_64::__cpuid;
@@ -211,6 +212,94 @@ pub unsafe fn write_efer(v: u64) {
     }
 }
 
+/// Read any MSR (SDM Vol. 4). Ring 0 only.
+pub fn rdmsr(msr: u32) -> u64 {
+    let (lo, hi): (u32, u32);
+    // SAFETY: RDMSR of an existing MSR is side-effect-free at ring 0;
+    // callers pass architectural MSR addresses only (#GP otherwise —
+    // every use site names its MSR and SDM reference).
+    unsafe {
+        core::arch::asm!("rdmsr", out("eax") lo, out("edx") hi, in("ecx") msr,
+            options(nostack, preserves_flags, nomem));
+    }
+    ((hi as u64) << 32) | (lo as u64)
+}
+
+/// Write any MSR (SDM Vol. 4). Ring 0 only.
+///
+/// # Safety
+/// The caller must know the MSR exists and that `value` is legal for it —
+/// an illegal write #GPs, and for control MSRs (EFER, STAR/LSTAR/SFMASK,
+/// KERNEL_GS_BASE) a wrong value corrupts every later transition.
+pub unsafe fn wrmsr(msr: u32, value: u64) {
+    // SAFETY: WRMSR consumes EDX:EAX with the MSR in ECX; caller contract.
+    unsafe {
+        core::arch::asm!(
+            "wrmsr",
+            in("eax") value as u32,
+            in("edx") (value >> 32) as u32,
+            in("ecx") msr,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
+/// Write CR4 (SDM Vol. 3 §2.6).
+///
+/// # Safety
+/// Caller must preserve PAE (long-mode requirement) and understand every
+/// changed bit; SMEP/SMAP changes take effect on the next access.
+pub unsafe fn write_cr4(v: u64) {
+    // SAFETY: forwarded to caller contract.
+    unsafe { core::arch::asm!("mov cr4, {}", in(reg) v, options(nostack, preserves_flags)) };
+}
+
+/// Whether SMAP enforcement is live (CR4.SMAP set by `syscall::init` when
+/// the CPU supports it). `stac`/`clac` gate on this: the instructions
+/// themselves #UD on CPUs without SMAP.
+static SMAP_ACTIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn set_smap_active(active: bool) {
+    SMAP_ACTIVE.store(active, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn smap_active() -> bool {
+    SMAP_ACTIVE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// Permit kernel access to user pages (EFLAGS.AC=1) — required around
+/// every deliberate kernel touch of U/S memory when SMAP is active
+/// (ADR-0014). No-op when SMAP is absent.
+pub unsafe fn stac() {
+    if smap_active() {
+        // SAFETY: STAC only sets EFLAGS.AC; legal at ring 0; guarded so
+        // it never executes on a SMAP-less CPU (#UD).
+        unsafe { core::arch::asm!("stac", options(nostack, nomem, preserves_flags)) };
+    }
+}
+
+/// Revoke kernel access to user pages (EFLAGS.AC=0). No-op without SMAP.
+pub unsafe fn clac() {
+    if smap_active() {
+        // SAFETY: as stac.
+        unsafe { core::arch::asm!("clac", options(nostack, nomem, preserves_flags)) };
+    }
+}
+
+/// Invalidate the TLB entry for one 4 KiB page (SDM Vol. 2 INVLPG).
+///
+/// # Safety
+/// `va` must be page-aligned; the instruction faults if paging is off.
+/// Single-CPU assumption: no remote shootdown exists yet (ADR-0014).
+pub unsafe fn invlpg(va: u64) {
+    // SAFETY: caller contract; INVLPG reads its operand as a memory
+    // address but never dereferences it.
+    unsafe {
+        core::arch::asm!("invlpg [{}]", in(reg) va,
+            options(nostack, preserves_flags, readonly));
+    }
+}
+
 pub mod cr0 {
     pub const PE: u64 = 1 << 0; // Protection Enable
     pub const WP: u64 = 1 << 16; // Write Protect (ring-0 writes honor RO pages)
@@ -220,10 +309,13 @@ pub mod cr0 {
 /// CR4 bit masks — SDM Vol. 3 §2.6.
 pub mod cr4 {
     pub const PAE: u64 = 1 << 5; // Physical Address Extension (required in long mode)
+    pub const SMEP: u64 = 1 << 20; // Supervisor Mode Execution Prevention
+    pub const SMAP: u64 = 1 << 21; // Supervisor Mode Access Prevention
 }
 
 /// IA32_EFER bit masks — SDM Vol. 4 §2.2.1.
 pub mod efer {
+    pub const SCE: u64 = 1 << 0; // System Call Extensions (syscall/sysret)
     pub const LME: u64 = 1 << 8; // Long Mode Enable
     pub const LMA: u64 = 1 << 10; // Long Mode Active
     pub const NXE: u64 = 1 << 11; // No-Execute Enable (PTE bit 63)
@@ -264,6 +356,10 @@ pub struct CpuInfo {
     pub has_long_mode: bool,
     /// CPUID.8000_0008h:EAX[7:0] — physical address bits.
     pub phys_addr_bits: u32,
+    /// CPUID.7.0:EBX[7] — Supervisor Mode Execution Prevention.
+    pub has_smep: bool,
+    /// CPUID.7.0:EBX[20] — Supervisor Mode Access Prevention.
+    pub has_smap: bool,
 }
 
 pub fn cpu_info() -> CpuInfo {
@@ -305,6 +401,17 @@ pub fn cpu_info() -> CpuInfo {
     } else {
         0
     };
+    // Structured feature leaf (SDM Vol. 2A §3.2: leaf 7 requires max
+    // leaf ≥ 7; QEMU exposes it on every model we target). NOTE the
+    // CPUID bit positions differ from the CR4 ones: SMEP is EBX[7]
+    // (CR4 bit 20), SMAP is EBX[20] (CR4 bit 21) — a bring-up bug here
+    // reported SMAP as "SMEP" and skipped SMAP arming entirely.
+    let (has_smep, has_smap) = if cpuid(0).eax >= 7 {
+        let f7 = cpuid(7);
+        (f7.ebx & (1 << 7) != 0, f7.ebx & (1 << 20) != 0)
+    } else {
+        (false, false)
+    };
 
     CpuInfo {
         vendor,
@@ -315,6 +422,8 @@ pub fn cpu_info() -> CpuInfo {
         has_nx,
         has_long_mode,
         phys_addr_bits,
+        has_smep,
+        has_smap,
     }
 }
 
@@ -323,7 +432,7 @@ impl fmt::Display for CpuInfo {
         let vendor = core::str::from_utf8(&self.vendor).unwrap_or("???");
         write!(
             f,
-            "vendor={} family={} model={} stepping={} physaddr={}bit sse2={} nx={} longmode={}",
+            "vendor={} family={} model={} stepping={} physaddr={}bit sse2={} nx={} longmode={} smep={} smap={}",
             vendor,
             self.family,
             self.model,
@@ -331,7 +440,9 @@ impl fmt::Display for CpuInfo {
             self.phys_addr_bits,
             self.has_sse2,
             self.has_nx,
-            self.has_long_mode
+            self.has_long_mode,
+            self.has_smep,
+            self.has_smap
         )
     }
 }

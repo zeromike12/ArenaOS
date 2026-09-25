@@ -8,10 +8,12 @@
 //!    that must survive a broken stack: #DF (8), NMI (2), #MC (18). Their
 //!    IDT gates carry IST=1, so entry switches to `FAULT_STACK` no matter
 //!    what state the interrupted stack was in.
-//! 2. **RSP0** — the ring-3→ring-0 stack pointer, consumed by M3's first
-//!    syscall/user-mode transition. Deliberately left 0 until then: if
-//!    anything ever tries a privilege-level stack switch before M3 wires
-//!    this up, we want a loud fault, not silent use of a stale stack.
+//! 2. **RSP0** — the ring-3→ring-0 stack pointer for interrupts that land
+//!    in user mode (M3.3, ADR-0014): the scheduler reprograms it to the
+//!    incoming thread's kernel stack top on every context switch. It
+//!    starts at 0 deliberately: any privilege-level stack switch before
+//!    the scheduler wires it up faults loudly instead of silently using a
+//!    stale stack.
 //!
 //! The TSS descriptor is a 16-byte system-segment pair living in GDT slots
 //! 3–4 (selector 0x18); `init()` fills it and loads TR with `ltr`.
@@ -65,6 +67,27 @@ static TSS: SyncCell<Tss> = SyncCell::new(Tss {
 /// The stack top programmed into IST1 (one past the end — stacks grow down).
 pub fn ist1_stack_top() -> u64 {
     core::ptr::addr_of!(FAULT_STACK) as u64 + FAULT_STACK_BYTES as u64
+}
+
+/// Program RSP0 — the stack the CPU switches to for any ring-3 → ring-0
+/// privilege-level transition (interrupts/exceptions landing in user mode;
+/// `syscall` uses the GS scratch instead, ADR-0014). The scheduler calls
+/// this on every switch to a stack-owning thread, together with
+/// `syscall::set_cpu_kernel_stack`, so the two always agree.
+///
+/// # Safety
+/// Ring 0, IF=0 (the scheduler's decision phase), `top` = one past the
+/// last byte of the current thread's kernel stack, 16-byte aligned.
+pub unsafe fn set_rsp0(top: u64) {
+    // SAFETY: caller contract; packed(4) field written by copy (E0793).
+    unsafe { core::ptr::addr_of_mut!((*TSS.get()).rsp0).write_unaligned(top) };
+}
+
+/// RSP0 as currently programmed (test evidence; copy-out of a packed
+/// field).
+pub fn read_back_rsp0() -> u64 {
+    // SAFETY: read-only copy-out; single-CPU.
+    unsafe { core::ptr::addr_of!((*TSS.get()).rsp0).read_unaligned() }
 }
 
 /// What the live TSS holds in IST1, read back out (test evidence). Copy-out

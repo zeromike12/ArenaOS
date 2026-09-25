@@ -60,6 +60,25 @@ pub fn arm(vector: u8) {
     }
 }
 
+/// Arm `vector` AND pre-set the resume address — the variant for faults
+/// taken in RING 3 (M3.3, ADR-0014): user code cannot write [`RESUME`]
+/// itself, so the kernel computes the resume point (from the recorded
+/// user RIP) when it arms the expectation from syscall context. The
+/// delivery/consumption protocol is unchanged.
+pub fn arm_with_resume(vector: u8, resume: u64) {
+    // SAFETY: single writer, IF=0 syscall context (SyncCell contract).
+    unsafe {
+        OBSERVED.get().write(ObservedFault {
+            valid: false,
+            vector: 0,
+            error_code: 0,
+            cr2: 0,
+        });
+        RESUME.get().write(resume);
+        ARMED.get().write(vector as u16 + 1);
+    }
+}
+
 /// Forget any armed expectation (test teardown; keeps a mis-armed state from
 /// leaking into later code).
 pub fn disarm() {

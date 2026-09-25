@@ -53,6 +53,9 @@ pub const DIRECT_MAP_BYTES: u64 = 2 << 30;
 // PTE/PDE flag bits (SDM Vol. 3 §4.5, Table 4-18 for 4-level):
 pub const PTE_PRESENT: u64 = 1 << 0;
 pub const PTE_WRITE: u64 = 1 << 1;
+/// U/S bit — ring-3 accessible (M3.3 user pages; everything mapped by the
+/// boot/kernel-view builders is deliberately supervisor-only).
+pub const PTE_USER: u64 = 1 << 2;
 /// Bit 63 — honored because EFER.NXE=1 (set in `init()`).
 pub const PTE_NX: u64 = 1 << 63;
 /// Page Size bit in PD/PDPT entries (2 MiB / 1 GiB page).
@@ -80,6 +83,44 @@ static APIC_BASE_PHYS: crate::sync::SyncCell<u64> = crate::sync::SyncCell::new(0
 pub fn apic_base_phys() -> u64 {
     // SAFETY: boot contract; copy-out.
     unsafe { *APIC_BASE_PHYS.get() }
+}
+
+/// Whether the identity alias of RAM is currently usable. True from boot
+/// (firmware tables, then our dual view) until the M2.7 trampoline
+/// switches CR3 to the kernel-only view — `kmain` calls
+/// [`note_identity_torn_down`] as its first act, and every page-table
+/// access afterwards goes through the kernel-view alias.
+static IDENTITY_LIVE: crate::sync::SyncCell<bool> = crate::sync::SyncCell::new(true);
+
+/// Record that the identity view of RAM is gone (post-M2.7 trampoline).
+///
+/// # Safety
+/// Call exactly once, only after CR3 references the kernel-only view.
+pub unsafe fn note_identity_torn_down() {
+    // SAFETY: single writer, boot-serialized (SyncCell contract).
+    unsafe { *IDENTITY_LIVE.get() = false };
+}
+
+/// The pointer through which a page-table frame at `phys` is accessible
+/// *right now*: identity while that alias is live, kernel-view alias
+/// afterwards. Table entries themselves always store PHYS (the CPU walks
+/// physical addresses); this helper exists because our *access* alias
+/// changes at the M2.7 boundary while table-building code must work on
+/// both sides of it.
+fn table_ptr(phys: u64) -> *mut PageTable {
+    // SAFETY: flag read; single-writer boot state (SyncCell contract).
+    let identity = unsafe { *IDENTITY_LIVE.get() };
+    if identity {
+        phys as *mut PageTable
+    } else {
+        phys.wrapping_add(KERNEL_OFFSET) as *mut PageTable
+    }
+}
+
+/// The PHYS a page-table entry must hold for a table living at pointer `p`
+/// (either alias normalizes to the same physical address).
+fn pte_of(p: *mut PageTable) -> u64 {
+    kernel_view_phys(p as u64)
 }
 
 pub fn kernel_cr3_phys() -> u64 {
@@ -257,18 +298,19 @@ pub unsafe fn init(image: &handoff::ImageLayout) -> Result<(), &'static str> {
         if cr0_v & cr0::WP == 0 {
             write_cr0(cr0_v | cr0::WP);
         }
-        write_cr3(pml4 as u64);
-        if read_cr3() & ADDR_MASK != pml4 as u64 {
+        let pml4_phys = pte_of(pml4);
+        write_cr3(pml4_phys);
+        if read_cr3() & ADDR_MASK != pml4_phys {
             return Err("CR3 read-back does not match our PML4");
         }
-        *PML4_PHYS.get() = pml4 as u64;
+        *PML4_PHYS.get() = pml4_phys;
     }
 
     let skipped = unsafe { *SKIPPED_HIGH_REGIONS.get() };
     info!(
         "paging",
         "address space live: cr3={:#x} identity+direct-map(offset {KERNEL_OFFSET:#x}), image window [{img_base:#x},{img_end:#x}) {nsec} sections, skipped_high_regions={skipped}",
-        pml4 as u64
+        pte_of(pml4)
     );
     Ok(())
 }
@@ -278,6 +320,218 @@ pub unsafe fn init(image: &handoff::ImageLayout) -> Result<(), &'static str> {
 pub fn cr3_phys() -> u64 {
     // SAFETY: plain read of a boot-initialized cell (module contract).
     unsafe { *PML4_PHYS.get() }
+}
+
+// ---------------------------------------------------------------------------
+// User pages and process address spaces (M3.3, ADR-0014)
+// ---------------------------------------------------------------------------
+
+/// Map one 4 KiB ring-3 page into the address space rooted at
+/// `pml4_phys` (any live-or-not PML4 this code can reach through
+/// [`table_ptr`]'s alias rules). W^X is enforced for user memory:
+/// `writable && exec` is rejected. `va` must be canonical lower-half
+/// (user addresses never live in the kernel half).
+///
+/// # Safety
+/// Ring 0, IF=0, `pml4_phys` names an owned PML4 frame, `phys` is an
+/// allocated frame, frames allocator live.
+pub unsafe fn map_user_page_4k(
+    pml4_phys: u64,
+    va: u64,
+    phys: u64,
+    writable: bool,
+    exec: bool,
+) -> Result<(), &'static str> {
+    if va % PAGE != 0 || phys % PAGE != 0 {
+        return Err("user map: unaligned va/phys");
+    }
+    if va >= 0x0000_8000_0000_0000 {
+        return Err("user map: va not in canonical lower half");
+    }
+    if writable && exec {
+        return Err("user map: W^X violation (writable+exec)");
+    }
+    let mut flags = PTE_PRESENT | PTE_USER;
+    if writable {
+        flags |= PTE_WRITE;
+    }
+    if !exec {
+        flags |= PTE_NX;
+    }
+    let root = table_ptr(pml4_phys);
+    // SAFETY: caller contract; map_page_4k creates intermediate tables as
+    // needed (entries store PHYS via pte_of, alias-correct by construction).
+    unsafe { map_page_4k(root, va, phys, flags) };
+    Ok(())
+}
+
+/// [`map_user_page_4k`] against the kernel's own view — the M3.3a
+/// machinery tests run ring-3 code on user pages mapped here (the
+/// kernel view is what CR3 holds whenever no process is running).
+///
+/// # Safety
+/// As [`map_user_page_4k`].
+pub unsafe fn map_user_page_kernel_view(
+    va: u64,
+    phys: u64,
+    writable: bool,
+    exec: bool,
+) -> Result<(), &'static str> {
+    let root = kernel_cr3_phys();
+    // SAFETY: forwarded to caller contract.
+    unsafe { map_user_page_4k(root, va, phys, writable, exec) }
+}
+
+/// Locate the live PTE for `va` in the given root without creating
+/// tables (None when any level is missing, a huge page covers the VA, or
+/// the leaf is absent).
+unsafe fn find_pte(pml4_phys: u64, va: u64) -> Option<*mut u64> {
+    // SAFETY: caller-of-caller guarantees a reachable, owned root; every
+    // step re-checks PRESENT and refuses HUGE (a 4 KiB PTE cannot live
+    // under a huge leaf).
+    unsafe {
+        let pml4 = table_ptr(pml4_phys);
+        let e4 = (*pml4).0[pml4_idx(va)];
+        if e4 & PTE_PRESENT == 0 {
+            return None;
+        }
+        let pdpt = table_ptr(e4 & ADDR_MASK);
+        let e3 = (*pdpt).0[pdpt_idx(va)];
+        if e3 & PTE_PRESENT == 0 || e3 & PTE_HUGE != 0 {
+            return None;
+        }
+        let pd = table_ptr(e3 & ADDR_MASK);
+        let e2 = (*pd).0[pd_idx(va)];
+        if e2 & PTE_PRESENT == 0 || e2 & PTE_HUGE != 0 {
+            return None;
+        }
+        let pt = table_ptr(e2 & ADDR_MASK);
+        Some(core::ptr::addr_of_mut!((*pt).0[pt_idx(va)]))
+    }
+}
+
+/// Unmap one 4 KiB user page from the kernel's own view; returns the
+/// physical frame it pointed at (caller frees it). INVLPG follows the
+/// PTE clear (single CPU — no shootdown exists yet, ADR-0014).
+///
+/// # Safety
+/// Ring 0, IF=0, `va` page-aligned and previously mapped by
+/// [`map_user_page_kernel_view`].
+pub unsafe fn unmap_user_page_kernel_view(va: u64) -> Option<u64> {
+    // SAFETY: caller contract.
+    unsafe {
+        let pte = find_pte(kernel_cr3_phys(), va)?;
+        let e = *pte;
+        if e & PTE_PRESENT == 0 {
+            return None;
+        }
+        *pte = 0;
+        super::invlpg(va);
+        Some(e & ADDR_MASK)
+    }
+}
+
+/// Create a fresh process PML4 (returns its PHYS): user half empty,
+/// kernel half (entries 256..511) cloned from the live kernel view so
+/// ring-3→ring-0 transitions never need a CR3 switch and every process
+/// sees exactly one kernel address space (ADR-0014).
+///
+/// # Safety
+/// Ring 0, IF=0, frames allocator live, kernel view built.
+pub unsafe fn build_process_pml4() -> Option<u64> {
+    // SAFETY: caller contract; new_table zeroes through the live alias.
+    unsafe {
+        let root = new_table()?;
+        let kroot = table_ptr(kernel_cr3_phys());
+        for i in 256..512 {
+            (*root).0[i] = (*kroot).0[i];
+        }
+        Some(pte_of(root))
+    }
+}
+
+/// Tear down the user half (PML4 entries 0..255) of `pml4_phys`: every
+/// present leaf page and every intermediate table frame is freed, entries
+/// zeroed as we go. Returns the number of 4 KiB frames freed (leaves +
+/// tables); the PML4 root frame itself is NOT freed — the owner (proc)
+/// frees it so create/destroy accounting stays symmetric.
+///
+/// A 2 MiB leaf in the user half is freed as a 512-frame run; a 1 GiB
+/// leaf is a construction bug (we never build one below the split) and
+/// halts with diagnostics rather than guessing.
+///
+/// # Safety
+/// Ring 0, IF=0, `pml4_phys` owned, NOT the live CR3 (its user half is
+/// about to disappear), frames allocator live.
+pub unsafe fn destroy_user_half(pml4_phys: u64) -> usize {
+    // SAFETY: caller contract.
+    unsafe {
+        let halt_free = |r: Result<(), &'static str>| {
+            if let Err(e) = r {
+                crate::log::log_error!("paging", "user-half teardown free failed: {}", e);
+                crate::halt::halt_machine("paging: user-half teardown free failed");
+            }
+        };
+        let mut freed = 0usize;
+        let pml4 = table_ptr(pml4_phys);
+        for i4 in 0..256 {
+            let e4 = (*pml4).0[i4];
+            if e4 & PTE_PRESENT == 0 {
+                continue;
+            }
+            let pdpt_phys = e4 & ADDR_MASK;
+            let pdpt = table_ptr(pdpt_phys);
+            for i3 in 0..512 {
+                let e3 = (*pdpt).0[i3];
+                if e3 & PTE_PRESENT == 0 {
+                    continue;
+                }
+                if e3 & PTE_HUGE != 0 {
+                    crate::log::log_error!(
+                        "paging",
+                        "user half holds a 1 GiB leaf at pdpt[{}] — construction bug",
+                        i3
+                    );
+                    crate::halt::halt_machine("paging: 1 GiB leaf in user half");
+                }
+                let pd_phys = e3 & ADDR_MASK;
+                let pd = table_ptr(pd_phys);
+                for i2 in 0..512 {
+                    let e2 = (*pd).0[i2];
+                    if e2 & PTE_PRESENT == 0 {
+                        continue;
+                    }
+                    if e2 & PTE_HUGE != 0 {
+                        halt_free(frames::free_contiguous(e2 & ADDR_MASK, 512));
+                        freed += 512;
+                        (*pd).0[i2] = 0;
+                        continue;
+                    }
+                    let pt_phys = e2 & ADDR_MASK;
+                    let pt = table_ptr(pt_phys);
+                    for i1 in 0..512 {
+                        let e1 = (*pt).0[i1];
+                        if e1 & PTE_PRESENT == 0 {
+                            continue;
+                        }
+                        halt_free(frames::free(e1 & ADDR_MASK));
+                        freed += 1;
+                        (*pt).0[i1] = 0;
+                    }
+                    halt_free(frames::free(pt_phys));
+                    freed += 1;
+                    (*pd).0[i2] = 0;
+                }
+                halt_free(frames::free(pd_phys));
+                freed += 1;
+                (*pdpt).0[i3] = 0;
+            }
+            halt_free(frames::free(pdpt_phys));
+            freed += 1;
+            (*pml4).0[i4] = 0;
+        }
+        freed
+    }
 }
 
 /// Translate a direct-map VA back to physical (None if outside the window).
@@ -417,14 +671,14 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
             phys += PAGE;
         }
 
-        *KERNEL_PML4_PHYS.get() = pml4 as u64;
+        *KERNEL_PML4_PHYS.get() = pte_of(pml4);
     }
     info!(
         "paging",
         "kernel view built: pml4={:#x} (direct map + image window + RT identity + MMIO/APIC aliases; identity view of RAM deliberately absent)",
-        pml4 as u64
+        pte_of(pml4)
     );
-    Ok(pml4 as u64)
+    Ok(pte_of(pml4))
 }
 
 pub fn direct_map_to_phys(va: u64) -> Option<u64> {
@@ -439,12 +693,13 @@ pub fn direct_map_to_phys(va: u64) -> Option<u64> {
 // Table construction
 // ---------------------------------------------------------------------------
 
-/// Allocate and zero one 4 KiB table frame.
+/// Allocate and zero one 4 KiB table frame; returns the pointer through
+/// which it is accessible now ([`table_ptr`] alias).
 fn new_table() -> Option<*mut PageTable> {
     let f = frames::alloc()?;
-    let p = f as *mut PageTable;
-    // SAFETY: freshly allocated exclusive frame, identity-mapped by the
-    // firmware tables we are still running under (init runs pre-switch).
+    let p = table_ptr(f);
+    // SAFETY: freshly allocated exclusive frame; `table_ptr` yields the
+    // alias valid at call time (identity pre-teardown, kernel view after).
     unsafe { (*p).0 = [0u64; 512] };
     Some(p)
 }
@@ -459,10 +714,20 @@ unsafe fn next_level(table: *mut PageTable, idx: usize) -> Option<*mut PageTable
     unsafe {
         let e = (*table).0[idx];
         if e & PTE_PRESENT != 0 {
-            return Some((e & ADDR_MASK) as *mut PageTable);
+            return Some(table_ptr(e & ADDR_MASK));
         }
         let child = new_table()?;
-        (*table).0[idx] = child as u64 | PTE_PRESENT | PTE_WRITE;
+        // Entries store PHYS — the CPU walks physical addresses; `child`
+        // may be either alias depending on when we run (table_ptr).
+        // Intermediate entries are maximally permissive (PRESENT|WRITE|
+        // USER, no NX): x86-64 ANDs permissions across levels, so the
+        // LEAF alone governs effective rights (a supervisor leaf under a
+        // USER intermediate stays supervisor-only — the M2 W^X tests pin
+        // that). The USER bit here is load-bearing for M3.3: without it a
+        // ring-3 access to a user leaf faults, and SMAP treats the
+        // translation as supervisor (the observed bring-up failure mode,
+        // ADR-0014).
+        (*table).0[idx] = pte_of(child) | PTE_PRESENT | PTE_WRITE | PTE_USER;
         Some(child)
     }
 }
@@ -516,7 +781,10 @@ unsafe fn map_page_4k(pml4: *mut PageTable, va: u64, pa: u64, flags: u64) {
             for i in 0..512 {
                 (*new_pt).0[i] = (huge_pa + (i as u64) * PAGE) | huge_flags;
             }
-            (*pd).0[pd_idx(va)] = new_pt as u64 | PTE_PRESENT | PTE_WRITE;
+            // Same permission rule as next_level: the split's new
+            // intermediate entry is permissive; the replicated leaves
+            // carry the huge page's exact flags.
+            (*pd).0[pd_idx(va)] = pte_of(new_pt) | PTE_PRESENT | PTE_WRITE | PTE_USER;
             pt = new_pt;
         } else {
             pt = next_level(pd, pd_idx(va)).expect("frames exhausted (window map)");

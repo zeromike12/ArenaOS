@@ -50,6 +50,18 @@ pub fn write_marker(args: core::fmt::Arguments<'_>) {
     let _ = writeln!(console, "{}", args);
 }
 
+/// Raw bytes to the console — no level tag, no newline, no formatting.
+/// The SYS_WRITE path (ADR-0014) uses this so *user* output appears
+/// exactly as the user emitted it. Caller discipline: only with IF=0
+/// (inside a syscall, or boot-serialized contexts) — concurrent writers
+/// would interleave bytes (same phase rule as ADR-0013).
+pub fn write_raw(bytes: &[u8]) {
+    for b in bytes {
+        // SAFETY: bounded-wait port write; caller guarantees IF=0.
+        unsafe { crate::drivers::serial::putc(*b) };
+    }
+}
+
 #[macro_export]
 macro_rules! log_info {
     ($module:expr, $($arg:tt)*) => {

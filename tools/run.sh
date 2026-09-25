@@ -27,7 +27,7 @@ mkdir -p "$REPO_ROOT/build"
 cp "$OVMF_VARS" "$REPO_ROOT/build/ovmf-vars-interactive.img"
 
 exec "${QEMU[@]}" \
-    -M q35 -m 512M -cpu qemu64,+nx \
+    -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$REPO_ROOT/build/ovmf-vars-interactive.img" \
     -drive format=raw,file="$REPO_ROOT/build/arena-esp.img" \

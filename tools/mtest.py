@@ -55,7 +55,7 @@ def run_qemu(label: str, esp: Path) -> tuple[int, str, float]:
         + [
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
-            "-cpu", "qemu64,+nx",
+            "-cpu", "qemu64,+nx,+smep,+smap",
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
             "-drive", f"format=raw,file={esp}",
