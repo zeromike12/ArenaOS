@@ -22,6 +22,24 @@ memory, privilege-level changes, VM exit behavior.
         └────────────────────────┘
 ```
 
+### Host-side unit tests (M2.5+)
+
+Pure-logic crates under `kernel/libs/` compile for the host too and carry
+their own `#[cfg(test)]` suites — fast, deterministic, and they can use
+`std` helpers (reference models, maps) that do not exist in the kernel:
+
+```
+cd kernel && cargo test -p arena-heap --lib --target x86_64-unknown-linux-gnu
+```
+
+(`--lib` because the offline toolchain has no `rustdoc`; these crates have
+no doctests.) `tools/run_tests.sh` runs the host suites *and* every
+milestone boot harness. In-guest tests still re-prove the same logic on
+real hardware semantics — e.g. `heap_guards` deliberately triggers
+double-free / red-zone / foreign-pointer rejections; their ERROR lines on
+serial are **expected evidence**, not failures (the harness fails only on
+PANIC or missing/failed markers).
+
 ## Marker grammar (serial)
 
 Every milestone emits machine-checkable lines:

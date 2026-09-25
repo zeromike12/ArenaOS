@@ -16,6 +16,8 @@ ArenaOS/
 ├── kernel/                 ← all ring-0 + boot code (Rust cargo workspace)
 │   ├── Cargo.toml          ← workspace root (members grow per milestone)
 │   ├── .cargo/config.toml  ← default target = x86_64-unknown-uefi
+│   ├── libs/               ← machine-independent kernel logic (host-testable)
+│   │   └── heap/           ← arena-heap: allocator core + host suite (M2.5)
 │   └── boot/               ← Milestone 1: boot stage = UEFI application
 │       └── src/
 │           ├── main.rs     ← efi_main entry, boot orchestration

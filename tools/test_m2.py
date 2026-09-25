@@ -38,6 +38,15 @@ Current coverage:
   * vm_nx             — instruction fetch through the higher-half alias of
                         an RW+NX data page faults: #PF, CR2 = target VA,
                         ec = present+instruction-fetch (EFER.NXE honored).
+  M2.5 — kernel heap (14 total):
+  * heap_basics       — distinct/aligned/patterned allocations, exact
+                        accounting to zero, typed alloc/free, align-256.
+  * heap_guards       — double free, red-zone overflow, and foreign
+                        pointer rejected with exact HeapError variants;
+                        heap usable after each (3 expected ERROR lines).
+  * heap_stress       — 60x32 xorshift alloc/free with tag verification,
+                        exact accounting restoration, 16KiB coalescing
+                        proof, ns/op timing.
   * frame_allocator   — bitmap allocator manages exactly the clipped
                         conventional regions; unique in-region frames;
                         pattern round-trip through real RAM; exact free
@@ -66,6 +75,9 @@ EXPECTED_TESTS = [
     "vm_address_space",
     "vm_write_protect",
     "vm_nx",
+    "heap_basics",
+    "heap_guards",
+    "heap_stress",
 ]
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+[package]
+name = "arena-heap"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS kernel heap — chunk-grown free-list allocator with debug guards (host-testable core, ADR-0009)"
+
+[dependencies]
+# Intentionally empty: zero third-party crates in the OS image (ADR-0004).
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

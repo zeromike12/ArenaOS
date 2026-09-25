@@ -7,6 +7,18 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 failures=0
 ran=0
 
+# Host-side unit tests (ROADMAP 2.5+): pure-logic crates run natively.
+echo "======================================================================"
+echo "== host-side unit tests (cargo test -p arena-heap --lib)"
+echo "======================================================================"
+if (cd "$REPO_ROOT/kernel" && cargo test -p arena-heap --lib --target x86_64-unknown-linux-gnu); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! host-side unit tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

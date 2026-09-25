@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["boot"]
+members = ["boot", "libs/heap"]
 
 # Notes:
 # - Panic strategy is `abort`, forced by the bare-metal target specs

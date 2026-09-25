@@ -16,7 +16,7 @@ automated tests that boot the real system in QEMU.
 |---|---|---|
 | Phase 0 — Architecture (vision, ADRs, toolchain) | ✅ complete | `docs/` |
 | **Milestone 1 — First boot** (UEFI → kernel → verified diagnostics → safe halt) | ✅ **complete** | `tools/test_m1.py` (8/8 in-guest self-tests, clean QEMU exit) |
-| Milestone 2 — Kernel foundations (exceptions, timers, frames, paging, heap, locks, boot split) | 🔨 in progress — 2.1 (TSS/IST, exception recovery) + 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) + 2.3 (frame allocator, ADR-0007) + 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) done | `tools/test_m2.py` (11/11, same boot re-proves M1 8/8) |
+| Milestone 2 — Kernel foundations (exceptions, timers, frames, paging, heap, locks, boot split) | 🔨 in progress — 2.1 (TSS/IST, exception recovery) + 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) + 2.3 (frame allocator, ADR-0007) + 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) + 2.5 (kernel heap: host-tested core, guards, ADR-0009) done | `tools/test_m2.py` (14/14) + host suite `cargo test -p arena-heap --lib` (10/10) |
 | Milestone 3 — Multitasking · 4 — Userspace & first program | ⬜ | — |
 | Phases 5–10 — Storage, drivers, net, userspace maturity, graphics, desktop | ⬜ | `docs/ROADMAP.md` |
 

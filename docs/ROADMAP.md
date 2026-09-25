@@ -84,8 +84,10 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       `vm_write_protect`, `vm_nx`). UEFI gotcha paid for in blood:
       HandleProtocol is slot 16 (CloseEvent/CheckEvent are slots 11/12).
 
-- 2.5 **Kernel heap**: typed allocator over frames; debug poisoning/redzones;
+- [x] 2.5 **Kernel heap**: typed allocator over frames; debug poisoning/redzones;
       host-side unit tests for the allocator logic + in-guest stress test.
+      DONE: arena-heap core crate (host suite 10/10 incl. model-checked
+      stress) + boot glue (ADR-0009); guards always on; m2 14/14.
 - 2.6 **Synchronization**: spinlocks (ticket or queued, decided by ADR when
       SMP lands — single-core correctness first), critical-section helpers,
       lock debugging (owner tracking in debug builds).

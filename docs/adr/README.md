@@ -25,6 +25,7 @@ Rules:
 | [0006](0006-abi-philosophy.md) | Kernel/user ABI philosophy: capability invocation | Accepted (direction; register-level detail due at M4) |
 | [0007](0007-frame-allocator.md) | Physical frame allocator — flat bitmap over conventional memory | accepted |
 | [0008](0008-kernel-address-space.md) | Kernel address space — dual-view paging with per-section W^X | accepted |
+| [0009](0009-kernel-heap.md) | Kernel heap — host-tested free-list core, frame-backed chunks, always-on guards | accepted |
 
 ## Template
 

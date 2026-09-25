@@ -23,6 +23,7 @@ mod bootinfo;
 mod drivers;
 mod frames;
 mod halt;
+mod heap;
 mod log;
 mod m1;
 mod m2;
@@ -203,6 +204,11 @@ pub extern "efiapi" fn efi_main(
         error!("boot", "paging init failed: {reason}");
         halt::halt_machine("paging init failed");
     }
+
+    // --- Step 3.8: kernel heap (M2.5) ---------------------------------------
+    // arena-heap core (host-tested) wired to the frame allocator; guards
+    // always on at boot stage, chunks grown lazily on first allocation.
+    heap::init();
 
     let (passed2, total2) = m2::run_all();
 

@@ -151,6 +151,34 @@ alias (#PF ec=present+I/D), and a *call* through the higher-half alias of
 `.text` that executes and returns. Bulk mappings use 2 MiB pages; the
 window splits huge pages where needed. Total cost at boot: 8 frames.
 
+### Kernel heap (M2.5) — `kernel/libs/heap` + boot glue
+
+The allocator core is a first-class workspace library crate (`arena-heap`,
+zero deps, `no_std`) so its logic is **host-testable**:
+`cargo test -p arena-heap --lib --target x86_64-unknown-linux-gnu` runs
+10 tests natively, including a 4000-round pseudo-random stress checked
+against a `BTreeMap` reference model (ADR-0009).
+
+- First-fit over an address-ordered free list; free coalesces both
+  neighbours (invariant: no two free blocks are adjacent).
+- 32-byte block header: footprint (×16, FREE in bit 0), user size, front
+  red-zone word, free-list link — the link lives in the *header*, so
+  poisoning covers every user byte.
+- Memory arrives in 64 KiB **chunks** from physically contiguous frame
+  runs (`FrameChunkProvider` over M2.3's `alloc_contiguous`); blocks never
+  span chunks, chunks are never shrunk; max single alloc ≈ chunk − 64 B.
+- **Guards always on at boot**: red zones around every payload, 0xAA fill
+  on alloc, 0xDD poison on free. `free` validates the pointer by walking
+  chunk block chains; double frees, red-zone violations, and foreign
+  pointers are rejected with typed errors and mutate nothing (each
+  rejection logs an ERROR line — the causal free is caught, not the
+  eventual symptom).
+- Boot API: `heap::alloc/free/alloc_typed/free_typed` + stats. Deliberately
+  **not** wired as `#[global_allocator]` yet (no Box/Vec users at boot;
+  OOM + locking policy belongs to the kernel proper, see ADR-0009).
+- Measured in guest: 1920 ops in 1.27 ms (~661 ns/op under TCG with
+  guards), accounting exact to the byte.
+
 ### Timekeeping (M2.2)
 
 The monotonic clock is the TSC; the *meaning* of a microsecond comes from

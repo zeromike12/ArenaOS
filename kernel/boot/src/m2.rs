@@ -23,8 +23,12 @@ use crate::arch::x86_64::{
 use crate::bootinfo;
 use crate::drivers::pit;
 use crate::frames;
+use crate::heap;
 use crate::log::{self, log_error as error, log_info as info};
 use crate::timekeeping;
+use arena_heap::HeapError;
+use core::alloc::Layout;
+use core::ptr::NonNull;
 
 type TestFn = fn() -> Result<(), &'static str>;
 
@@ -41,6 +45,9 @@ const TESTS: &[(&str, TestFn)] = &[
     ("vm_address_space", test_vm_address_space),
     ("vm_write_protect", test_vm_write_protect),
     ("vm_nx", test_vm_nx),
+    ("heap_basics", test_heap_basics),
+    ("heap_guards", test_heap_guards),
+    ("heap_stress", test_heap_stress),
 ];
 
 /// Fault sites: minimal assembly that (1) records its own resume address
@@ -650,6 +657,184 @@ fn test_vm_nx() -> Result<(), &'static str> {
     if obs.error_code & 0b1_1111 != 0b1_0001 {
         return Err("error code is not present+instruction-fetch for an NX violation");
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// M2.5 — kernel heap: arena-heap core over frames, guards, stress
+// ---------------------------------------------------------------------------
+
+fn heap_layout(size: usize, align: usize) -> Result<Layout, &'static str> {
+    Layout::from_size_align(size, align).map_err(|_| "invalid heap layout")
+}
+
+/// Basic contract: allocations are distinct, aligned, real writable RAM;
+/// accounting is exact; typed alloc/free works; a larger alignment request
+/// is honored; freeing everything returns the heap to zero.
+fn test_heap_basics() -> Result<(), &'static str> {
+    let a = heap::alloc(heap_layout(64, 16)?).ok_or("alloc(64) returned None")?;
+    let b = heap::alloc(heap_layout(4096, 16)?).ok_or("alloc(4096) returned None")?;
+    let c = heap::alloc_typed::<u64>().ok_or("alloc_typed::<u64> returned None")?;
+    let d = heap::alloc(heap_layout(100, 256)?).ok_or("align-256 alloc returned None")?;
+    let addrs = [
+        a.as_ptr() as usize,
+        b.as_ptr() as usize,
+        c.as_ptr() as usize,
+        d.as_ptr() as usize,
+    ];
+    for (i, x) in addrs.iter().enumerate() {
+        if addrs[i + 1..].contains(x) {
+            return Err("two live allocations share an address");
+        }
+    }
+    if !addrs[0].is_multiple_of(16) || !addrs[1].is_multiple_of(16) || !addrs[3].is_multiple_of(256)
+    {
+        return Err("alignment contract violated");
+    }
+    if heap::in_use_bytes() != 64 + 4096 + 8 + 100 || heap::blocks_live() != 4 {
+        return Err("in-use accounting does not match the live allocations");
+    }
+    // SAFETY: a..d are live, owned, correctly sized allocations from our
+    // own heap; single-CPU boot context.
+    unsafe {
+        core::ptr::write_bytes(a.as_ptr(), 0x5A, 64);
+        core::ptr::write_bytes(b.as_ptr(), 0xA5, 4096);
+        c.as_ptr().write_volatile(0x1234_5678_9ABC_DEF0);
+        core::ptr::write_bytes(d.as_ptr(), 0x33, 100);
+        if *a.as_ptr() != 0x5A
+            || *b.as_ptr().add(4095) != 0xA5
+            || c.as_ptr().read_volatile() != 0x1234_5678_9ABC_DEF0
+            || *d.as_ptr().add(99) != 0x33
+        {
+            return Err("heap payload pattern round-trip failed");
+        }
+        heap::free(a).map_err(|_| "free(a) was rejected")?;
+        heap::free(b).map_err(|_| "free(b) was rejected")?;
+        heap::free_typed(c).map_err(|_| "free_typed(c) was rejected")?;
+        heap::free(d).map_err(|_| "free(d) was rejected")?;
+    }
+    if heap::in_use_bytes() != 0 || heap::blocks_live() != 0 {
+        return Err("accounting did not return to zero after freeing all");
+    }
+    info!(
+        "m2",
+        "heap_basics: distinct/aligned/patterned; chunks={} reserved={}KiB",
+        heap::chunk_count(),
+        heap::bytes_reserved() / 1024
+    );
+    Ok(())
+}
+
+/// Guard contract: double free, red-zone overflow, and a foreign pointer
+/// are each rejected with the exact error and without mutating the heap;
+/// after repairing the overflow the block frees cleanly (rejections leave
+/// the heap usable, not merely loud). The three expected ERROR lines on
+/// serial are the evidence trail.
+fn test_heap_guards() -> Result<(), &'static str> {
+    let l = heap_layout(32, 16)?;
+    // SAFETY: p/q come from our own heap; every free below is a deliberate
+    // probe of a rejection path (documented safe contract of Heap::free).
+    unsafe {
+        let p = heap::alloc(l).ok_or("alloc p failed")?;
+        heap::free(p).map_err(|_| "first free of p was rejected")?;
+        if heap::free(p) != Err(HeapError::DoubleFree) {
+            return Err("double free was not rejected as DoubleFree");
+        }
+        let q = heap::alloc(l).ok_or("alloc q failed")?;
+        // Clobber the trailing red-zone word's first byte (0xA5 in LE).
+        *q.as_ptr().add(32) = 0x99;
+        if heap::free(q) != Err(HeapError::RedZoneBack) {
+            return Err("red-zone overflow was not rejected as RedZoneBack");
+        }
+        // A .bss static is not from the heap.
+        let decoy = NonNull::new(core::ptr::addr_of!(VM_PROBE_DATA) as *mut u8)
+            .ok_or("decoy pointer was null")?;
+        if heap::free(decoy) != Err(HeapError::NotFromHeap) {
+            return Err("foreign pointer was not rejected as NotFromHeap");
+        }
+        // Repair q's red zone: the rejected free left it live and intact.
+        *q.as_ptr().add(32) = 0xA5;
+        heap::free(q).map_err(|_| "repaired q was rejected")?;
+    }
+    info!(
+        "m2",
+        "heap_guards: DoubleFree/RedZoneBack/NotFromHeap rejected; heap usable after each"
+    );
+    Ok(())
+}
+
+/// In-guest stress (the host suite covers logic depth): 60 rounds over 32
+/// slots of xorshift-driven alloc/free with per-slot tags verified before
+/// every free, exact accounting restored to the pre-test baseline, and a
+/// 16 KiB post-stress allocation as the coalescing proof. Timed and logged
+/// as ns/op evidence.
+fn test_heap_stress() -> Result<(), &'static str> {
+    let base_use = heap::in_use_bytes();
+    let base_live = heap::blocks_live();
+    let base_count = heap::alloc_count();
+    let mut slots = [None::<NonNull<u8>>; 32];
+    let mut tags = [0u64; 32];
+    let mut rng = 0x2545_F491_4F6C_DD1Du64;
+    let mut ops = 0u64;
+    let t0 = timekeeping::now_ticks();
+    for round in 0..60u64 {
+        for i in 0..slots.len() {
+            rng ^= rng >> 12;
+            rng ^= rng << 25;
+            rng ^= rng >> 27;
+            let r = rng.wrapping_mul(0x2545_F491_4F6C_DD1D);
+            match slots[i] {
+                None => {
+                    let size = 8 + (r >> 33) as usize % 1024;
+                    // Exhaustion is tolerated (slot stays empty) — the
+                    // accounting check below is the real invariant.
+                    if let Some(p) = heap::alloc(heap_layout(size, 16)?) {
+                        tags[i] = (round << 40) ^ ((i as u64) << 8) ^ (size as u64);
+                        // SAFETY: p is a live owned allocation of `size`
+                        // bytes; unaligned tag write at its start.
+                        unsafe { (p.as_ptr() as *mut u64).write_unaligned(tags[i]) };
+                        slots[i] = Some(p);
+                        ops += 1;
+                    }
+                }
+                Some(p) => {
+                    // SAFETY: p is live and exclusively ours.
+                    unsafe {
+                        if (p.as_ptr() as *const u64).read_unaligned() != tags[i] {
+                            return Err("payload tag corrupted while live");
+                        }
+                        heap::free(p).map_err(|_| "stress free was rejected")?;
+                    }
+                    slots[i] = None;
+                    ops += 1;
+                }
+            }
+        }
+    }
+    for slot in slots.iter_mut() {
+        if let Some(p) = *slot {
+            // SAFETY: draining our own live allocations.
+            unsafe { heap::free(p).map_err(|_| "drain free was rejected")? };
+            *slot = None;
+            ops += 1;
+        }
+    }
+    if heap::in_use_bytes() != base_use || heap::blocks_live() != base_live {
+        return Err("stress did not restore exact accounting");
+    }
+    let big = heap::alloc(heap_layout(16384, 16)?)
+        .ok_or("post-stress 16KiB alloc failed — coalescing broken")?;
+    // SAFETY: big is a live owned allocation.
+    unsafe { heap::free(big).map_err(|_| "big free was rejected")? };
+    let dt_us = timekeeping::ticks_to_us(timekeeping::now_ticks() - t0);
+    info!(
+        "m2",
+        "heap_stress: {ops} alloc/free ops in {dt_us}us (~{} ns/op), chunks={}, reserved={}KiB, this-test allocs={}",
+        dt_us * 1000 / ops.max(1),
+        heap::chunk_count(),
+        heap::bytes_reserved() / 1024,
+        heap::alloc_count() - base_count
+    );
     Ok(())
 }
 
