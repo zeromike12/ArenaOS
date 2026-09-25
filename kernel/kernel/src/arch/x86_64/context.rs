@@ -10,9 +10,13 @@
 //! build* if that invariant ever breaks (ADR-0012).
 //!
 //! A brand-new thread's first context is a synthesized image of the same
-//! 80-byte frame (zeroed registers, RFLAGS=0x2 — reserved bit set, IF=0 —
-//! return address = the trampoline), so the very first switch into it is
-//! indistinguishable from a resume.
+//! 80-byte frame (zeroed registers, RFLAGS=0x202 — reserved bit set,
+//! IF=1 — return address = the trampoline), so the very first switch
+//! into it is indistinguishable from a resume. IF=1 (M3.2, ADR-0013):
+//! kernel threads run interruptible so the timer tick can preempt them
+//! from their first instruction; scheduler sections mask interrupts
+//! themselves (`without_interrupts`), which save/restores flags and so
+//! preserves each thread's own posture.
 
 use core::arch::global_asm;
 
@@ -31,9 +35,14 @@ pub struct Context {
 const FRAME_BYTES: u64 = 80;
 
 /// RFLAGS image for a brand-new thread: bit 1 is reserved-one (SDM Vol. 1
-/// §3.4.3), IF=0 per the kernel's interrupt discipline — the scheduler
-/// controls when interrupts exist at all (3.2).
-const INITIAL_RFLAGS: u64 = 0x2;
+/// §3.4.3) and IF=1 — threads run interruptible so preemption (ADR-0013)
+/// can reach them from their first instruction. A new thread entered with
+/// IF=0 would be un-preemptible until its first voluntary yield; a
+/// yield-free busy loop would then wedge the CPU forever (observed live:
+/// the M3.2 rotation test hung exactly this way before this constant
+/// changed). Scheduler critical sections are unaffected: they run under
+/// `without_interrupts`, which restores each thread's saved flags.
+const INITIAL_RFLAGS: u64 = 0x202;
 
 global_asm!(
     ".section .text",

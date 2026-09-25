@@ -65,6 +65,49 @@ pub fn set_lapic_eoi_addr(addr: u64) {
     LAPIC_EOI_ADDR.store(addr, Ordering::Relaxed);
 }
 
+/// Optional scheduler tick hook (M3.2, ADR-0013): called by the vector-32
+/// handler *after* EOI and the absorb-counter bump, in interrupt context
+/// (IF=0 via the interrupt gate, caller-saved registers saved by the stub).
+/// Unset through boot and the whole M1/M2 lifecycle — with no hook the
+/// timer stub's observable behavior is exactly the old absorb stub's.
+/// `sched::preempt` installs it for the preemptive phase and removes it
+/// after; the fn-pointer-in-atomic pattern matches `RESET_FN`/`LAPIC_EOI_ADDR`.
+static TIMER_HOOK: AtomicU64 = AtomicU64::new(0);
+
+/// Install (or remove, with `None`) the tick hook. Call with IF=0.
+pub fn set_timer_hook(hook: Option<extern "C" fn()>) {
+    TIMER_HOOK.store(hook.map_or(0, |f| f as usize as u64), Ordering::Relaxed);
+}
+
+/// Rust half of `arena_irq_timer_stub` (vector 32 = the reclaimed PIT
+/// tick, `drivers::intc::PIT_VECTOR`; the literal 32 below is kept local
+/// because arch code does not import driver modules).
+extern "C" fn arena_timer_handler() {
+    // Dual-controller EOI, same discipline and rationale as the ignore
+    // stub (M1 findings): 8259 cascade pair first (no-op when nothing is
+    // in service — the 8259s are masked in this platform's IOAPIC mode),
+    // then the LAPIC at whichever alias `paging`/kernel-entry installed.
+    // EOI happens *before* the hook: the hook may context-switch, and the
+    // controller must not be left with a vector in service across that.
+    // SAFETY: fixed ports; LAPIC_EOI_ADDR always points at a mapped LAPIC
+    // EOI register in the live view (set_lapic_eoi_addr contract).
+    unsafe {
+        super::outb(0xA0, 0x20);
+        super::outb(0x20, 0x20);
+        let eoi = LAPIC_EOI_ADDR.load(Ordering::Relaxed);
+        (eoi as *mut u32).write_volatile(0);
+    }
+    TIMER_IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
+    let hook = TIMER_HOOK.load(Ordering::Relaxed);
+    if hook != 0 {
+        // SAFETY: only set_timer_hook writes this slot, always with a
+        // real `extern "C" fn()` (or 0); the hook itself upholds the
+        // interrupt-context contract (ADR-0013).
+        let f = unsafe { core::mem::transmute::<u64, extern "C" fn()>(hook) };
+        f();
+    }
+}
+
 global_asm!(
     // ---- exception stubs: 32 slots at a fixed 16-byte stride -------------
     // Each stub body is at most 9 bytes (push imm8 ×2 = 4, jmp rel32 = 5),
@@ -147,6 +190,46 @@ global_asm!(
     "lock inc qword ptr [rip + {timer_count}]",
     "pop rax",
     "iretq",
+    // ---- timer stub (vector 32, M3.2 / ADR-0013) ---------------------------
+    // Same dual-controller EOI + absorb counter as the ignore stub (the
+    // M1/M2 suites read that counter), plus a Rust handler that may call
+    // the scheduler's tick hook. Frame discipline mirrors
+    // exception_common: RBP frames the stub, all caller-saved registers
+    // are saved (the interrupted thread may hold live values in any of
+    // them, and the handler chain may context-switch — ADR-0013), RSP is
+    // forced 16-aligned before the call. The tick hook (if installed)
+    // runs with IF=0 (interrupt gate) and may switch threads; the
+    // switched-away thread resumes by returning up this exact call chain
+    // and iretq-ing into its interrupted body.
+    ".p2align 4",
+    ".globl arena_irq_timer_stub",
+    "arena_irq_timer_stub:",
+    "push rbp",
+    "mov rbp, rsp",
+    "push rax",
+    "push rcx",
+    "push rdx",
+    "push rsi",
+    "push rdi",
+    "push r8",
+    "push r9",
+    "push r10",
+    "push r11",
+    "and rsp, -16",
+    "sub rsp, 32",
+    "call {timer_handler}",
+    "lea rsp, [rbp - 72]",
+    "pop r11",
+    "pop r10",
+    "pop r9",
+    "pop r8",
+    "pop rdi",
+    "pop rsi",
+    "pop rdx",
+    "pop rcx",
+    "pop rax",
+    "pop rbp",
+    "iretq",
     // ---- common exception path --------------------------------------------
     // Stack here: [vector][error_code][RIP][CS][RFLAGS][RSP][SS]
     // Hand (vector, error_code, &mut frame) to Rust in rcx/rdx/r8 (win64
@@ -193,6 +276,7 @@ global_asm!(
     timer_count = sym TIMER_IRQ_COUNT,
     lapic_eoi = sym LAPIC_EOI_ADDR,
     handler = sym arena_exception_handler,
+    timer_handler = sym arena_timer_handler,
 );
 
 /// Hardware-pushed interrupt frame (SDM Vol. 3 §6.12.1, Figure 6-9): the
@@ -332,9 +416,15 @@ static IDT_DESCRIPTOR: SyncCell<IdtDescriptor> = SyncCell::new(IdtDescriptor { l
 unsafe extern "C" {
     /// First of the 32 per-vector exception stubs, EXC_STUB_STRIDE apart.
     static arena_exc_stubs: u8;
-    /// Shared absorb-and-EOI stub for vectors 32..255.
+    /// Shared absorb-and-EOI stub for vectors 33..255.
     static arena_irq_ignore_stub: u8;
+    /// Full-frame timer stub for vector 32 (M3.2, ADR-0013).
+    static arena_irq_timer_stub: u8;
 }
+
+/// Vector carrying the PIT tick (`drivers::intc::PIT_VECTOR`; literal
+/// here — arch does not import driver modules).
+const PIT_TICK_VECTOR: usize = 32;
 
 /// Stride between consecutive exception stubs (asm guarantees `.p2align 4`
 /// and bodies ≤ 9 bytes, so each stub fits its 16-byte slot).
@@ -349,6 +439,10 @@ fn exc_stub_addr(vector: usize) -> u64 {
 
 fn irq_stub_addr() -> u64 {
     core::ptr::addr_of!(arena_irq_ignore_stub) as u64
+}
+
+fn timer_stub_addr() -> u64 {
+    core::ptr::addr_of!(arena_irq_timer_stub) as u64
 }
 
 /// IST index per vector (SDM Vol. 3 §6.14.5): the exceptions that must
@@ -387,6 +481,8 @@ pub unsafe fn init() {
         for vector in 0..NUM_VECTORS {
             let handler = if vector < 32 {
                 exc_stub_addr(vector)
+            } else if vector == PIT_TICK_VECTOR {
+                timer_stub_addr()
             } else {
                 irq_stub_addr()
             };
@@ -459,7 +555,9 @@ pub unsafe fn readback_gate(vector: usize) -> (u64, u64, u64) {
 /// Audit the live IDT (located via `sidt`): count gates whose selector,
 /// attribute/IST bytes, or handler offset deviate from the intended encoding
 /// (KERNEL_CODE_SELECTOR, GATE_INT64_PRESENT, IST = `ist_for(vector)`,
-/// offset = the stub for that vector). Returns (bad_selectors, bad_attrs, bad_offsets). Used by the
+/// offset = the stub `init` would install for that vector: exception stub
+/// per vector < 32, the timer stub at `PIT_TICK_VECTOR`, the ignore stub
+/// elsewhere). Returns (bad_selectors, bad_attrs, bad_offsets). Used by the
 /// M1 suite as independent evidence that the table the CPU will walk is the
 /// table we meant to build.
 pub fn audit_gates() -> (usize, usize, usize) {
@@ -479,6 +577,8 @@ pub fn audit_gates() -> (usize, usize, usize) {
         let offset = (lo & 0xFFFF) | (((lo >> 48) & 0xFFFF) << 16) | (hi << 32);
         let want = if v < 32 {
             exc_stub_addr(v)
+        } else if v == PIT_TICK_VECTOR {
+            timer_stub_addr() // M3.2: the tick gets the hook-capable stub
         } else {
             irq_stub_addr()
         };

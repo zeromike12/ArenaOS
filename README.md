@@ -17,7 +17,7 @@ automated tests that boot the real system in QEMU.
 | Phase 0 — Architecture (vision, ADRs, toolchain) | ✅ complete | `docs/` |
 | **Milestone 1 — First boot** (UEFI → kernel → verified diagnostics → safe halt) | ✅ **complete** | `tools/test_m1.py` (8/8 in-guest self-tests, clean QEMU exit) |
 | **Milestone 2 — Kernel foundations** (exceptions, timers, frames, paging, heap, locks, boot split) | ✅ **complete** — 2.1 (TSS/IST, exception recovery) · 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) · 2.3 (frame allocator, ADR-0007) · 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) · 2.5 (kernel heap, ADR-0009) · 2.6 (spinlocks, irqsave critical sections, ADR-0010) · 2.7 (boot split: ExitBootServices → kernel proper, reclaimed timer chain, farewell-island shutdown, ADR-0011) | `tools/test_m2.py` (21/21) + 100/100-boot stability loop + host suites (arena-heap 12/12, arena-sync 6/6) |
-| Milestone 3 — Multitasking (threads, scheduler, processes, capabilities) | 🔨 in progress — 3.1 (kernel threads + context switch: callee-saved frame, no-FPU invariant build-enforced, canaried 32 KiB stacks, exact-accounting reap, ADR-0012) done | `tools/test_m3.py` (5/5) + m1/m2 regressions green |
+| Milestone 3 — Multitasking (threads, scheduler, processes, capabilities) | 🔨 in progress — 3.1 (kernel threads + context switch: callee-saved frame, no-FPU invariant build-enforced, canaried 32 KiB stacks, exact-accounting reap, ADR-0012) + 3.2 (timer-driven preemption: tick hook, nested cooperative switch, per-CPU run queues, exact-RR proof on yield-free threads, ADR-0013) done | `tools/test_m3.py` (7/7) + m1/m2 regressions green + 100/100-boot stability |
 | Milestone 4 — Userspace & first program | ⬜ | — |
 | Phases 5–10 — Storage, drivers, net, userspace maturity, graphics, desktop | ⬜ | `docs/ROADMAP.md` |
 
@@ -67,8 +67,12 @@ thread and the scheduler runs real kernel threads (ADR-0012) — exact
 round-robin interleave order, callee-saved registers round-tripped
 *through* a live context switch, canaried 32 KiB stacks that stay
 disjoint under depth-200 recursion, and a 127-thread churn whose frame
-and heap accounting returns exactly to baseline (`m3: RESULT PASS
-(5/5)`). Finally the machine shuts down through a farewell island that
+and heap accounting returns exactly to baseline. Then the 100 Hz PIT
+tick starts driving the scheduler itself (ADR-0013): three threads that
+contain *no yield call at all* are rotated in exact round-robin order
+by timer preemption (~200k loop iterations each), and cooperative
+yields provably compose with 10 ms quanta (`m3: RESULT PASS (7/7)`).
+Finally the machine shuts down through a farewell island that
 hands control back to firmware's `ResetSystem` in firmware's own address
 space. Every claim above is a machine-checked serial marker; nothing is
 decorative.

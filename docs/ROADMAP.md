@@ -125,9 +125,23 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       churn with exact accounting + MAX_THREADS refusal. m3 5/5; Rust
       trap documented in CODING-CONVENTIONS (expect-assign on Copy
       places is a silent no-op — the scheduler's first bug).
-- 3.2 **Preemptive scheduler**: timer-driven, per-CPU-ready run queues (SMP
+- [x] 3.2 **Preemptive scheduler**: timer-driven, per-CPU-ready run queues (SMP
       *structures*, single-core execution), deterministic RR test mode.
-      Test: N threads print interleaved sequence proving preemption.
+      DONE (ADR-0013): vector-32 PIT tick gets a full-save stub whose Rust
+      handler EOIs, counts, and calls a scheduler hook; the hook counts the
+      quantum down and — when it expires with another thread ready — runs the
+      *same* decision + assembly switch as `yield_now`, nested inside the
+      interrupt (resume returns up the IRQ chain and `iretq`s into the
+      interrupted body). Per-CPU `CpuSched` structures (`MAX_CPUS=4`,
+      `this_cpu()`=0 until SMP). Soundness: every scheduler mutation runs
+      IF=0, so a tick never observes a half-finished decision. New threads'
+      first frame now carries IF=1 (amends ADR-0012) — an IF=0 first-run
+      thread would be un-preemptible (hang observed + fixed). Tests:
+      three threads containing NO yield call rotated in *exact* RR order
+      (≥12 timer switches, entry-by-entry) with ~200k loop iterations each;
+      cooperative yields and 10 ms quanta compose across 15 ms busy-waits
+      (mid-wait rotation). m3 7/7; mtest.py now fails a milestone run when
+      any prior-milestone RESULT in the same boot is not PASS.
 - 3.3 **Processes** = address space + capability space objects; kernel/user
       privilege separation machinery: TSS with RSP0, ring-3 segments,
       `syscall`/`sysret` MSRs (STAR/LSTAR/SFMASK/FMASK), SMAP/SMEP when

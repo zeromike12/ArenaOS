@@ -298,14 +298,52 @@ first execution contexts beyond `kmain`:
 * **Discipline**: every decision phase runs under `without_interrupts`
   and ends its borrows *before* the assembly switch runs on raw values —
   nothing may be live across a switch except the frame itself.
-  Cooperative today (`yield_now`); 3.2 adds the timer-driven preemptive
-  path on the same frame, and the per-CPU queue structures §5 promises.
+  Cooperative (`yield_now`) since M3.1; timer-driven preemption (M3.2)
+  reuses the same decision and the same frame — see below.
 
 The M3 suite pins all of it to machine-checked evidence: exact
 round-robin interleave order, callee-saved registers round-tripped
 *through* a live switch (asm probe), disjoint stack ranges with
 depth-200 recursion, and 127-thread churn with frame/heap accounting
 exact to the unit.
+
+### Timer-driven preemption (M3.2)
+
+`sched/preempt.rs` + the vector-32 timer stub in `arch/x86_64/idt.rs`
+(ADR-0013) turn the RR ring into a preemptive scheduler:
+
+* **Tick path**: the reclaimed PIT tick (100 Hz, IOAPIC pin 2 → vector
+  32) hits a dedicated stub that saves *all* caller-saved registers
+  (the interrupted thread may hold live values in any of them), EOIs
+  both controllers, bumps the absorb counter, and calls a Rust handler
+  that invokes the installed scheduler hook — with IF=0 for free
+  (interrupt gate).
+* **Nested cooperative switch**: when the running thread's quantum
+  (PIT ticks per slice, armed by `preempt::enable`) expires and another
+  thread is ready, the hook calls the *same* `plan_switch` + assembly
+  `switch_context` as `yield_now` — nested inside the interrupt, on the
+  interrupted thread's own stack. The switched-away thread's saved RSP
+  points into its IRQ frame; resuming it later returns up through the
+  hook, handler, and stub epilogue, and its `iretq` restores the exact
+  interrupted state (including IF=1). No separate IRQ stacks, no
+  switch-at-iretq complexity.
+* **The IF=0 invariant**: every scheduler-state mutation runs with
+  interrupts masked — cooperative sections via `without_interrupts`,
+  the hook via the interrupt gate. A tick can therefore never observe a
+  half-finished decision, and preemption needs no locks beyond the
+  existing cell discipline.
+* **Per-CPU structures**: `CpuSched { current, ready-ring, slice,
+  remaining }` × `MAX_CPUS=4` (SMP *structures*, single-core execution;
+  `this_cpu()` is 0 until M5 brings up APs).
+* **First-run frames are interruptible**: a new thread's synthesized
+  frame carries RFLAGS=0x202 (IF=1, amending ADR-0012's 0x2) so it is
+  preemptible from its first instruction — an IF=0 first-run thread
+  would wedge the CPU if it never yielded (observed live, then fixed).
+* **Determinism kept testable**: the preempt tests run threads with no
+  yield call at all and assert the *exact* rotation order from a capped
+  transition log, and prove timer rotation composes with cooperative
+  yields. Phase discipline: no serial output while IF=1 (no console
+  lock yet — ADR-0013).
 
 ## 4. Memory model
 
@@ -469,7 +507,8 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Boot stage (UEFI app, serial, GDT, CPU-state verification, memory-map parsing) | **Milestone 1 — implemented, tested in QEMU/OVMF** |
 | Kernel proper: exceptions/TSS, timers & monotonic clock, frame allocator, own page tables (higher-half, W^X), guarded heap, spinlocks/irqsave, boot split (EBS → kernel entry, reclaimed timer chain) | **Milestone 2 — implemented, 21/21 in-guest + 100/100-boot stability (ADR-0007…0011)** |
 | Kernel threads + cooperative context switch (callee-saved frame, canaried stacks, exact-accounting reap) | **M3.1 — implemented, 5/5 in-guest (ADR-0012)** |
-| Preemptive scheduling, processes, IPC, capabilities | in progress / not started (roadmap M3.2–M4) |
+| Timer-driven preemption (tick hook → nested cooperative switch, per-CPU run-queue structures, exact-RR determinism proven on yield-free threads) | **M3.2 — implemented, 7/7 in-guest + 100/100-boot stability (ADR-0013)** |
+| Processes, IPC, capabilities | in progress / not started (roadmap M3.3–M4) |
 | Userspace, drivers, FS, net, graphics | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

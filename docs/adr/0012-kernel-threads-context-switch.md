@@ -1,6 +1,9 @@
 # ADR-0012: Kernel threads and the context switch — callee-saved frame, no FPU state (build-enforced)
 
-Status: accepted (M3.1, 2026-09)
+Status: accepted (M3.1, 2026-09); amended by ADR-0013 (M3.2): a brand-new
+thread's synthesized frame now carries RFLAGS=0x202 (IF=1) instead of 0x2,
+so threads are preemptible from their first instruction. Everything else
+stands.
 
 ## Problem
 

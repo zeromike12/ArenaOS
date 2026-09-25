@@ -289,7 +289,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     info!(
         "kernel",
-        "milestone 3 step 3.1 complete — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 3 step 3.2 complete (threads + preemption) — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }

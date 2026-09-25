@@ -106,6 +106,18 @@ def evaluate(label: str, milestone: str, expected_tests: list[str],
               f"RESULT covers all {len(expected_tests)} expected tests "
               f"(got {m.group(3)})")
 
+    # Cross-milestone regression guard (ADR-0005: old tests are never
+    # deleted): every boot replays all earlier suites before this
+    # milestone's, so any prior-milestone RESULT line on the serial that
+    # is not PASS must fail THIS run — an old-suite failure must never
+    # ride along invisibly inside a green new-milestone boot.
+    for pm in re.finditer(r"^(m\d+): RESULT (PASS|FAIL) \((\d+)/(\d+)\)$",
+                          serial, re.MULTILINE):
+        if pm.group(1) != milestone:
+            check(pm.group(2) == "PASS",
+                  f"prior-milestone regression: {pm.group(1)} RESULT "
+                  f"{pm.group(2)} ({pm.group(3)}/{pm.group(4)}) in this boot")
+
     # rc==0 alone does NOT prove a clean halt: a triple fault also ends with
     # QEMU exiting 0 under -no-reboot. The kernel's declared-halt log line is
     # the discriminator (it is printed only on the clean-shutdown path).

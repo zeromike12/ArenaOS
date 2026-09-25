@@ -1,22 +1,33 @@
-//! Milestone 3.1 test suite — kernel threads and the context switch
-//! (ADR-0012). Runs in `kmain` after the M2 RESULT line; every test is a
-//! real machine effect (side-effect verification, exact interleave
-//! sequences, callee-saved register round-trips *through* the assembly
-//! switch, stack isolation with disjoint ranges, and exact frame/heap
-//! accounting after churn). Markers: `m3:test:<name>`, `m3: RESULT`.
+//! Milestone 3 test suite — kernel threads, the context switch (M3.1,
+//! ADR-0012), and timer-driven preemption (M3.2, ADR-0013). Runs in
+//! `kmain` after the M2 RESULT line; every test is a real machine effect
+//! (side-effect verification, exact interleave sequences, callee-saved
+//! register round-trips *through* the assembly switch, stack isolation
+//! with disjoint ranges, exact frame/heap accounting after churn, and
+//! preemption proven on threads that contain no yield call at all).
+//! Markers: `m3:test:<name>`, `m3: RESULT`.
+//!
+//! Phase discipline (ADR-0013): the five M3.1 tests run cooperative with
+//! IF=0 (ticks cannot perturb their exact assertions); the two preempt
+//! tests arm the tick hook for bounded IF=1 windows, log NOTHING while
+//! IF=1 (serial bytes from two threads would interleave without a console
+//! lock), and re-mask + disarm before asserting.
 
+use crate::arch::x86_64;
 use crate::log::{log_error as error, log_info as info, write_marker};
 use crate::sched;
 use crate::sync::SyncCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 5] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 7] = [
         ("thread_spawn_run", test_thread_spawn_run),
         ("thread_rr_interleave", test_thread_rr_interleave),
         ("thread_callee_saved", test_thread_callee_saved),
         ("thread_stack_isolation", test_thread_stack_isolation),
         ("thread_churn_accounting", test_thread_churn_accounting),
+        ("preempt_rotation", test_preempt_rotation),
+        ("preempt_coexist", test_preempt_coexist),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -402,6 +413,141 @@ fn test_thread_churn_accounting() -> Result<(), &'static str> {
         "thread_churn_accounting: {spawned} threads created/run/reaped; free frames {frames_baseline} -> {frames_now} (exact); heap reserved unchanged at {} KiB; table-full refusal at MAX_THREADS={}",
         heap_baseline / 1024,
         sched::MAX_THREADS
+    );
+    Ok(())
+}
+
+// ---- 6. timer-driven rotation of threads that never yield (M3.2) ---------
+
+static P_STOP: AtomicU64 = AtomicU64::new(0);
+static P_COUNTERS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+/// Busy loop with NO scheduler call anywhere — every context switch this
+/// thread ever experiences is timer-driven. That is the point (ROADMAP
+/// 3.2: interleaving that *proves* preemption).
+fn p_rot_entry(arg: usize) {
+    while P_STOP.load(Ordering::Relaxed) == 0 {
+        P_COUNTERS[arg].fetch_add(1, Ordering::Relaxed);
+        core::hint::spin_loop();
+    }
+}
+
+fn test_preempt_rotation() -> Result<(), &'static str> {
+    P_STOP.store(0, Ordering::Relaxed);
+    for c in P_COUNTERS.iter() {
+        c.store(0, Ordering::Relaxed);
+    }
+    let log_base = sched::preempt::log_len();
+    let total_base = sched::preempt::total();
+    // Spawn order == slot order (1,2,3): earlier tests reaped their slots.
+    for i in 0..3 {
+        sched::spawn("p_rot", p_rot_entry, i)?;
+    }
+    // Arm: 2-tick quantum (20 ms at 100 Hz); 12 transitions ≈ 240 ms.
+    sched::preempt::enable(2);
+    x86_64::sti();
+    // Bounded wait — NO logging while IF=1 (phase discipline, ADR-0013).
+    const NEED: u64 = 12;
+    let t0 = crate::timekeeping::now_us();
+    while sched::preempt::total() - total_base < NEED
+        && crate::timekeeping::now_us() - t0 < 3_000_000
+    {
+        core::hint::spin_loop();
+    }
+    x86_64::cli();
+    sched::preempt::disable();
+    P_STOP.store(1, Ordering::Relaxed);
+    // IF=0 from here: drain (each ready thread resumes from its nested
+    // IRQ switch, sees STOP, and exits), then log and assert.
+    drain(64)?;
+
+    let n = sched::preempt::total() - total_base;
+    if n < NEED {
+        return Err("fewer than 12 timer-driven rotations observed");
+    }
+    // Exact cycle bootstrap(0) → t(1) → t(2) → t(3) → bootstrap...:
+    // FIFO ring + equal quanta + switch-in refill ⇒ deterministic RR.
+    for i in 0..NEED {
+        let e = sched::preempt::log_entry(log_base + i as usize)
+            .ok_or("preemption log entry vanished")?;
+        let (from, to) = (e >> 32, e & 0xFFFF_FFFF);
+        if from != i % 4 || to != (i + 1) % 4 {
+            return Err("rotation order is not exact round-robin");
+        }
+    }
+    let c = [
+        P_COUNTERS[0].load(Ordering::Relaxed),
+        P_COUNTERS[1].load(Ordering::Relaxed),
+        P_COUNTERS[2].load(Ordering::Relaxed),
+    ];
+    if c.iter().any(|x| *x == 0) {
+        return Err("a thread that never yielded made no progress (preemption not real)");
+    }
+    info!(
+        "m3",
+        "preempt_rotation: {n} timer rotations, exact order 0->1->2->3 cycle; progress without a single yield call: {} / {} / {} loop iterations",
+        c[0],
+        c[1],
+        c[2]
+    );
+    Ok(())
+}
+
+// ---- 7. preemptive and cooperative triggers compose -----------------------
+
+static P_COEXIST: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+static P_COEXIST_WAITFAIL: AtomicU64 = AtomicU64::new(0);
+
+fn p_coexist_entry(arg: usize) {
+    for _ in 0..3 {
+        P_COEXIST[arg].fetch_add(1, Ordering::Relaxed);
+        // A 15 ms busy-wait under a 1-tick (10 ms) quantum is guaranteed
+        // to be rotated out mid-wait at least once per round.
+        if !crate::timekeeping::busy_wait_us(15_000) {
+            P_COEXIST_WAITFAIL.fetch_add(1, Ordering::Relaxed);
+        }
+        // ... and the cooperative trigger still works between waits.
+        sched::yield_now();
+    }
+}
+
+fn test_preempt_coexist() -> Result<(), &'static str> {
+    for c in P_COEXIST.iter() {
+        c.store(0, Ordering::Relaxed);
+    }
+    P_COEXIST_WAITFAIL.store(0, Ordering::Relaxed);
+    let total_base = sched::preempt::total();
+    sched::spawn("p_co0", p_coexist_entry, 0)?;
+    sched::spawn("p_co1", p_coexist_entry, 1)?;
+    sched::preempt::enable(1); // 10 ms quantum < 15 ms waits
+    x86_64::sti();
+    let t0 = crate::timekeeping::now_us();
+    while (P_COEXIST[0].load(Ordering::Relaxed) < 3 || P_COEXIST[1].load(Ordering::Relaxed) < 3)
+        && crate::timekeeping::now_us() - t0 < 3_000_000
+    {
+        core::hint::spin_loop();
+    }
+    x86_64::cli();
+    sched::preempt::disable();
+    drain(64)?;
+
+    let (a, b) = (
+        P_COEXIST[0].load(Ordering::Relaxed),
+        P_COEXIST[1].load(Ordering::Relaxed),
+    );
+    if a != 3 || b != 3 {
+        return Err("coexist threads did not finish all rounds");
+    }
+    if P_COEXIST_WAITFAIL.load(Ordering::Relaxed) != 0 {
+        return Err("busy-wait anti-hang guard fired under preemption");
+    }
+    let preempts = sched::preempt::total() - total_base;
+    if preempts < 2 {
+        return Err("busy-waiting threads were not rotated by the timer");
+    }
+    info!(
+        "m3",
+        "preempt_coexist: 2 threads finished 3x(15ms wait + yield) under 10ms quanta; {preempts} timer rotations interleaved with cooperative yields"
     );
     Ok(())
 }

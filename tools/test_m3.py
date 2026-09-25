@@ -33,6 +33,22 @@ Current coverage:
                               recorded baseline, plus the MAX_THREADS
                               table-full boundary (clean refusal, then
                               full drain and exact accounting again).
+  M3.2 — timer-driven preemption (ADR-0013; the vector-32 PIT tick stub
+  runs the scheduler when a quantum expires):
+  * preempt_rotation        — three threads that contain NO yield call
+                              anywhere are rotated in *exact* round-robin
+                              order (bootstrap→1→2→3 cycle, ≥12 timer
+                              switches, entry-by-entry log comparison)
+                              and all three make progress — the direct
+                              ROADMAP 3.2 proof ("interleaving that
+                              proves preemption is happening").
+  * preempt_coexist         — two threads doing 15 ms busy-waits (longer
+                              than the 10 ms quantum, so they are rotated
+                              out mid-wait) interleaved with cooperative
+                              yields: both finish all rounds, the waits
+                              never trip the anti-hang guard, and timer
+                              rotations are observed alongside yields —
+                              cooperative and preemptive triggers compose.
 
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
@@ -49,6 +65,8 @@ EXPECTED_TESTS = [
     "thread_callee_saved",
     "thread_stack_isolation",
     "thread_churn_accounting",
+    "preempt_rotation",
+    "preempt_coexist",
 ]
 
 if __name__ == "__main__":

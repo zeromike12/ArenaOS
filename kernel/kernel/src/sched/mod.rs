@@ -1,16 +1,26 @@
-//! Kernel threads and the cooperative scheduler (M3.1, ADR-0012).
+//! Kernel threads and the scheduler core (M3.1/M3.2, ADR-0012/ADR-0013).
 //!
 //! Model: fixed table of `MAX_THREADS` slots (stable indices — the ready
-//! queue stores indices and a compaction would invalidate them), one
-//! round-robin ready queue, `yield_now()` as the only switch trigger.
-//! Preemption (timer-driven switching, per-CPU queues) is M3.2 and builds
-//! on this exact switch frame.
+//! ring stores indices and a compaction would invalidate them), one
+//! round-robin ready ring **per CPU** (`MAX_CPUS` structures; execution
+//! is single-core until SMP lands — `this_cpu()` is 0 by contract), and
+//! two switch triggers sharing one decision routine:
+//!
+//! * cooperative `yield_now()` (M3.1), and
+//! * timer-driven preemption from the vector-32 tick hook
+//!   ([`preempt`], M3.2) — the tick calls the *same* `plan_switch` +
+//!   `arena_context_switch` from interrupt context; the interrupted
+//!   thread's full state is its hardware iretq frame + stub saves + our
+//!   standard switch frame, all on its own stack (ADR-0013).
 //!
 //! Discipline (all machine-checked by the M3 suite):
-//! - All scheduler state is mutated under `without_interrupts` (ADR-0010)
-//!   and **no borrow crosses the context switch**: the decision phase
-//!   yields a plan of raw values (save-slot pointer, restore RSP), the
-//!   borrow ends, and only then does the assembly switch run.
+//! - All scheduler state is mutated under IF=0: cooperative sections
+//!   enter `without_interrupts` (ADR-0010) themselves, and the interrupt
+//!   gate hands the tick hook IF=0 for free — a tick can therefore never
+//!   observe a half-finished decision. **No borrow crosses the context
+//!   switch**: the decision phase yields a plan of raw values (save-slot
+//!   pointer, restore RSP), the borrow ends, and only then does the
+//!   assembly switch run.
 //! - Every kernel thread stack is 32 KiB of contiguous frames with a
 //!   canary in its bottom qword, checked whenever the thread switches
 //!   away and again at reap; a corrupted canary halts the machine with
@@ -22,6 +32,8 @@
 //!   stack is a reserved firmware region the scheduler does not own
 //!   (`stack_frames = 0` ⇒ no canary, nothing to free).
 
+pub mod preempt;
+
 use crate::arch::x86_64::context;
 use crate::arch::x86_64::paging::KERNEL_OFFSET;
 use crate::log::log_error as error;
@@ -29,9 +41,13 @@ use crate::sync::{SyncCell, without_interrupts};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Scheduler slot cap (M3.1): thread structs are small and static, the
-/// ready ring is sized to match, and `spawn` fails cleanly at the cap —
+/// ready rings are sized to match, and `spawn` fails cleanly at the cap —
 /// a boundary the churn test exercises on purpose.
 pub const MAX_THREADS: usize = 64;
+
+/// Per-CPU scheduler structures exist for `MAX_CPUS` CPUs; execution is
+/// BSP-only until SMP lands (M5) — see [`this_cpu`].
+pub const MAX_CPUS: usize = 4;
 
 /// Kernel stack per thread: 8 contiguous frames = 32 KiB (ADR-0012).
 pub const THREAD_STACK_FRAMES: usize = 8;
@@ -66,7 +82,7 @@ pub struct KThread {
     stack_frames: usize,
 }
 
-/// Fixed-capacity FIFO of slot indices (the round-robin ready queue).
+/// Fixed-capacity FIFO of slot indices (one CPU's round-robin ready ring).
 #[derive(Clone, Copy)]
 struct Ring {
     q: [usize; MAX_THREADS],
@@ -101,22 +117,51 @@ impl Ring {
     }
 }
 
+/// Per-CPU scheduler state (ADR-0013): who is running here, what is
+/// ready to run here, and this CPU's preemption quantum accounting.
+#[derive(Clone, Copy)]
+pub(super) struct CpuSched {
+    current: usize,
+    ready: Ring,
+    /// Quantum length in PIT ticks; 0 = preemption disarmed on this CPU.
+    slice: u32,
+    /// Ticks left for `current`.
+    remaining: u32,
+}
+
+impl CpuSched {
+    const fn new() -> Self {
+        Self {
+            current: 0,
+            ready: Ring::new(),
+            slice: 0,
+            remaining: 0,
+        }
+    }
+}
+
 static THREADS: SyncCell<[Option<KThread>; MAX_THREADS]> = SyncCell::new([None; MAX_THREADS]);
 /// Saved RSP per slot (the switch's save-slot target; raw access by
 /// design — a pointer into here crosses the switch, a borrow must not).
 static CTX: SyncCell<[u64; MAX_THREADS]> = SyncCell::new([0; MAX_THREADS]);
-static READY: SyncCell<Ring> = SyncCell::new(Ring::new());
-static CURRENT: SyncCell<usize> = SyncCell::new(0);
+static CPUS: SyncCell<[CpuSched; MAX_CPUS]> = SyncCell::new([CpuSched::new(); MAX_CPUS]);
 static NEXT_ID: SyncCell<u64> = SyncCell::new(1);
 static SWITCH_COUNT: AtomicU64 = AtomicU64::new(0);
 static SPAWNED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
+/// The CPU this code runs on. Single-core execution until SMP (M5):
+/// only the BSP exists, and every scheduler structure is already shaped
+/// per-CPU so that "start the APs" is a data change, not a redesign.
+pub fn this_cpu() -> usize {
+    0
+}
+
 /// Raw plan produced by a decision phase: everything the assembly switch
 /// needs, with every borrow already ended (ADR-0012 discipline).
 #[derive(Clone, Copy)]
-struct Plan {
-    save: *mut u64,
-    restore: u64,
+pub(super) struct Plan {
+    pub save: *mut u64,
+    pub restore: u64,
 }
 
 /// Placeholder entry for the bootstrap thread — never invoked: slot 0 is
@@ -143,16 +188,16 @@ pub fn init() -> Result<(), &'static str> {
         });
         // SAFETY: same discipline; fresh scheduler, known values.
         unsafe {
-            *CURRENT.get() = 0;
+            *CPUS.get() = [CpuSched::new(); MAX_CPUS];
             *NEXT_ID.get() = 1;
         }
         Ok(())
     })
 }
 
-/// Create a thread and enqueue it Ready. It runs `entry(arg)` on its own
-/// 32 KiB stack the next time the scheduler picks it, then exits and is
-/// reaped automatically. Returns the thread id.
+/// Create a thread and enqueue it Ready on this CPU. It runs `entry(arg)`
+/// on its own 32 KiB stack the next time the scheduler picks it, then
+/// exits and is reaped automatically. Returns the thread id.
 pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'static str> {
     without_interrupts(|| {
         reap();
@@ -193,7 +238,8 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
                 stack_frames: THREAD_STACK_FRAMES,
             });
             (*CTX.get())[idx] = rsp0;
-            if !(*READY.get()).push(idx) {
+            let cpu = &mut (*CPUS.get())[this_cpu()];
+            if !cpu.ready.push(idx) {
                 // Unreachable: ready len ≤ MAX_THREADS-1 while a slot was
                 // free — but leave no leak if the invariant is ever broken.
                 threads[idx] = None;
@@ -208,8 +254,8 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
 
 /// Voluntarily give up the CPU: run the round-robin decision and, if
 /// another thread is ready, switch to it. Returns when this thread is
-/// resumed (or immediately if the ready queue is empty — spinning on an
-/// empty queue would starve the very thread asking others to run).
+/// resumed (or immediately if the ready ring is empty — spinning on an
+/// empty ring would starve the very thread asking others to run).
 pub fn yield_now() {
     without_interrupts(|| {
         let Some(plan) = plan_switch(true) else {
@@ -233,7 +279,7 @@ pub extern "C" fn thread_main() -> ! {
     let (entry, arg) = without_interrupts(|| {
         // SAFETY: single reader under IF=0; CURRENT is a Running slot.
         unsafe {
-            let cur = *CURRENT.get();
+            let cur = (*CPUS.get())[this_cpu()].current;
             let t = (*THREADS.get())[cur].expect("current thread vanished");
             (t.entry, t.arg)
         }
@@ -249,7 +295,7 @@ fn exit_now() -> ! {
         check_canary_current();
         // SAFETY: single writer under IF=0.
         unsafe {
-            let cur = *CURRENT.get();
+            let cur = (*CPUS.get())[this_cpu()].current;
             // as_mut() — NOT expect(): on a Copy item, place.expect()
             // returns a temporary and the assignment would silently be
             // discarded (proved standalone; caught by the drain tests).
@@ -277,21 +323,24 @@ fn exit_now() -> ! {
     crate::halt::halt_machine("scheduler: zombie resumed");
 }
 
-/// Decision phase: reap zombies, canary-check the outgoing thread, pick
-/// the next ready thread, update states/queue, and return the raw switch
-/// plan. `enqueue_current` = yield semantics (current goes to the back of
-/// the queue); `false` = exit semantics (current stays Zombie).
+/// Decision phase (shared by yield, exit, and the preemptive tick —
+/// ADR-0013): reap zombies, canary-check the outgoing thread, pick the
+/// next ready thread, refill its quantum, update states/ring, and return
+/// the raw switch plan. `enqueue_current` = yield/preempt semantics
+/// (current goes to the back of its CPU's ring); `false` = exit
+/// semantics (current stays Zombie).
 ///
 /// Every borrow ends before this returns — the plan is raw by design.
-fn plan_switch(enqueue_current: bool) -> Option<Plan> {
+pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
     reap();
     if enqueue_current {
         check_canary_current();
     }
     // SAFETY: single writer under IF=0; all reads/writes complete here.
     unsafe {
-        let next = (*READY.get()).pop()?;
-        let cur = *CURRENT.get();
+        let cpu = &mut (*CPUS.get())[this_cpu()];
+        let next = cpu.ready.pop()?;
+        let cur = cpu.current;
         let threads = &mut *THREADS.get();
         if enqueue_current {
             // as_mut(), not expect() — expect() on a Copy place assigns
@@ -300,11 +349,15 @@ fn plan_switch(enqueue_current: bool) -> Option<Plan> {
                 .as_mut()
                 .expect("current thread vanished")
                 .state = State::Ready;
-            let ok = (*READY.get()).push(cur);
+            let ok = cpu.ready.push(cur);
             debug_assert!(ok, "ready ring overflow with a free slot");
         }
         threads[next].as_mut().expect("ready slot vanished").state = State::Running;
-        *CURRENT.get() = next;
+        cpu.current = next;
+        // Fresh quantum for the incoming thread (strict RR; also resets
+        // the countdown when a yield found the ring empty and no switch
+        // happens — the current thread simply gets a new slice).
+        cpu.remaining = cpu.slice;
         Some(Plan {
             save: (CTX.get() as *mut u64).add(cur),
             restore: (*CTX.get())[next],
@@ -351,7 +404,7 @@ fn reap() {
 fn check_canary_current() {
     // SAFETY: single reader under IF=0.
     unsafe {
-        let cur = *CURRENT.get();
+        let cur = (*CPUS.get())[this_cpu()].current;
         let t = (*THREADS.get())[cur].expect("current thread vanished");
         if t.stack_frames == 0 {
             return; // bootstrap: stack not owned, no canary
@@ -388,7 +441,8 @@ pub fn live_threads() -> usize {
     })
 }
 
-/// Total context switches performed (one per save/restore pair).
+/// Total context switches performed (one per save/restore pair),
+/// cooperative and preemptive alike.
 pub fn switch_count() -> u64 {
     SWITCH_COUNT.load(Ordering::Relaxed)
 }
@@ -404,7 +458,7 @@ pub fn current_stack_range() -> (u64, u64) {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
         unsafe {
-            let cur = *CURRENT.get();
+            let cur = (*CPUS.get())[this_cpu()].current;
             let t = (*THREADS.get())[cur].expect("current thread vanished");
             if t.stack_frames == 0 {
                 return (0, 0);
