@@ -109,6 +109,21 @@ code (ADR-0004). During Milestone 1 the boot stage *is* the whole kernel —
 one binary; the split into boot stage + kernel proper arrives with paging in
 Milestone 2.
 
+### Timekeeping (M2.2)
+
+The monotonic clock is the TSC; the *meaning* of a microsecond comes from
+the PIT oscillator (1 193 182 Hz), the platform's only hardware real-time
+reference at this stage. Boot calibrates once, loudly: two independent
+~20 ms windows of linear PIT countdown versus TSC delta must agree within
+5% and land in plausible bounds, or boot halts rather than run on a
+made-up clock. After calibration the PIT channel 0 is left ticking at
+100 Hz in square-wave mode 3 — measured fact about QEMU: mode 2's 1 ns OUT
+pulses do not reliably drive the IOAPIC→LAPIC edge path, mode 3 (what the
+firmware itself used) does. `timekeeping::now_us()` (TSC-based, no I/O) is
+the kernel's monotonic time source from M2.2 onward; there is no wall clock
+until an RTC/NTP-class source exists (Phase 5+), and no sleeping until the
+scheduler (M3).
+
 ### Interrupt-controller handoff (M1 findings, probed at runtime)
 
 EDK2/OVMF on QEMU q35 hands off with the platform in **IOAPIC → local-APIC

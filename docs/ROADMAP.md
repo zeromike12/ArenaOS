@@ -63,9 +63,12 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       encoded as tests/comments — LTR requires the TSS descriptor type
       *available* (0x9; LTR itself sets busy), and an exception handler that
       can return must treat every caller-saved register as live.
-- 2.2 **Timers**: PIT in one-shot/periodic mode for calibration; TSC
-      frequency measurement; monotonic clock source; timer interrupt ticks
-      counted and reported.
+- [x] 2.2 **Timers**: PIT driver (one-shot/periodic/latch/read-back —
+      modes chosen from measured QEMU behavior, see `drivers/pit.rs`);
+      TSC calibrated against the PIT oscillator in two agreeing windows
+      (boot halts on implausible/disagreeing calibration); monotonic
+      `now_us()` clock; kernel tick left running at 100 Hz mode 3; markers
+      `pit_oneshot`, `tsc_frequency`, `clock_monotonic`, `tick_rate`.
 - 2.3 **Physical memory**: frame allocator from the boot-info map (bitmap or
       buddy — decided by small benchmark + ADR); UEFI runtime regions
       preserved; allocation/free stress test with integrity checks.

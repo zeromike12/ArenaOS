@@ -26,10 +26,11 @@ mod log;
 mod m1;
 mod m2;
 mod panic;
+mod timekeeping;
 mod uefi;
 
 use arch::x86_64::{self, gdt, tss};
-use log::{log_info as info, log_warn as warn};
+use log::{log_error as error, log_info as info, log_warn as warn};
 
 /// UEFI image entry point (UEFI 2.10 §2.1 EFI_IMAGE_ENTRY_POINT; win64/
 /// efiapi ABI on x86_64, entry symbol fixed to `efi_main` by our target's
@@ -130,6 +131,18 @@ pub extern "efiapi" fn efi_main(
     // --- Step 3: verified diagnostics -------------------------------------
     info!("m1", "running milestone-1 self-tests");
     let (passed, total) = m1::run_all();
+
+    // --- Step 3.5: take over timekeeping (M2.2) ----------------------------
+    // After the M1 suite (which observes firmware-owned hardware state) and
+    // before the M2 suite (which verifies and consumes the clock): calibrate
+    // the TSC against the PIT oscillator and start the kernel tick. A boot
+    // without a trustworthy clock is not a boot we want to continue — fail
+    // loudly (ADR-0005).
+    if let Err(reason) = timekeeping::init() {
+        error!("boot", "timekeeping init failed: {reason}");
+        halt::halt_machine("timekeeping init failed");
+    }
+
     let (passed2, total2) = m2::run_all();
 
     // --- Step 4: halt safely ------------------------------------------------

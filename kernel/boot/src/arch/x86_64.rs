@@ -83,6 +83,21 @@ pub fn read_cr0() -> u64 {
     v
 }
 
+/// Time Stamp Counter (`rdtsc`). Monotonic per-socket counter of unknown
+/// rate until calibrated against a real time source — see `timekeeping`
+/// (M2.2), which measures TSC-per-PIT-oscillator-tick.
+pub fn read_tsc() -> u64 {
+    let lo: u32;
+    let hi: u32;
+    // SAFETY: RDTSC is unprivileged, side-effect-free beyond the two
+    // output registers.
+    unsafe {
+        core::arch::asm!("rdtsc", out("eax") lo, out("edx") hi,
+            options(nostack, preserves_flags, nomem));
+    }
+    ((hi as u64) << 32) | lo as u64
+}
+
 /// CR2 — last linear address that caused a #PF (SDM Vol. 3 §4.7). Read by
 /// the exception handler so page-fault diagnostics can name the address.
 pub fn read_cr2() -> u64 {
