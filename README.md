@@ -16,7 +16,7 @@ automated tests that boot the real system in QEMU.
 |---|---|---|
 | Phase 0 — Architecture (vision, ADRs, toolchain) | ✅ complete | `docs/` |
 | **Milestone 1 — First boot** (UEFI → kernel → verified diagnostics → safe halt) | ✅ **complete** | `tools/test_m1.py` (8/8 in-guest self-tests, clean QEMU exit) |
-| Milestone 2 — Kernel foundations (exceptions, timers, frames, paging, heap, locks, boot split) | 🔨 in progress — 2.1 (TSS/IST, exception recovery) + 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) + 2.3 (frame allocator, ADR-0007) + 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) + 2.5 (kernel heap: host-tested core, guards, ADR-0009) + 2.6 (spinlocks, irqsave critical sections, owner tracking, ADR-0010) done | `tools/test_m2.py` (16/16) + host suites (arena-heap 10/10, arena-sync 6/6) |
+| **Milestone 2 — Kernel foundations** (exceptions, timers, frames, paging, heap, locks, boot split) | ✅ **complete** — 2.1 (TSS/IST, exception recovery) · 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) · 2.3 (frame allocator, ADR-0007) · 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) · 2.5 (kernel heap, ADR-0009) · 2.6 (spinlocks, irqsave critical sections, ADR-0010) · 2.7 (boot split: ExitBootServices → kernel proper, reclaimed timer chain, farewell-island shutdown, ADR-0011) | `tools/test_m2.py` (21/21) + 100/100-boot stability loop + host suites (arena-heap 12/12, arena-sync 6/6) |
 | Milestone 3 — Multitasking · 4 — Userspace & first program | ⬜ | — |
 | Phases 5–10 — Storage, drivers, net, userspace maturity, graphics, desktop | ⬜ | `docs/ROADMAP.md` |
 
@@ -33,16 +33,36 @@ On a normal workstation with system packages (`qemu-system-x86`, `ovmf`,
 Rust with the `x86_64-unknown-uefi` target), the same scripts work
 unmodified — see `docs/DEV-ENV.md` for resolution order and overrides.
 
-## What just booted (Milestone 1)
+## Run a released build in your own QEMU
 
-QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It disables
-interrupts, installs its own GDT (verified by `sgdt` read-back), initializes
-the 16550 UART (verified by hardware loopback), inspects CPU state (long
-mode, CR0/CR3/CR4/EFER, CPUID), parses and classifies the real UEFI memory
-map, runs six self-tests, reports `m1: RESULT PASS (6/6)` over serial, and
-halts the machine safely via UEFI `ResetSystem`. The test harness asserts
-every one of those facts and that QEMU exits cleanly. No fake output: each
-test fails loudly if the underlying mechanism is broken.
+Every completed milestone ships as a GitHub release: a prebuilt boot
+image plus the exact EDK2 firmware pair it was tested against. See
+**[docs/RUNNING.md](docs/RUNNING.md)** — one `cp`, one
+`qemu-system-x86_64` command, serial is the console, and the VM shuts
+itself down cleanly when the milestone suite finishes.
+
+## What just booted (Milestone 2)
+
+QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It brings
+up serial, GDT/IDT/TSS, the 16550 UART, and the real UEFI memory map;
+calibrates the TSC against the PIT oscillator; installs its own page
+tables (higher-half direct map, per-section W^X, WP+NXE enforced and
+fault-tested); grows a guarded kernel heap from the frame allocator; and
+proves spinlock/irqsave critical sections against live PIT hardware —
+re-running every Milestone-1 self-test on the way (`m1: RESULT PASS
+(8/8)`).
+
+Then the M2.7 handoff (ADR-0011): `ExitBootServices()`, CR3 switches to
+the kernel-only view through a trampoline (identity mapping torn down,
+verified by a recovered fault), PE base relocations are replayed at
+`+KERNEL_OFFSET`, and `kmain` validates the `BootInfo` ABI record. The
+kernel reclaims the timer chain firmware left behind — the PIT arrives on
+IOAPIC **pin 2** (the classic ISA-IRQ0→GSI-2 override), re-routed to our
+vector — and proves two live ticks through the relocated IDT with
+kernel-alias LAPIC EOI. Finally `m2: RESULT PASS (21/21)`, and the
+machine shuts down through a farewell island that hands control back to
+firmware's `ResetSystem` in firmware's own address space. Every claim
+above is a machine-checked serial marker; nothing is decorative.
 
 ## Documentation map
 
@@ -57,6 +77,7 @@ test fails loudly if the underlying mechanism is broken.
   "do not build yet" firewall
 - [docs/RISKS.md](docs/RISKS.md) — risk register
 - [docs/DEV-ENV.md](docs/DEV-ENV.md) — toolchain bootstrap, build/boot/debug
+- [docs/RUNNING.md](docs/RUNNING.md) — running a release build in your own QEMU
 - [docs/TESTING.md](docs/TESTING.md) — testing doctrine and marker grammar
 - [docs/CODING-CONVENTIONS.md](docs/CODING-CONVENTIONS.md),
   [docs/REPO-LAYOUT.md](docs/REPO-LAYOUT.md)
