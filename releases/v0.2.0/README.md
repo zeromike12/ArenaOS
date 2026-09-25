@@ -17,9 +17,10 @@ bundle: extract → boot → `m1: RESULT PASS (8/8)`, `m2: RESULT PASS
 # raw file (works in a browser too):
 curl -LO https://github.com/zeromike12/ArenaOS/raw/refs/heads/arena/01a0d6fd-arenaos/releases/v0.2.0/arenaos-v0.2.0-qemu-x86_64.tar.gz
 
-# or via the GitHub API:
-gh api repos/zeromike12/ArenaOS/contents/releases/v0.2.0/arenaos-v0.2.0-qemu-x86_64.tar.gz \
-    --jq '.content' | base64 -d > arenaos-v0.2.0-qemu-x86_64.tar.gz
+# or via the GitHub API (the contents endpoint caps base64 responses at
+# 1 MiB — fetch the git blob raw instead; verified byte-identical):
+gh api repos/zeromike12/ArenaOS/git/blobs/6e41012fa4bc0ab15c017623a72d9999342f2f67 \
+    -H "Accept: application/vnd.github.raw" > arenaos-v0.2.0-qemu-x86_64.tar.gz
 ```
 
 Verify (optional but recommended):
