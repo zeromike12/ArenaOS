@@ -307,26 +307,50 @@ fn test_clock_monotonic() -> Result<(), &'static str> {
 
     // Cross-check the scale against the oscillator directly: run a ~2 ms
     // PIT-count window and compare PIT-derived µs with clock-derived µs.
+    // The window's endpoint samples are (PIT latch, rdtsc) pairs — not
+    // atomic. A host preemption of the TCG vCPU thread landing inside a
+    // pair corrupts that window (observed once in 100 stability-loop
+    // boots: pit=2013us vs clock=1239us, a ~770us stall between the start
+    // latch and rdtsc). A corrupted window is not evidence of clock
+    // disagreement, so measure best-of-3: agree within 10% on ANY window
+    // and pass; only a persistent disagreement (a real scale bug, which
+    // preemption cannot fake three times in a row) fails.
     // SAFETY: PIT owned post-init; IF=0; periodic tick restored below.
-    unsafe { pit::set_calibration_mode() };
-    let (counts, tsc) = unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 500) };
-    unsafe { pit::set_periodic_hz(timekeeping::KERNEL_TICK_HZ) };
-    if counts == 0 {
-        return Err("cross-check window measured zero counts");
+    const CROSS_CHECK_TRIALS: u32 = 3;
+    let mut agreed = false;
+    let (mut best_pit_us, mut best_clock_us, mut best_skew) = (0u64, 0u64, u64::MAX);
+    for _ in 0..CROSS_CHECK_TRIALS {
+        unsafe { pit::set_calibration_mode() };
+        let (counts, tsc) =
+            unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 500) };
+        unsafe { pit::set_periodic_hz(timekeeping::KERNEL_TICK_HZ) };
+        if counts == 0 {
+            return Err("cross-check window measured zero counts");
+        }
+        let pit_us = u64::from(counts) * 1_000_000 / pit::OSCILLATOR_HZ;
+        let clock_us = timekeeping::ticks_to_us(tsc);
+        let (lo, hi) = if pit_us <= clock_us {
+            (pit_us, clock_us)
+        } else {
+            (clock_us, pit_us)
+        };
+        let skew = hi - lo;
+        if skew < best_skew {
+            (best_pit_us, best_clock_us, best_skew) = (pit_us, clock_us, skew);
+        }
+        if skew <= hi / 10 + 1 {
+            agreed = true;
+            break;
+        }
     }
-    let pit_us = u64::from(counts) * 1_000_000 / pit::OSCILLATOR_HZ;
-    let tsc_us = timekeeping::ticks_to_us(tsc);
     info!(
         "m2",
-        "clock_monotonic: waited {waited}us for {WAIT_US}us request; cross-check window pit={pit_us}us clock={tsc_us}us"
+        "clock_monotonic: waited {waited}us for {WAIT_US}us request; cross-check best window pit={best_pit_us}us clock={best_clock_us}us skew={best_skew}us"
     );
-    let (lo, hi) = if pit_us <= tsc_us {
-        (pit_us, tsc_us)
-    } else {
-        (tsc_us, pit_us)
-    };
-    if hi - lo > hi / 10 + 1 {
-        return Err("clock microseconds disagree with PIT-oscillator microseconds (>10%)");
+    if !agreed {
+        return Err(
+            "clock microseconds disagree with PIT-oscillator microseconds (>10% in 3 windows)",
+        );
     }
     Ok(())
 }
