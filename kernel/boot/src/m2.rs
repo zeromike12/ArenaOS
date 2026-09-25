@@ -991,7 +991,8 @@ fn test_spinlock_basics() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Run all M2 tests so far, emit markers, return (passed, total).
+/// Run all boot-stage M2 tests, emitting per-test markers. The RESULT
+/// line comes from the kernel proper after the M2.7 entry tests.
 pub fn run_all() -> (usize, usize) {
     info!("m2", "running milestone-2 self-tests");
     let mut passed = 0usize;
@@ -1007,11 +1008,9 @@ pub fn run_all() -> (usize, usize) {
             }
         }
     }
-    let total = TESTS.len();
-    if passed == total {
-        log::write_marker(format_args!("m2: RESULT PASS ({passed}/{total})"));
-    } else {
-        log::write_marker(format_args!("m2: RESULT FAIL ({passed}/{total})"));
-    }
-    (passed, total)
+    // The RESULT line is emitted by the kernel proper (M2.7): the m2
+    // milestone now spans the ExitBootServices boundary, and the final
+    // count includes the kernel-entry tests. Boot passes these counts in
+    // the boot-info record.
+    (passed, TESTS.len())
 }

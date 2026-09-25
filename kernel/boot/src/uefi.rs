@@ -19,6 +19,11 @@ pub const EFI_SUCCESS: Status = 0;
 /// (MAX_BIT | 5) — UEFI 2.10 Table 31 error encoding.
 pub const EFI_BUFFER_TOO_SMALL: Status = 0x8000_0000_0000_0005;
 
+/// EFI_INVALID_PARAMETER (UEFI 2.10 §7.1) — what `ExitBootServices`
+/// returns when the map key is stale (the map changed since the
+/// GetMemoryMap that produced it).
+pub const EFI_INVALID_PARAMETER: Status = 0x8000_0000_0000_0002;
+
 /// EFI_TABLE_HEADER — UEFI 2.10 §11.2.1 (Table 15). 24 bytes.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -122,10 +127,37 @@ pub struct BootServices {
         protocol: *const Guid,
         interface: *mut usize,
     ) -> Status,
-    // Later slots (Reserved at 17 through CreateEventEx at 43) are not
-    // consumed at M2; add them typed, in spec order, when they are needed.
+    // Slots 17..=25 in spec order (UEFI 2.10 §7.3). Slot 17 is Reserved
+    // (NULL) in every spec version — it is counted here, as always.
+    pub reserved_17: usize,
+    pub register_protocol_notify: usize,
+    pub locate_handle: usize,
+    pub locate_device_path: usize,
+    pub install_configuration_table: usize,
+    pub load_image: usize,
+    pub start_image: usize,
+    pub exit: usize,
+    pub unload_image: usize,
+    /// EFI_EXIT_BOOT_SERVICES — UEFI 2.10 §7.3.16 (table slot 26). The
+    /// point of no return (M2.7): on success every slot above this one is
+    /// dead; only runtime services survive.
+    pub exit_boot_services:
+        unsafe extern "efiapi" fn(image_handle: usize, map_key: usize) -> Status,
+    pub get_next_monotonic_count: usize,
+    pub stall: usize,
+    /// EFI_SET_WATCHDOG_TIMER — UEFI 2.10 §7.3.19 (table slot 29).
+    /// Disabled (timeout 0) before ExitBootServices so nothing external
+    /// can reset the machine mid-handoff.
+    pub set_watchdog_timer: unsafe extern "efiapi" fn(
+        timeout: usize,
+        watchdog_code: usize,
+        data_size: usize,
+        watchdog_data: *const u16,
+    ) -> Status,
+    // Later slots (ConnectController at 30 through CreateEventEx at 43)
+    // are not consumed at M2; add them typed, in spec order, when needed.
 }
-const _: () = assert!(core::mem::size_of::<BootServices>() == 24 + 17 * 8);
+const _: () = assert!(core::mem::size_of::<BootServices>() == 24 + 30 * 8);
 
 impl BootServices {
     /// The table's own claimed spec revision (this firmware reports 0x20046,

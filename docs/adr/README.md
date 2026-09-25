@@ -27,6 +27,7 @@ Rules:
 | [0008](0008-kernel-address-space.md) | Kernel address space — dual-view paging with per-section W^X | accepted |
 | [0009](0009-kernel-heap.md) | Kernel heap — host-tested free-list core, frame-backed chunks, always-on guards | accepted |
 | [0010](0010-synchronization-primitives.md) | Synchronization — spinlock with owner tracking, irqsave critical sections | accepted |
+| [0011](0011-boot-split-kernel-entry.md) | Boot split — ExitBootServices, kernel entry, and the reclaimed timer chain (PIT on IOAPIC pin 2) | accepted |
 
 ## Template
 

@@ -13,14 +13,19 @@ use core::ptr::NonNull;
 
 /// Chunk source: physically contiguous frame runs (16 × 4 KiB for the
 /// default 64 KiB chunk) from the M2.3 allocator. Chunks are conventional
-/// memory, identity-mapped RW+NX like every other frame.
-pub struct FrameChunkProvider;
+/// memory, mapped RW+NX in whichever view is live: the boot stage runs
+/// them at identity addresses (`va_offset` 0); after the M2.7 kernel-view
+/// switch the re-initialized heap requests them at their direct-map
+/// aliases (`va_offset` = KERNEL_OFFSET).
+pub struct FrameChunkProvider {
+    pub va_offset: u64,
+}
 
 impl ChunkProvider for FrameChunkProvider {
     fn provide_chunk(&mut self, bytes: usize) -> Option<NonNull<u8>> {
         let needed = bytes.div_ceil(4096);
         let phys = frames::alloc_contiguous(needed)?;
-        NonNull::new(phys as *mut u8)
+        NonNull::new((phys + self.va_offset) as *mut u8)
     }
 }
 
@@ -40,7 +45,11 @@ fn boot_cpu_id() -> u32 {
 /// proper, and its guard/owner machinery is host-tested under real
 /// parallelism.
 static HEAP: Spinlock<Heap<FrameChunkProvider>> = Spinlock::new(
-    Heap::new(FrameChunkProvider, true, CHUNK_BYTES_DEFAULT),
+    Heap::new(
+        FrameChunkProvider { va_offset: 0 },
+        true,
+        CHUNK_BYTES_DEFAULT,
+    ),
     boot_cpu_id,
 );
 
@@ -95,6 +104,39 @@ pub fn chunk_count() -> usize {
 }
 pub fn alloc_count() -> usize {
     HEAP.lock().alloc_count()
+}
+
+/// M2.7 kernel-view switch: the boot-stage heap must be EMPTY here (the
+/// test suites free everything — asserted), its identity-addressed chunks
+/// are released back to the frame allocator, and a pristine heap is
+/// installed whose provider hands out direct-map (higher-half) addresses.
+/// Returns the number of chunks released.
+pub fn reinit_for_kernel_view() -> Result<u64, &'static str> {
+    let mut heap = HEAP.lock();
+    if heap.in_use_bytes() != 0 || heap.blocks_live() != 0 {
+        return Err("heap not empty at kernel-view switch");
+    }
+    let mut released = 0u64;
+    // SAFETY: emptiness checked above; single CPU, IF=0; every existing
+    // chunk was provided with va_offset 0, so its base pointer IS its
+    // physical address — exactly what free_contiguous wants.
+    unsafe {
+        heap.release_chunks(|ptr, bytes| {
+            let frames_n = bytes / 4096;
+            if let Err(reason) = frames::free_contiguous(ptr.as_ptr() as u64, frames_n) {
+                error!("heap", "chunk release failed ({reason}) — leaking {frames_n} frames");
+            }
+            released += 1;
+        });
+    }
+    *heap = Heap::new(
+        FrameChunkProvider {
+            va_offset: crate::arch::x86_64::paging::KERNEL_OFFSET,
+        },
+        true,
+        CHUNK_BYTES_DEFAULT,
+    );
+    Ok(released)
 }
 
 /// Boot step 3.8: the heap is lazy (first allocation grows the first

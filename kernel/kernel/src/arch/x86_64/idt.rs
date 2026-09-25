@@ -51,6 +51,20 @@ pub fn absorbed_irq_count() -> u64 {
     TIMER_IRQ_COUNT.load(Ordering::Relaxed)
 }
 
+/// Address the absorb stub stores its LAPIC EOI to. Default: the
+/// architectural default base (M1 runs before paging exists — same
+/// documented assumption the stub always had). `paging::init` updates it
+/// from the real IA32_APIC_BASE; the M2.7 kernel-entry sequence updates
+/// it to the kernel-view alias. The stub reads it RIP-relative, so it
+/// resolves to this same physical static under whichever alias executes.
+static LAPIC_EOI_ADDR: AtomicU64 = AtomicU64::new(0xFEE0_00B0);
+
+/// Point the absorb stub's LAPIC EOI at `addr` (must be mapped in the
+/// currently live and the next address space at the time of the call).
+pub fn set_lapic_eoi_addr(addr: u64) {
+    LAPIC_EOI_ADDR.store(addr, Ordering::Relaxed);
+}
+
 global_asm!(
     // ---- exception stubs: 32 slots at a fixed 16-byte stride -------------
     // Each stub body is at most 9 bytes (push imm8 ×2 = 4, jmp rel32 = 5),
@@ -128,7 +142,7 @@ global_asm!(
     "mov al, 0x20",
     "out 0xa0, al",
     "out 0x20, al",
-    "mov rax, 0xfee000b0",
+    "mov rax, [rip + {lapic_eoi}]",
     "mov dword ptr [rax], 0",
     "lock inc qword ptr [rip + {timer_count}]",
     "pop rax",
@@ -177,6 +191,7 @@ global_asm!(
     "add rsp, 16",
     "iretq",
     timer_count = sym TIMER_IRQ_COUNT,
+    lapic_eoi = sym LAPIC_EOI_ADDR,
     handler = sym arena_exception_handler,
 );
 
@@ -385,6 +400,61 @@ pub unsafe fn init() {
         });
         core::arch::asm!("lidt [{}]", in(reg) IDT_DESCRIPTOR.get(),
             options(readonly, nostack, preserves_flags));
+    }
+}
+
+/// M2.7 kernel-view switch: rewrite every gate's handler offset to its
+/// `+offset` (kernel-view) alias and reload IDTR with this table's own
+/// `+offset` alias. Runs while the boot-stage dual-view tables are still
+/// live, so both aliases are valid at every instant.
+///
+/// # Safety
+/// Ring 0, IF=0, `offset` = the kernel-view offset (KERNEL_OFFSET), and
+/// the image window must be mapped at phys+offset in the view being
+/// switched to (the kernel-view PML4 built by `paging::build_kernel_view`).
+pub unsafe fn relocate_for_kernel(offset: u64) {
+    // SAFETY: caller contract; single writer (boot sequence), IF=0.
+    unsafe {
+        let idt = IDT.get();
+        for vector in 0..NUM_VECTORS {
+            // Copy out (packed struct — never borrow fields), rewrite the
+            // 64-bit offset, write the whole gate back.
+            let gate = core::ptr::read(&(*idt)[vector]);
+            let handler = u64::from(gate.offset_low)
+                | (u64::from(gate.offset_mid) << 16)
+                | (u64::from(gate.offset_high) << 32);
+            core::ptr::write(&mut (*idt)[vector], make_gate(handler + offset, gate.ist));
+        }
+        IDT_DESCRIPTOR.get().write(IdtDescriptor {
+            limit: (core::mem::size_of::<[IdtGate; NUM_VECTORS]>() - 1) as u16,
+            base: (idt as u64) + offset,
+        });
+        core::arch::asm!("lidt [{}]", in(reg) IDT_DESCRIPTOR.get(),
+            options(readonly, nostack, preserves_flags));
+    }
+}
+
+/// M2.7 bring-up diagnostic: reconstruct the handler target of `vector`
+/// twice — once through our `IDT` static, once through the table `sidt`
+/// reports the CPU actually has loaded — and return both plus the `sidt`
+/// base. Disagreement (or targets below `KERNEL_OFFSET` after relocation)
+/// proves the CPU is walking a table other than the one we wrote.
+///
+/// # Safety
+/// Ring 0 with the IDT mapped at both the static's address and the `sidt`
+/// base (true under the dual view and the kernel view alike).
+pub unsafe fn readback_gate(vector: usize) -> (u64, u64, u64) {
+    fn target_of(g: IdtGate) -> u64 {
+        u64::from(g.offset_low)
+            | (u64::from(g.offset_mid) << 16)
+            | (u64::from(g.offset_high) << 32)
+    }
+    // SAFETY: caller contract; both reads hit mapped table memory.
+    unsafe {
+        let via_static = target_of(core::ptr::read(&(*IDT.get())[vector]));
+        let (base, _) = read_idtr();
+        let via_idtr = target_of(core::ptr::read((base as *const IdtGate).add(vector)));
+        (via_static, via_idtr, base)
     }
 }
 

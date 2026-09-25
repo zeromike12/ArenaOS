@@ -58,6 +58,16 @@ pub unsafe fn restore_flags(flags: u64) {
     unsafe { core::arch::asm!("push {flags}", "popfq", flags = in(reg) flags) };
 }
 
+/// Read the current stack pointer (M2.7: the boot stack's physical
+/// address while the identity view is live — the kernel-view switch lifts
+/// it by KERNEL_OFFSET).
+pub fn read_rsp() -> u64 {
+    let rsp: u64;
+    // SAFETY: pure register read.
+    unsafe { core::arch::asm!("mov {rsp}, rsp", rsp = lateout(reg) rsp, options(nostack, nomem, preserves_flags)) };
+    rsp
+}
+
 /// Whether IF is currently set.
 pub fn interrupts_enabled() -> bool {
     read_flags() & RFLAGS_IF != 0

@@ -202,6 +202,43 @@ impl<P: ChunkProvider> Heap<P> {
         self.guards
     }
 
+    /// Hand every chunk back to the caller (M2.7 kernel-view switch: the
+    /// boot-stage chunks were obtained under identity-mapped addresses and
+    /// the kernel re-requests memory under its own view). The heap must be
+    /// empty — asserted — and returns to the pristine state of
+    /// [`Heap::new`], except that `alloc_count` (a lifetime statistic) is
+    /// preserved. `f` receives each chunk base exactly as the provider
+    /// returned it, plus its size in bytes, newest chunk first, and must
+    /// release the underlying memory.
+    ///
+    /// # Safety
+    /// No pointer into any chunk may be used after this call (an empty
+    /// heap is necessary but not sufficient — dangling user pointers are
+    /// the caller's problem), and the chunk memory `f` releases must not
+    /// alias anything still in use.
+    pub unsafe fn release_chunks(&mut self, mut f: impl FnMut(NonNull<u8>, usize)) {
+        assert_eq!(self.bytes_in_use, 0, "release_chunks with live allocations");
+        assert_eq!(self.blocks_live, 0, "release_chunks with live blocks");
+        let mut cur = self.chunk_head;
+        while cur != 0 {
+            // SAFETY: `cur` is a chunk header this heap wrote in `grow()`;
+            // the caller guarantees no other accessor, and `&mut self` is
+            // held for the walk.
+            let (bytes, next) = unsafe {
+                let ch = cur as *const ChunkHeader;
+                debug_assert_eq!((*ch).magic, CHUNK_MAGIC);
+                ((*ch).chunk_bytes as usize, (*ch).next as usize)
+            };
+            let Some(ptr) = NonNull::new(cur as *mut u8) else { break };
+            f(ptr, bytes);
+            cur = next;
+        }
+        self.free_head = 0;
+        self.chunk_head = 0;
+        self.bytes_reserved = 0;
+        self.chunk_count = 0;
+    }
+
     /// Allocate `layout.size()` bytes with `layout.align()` alignment.
     ///
     /// Returns `None` for zero-sized layouts, layouts needing more than a
@@ -716,6 +753,46 @@ mod tests {
         // After full coalescing, chunk 1 is one block again.
         let big = h.alloc(layout(3968)).expect("coalesced chunk fits");
         unsafe { h.free(big).unwrap() };
+    }
+
+    #[test]
+    fn release_chunks_resets_and_regrows() {
+        let mut h = heap(true, 4);
+        // Two 2000-byte allocations cannot share one 4 KiB chunk
+        // (2 x (32 + 2000->2000+8 aligned) > 4064) — forces two chunks.
+        let a = h.alloc(layout(2000)).expect("alloc a");
+        let b = h.alloc(layout(2000)).expect("alloc b");
+        assert_eq!(h.chunk_count(), 2);
+        unsafe {
+            h.free(a).unwrap();
+            h.free(b).unwrap();
+        }
+        let mut released = Vec::new();
+        // SAFETY: heap is empty (both frees above); no pointers survive.
+        unsafe { h.release_chunks(|p, bytes| released.push((p.as_ptr() as usize, bytes))) };
+        assert_eq!(released.len(), 2, "both chunks must be handed back");
+        assert!(released.iter().all(|(_, b)| *b == 4096));
+        // Newest-first ordering: the second chunk was pushed to the head.
+        assert!(released[0].0 > released[1].0, "chunk list is newest-first");
+        assert_eq!(h.chunk_count(), 0);
+        assert_eq!(h.bytes_reserved(), 0);
+        assert_eq!(h.in_use_bytes(), 0);
+        assert_eq!(h.alloc_count(), 2, "lifetime stat survives release");
+        // Pristine behavior: the next alloc regrows from the provider.
+        let c = h.alloc(layout(100)).expect("regrow alloc");
+        assert_eq!(h.chunk_count(), 1);
+        unsafe { h.free(c).unwrap() };
+        assert_eq!(h.in_use_bytes(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "live allocations")]
+    fn release_chunks_refuses_nonempty_heap() {
+        let mut h = heap(true, 4);
+        // Deliberately leaked for this test: the assert must fire.
+        let _live = h.alloc(layout(8)).expect("alloc");
+        // SAFETY: contract intentionally violated — that is the test.
+        unsafe { h.release_chunks(|_, _| {}) };
     }
 
     #[test]

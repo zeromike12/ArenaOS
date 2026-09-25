@@ -49,7 +49,7 @@ Kernel image boots under QEMU/OVMF and produces *verified* diagnostics.
 - **Exit criteria (all machine-checked):** `m1: RESULT PASS (8/8)` on serial,
   QEMU exits cleanly (code 0) under `-no-reboot`, no `PANIC` marker.
 
-## Milestone 2 — Kernel foundations 🔨
+## Milestone 2 — Kernel foundations ✅
 
 Each step boots and adds markers (`m2:test:...`), previous tests re-run.
 
@@ -96,9 +96,18 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       irqsave/irqrestore, heap lock-wrapped, crit_section proves zero
       interrupts cross a 25ms section on real PIT hardware (ADR-0010);
       m2 16/16.
-- 2.7 **Boot split**: boot stage → `ExitBootServices()` → kernel proper
+- [x] 2.7 **Boot split**: boot stage → `ExitBootServices()` → kernel proper
       entry with boot-info record; boot stage and kernel become separate
       crates; reboot-stability test loop (100 clean boots).
+      DONE (ADR-0011): BootInfo ABI record + kernel-view trampoline;
+      .reloc replay (101 DIR64) at +KERNEL_OFFSET under cli; farewell
+      island for post-EBS ResetSystem (fw CR3 + identity stack); timer
+      chain reclaimed — the PIT lives on IOAPIC **pin 2** (QEMU's
+      ISA-IRQ0→GSI-2 override), firmware's masked RTE2 re-routed to
+      vector 32, kernel_irq_live proves 2 real ticks through the
+      relocated IDT + kernel-alias LAPIC EOI; m2 21/21; stability:
+      100/100 clean boots (tools/stability_loop.sh); release artifacts
+      (tools/release.sh, docs/RUNNING.md) shipped as GitHub release.
 
 ## Milestone 3 — Multitasking
 

@@ -152,8 +152,10 @@ figures are `conventional=`/`reclaimable=`.
 
 - **Fault injection** (M2+): deliberate exceptions, corrupted structures fed
   to parsers, double-frees against debug allocators.
-- **Stress loops**: 100-boot stability loop for the ExitBootServices
-  transition (M2.7); allocator churn tests.
+- **Stress loops**: the 100-boot stability loop for the ExitBootServices
+  transition shipped in M2.7 (`tools/stability_loop.sh`, ADR-0011 — every
+  boot must show `m2: RESULT PASS`, the clean-halt declaration, no PANIC,
+  QEMU exit 0); allocator churn tests.
 - **Host fuzzing** (Phase 5+): boot-info parser, FS metadata parser, image
   loader — all reachable from host unit-test binaries.
 - **KVM acceleration** when the host allows it; test semantics unchanged.

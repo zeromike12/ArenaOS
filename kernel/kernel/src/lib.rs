@@ -16,6 +16,7 @@
 
 pub mod arch;
 pub mod drivers;
+pub mod entry;
 pub mod frames;
 pub mod halt;
 pub mod handoff;

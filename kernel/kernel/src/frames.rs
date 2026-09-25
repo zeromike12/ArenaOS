@@ -228,6 +228,62 @@ pub fn free_contiguous(base: u64, n: usize) -> Result<(), &'static str> {
 }
 
 /// Frames under management (constant after `init()`).
+/// M2.7 post-`ExitBootServices` reconciliation. The allocator was built
+/// from an *earlier* capture; firmware may have changed the map between
+/// then and the final capture that fed `ExitBootServices` (its own
+/// allocations, bookkeeping). Rule: a frame still marked FREE here but
+/// not inside a Conventional region of the FINAL handoff map is leaked —
+/// marked in-use, never handed out. Frames the final map gained are
+/// deliberately NOT claimed (conservative: leaked, not chased). Returns
+/// the number of leaked frames (0 means the maps agreed exactly).
+pub fn reconcile_final_map() -> Result<u64, &'static str> {
+    // SAFETY: boot contract — single CPU, IF=0; sequential post-EBS init.
+    unsafe {
+        if !*READY.get() {
+            return Err("reconcile before init");
+        }
+        if crate::handoff::region_count() == 0 {
+            return Err("handoff record empty at reconcile");
+        }
+        let map = BITMAP.0.get();
+        let mut leaked = 0u64;
+        for word_idx in 0..WORDS {
+            // Free frames are ZERO bits (bitmap starts all-reserved and
+            // init pokes holes); iterate the free ones.
+            let mut inv = !(*map)[word_idx];
+            while inv != 0 {
+                let bit = inv.trailing_zeros() as usize;
+                inv &= inv - 1;
+                let frame = (word_idx * 64 + bit) as u64 * FRAME_BYTES;
+                if !in_final_conventional(frame) {
+                    (*map)[word_idx] |= 1u64 << bit;
+                    *FREE.get() -= 1;
+                    leaked += 1;
+                }
+            }
+        }
+        Ok(leaked)
+    }
+}
+
+/// Is `frame`'s physical address inside a Conventional region of the
+/// final handoff map? Linear scan over a couple dozen regions per free
+/// frame — a one-time post-EBS pass, simplicity beats cleverness here.
+fn in_final_conventional(frame: u64) -> bool {
+    for i in 0..crate::handoff::region_count() {
+        let Some(r) = crate::handoff::region(i) else {
+            continue;
+        };
+        if r.kind == crate::handoff::KIND_CONVENTIONAL
+            && frame >= r.base
+            && frame < r.base + r.pages * FRAME_BYTES
+        {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn total_frames() -> u64 {
     // SAFETY: plain read of a boot-initialized counter (contract above).
     unsafe { *TOTAL.get() }

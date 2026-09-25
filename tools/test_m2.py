@@ -55,6 +55,19 @@ Current coverage:
   * spinlock_basics   — held/owner/try_lock/drop state machine; heap
                         alloc/free under an outer lock (contention itself
                         is host-proven: arena-sync 4-thread suite).
+  M2.7 — boot split / kernel entry (21 total; the last five markers
+  straddle ExitBootServices — `ebs_exited` is emitted by the boot stage,
+  the other four by kmain in the arena-kernel crate):
+  * ebs_exited        — ExitBootServices succeeded with the final map key.
+  * kernel_entry      — RIP/RSP higher-half, CR3 = kernel-view PML4 (and
+                        not the boot dual-view one), WP/PG/NXE/LMA intact.
+  * identity_torn_down— write to identity 0x1000 → #PF (not-present, W),
+                        CR2 exact, recovered via the relocated IDT.
+  * kernel_heap_live  — recycled heap allocates higher-half post-EBS,
+                        payload round-trips, frame round-trip works.
+  * kernel_irq_live   — PIT ticks flow through the relocated IDT with
+                        EOI via the LAPIC's kernel-view alias.
+  The m2 RESULT line is emitted by kmain with the combined count.
   * frame_allocator   — bitmap allocator manages exactly the clipped
                         conventional regions; unique in-region frames;
                         pattern round-trip through real RAM; exact free
@@ -88,6 +101,11 @@ EXPECTED_TESTS = [
     "heap_stress",
     "crit_section",
     "spinlock_basics",
+    "ebs_exited",
+    "kernel_entry",
+    "identity_torn_down",
+    "kernel_heap_live",
+    "kernel_irq_live",
 ]
 
 if __name__ == "__main__":

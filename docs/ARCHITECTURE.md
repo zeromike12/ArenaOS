@@ -151,12 +151,22 @@ alias (#PF ec=present+I/D), and a *call* through the higher-half alias of
 `.text` that executes and returns. Bulk mappings use 2 MiB pages; the
 window splits huge pages where needed. Total cost at boot: 8 frames.
 
+At `ExitBootServices` (M2.7, ADR-0011) the identity view is torn down as
+planned: the kernel-only tables map the direct map, the image window at
+its link base, and the interrupt-controller MMIO the kernel drives
+(IOAPIC `0xFEC00000`, LAPIC base from `IA32_APIC_BASE`, HPET
+`0xFED00000` — the latter two share/adjacent 2 MiB alias blocks). One
+deliberate exception survives the tear-down: the **farewell island** page
+in `halt.rs` stays mapped executable, because the clean-shutdown path
+must be able to hand the machine back to firmware's `ResetSystem` (with
+firmware's own CR3) from a kernel-only address space.
+
 ### Kernel heap (M2.5) — `kernel/libs/heap` + boot glue
 
 The allocator core is a first-class workspace library crate (`arena-heap`,
 zero deps, `no_std`) so its logic is **host-testable**:
 `cargo test -p arena-heap --lib --target x86_64-unknown-linux-gnu` runs
-10 tests natively, including a 4000-round pseudo-random stress checked
+12 tests natively, including a 4000-round pseudo-random stress checked
 against a `BTreeMap` reference model (ADR-0009).
 
 - First-fit over an address-ordered free list; free coalesces both
@@ -234,10 +244,18 @@ study in `docs/TESTING.md`):
    acknowledge through LINT0 deliver **vector 0x00** — a #DE through gate 0.
    Never touch the 8259 masks until the vector base is programmed.
 
-From M2 (post-`ExitBootServices`) the kernel owns both controllers outright:
-it will read `IA32_APIC_BASE`, keep the LAPIC as the delivery path (per-CPU
-timer/IPI later), and either fully reprogram or permanently disable the
-legacy PIC.
+From M2.7 (post-`ExitBootServices`) the kernel owns both controllers
+outright and *reclaims* the timer chain in `kmain` (ADR-0011): PIT
+channel 0 re-armed at 100 Hz, IOAPIC **pin 2** — QEMU applies the classic
+PC convention that ISA IRQ0 maps to GSI 2, so the PIT never arrives on
+pin 0 — re-routed from firmware's masked RTE to our vector 32
+(fixed/physical/edge/unmasked), LAPIC TPR zeroed, spurious EOI, SVR
+enabled. The 8259 stays permanently masked: the LAPIC is the only
+delivery path. `kernel_irq_live` proves the whole chain by requiring two
+real ticks through the relocated IDT with EOI via the kernel-alias LAPIC
+MMIO, and the HPET legacy-replacement bit is defensively cleared (it
+reads 0 — firmware never enabled the HPET — because that mode would
+silently suppress PIT IRQs at the source).
 
 Since M2.1 the exception side is complete enough to *survive*: a 64-bit TSS
 provides IST1 (a dedicated 16 KiB fault stack) for the exceptions that must

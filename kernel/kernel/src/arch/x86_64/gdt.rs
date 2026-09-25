@@ -123,6 +123,30 @@ pub unsafe fn load() {
 
 /// Read back the GDTR (base, limit) with `sgdt` — used by the M1 test to
 /// prove the CPU accepted *our* table, not the firmware's.
+/// Address of the GDT table storage itself (a static in our image).
+pub fn table_addr() -> u64 {
+    GDT.get() as u64
+}
+
+/// Reload GDTR to point at `base` — M2.7 uses this to re-point the CPU at
+/// the kernel-view alias of the same physical table before the identity
+/// view disappears.
+///
+/// # Safety
+/// Ring 0, IF=0, `base` must reference the live GDT storage in a mapping
+/// valid now and after the imminent CR3 switch.
+pub unsafe fn reload_at(base: u64) {
+    // SAFETY: caller contract; single-writer boot sequence.
+    unsafe {
+        GDT_DESCRIPTOR.get().write(GdtDescriptor {
+            limit: (core::mem::size_of::<Gdt>() - 1) as u16,
+            base,
+        });
+        core::arch::asm!("lgdt [{}]", in(reg) GDT_DESCRIPTOR.get(),
+            options(readonly, nostack, preserves_flags));
+    }
+}
+
 pub fn read_gdtr() -> (u64 /*base*/, u16 /*limit*/) {
     let mut desc = GdtDescriptor { limit: 0, base: 0 };
     // SAFETY: SGDT writes exactly 10 bytes to a valid, aligned-enough stack

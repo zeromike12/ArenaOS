@@ -107,6 +107,42 @@ pub unsafe fn init() {
     }
 }
 
+/// M2.7 kernel-view switch: move IST1 and the TSS descriptor base to
+/// their `+offset` (kernel-view) aliases, reload GDTR at the GDT's own
+/// `+offset` alias, and re-LTR. The descriptor must be re-encoded as
+/// type 0x9 (*available*): the live one carries busy (0xB) since the
+/// first LTR, and LTR rejects 0xB with #GP — the M2.1b lesson, applied
+/// deliberately this time.
+///
+/// # Safety
+/// Ring 0, IF=0, called while the dual-view tables are still live (both
+/// aliases valid), `offset` = KERNEL_OFFSET, GDT already prepared for
+/// reload (its content is position-independent).
+pub unsafe fn relocate_for_kernel(offset: u64) {
+    // SAFETY: caller contract; single-writer boot sequence.
+    unsafe {
+        let tss = TSS.get();
+        // ist lives in a packed(4) struct: copy the array out, adjust,
+        // copy it back (never borrow packed fields — E0793).
+        let mut ist = core::ptr::addr_of!((*tss).ist).read_unaligned();
+        ist[0] += offset;
+        core::ptr::addr_of_mut!((*tss).ist).write_unaligned(ist);
+
+        let base = (tss as u64) + offset;
+        let limit = (core::mem::size_of::<Tss>() - 1) as u64;
+        let lo = (limit & 0xFFFF)
+            | ((base & 0xFF_FFFF) << 16)
+            | (0x9_u64 << 40) // type: 64-bit TSS, *available* (LTR sets busy)
+            | (1_u64 << 47) // P
+            | (((limit >> 16) & 0xF) << 48)
+            | (((base >> 24) & 0xFF) << 56);
+        gdt::set_tss_descriptor(lo, base >> 32);
+        gdt::reload_at(gdt::table_addr() + offset);
+        core::arch::asm!("ltr ax", in("ax") gdt::TSS_SELECTOR,
+            options(nostack, preserves_flags));
+    }
+}
+
 /// Read back the task register selector (`str`) — M2 test evidence that the
 /// CPU accepted our TSS.
 pub fn read_tr() -> u16 {
