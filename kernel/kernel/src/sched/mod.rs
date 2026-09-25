@@ -84,10 +84,15 @@ pub struct KThread {
     /// Stack base *physical* address (0 = not owned: the bootstrap thread).
     stack_base: u64,
     stack_frames: usize,
-    /// CR3 (PML4 PHYS) of this thread's address space (M3.3, ADR-0014);
-    /// 0 = leave CR3 alone at switch-in (the bootstrap thread). Kernel
-    /// threads carry the kernel-view PML4; process threads carry their
-    /// process's own (kernel half cloned, user half private).
+    /// CR3 (PML4 PHYS) of this thread's address space (M3.3, ADR-0014).
+    /// Kernel threads (including the bootstrap) carry the kernel-view
+    /// PML4; process threads carry their process's own PML4 (kernel half
+    /// cloned, user half private). plan_switch installs it at every
+    /// switch-in when it differs from the live CR3 — so switching back
+    /// to any kernel thread restores the kernel view, which is what
+    /// makes proc::destroy's "not the live CR3" guard satisfiable.
+    /// Never 0 (write_cr3(0) would be fatal; plan_switch keeps a
+    /// belt-and-braces zero check).
     cr3: u64,
     /// Registered user-memory regions ((lo, hi) page-granular pairs;
     /// (0,0) = slot unused) — the syscall dispatcher validates every
@@ -200,7 +205,9 @@ pub fn init() -> Result<(), &'static str> {
             arg: 0,
             stack_base: 0,
             stack_frames: 0,
-            cr3: 0, // leave CR3 alone: the bootstrap never leaves the kernel view
+            // The bootstrap thread owns the kernel view: every switch
+            // back to it restores the canonical CR3 (M3.3b).
+            cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
             regions: [(0, 0); USER_REGIONS_MAX],
         });
         // SAFETY: same discipline; fresh scheduler, known values.
@@ -216,6 +223,38 @@ pub fn init() -> Result<(), &'static str> {
 /// on its own 32 KiB stack the next time the scheduler picks it, then
 /// exits and is reaped automatically. Returns the thread id.
 pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'static str> {
+    spawn_inner(
+        name,
+        entry,
+        arg,
+        crate::arch::x86_64::paging::kernel_cr3_phys(),
+    )
+}
+
+/// Like [`spawn`], but the thread runs in the address space rooted at
+/// `cr3_phys` (a process PML4 from [`crate::proc::create`], whose kernel
+/// half is cloned and user half private). plan_switch installs it as CR3
+/// at every switch-in to this thread, so its ring-3 code sees the
+/// process's user half while syscalls/interrupts keep running on the one
+/// shared kernel half — no CR3 switch at the privilege boundary.
+pub fn spawn_with_cr3(
+    name: &'static str,
+    entry: fn(usize),
+    arg: usize,
+    cr3_phys: u64,
+) -> Result<u64, &'static str> {
+    if cr3_phys == 0 || cr3_phys % crate::arch::x86_64::paging::PAGE != 0 {
+        return Err("spawn_with_cr3: not a valid PML4 root");
+    }
+    spawn_inner(name, entry, arg, cr3_phys)
+}
+
+fn spawn_inner(
+    name: &'static str,
+    entry: fn(usize),
+    arg: usize,
+    cr3: u64,
+) -> Result<u64, &'static str> {
     without_interrupts(|| {
         reap();
         // SAFETY: single writer under IF=0.
@@ -253,7 +292,7 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
                 arg,
                 stack_base: phys,
                 stack_frames: THREAD_STACK_FRAMES,
-                cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
+                cr3,
                 regions: [(0, 0); USER_REGIONS_MAX],
             });
             (*CTX.get())[idx] = rsp0;
@@ -267,6 +306,16 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
             }
         }
         SPAWNED_TOTAL.fetch_add(1, Ordering::Relaxed);
+        if cr3 != crate::arch::x86_64::paging::kernel_cr3_phys() {
+            crate::log::log_info!(
+                "sched",
+                "spawn(proc): id={} slot={} entry={:x} cr3={:x}",
+                id,
+                idx,
+                entry as usize,
+                cr3
+            );
+        }
         Ok(id)
     })
 }
@@ -300,6 +349,18 @@ pub extern "C" fn thread_main() -> ! {
         unsafe {
             let cur = (*CPUS.get())[this_cpu()].current;
             let t = (*THREADS.get())[cur].expect("current thread vanished");
+            // M3.3b bring-up instrumentation: a process thread's first
+            // run logs the pointer it is about to call (IF=0 here).
+            if t.cr3 != crate::arch::x86_64::paging::kernel_cr3_phys() {
+                crate::log::log_info!(
+                    "sched",
+                    "thread_main(proc): id={} entry={:x} arg={} cr3={:x}",
+                    t.id,
+                    t.entry as usize,
+                    t.arg,
+                    t.cr3
+                );
+            }
             (t.entry, t.arg)
         }
     });
@@ -538,6 +599,21 @@ pub fn thread_stack_top(id: u64) -> Option<u64> {
                 }
             }
             None
+        }
+    })
+}
+
+/// The entry pointer stored in thread `id`'s slot (readback for the
+/// suite: what spawn wrote is what the trampoline will call).
+pub fn thread_entry_of(id: u64) -> Option<usize> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*THREADS.get())
+                .iter()
+                .flatten()
+                .find(|t| t.id == id)
+                .map(|t| t.entry as usize)
         }
     })
 }

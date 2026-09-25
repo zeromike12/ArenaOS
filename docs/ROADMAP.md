@@ -142,10 +142,36 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       cooperative yields and 10 ms quanta compose across 15 ms busy-waits
       (mid-wait rotation). m3 7/7; mtest.py now fails a milestone run when
       any prior-milestone RESULT in the same boot is not PASS.
-- 3.3 **Processes** = address space + capability space objects; kernel/user
-      privilege separation machinery: TSS with RSP0, ring-3 segments,
-      `syscall`/`sysret` MSRs (STAR/LSTAR/SFMASK/FMASK), SMAP/SMEP when
-      available.
+- [x] 3.3 **Processes** = address-space objects + kernel/user privilege
+      separation machinery (the capability-space half is tracked under
+      3.4). DONE (ADR-0014 + its M3.3b addendum). **3.3a — machinery:**
+      hand-encoded payloads run at CPL 3 (kernel-view CR3);
+      `syscall`/`sysret` entry (STAR/LSTAR/SFMASK, ring-3 segments), TSS
+      RSP0 + per-CPU entry stacks, SYS_WRITE/SYS_EXIT dispatch, SMAP
+      enforced (bare kernel touch of a user page #PFs; STAC-bracketed
+      reads work), enter_user via iretq; a ring-3 spin survives ticks and
+      mid-user preemption. **3.3b — address-space objects:** `proc.rs`
+      (32 slots, pid 1+) — a private PML4 per process, user half empty,
+      kernel half cloned entry-wise from the kernel view (lower tables
+      shared); `spawn_with_cr3` binds threads to process roots;
+      `plan_switch` installs the incoming CR3 together with RSP0 and the
+      syscall scratch so syscalls/IRQs never switch CR3; destroy frees
+      the user half + root with exact accounting. The first timer tick
+      under a process CR3 exposed a real design bug: the kernel view's
+      aliases for above-2 GiB MMIO were computed `phys + KERNEL_OFFSET`,
+      which WRAPS INTO THE USER HALF (LAPIC → 0x7EE0_0000) — invisible
+      while the kernel view was the only address space, fatal under any
+      clone. Fixed with `paging::mmio_alias_va` (kernel-half alias rule
+      for below-4 GiB MMIO), a build-time direct-map collision check, and
+      a test assertion that the EOI slot reads identically — same value,
+      same physical chain — through both CR3s. Tests: two processes
+      isolate the same VA (distinct frames, cross-invisible writes,
+      persistence), kernel-half .data identical under both CR3s,
+      unmapped-VA #PF recovery, teardown frees exact; 8x
+      create/map/destroy churn; table-full refusal at 32; a full ring-3
+      round inside a process (SYS_WRITE byte-exact, SYS_EXIT(42), RSP0
+      evidence, CR3 restored, frame accounting exact). m3 11/11 +
+      100/100-boot stability.
 - 3.4 **Capability spaces** (minimal): slots, rights, copy/move/destroy —
       kernel-internal use only at first.
 

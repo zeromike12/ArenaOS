@@ -80,6 +80,11 @@ unmapped memory) and must survive them: the suite arms an expected vector
 the handler verifies/recovers, and the test asserts the **measured** delivery
 (vector, error code, CR2) — never the expectation. Unarmed faults still take
 the full diagnostics-and-halt path, so injection cannot mask real bugs.
+Since M3.3b that path also dumps the stub-saved caller-saved registers and a
+bounded best-effort scan of the faulting stack for text-range return
+addresses — a frame-pointer-less backtrace, valid under any CR3 (it is what
+caught the wrapped MMIO-alias EOI fault: the trace led into the paging
+walk reading a "table" at the LAPIC's physical address).
 
 **Standing invariant:** `0x0000_6000_0000_0000` (m2.rs
 `UNMAPPED_CANONICAL_ADDR`) must remain unmapped in *every* address space this

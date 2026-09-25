@@ -59,6 +59,18 @@ pub fn absorbed_irq_count() -> u64 {
 /// resolves to this same physical static under whichever alias executes.
 static LAPIC_EOI_ADDR: AtomicU64 = AtomicU64::new(0xFEE0_00B0);
 
+/// Address of the [`LAPIC_EOI_ADDR`] slot itself (M3.3b bring-up probe:
+/// the same VA must read the same value under every process CR3 — the
+/// kernel half is cloned by pointer, so any divergence is a paging bug).
+pub fn lapic_eoi_slot_addr() -> u64 {
+    core::ptr::addr_of!(LAPIC_EOI_ADDR) as u64
+}
+
+/// The EOI address the stub currently holds.
+pub fn lapic_eoi_addr() -> u64 {
+    LAPIC_EOI_ADDR.load(Ordering::Relaxed)
+}
+
 /// Point the absorb stub's LAPIC EOI at `addr` (must be mapped in the
 /// currently live and the next address space at the time of the call).
 pub fn set_lapic_eoi_addr(addr: u64) {
@@ -327,6 +339,48 @@ extern "C" fn arena_exception_handler(
         "[arena PANIC fault] vector={vector:#04x} ({}) error_code={error_code:#x} rip={rip:#x} cs={cs:#x} rflags={rflags:#x} rsp={rsp:#x} ss={ss:#x} cr2={cr2:#x}",
         vector_name(vector),
     ));
+    // Bring-up diagnostics (M3.3b): the stub's saved caller-saved
+    // registers (exception_common pushes rax..r11 directly below the
+    // hardware frame; frame = stub_rbp + 24) plus a bounded stack scan
+    // for text-range return addresses — a frame-pointer-less backtrace.
+    // SAFETY: production fault path halts; the stub stack is live and
+    // readable, IF=0, reads are plain and bounded.
+    unsafe {
+        let sb = (frame as *const u8).sub(24) as *const u64; // stub RBP slot
+        let srbp = *sb;
+        let g = |i: usize| *((srbp as *const u64).sub(i));
+        crate::log::write_marker(format_args!(
+            "[arena PANIC regs] rax={:x} rcx={:x} rdx={:x} rsi={:x} rdi={:x} r8={:x} r9={:x} r10={:x} r11={:x}",
+            g(1),
+            g(2),
+            g(3),
+            g(4),
+            g(5),
+            g(6),
+            g(7),
+            g(8),
+            g(9)
+        ));
+        if let Some(img) = crate::handoff::image_layout() {
+            let kbase = img.base + super::paging::KERNEL_OFFSET;
+            let tlo = kbase + 0x1000;
+            let thi = tlo + 0x19000;
+            let mut hits = 0usize;
+            let mut sp = rsp & !7u64;
+            for _ in 0..512 {
+                let v = *(sp as *const u64);
+                if v >= tlo && v < thi && hits < 10 {
+                    crate::log::write_marker(format_args!(
+                        "[arena PANIC bt] [sp={:x}] -> rva={:x}",
+                        sp,
+                        v - kbase
+                    ));
+                    hits += 1;
+                }
+                sp += 8;
+            }
+        }
+    }
     crate::halt::halt_machine("cpu exception")
 }
 

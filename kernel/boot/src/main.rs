@@ -408,7 +408,9 @@ pub extern "efiapi" fn efi_main(
     // interrupts under the kernel view, where every descriptor is high.
     x86_64::cli();
     unsafe {
-        x86_64::idt::set_lapic_eoi_addr(x86_64::paging::apic_base_phys() + KERNEL_OFFSET + 0xB0);
+        x86_64::idt::set_lapic_eoi_addr(
+            x86_64::paging::mmio_alias_va(x86_64::paging::apic_base_phys()) + 0xB0,
+        );
         x86_64::tss::relocate_for_kernel(KERNEL_OFFSET);
         x86_64::idt::relocate_for_kernel(KERNEL_OFFSET);
     }

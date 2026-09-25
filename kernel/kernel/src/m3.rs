@@ -1,6 +1,8 @@
 //! Milestone 3 test suite — kernel threads, the context switch (M3.1,
 //! ADR-0012), timer-driven preemption (M3.2, ADR-0013), and the ring-3
-//! boundary: hand-assembled user payloads executing real `syscall`s
+//! boundary: hand-assembled user payloads executing real `syscall`s, and
+//! process address spaces — private user halves, cloned kernel halves,
+//! exact create/destroy accounting, ring-3 code running inside a process
 //! (M3.3, ADR-0014). Runs in
 //! `kmain` after the M2 RESULT line; every test is a real machine effect
 //! (side-effect verification, exact interleave sequences, callee-saved
@@ -18,12 +20,13 @@
 use crate::arch::x86_64::{self, faults, gdt, idt, paging, syscall, tss};
 use crate::frames;
 use crate::log::{log_error as error, log_info as info, write_marker};
+use crate::proc;
 use crate::sched;
 use crate::sync::SyncCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 9] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 11] = [
         ("thread_spawn_run", test_thread_spawn_run),
         ("thread_rr_interleave", test_thread_rr_interleave),
         ("thread_callee_saved", test_thread_callee_saved),
@@ -33,6 +36,8 @@ pub fn run_suite() -> bool {
         ("preempt_coexist", test_preempt_coexist),
         ("user_ring3_syscall", test_user_ring3_syscall),
         ("user_ring3_interrupted", test_user_ring3_interrupted),
+        ("process_address_spaces", test_process_address_spaces),
+        ("process_accounting", test_process_accounting),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -754,18 +759,37 @@ unsafe fn u3_setup(
     msg_off: usize,
     msg: &[u8],
 ) -> Result<([u64; 3], u64), &'static str> {
+    // SAFETY: forwarded to u3_setup_in's contract (kernel view is an
+    // owned, reachable root like any).
+    unsafe { u3_setup_in(paging::kernel_cr3_phys(), payload, msg_off, msg) }
+}
+
+/// Map the three-page user window (code RX / data RW+NX / stack RW+NX)
+/// into the address space rooted at `root_phys` — the kernel view for
+/// the M3.3a machinery tests, a process PML4 for M3.3b — and load the
+/// payload + message through the direct-map alias (CR0.WP forbids
+/// kernel writes through read-only user mappings, and the window VAs are
+/// only mapped under `root_phys`, not under the live CR3 in general).
+/// Returns the three leaf PHYS and the post-setup free-frame count.
+unsafe fn u3_setup_in(
+    root_phys: u64,
+    payload: &[u8],
+    msg_off: usize,
+    msg: &[u8],
+) -> Result<([u64; 3], u64), &'static str> {
     let mut phys = [0u64; 3];
     for slot in phys.iter_mut() {
         *slot = frames::alloc().ok_or("frame exhaustion for user pages")?;
     }
     // SAFETY: IF=0 (suite discipline), fresh owned frames, canonical
-    // lower-half VAs, W^X-respecting permission pairs.
+    // lower-half VAs, W^X-respecting permission pairs, `root_phys` an
+    // owned reachable PML4.
     unsafe {
-        paging::map_user_page_kernel_view(U3_CODE_VA, phys[0], false, true)
+        paging::map_user_page_4k(root_phys, U3_CODE_VA, phys[0], false, true)
             .map_err(|_| "user code page map failed")?;
-        paging::map_user_page_kernel_view(U3_DATA_VA, phys[1], true, false)
+        paging::map_user_page_4k(root_phys, U3_DATA_VA, phys[1], true, false)
             .map_err(|_| "user data page map failed")?;
-        paging::map_user_page_kernel_view(U3_STACK_VA, phys[2], true, false)
+        paging::map_user_page_4k(root_phys, U3_STACK_VA, phys[2], true, false)
             .map_err(|_| "user stack page map failed")?;
         let code_kv = phys[0].wrapping_add(paging::KERNEL_OFFSET);
         let data_kv = phys[1].wrapping_add(paging::KERNEL_OFFSET);
@@ -1033,6 +1057,346 @@ fn test_user_ring3_interrupted() -> Result<(), &'static str> {
     info!(
         "m3",
         "user_ring3_interrupted: ring-3 spin survived {ticks} ticks and {switches} timer rotations (RSP0 path + mid-user preemption, resume-to-user via iretq); kernel-released flag ended the spin; SYS_WRITE+SYS_EXIT(7) verified; frames {free_now} (teardown exact)"
+    );
+    Ok(())
+}
+
+// ---- M3.3b: process address spaces ---------------------------------------
+//
+// A process is an owned PML4: private user half, cloned kernel half
+// (ADR-0014). These tests drive proc::create/destroy from the bootstrap
+// thread and prove the two properties the design rests on:
+//   * isolation — the same user VA under two process CR3s names two
+//     different frames, and a write under one is invisible under the
+//     other, while kernel-half data reads identically under both and an
+//     unmapped user VA still #PFs (recovered, CR2-exact);
+//   * accounting — create/map/destroy churn (including a full-table
+//     refusal) reclaims every frame, and payload A runs at ring 3 INSIDE
+//     a process address space (user pages mapped only in the process
+//     PML4, thread cr3 = the process root), with CR3 restored to the
+//     kernel view on the switch back after SYS_EXIT.
+
+/// User VA mapped in BOTH test processes — over different frames.
+const P10_VA: u64 = 0x0041_0000;
+/// VA deliberately left unmapped in every address space: reading it
+/// under a process CR3 must #PF.
+const P10_HOLE_VA: u64 = 0x0050_0000;
+/// Base VA for the accounting test's per-process user pages.
+const P11_VA: u64 = 0x0042_0000;
+
+/// Kernel-half data probe: written once under the kernel view, read back
+/// under each process CR3 — same value proves the cloned kernel half is
+/// the *same* memory (not a copy) for .data pages.
+static KHALF_PROBE: AtomicU64 = AtomicU64::new(0);
+const KHALF_PATTERN: u64 = 0xA5A5_5A5A_A5A5_5A5A;
+
+/// Walk the four page-table levels for `va` under `pml4_phys`, returning
+/// the raw entries [pml4e, pdpte, pde, pte] (0 = level absent; a huge
+/// leaf stops the walk at its level). Reads go through the direct-map
+/// alias; used by test 11's kernel-half equality assertion.
+fn walk_chain(pml4_phys: u64, va: u64) -> [u64; 4] {
+    let mut out = [0u64; 4];
+    let alias = |phys: u64| (phys + paging::KERNEL_OFFSET) as *const u64;
+    // SAFETY: IF=0; every step re-reads PRESENT before descending; the
+    // tables are kernel-owned pages inside the direct map.
+    unsafe {
+        let e4 = *alias(pml4_phys).add((va >> 39) as usize & 0x1FF);
+        out[0] = e4;
+        if e4 & paging::PTE_PRESENT == 0 {
+            return out;
+        }
+        let e3 = *alias(e4 & 0x000F_FFFF_FFFF_F000).add((va >> 30) as usize & 0x1FF);
+        out[1] = e3;
+        // Huge leaf (1 GiB / 2 MiB): the address bits are the TARGET, not
+        // a next-level table — descending through one reads device memory
+        // (the probe's own crash: LAPIC's huge PDE aliased to 0x7EE00000).
+        if e3 & paging::PTE_PRESENT == 0 || e3 & paging::PTE_HUGE != 0 {
+            return out;
+        }
+        let e2 = *alias(e3 & 0x000F_FFFF_FFFF_F000).add((va >> 21) as usize & 0x1FF);
+        out[2] = e2;
+        if e2 & paging::PTE_PRESENT == 0 || e2 & paging::PTE_HUGE != 0 {
+            return out;
+        }
+        out[3] = *alias(e2 & 0x000F_FFFF_FFFF_F000).add((va >> 12) as usize & 0x1FF);
+    }
+    out
+}
+
+/// STAC-bracketed kernel read of one byte of a user page (under SMAP a
+/// bare access #PFs — that fault IS test 8's proof; here we want the
+/// positive path).
+///
+/// # Safety
+/// IF=0; `va` mapped U/S in the live address space.
+unsafe fn stac_read(va: u64) -> u8 {
+    // SAFETY: caller contract; stac/clac bracket the single access.
+    unsafe {
+        x86_64::stac();
+        let b = core::ptr::read_volatile(va as *const u8);
+        x86_64::clac();
+        b
+    }
+}
+
+/// [`stac_read`]'s writing twin.
+///
+/// # Safety
+/// As [`stac_read`], and the page must be writable.
+unsafe fn stac_write(va: u64, byte: u8) {
+    // SAFETY: caller contract.
+    unsafe {
+        x86_64::stac();
+        core::ptr::write_volatile(va as *mut u8, byte);
+        x86_64::clac();
+    }
+}
+
+fn test_process_address_spaces() -> Result<(), &'static str> {
+    let f0 = frames::free_frames();
+    let pid_a = proc::create("procA")?;
+    let pid_b = proc::create("procB")?;
+    let ra = proc::pml4_of(pid_a).ok_or("procA's PML4 vanished")?;
+    let rb = proc::pml4_of(pid_b).ok_or("procB's PML4 vanished")?;
+    let kview = paging::kernel_cr3_phys();
+    if ra == rb || ra == kview || rb == kview {
+        return Err("process roots are not distinct owned PML4s");
+    }
+    // The same VA over two different frames, filled with two patterns
+    // (through the direct-map alias — P10_VA is not mapped under the
+    // live kernel view at all).
+    let fa = frames::alloc().ok_or("frame exhaustion (procA page)")?;
+    let fb = frames::alloc().ok_or("frame exhaustion (procB page)")?;
+    // SAFETY: IF=0; fresh owned frames; owned roots; canonical
+    // lower-half VA; RW+NX leaves.
+    unsafe {
+        paging::map_user_page_4k(ra, P10_VA, fa, true, false).map_err(|_| "procA map failed")?;
+        paging::map_user_page_4k(rb, P10_VA, fb, true, false).map_err(|_| "procB map failed")?;
+        core::ptr::write_bytes((fa + paging::KERNEL_OFFSET) as *mut u8, 0xAA, 4096);
+        core::ptr::write_bytes((fb + paging::KERNEL_OFFSET) as *mut u8, 0xBB, 4096);
+    }
+    KHALF_PROBE.store(KHALF_PATTERN, Ordering::Relaxed);
+
+    // Visit procA: read its pattern, write a marker, probe the hole.
+    // Every instruction here runs on the cloned kernel half — the visit
+    // itself is the proof that it is live and executable.
+    // SAFETY: IF=0; both roots owned and fully built (kernel halves
+    // cloned at create); write_cr3 flushes the TLB (no PCID); each
+    // block restores the kernel view before returning.
+    let (a1, kp_a, hole_seen, hole_cr2) = unsafe {
+        x86_64::write_cr3(ra);
+        let v = stac_read(P10_VA);
+        stac_write(P10_VA, 0x11);
+        let kp = KHALF_PROBE.load(Ordering::Relaxed);
+        faults::arm(14);
+        read_probe(core::hint::black_box(P10_HOLE_VA));
+        let obs = faults::observed();
+        faults::disarm();
+        x86_64::write_cr3(kview);
+        (v, kp, obs.valid && obs.vector == 14, obs.cr2)
+    };
+    // Visit procB: the marker written under procA's CR3 must NOT be
+    // visible here — same VA, different frame.
+    let (b1, kp_b) = unsafe {
+        x86_64::write_cr3(rb);
+        let v = stac_read(P10_VA);
+        let kp = KHALF_PROBE.load(Ordering::Relaxed);
+        x86_64::write_cr3(kview);
+        (v, kp)
+    };
+    // Revisit procA: its own marker persisted in its own frame.
+    let a2 = unsafe {
+        x86_64::write_cr3(ra);
+        let v = stac_read(P10_VA);
+        x86_64::write_cr3(kview);
+        v
+    };
+
+    if a1 != 0xAA {
+        return Err("procA's page does not carry procA's pattern");
+    }
+    if b1 != 0xBB {
+        return Err("procB sees procA's page — user halves are NOT isolated");
+    }
+    if a2 != 0x11 {
+        return Err("procA's write did not persist in its own page");
+    }
+    if kp_a != KHALF_PATTERN || kp_b != KHALF_PATTERN {
+        return Err("cloned kernel half lost kernel .data under a process CR3");
+    }
+    if !hole_seen {
+        return Err("unmapped user VA did not #PF under a process CR3");
+    }
+    if hole_cr2 != P10_HOLE_VA {
+        return Err("#PF CR2 does not name the unmapped VA");
+    }
+    // Teardown: destroy reclaims leaves + intermediates + root; the
+    // global free-frame count must land exactly where it started.
+    let freed_a = proc::destroy(pid_a)?;
+    let freed_b = proc::destroy(pid_b)?;
+    if proc::pml4_of(pid_a).is_some() || proc::pml4_of(pid_b).is_some() {
+        return Err("destroyed processes still occupy table slots");
+    }
+    let f1 = frames::free_frames();
+    if f1 != f0 {
+        return Err("process create/destroy frame accounting is not exact");
+    }
+    info!(
+        "m3",
+        "process_address_spaces: same VA over distinct frames in two processes (0xAA vs 0xBB, write under procA invisible to procB, persisted in procA); kernel-half .data identical under both CR3s; unmapped VA -> recovered #PF (CR2=0x{:x}); teardown freed {}+{} frames, accounting exact ({})",
+        hole_cr2,
+        freed_a,
+        freed_b,
+        f1
+    );
+    Ok(())
+}
+
+fn test_process_accounting() -> Result<(), &'static str> {
+    let f0 = frames::free_frames();
+    let ct0 = proc::created_total();
+    // (a) Churn: eight create/map/destroy rounds must reclaim EVERY
+    //     frame (roots, intermediates, leaves).
+    let mut last_freed = 0u64;
+    for _round in 0..8 {
+        let pid = proc::create("acct").map_err(|_| "create failed during churn")?;
+        let root = proc::pml4_of(pid).ok_or("churn process PML4 vanished")?;
+        for j in 0..4u64 {
+            let f = frames::alloc().ok_or("frame exhaustion during churn")?;
+            // SAFETY: IF=0; owned root, fresh owned frame, canonical
+            // lower-half VA, RW+NX leaf.
+            unsafe {
+                paging::map_user_page_4k(root, P11_VA + j * 0x1000, f, true, false)
+                    .map_err(|_| "churn map failed")?;
+            }
+        }
+        last_freed = proc::destroy(pid)?;
+    }
+    if frames::free_frames() != f0 {
+        return Err("process churn frame accounting is not exact");
+    }
+    // (b) Table-full refusal at MAX_PROCESSES (empty user halves: each
+    //     destroy must give back exactly its root frame).
+    let mut pids = [0u64; proc::MAX_PROCESSES];
+    for slot in pids.iter_mut() {
+        *slot = proc::create("full")?;
+    }
+    if proc::create("overflow").is_ok() {
+        return Err("process table accepted a create beyond MAX_PROCESSES");
+    }
+    if proc::live_count() != proc::MAX_PROCESSES {
+        return Err("live_count disagrees with the full table");
+    }
+    for pid in pids {
+        let freed = proc::destroy(pid)?;
+        if freed != 1 {
+            return Err("empty-process destroy did not free exactly its root");
+        }
+    }
+    if frames::free_frames() != f0 {
+        return Err("table-full round leaked frames");
+    }
+    if proc::created_total() - ct0 != 8 + proc::MAX_PROCESSES as u64 {
+        return Err("created_total disagrees with the churn (the refused create must not count)");
+    }
+    // (c) Integration: payload A at ring 3 INSIDE a process address
+    //     space. The user window exists ONLY in the process PML4 (never
+    //     in the kernel view); the thread enters with cr3 = the process
+    //     root; syscalls run on the cloned kernel half with no CR3
+    //     switch; the exit's switch back to the bootstrap restores the
+    //     kernel view (bootstrap carries the kernel-view cr3).
+    let (p, msg_off) = build_payload_a();
+    // Accounting window opens BEFORE create: destroy returns the root
+    // frame too, so sampling after create guaranteed a +1 delta.
+    let before = frames::free_frames();
+    let pid = proc::create("u3proc")?;
+    let root = proc::pml4_of(pid).ok_or("u3proc PML4 vanished")?;
+    // The kernel half must be bit-identical through both address spaces:
+    // same value, same physical chain — down to the LAPIC-EOI slot the
+    // timer stub writes under EVERY CR3 (M3.3b bring-up: its alias used
+    // to wrap into the user half, which process clones never inherit).
+    {
+        let slot_va = idt::lapic_eoi_slot_addr();
+        // SAFETY: IF=0; slot_va is kernel .data (readable in both).
+        let kv_val = unsafe { core::ptr::read_volatile(slot_va as *const u64) };
+        let kv_chain = walk_chain(paging::kernel_cr3_phys(), slot_va);
+        let proc_chain = walk_chain(root, slot_va);
+        let proc_val = unsafe {
+            x86_64::write_cr3(root);
+            let v = core::ptr::read_volatile(slot_va as *const u64);
+            x86_64::write_cr3(paging::kernel_cr3_phys());
+            v
+        };
+        if proc_val != kv_val
+            || kv_val != paging::mmio_alias_va(paging::apic_base_phys()) + 0xB0
+            || proc_chain != kv_chain
+        {
+            return Err("kernel half diverged between the kernel view and the process clone");
+        }
+        info!(
+            "m3",
+            "process clone kernel-half check: EOI slot {:x} identical through both CR3s", kv_val
+        );
+    }
+    // SAFETY: IF=0; contract per u3_setup_in; root owned by `pid`.
+    let (_phys3, _free_setup) = unsafe { u3_setup_in(root, &p.b[..msg_off], msg_off, U3_MSG_A) }?;
+    let st0 = syscall::stats();
+    U3_RSP0_ENTRY.store(0, Ordering::Relaxed);
+    U3_TOP_ENTRY.store(0, Ordering::Relaxed);
+    let id = sched::spawn_with_cr3("u3p", u3_thread_entry, 0, root)?;
+    let entry_addr = (u3_thread_entry as fn(usize)) as usize;
+    if sched::thread_entry_of(id) != Some(entry_addr) {
+        return Err("u3p slot entry corrupted between spawn and first run");
+    }
+    sched::yield_now();
+    drain(64)?;
+    let Some(status) = syscall::exit_status_of(id) else {
+        return Err("no SYS_EXIT recorded for the in-process user thread");
+    };
+    if status != 42 {
+        return Err("in-process payload took a failure exit (ring-3 contract violated)");
+    }
+    let st = syscall::stats();
+    if st.write_calls - st0.write_calls != 1
+        || st.write_bytes - st0.write_bytes != U3_MSG_A.len() as u64
+    {
+        return Err("in-process SYS_WRITE accounting wrong");
+    }
+    let (buf, n) = syscall::last_write();
+    if n != U3_MSG_A.len() || buf[..n] != U3_MSG_A[..] {
+        return Err("in-process SYS_WRITE kernel-side copy mismatch");
+    }
+    let rsp0 = U3_RSP0_ENTRY.load(Ordering::Relaxed);
+    let top = U3_TOP_ENTRY.load(Ordering::Relaxed);
+    if top == 0 || rsp0 != top {
+        return Err("RSP0 evidence missing for the in-process thread");
+    }
+    if x86_64::read_cr3() != paging::kernel_cr3_phys() {
+        return Err("CR3 was not restored to the kernel view after the process thread exited");
+    }
+    // The process teardown must reclaim the window (3 leaves + its
+    // intermediates) and the root — landing exactly on `before` (the
+    // thread stack was reclaimed by the reap during drain).
+    let freed = proc::destroy(pid)?;
+    let after = frames::free_frames();
+    if after != before {
+        info!(
+            "m3",
+            "accounting miss: before={} after={} delta={}",
+            before,
+            after,
+            after as i64 - before as i64
+        );
+        return Err("in-process round frame accounting is not exact");
+    }
+    info!(
+        "m3",
+        "process_accounting: 8 create/map/destroy rounds ({} frames back each) + a {}-process full-table refusal reclaimed every frame (free {} exact); payload A ran at ring 3 INSIDE a process address space (SYS_WRITE {} bytes, SYS_EXIT(42), RSP0 exact, CR3 restored on exit); final teardown freed {} frames incl. the root",
+        last_freed,
+        proc::MAX_PROCESSES,
+        f0,
+        U3_MSG_A.len(),
+        freed
     );
     Ok(())
 }

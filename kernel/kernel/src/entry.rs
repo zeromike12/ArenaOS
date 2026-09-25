@@ -208,11 +208,11 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     unsafe {
         use crate::drivers::intc;
         crate::drivers::pit::set_periodic_hz(crate::timekeeping::KERNEL_TICK_HZ);
-        // MMIO phys > 2 GiB, so the kernel-view alias (phys + KERNEL_OFFSET)
-        // wraps below 2 GiB — the same arithmetic build_kernel_view used.
-        let ioapic_va = intc::IOAPIC_PHYS.wrapping_add(KERNEL_OFFSET);
-        let lapic_va = x86_64::paging::apic_base_phys().wrapping_add(KERNEL_OFFSET);
-        let hpet_va = intc::HPET_PHYS.wrapping_add(KERNEL_OFFSET);
+        // MMIO phys > 2 GiB: kernel-half alias rule (mmio_alias_va) — the
+        // same arithmetic build_kernel_view used to place the mappings.
+        let ioapic_va = x86_64::paging::mmio_alias_va(intc::IOAPIC_PHYS);
+        let lapic_va = x86_64::paging::mmio_alias_va(x86_64::paging::apic_base_phys());
+        let hpet_va = x86_64::paging::mmio_alias_va(intc::HPET_PHYS);
         // 2. HPET legacy replacement off: IRQ0 belongs to the PIT again.
         let hpet_conf0 = intc::hpet_read(hpet_va, intc::HPET_GEN_CONF);
         intc::hpet_write(
@@ -307,7 +307,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     info!(
         "kernel",
-        "milestone 3 step 3.2 complete (threads + preemption) — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 3 step 3.3 complete (processes + kernel/user privilege separation) — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }
@@ -469,7 +469,7 @@ fn test_kernel_irq_live(_info: &BootInfo) -> Result<(), &'static str> {
     // Post-window LAPIC evidence: irr1 nonzero with zero absorptions means
     // the wire works but the CPU is not taking the interrupt (IF/delivery);
     // all-zero means nothing reaches the LAPIC at all (IOAPIC/wiring).
-    let lapic_va = x86_64::paging::apic_base_phys().wrapping_add(KERNEL_OFFSET);
+    let lapic_va = x86_64::paging::mmio_alias_va(x86_64::paging::apic_base_phys());
     // SAFETY: mapped RW alias in the kernel view; IF=0 again; MMIO reads.
     let irr1 =
         unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_IRR1) };

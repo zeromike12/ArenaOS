@@ -248,3 +248,47 @@ preemption:
   per-switch already; the missing piece is TLB shootdown for
   cross-CPU address-space changes (and a real answer for the cloned
   kernel half).
+
+## M3.3b addendum — processes = address-space objects (and the kernel-half MMIO rule)
+
+Implemented since the original ADR, on the same test boot (m3 11/11):
+
+* **`kernel/kernel/src/proc.rs`** — the process table (`MAX_PROCESSES = 32`,
+  pids `1..`, 32-byte slots): `create` allocates a private PML4 (user half
+  empty; kernel half cloned entry-wise from the kernel view, so every lower
+  table stays *shared*), `destroy` frees the user half and the root with
+  exact frame accounting, `pml4_of` exposes the root as a thread CR3. The
+  capability space and limits — the other halves of the §5 process
+  definition — remain deferred to 3.4/M4, as planned.
+* **Threads belong to an address space** — `sched::spawn_with_cr3` stores
+  the process root in the thread slot; `plan_switch` writes the incoming
+  thread's CR3 *together with* its TSS RSP0 and syscall scratch stack, so
+  the three can never disagree. Syscalls and IRQs run on the shared kernel
+  half with **no CR3 switch**; the switch away from an exiting thread
+  restores the next thread's address space (the bootstrap thread carries
+  the kernel view).
+* **The cloned-kernel-half consequence bit immediately — as a bug.**
+  Process clones inherit pml4[256..511] *only*, so everything the kernel
+  touches under any CR3 must live in the kernel half. The kernel view's
+  aliases for above-2 GiB MMIO were computed as `phys + KERNEL_OFFSET`,
+  which **wraps into the user half** for phys ≥ 2 GiB (LAPIC `0xFEE0_0000`
+  → `0x7EE0_0000`). While the kernel view was the only address space this
+  was invisible — the mapping and all its consumers wrapped identically,
+  and EOIs landed fine. The first timer tick under a process CR3 wrote its
+  LAPIC EOI through the user-half alias, which the clone does not carry:
+  fatal #PF mid-tick. Fix: **`paging::mmio_alias_va(phys) =
+  phys | 0xFFFF_FFFF_0000_0000`** — the kernel-half alias rule for all
+  below-4 GiB MMIO — applied to the LAPIC/IOAPIC/map-described MMIO
+  aliases and every consumer (boot's EOI-target setup, the intc reclaim
+  path, the M2 evidence reads), with a build-time check that an alias does
+  not collide with the RAM direct map (possible only if RAM exists at
+  exactly `mmio_phys − 2 GiB`; the build fails loudly if a machine ever
+  presents that layout). Test 11 now asserts the invariant directly: the
+  EOI slot must read the same value, through the same physical page-table
+  chain, under the kernel view *and* under a process clone.
+* **Halt-path diagnostics extended during the hunt (kept, production):**
+  an unarmed fault now also dumps the stub-saved caller-saved registers
+  and a bounded best-effort scan of the faulting stack for text-range
+  return addresses — a frame-pointer-less backtrace that works under any
+  CR3. It is what identified the faulting path (a page-table walk
+  descending "into" the LAPIC's physical address) within one boot.

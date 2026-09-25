@@ -59,11 +59,12 @@ pub const PTE_USER: u64 = 1 << 2;
 /// Bit 63 — honored because EFER.NXE=1 (set in `init()`).
 pub const PTE_NX: u64 = 1 << 63;
 /// Page Size bit in PD/PDPT entries (2 MiB / 1 GiB page).
-const PTE_HUGE: u64 = 1 << 7;
+pub const PTE_HUGE: u64 = 1 << 7;
 /// Address mask for table/leaf entries (bits 12..51).
 const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
-const PAGE: u64 = 4096;
+/// The one page size this kernel maps with at leaf level (4 KiB).
+pub const PAGE: u64 = 4096;
 const PAGE_2M: u64 = 2 << 20;
 
 #[repr(C, align(4096))]
@@ -83,6 +84,47 @@ static APIC_BASE_PHYS: crate::sync::SyncCell<u64> = crate::sync::SyncCell::new(0
 pub fn apic_base_phys() -> u64 {
     // SAFETY: boot contract; copy-out.
     unsafe { *APIC_BASE_PHYS.get() }
+}
+
+/// Kernel-half alias VA for a below-4 GiB MMIO `phys`.
+///
+/// The RAM direct-map rule (`phys + KERNEL_OFFSET`) lands in the kernel
+/// half only while `phys < 2 GiB`; past that the addition carries out of
+/// bit 63 and wraps into the USER half (LAPIC `0xFEE0_0000 +
+/// KERNEL_OFFSET = 0x7EE0_0000`). The kernel view tolerated that while it
+/// was the only address space (M2.7), but process clones inherit
+/// pml4[256..511] only — the first timer tick under a process CR3 wrote
+/// its LAPIC EOI through the user-half alias and took a fatal #PF
+/// (M3.3b). This rule keeps every below-4 GiB MMIO alias in the kernel
+/// half, so every address space inherits it. It collides with the RAM
+/// alias of `phys - 2 GiB` only if RAM exists there; `build_kernel_view`
+/// checks and rejects that case.
+pub fn mmio_alias_va(phys: u64) -> u64 {
+    phys | 0xFFFF_FFFF_0000_0000
+}
+
+/// Read-only walk: is anything already mapped at kernel-view VA `va`?
+/// Used to reject MMIO-alias / direct-map collisions at build time.
+///
+/// # Safety
+/// Boot-time table-build context: IF=0, `pml4` and every frame it points
+/// at readable through [`table_ptr`]; the walk stops at the first absent
+/// entry or huge leaf.
+unsafe fn kernel_alias_busy(pml4: *mut PageTable, va: u64) -> bool {
+    unsafe {
+        let mut table = pml4;
+        for shift in [39u32, 30, 21, 12] {
+            let ent = (*table).0[((va >> shift) & 0x1FF) as usize];
+            if ent & PTE_PRESENT == 0 {
+                return false;
+            }
+            if shift == 12 || ent & PTE_HUGE != 0 {
+                return true;
+            }
+            table = table_ptr(ent & 0x000F_FFFF_FFFF_F000);
+        }
+        true
+    }
 }
 
 /// Whether the identity alias of RAM is currently usable. True from boot
@@ -601,17 +643,26 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
                         map_page_4k(pml4, va, va, flags_for(perm));
                         va += PAGE;
                     }
-                    // Kernel-view alias for any part beyond the direct map.
+                    // Kernel-view alias for any part beyond the direct map
+                    // (high-phys kernel-half rule; see mmio_alias_va).
                     let mut phys = base.max(DIRECT_MAP_BYTES);
                     while phys < end {
-                        map_page_4k(pml4, phys + KERNEL_OFFSET, phys, flags_for(perm));
+                        map_page_4k(pml4, mmio_alias_va(phys), phys, flags_for(perm));
                         phys += PAGE;
                     }
                 }
                 handoff::KIND_MMIO | handoff::KIND_MMIO_PORT_SPACE => {
                     let mut phys = base;
                     while phys < end {
-                        map_page_4k(pml4, phys + KERNEL_OFFSET, phys, flags_for(Perm::Rw));
+                        // Below the direct-map limit the RAM rule lands in
+                        // the kernel half; above it the addition would wrap
+                        // into the USER half — use the MMIO alias rule.
+                        let va = if phys < DIRECT_MAP_BYTES {
+                            phys + KERNEL_OFFSET
+                        } else {
+                            mmio_alias_va(phys)
+                        };
+                        map_page_4k(pml4, va, phys, flags_for(Perm::Rw));
                         phys += PAGE;
                     }
                 }
@@ -637,11 +688,17 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
         let island = crate::halt::reset_island_addr() & !(PAGE - 1);
         map_page_4k(pml4, island, island, flags_for(Perm::Rx));
 
-        // LAPIC kernel-view alias (real base, from init's MSR read).
+        // LAPIC kernel-view alias (real base, from init's MSR read). The
+        // alias MUST sit in the kernel half: process clones inherit
+        // pml4[256..511] only, and the timer stub EOIs under every CR3.
         let apic = apic_base_phys();
         if apic != 0 {
             let a2m = apic / PAGE_2M * PAGE_2M;
-            map_2m(pml4, a2m + KERNEL_OFFSET, a2m, flags_for(Perm::Rw));
+            let alias = mmio_alias_va(a2m);
+            if kernel_alias_busy(pml4, alias) {
+                return Err("LAPIC kernel-half alias collides with the direct map");
+            }
+            map_2m(pml4, alias, a2m, flags_for(Perm::Rw));
         }
 
         // IOAPIC kernel-view alias. Like the LAPIC, the IOAPIC register
@@ -651,15 +708,13 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
         // it gets an explicit alias of the q35-fixed base. The kernel's
         // reclaimed IRQ chain (drivers::intc) programs RTE0 through it.
         // Both phys and alias are 2 MiB-aligned by construction; the
-        // alias arithmetic wraps (phys > 2 GiB) exactly as the MMIO
-        // branch does.
+        // alias follows the kernel-half MMIO rule (see mmio_alias_va).
         let i2m = crate::drivers::intc::IOAPIC_PHYS / PAGE_2M * PAGE_2M;
-        map_2m(
-            pml4,
-            i2m.wrapping_add(KERNEL_OFFSET),
-            i2m,
-            flags_for(Perm::Rw),
-        );
+        let ialias = mmio_alias_va(i2m);
+        if kernel_alias_busy(pml4, ialias) {
+            return Err("IOAPIC kernel-half alias collides with the direct map");
+        }
+        map_2m(pml4, ialias, i2m, flags_for(Perm::Rw));
 
         // Image window, kernel-view alias only, per-section permissions.
         let win_start = image.base / PAGE * PAGE;

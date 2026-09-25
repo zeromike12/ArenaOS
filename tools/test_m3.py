@@ -73,6 +73,23 @@ Current coverage:
                               releases the spin, and SYS_WRITE+SYS_EXIT(7)
                               verify afterwards — interrupts, preemption,
                               and shared memory all compose with ring 3.
+  M3.3b — process address spaces (ADR-0014; proc.rs: a process = owned
+  PML4 with private user half + cloned kernel half):
+  * process_address_spaces  — two processes map the same user VA over
+                              distinct frames; a write under procA's CR3
+                              is invisible under procB's and persists in
+                              procA's; kernel-half .data reads identical
+                              under both CR3s; an unmapped user VA under a
+                              process CR3 gives a recovered #PF with CR2
+                              asserted; destroy reclaims every frame.
+  * process_accounting      — 8 create/map/destroy churn rounds plus a
+                              MAX_PROCESSES full-table refusal reclaim
+                              every frame exactly; payload A runs at
+                              ring 3 INSIDE a process address space
+                              (user pages only in the process PML4,
+                              thread cr3 = process root, syscalls on the
+                              cloned kernel half, CR3 restored to the
+                              kernel view on the post-exit switch).
 
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
@@ -93,6 +110,8 @@ EXPECTED_TESTS = [
     "preempt_coexist",
     "user_ring3_syscall",
     "user_ring3_interrupted",
+    "process_address_spaces",
+    "process_accounting",
 ]
 
 if __name__ == "__main__":

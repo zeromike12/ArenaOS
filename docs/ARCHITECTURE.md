@@ -353,7 +353,10 @@ exact to the unit.
 - **Virtual:** the kernel runs in a higher-half address space with strict
   W^X, NX everywhere it applies, and no mapping that is both writable and
   executable. Each process gets its own address space object; the kernel
-  mapping is not visible to user pages. Page-table machinery is arch-isolated
+  mapping is not visible to user pages. Everything the kernel itself must
+  reach under *every* CR3 (device MMIO aliases included) lives in the
+  kernel half — `paging::mmio_alias_va` for below-4 GiB MMIO, since
+  `phys + KERNEL_OFFSET` wraps into the user half above 2 GiB (M3.3b). Page-table machinery is arch-isolated
   (`kernel/*/src/arch/`).
 - **User-visible memory:** *untyped memory* capabilities (Zircon/seL4
   lineage): the basic allocatable resource is a range of physical memory with
@@ -367,7 +370,10 @@ exact to the unit.
 ## 5. Process & thread model
 
 - **Process** = address space + capability space + resource limits. Not a
-  unit of execution.
+  unit of execution. (Since M3.3b the address-space half is implemented:
+  `proc.rs` objects own a private PML4 whose kernel half is cloned from
+  the kernel view; threads carry their process's root as CR3. Capability
+  spaces and limits follow in 3.4/M4.)
 - **Thread** = execution context scheduled by the kernel, belonging to
   exactly one process.
 - **Spawning** is explicit and capability-mediated: a spawner holds a
@@ -508,7 +514,9 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Kernel proper: exceptions/TSS, timers & monotonic clock, frame allocator, own page tables (higher-half, W^X), guarded heap, spinlocks/irqsave, boot split (EBS → kernel entry, reclaimed timer chain) | **Milestone 2 — implemented, 21/21 in-guest + 100/100-boot stability (ADR-0007…0011)** |
 | Kernel threads + cooperative context switch (callee-saved frame, canaried stacks, exact-accounting reap) | **M3.1 — implemented, 5/5 in-guest (ADR-0012)** |
 | Timer-driven preemption (tick hook → nested cooperative switch, per-CPU run-queue structures, exact-RR determinism proven on yield-free threads) | **M3.2 — implemented, 7/7 in-guest + 100/100-boot stability (ADR-0013)** |
-| Processes, IPC, capabilities | in progress / not started (roadmap M3.3–M4) |
+| Privilege machinery: ring-3 threads, syscall/sysret, TSS RSP0, SMAP/SMEP | **M3.3a — implemented, 9/9 in-guest (ADR-0014)** |
+| Processes = address-space objects (private PML4, cloned kernel half, per-thread CR3, exact teardown) | **M3.3b — implemented, 11/11 in-guest + 100/100-boot stability (ADR-0014 addendum)** |
+| Capability spaces, IPC | not started (roadmap M3.4–M4) |
 | Userspace, drivers, FS, net, graphics | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

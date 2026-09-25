@@ -10,9 +10,10 @@
 //!
 //! All accessors take the register-window base as a *virtual* address: the
 //! caller picks the alias that matches the live page tables (identity
-//! pre-handover, `phys + KERNEL_OFFSET` under the kernel view — the MMIO
-//! region is map-described, so the kernel view provides exactly that
-//! alias). Register-window protocol: write the index to REGSEL, then
+//! pre-handover; under the kernel view, `paging::mmio_alias_va(phys)` for
+//! the above-2 GiB windows — the kernel-half alias rule every address
+//! space inherits; see that function for why `phys + KERNEL_OFFSET` wraps
+//! out of the kernel half there). Register-window protocol: write the index to REGSEL, then
 //! read/write REGWIN; both accesses must not be interleaved with other
 //! IOAPIC users (single CPU, IF=0 — boot contract).
 
