@@ -118,13 +118,13 @@ global_asm!(
     ".p2align 4",
     ".globl arena_switch_to_kernel_view",
     "arena_switch_to_kernel_view:",
-    "mov rax, rdx",                     // kmain address
-    "mov rdx, rcx",                     // PML4 phys into scratch
-    "mov rcx, r8",                      // kmain arg0 = BootInfo
-    "mov cr3, rdx",                     // kernel-only tables live
-    "mov r10, 0xffffffff80000000",      // KERNEL_OFFSET
-    "add rsp, r10",                     // stack to its kernel-view alias
-    "jmp rax",                          // enter kmain; never returns
+    "mov rax, rdx",                // kmain address
+    "mov rdx, rcx",                // PML4 phys into scratch
+    "mov rcx, r8",                 // kmain arg0 = BootInfo
+    "mov cr3, rdx",                // kernel-only tables live
+    "mov r10, 0xffffffff80000000", // KERNEL_OFFSET
+    "add rsp, r10",                // stack to its kernel-view alias
+    "jmp rax",                     // enter kmain; never returns
 );
 
 unsafe extern "C" {
@@ -151,7 +151,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         error!(
             "kernel",
             "boot-info record invalid: magic={:#x} version={} (want {:#x} v{})",
-            boot_info.magic, boot_info.version, BOOTINFO_MAGIC, BOOTINFO_VERSION
+            boot_info.magic,
+            boot_info.version,
+            BOOTINFO_MAGIC,
+            BOOTINFO_VERSION
         );
         crate::halt::halt_machine("boot-info record invalid");
     }
@@ -270,7 +273,23 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     info!(
         "kernel",
-        "milestone 2 complete — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 2 complete — starting the milestone 3 suite"
+    );
+
+    // --- M3.1: kernel threads + context switch (ADR-0012) ----------------
+    // The bootstrap thread is kmain itself; init is a real ABI step and a
+    // failure (double-init, corrupt state) halts with diagnostics.
+    if let Err(reason) = crate::sched::init() {
+        error!("kernel", "scheduler init failed: {reason}");
+        crate::halt::halt_machine("scheduler init failed");
+    }
+    if !crate::m3::run_suite() {
+        crate::halt::halt_machine("milestone 3 suite failed");
+    }
+
+    info!(
+        "kernel",
+        "milestone 3 step 3.1 complete — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }
@@ -369,7 +388,8 @@ fn test_identity_torn_down(_info: &BootInfo) -> Result<(), &'static str> {
     info!(
         "kernel",
         "identity_torn_down: write to {PROBE_VA:#x} → #PF ec={:#x} cr2={:#x}, recovered at a kernel-view RIP",
-        obs.error_code, obs.cr2
+        obs.error_code,
+        obs.cr2
     );
     Ok(())
 }
@@ -433,9 +453,12 @@ fn test_kernel_irq_live(_info: &BootInfo) -> Result<(), &'static str> {
     // all-zero means nothing reaches the LAPIC at all (IOAPIC/wiring).
     let lapic_va = x86_64::paging::apic_base_phys().wrapping_add(KERNEL_OFFSET);
     // SAFETY: mapped RW alias in the kernel view; IF=0 again; MMIO reads.
-    let irr1 = unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_IRR1) };
-    let isr1 = unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_ISR1) };
-    let ppr = unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_PPR) };
+    let irr1 =
+        unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_IRR1) };
+    let isr1 =
+        unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_ISR1) };
+    let ppr =
+        unsafe { crate::drivers::intc::lapic_read(lapic_va, crate::drivers::intc::LAPIC_PPR) };
     x86_64::cli();
     if ticks < REQUIRED_TICKS {
         info!(

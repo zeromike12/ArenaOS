@@ -445,9 +445,7 @@ pub unsafe fn relocate_for_kernel(offset: u64) {
 /// base (true under the dual view and the kernel view alike).
 pub unsafe fn readback_gate(vector: usize) -> (u64, u64, u64) {
     fn target_of(g: IdtGate) -> u64 {
-        u64::from(g.offset_low)
-            | (u64::from(g.offset_mid) << 16)
-            | (u64::from(g.offset_high) << 32)
+        u64::from(g.offset_low) | (u64::from(g.offset_mid) << 16) | (u64::from(g.offset_high) << 32)
     }
     // SAFETY: caller contract; both reads hit mapped table memory.
     unsafe {

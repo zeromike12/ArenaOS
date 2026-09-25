@@ -57,20 +57,20 @@ global_asm!(
     ".p2align 12",
     ".globl arena_reset_island",
     "arena_reset_island:",
-    "mov r10, rdx",           // ResetSystem entry point
-    "mov cr3, rcx",           // firmware's own tables live
+    "mov r10, rdx", // ResetSystem entry point
+    "mov cr3, rcx", // firmware's own tables live
     "test rsp, rsp",
-    "jns 1f",                 // identity stack (bit63 clear): leave it
-    "mov eax, 0x80000000",    // +2 GiB wraps the high alias back to
-    "add rsp, rax",           // identity (KERNEL_OFFSET = -2 GiB)
+    "jns 1f",              // identity stack (bit63 clear): leave it
+    "mov eax, 0x80000000", // +2 GiB wraps the high alias back to
+    "add rsp, rax",        // identity (KERNEL_OFFSET = -2 GiB)
     "1:",
-    "mov ecx, 2",             // EfiResetShutdown
-    "xor edx, edx",           // ResetStatus = EFI_SUCCESS
-    "xor r8d, r8d",           // DataSize = 0
-    "xor r9d, r9d",           // ResetData = NULL
-    "sub rsp, 40",            // win64 shadow space + alignment
+    "mov ecx, 2",   // EfiResetShutdown
+    "xor edx, edx", // ResetStatus = EFI_SUCCESS
+    "xor r8d, r8d", // DataSize = 0
+    "xor r9d, r9d", // ResetData = NULL
+    "sub rsp, 40",  // win64 shadow space + alignment
     "call r10",
-    "2:",                     // ResetSystem returned: park for good
+    "2:", // ResetSystem returned: park for good
     "cli",
     "hlt",
     "jmp 2b",

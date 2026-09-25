@@ -22,5 +22,7 @@ pub mod halt;
 pub mod handoff;
 pub mod heap;
 pub mod log;
+pub mod m3;
+pub mod sched;
 pub mod sync;
 pub mod timekeeping;

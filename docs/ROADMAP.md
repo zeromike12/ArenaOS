@@ -109,10 +109,22 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       100/100 clean boots (tools/stability_loop.sh); release artifacts
       (tools/release.sh, docs/RUNNING.md) shipped as GitHub release.
 
-## Milestone 3 — Multitasking
+## Milestone 3 — Multitasking 🔨
 
-- 3.1 **Kernel threads + context switch** (assembly fast path; full state:
+- [x] 3.1 **Kernel threads + context switch** (assembly fast path; full state:
       GPRs, FPU/SSE state lazily or XSAVE — ADR at the time).
+      DONE (ADR-0012): Win64 callee-saved + RFLAGS + RSP switch frame; no
+      FPU/SSE state — the image is audited SSE/MMX-free at *every build*
+      (build.sh fails otherwise); 32 KiB frame-allocated stacks with
+      bottom canaries (checked at every switch-away + reap); stable-slot
+      thread table, RR ready ring, deferred zombie reaping with exact
+      frame/heap accounting; bootstrap thread = kmain. Tests: spawn/run/
+      reap, exact RR interleave (1,2,3 × 4), callee-saved register
+      round-trip through a live switch (asm probe), two-thread stack
+      isolation with disjoint ranges + depth-200 recursion, 127-thread
+      churn with exact accounting + MAX_THREADS refusal. m3 5/5; Rust
+      trap documented in CODING-CONVENTIONS (expect-assign on Copy
+      places is a silent no-op — the scheduler's first bug).
 - 3.2 **Preemptive scheduler**: timer-driven, per-CPU-ready run queues (SMP
       *structures*, single-core execution), deterministic RR test mode.
       Test: N threads print interleaved sequence proving preemption.

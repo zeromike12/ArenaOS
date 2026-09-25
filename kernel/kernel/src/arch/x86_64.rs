@@ -2,6 +2,7 @@
 //! under `arch/`). x86-64 CPU state access: control registers, MSRs, CPUID,
 //! port I/O.
 
+pub mod context;
 pub mod faults;
 pub mod gdt;
 pub mod idt;
@@ -64,7 +65,9 @@ pub unsafe fn restore_flags(flags: u64) {
 pub fn read_rsp() -> u64 {
     let rsp: u64;
     // SAFETY: pure register read.
-    unsafe { core::arch::asm!("mov {rsp}, rsp", rsp = lateout(reg) rsp, options(nostack, nomem, preserves_flags)) };
+    unsafe {
+        core::arch::asm!("mov {rsp}, rsp", rsp = lateout(reg) rsp, options(nostack, nomem, preserves_flags))
+    };
     rsp
 }
 

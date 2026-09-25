@@ -32,6 +32,30 @@ mkdir -p "$REPO_ROOT/build"
 cp "$EFI_SRC" "$REPO_ROOT/build/arena-boot.efi"
 echo "kernel image: build/arena-boot.efi ($(stat -c%s "$REPO_ROOT/build/arena-boot.efi") bytes)"
 
+# ADR-0012 invariant: the kernel image contains NO FPU/SSE/MMX
+# instructions — the context switch saves callee-saved GPRs + RFLAGS
+# only, which is sound exactly while this holds. The audit runs on every
+# build (release gate included); if it ever fires, the ADR's escalation
+# path applies (-C target-feature=-sse,-sse2,-mmx first, xsave second).
+RUSTLIB_BIN="$(dirname "$(dirname "$(command -v rustc)")")/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+DISASM=""
+if [[ -x "$RUSTLIB_BIN/llvm-objdump" ]]; then
+    DISASM="$RUSTLIB_BIN/llvm-objdump"
+elif command -v objdump >/dev/null 2>&1; then
+    DISASM="$(command -v objdump)"
+fi
+if [[ -n "$DISASM" ]]; then
+    if "$DISASM" -d "$REPO_ROOT/build/arena-boot.efi" | grep -qE '\bx?mm[0-7]\b'; then
+        echo "error: FPU/SSE/MMX instruction found in the kernel image —" >&2
+        echo "       the ADR-0012 context-switch invariant is violated." >&2
+        echo "       See docs/adr/0012-kernel-threads-context-switch.md." >&2
+        exit 1
+    fi
+    echo "ADR-0012 audit: no FPU/SSE/MMX instructions in the image"
+else
+    echo "warning: no disassembler found — ADR-0012 no-SSE audit SKIPPED" >&2
+fi
+
 if [[ "${1:-}" == "--image" ]]; then
     python3 "$REPO_ROOT/tools/espimg.py" "$REPO_ROOT/build/arena-boot.efi" "$REPO_ROOT/build/arena-esp.img"
 fi

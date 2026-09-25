@@ -26,7 +26,7 @@ mod uefi;
 
 use arena_kernel::arch::x86_64::paging::{DIRECT_MAP_BYTES, KERNEL_OFFSET};
 use arena_kernel::arch::x86_64::{self, gdt, tss};
-use arena_kernel::entry::{self, BootInfo, BOOTINFO_MAGIC, BOOTINFO_VERSION};
+use arena_kernel::entry::{self, BOOTINFO_MAGIC, BOOTINFO_VERSION, BootInfo};
 use arena_kernel::handoff;
 use arena_kernel::log::{log_error as error, log_info as info, log_warn as warn};
 use arena_kernel::{frames, halt, heap, timekeeping};
@@ -242,7 +242,10 @@ pub extern "efiapi" fn efi_main(
     // firmware's world completely — including our image (LoaderCode/Data)
     // and every conventional page our statics live in. We switch back to
     // our dual view the moment EBS succeeds.
-    info!("boot", "restoring firmware page tables for the EBS window (cr3={fw_cr3:#x})");
+    info!(
+        "boot",
+        "restoring firmware page tables for the EBS window (cr3={fw_cr3:#x})"
+    );
     // SAFETY: fw_cr3 was read at entry, before we installed any tables of
     // our own; firmware's tables are intact (nothing freed or remapped
     // them — our frames come from the bitmap, not from firmware).
@@ -318,7 +321,10 @@ pub extern "efiapi" fn efi_main(
     let dual_cr3 = x86_64::paging::cr3_phys();
     // SAFETY: our dual-view PML4 is live state from step 3.7; IF=0.
     unsafe { x86_64::write_cr3(dual_cr3) };
-    info!("boot", "back on kernel dual-view tables (cr3={dual_cr3:#x}); boot services are dead");
+    info!(
+        "boot",
+        "back on kernel dual-view tables (cr3={dual_cr3:#x}); boot services are dead"
+    );
     // The 16550, the PIT, the APICs and the frame bitmap are ours; runtime
     // services remain, for shutdown only.
     arena_kernel::log::write_marker(format_args!("m2:test:ebs_exited: PASS"));
@@ -350,7 +356,10 @@ pub extern "efiapi" fn efi_main(
             halt::halt_machine("heap kernel-view reinit failed");
         }
     };
-    info!("boot", "heap: recycled {released} boot chunk(s); kernel-view heap armed");
+    info!(
+        "boot",
+        "heap: recycled {released} boot chunk(s); kernel-view heap armed"
+    );
 
     // --- Step 5: enter the kernel proper ------------------------------------
     // Kernel-only tables: higher-half everything, runtime services kept at
@@ -403,7 +412,10 @@ pub extern "efiapi" fn efi_main(
         x86_64::tss::relocate_for_kernel(KERNEL_OFFSET);
         x86_64::idt::relocate_for_kernel(KERNEL_OFFSET);
     }
-    info!("boot", "descriptors relocated to the kernel view (GDT/TSS/IDT, LAPIC EOI)");
+    info!(
+        "boot",
+        "descriptors relocated to the kernel view (GDT/TSS/IDT, LAPIC EOI)"
+    );
     // Readback proof: what the CPU will walk (via sidt) must equal what we
     // wrote (via the static), and both must sit at the high alias.
     // SAFETY: ring 0, dual view maps the table at both aliases.
@@ -421,7 +433,8 @@ pub extern "efiapi" fn efi_main(
     // serial-write code and dies (M2.7 bring-up root cause; ADR-0011).
     // The log line right after this call is itself the canary: it runs
     // through the re-relocated vtables under the dual view.
-    let (patched, skipped) = match unsafe { x86_64::paging::apply_base_relocations(KERNEL_OFFSET) } {
+    let (patched, skipped) = match unsafe { x86_64::paging::apply_base_relocations(KERNEL_OFFSET) }
+    {
         Ok(counts) => counts,
         Err(e) => halt::halt_machine(e),
     };
@@ -435,7 +448,10 @@ pub extern "efiapi" fn efi_main(
     // must live inside the direct-map span.
     let stack_phys = x86_64::read_rsp();
     if stack_phys >= DIRECT_MAP_BYTES {
-        error!("boot", "boot stack {stack_phys:#x} lies outside the direct map");
+        error!(
+            "boot",
+            "boot stack {stack_phys:#x} lies outside the direct map"
+        );
         halt::halt_machine("boot stack not direct-mapped");
     }
     let record = entry::prepare(BootInfo {

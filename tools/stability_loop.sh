@@ -40,6 +40,7 @@ VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
+RESULT_LINE_M3='m3: RESULT PASS (5/5)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -65,6 +66,8 @@ for i in $(seq 1 "$N"); do
         why="kernel PANIC on serial"
     elif ! grep -aqF "$RESULT_LINE" "$SERIAL"; then
         why="missing '$RESULT_LINE'"
+    elif ! grep -aqF "$RESULT_LINE_M3" "$SERIAL"; then
+        why="missing '$RESULT_LINE_M3'"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then
         why="missing clean-halt declaration"
     fi

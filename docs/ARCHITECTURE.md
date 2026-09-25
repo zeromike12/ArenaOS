@@ -275,6 +275,38 @@ Fallback plans documented: if UEFI diversity becomes painful, a thin
 multiboot2/BIOS path could be added *under the same boot-info contract* —
 the kernel proper never knows who produced the boot-info record.
 
+### Kernel threads & context switch (M3.1)
+
+`sched.rs` + `arch/x86_64/context.rs` (ADR-0012) give the kernel its
+first execution contexts beyond `kmain`:
+
+* **Switch frame**: the eight Win64 callee-saved registers + RFLAGS +
+  RSP (80 bytes), swapped by a ~20-instruction assembly fast path. No
+  FPU/SSE state: the image is *audited* to contain zero FPU/SSE/MMX
+  instructions at every build (`tools/build.sh` fails otherwise), and
+  the audit's escalation path is written into the ADR.
+* **Threads**: fixed 64-slot table with stable indices (the RR ready
+  ring stores indices), `Ready`/`Running`/`Zombie` states, and deferred
+  reaping — a thread never frees the stack it runs on; the next
+  scheduler entry does.
+* **Stacks**: 32 KiB of contiguous frames per thread, direct-mapped,
+  bottom qword canary checked at every switch-away and at reap; a
+  corrupt canary halts with diagnostics instead of limping on.
+* **Bootstrap thread**: `kmain` itself is slot 0 on the reserved boot
+  stack the scheduler does not own; `sched::init()` is an ABI-checked
+  step of kernel entry.
+* **Discipline**: every decision phase runs under `without_interrupts`
+  and ends its borrows *before* the assembly switch runs on raw values —
+  nothing may be live across a switch except the frame itself.
+  Cooperative today (`yield_now`); 3.2 adds the timer-driven preemptive
+  path on the same frame, and the per-CPU queue structures §5 promises.
+
+The M3 suite pins all of it to machine-checked evidence: exact
+round-robin interleave order, callee-saved registers round-tripped
+*through* a live switch (asm probe), disjoint stack ranges with
+depth-200 recursion, and 127-thread churn with frame/heap accounting
+exact to the unit.
+
 ## 4. Memory model
 
 - **Physical:** firmware memory map → boot-info record → physical frame
@@ -435,7 +467,9 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Component | State |
 |---|---|
 | Boot stage (UEFI app, serial, GDT, CPU-state verification, memory-map parsing) | **Milestone 1 — implemented, tested in QEMU/OVMF** |
-| Kernel proper, paging, interrupts, scheduling, IPC, capabilities | not started (roadmap M2–M4) |
+| Kernel proper: exceptions/TSS, timers & monotonic clock, frame allocator, own page tables (higher-half, W^X), guarded heap, spinlocks/irqsave, boot split (EBS → kernel entry, reclaimed timer chain) | **Milestone 2 — implemented, 21/21 in-guest + 100/100-boot stability (ADR-0007…0011)** |
+| Kernel threads + cooperative context switch (callee-saved frame, canaried stacks, exact-accounting reap) | **M3.1 — implemented, 5/5 in-guest (ADR-0012)** |
+| Preemptive scheduling, processes, IPC, capabilities | in progress / not started (roadmap M3.2–M4) |
 | Userspace, drivers, FS, net, graphics | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

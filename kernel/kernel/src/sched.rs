@@ -1,0 +1,416 @@
+//! Kernel threads and the cooperative scheduler (M3.1, ADR-0012).
+//!
+//! Model: fixed table of `MAX_THREADS` slots (stable indices — the ready
+//! queue stores indices and a compaction would invalidate them), one
+//! round-robin ready queue, `yield_now()` as the only switch trigger.
+//! Preemption (timer-driven switching, per-CPU queues) is M3.2 and builds
+//! on this exact switch frame.
+//!
+//! Discipline (all machine-checked by the M3 suite):
+//! - All scheduler state is mutated under `without_interrupts` (ADR-0010)
+//!   and **no borrow crosses the context switch**: the decision phase
+//!   yields a plan of raw values (save-slot pointer, restore RSP), the
+//!   borrow ends, and only then does the assembly switch run.
+//! - Every kernel thread stack is 32 KiB of contiguous frames with a
+//!   canary in its bottom qword, checked whenever the thread switches
+//!   away and again at reap; a corrupted canary halts the machine with
+//!   diagnostics (an overflowed kernel stack is never safe to continue).
+//! - A thread cannot free the stack it runs on: `exit` marks it `Zombie`
+//!   and the *next* scheduler entry reaps it (`free_contiguous` + slot
+//!   cleared). The churn test pins the accounting to exact baselines.
+//! - The bootstrap thread is `kmain` itself (slot 0, id 0); its boot
+//!   stack is a reserved firmware region the scheduler does not own
+//!   (`stack_frames = 0` ⇒ no canary, nothing to free).
+
+use crate::arch::x86_64::context;
+use crate::arch::x86_64::paging::KERNEL_OFFSET;
+use crate::log::log_error as error;
+use crate::sync::{SyncCell, without_interrupts};
+use core::sync::atomic::{AtomicU64, Ordering};
+
+/// Scheduler slot cap (M3.1): thread structs are small and static, the
+/// ready ring is sized to match, and `spawn` fails cleanly at the cap —
+/// a boundary the churn test exercises on purpose.
+pub const MAX_THREADS: usize = 64;
+
+/// Kernel stack per thread: 8 contiguous frames = 32 KiB (ADR-0012).
+pub const THREAD_STACK_FRAMES: usize = 8;
+const THREAD_STACK_BYTES: u64 = (THREAD_STACK_FRAMES * 4096) as u64;
+
+/// Bottom-of-stack canary ("ARENASTK"), checked on every switch-away.
+const STACK_CANARY: u64 = 0x4152_454E_4153_544B;
+
+/// M3.1 stacks come from the direct map's first 2 GiB (ADR-0008); a frame
+/// beyond that has no kernel-view alias yet, so `spawn` refuses it rather
+/// than hand back an unmapped stack. (512 MiB reference VM: all
+/// conventional memory is far below the bound.)
+const DIRECT_MAP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Ready,
+    Running,
+    /// Exited; awaiting reap by the next scheduler entry.
+    Zombie,
+}
+
+#[derive(Clone, Copy)]
+pub struct KThread {
+    pub id: u64,
+    pub name: &'static str,
+    pub state: State,
+    entry: fn(usize),
+    arg: usize,
+    /// Stack base *physical* address (0 = not owned: the bootstrap thread).
+    stack_base: u64,
+    stack_frames: usize,
+}
+
+/// Fixed-capacity FIFO of slot indices (the round-robin ready queue).
+#[derive(Clone, Copy)]
+struct Ring {
+    q: [usize; MAX_THREADS],
+    head: usize,
+    len: usize,
+}
+
+impl Ring {
+    const fn new() -> Self {
+        Self {
+            q: [0; MAX_THREADS],
+            head: 0,
+            len: 0,
+        }
+    }
+    fn push(&mut self, idx: usize) -> bool {
+        if self.len == MAX_THREADS {
+            return false;
+        }
+        self.q[(self.head + self.len) % MAX_THREADS] = idx;
+        self.len += 1;
+        true
+    }
+    fn pop(&mut self) -> Option<usize> {
+        if self.len == 0 {
+            return None;
+        }
+        let idx = self.q[self.head];
+        self.head = (self.head + 1) % MAX_THREADS;
+        self.len -= 1;
+        Some(idx)
+    }
+}
+
+static THREADS: SyncCell<[Option<KThread>; MAX_THREADS]> = SyncCell::new([None; MAX_THREADS]);
+/// Saved RSP per slot (the switch's save-slot target; raw access by
+/// design — a pointer into here crosses the switch, a borrow must not).
+static CTX: SyncCell<[u64; MAX_THREADS]> = SyncCell::new([0; MAX_THREADS]);
+static READY: SyncCell<Ring> = SyncCell::new(Ring::new());
+static CURRENT: SyncCell<usize> = SyncCell::new(0);
+static NEXT_ID: SyncCell<u64> = SyncCell::new(1);
+static SWITCH_COUNT: AtomicU64 = AtomicU64::new(0);
+static SPAWNED_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Raw plan produced by a decision phase: everything the assembly switch
+/// needs, with every borrow already ended (ADR-0012 discipline).
+#[derive(Clone, Copy)]
+struct Plan {
+    save: *mut u64,
+    restore: u64,
+}
+
+/// Placeholder entry for the bootstrap thread — never invoked: slot 0 is
+/// already running when the scheduler is born and has no trampoline frame.
+fn bootstrap_entry_never_runs(_: usize) {}
+
+/// Register the bootstrap thread (kmain, slot 0). Called once from
+/// `kmain` before any thread work; a second call is a bug and fails.
+pub fn init() -> Result<(), &'static str> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0 (boot-contract discipline).
+        let threads = unsafe { &mut *THREADS.get() };
+        if threads[0].is_some() {
+            return Err("scheduler already initialized");
+        }
+        threads[0] = Some(KThread {
+            id: 0,
+            name: "kmain",
+            state: State::Running,
+            entry: bootstrap_entry_never_runs,
+            arg: 0,
+            stack_base: 0,
+            stack_frames: 0,
+        });
+        // SAFETY: same discipline; fresh scheduler, known values.
+        unsafe {
+            *CURRENT.get() = 0;
+            *NEXT_ID.get() = 1;
+        }
+        Ok(())
+    })
+}
+
+/// Create a thread and enqueue it Ready. It runs `entry(arg)` on its own
+/// 32 KiB stack the next time the scheduler picks it, then exits and is
+/// reaped automatically. Returns the thread id.
+pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'static str> {
+    without_interrupts(|| {
+        reap();
+        // SAFETY: single writer under IF=0.
+        let (idx, id) = unsafe {
+            let threads = &mut *THREADS.get();
+            let Some(idx) = threads.iter().position(Option::is_none) else {
+                return Err("thread table full (MAX_THREADS)");
+            };
+            let id = *NEXT_ID.get();
+            *NEXT_ID.get() = id + 1;
+            (idx, id)
+        };
+        let Some(phys) = crate::frames::alloc_contiguous(THREAD_STACK_FRAMES) else {
+            return Err("frame exhaustion: no contiguous run for a thread stack");
+        };
+        if phys + THREAD_STACK_BYTES > DIRECT_MAP_LIMIT {
+            // Unmappable in the kernel view (3.1 bound) — give it back.
+            let _ = crate::frames::free_contiguous(phys, THREAD_STACK_FRAMES);
+            return Err("stack frame beyond the 2 GiB direct map (M3.1 bound)");
+        }
+        let base_va = phys.wrapping_add(KERNEL_OFFSET);
+        // SAFETY: fresh exclusive frames, mapped RW in the kernel view.
+        let rsp0 = unsafe {
+            *(base_va as *mut u64) = STACK_CANARY;
+            context::new_thread_stack(base_va + THREAD_STACK_BYTES)
+        };
+        // SAFETY: slot `idx` is free (found above) and stays ours (IF=0).
+        unsafe {
+            let threads = &mut *THREADS.get();
+            threads[idx] = Some(KThread {
+                id,
+                name,
+                state: State::Ready,
+                entry,
+                arg,
+                stack_base: phys,
+                stack_frames: THREAD_STACK_FRAMES,
+            });
+            (*CTX.get())[idx] = rsp0;
+            if !(*READY.get()).push(idx) {
+                // Unreachable: ready len ≤ MAX_THREADS-1 while a slot was
+                // free — but leave no leak if the invariant is ever broken.
+                threads[idx] = None;
+                let _ = crate::frames::free_contiguous(phys, THREAD_STACK_FRAMES);
+                return Err("ready queue overflow");
+            }
+        }
+        SPAWNED_TOTAL.fetch_add(1, Ordering::Relaxed);
+        Ok(id)
+    })
+}
+
+/// Voluntarily give up the CPU: run the round-robin decision and, if
+/// another thread is ready, switch to it. Returns when this thread is
+/// resumed (or immediately if the ready queue is empty — spinning on an
+/// empty queue would starve the very thread asking others to run).
+pub fn yield_now() {
+    without_interrupts(|| {
+        let Some(plan) = plan_switch(true) else {
+            return;
+        };
+        SWITCH_COUNT.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: plan holds raw values; every borrow ended in
+        // plan_switch; both stacks are mapped RW; IF=0 (we are inside
+        // without_interrupts), so no interrupt sees the half-switched
+        // state. This call resumes the incoming thread and suspends us
+        // until our own frame is switched back to.
+        unsafe { context::switch_context(plan.save, plan.restore) };
+    });
+}
+
+/// Trampoline target (ADR-0012): runs the current thread's entry, then
+/// exits. Never returns — `exit_now` switches away for good.
+pub extern "C" fn thread_main() -> ! {
+    // Copy the (immutable while Running) entry info out; no borrow stays
+    // live across the entry call, which may itself yield.
+    let (entry, arg) = without_interrupts(|| {
+        // SAFETY: single reader under IF=0; CURRENT is a Running slot.
+        unsafe {
+            let cur = *CURRENT.get();
+            let t = (*THREADS.get())[cur].expect("current thread vanished");
+            (t.entry, t.arg)
+        }
+    });
+    entry(arg);
+    exit_now()
+}
+
+/// The current thread is done: zombie it, switch to the next ready
+/// thread, and let a later scheduler entry reap the stack.
+fn exit_now() -> ! {
+    let plan = without_interrupts(|| {
+        check_canary_current();
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let cur = *CURRENT.get();
+            // as_mut() — NOT expect(): on a Copy item, place.expect()
+            // returns a temporary and the assignment would silently be
+            // discarded (proved standalone; caught by the drain tests).
+            (*THREADS.get())[cur]
+                .as_mut()
+                .expect("current thread vanished")
+                .state = State::Zombie;
+        }
+        plan_switch(false)
+    });
+    let Some(plan) = plan else {
+        // Impossible while the bootstrap thread exists (it is never a
+        // zombie and is either Running or Ready) — a bug, not a state to
+        // limp on in.
+        error!("sched", "thread exited with an empty ready queue");
+        crate::halt::halt_machine("scheduler: exited with empty ready queue");
+    };
+    SWITCH_COUNT.fetch_add(1, Ordering::Relaxed);
+    // SAFETY: as in yield_now. The exiting thread's slot stays allocated
+    // (Zombie) until reaped, so its save slot remains valid — but the
+    // scheduler never enqueues zombies, so this switch must not return.
+    unsafe { context::switch_context(plan.save, plan.restore) };
+    // A resumed zombie means the scheduler violated its own invariant.
+    error!("sched", "zombie thread was resumed after exit");
+    crate::halt::halt_machine("scheduler: zombie resumed");
+}
+
+/// Decision phase: reap zombies, canary-check the outgoing thread, pick
+/// the next ready thread, update states/queue, and return the raw switch
+/// plan. `enqueue_current` = yield semantics (current goes to the back of
+/// the queue); `false` = exit semantics (current stays Zombie).
+///
+/// Every borrow ends before this returns — the plan is raw by design.
+fn plan_switch(enqueue_current: bool) -> Option<Plan> {
+    reap();
+    if enqueue_current {
+        check_canary_current();
+    }
+    // SAFETY: single writer under IF=0; all reads/writes complete here.
+    unsafe {
+        let next = (*READY.get()).pop()?;
+        let cur = *CURRENT.get();
+        let threads = &mut *THREADS.get();
+        if enqueue_current {
+            // as_mut(), not expect() — expect() on a Copy place assigns
+            // to a discarded temporary (see exit_now).
+            threads[cur]
+                .as_mut()
+                .expect("current thread vanished")
+                .state = State::Ready;
+            let ok = (*READY.get()).push(cur);
+            debug_assert!(ok, "ready ring overflow with a free slot");
+        }
+        threads[next].as_mut().expect("ready slot vanished").state = State::Running;
+        *CURRENT.get() = next;
+        Some(Plan {
+            save: (CTX.get() as *mut u64).add(cur),
+            restore: (*CTX.get())[next],
+        })
+    }
+}
+
+/// Free exited threads: final canary check, stack frames back to the
+/// allocator, slot cleared. Called at the top of every decision phase —
+/// a thread cannot free the stack it is running on (ADR-0012).
+fn reap() {
+    // SAFETY: single writer under IF=0.
+    unsafe {
+        let threads = &mut *THREADS.get();
+        for slot in threads.iter_mut() {
+            let Some(t) = slot else { continue };
+            if t.state != State::Zombie {
+                continue;
+            }
+            if t.stack_frames > 0 {
+                let canary = *(t.stack_base.wrapping_add(KERNEL_OFFSET) as *const u64);
+                if canary != STACK_CANARY {
+                    error!(
+                        "sched",
+                        "stack canary corrupt at reap: thread {} '{}' base={:#x} canary={:#x}",
+                        t.id,
+                        t.name,
+                        t.stack_base,
+                        canary
+                    );
+                    crate::halt::halt_machine("kernel stack overflow (canary at reap)");
+                }
+                if let Err(e) = crate::frames::free_contiguous(t.stack_base, t.stack_frames) {
+                    error!("sched", "stack free failed for thread {}: {}", t.id, e);
+                    crate::halt::halt_machine("thread stack free failed");
+                }
+            }
+            *slot = None;
+        }
+    }
+}
+
+/// Canary check for the thread that is about to switch away.
+fn check_canary_current() {
+    // SAFETY: single reader under IF=0.
+    unsafe {
+        let cur = *CURRENT.get();
+        let t = (*THREADS.get())[cur].expect("current thread vanished");
+        if t.stack_frames == 0 {
+            return; // bootstrap: stack not owned, no canary
+        }
+        let canary = *(t.stack_base.wrapping_add(KERNEL_OFFSET) as *const u64);
+        if canary != STACK_CANARY {
+            error!(
+                "sched",
+                "stack canary corrupt: thread {} '{}' base={:#x} canary={:#x} (want {:#x})",
+                t.id,
+                t.name,
+                t.stack_base,
+                canary,
+                STACK_CANARY
+            );
+            crate::halt::halt_machine("kernel stack overflow (canary at switch)");
+        }
+    }
+}
+
+// ---- observability (the M3 suite asserts on these) ----------------------
+
+/// Threads not yet exited (Ready + Running, including the bootstrap).
+/// Zombies count as gone; the next scheduler entry reaps them.
+pub fn live_threads() -> usize {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*THREADS.get())
+                .iter()
+                .filter(|s| matches!(s, Some(t) if t.state != State::Zombie))
+                .count()
+        }
+    })
+}
+
+/// Total context switches performed (one per save/restore pair).
+pub fn switch_count() -> u64 {
+    SWITCH_COUNT.load(Ordering::Relaxed)
+}
+
+/// Total successful spawns since init.
+pub fn spawned_total() -> u64 {
+    SPAWNED_TOTAL.load(Ordering::Relaxed)
+}
+
+/// Kernel-view stack range `(base_va_incl, top_va_excl)` of the current
+/// thread; `(0, 0)` for the bootstrap thread (stack not scheduler-owned).
+pub fn current_stack_range() -> (u64, u64) {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            let cur = *CURRENT.get();
+            let t = (*THREADS.get())[cur].expect("current thread vanished");
+            if t.stack_frames == 0 {
+                return (0, 0);
+            }
+            let base = t.stack_base.wrapping_add(KERNEL_OFFSET);
+            (base, base + THREAD_STACK_BYTES)
+        }
+    })
+}

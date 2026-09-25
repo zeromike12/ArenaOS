@@ -21,6 +21,15 @@
   are for boot-time self-tests and "impossible" states with a comment; the
   panic handler prints diagnostics and halts (later: reboots/parks
   gracefully). Library-style `Result` for anything fallible.
+- **Mutating through by-value accessors is a silent no-op**: for `T: Copy`,
+  `slot.expect("x").field = v` (same for `.unwrap()`) copies the slot into a
+  *temporary* and assigns into the temporary — rustc accepts it without a
+  warning, and the write evaporates. Mutate only through references or
+  place expressions: `slot.as_mut().expect("x").field = v`, `&mut place`,
+  or direct `place.field = v`. Paid for in M3.1: all three scheduler state
+  transitions were discarded this way (threads ran but never became
+  `Zombie`); the drain tests caught it, and the semantics were proven with
+  a standalone host repro before the fix.
 - Floating point: avoided in kernel code (soft-float target); when truly
   needed (calibration math), integer-only formulations preferred.
 - No `std`, obviously; `alloc` usage in the kernel starts at M2.5 with the

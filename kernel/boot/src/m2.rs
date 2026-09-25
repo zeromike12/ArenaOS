@@ -321,8 +321,7 @@ fn test_clock_monotonic() -> Result<(), &'static str> {
     let (mut best_pit_us, mut best_clock_us, mut best_skew) = (0u64, 0u64, u64::MAX);
     for _ in 0..CROSS_CHECK_TRIALS {
         unsafe { pit::set_calibration_mode() };
-        let (counts, tsc) =
-            unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 500) };
+        let (counts, tsc) = unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 500) };
         unsafe { pit::set_periodic_hz(timekeeping::KERNEL_TICK_HZ) };
         if counts == 0 {
             return Err("cross-check window measured zero counts");

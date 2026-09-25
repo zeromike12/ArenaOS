@@ -124,7 +124,10 @@ pub fn reinit_for_kernel_view() -> Result<u64, &'static str> {
         heap.release_chunks(|ptr, bytes| {
             let frames_n = bytes / 4096;
             if let Err(reason) = frames::free_contiguous(ptr.as_ptr() as u64, frames_n) {
-                error!("heap", "chunk release failed ({reason}) — leaking {frames_n} frames");
+                error!(
+                    "heap",
+                    "chunk release failed ({reason}) — leaking {frames_n} frames"
+                );
             }
             released += 1;
         });

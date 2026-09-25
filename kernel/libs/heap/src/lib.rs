@@ -229,7 +229,9 @@ impl<P: ChunkProvider> Heap<P> {
                 debug_assert_eq!((*ch).magic, CHUNK_MAGIC);
                 ((*ch).chunk_bytes as usize, (*ch).next as usize)
             };
-            let Some(ptr) = NonNull::new(cur as *mut u8) else { break };
+            let Some(ptr) = NonNull::new(cur as *mut u8) else {
+                break;
+            };
             f(ptr, bytes);
             cur = next;
         }

@@ -324,7 +324,9 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
     // SAFETY: caller contract; table writes go into frames we own; IF=0.
     unsafe {
         for i in 0..handoff::region_count() {
-            let Some(r) = handoff::region(i) else { continue };
+            let Some(r) = handoff::region(i) else {
+                continue;
+            };
             let base = r.base;
             let size = r.pages * PAGE;
             if size == 0 || base > u64::from(u32::MAX) {
@@ -398,7 +400,12 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
         // alias arithmetic wraps (phys > 2 GiB) exactly as the MMIO
         // branch does.
         let i2m = crate::drivers::intc::IOAPIC_PHYS / PAGE_2M * PAGE_2M;
-        map_2m(pml4, i2m.wrapping_add(KERNEL_OFFSET), i2m, flags_for(Perm::Rw));
+        map_2m(
+            pml4,
+            i2m.wrapping_add(KERNEL_OFFSET),
+            i2m,
+            flags_for(Perm::Rw),
+        );
 
         // Image window, kernel-view alias only, per-section permissions.
         let win_start = image.base / PAGE * PAGE;
@@ -634,14 +641,13 @@ pub unsafe fn apply_base_relocations(delta: u64) -> Result<(usize, usize), &'sta
                 let page_rva = read_u32(reloc_rva + off).ok_or("truncated reloc block")? as u64;
                 let block_size =
                     read_u32(reloc_rva + off + 4).ok_or("truncated reloc block")? as u64;
-                if block_size < 8 || !block_size.is_multiple_of(2)
-                    || off + block_size > reloc_size
+                if block_size < 8 || !block_size.is_multiple_of(2) || off + block_size > reloc_size
                 {
                     return Err("malformed relocation block");
                 }
                 for i in 0..(block_size - 8) / 2 {
-                    let ent = read_u16(reloc_rva + off + 8 + i * 2)
-                        .ok_or("truncated reloc entry")?;
+                    let ent =
+                        read_u16(reloc_rva + off + 8 + i * 2).ok_or("truncated reloc entry")?;
                     let slot_rva = page_rva + u64::from(ent & 0x0FFF);
                     match ent >> 12 {
                         0 => {} // IMAGE_REL_BASED_ABSOLUTE: padding, skip.
