@@ -18,7 +18,7 @@ automated tests that boot the real system in QEMU.
 | **Milestone 1 — First boot** (UEFI → kernel → verified diagnostics → safe halt) | ✅ **complete** | `tools/test_m1.py` (8/8 in-guest self-tests, clean QEMU exit) |
 | **Milestone 2 — Kernel foundations** (exceptions, timers, frames, paging, heap, locks, boot split) | ✅ **complete** — 2.1 (TSS/IST, exception recovery) · 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) · 2.3 (frame allocator, ADR-0007) · 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) · 2.5 (kernel heap, ADR-0009) · 2.6 (spinlocks, irqsave critical sections, ADR-0010) · 2.7 (boot split: ExitBootServices → kernel proper, reclaimed timer chain, farewell-island shutdown, ADR-0011) | `tools/test_m2.py` (21/21) + 100/100-boot stability loop + host suites (arena-heap 12/12, arena-sync 6/6) |
 | **Milestone 3 — Multitasking** (threads, scheduler, processes, capabilities) | ✅ **complete** — 3.1 (kernel threads + context switch: callee-saved frame, no-FPU invariant build-enforced, canaried 32 KiB stacks, exact-accounting reap, ADR-0012) · 3.2 (timer-driven preemption: tick hook, nested cooperative switch, per-CPU run queues, exact-RR proof on yield-free threads, ADR-0013) · 3.3 (ring-3 threads, syscall/sysret boundary, TSS RSP0, SMEP/SMAP armed and fault-tested; processes = address-space objects: private PML4, cloned kernel half, exact teardown, ADR-0014) · 3.4 (capability spaces: per-process slot tables, attenuation-only delegation, right-gated destroy, gated `process_root`/`map_memory` invokes, ADR-0015) | `tools/test_m3.py` (13/13) + m1/m2 regressions green + 100/100-boot stability + release [v0.3.0](https://github.com/zeromike12/ArenaOS/releases/tag/v0.3.0) |
-| Milestone 4 — Userspace & first program | 🔨 in progress — 4.1 (executable format + image loader: ELF64 container with ArenaOS strict-subset semantics — ET_EXEC-only validator, W^X segments, zero-filled NOLOAD bss, exact-accounting load into a process space; test image is a genuine cargo/rust-lld artifact in `userspace/payload`, ADR-0016) + 4.2 (syscall ABI v1: six argument registers, typed i64 status codes, frozen call registry — `debug_write`/`thread_exit` — with the marshalling and callee-saved promises proven from ring 3, ADR-0017) + 4.3 (first user process: the real rust-lld image runs at ring 3 in its own address space — writes its pinned message via debug_write byte-identical to the file, stamps bss from ring 3, exits via thread_exit with META's own success code) + 4.4 (IPC v1: endpoint rendezvous with blocking call/reply, badged merged notifications, capability transfer in messages — an echo-server demo across two real processes, ADR-0018) + 4.5 (spawn protocol v1: SYS_SPAWN from image capabilities with explicit attenuating inheritance, Process handles, exit-badge notifications — a ring-3 supervisor spawns the real image twice and the restart is visible as its console message appearing twice, ADR-0019) done | `tools/test_m4.py` (8/8) + m1/m2/m3 regressions green |
+| Milestone 4 — Userspace & first program | ✅ complete — 4.1 (executable format + image loader: ELF64 container with ArenaOS strict-subset semantics — ET_EXEC-only validator, W^X segments, zero-filled NOLOAD bss, exact-accounting load into a process space; test image is a genuine cargo/rust-lld artifact in `userspace/payload`, ADR-0016) + 4.2 (syscall ABI v1: six argument registers, typed i64 status codes, frozen call registry — `debug_write`/`thread_exit` — with the marshalling and callee-saved promises proven from ring 3, ADR-0017) + 4.3 (first user process: the real rust-lld image runs at ring 3 in its own address space — writes its pinned message via debug_write byte-identical to the file, stamps bss from ring 3, exits via thread_exit with META's own success code) + 4.4 (IPC v1: endpoint rendezvous with blocking call/reply, badged merged notifications, capability transfer in messages — an echo-server demo across two real processes, ADR-0018) + 4.5 (spawn protocol v1: SYS_SPAWN from image capabilities with explicit attenuating inheritance, Process handles, exit-badge notifications — a ring-3 supervisor spawns the real image twice and the restart is visible as its console message appearing twice, ADR-0019) + 4.6 (minimal shell: interrupt-driven console input with a kernel line discipline, a real second userspace image spawned at boot as the initial service, builtins help/ps/echo/spawn/shutdown, the machine halt gated on a Power capability — every test boot now ends by typing `shutdown` into the running shell, ADR-0020) done | `tools/test_m4.py` (9/9) + `tools/test_m4_shell.py` (interactive session, 26 checks) + m1/m2/m3 regressions green |
 | Phases 5–10 — Storage, drivers, net, userspace maturity, graphics, desktop | ⬜ | `docs/ROADMAP.md` |
 
 ## Quickstart (this sandbox)
@@ -39,10 +39,12 @@ unmodified — see `docs/DEV-ENV.md` for resolution order and overrides.
 Every completed milestone ships as a GitHub release: a prebuilt boot
 image plus the exact EDK2 firmware pair it was tested against. See
 **[docs/RUNNING.md](docs/RUNNING.md)** — one `cp`, one
-`qemu-system-x86_64` command, serial is the console, and the VM shuts
-itself down cleanly when the milestone suite finishes.
+`qemu-system-x86_64` command, serial is the console in BOTH directions:
+after the boot-time test suites pass, the kernel spawns the shell and
+the machine waits for you at the `arena> ` prompt — type `help`, and
+`shutdown` when you are done.
 
-## What just booted (current: Milestone 4 in progress)
+## What just booted (current: Milestone 4 complete — the system boots into an interactive shell)
 
 QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It brings
 up serial, GDT/IDT/TSS, the 16550 UART, and the real UEFI memory map;
@@ -90,11 +92,26 @@ field against the ArenaOS strict ELF subset, 25 mutation classes of it
 are refused, and a real process loads it — 3 pages, 7 frames, PTEs
 W^X-exact, entry stub + META manifest + 4 KiB of zeroed NOLOAD bss
 read back under the *target's* CR3 through STAC-bracketed accesses,
-double-load refused at zero cost, teardown exact (`m4: RESULT PASS
-(3/3)`). Finally the machine shuts down through a farewell island that
-hands control back to firmware's `ResetSystem` in firmware's own address
-space. Every claim above is a machine-checked serial marker; nothing is
-decorative.
+double-load refused at zero cost, teardown exact. The syscall ABI v1
+(ADR-0017) then proves six-register marshalling and typed status codes
+from ring 3; the payload image RUNS as the first user process (M4.3);
+IPC v1 (ADR-0018) lands endpoints, blocking call/reply, badged
+notifications and capability transfer with an echo-server demo across
+two processes; the spawn protocol (ADR-0019) lets a ring-3 supervisor
+create processes from image capabilities with explicit attenuating
+inheritance and restart a worker through its exit badge; and the
+console learns to LISTEN (ADR-0020): COM1 RX on IRQ4/vector 33, a
+kernel line discipline, and a real second userspace image — the shell —
+spawned at boot as the initial service (`m4: RESULT PASS (9/9)`).
+
+The machine no longer shuts itself down: it ends the suites by handing
+the console to the shell and waits at the `arena> ` prompt. It stops
+only when a process holding the Power capability asks — `shutdown` in
+the shell routes through the farewell island that hands control back to
+firmware's `ResetSystem` in firmware's own address space (the test
+harnesses type `shutdown` for you, marker-paced, so every automated
+boot proves the whole chain). Every claim above is a machine-checked
+serial marker; nothing is decorative.
 
 ## Documentation map
 

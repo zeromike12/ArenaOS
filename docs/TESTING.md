@@ -72,6 +72,18 @@ harnesses run against the same image in one boot: the kernel executes every
 milestone suite in order, so M1 markers prove the older guarantees still hold
 while M2 code is present.
 
+Since M4.6 (ADR-0020) a healthy boot no longer halts by itself — it ends at
+the shell — so the pipeline also FEEDS the console: serial runs through a
+stdio chardev (no monitor interleaving) and a marker-paced feeder thread
+types `shutdown` when the shell's first `arena> ` prompt appears. Every
+milestone boot thereby proves the full console chain: UART RX IRQ → kernel
+line discipline → blocking `SYS_CONSOLE_READ` → shell dispatch → Power-gated
+`SYS_SHUTDOWN` → `ResetSystem`. `tools/test_m4_shell.py` overrides the feed
+script to drive a full interactive session (help/echo/ps/spawn/unknown/
+shutdown) and asserts every response, including the spawned payload's pinned
+message appearing mid-session. `tools/stability_loop.sh` feeds the same way
+from bash (marker-paced, never sleep-based).
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

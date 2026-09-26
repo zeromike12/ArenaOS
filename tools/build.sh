@@ -34,6 +34,17 @@ if [[ ! -f "$PAYLOAD_ELF" ]]; then
 fi
 echo "payload image: ${PAYLOAD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PAYLOAD_ELF") bytes)"
 
+# M4.6 (ADR-0020): the minimal shell is embedded the same way —
+# spawn-registry image 1, spawned at boot as the initial service.
+echo "== building userspace shell (userspace/shell, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/shell" && cargo build --release )
+SHELL_ELF="$REPO_ROOT/userspace/shell/target/x86_64-unknown-none/release/arena-shell"
+if [[ ! -f "$SHELL_ELF" ]]; then
+    echo "error: shell ELF not produced at $SHELL_ELF" >&2
+    exit 1
+fi
+echo "shell image: ${SHELL_ELF#"$REPO_ROOT"/} ($(stat -c%s "$SHELL_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

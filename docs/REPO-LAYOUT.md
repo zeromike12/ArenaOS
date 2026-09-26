@@ -54,8 +54,11 @@ Layout rules:
 - **`userspace/`** is live since M4.1 with its first crate,
   `userspace/payload` (the ADR-0016 test image: a static ELF64 built for
   `x86_64-unknown-none` with its own linker script, embedded into the
-  kernel by `tools/build.sh`). Servers, the shell, and apps join here in
-  M4.4+.
+  kernel by `tools/build.sh`). Since M4.6 it holds a second crate,
+  `userspace/shell` (the minimal shell, ADR-0020: same toolchain
+  contract, its own address window at 0x400000, embedded as
+  spawn-registry image 1 and spawned at boot as the initial service).
+  Servers and apps join here in later phases.
 - Future top-level directories, added only when their phase begins:
   `libs/` (shared userspace libraries), `drivers/` (userspace driver
   servers, Phase 6). Not created empty — directories appear with code.

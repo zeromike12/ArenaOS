@@ -120,6 +120,46 @@ extern "C" fn arena_timer_handler() {
     }
 }
 
+/// Console RX hook (M4.6, ADR-0020): called by the vector-33 handler
+/// *after* EOI, in interrupt context (IF=0 via the interrupt gate,
+/// caller-saved registers saved by the stub). `console::init` installs
+/// the UART drain; unset until then — with no hook the serial stub is
+/// an absorb-and-EOI stub like the ignore stub. Same fn-pointer-in-
+/// atomic pattern as `TIMER_HOOK`.
+static SERIAL_HOOK: AtomicU64 = AtomicU64::new(0);
+
+/// Install (or remove, with `None`) the console RX hook. Call with IF=0.
+pub fn set_serial_hook(hook: Option<extern "C" fn()>) {
+    SERIAL_HOOK.store(hook.map_or(0, |f| f as usize as u64), Ordering::Relaxed);
+}
+
+/// Rust half of `arena_irq_serial_stub` (vector 33 = COM1 RX,
+/// `drivers::intc::SERIAL_RX_VECTOR`; the literal 33 lives at the
+/// `SERIAL_RX_VECTOR` const below because arch code does not import
+/// driver modules).
+extern "C" fn arena_serial_handler() {
+    // Dual-controller EOI BEFORE the hook, same discipline and rationale
+    // as the timer handler: the hook may wake a thread, and the
+    // controller must not be left with a vector in service across any
+    // scheduler work.
+    // SAFETY: fixed ports; LAPIC_EOI_ADDR contract as in the timer half.
+    unsafe {
+        super::outb(0xA0, 0x20);
+        super::outb(0x20, 0x20);
+        let eoi = LAPIC_EOI_ADDR.load(Ordering::Relaxed);
+        (eoi as *mut u32).write_volatile(0);
+    }
+    let hook = SERIAL_HOOK.load(Ordering::Relaxed);
+    if hook != 0 {
+        // SAFETY: only set_serial_hook writes this slot, always with a
+        // real `extern "C" fn()` (or 0); the hook upholds the
+        // interrupt-context contract (ADR-0020: drain, feed, maybe
+        // wake — never switch inside the ISR).
+        let f = unsafe { core::mem::transmute::<u64, extern "C" fn()>(hook) };
+        f();
+    }
+}
+
 global_asm!(
     // ---- exception stubs: 32 slots at a fixed 16-byte stride -------------
     // Each stub body is at most 9 bytes (push imm8 ×2 = 4, jmp rel32 = 5),
@@ -242,6 +282,43 @@ global_asm!(
     "pop rax",
     "pop rbp",
     "iretq",
+    // ---- serial RX stub (vector 33, M4.6 / ADR-0020) ----------------------
+    // Same frame discipline as the timer stub: the interrupted thread may
+    // hold live values in any caller-saved register (the console IRQ can
+    // land anywhere, ring 0 or ring 3), RBP frames the stub, RSP is
+    // 16-aligned before the call. The Rust half EOIs both controllers
+    // *first* (the handler feeds the console line discipline, which may
+    // wake a blocked reader — enqueue-only, but the EOI-before-work rule
+    // of ADR-0013 stays unbroken), then calls the installed hook.
+    ".p2align 4",
+    ".globl arena_irq_serial_stub",
+    "arena_irq_serial_stub:",
+    "push rbp",
+    "mov rbp, rsp",
+    "push rax",
+    "push rcx",
+    "push rdx",
+    "push rsi",
+    "push rdi",
+    "push r8",
+    "push r9",
+    "push r10",
+    "push r11",
+    "and rsp, -16",
+    "sub rsp, 32",
+    "call {serial_handler}",
+    "lea rsp, [rbp - 72]",
+    "pop r11",
+    "pop r10",
+    "pop r9",
+    "pop r8",
+    "pop rdi",
+    "pop rsi",
+    "pop rdx",
+    "pop rcx",
+    "pop rax",
+    "pop rbp",
+    "iretq",
     // ---- common exception path --------------------------------------------
     // Stack here: [vector][error_code][RIP][CS][RFLAGS][RSP][SS]
     // Hand (vector, error_code, &mut frame) to Rust in rcx/rdx/r8 (win64
@@ -289,6 +366,7 @@ global_asm!(
     lapic_eoi = sym LAPIC_EOI_ADDR,
     handler = sym arena_exception_handler,
     timer_handler = sym arena_timer_handler,
+    serial_handler = sym arena_serial_handler,
 );
 
 /// Hardware-pushed interrupt frame (SDM Vol. 3 §6.12.1, Figure 6-9): the
@@ -470,15 +548,21 @@ static IDT_DESCRIPTOR: SyncCell<IdtDescriptor> = SyncCell::new(IdtDescriptor { l
 unsafe extern "C" {
     /// First of the 32 per-vector exception stubs, EXC_STUB_STRIDE apart.
     static arena_exc_stubs: u8;
-    /// Shared absorb-and-EOI stub for vectors 33..255.
+    /// Shared absorb-and-EOI stub for vectors 34..255.
     static arena_irq_ignore_stub: u8;
     /// Full-frame timer stub for vector 32 (M3.2, ADR-0013).
     static arena_irq_timer_stub: u8;
+    /// Full-frame serial RX stub for vector 33 (M4.6, ADR-0020).
+    static arena_irq_serial_stub: u8;
 }
 
 /// Vector carrying the PIT tick (`drivers::intc::PIT_VECTOR`; literal
 /// here — arch does not import driver modules).
 const PIT_TICK_VECTOR: usize = 32;
+
+/// Vector carrying the COM1 RX interrupt (`drivers::intc::
+/// SERIAL_RX_VECTOR`; literal here for the same reason).
+const SERIAL_RX_VECTOR: usize = 33;
 
 /// Stride between consecutive exception stubs (asm guarantees `.p2align 4`
 /// and bodies ≤ 9 bytes, so each stub fits its 16-byte slot).
@@ -497,6 +581,10 @@ fn irq_stub_addr() -> u64 {
 
 fn timer_stub_addr() -> u64 {
     core::ptr::addr_of!(arena_irq_timer_stub) as u64
+}
+
+fn serial_stub_addr() -> u64 {
+    core::ptr::addr_of!(arena_irq_serial_stub) as u64
 }
 
 /// IST index per vector (SDM Vol. 3 §6.14.5): the exceptions that must
@@ -537,6 +625,8 @@ pub unsafe fn init() {
                 exc_stub_addr(vector)
             } else if vector == PIT_TICK_VECTOR {
                 timer_stub_addr()
+            } else if vector == SERIAL_RX_VECTOR {
+                serial_stub_addr() // M4.6: console RX (ADR-0020)
             } else {
                 irq_stub_addr()
             };
@@ -633,6 +723,8 @@ pub fn audit_gates() -> (usize, usize, usize) {
             exc_stub_addr(v)
         } else if v == PIT_TICK_VECTOR {
             timer_stub_addr() // M3.2: the tick gets the hook-capable stub
+        } else if v == SERIAL_RX_VECTOR {
+            serial_stub_addr() // M4.6: console RX gets its own stub
         } else {
             irq_stub_addr()
         };

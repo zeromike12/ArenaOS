@@ -51,6 +51,13 @@ const REGWIN: u64 = 0x10;
 /// M3+ reads the MADT override table instead of hardcoding.
 pub const PIT_IOAPIC_PIN: u8 = 2;
 
+/// Vector carrying COM1's receive interrupt (M4.6, ADR-0020).
+pub const SERIAL_RX_VECTOR: u8 = 33;
+
+/// IOAPIC pin for ISA IRQ4 (COM1). Unlike IRQ0 (which QEMU's IOAPIC
+/// remaps to pin 2), IRQ4 follows the PC convention: pin = IRQ number.
+pub const SERIAL_IOAPIC_PIN: u8 = 4;
+
 /// LAPIC spurious-vector register (MMIO offset 0xF0); bit 8 is the
 /// software-enable flag.
 const LAPIC_SVR: u64 = 0xF0;

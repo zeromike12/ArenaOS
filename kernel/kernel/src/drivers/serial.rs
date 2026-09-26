@@ -30,7 +30,11 @@ const SCRATCH: u16 = 7; // Scratch Register (datasheet: general purpose R/W)
 const LCR_DLAB: u8 = 1 << 7; // Divisor Latch Access Bit
 const LCR_8N1: u8 = 0x03; // 8 data bits, no parity, 1 stop bit
 
+// Interrupt Enable Register bits (PC16550D §IER)
+const IER_ERBFI: u8 = 1 << 0; // Enable Received-Data-Available interrupt
+
 // Line Status Register bits (PC16550D §LSR)
+const LSR_DATA_READY: u8 = 1 << 0; // Receiver holds a byte (RBR valid)
 const LSR_THR_EMPTY: u8 = 1 << 5; // Transmitter Holding Register is empty
 
 // Modem Control Register bits (PC16550D §MCR)
@@ -88,6 +92,40 @@ pub unsafe fn putc(c: u8) {
         }
         outb(COM1_BASE + RBR_THR_DLL, c);
     }
+}
+
+/// Enable the receive-data-available interrupt (IER.ERBFI). Called once,
+/// after ExitBootServices, with the IOAPIC route and the IDT vector
+/// already installed (ADR-0020 — UEFI forbids interrupt-driven models
+/// before EBS, which is why [`init`] leaves interrupts off). Bytes that
+/// arrive while the CPU masks interrupts wait in the 16550 FIFO; the
+/// IOAPIC latches the edge, so the first `sti` delivers them.
+///
+/// # Safety
+/// Port I/O contract as [`init`]; caller owns the RX path from here on.
+pub unsafe fn enable_rx_interrupt() {
+    // SAFETY: caller contract.
+    unsafe { outb(COM1_BASE + IER_DLM, IER_ERBFI) };
+}
+
+/// True when the receiver holds a byte (LSR.DR, PC16550D §LSR bit 0).
+///
+/// # Safety
+/// Port I/O contract as [`init`].
+pub unsafe fn rx_ready() -> bool {
+    // SAFETY: caller contract.
+    unsafe { inb(COM1_BASE + LSR) & LSR_DATA_READY != 0 }
+}
+
+/// Read one received byte from the RBR. Caller must have observed
+/// [`rx_ready`] (a blind RBR read on an empty receiver is undefined by
+/// the datasheet).
+///
+/// # Safety
+/// Port I/O contract as [`init`].
+pub unsafe fn rx_byte() -> u8 {
+    // SAFETY: caller contract.
+    unsafe { inb(COM1_BASE + RBR_THR_DLL) }
 }
 
 /// Hardware self-test: scratch-register round-trip + loopback round-trip.

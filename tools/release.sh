@@ -38,6 +38,8 @@ echo "== release $TAG: gating on the full test suite =="
 python3 tools/test_m1.py
 python3 tools/test_m2.py
 python3 tools/test_m3.py
+python3 tools/test_m4.py
+python3 tools/test_m4_shell.py
 
 echo "== release $TAG: staging assets =="
 REL="build/release"

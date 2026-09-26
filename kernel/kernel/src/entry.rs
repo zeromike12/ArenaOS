@@ -239,11 +239,26 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         let c1 = crate::drivers::pit::latch_count_ch0();
         crate::timekeeping::busy_wait_us(2_000);
         let c2 = crate::drivers::pit::latch_count_ch0();
+        // COM1 RX (M4.6, ADR-0020): the console's input half, reclaimed
+        // in the same shape as the PIT — route ISA IRQ4 (IOAPIC pin 4)
+        // to our vector, then unmask the UART's receive interrupt.
+        // Bytes typed while IF=0 wait in the 16550 FIFO with the edge
+        // latched in the IOAPIC; the idle loop's first `sti` delivers
+        // them. The hook (console::init) drains RBR → line discipline.
+        intc::route_pin_to_vector(ioapic_va, intc::SERIAL_IOAPIC_PIN, intc::SERIAL_RX_VECTOR);
+        crate::console::init();
+        let serial_rte = intc::ioapic_read(ioapic_va, intc::rte_lo_index(intc::SERIAL_IOAPIC_PIN));
         info!(
             "kernel",
             "timer chain reclaimed: pit {KERNEL_TICK_HZ} Hz (ch0 {c1} -> {c2} over 2ms); ioapic pin {} rte {rte_lo:#x}/{rte_hi:#x} -> {rte_now:#x}; hpet gen_conf {hpet_conf0:#x} -> {hpet_conf1:#x}; lapic svr={svr:#x}",
             intc::PIT_IOAPIC_PIN,
             KERNEL_TICK_HZ = crate::timekeeping::KERNEL_TICK_HZ
+        );
+        info!(
+            "kernel",
+            "console input armed: com1 rx -> ioapic pin {} -> vector {} (rte {serial_rte:#x}), line discipline live",
+            intc::SERIAL_IOAPIC_PIN,
+            intc::SERIAL_RX_VECTOR
         );
     }
 
@@ -324,9 +339,58 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     info!(
         "kernel",
-        "milestone 4 step 4.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1 + spawn protocol) — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 4 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1 + spawn protocol + minimal shell) — spawning the shell"
     );
-    crate::halt::reset_shutdown()
+
+    // --- M4.6: the hand-off (ADR-0020) -----------------------------------
+    // The shell is the initial service: spawned through the M4.5
+    // protocol's kernel-internal entry point (image 1, no parent), with
+    // kernel-literal grants in slot order — Power (WRITE, so `shutdown`
+    // is an authority the shell HOLDS), Image 0 (READ, so `spawn` can
+    // start the test payload), and its own notification (READ|WRITE,
+    // the exit-badge channel for its children). From here the machine
+    // stops only through the shell's Power-gated SYS_SHUTDOWN, a panic
+    // path, or the harness killing QEMU — the boot sequence no longer
+    // halts on its own.
+    let shell_nid = match crate::ipc::create_notification() {
+        Ok(nid) => nid,
+        Err(_) => crate::halt::halt_machine("shell: notification table full"),
+    };
+    let shell_grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Power,
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Image { img_id: 0 },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: shell_nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    match crate::spawn::spawn_init(1, &shell_grants, None) {
+        Ok(pid) => info!(
+            "kernel",
+            "shell spawned: pid {pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW) — the console is live; type 'help'"
+        ),
+        Err(reason) => crate::halt::halt_machine(reason),
+    }
+
+    // The bootstrap thread becomes the idle thread: it stays runnable
+    // forever, which keeps block_current's no-runnable-thread deadlock
+    // halt (ADR-0018) unreachable while the shell parks on console
+    // input, and gives every wake (console RX, tick) somewhere to
+    // return. Between wakes it halts the CPU with IF=1 — interrupts
+    // must flow now: the UART RX path IS the input device.
+    loop {
+        crate::sched::yield_now();
+        // SAFETY: ring 0; `sti; hlt` is the canonical idle pair — any
+        // pending or arriving interrupt resumes the loop right here,
+        // and the interrupt gate masks IF again for the handler.
+        unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+    }
 }
 
 /// We are running in the kernel view: RIP and RSP are higher-half, CR3 is

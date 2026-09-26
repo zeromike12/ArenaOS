@@ -212,6 +212,29 @@ pub fn live_count() -> usize {
 }
 
 /// Total processes created since boot.
+/// Snapshot of the live process table for `SYS_PROC_LIST` (ADR-0020):
+/// fills `out` with `(pid, live_thread_count)` pairs in table order and
+/// returns how many pairs were written (at most `out.len()`).
+pub fn list_live(out: &mut [(u64, usize)]) -> usize {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0; the nested
+        // proc_live_threads bracket is re-entrant (save/restore flags).
+        unsafe {
+            let mut n = 0;
+            for slot in (*PROCESSES.get()).iter() {
+                if n >= out.len() {
+                    break;
+                }
+                if let Some(p) = slot {
+                    out[n] = (p.id, crate::sched::proc_live_threads(p.id));
+                    n += 1;
+                }
+            }
+            n
+        }
+    })
+}
+
 pub fn created_total() -> u64 {
     CREATED_TOTAL.load(Ordering::Relaxed)
 }

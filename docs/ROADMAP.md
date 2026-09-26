@@ -109,7 +109,7 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       100/100 clean boots (tools/stability_loop.sh); release artifacts
       (tools/release.sh, docs/RUNNING.md) shipped as GitHub release.
 
-## Milestone 3 — Multitasking 🔨
+## Milestone 3 — Multitasking ✅
 
 - [x] 3.1 **Kernel threads + context switch** (assembly fast path; full state:
       GPRs, FPU/SSE state lazily or XSAVE — ADR at the time).
@@ -198,7 +198,7 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       processes, ring 3, capability spaces: the object model M4 puts
       userspace on top of.
 
-## Milestone 4 — Userspace & first program 🎯 (assignment's "first userspace program")
+## Milestone 4 — Userspace & first program ✅ (assignment's "first userspace program")
 
 - [x] 4.1 **Executable format decision + loader** (ADR due: ELF container with
       our own semantics vs. bespoke format — container pragmatism, semantics
@@ -316,8 +316,35 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       counters exact (9 dispatches, 2 notifies, 2 parked waits),
       teardown frame-exact across three address spaces. m4 8/8,
       m1/m2/m3 regressions green.
-- 4.6 **Minimal shell**: line input from console service, spawn builtins +
+- [x] 4.6 **Minimal shell**: line input from console service, spawn builtins +
       images, `help/ps/echo/shutdown`. First "real" userspace surface.
+      DONE (ADR-0020): COM1 RX interrupt-driven through IOAPIC pin 4 →
+      vector 33 (the timer stub's frame discipline, EOI-before-work);
+      a kernel line discipline (echo, backspace, CR/LF commit, 4-line
+      queue that drops oldest, one-reader reservation) behind three
+      frozen registry slots — 13 SYS_CONSOLE_READ (blocking), 14
+      SYS_PROC_LIST ((pid, threads) pairs), 15 SYS_SHUTDOWN (gated on a
+      new CapObj::Power: the authority to halt the machine is an object
+      a process HOLDS, never a public verb). The shell is the second
+      real userspace image (userspace/shell: cargo/rust-lld ET_EXEC at
+      0x400000/0x410000, embedded as spawn-registry image 1), spawned
+      at boot by spawn_init — the M4.5 creation sequence without a
+      parent — with Power/Image0/Notification grants; the bootstrap
+      thread becomes the idle thread (yield + sti;hlt). Builtins: help,
+      ps, echo, spawn (SYS_SPAWN image 0 with an empty inheritance spec
+      + exit-badge wait — the payload's message lands mid-session),
+      shutdown. Bring-up caught one deep bug: the farewell island is
+      identity-mapped only in the kernel view, so reset_shutdown called
+      under a PROCESS CR3 (the shell's syscall, or any panic on a
+      process thread) fetch-faulted at the island's phys — the island
+      path now normalizes to the kernel view first. Harness: serial
+      runs through a stdio chardev and every boot is marker-paced-fed
+      `shutdown` at the shell's first prompt, so all seven test scripts
+      and the stability loop prove the full console chain (UART RX IRQ
+      → line discipline → blocking read → shell → Power-gated shutdown
+      → ResetSystem) on every run; test_m4_shell.py drives the whole
+      interactive session (26 checks). m4 9/9, m1/m2/m3 regressions
+      green.
 
 ## Phase 5 — Storage (outline)
 

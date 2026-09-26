@@ -79,6 +79,15 @@ const P_MEMSZ: usize = 40;
 pub static TEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/payload/target/x86_64-unknown-none/release/arena-payload");
 
+/// The minimal shell (M4.6, ADR-0020): spawn-registry image 1, built
+/// by `tools/build.sh` from `userspace/shell` with the same
+/// strict-subset contract as the payload — a genuine cargo/rust-lld
+/// ET_EXEC artifact at fixed addresses (0x400000 text / 0x410000
+/// data+bss), embedded by `include_bytes!` and spawned by the boot
+/// sequence as the initial service.
+pub static SHELL_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/shell/target/x86_64-unknown-none/release/arena-shell");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

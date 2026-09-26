@@ -62,9 +62,13 @@ qemu-system-x86_64 \
     -display none -serial mon:stdio -no-reboot
 ```
 
-Serial is the console: everything ArenaOS logs goes there. The VM
-**shuts itself down** when the milestone test suite finishes (typically
-a few seconds) — that is the expected, clean ending, not a crash.
+Serial is the console — in **both directions**. Everything ArenaOS logs
+goes there, and since Milestone 4.6 (ADR-0020) your keystrokes come
+back in through the same port: after the boot-time test suites pass (a
+few seconds), the kernel spawns the **shell** and the machine waits for
+you at the `arena> ` prompt. Type `help`. The VM stops only when you
+type `shutdown` (or kill QEMU with `Ctrl-A X`) — a boot that ends by
+itself would mean the shell never came up.
 
 ### Using your distro's OVMF instead
 
@@ -79,7 +83,22 @@ files instead, e.g. on Debian/Ubuntu:
 
 (copy `OVMF_VARS.fd` to a writable location first, as above).
 
-## What a healthy boot looks like (current: Milestone 4 in progress)
+## The shell
+
+The initial service (a real userspace image, spawned through the M4.5
+protocol with kernel-granted capabilities). What it understands:
+
+| Command | What happens |
+|---|---|
+| `help` | lists the builtins |
+| `ps` | live processes as `(pid, threads)` pairs — you will see the shell itself |
+| `echo TEXT` | prints TEXT (the kernel line discipline echoes as you type; backspace works) |
+| `spawn` | `SYS_SPAWN`s registry image 0 — the untouched M4.3 test payload — as a child process: its pinned message lands mid-session, then its exit badge comes back through the shell's notification |
+| `shutdown` | the Power-gated halt: the kernel logs the requesting pid and hands the machine to firmware's `ResetSystem` |
+
+Anything else answers `unknown command: '…' — try 'help'`.
+
+## What a healthy boot looks like (current: Milestone 4 complete)
 
 The serial output is a boot stage log followed by kernel log lines. The
 machine-checkable landmarks, in order:
@@ -93,17 +112,29 @@ machine-checkable landmarks, in order:
 6. 13 `m3:test:<name>: PASS` lines — kernel threads, preemption, ring 3
    + syscalls, processes as address spaces, capability spaces
    (ADR-0012…0015) — ending with `m3: RESULT PASS (13/13)`
-7. 8 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
+7. 9 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
    corpus, the image loader (ADR-0016), the syscall ABI v1 proven from
    ring 3 (ADR-0017), the first user process (its
    `ARENAOS-M43-FIRST-USER-PROCESS…` message on the console is the
    payload's own debug_write), the IPC v1 echo-server demo — two
-   processes rendezvousing over an endpoint (ADR-0018) — and the spawn
-   protocol's supervisor restart demo: the same image spawned twice
+   processes rendezvousing over an endpoint (ADR-0018), the spawn
+   protocol's supervisor restart demo — the same image spawned twice
    through SYS_SPAWN, its message on the console once per life
-   (ADR-0019) — ending with `m4: RESULT PASS (8/8)`
-8. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
-9. QEMU exits on its own with status 0
+   (ADR-0019) — and the console input service: the line discipline
+   driven through the RX ISR's own entry point, with a ring-3 reader
+   parked and woken by a fed line (ADR-0020), ending with
+   `m4: RESULT PASS (9/9)`
+8. `console input armed: com1 rx -> ioapic pin 4 -> vector 33` — the
+   input half of the console (right after the timer-chain line, step 4)
+9. `milestone 4 complete … spawning the shell`, then
+   `shell spawned: pid …` — the hand-off (ADR-0020)
+10. `ArenaOS shell v0.4 …` and the `arena> ` prompt — the machine is
+    now an interactive system; type into it (see "The shell" above)
+11. After `shutdown`: `shutdown requested by pid … through its Power
+    cap` and `halting via UEFI ResetSystem(shutdown)` — the clean-halt
+    declaration (the automated harnesses type `shutdown` for you,
+    marker-paced)
+12. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to
@@ -112,12 +143,14 @@ be a diagnostic artifact, not decoration.
 ## Useful variations
 
 ```sh
-# Keep the machine alive after the suite (drop -no-reboot effect on
-# shutdown): there is nothing to interact with yet — milestones are
-# headless test boots by design (see docs/ROADMAP.md).
-
-# Log serial to a file instead of the terminal:
+# Log serial to a file INSTEAD of the terminal — output only: the shell
+# gets no input this way and the machine stays up until you kill QEMU
+# (the automated suites feed it from a pipe; see tools/mtest.py):
     -serial file:serial.log
+
+# Log to a file AND keep typing (the monitor multiplex also lands in
+# the log — fine for humans, the harnesses use a clean chardev instead):
+    -serial mon:stdio | tee serial.log
 
 # Interrupt/CPU-reset trace for debugging (QEMU-side):
     -d int,cpu_reset -D qemu-int.log

@@ -6,6 +6,19 @@ kernel + ESP image, boot it in QEMU/EDK2 headless with fresh NVRAM, capture
 serial, assert the milestone's marker grammar, and assert the VM terminated
 by itself through the kernel's declared clean-halt path.
 
+Since M4.6 (ADR-0020) a healthy boot no longer halts by itself: after the
+suites the kernel spawns the shell and the machine lives until someone
+types `shutdown`. So the serial runs through a stdio chardev (input and
+output on one pipe pair, no monitor interleaving) and every boot gets a
+marker-paced feeder thread: the default script sends `shutdown` when the
+shell's first `arena>` prompt appears — which means EVERY milestone boot
+now also proves the whole console chain (UART RX IRQ -> line discipline ->
+blocking SYS_CONSOLE_READ -> shell -> Power-gated SYS_SHUTDOWN ->
+ResetSystem). test_m4_shell.py overrides the script to drive a full
+interactive session. A feed item is (marker bytes, occurrence count,
+payload bytes): the payload is written once the marker has appeared that
+many times in the captured serial.
+
 Verdict logic (three distinct failure modes):
   * timeout            -> kernel hung
   * nonzero QEMU exit  -> kernel crashed / reset loop
@@ -18,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -41,7 +55,14 @@ def build(label: str) -> Path:
     return esp
 
 
-def run_qemu(label: str, esp: Path) -> tuple[int, str, float]:
+# The default feed: when the shell prompts for the first time, shut the
+# machine down (ADR-0020 — boots end at the shell, never by themselves).
+DEFAULT_FEED: list[tuple[bytes, int, bytes]] = [(b"arena>", 1, b"shutdown\r")]
+
+
+def run_qemu(label: str, esp: Path,
+             feed: list[tuple[bytes, int, bytes]] | None = None,
+             ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     vars_img = bdir / "ovmf-vars.img"
     shutil.copyfile(arena_env.ovmf_vars_template(), vars_img)  # fresh NVRAM every run
@@ -60,16 +81,54 @@ def run_qemu(label: str, esp: Path) -> tuple[int, str, float]:
             "-drive", f"if=pflash,format=raw,file={vars_img}",
             "-drive", f"format=raw,file={esp}",
             "-display", "none",
-            "-serial", f"file:{serial_log}",
+            # Serial on a stdio chardev: output captured to the log file,
+            # input written by the feeder. NOT mon:stdio — the monitor's
+            # "(qemu)" chatter and Ctrl-a escapes would pollute the
+            # marker grammar (ADR-0020).
+            "-chardev", "stdio,id=con0,signal=off",
+            "-serial", "chardev:con0",
             "-no-reboot",
         ]
     )
     print(f"[{label}] booting QEMU/EDK2:", " ".join(cmd[:3]), "...")
+    script = DEFAULT_FEED if feed is None else feed
     t0 = time.monotonic()
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S)
+    with open(serial_log, "wb") as logf:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logf,
+                                stderr=subprocess.DEVNULL)
+        stop = threading.Event()
+
+        def feeder() -> None:
+            sent = 0
+            while not stop.is_set() and sent < len(script):
+                try:
+                    data = serial_log.read_bytes()
+                except OSError:
+                    data = b""
+                marker, nth, payload = script[sent]
+                if data.count(marker) >= nth:
+                    try:
+                        assert proc.stdin is not None
+                        proc.stdin.write(payload)
+                        proc.stdin.flush()
+                    except (BrokenPipeError, OSError):
+                        return  # VM gone; nothing left to feed
+                    sent += 1
+                time.sleep(0.05)
+
+        th = threading.Thread(target=feeder, daemon=True)
+        th.start()
+        try:
+            rc = proc.wait(timeout=TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            stop.set()
+            raise
+        stop.set()
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
-    return proc.returncode, serial, dt
+    return rc, serial, dt
 
 
 def evaluate(label: str, milestone: str, expected_tests: list[str],
@@ -130,7 +189,8 @@ def evaluate(label: str, milestone: str, expected_tests: list[str],
     return ok
 
 
-def run_milestone(milestone: str, expected_tests: list[str]) -> int:
+def run_milestone(milestone: str, expected_tests: list[str],
+                  feed: list[tuple[bytes, int, bytes]] | None = None) -> int:
     """Full pipeline for one milestone's markers. Returns process exit code."""
     label = f"test-{milestone}"
     try:
@@ -139,7 +199,7 @@ def run_milestone(milestone: str, expected_tests: list[str]) -> int:
         print(f"[{label}] FAIL: kernel build failed:\n{e.stdout}\n{e.stderr}")
         return 1
     try:
-        rc, serial, dt = run_qemu(label, esp)
+        rc, serial, dt = run_qemu(label, esp, feed)
     except subprocess.TimeoutExpired:
         print(f"[{label}] FAIL: VM did not terminate within {TIMEOUT_S}s (kernel hang?)")
         return 1

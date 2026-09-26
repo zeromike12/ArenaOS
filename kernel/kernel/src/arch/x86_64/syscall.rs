@@ -42,7 +42,11 @@
 //! notification flags). The spawn protocol (M4.5, ADR-0019) adds
 //! `SYS_SPAWN`: build a process from an image capability, hand the
 //! child an explicit, attenuated inheritance list, register an exit
-//! badge, and start its first thread at the image entry.
+//! badge, and start its first thread at the image entry. The console
+//! and shell step (M4.6, ADR-0020) adds `SYS_CONSOLE_READ` (blocking
+//! line read from the kernel's console input service), `SYS_PROC_LIST`
+//! (the live process table's public shape, for `ps`), and
+//! `SYS_SHUTDOWN` (machine halt, gated on a Power capability).
 
 use super::gdt;
 use core::arch::global_asm;
@@ -96,6 +100,11 @@ pub const SYS_WAIT: u64 = 11;
 // Spawn protocol v1 (M4.5, ADR-0019): create a process from an image
 // capability with explicit handle inheritance and an exit notification.
 pub const SYS_SPAWN: u64 = 12;
+// Console + shell v1 (M4.6, ADR-0020): blocking console line input,
+// the live process table for `ps`, and the Power-gated machine halt.
+pub const SYS_CONSOLE_READ: u64 = 13;
+pub const SYS_PROC_LIST: u64 = 14;
+pub const SYS_SHUTDOWN: u64 = 15;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -551,6 +560,9 @@ extern "C" fn syscall_dispatch(
         SYS_NOTIFY => sys_notify(a0, a1) as u64,
         SYS_WAIT => sys_wait(a0) as u64,
         SYS_SPAWN => sys_spawn(a0, a1, a2, a3, a4) as u64,
+        SYS_CONSOLE_READ => sys_console_read(a0, a1) as u64,
+        SYS_PROC_LIST => sys_proc_list(a0, a1) as u64,
+        SYS_SHUTDOWN => sys_shutdown(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -890,6 +902,93 @@ fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
         Ok(child_pid) => child_pid as Status, // pid > 0 = success payload
         Err(status) => status,
     }
+}
+
+/// SYS_CONSOLE_READ(buf, max): pop the next complete console line into
+/// the caller's buffer, blocking while the queue is empty (ADR-0020).
+/// Returns the line's byte count as a positive payload — the terminator
+/// is never included. `max` is bounded by `console::LINE_MAX`; a
+/// shorter `max` truncates the line (counted, remainder discarded).
+/// One reader at a time: a second concurrent reader gets STATUS_BUSY.
+fn sys_console_read(a0: u64, a1: u64) -> Status {
+    if a1 == 0 || a1 > crate::console::LINE_MAX as u64 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(a0, a1) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let mut line = [0u8; crate::console::LINE_MAX];
+    match crate::console::read_line(&mut line[..a1 as usize]) {
+        Ok(n) => {
+            // SAFETY: the span was validated against this thread's
+            // regions; own address space live; STAC brackets the
+            // SMAP-guarded writes; IF=0. The copy source is this
+            // stack's own scratch. read_line may have blocked (GS-side
+            // invariant handled inside, ADR-0018) — on resume we are
+            // back in this same dispatcher frame.
+            unsafe {
+                super::stac();
+                core::ptr::copy_nonoverlapping(line.as_ptr(), a0 as *mut u8, n);
+                super::clac();
+            }
+            n as Status
+        }
+        Err(status) => status,
+    }
+}
+
+/// SYS_PROC_LIST(buf, max_pairs): write up to `max_pairs`
+/// `(pid, live_thread_count)` u64 pairs for every live process into the
+/// caller's buffer; returns the pair count as a positive payload
+/// (ADR-0020 — `ps`'s whole view of the process table).
+fn sys_proc_list(a0: u64, a1: u64) -> Status {
+    if a1 == 0 || a1 > crate::proc::MAX_PROCESSES as u64 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(a0, a1 * 16) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let mut pairs = [(0u64, 0usize); crate::proc::MAX_PROCESSES];
+    let n = crate::proc::list_live(&mut pairs[..a1 as usize]);
+    // SAFETY: validated span, own address space, STAC bracket, IF=0;
+    // the scratch is this stack's own.
+    unsafe {
+        super::stac();
+        for i in 0..n {
+            let p = (a0 + (i * 16) as u64) as *mut u64;
+            core::ptr::write_volatile(p, pairs[i].0);
+            core::ptr::write_volatile(p.add(1), pairs[i].1 as u64);
+        }
+        super::clac();
+    }
+    n as Status
+}
+
+/// SYS_SHUTDOWN(power slot): halt the machine through the firmware's
+/// ResetSystem — gated on a `CapObj::Power` capability with WRITE in
+/// the caller's slot (ADR-0020: the authority to stop the machine is
+/// an object, never a public verb). Logs the requesting pid, then
+/// enters the same farewell-island path the boot sequence's clean halt
+/// uses; the canonical halt declaration on the wire is the harness's
+/// discriminator, unchanged.
+fn sys_shutdown(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if !matches!(c.obj, crate::cap::CapObj::Power) || c.rights & crate::cap::RIGHTS_WRITE == 0 {
+        return STATUS_BAD_ARG;
+    }
+    info!(
+        "kernel",
+        "shutdown requested by pid {pid} through its Power cap — goodnight"
+    );
+    crate::halt::reset_shutdown()
 }
 
 /// SYS_PROVE_RING3: arm a #GP expectation whose resume address is the

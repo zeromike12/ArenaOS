@@ -28,11 +28,15 @@
 //! (M4.5, ADR-0019): a ring-3 supervisor spawns the real image twice
 //! through SYS_SPAWN — explicit attenuated inheritance, Process handles,
 //! exit badges — and the restart is visible as the child's console
-//! message appearing twice.
+//! message appearing twice. Test 9 is the console input service (M4.6,
+//! ADR-0020): the line discipline driven through the exact feed() the
+//! RX ISR calls, a ring-3 reader parked and woken by it, and the shell
+//! image validated as the spawn registry's image 1.
 //! Markers: `m4:test:<name>`, `m4: RESULT`.
 
 use crate::arch::x86_64::{self, paging, syscall};
 use crate::cap::{self, Cap, CapObj};
+use crate::console;
 use crate::elf::{self, PF_R, PF_W, PF_X};
 use crate::frames;
 use crate::ipc;
@@ -43,7 +47,7 @@ use crate::spawn;
 use crate::sync::SyncCell;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 8] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 9] = [
         ("elf_parse", test_elf_parse),
         ("elf_reject", test_elf_reject),
         ("elf_load", test_elf_load),
@@ -52,6 +56,7 @@ pub fn run_suite() -> bool {
         ("first_process", test_first_process),
         ("ipc_echo", test_ipc_echo),
         ("spawn_restart", test_spawn_restart),
+        ("console_line", test_console_line),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -675,6 +680,19 @@ impl Payload {
     fn cmp_rax_i8_je(&mut self, v: i8) -> usize {
         self.emit(&[0x48, 0x83, 0xF8, v as u8]);
         self.emit(&[0x0F, 0x84]);
+        let at = self.n;
+        self.emit(&[0; 4]);
+        at
+    }
+    /// `cmp byte [rbx+disp8], imm8` + `jne rel32` patchable hole
+    /// (disp 0 uses the mod-00 form; /7 is the cmp opcode extension).
+    fn cmp_byte_rbx_jne(&mut self, disp: u8, imm: u8) -> usize {
+        if disp == 0 {
+            self.emit(&[0x80, 0x3B, imm]);
+        } else {
+            self.emit(&[0x80, 0x7B, disp, imm]);
+        }
+        self.emit(&[0x0F, 0x85]);
         let at = self.n;
         self.emit(&[0; 4]);
         at
@@ -1813,6 +1831,175 @@ fn test_spawn_restart() -> Result<(), &'static str> {
         "m4",
         "spawn_restart: a ring-3 supervisor spawned the real image TWICE through SYS_SPAWN — each child inherited the attenuated Memory cap at its slot 0, ran the M4.3 program (its {}-byte message on the console twice: the restart, visible), and badged the supervisor at exit; both children exited 42, Process handles landed in order, the supervisor kept its original, counters exact (9 dispatches / 2 notifies / 2 parked waits), frames {} (teardown exact)",
         msg_len,
+        after
+    );
+    Ok(())
+}
+
+// ---- 9. the console input service (M4.6, ADR-0020) -------------------------
+
+/// The ring-3 CONSOLE READER: one `SYS_CONSOLE_READ` into its data page,
+/// then verify in ring 3 that the line arrived byte-exact ("hi m4" — 5
+/// bytes, first 'h', last '4'). Exit 42 on success; 81 = wrong length,
+/// 82 = wrong bytes. The read parks the thread (the queue is empty when
+/// it starts) — the bootstrap's `feed()` below wakes it, which is the
+/// exact scheduler dance the vector-33 UART ISR performs for the shell.
+fn build_console_reader() -> Payload {
+    let mut p = Payload::new();
+    let buf = I_DATA + 0x100;
+    p.movabs(3, buf); // rbx = line buffer (callee-saved across syscalls)
+    p.mov_eax(syscall::SYS_CONSOLE_READ as u32);
+    p.movabs(7, buf); // RDI = buffer
+    p.movabs(6, 64); // RSI = max
+    p.do_syscall();
+    let h_len = p.cmp_rax_i8_jne(5); // "hi m4" = 5 bytes
+    let h_b0 = p.cmp_byte_rbx_jne(0, b'h');
+    let h_b4 = p.cmp_byte_rbx_jne(4, b'4');
+    p.exit_with(42);
+    let t_len = p.here();
+    p.exit_with(81);
+    p.patch_rel32(h_len, t_len);
+    let t_bytes = p.here();
+    p.exit_with(82);
+    p.patch_rel32(h_b0, t_bytes);
+    p.patch_rel32(h_b4, t_bytes);
+    p
+}
+
+/// M4.6 — the console input service end to end (ADR-0020). The line
+/// discipline is driven through `console::feed` — the SAME function the
+/// vector-33 RX ISR calls per received byte, so there is no test-only
+/// twin of the input path: edit/commit/queue/wake semantics here are
+/// the live ones, and the harness's shell session exercises the real
+/// UART in front of them. Kernel-side: backspace editing, empty lines
+/// never queued, truncation counted, queue overflow drops the OLDEST
+/// line. Ring-3 side: a reader parks on the empty queue and is woken by
+/// a fed line, verifying length and bytes in ring 3. Plus the shell
+/// image itself — the spawn registry's image 1, which the boot sequence
+/// spawns as the initial service the moment this suite passes.
+///
+/// Counter deltas (not absolutes): the suite assumes no EXTERNAL console
+/// input arrives while it runs — true by construction in the harness,
+/// where every feed is paced on the shell prompt, which only exists
+/// after this suite.
+fn test_console_line() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+    let c0 = console::stats();
+    let mut kbuf = [0u8; console::LINE_MAX];
+
+    // 1. The discipline: backspace edit, commit on CR; an empty line is
+    //    consumed, never queued.
+    for &b in b"ab\x7fc\r" {
+        console::feed(b);
+    }
+    let n = console::read_line(&mut kbuf).map_err(|_| "read refused a queued line")?;
+    if n != 2 || &kbuf[..n] != b"ac" {
+        return Err("backspace edit did not produce 'ac'");
+    }
+    console::feed(b'\r');
+    if console::pending_lines() != 0 {
+        return Err("an empty line reached the queue");
+    }
+
+    // 2. Truncation: a short `max` cuts the line and is counted (the
+    //    remainder is discarded, never re-queued).
+    for &b in b"uvwxyz\r" {
+        console::feed(b);
+    }
+    let n = console::read_line(&mut kbuf[..3]).map_err(|_| "truncating read refused")?;
+    if n != 3 || &kbuf[..3] != b"uvw" {
+        return Err("truncated read wrong");
+    }
+
+    // 3. Overflow: five committed lines into a four-deep queue — the
+    //    OLDEST (l1) is dropped, the rest come out in order.
+    for &b in b"l1\rl2\rl3\rl4\rl5\r" {
+        console::feed(b);
+    }
+    for want in [b"l2", b"l3", b"l4", b"l5"] {
+        let n = console::read_line(&mut kbuf).map_err(|_| "queued read refused")?;
+        if &kbuf[..n] != *want {
+            return Err("queue order wrong after oldest-drop");
+        }
+    }
+
+    // 4. The ring-3 leg: the reader parks on the empty queue; the fed
+    //    line wakes it (feed() from this kernel thread == feed() from
+    //    the ISR: same function, same wake, enqueue-only).
+    let cproc = proc::create("console")?;
+    let croot = proc::pml4_of(cproc).ok_or("console proc lost its pml4")?;
+    let p = build_console_reader();
+    // SAFETY: IF=0 suite discipline; owned live root; fresh frames.
+    unsafe {
+        ipc_proc_setup(croot, &p.b[..p.n])?;
+    }
+    let threads0 = sched::live_threads();
+    let tid = sched::spawn_in_proc("console", ipc_thread_entry, 0, cproc)?;
+    sched::yield_now(); // the reader reaches SYS_CONSOLE_READ and parks
+    sched::yield_now();
+    for &b in b"hi m4\r" {
+        console::feed(b);
+    }
+    m4_drain(64)?;
+    let Some(ss) = syscall::exit_status_of(tid) else {
+        return Err("the console reader never exited");
+    };
+    if ss != 42 {
+        return Err(match ss {
+            81 => "ring-3 console read returned the wrong length (81)",
+            82 => "ring-3 console read returned wrong bytes (82)",
+            _ => "console reader exited with a code from nowhere in the contract",
+        });
+    }
+
+    // 5. The shell image: registry image 1, a loadable ADR-0016
+    //    artifact — the boot sequence spawns it as the initial service
+    //    the moment this suite passes.
+    let sh = elf::validate(elf::SHELL_IMAGE)?;
+    if spawn::image_bytes(1) != Some(elf::SHELL_IMAGE) {
+        return Err("registry image 1 is not the embedded shell");
+    }
+    if sh.nsegs != 2 {
+        return Err("shell image is not exactly two PT_LOAD segments (W^X text + data/bss)");
+    }
+
+    // 6. Counter deltas: 8 committed lines (ac, uvwxyz, l1..l5, hi m4),
+    //    1 dropped to overflow (l1), 7 reads (1+1+4 kernel-side, 1 from
+    //    ring 3), exactly 1 parked read (the ring-3 leg), 1 truncation.
+    let c1 = console::stats();
+    if c1.lines_in - c0.lines_in != 8 {
+        return Err("committed-line count wrong (want 8)");
+    }
+    if c1.dropped_lines - c0.dropped_lines != 1 {
+        return Err("overflow drop count wrong (want exactly l1)");
+    }
+    if c1.reads - c0.reads != 7 {
+        return Err("read count wrong (want 7)");
+    }
+    if c1.blocks - c0.blocks != 1 {
+        return Err("exactly the ring-3 read should have parked");
+    }
+    if c1.truncations - c0.truncations != 1 {
+        return Err("truncation count wrong (want 1)");
+    }
+    if console::pending_lines() != 0 {
+        return Err("console queue not drained — the shell would inherit stale lines");
+    }
+
+    proc::destroy(cproc)?;
+    if sched::live_threads() != threads0 {
+        return Err("console reader was not reaped");
+    }
+    let after = frames::free_frames();
+    if after != baseline {
+        return Err("console test teardown is not frame-exact");
+    }
+    info!(
+        "m4",
+        "console_line: the line discipline (fed through the RX ISR's own entry point) did backspace edits, refused empty lines, truncated and counted, dropped the OLDEST of five queued lines; a ring-3 reader parked on the empty queue and a fed line woke it — length and bytes verified IN RING 3; the shell image validated as registry image 1 ({} bytes, entry {:#x}, {} segments); counters exact, frames {} (teardown exact)",
+        elf::SHELL_IMAGE.len(),
+        sh.entry,
+        sh.nsegs,
         after
     );
     Ok(())

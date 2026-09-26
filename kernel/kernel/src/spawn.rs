@@ -1,15 +1,22 @@
-//! Spawn protocol v1 (M4.5, ADR-0019): process creation from image
-//! capabilities, with explicit attenuating handle inheritance and
-//! exit-badge notification.
+//! Spawn protocol v1 (M4.5, ADR-0019; kernel-internal root spawn added
+//! by M4.6, ADR-0020): process creation from image capabilities, with
+//! explicit attenuating handle inheritance and exit-badge notification.
 //!
-//! The syscall handler (`arch::x86_64::syscall::sys_spawn`) owns the ABI
-//! surface — cap resolution for the image and notification handles, the
-//! STAC-bracketed read of the inheritance spec from the parent's memory.
-//! This module owns the creation sequence itself: validate → create →
-//! load → stack → inherit → register → handle → start, with rollback on
-//! every partial failure (a refused spawn costs zero frames and leaves
-//! zero objects — the M4.1 double-load discipline applied to process
-//! creation).
+//! Two entry points share one creation sequence:
+//! - [`spawn_from`] — the syscall path (`arch::x86_64::syscall::sys_spawn`
+//!   owns the ABI surface: cap resolution for the image and notification
+//!   handles, the STAC-bracketed read of the inheritance spec from the
+//!   parent's memory). Sequence: validate → create → load → stack →
+//!   inherit → register → handle → start.
+//! - [`spawn_init`] — the boot path (ADR-0020): the same sequence
+//!   WITHOUT a parent. No inheritance spec (there is nothing above to
+//!   inherit from), no Process handle to grant; the initial service's
+//!   caps arrive as kernel literals. This is the seed of the root-task
+//!   story — boot-time policy grows here, not in the syscall path.
+//!
+//! Every partial failure rolls back: a refused spawn costs zero frames
+//! and leaves zero objects (the M4.1 double-load discipline applied to
+//! process creation).
 //!
 //! The child's first thread reads its start facts (entry, stack top,
 //! user regions) from its spawn record; the test side reads the same
@@ -25,9 +32,9 @@ use crate::proc;
 use crate::sched;
 use crate::sync::{SyncCell, without_interrupts};
 
-/// Image-registry capacity. v1 populates exactly one entry (the embedded
-/// rust-lld payload image); the bound exists so `img_id` is always a
-/// checked index, never a trust.
+/// Image-registry capacity. v1 populates two entries (the embedded
+/// rust-lld payload image and the shell); the bound exists so `img_id`
+/// is always a checked index, never a trust.
 pub const MAX_IMAGES: usize = 4;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
@@ -37,13 +44,15 @@ pub const MAX_INHERIT: usize = 4;
 /// explicitly forgotten).
 pub const MAX_SPAWN_RECS: usize = 8;
 
-/// The kernel-side image registry (ADR-0019): v1 = the embedded test
-/// image, the same bytes the M4.1–M4.3 suites parse, load, and run. A
-/// filesystem-backed source slots in here later without changing the
-/// cap shape.
+/// The kernel-side image registry (ADR-0019/0020): image 0 is the
+/// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
+/// load, and run; image 1 is the shell the boot sequence spawns as the
+/// initial service. A filesystem-backed source slots in here later
+/// without changing the cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
     match img_id {
         0 => Some(elf::TEST_IMAGE),
+        1 => Some(elf::SHELL_IMAGE),
         _ => None,
     }
 }
@@ -102,35 +111,65 @@ pub fn forget(child_pid: u64) -> Result<(), &'static str> {
     })
 }
 
-/// The creation sequence of ADR-0019, from the parent's syscall:
-/// build a child process from registered image `img_id`, install the
-/// attenuated inheritance list (spec: `(parent slot, rights)` pairs),
-/// register the exit notification, hand the parent a `Process` handle,
-/// and start the child's first thread at the image entry. Returns the
-/// child's pid (the handler turns it into a positive status payload).
-pub fn spawn_from(
-    parent: u64,
-    img_id: u32,
-    inherit: &[(u64, u64)],
-    notif: Option<(u32, u64)>,
-) -> Result<u64, Status> {
+// ---- the shared creation sequence ------------------------------------------
+
+/// A half-built child: reserved record + created process + loaded image
+/// + mapped stack, with all the start facts the record and the first
+/// thread need. Both entry points build one, finish it their own way,
+/// and roll it back on any refusal.
+#[derive(Clone, Copy)]
+struct Prepared {
+    idx: usize,
+    pid: u64,
+    entry: u64,
+    stack_top: u64,
+    regions: [(u64, u64); sched::USER_REGIONS_MAX],
+}
+
+impl Prepared {
+    /// Undo everything `prepare` built: destroy the process (which
+    /// reclaims the image AND stack frames — including partial table
+    /// walks — and the cap space with any caps already granted into
+    /// it) and release the record. After this, the failed spawn has
+    /// cost exactly zero frames and left zero objects.
+    fn rollback(self) {
+        if let Err(e) = proc::destroy(self.pid) {
+            error!("spawn", "rollback: destroy({}) failed: {e}", self.pid);
+        }
+        // SAFETY: single writer under IF=0.
+        without_interrupts(|| unsafe { (*RECORDS.get())[self.idx] = EMPTY_REC });
+    }
+}
+
+/// Steps 1–3 of the creation sequence: validate the image BEFORE
+/// allocating anything, reserve the record, create the process, load
+/// the image, derive and map the stack page (first page above the
+/// image's top segment VA — derived from the image, never hardcoded,
+/// ADR-0019), and compute the page-granular user regions.
+fn prepare(img_id: u32) -> Result<Prepared, Status> {
     // 1. Validate BEFORE allocating anything: the registry lookup and
-    //    the ADR-0016 validator both run on the parent's syscall stack.
+    //    the ADR-0016 validator both run on the caller's kernel stack.
     let bytes = image_bytes(img_id).ok_or(STATUS_BAD_ARG)?;
     let parsed = elf::validate(bytes).map_err(|_| STATUS_BAD_ARG)?;
     // Regions: one per segment + the stack page must fit the thread's
-    // region table (v1 images have 2 segments; 3 would still fit).
+    // region table.
     if parsed.nsegs == 0 || parsed.nsegs + 1 > sched::USER_REGIONS_MAX {
         return Err(STATUS_BAD_ARG);
     }
-    // The stack page: first page above the image's top segment VA —
-    // derived from the image, never hardcoded (ADR-0019).
     let mut top = 0u64;
     for seg in &parsed.segs[..parsed.nsegs] {
         top = top.max(seg.vaddr + seg.memsz);
     }
     let stack_va = top.div_ceil(paging::PAGE) * paging::PAGE;
     let stack_top = stack_va + paging::PAGE;
+    let mut regions = [(0u64, 0u64); sched::USER_REGIONS_MAX];
+    let mut nr = 0;
+    for seg in &parsed.segs[..parsed.nsegs] {
+        let hi = (seg.vaddr + seg.memsz).div_ceil(paging::PAGE) * paging::PAGE;
+        regions[nr] = (seg.vaddr, hi);
+        nr += 1;
+    }
+    regions[nr] = (stack_va, stack_top);
 
     // 2. Reserve the record (its index is the child thread's argument).
     // SAFETY: single writer under IF=0.
@@ -147,42 +186,35 @@ pub fn spawn_from(
     })
     .ok_or(STATUS_BUSY)?;
 
-    // From here, every failure path must roll back: release the record,
-    // destroy whatever of the child exists (destroy_user_half reclaims
-    // image AND stack frames — including partial table walks — so a
-    // refused spawn still costs exactly zero frames).
-    let rollback = |idx: usize, child: Option<u64>| {
-        if let Some(pid) = child {
-            if let Err(e) = proc::destroy(pid) {
-                error!("spawn", "rollback: destroy({pid}) failed: {e}");
-            }
-        }
-        // SAFETY: single writer under IF=0.
-        without_interrupts(|| unsafe { (*RECORDS.get())[idx] = EMPTY_REC });
-    };
-
+    // From here, every failure path must roll back (see
+    // Prepared::rollback for the zero-cost guarantee).
     // 3. Child process + image + stack page.
     let child = match proc::create("spawned") {
         Ok(pid) => pid,
         Err(_) => {
-            rollback(idx, None);
+            // SAFETY: single writer under IF=0.
+            without_interrupts(|| unsafe { (*RECORDS.get())[idx] = EMPTY_REC });
             return Err(STATUS_BUSY); // process table full
         }
     };
+    let half = Prepared {
+        idx,
+        pid: child,
+        entry: parsed.entry,
+        stack_top,
+        regions,
+    };
     if elf::load(bytes, child).is_err() {
-        rollback(idx, Some(child));
+        half.rollback();
         return Err(STATUS_BAD_ARG);
     }
     // SAFETY: IF=0; the child root is live and owned (just created).
-    let root = match proc::pml4_of(child) {
-        Some(r) => r,
-        None => {
-            rollback(idx, Some(child));
-            return Err(STATUS_BAD_ARG);
-        }
+    let Some(root) = proc::pml4_of(child) else {
+        half.rollback();
+        return Err(STATUS_BAD_ARG);
     };
     let Some(stack_phys) = frames::alloc() else {
-        rollback(idx, Some(child));
+        half.rollback();
         return Err(STATUS_BUSY);
     };
     // SAFETY: IF=0; `stack_phys` freshly allocated (exclusive owner);
@@ -194,9 +226,62 @@ pub fn spawn_from(
         paging::map_user_page_4k(root, stack_va, stack_phys, true, false)
     };
     if mapped.is_err() {
-        rollback(idx, Some(child)); // destroy reclaims the stack frame too
+        half.rollback(); // destroy reclaims the stack frame too
         return Err(STATUS_BAD_ARG);
     }
+    Ok(half)
+}
+
+/// The final steps both entry points share: register the exit
+/// notification (fires on the child's last thread exit — the hook lives
+/// in SYS_THREAD_EXIT), fill the record's start facts, and start the
+/// child's first thread. Rolls the half-built child back on any
+/// refusal; returns the child's pid.
+fn finish(p: &Prepared, notif: Option<(u32, u64)>) -> Result<u64, Status> {
+    if let Some((nid, badge)) = notif {
+        if proc::set_exit_notif(p.pid, nid, badge).is_err() {
+            p.rollback();
+            return Err(STATUS_BAD_ARG);
+        }
+    }
+    // SAFETY: single writer under IF=0.
+    without_interrupts(|| unsafe {
+        let rec = &mut (*RECORDS.get())[p.idx];
+        rec.child_pid = p.pid;
+        rec.entry = p.entry;
+        rec.stack_top = p.stack_top;
+        rec.regions = p.regions;
+    });
+    match sched::spawn_in_proc("spawned", proc_thread_entry, p.idx, p.pid) {
+        Ok(tid) => {
+            // SAFETY: single writer under IF=0.
+            without_interrupts(|| unsafe {
+                (*RECORDS.get())[p.idx].child_tid = tid;
+            });
+            Ok(p.pid)
+        }
+        Err(_) => {
+            p.rollback();
+            Err(STATUS_BUSY)
+        }
+    }
+}
+
+// ---- entry point 1: the syscall path (ADR-0019) ----------------------------
+
+/// The creation sequence of ADR-0019, from the parent's syscall:
+/// build a child process from registered image `img_id`, install the
+/// attenuated inheritance list (spec: `(parent slot, rights)` pairs),
+/// register the exit notification, hand the parent a `Process` handle,
+/// and start the child's first thread at the image entry. Returns the
+/// child's pid (the handler turns it into a positive status payload).
+pub fn spawn_from(
+    parent: u64,
+    img_id: u32,
+    inherit: &[(u64, u64)],
+    notif: Option<(u32, u64)>,
+) -> Result<u64, Status> {
+    let half = prepare(img_id)?;
 
     // 4. Explicit handle inheritance: delegation-by-copy under the
     //    ADR-0015 attenuation rule — the source must hold COPY, and any
@@ -214,7 +299,7 @@ pub fn spawn_from(
                 return Err("inherit: rights amplification refused");
             }
             cap::grant(
-                child,
+                half.pid,
                 Cap {
                     obj: src.obj,
                     rights: rights as u32,
@@ -224,69 +309,79 @@ pub fn spawn_from(
         })();
         if let Err(e) = inherited {
             error!("spawn", "inheritance refused: {e}");
-            rollback(idx, Some(child));
+            half.rollback();
             return Err(STATUS_BAD_ARG);
         }
     }
 
-    // 5. The exit notification registration (fires on the child's last
-    //    thread exit — the hook lives in SYS_THREAD_EXIT).
-    if let Some((nid, badge)) = notif {
-        if proc::set_exit_notif(child, nid, badge).is_err() {
-            rollback(idx, Some(child));
-            return Err(STATUS_BAD_ARG);
-        }
-    }
-
-    // 6. The parent's Process handle (READ|DESTROY — DESTROY is the
+    // 5. The parent's Process handle (READ|DESTROY — DESTROY is the
     //    forward-looking right: the rollback below needs it, and
     //    user-driven child reaping must not re-mint handles).
     let handle_slot = match cap::grant(
         parent,
         Cap {
-            obj: CapObj::Process { pid: child },
+            obj: CapObj::Process { pid: half.pid },
             rights: cap::RIGHTS_READ | cap::RIGHTS_DESTROY,
         },
     ) {
         Ok(slot) => slot,
         Err(_) => {
-            rollback(idx, Some(child));
+            half.rollback();
             return Err(STATUS_BUSY); // parent space full — no handle, no child
         }
     };
 
-    // 7. Start facts into the record, then the child's first thread.
-    // SAFETY: single writer under IF=0.
-    without_interrupts(|| unsafe {
-        let rec = &mut (*RECORDS.get())[idx];
-        rec.child_pid = child;
-        rec.entry = parsed.entry;
-        rec.stack_top = stack_top;
-        let mut nr = 0;
-        for seg in &parsed.segs[..parsed.nsegs] {
-            let hi = (seg.vaddr + seg.memsz).div_ceil(paging::PAGE) * paging::PAGE;
-            rec.regions[nr] = (seg.vaddr, hi);
-            nr += 1;
-        }
-        rec.regions[nr] = (stack_va, stack_top);
-    });
-    match sched::spawn_in_proc("spawned", proc_thread_entry, idx, child) {
-        Ok(tid) => {
-            // SAFETY: single writer under IF=0.
-            without_interrupts(|| unsafe {
-                (*RECORDS.get())[idx].child_tid = tid;
-            });
-            Ok(child)
-        }
-        Err(_) => {
-            // The handle was granted but the thread never started: undo
-            // the handle (it carries DESTROY exactly for this), then
-            // roll the child back.
+    // 6. Notification registration + record + first thread.
+    match finish(&half, notif) {
+        Ok(pid) => Ok(pid),
+        Err(status) => {
+            // finish rolled the child back; the handle in the PARENT's
+            // space still needs undoing (it carries DESTROY exactly for
+            // this).
             if let Err(e) = cap::destroy(parent, handle_slot) {
                 error!("spawn", "rollback: handle destroy failed: {e}");
             }
-            rollback(idx, Some(child));
-            Err(STATUS_BUSY)
+            Err(status)
+        }
+    }
+}
+
+// ---- entry point 2: the boot path (ADR-0020) -------------------------------
+
+/// Kernel-internal root spawn: the boot sequence creates the initial
+/// service (the shell) with the same creation sequence as SYS_SPAWN —
+/// but with no parent. `grants` are kernel literals placed into the
+/// child's space in order (slot 0 first); no inheritance spec applies
+/// (nothing exists above), and no Process handle is minted (the
+/// bootstrap thread is not a process). Failure here is a boot failure:
+/// the caller halts with the returned reason.
+pub fn spawn_init(
+    img_id: u32,
+    grants: &[Cap],
+    notif: Option<(u32, u64)>,
+) -> Result<u64, &'static str> {
+    let half = match prepare(img_id) {
+        Ok(h) => h,
+        Err(status) => {
+            error!(
+                "spawn",
+                "spawn_init: image {img_id} preparation failed ({status})"
+            );
+            return Err("spawn_init: image preparation failed");
+        }
+    };
+    for &g in grants {
+        if let Err(e) = cap::grant(half.pid, g) {
+            half.rollback();
+            return Err(e);
+        }
+    }
+    match finish(&half, notif) {
+        Ok(pid) => Ok(pid),
+        Err(status) => {
+            // finish already rolled the child back.
+            error!("spawn", "spawn_init: shell start failed ({status})");
+            Err("spawn_init: initial thread could not be started")
         }
     }
 }
@@ -305,7 +400,7 @@ fn proc_thread_entry(arg: usize) {
     without_interrupts(|| {
         sched::set_current_user_regions(&regions).expect("spawned regions rejected");
         // SAFETY: the image pages and the stack page are mapped U/S in
-        // this process's address space by spawn_from (the scheduler put
+        // this process's address space by prepare() (the scheduler put
         // us on its CR3 at switch-in); entry is the validated image
         // entry inside the registered regions; stack_top is the top of
         // the derived stack page; RSP0/scratch describe this thread

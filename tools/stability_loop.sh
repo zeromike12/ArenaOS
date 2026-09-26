@@ -42,7 +42,7 @@ SERIAL="$REPO_ROOT/build/stability-serial.log"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
-RESULT_LINE_M4='m4: RESULT PASS (8/8)'
+RESULT_LINE_M4='m4: RESULT PASS (9/9)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -52,12 +52,23 @@ for i in $(seq 1 "$N"); do
     cp "$OVMF_VARS" "$VARS"              # fresh NVRAM every boot
     rm -f "$SERIAL"
     rc=0
-    timeout "$BOOT_TIMEOUT" "${QEMU[@]}" \
+    # ADR-0020: a healthy boot no longer halts by itself — it ends at
+    # the shell. The feeder subshell types 'shutdown' when the shell's
+    # prompt appears (marker-paced, never sleep-based), then holds
+    # stdin open until the clean-halt declaration lands. A dead boot
+    # (panic/hang before the prompt) leaves the feeder spinning until
+    # the timeout kills the pipeline — the failure verdict is unchanged.
+    {
+        while ! grep -aq 'arena>' "$SERIAL" 2>/dev/null; do sleep 0.2; done
+        printf 'shutdown\r'
+        while ! grep -aqF "$HALT_LINE" "$SERIAL" 2>/dev/null; do sleep 0.2; done
+    } | timeout "$BOOT_TIMEOUT" "${QEMU[@]}" \
         -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$VARS" \
         -drive format=raw,file="$ESP" \
-        -display none -serial "file:$SERIAL" -no-reboot || rc=$?
+        -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
+        -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
 
     why=""
     if (( rc != 0 )); then

@@ -1,0 +1,10 @@
+# The shell is a bare-metal static ELF: x86_64-unknown-none (no std,
+# no OS assumptions) linked by rust-lld with our own script so the
+# layout matches ADR-0016's fixed addresses exactly — the same
+# toolchain contract as userspace/payload (see its config for the
+# full GOT/relocation-model history).
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = ["-C", "link-arg=-Tshell.ld", "-C", "link-arg=-no-pie", "-C", "relocation-model=static"]

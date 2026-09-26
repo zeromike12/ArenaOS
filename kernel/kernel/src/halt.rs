@@ -112,6 +112,27 @@ pub fn reset_shutdown() -> ! {
     let ptr = RESET_FN.load(Ordering::Relaxed);
     let fw_cr3 = FW_CR3.load(Ordering::Relaxed);
     if ptr != 0 && fw_cr3 != 0 {
+        // M4.6 (ADR-0020): this path is now reachable from ANY context —
+        // the shell's SYS_SHUTDOWN syscall and panics on process threads
+        // run under a PROCESS CR3. The island is entered at its identity
+        // address, which the kernel view maps by design but process page
+        // tables do NOT (they clone the kernel half only) — the bring-up
+        // caught it as an instruction-fetch #PF at the island's phys.
+        // So: normalize to the kernel view first. Every address this
+        // path touches — the kernel-view RIP, this stack's direct-map
+        // alias, the island page — is mapped identically there, and the
+        // island itself handles the fw_cr3 switch and the stack's
+        // identity aliasing from that known-good state. Guarded: during
+        // the boot stage (kernel view not built yet, kcr3 == 0) the live
+        // firmware/dual tables already map all identity, and when we are
+        // ON the kernel view the write would be a pointless TLB flush.
+        // SAFETY: ring 0; the kernel-view PML4 is live and fully
+        // populated for the machine's remaining lifetime; the guard
+        // above ensures it exists and is not already current.
+        let kcr3 = crate::arch::x86_64::paging::kernel_cr3_phys();
+        if kcr3 != 0 && crate::arch::x86_64::read_cr3() != kcr3 {
+            unsafe { crate::arch::x86_64::write_cr3(kcr3) };
+        }
         // Farewell-island path (M2.7+): hand the machine back to firmware
         // for the actual reset — its tables, its stack alias, its world.
         // SAFETY: the island is entered at its identity address, mapped

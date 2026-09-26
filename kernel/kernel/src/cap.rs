@@ -75,6 +75,12 @@ pub enum CapObj {
     /// registry is kernel-side and fixed; a filesystem-backed source
     /// arrives later without changing this shape.
     Image { img_id: u32 },
+    /// The machine-power singleton (ADR-0020): WRITE = may halt the
+    /// machine through `SYS_SHUTDOWN`. One kernel object, no identity —
+    /// holding the cap with the right IS the authority. The kernel's
+    /// own panic/suite halt paths are ring-0 internals, not invokes of
+    /// this object.
+    Power,
 }
 
 /// One capability: an object reference plus its rights mask.

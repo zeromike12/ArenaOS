@@ -97,6 +97,19 @@ Current coverage:
 
   M4.5 — spawn protocol (ADR-0019: SYS_SPAWN registry slot 12, image
   capabilities, explicit attenuating inheritance, exit notifications):
+  M4.6 — console input service (ADR-0020: COM1 RX line discipline on
+  IRQ4/vector 33, SYS_CONSOLE_READ registry slot 13):
+  * console_line   — the line discipline driven through the SAME feed()
+                     the RX ISR calls: backspace edits, empty lines
+                     never queued, truncation counted, queue overflow
+                     drops the OLDEST line; a ring-3 reader parks on
+                     the empty queue and a fed line wakes it (length +
+                     bytes verified IN RING 3); the shell image
+                     validated as spawn-registry image 1 — the boot
+                     sequence spawns it as the initial service the
+                     moment the suite passes (the interactive session
+                     itself is tools/test_m4_shell.py's job).
+
   * spawn_restart  — the supervisor restart demo across THREE real
                      address spaces: a ring-3 supervisor writes its
                      inheritance spec to its data page, spawns the
@@ -135,6 +148,7 @@ EXPECTED_TESTS = [
     "first_process",
     "ipc_echo",
     "spawn_restart",
+    "console_line",
 ]
 
 if __name__ == "__main__":

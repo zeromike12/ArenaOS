@@ -1,0 +1,16 @@
+[package]
+name = "arena-shell"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS minimal shell (M4.6, ADR-0020) — the first input-driven userspace program: line input through SYS_CONSOLE_READ, builtins (help/ps/echo/spawn/shutdown), image spawning through SYS_SPAWN. A genuine cargo/rust-lld ET_EXEC artifact embedded into the kernel as spawn-registry image 1 and spawned at boot as the initial service."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
