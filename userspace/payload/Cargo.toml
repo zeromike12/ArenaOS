@@ -1,0 +1,16 @@
+[package]
+name = "arena-payload"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS M4 test payload — the first userspace image (ADR-0016): a real rust-lld ELF64 artifact for x86_64-unknown-none with a fixed, self-describing layout. Embedded into the kernel by tools/build.sh; the M4.1 loader tests parse and load it, M4.2/4.3 turn its stub into the first running program."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"

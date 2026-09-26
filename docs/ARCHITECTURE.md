@@ -379,7 +379,9 @@ exact to the unit.
   exactly one process.
 - **Spawning** is explicit and capability-mediated: a spawner holds a
   capability to an executable image object and a set of capabilities to hand
-  over; the kernel creates the new process with *exactly* those. There is no
+  over (since M4.1 the kernel can validate and load image bytes into a
+  process space — `elf.rs`, ADR-0016; the image *object* and the spawn
+  protocol are M4.5); the kernel creates the new process with *exactly* those. There is no
   `fork`: no inherited address space, no inherited handle table, no COW
   semantics leaking into the object model. (A `posix_spawn`-like convenience
   can live in a userspace compatibility layer someday.)
@@ -518,7 +520,8 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Privilege machinery: ring-3 threads, syscall/sysret, TSS RSP0, SMAP/SMEP | **M3.3a — implemented, 9/9 in-guest (ADR-0014)** |
 | Processes = address-space objects (private PML4, cloned kernel half, per-thread CR3, exact teardown) | **M3.3b — implemented, 11/11 in-guest + 100/100-boot stability (ADR-0014 addendum)** |
 | Capability spaces: per-process slot tables, attenuation-only rights, copy/move/destroy, gated invokes (`process_root`, `map_memory`) | **M3.4 — implemented, 13/13 in-guest + 100/100-boot stability (ADR-0015)** |
+| Executable format + image loader: ELF64 container with ArenaOS strict-subset semantics (ET_EXEC-only validator, W^X segments, zero-fill BSS, exact-accounting load into a process space) | **M4.1 — implemented, 3/3 in-guest (ADR-0016)** |
 | IPC, endpoints | not started (roadmap M4) |
-| Userspace, drivers, FS, net, graphics | not started |
+| Userspace programs beyond the first test image (`userspace/payload`), drivers, FS, net, graphics | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

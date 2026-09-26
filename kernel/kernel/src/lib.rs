@@ -17,6 +17,7 @@
 pub mod arch;
 pub mod cap;
 pub mod drivers;
+pub mod elf;
 pub mod entry;
 pub mod frames;
 pub mod halt;
@@ -24,6 +25,7 @@ pub mod handoff;
 pub mod heap;
 pub mod log;
 pub mod m3;
+pub mod m4;
 pub mod proc;
 pub mod sched;
 pub mod sync;

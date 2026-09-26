@@ -305,9 +305,17 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 3 suite failed");
     }
 
+    // --- M4.1: userspace images — ELF strict-subset validator + loader
+    // (ADR-0016): the embedded rust-lld artifact parsed, its rejection
+    // corpus attacked, and a real process address space loaded, verified
+    // under its own CR3, and reclaimed exactly.
+    if !crate::m4::run_suite() {
+        crate::halt::halt_machine("milestone 4 suite failed");
+    }
+
     info!(
         "kernel",
-        "milestone 3 step 3.3 complete (processes + kernel/user privilege separation) — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 4 step 4.1 complete (executable format + image loader) — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }

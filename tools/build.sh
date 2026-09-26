@@ -23,6 +23,17 @@ if [[ "$PROFILE" == "debug" ]]; then
     PROFILE_DIR="debug"
 fi
 
+# M4.1 (ADR-0016): the userspace test payload is embedded into the
+# kernel via include_bytes! — it must exist before the kernel compiles.
+echo "== building userspace payload (userspace/payload, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/payload" && cargo build --release )
+PAYLOAD_ELF="$REPO_ROOT/userspace/payload/target/x86_64-unknown-none/release/arena-payload"
+if [[ ! -f "$PAYLOAD_ELF" ]]; then
+    echo "error: payload ELF not produced at $PAYLOAD_ELF" >&2
+    exit 1
+fi
+echo "payload image: ${PAYLOAD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PAYLOAD_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

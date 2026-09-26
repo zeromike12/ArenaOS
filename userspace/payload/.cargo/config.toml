@@ -1,0 +1,10 @@
+# The payload is a bare-metal static ELF: x86_64-unknown-none (no std,
+# no OS assumptions) linked by rust-lld with our own script so the
+# layout matches ADR-0016's fixed addresses exactly.
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+# -no-pie: lld defaults to PIE on this target (ET_DYN + a GOT). ADR-0016
+# accepts ET_EXEC only — static images at fixed addresses.
+rustflags = ["-C", "link-arg=-Tpayload.ld", "-C", "link-arg=-no-pie"]

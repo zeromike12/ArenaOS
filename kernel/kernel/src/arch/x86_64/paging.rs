@@ -473,6 +473,24 @@ pub unsafe fn unmap_user_page_kernel_view(va: u64) -> Option<u64> {
     }
 }
 
+/// Read the live 4 KiB user PTE for `va` under `pml4_phys`: `None` when
+/// any level is missing or the leaf is not present, else the raw entry
+/// (flag bits per the `PTE_*` constants). The ELF loader's double-map
+/// guard and the m4 suite's W^X assertions read through this (M4.1,
+/// ADR-0016) — introspection only; nothing is modified.
+///
+/// # Safety
+/// Ring 0, IF=0, `pml4_phys` a reachable, owned page-table root, `va`
+/// page-aligned in the canonical lower half.
+pub unsafe fn user_pte_flags(pml4_phys: u64, va: u64) -> Option<u64> {
+    // SAFETY: caller contract; find_pte re-checks PRESENT at every level
+    // and refuses huge leaves.
+    unsafe {
+        let e = *find_pte(pml4_phys, va)?;
+        if e & PTE_PRESENT == 0 { None } else { Some(e) }
+    }
+}
+
 /// Create a fresh process PML4 (returns its PHYS): user half empty,
 /// kernel half (entries 256..511) cloned from the live kernel view so
 /// ring-3→ring-0 transitions never need a CR3 switch and every process

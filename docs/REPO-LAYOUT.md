@@ -51,10 +51,14 @@ Layout rules:
   kernel proper, M2.7 split), `kernel/arch-x86_64/` if shared arch code
   outgrows in-crate modules. Every crate in it builds for a bare-metal
   target and contains zero external dependencies (ADR-0004).
+- **`userspace/`** is live since M4.1 with its first crate,
+  `userspace/payload` (the ADR-0016 test image: a static ELF64 built for
+  `x86_64-unknown-none` with its own linker script, embedded into the
+  kernel by `tools/build.sh`). Servers, the shell, and apps join here in
+  M4.4+.
 - Future top-level directories, added only when their phase begins:
-  `userspace/` (servers, shell, apps), `libs/` (shared userspace libraries),
-  `drivers/` (userspace driver servers, Phase 6). Not created empty —
-  directories appear with code.
+  `libs/` (shared userspace libraries), `drivers/` (userspace driver
+  servers, Phase 6). Not created empty — directories appear with code.
 - `tools/` may use external packages (pip/npm); it is explicitly outside the
   OS image. `tests/` holds assets consumed by `tools/test_*.py`.
 - Docs are peers of code: a change that alters an architectural fact must

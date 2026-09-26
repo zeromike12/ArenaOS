@@ -200,9 +200,26 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
 
 ## Milestone 4 — Userspace & first program 🎯 (assignment's "first userspace program")
 
-- 4.1 **Executable format decision + loader** (ADR due: ELF container with
+- [x] 4.1 **Executable format decision + loader** (ADR due: ELF container with
       our own semantics vs. bespoke format — container pragmatism, semantics
       ours).
+      DONE (ADR-0016): ELF64 container, ArenaOS strict-subset semantics —
+      `kernel/kernel/src/elf.rs` validates (ET_EXEC static only, ≤8
+      page-aligned `PT_LOAD`s in the canonical lower half, W^X per segment,
+      filesz ≤ memsz inside the file, non-overlapping, entry inside an X
+      segment, `PT_INTERP` an explicit refusal; all other phdr types inert,
+      section headers never consulted) and loads (per page: occupied-VA
+      refusal *before* allocation, fresh zeroed frame, file-backed prefix
+      copied, mapped with the segment's own flags — W^X re-enforced by the
+      mapper; frames belong to the address space, `proc::destroy` reclaims).
+      Test image is a genuine cargo/rust-lld artifact — `userspace/payload`
+      (`x86_64-unknown-none`, own `payload.ld`, fixed layout: entry stub
+      0x200000, self-describing META 0x201000, 4 KiB NOLOAD bss 0x202000),
+      embedded via `include_bytes!` (build.sh compiles it first). m4 suite:
+      parse + META cross-check, 25-mutation rejection corpus, load round
+      (7 frames exact, PTE W^X flags, contents under the target's CR3
+      through STAC, double-load/dead-target refusals, exact teardown) —
+      m4 3/3, m1/m2/m3 regressions green.
 - 4.2 **Syscall ABI v1** (register encoding ADR), dispatch, typed status
       codes; first calls: debug-write (temporary console backdoor),
       thread_exit.

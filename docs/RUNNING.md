@@ -79,7 +79,7 @@ files instead, e.g. on Debian/Ubuntu:
 
 (copy `OVMF_VARS.fd` to a writable location first, as above).
 
-## What a healthy boot looks like (current: Milestone 3 complete)
+## What a healthy boot looks like (current: Milestone 4 in progress)
 
 The serial output is a boot stage log followed by kernel log lines. The
 machine-checkable landmarks, in order:
@@ -93,8 +93,11 @@ machine-checkable landmarks, in order:
 6. 13 `m3:test:<name>: PASS` lines — kernel threads, preemption, ring 3
    + syscalls, processes as address spaces, capability spaces
    (ADR-0012…0015) — ending with `m3: RESULT PASS (13/13)`
-7. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
-8. QEMU exits on its own with status 0
+7. 3 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
+   corpus, and the image loader (ADR-0016) — ending with
+   `m4: RESULT PASS (3/3)`
+8. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
+9. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to

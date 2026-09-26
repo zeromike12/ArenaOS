@@ -17,8 +17,8 @@ automated tests that boot the real system in QEMU.
 | Phase 0 — Architecture (vision, ADRs, toolchain) | ✅ complete | `docs/` |
 | **Milestone 1 — First boot** (UEFI → kernel → verified diagnostics → safe halt) | ✅ **complete** | `tools/test_m1.py` (8/8 in-guest self-tests, clean QEMU exit) |
 | **Milestone 2 — Kernel foundations** (exceptions, timers, frames, paging, heap, locks, boot split) | ✅ **complete** — 2.1 (TSS/IST, exception recovery) · 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) · 2.3 (frame allocator, ADR-0007) · 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) · 2.5 (kernel heap, ADR-0009) · 2.6 (spinlocks, irqsave critical sections, ADR-0010) · 2.7 (boot split: ExitBootServices → kernel proper, reclaimed timer chain, farewell-island shutdown, ADR-0011) | `tools/test_m2.py` (21/21) + 100/100-boot stability loop + host suites (arena-heap 12/12, arena-sync 6/6) |
-| Milestone 3 — Multitasking (threads, scheduler, processes, capabilities) | 🔨 in progress — 3.1 (kernel threads + context switch: callee-saved frame, no-FPU invariant build-enforced, canaried 32 KiB stacks, exact-accounting reap, ADR-0012) + 3.2 (timer-driven preemption: tick hook, nested cooperative switch, per-CPU run queues, exact-RR proof on yield-free threads, ADR-0013) done | `tools/test_m3.py` (7/7) + m1/m2 regressions green + 100/100-boot stability |
-| Milestone 4 — Userspace & first program | ⬜ | — |
+| **Milestone 3 — Multitasking** (threads, scheduler, processes, capabilities) | ✅ **complete** — 3.1 (kernel threads + context switch: callee-saved frame, no-FPU invariant build-enforced, canaried 32 KiB stacks, exact-accounting reap, ADR-0012) · 3.2 (timer-driven preemption: tick hook, nested cooperative switch, per-CPU run queues, exact-RR proof on yield-free threads, ADR-0013) · 3.3 (ring-3 threads, syscall/sysret boundary, TSS RSP0, SMEP/SMAP armed and fault-tested; processes = address-space objects: private PML4, cloned kernel half, exact teardown, ADR-0014) · 3.4 (capability spaces: per-process slot tables, attenuation-only delegation, right-gated destroy, gated `process_root`/`map_memory` invokes, ADR-0015) | `tools/test_m3.py` (13/13) + m1/m2 regressions green + 100/100-boot stability + release [v0.3.0](https://github.com/zeromike12/ArenaOS/releases/tag/v0.3.0) |
+| Milestone 4 — Userspace & first program | 🔨 in progress — 4.1 (executable format + image loader: ELF64 container with ArenaOS strict-subset semantics — ET_EXEC-only validator, W^X segments, zero-filled NOLOAD bss, exact-accounting load into a process space; test image is a genuine cargo/rust-lld artifact in `userspace/payload`, ADR-0016) done | `tools/test_m4.py` (3/3) + m1/m2/m3 regressions green |
 | Phases 5–10 — Storage, drivers, net, userspace maturity, graphics, desktop | ⬜ | `docs/ROADMAP.md` |
 
 ## Quickstart (this sandbox)
@@ -42,7 +42,7 @@ image plus the exact EDK2 firmware pair it was tested against. See
 `qemu-system-x86_64` command, serial is the console, and the VM shuts
 itself down cleanly when the milestone suite finishes.
 
-## What just booted (Milestone 2)
+## What just booted (current: Milestone 4 in progress)
 
 QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It brings
 up serial, GDT/IDT/TSS, the 16550 UART, and the real UEFI memory map;
@@ -71,8 +71,27 @@ and heap accounting returns exactly to baseline. Then the 100 Hz PIT
 tick starts driving the scheduler itself (ADR-0013): three threads that
 contain *no yield call at all* are rotated in exact round-robin order
 by timer preemption (~200k loop iterations each), and cooperative
-yields provably compose with 10 ms quanta (`m3: RESULT PASS (7/7)`).
-Finally the machine shuts down through a farewell island that
+yields provably compose with 10 ms quanta. Then the ring-3 boundary
+comes up (ADR-0014): hand-assembled user payloads execute at CPL 3 and
+cross it through real `syscall`s with SMEP/SMAP armed — a privileged
+instruction in user mode faults and resumes, a bare kernel read of a
+user page takes the SMAP #PF — and processes become address-space
+objects: private PML4s with cloned kernel halves, same VA over distinct
+frames per process, exact create/destroy accounting. Every process also
+anchors a 16-slot capability space (ADR-0015): rights attenuate on
+copy (amplification is a loud refusal), destroy is right-gated and
+removes references only — dangling caps refuse cleanly — and two
+gated invokes (`process_root`, `map_memory`) bind untyped frames into
+a target's address space under WRITE rights on both caps
+(`m3: RESULT PASS (13/13)`). Milestone 4 begins with the executable
+format (ADR-0016): a genuine cargo/rust-lld ELF artifact
+(`userspace/payload`, embedded at compile time) is validated field by
+field against the ArenaOS strict ELF subset, 25 mutation classes of it
+are refused, and a real process loads it — 3 pages, 7 frames, PTEs
+W^X-exact, entry stub + META manifest + 4 KiB of zeroed NOLOAD bss
+read back under the *target's* CR3 through STAC-bracketed accesses,
+double-load refused at zero cost, teardown exact (`m4: RESULT PASS
+(3/3)`). Finally the machine shuts down through a farewell island that
 hands control back to firmware's `ResetSystem` in firmware's own address
 space. Every claim above is a machine-checked serial marker; nothing is
 decorative.
@@ -85,7 +104,8 @@ decorative.
   philosophy
 - [docs/adr/](docs/adr/README.md) — architecture decision records
   (language, kernel architecture, boot strategy, dependency policy, testing,
-  ABI philosophy)
+  ABI philosophy, allocator, address space, heap, sync, boot split, threads,
+  preemption, processes/ring-3, capabilities, executable format)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — milestones with exit criteria + the
   "do not build yet" firewall
 - [docs/RISKS.md](docs/RISKS.md) — risk register
