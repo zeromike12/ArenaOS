@@ -254,7 +254,20 @@ pub fn destroy_notification(nid: u32) -> Result<(), &'static str> {
 /// the transfer or the drop. Returns the landing slot, or `CAP_NONE` when
 /// the space was full (the cap is dropped: v1 caps describe, never own,
 /// so a drop frees nothing and strands nothing).
+///
+/// An Untyped cap LANDING through IPC is forced LENT (`owned: false`,
+/// ADR-0022): the sender keeps the single owning cap, so the receiver
+/// can aim a device at the frame (zero-copy DMA via `SYS_CAP_PHYS`) and
+/// discard the reference when the request completes — freeing or mapping
+/// through a landed cap is structurally impossible.
 fn install_cap(pid: u64, cap: Cap) -> u64 {
+    let cap = match cap.obj {
+        CapObj::Untyped { phys, .. } => Cap {
+            obj: CapObj::Untyped { phys, owned: false },
+            rights: cap.rights,
+        },
+        _ => cap,
+    };
     match crate::cap::grant(pid, cap) {
         Ok(slot) => {
             bump!(cap_transfers);

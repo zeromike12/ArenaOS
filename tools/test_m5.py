@@ -47,6 +47,25 @@ Current coverage:
                     spurious hit on unregistered vector 49 is counted
                     and survived.
 
+  M5.2 — the userspace block service (ADR-0022):
+  * block_service — the kernel spawns storaged (registry image 2, the
+                    userspace virtio-blk driver: Mmio-cap window grant,
+                    endpoint serve side, interrupt notification) and
+                    blktest (image 3, the client: endpoint call side).
+                    The client allocates a buffer frame, lends a COPY
+                    of its cap through IPC, and drives a
+                    write→clear→read-back→verify cycle against the
+                    scratch disk THROUGH the service boundary — the
+                    device DMAs the caller's own page (zero copy).
+                    Completions arrive as device MSI-X interrupts on a
+                    SYS_IRQ_RELAY-armed vector, relayed into the
+                    driver's SYS_WAIT (never polled). Kernel-side
+                    proofs: both exit badges exact, both exit codes 42
+                    (the client verified the pattern byte-for-byte),
+                    exactly TWO relay-vector deliveries (one per
+                    request), proc::destroy sweeps the dead driver's
+                    relay, and teardown is frame-exact.
+
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
@@ -61,6 +80,7 @@ EXPECTED_TESTS = [
     "untyped_alloc",
     "mmio_user",
     "irq_relay",
+    "block_service",
 ]
 
 if __name__ == "__main__":

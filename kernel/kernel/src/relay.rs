@@ -10,8 +10,10 @@
 //! context and the kernel's ISR footprint stays one table lookup.
 //!
 //! Registration/release are kernel-side APIs (the M5 suites and, from M5.2,
-//! the `SYS_IRQ_RELAY` handler). The table is deliberately tiny and static —
-//! 16 slots, one per relay vector — like every other bounded kernel object.
+//! the `SYS_IRQ_RELAY` handler); process-armed registrations carry an owner
+//! pid and are swept when that process is destroyed. The table is
+//! deliberately tiny and static — 16 slots, one per relay vector — like
+//! every other bounded kernel object.
 
 use crate::arch::x86_64::idt;
 use crate::ipc;
@@ -26,6 +28,11 @@ struct RelaySlot {
     nid: u32,
     badge: u64,
     deliveries: u64,
+    /// Owning process (0 = kernel-owned: the suites' own registrations).
+    /// A process-armed relay (`SYS_IRQ_RELAY`, M5.2) dies with its owner —
+    /// `proc::destroy` calls [`release_by_owner`] so a dead driver can
+    /// never leave a live vector notifying a dead notification.
+    owner: u64,
 }
 
 const EMPTY: RelaySlot = RelaySlot {
@@ -33,6 +40,7 @@ const EMPTY: RelaySlot = RelaySlot {
     nid: 0,
     badge: 0,
     deliveries: 0,
+    owner: 0,
 };
 
 /// One slot per relay vector (48..63).
@@ -56,6 +64,13 @@ fn idx(vector: u64) -> Result<usize, &'static str> {
 /// protocol, ADR-0018). Call with IF=0 or from a syscall (the dispatcher
 /// runs IF=0).
 pub fn register(vector: u64, nid: u32, badge: u64) -> Result<(), &'static str> {
+    register_owned(vector, nid, badge, 0)
+}
+
+/// [`register`] with a process owner (M5.2's `SYS_IRQ_RELAY` path): the
+/// registration is torn down automatically when the owning process is
+/// destroyed. `owner` 0 means kernel-owned (the suites).
+pub fn register_owned(vector: u64, nid: u32, badge: u64, owner: u64) -> Result<(), &'static str> {
     let i = idx(vector)?;
     if badge == 0 {
         return Err("relay: badge must be nonzero");
@@ -71,12 +86,37 @@ pub fn register(vector: u64, nid: u32, badge: u64) -> Result<(), &'static str> {
             s.nid = nid;
             s.badge = badge;
             s.deliveries = 0;
+            s.owner = owner;
         }
         log_info!(
             "relay",
-            "vector {vector} → notification {nid} badge {badge:#x}"
+            "vector {vector} → notification {nid} badge {badge:#x} (owner pid {owner})"
         );
         Ok(())
+    })
+}
+
+/// Release every relay owned by `pid` (called from `proc::destroy`;
+/// pid 0 is kernel-owned and never swept). Returns the released count.
+pub fn release_by_owner(pid: u64) -> usize {
+    if pid == 0 {
+        return 0;
+    }
+    without_interrupts(|| {
+        let mut n = 0;
+        // SAFETY: single writer under IF=0 (SyncCell contract).
+        unsafe {
+            for s in (*RELAYS.get()).iter_mut() {
+                if s.live && s.owner == pid {
+                    s.live = false;
+                    s.nid = 0;
+                    s.badge = 0;
+                    s.owner = 0;
+                    n += 1; // deliveries stay: the count is history
+                }
+            }
+        }
+        n
     })
 }
 
@@ -96,6 +136,7 @@ pub fn release(vector: u64) -> Result<(), &'static str> {
                 nid: 0,
                 badge: 0,
                 deliveries: s.deliveries, // the count is history, not state
+                owner: 0,
             };
         }
         Ok(())

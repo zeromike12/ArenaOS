@@ -193,7 +193,7 @@ EOF
             -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
             -no-reboot > verify-serial.log )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
-            && grep -aqF 'm5: RESULT PASS (4/4)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm5: RESULT PASS (5/5)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"

@@ -369,17 +369,31 @@ medium — the ESP stays the boot medium throughout).
       vector allocation stay kernel POLICY; the virtio protocol itself
       is userspace MECHANISM). Harness grows a scratch `virtio-blk-pci`
       disk. Exit: m5 suite green in-guest, every prior suite unaffected.
-- [ ] 5.2 **Userspace VirtIO-blk driver**: `userspace/storaged` — the
-      third real userspace image (registry image 2, spawned at boot
-      with a VirtioDevice cap): modern virtio 1.0 handshake, one split
-      virtqueue living in Untyped frames, MSI-X completions through the
-      relay, synchronous sector read/write on the scratch disk, and a
-      block-service endpoint (IPC v1: request words + a data-buffer
-      cap). Exit: a write→read-back→verify cycle driven THROUGH the
-      service boundary from another process, interrupt-delivered
-      completions counted; markers on the wire.
+- [x] 5.2 **Userspace VirtIO-blk driver**: `userspace/storaged` — the
+      third real userspace crate (registry image 2, spawned at boot
+      with kernel-literal grants: an `Mmio` cap over the virtio
+      structure BAR, the endpoint's serve side, an interrupt
+      notification — device discovery through `SYS_DEV_INFO`, gated on
+      the Mmio cap): modern virtio 1.0 handshake, one split virtqueue
+      over three self-allocated Untyped frames, MSI-X completions
+      armed by `SYS_IRQ_RELAY` (kernel programs the table + enable bit
+      through the pre-wired kernel PCI window; relays are pid-owned
+      and swept at `proc::destroy`) and received through `SYS_WAIT` —
+      never polled. Synchronous sector read/write on the scratch disk
+      over a zero-copy block protocol (IPC v1: `[sector, op]` words +
+      the caller's LENT buffer cap; the device DMAs the caller's own
+      frame — phys via `SYS_CAP_PHYS`, ownership refined to
+      `Untyped{phys, owned}` so copy/IPC-landing can never duplicate
+      an owner). Exit proven by m5 `block_service` (5/5): `blktest`
+      (image 3) drove a write→clear→read-back→verify cycle THROUGH
+      the service boundary from another process — all 512 bytes
+      verified, exactly 2 interrupt-delivered completions counted on
+      the relay vector, both exit badges/codes exact, dead driver's
+      relay swept, teardown frame-exact; markers on the wire; the
+      PRODUCTION storaged instance spawns after the suite and parks
+      resident (`ps` shows it beside the shell). ADR-0022.
 - [ ] 5.3 **Filesystem v1 — own design**: extent-based data,
-      copy-on-write + transactional metadata (ADR-0022); host-side
+      copy-on-write + transactional metadata (ADR-0023); host-side
       `mkfs`; `userspace/fsd` server on a block-endpoint cap:
       superblock, object table, extent tree, transaction commit. Exit:
       create/write/read/close files served entirely from ring 3; the

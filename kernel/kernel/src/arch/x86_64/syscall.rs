@@ -113,6 +113,14 @@ pub const SYS_SHUTDOWN: u64 = 15;
 // userspace drivers and self-map windows at kernel-chosen VAs.
 pub const SYS_ALLOC_FRAME: u64 = 16;
 pub const SYS_MAP_MEMORY: u64 = 17;
+// Block-service substrate (M5.2, ADR-0022): device-interrupt relays,
+// zero-copy buffer references (phys query / discard / attenuated copy),
+// and the resolved virtio record of a granted device.
+pub const SYS_IRQ_RELAY: u64 = 18;
+pub const SYS_CAP_PHYS: u64 = 19;
+pub const SYS_CAP_DESTROY: u64 = 20;
+pub const SYS_CAP_COPY: u64 = 21;
+pub const SYS_DEV_INFO: u64 = 22;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -573,6 +581,11 @@ extern "C" fn syscall_dispatch(
         SYS_SHUTDOWN => sys_shutdown(a0) as u64,
         SYS_ALLOC_FRAME => sys_alloc_frame(a0) as u64,
         SYS_MAP_MEMORY => sys_map_memory(a0, a1) as u64,
+        SYS_IRQ_RELAY => sys_irq_relay(a0, a1, a2, a3) as u64,
+        SYS_CAP_PHYS => sys_cap_phys(a0) as u64,
+        SYS_CAP_DESTROY => sys_cap_destroy(a0) as u64,
+        SYS_CAP_COPY => sys_cap_copy(a0, a1, a2) as u64,
+        SYS_DEV_INFO => sys_dev_info(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1030,7 +1043,7 @@ fn sys_alloc_frame(a0: u64) -> Status {
         return STATUS_BUSY; // frame allocator exhausted
     };
     let cap = crate::cap::Cap {
-        obj: crate::cap::CapObj::Untyped { phys },
+        obj: crate::cap::CapObj::Untyped { phys, owned: true },
         rights: crate::cap::RIGHTS_ALL,
     };
     match crate::cap::issue(pid, a0 as usize, cap) {
@@ -1068,7 +1081,11 @@ fn sys_map_memory(a0: u64, a1: u64) -> Status {
         return STATUS_BAD_ARG;
     };
     let (phys, pages, owned) = match c.obj {
-        crate::cap::CapObj::Untyped { phys } => (phys, 1u32, true),
+        // A LENT Untyped cap (copy/IPC-landed) is refused: mapping
+        // consumes the cap and hands the frame to this address space,
+        // whose teardown would free a frame owned by ANOTHER cap
+        // (ADR-0022 — ownership is never duplicated).
+        crate::cap::CapObj::Untyped { phys, owned: true } => (phys, 1u32, true),
         crate::cap::CapObj::Mmio { phys, pages } => (phys, pages, false),
         _ => return STATUS_BAD_ARG, // only owned/device memory self-maps
     };
@@ -1190,6 +1207,231 @@ fn sys_map_memory(a0: u64, a1: u64) -> Status {
         !owned
     );
     chosen as Status
+}
+
+// ---- block-service substrate handlers (M5.2, ADR-0022) ----------------------
+
+/// Number of u64 words `SYS_DEV_INFO` writes (the layout is frozen in
+/// ADR-0022 and mirrored by `userspace/storaged`).
+const DEV_INFO_WORDS: u64 = 12;
+
+/// The device gate: resolve virtio record `dev_idx` and require that the
+/// CALLER HOLDS an Mmio cap over the BAR carrying the device's virtio
+/// structures — the proof that the kernel granted this process this
+/// device (caps are the only authority; device indices are not
+/// guessable secrets, but the gate keeps the surface honest). v1
+/// requires all four structures on ONE BAR (the reference fixture puts
+/// them all in BAR4); a multi-BAR layout is a typed refusal, documented
+/// in ADR-0022. Returns (device, structure-bar index, function record).
+fn virtio_for_caller(
+    pid: u64,
+    dev_idx: u64,
+) -> Result<
+    (
+        crate::drivers::pci::VirtioDevice,
+        usize,
+        crate::drivers::pci::PciFunction,
+    ),
+    Status,
+> {
+    use crate::drivers::pci;
+    let Some(v) = pci::virtio_device(dev_idx as usize) else {
+        return Err(STATUS_BAD_ARG);
+    };
+    if !v.common.present
+        || v.notify.bar != v.common.bar
+        || v.isr.bar != v.common.bar
+        || v.device_cfg.bar != v.common.bar
+    {
+        return Err(STATUS_BAD_ARG); // absent or split across BARs (v1: one window)
+    }
+    let bar = v.common.bar as usize;
+    let Some(f) = pci::pci_function(v.pci_index) else {
+        return Err(STATUS_BAD_ARG);
+    };
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    // The gate itself: an Mmio cap whose phys is the structure BAR's base.
+    let base = f.bar_base[bar];
+    let holds = (0..crate::cap::CAP_SLOTS).any(|slot| {
+        crate::cap::read(pid, slot)
+            .is_ok_and(|c| matches!(c.obj, crate::cap::CapObj::Mmio { phys, .. } if phys == base))
+    });
+    if !holds {
+        return Err(STATUS_BAD_ARG);
+    }
+    Ok((v, bar, f))
+}
+
+/// SYS_DEV_INFO(dev_idx, buf): write the kernel's RESOLVED virtio record
+/// for a granted device into the caller's buffer — `DEV_INFO_WORDS` u64
+/// words, little-endian, the layout of ADR-0022:
+/// `[0]`=pci_index, `[1]`=structure-BAR base, `[2..7]`=common/notify/isr/
+/// device offset|length<<32 pairs plus the notify multiplier,
+/// `[7]`=msix present|table_size<<32, `[8]`=device_id|transitional<<32.
+/// Config space itself is never exposed — this record IS the ring-3 view
+/// of the kernel's scan. Returns the word count as a positive payload.
+fn sys_dev_info(a0: u64, a1: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    if !user_range_ok(a1, DEV_INFO_WORDS * 8) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Ok((v, bar, f)) = virtio_for_caller(pid, a0) else {
+        return STATUS_BAD_ARG;
+    };
+    let loc =
+        |c: crate::drivers::pci::VirtioCapLoc| u64::from(c.offset) | (u64::from(c.length) << 32);
+    let words = [
+        v.pci_index as u64,
+        f.bar_base[bar],
+        loc(v.common),
+        loc(v.notify),
+        u64::from(v.notify_off_multiplier),
+        loc(v.isr),
+        loc(v.device_cfg),
+        u64::from(v.msix.present) | (u64::from(v.msix.table_size) << 32),
+        u64::from(v.device_id) | (u64::from(v.transitional) << 32),
+        0,
+        0,
+        0,
+    ];
+    // SAFETY: validated span against this thread's regions, own address
+    // space live, STAC brackets the write, IF=0; the source is this
+    // stack's own scratch.
+    unsafe {
+        super::stac();
+        let p = a1 as *mut u64;
+        for (i, w) in words.iter().enumerate() {
+            core::ptr::write_volatile(p.add(i), *w);
+        }
+        super::clac();
+    }
+    DEV_INFO_WORDS as Status
+}
+
+/// SYS_IRQ_RELAY(dev_idx, msix_entry, notif_slot, badge): arm the
+/// device-interrupt → notification bridge (ADR-0022). The kernel — the
+/// only party that may touch config space and interrupt routing —
+/// allocates a free relay vector (48..63), programs MSI-X table entry
+/// `msix_entry` to deliver it to this CPU, enables MSI-X on the
+/// function, and registers (vector → notification, badge) OWNED by the
+/// calling process (a dead driver's relay dies with it, via
+/// `proc::destroy`'s sweep). The caller needs WRITE on its notification
+/// cap and the device gate of [`virtio_for_caller`]. Returns the vector
+/// as a positive payload; `STATUS_BUSY` when all relay vectors are
+/// armed or the device refused the programming.
+fn sys_irq_relay(a0: u64, a1: u64, a2: u64, a3: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    // The notification the deliveries will wake: WRITE is the notify side.
+    let Ok(nid) = notification_of(pid, a2, crate::cap::RIGHTS_WRITE) else {
+        return STATUS_BAD_ARG;
+    };
+    if a3 == 0 {
+        return STATUS_BAD_ARG; // the merged-badge protocol has no empty word
+    }
+    let Ok((v, _bar, f)) = virtio_for_caller(pid, a0) else {
+        return STATUS_BAD_ARG;
+    };
+    if !v.msix.present || a1 >= u64::from(v.msix.table_size) {
+        return STATUS_BAD_ARG;
+    }
+    let tbar = v.msix.table_bar as usize;
+    if tbar > 5 || f.bar_is_io[tbar] || f.bar_base[tbar] == 0 {
+        return STATUS_BAD_ARG;
+    }
+    // First free relay vector (the range itself belongs to idt.rs).
+    let base = super::idt::RELAY_VECTOR_BASE as u64;
+    let Some(vector) = (base..base + super::idt::RELAY_VECTOR_COUNT as u64)
+        .find(|&vec| !crate::relay::registered(vec))
+    else {
+        return STATUS_BUSY; // all 16 relay vectors armed
+    };
+    let table_phys = f.bar_base[tbar] + u64::from(v.msix.table_offset);
+    if let Err(e) = crate::drivers::pci::msix_write_entry(table_phys, a1 as u16, vector) {
+        error!("syscall", "irq_relay: MSI-X entry programming failed: {e}");
+        return STATUS_BUSY;
+    }
+    if let Err(e) = crate::drivers::pci::msix_enable(v.pci_index, v.msix.cap_ptr) {
+        error!("syscall", "irq_relay: MSI-X enable failed: {e}");
+        return STATUS_BUSY;
+    }
+    if let Err(e) = crate::relay::register_owned(vector, nid, a3, pid) {
+        // Unreachable in practice (the vector was just probed free, the
+        // badge is nonzero) — loud on the impossible, no half-armed state
+        // matters: without the registration the vector is spurious-only.
+        error!("syscall", "irq_relay: registration failed: {e}");
+        return STATUS_BUSY;
+    }
+    info!(
+        "syscall",
+        "irq_relay: pid {pid} dev {a0} msix entry {a1} → vector {vector}, notification {nid} badge {a3:#x}"
+    );
+    vector as Status
+}
+
+/// SYS_CAP_PHYS(slot): the physical address a memory-kind cap names
+/// (`Untyped` owned OR lent, `Memory`, `Mmio`). Needs READ. This is the
+/// zero-copy DMA seam: a driver points a device at a caller's buffer
+/// through the phys of the LENT cap the caller handed over — never
+/// through a bare number in a message word (which would let any process
+/// aim a bus master at any frame). Returns the phys as a positive
+/// payload.
+fn sys_cap_phys(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    match crate::cap::phys_of(pid, a0 as usize) {
+        Ok(phys) => phys as Status,
+        Err(_) => STATUS_BAD_ARG,
+    }
+}
+
+/// SYS_CAP_DESTROY(slot): discard a cap reference (the ring-3 twin of
+/// `cap::destroy`, DESTROY right required). An OWNED Untyped cap frees
+/// its frame; a LENT reference (IPC-landed DMA buffer) just goes away —
+/// the frame stays with its owner. `STATUS_OK` or a typed refusal.
+fn sys_cap_destroy(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    match crate::cap::destroy(pid, a0 as usize) {
+        Ok(()) => STATUS_OK,
+        Err(_) => STATUS_BAD_ARG,
+    }
+}
+
+/// SYS_CAP_COPY(src, dst, rights): delegation by copy INSIDE the
+/// caller's own space — attenuation-only (`cap::copy` refuses
+/// amplification loudly), `dst` must be empty, the source needs COPY.
+/// A copy of an Untyped cap is LENT (ownership never duplicates): the
+/// pattern every zero-copy client uses — keep the owned cap, hand a
+/// copy to the driver, keep the local mapping alive. `STATUS_OK` or a
+/// typed refusal.
+fn sys_cap_copy(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 || a1 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    if a2 == 0 || a2 & !u64::from(crate::cap::RIGHTS_ALL) != 0 {
+        return STATUS_BAD_ARG; // unknown right bits are a contract error
+    }
+    match crate::cap::copy(pid, a0 as usize, pid, a1 as usize, a2 as u32) {
+        Ok(()) => STATUS_OK,
+        Err(_) => STATUS_BAD_ARG,
+    }
 }
 
 /// SYS_PROVE_RING3: arm a #GP expectation whose resume address is the

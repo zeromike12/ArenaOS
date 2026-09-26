@@ -453,6 +453,76 @@ pub unsafe fn user_va_mapped(pml4_phys: u64, va: u64) -> bool {
     unsafe { find_pte(pml4_phys, va).is_some() }
 }
 
+// ---------------------------------------------------------------------------
+// The kernel PCI window (M5.2, ADR-0022)
+// ---------------------------------------------------------------------------
+
+/// Base VA of the kernel-only PCI MMIO window: 16 supervisor pages the
+/// kernel maps on demand over PCI device register pages it must touch
+/// itself (M5.2: the MSI-X table `SYS_IRQ_RELAY` programs — the guest
+/// side of a write the ring-3 driver is never allowed to make).
+///
+/// The generic [`mmio_alias_va`] rule CANNOT serve sub-2 GiB BARs: the
+/// alias VA of a phys below 2 GiB collides with the RAM direct-map alias
+/// of `phys + 2 GiB`-wrapped addresses (the harness's MSI-X table at
+/// 0x8108_5000 aliases onto the RAM page at 0x0108_5000 — present in
+/// any VM with more than ~17 MiB of RAM). This window lives in
+/// pml4[510], an index the kernel view leaves empty (direct map, image
+/// sections, and MMIO aliases all sit in pml4[511]), and process PML4s
+/// copy kernel-half entries BY REFERENCE — so a page mapped here after
+/// processes exist is instantly visible under every CR3 the kernel runs
+/// on (syscall dispatch included).
+pub const KPCI_WIN_BASE: u64 = 0xFFFF_FF00_0000_0000;
+
+/// Window capacity in 4 KiB pages (one MSI-X table needs one).
+const KPCI_SLOTS: usize = 16;
+
+/// (phys page, window VA) per mapped slot; `(0, 0)` = empty.
+static KPCI_PAGES: crate::sync::SyncCell<[(u64, u64); KPCI_SLOTS]> =
+    crate::sync::SyncCell::new([(0, 0); KPCI_SLOTS]);
+
+/// Kernel-view VA for the PCI MMIO page at `phys_page`, mapped on first
+/// use (UC + NX, supervisor-only) and idempotent afterwards. The window
+/// hierarchy is pre-wired by `build_kernel_view`, so this installs a
+/// LEAF only — no frame allocation, no accounting surprise.
+///
+/// # Safety
+/// Ring 0, IF=0; `phys_page` page-aligned and naming a real PCI device
+/// register page taken from the kernel's own BAR records (never from a
+/// user-supplied number).
+pub unsafe fn kernel_pci_alias(phys_page: u64) -> Result<u64, &'static str> {
+    if !phys_page.is_multiple_of(PAGE) {
+        return Err("kpci: unaligned phys page");
+    }
+    // SAFETY: caller contract; single accessor under IF=0.
+    unsafe {
+        let pages = &mut *KPCI_PAGES.get();
+        if let Some(&(_p, va)) = pages.iter().find(|&&(p, _)| p == phys_page) {
+            return Ok(va);
+        }
+        let slot = pages
+            .iter()
+            .position(|&(p, _)| p == 0)
+            .ok_or("kpci: window exhausted")?;
+        let va = KPCI_WIN_BASE + (slot as u64) * PAGE;
+        let root = table_ptr(kernel_cr3_phys());
+        if kernel_alias_busy(root, va) {
+            return Err("kpci: window VA already mapped (kernel-view collision)");
+        }
+        // UC like every device window (PCD|PWT — WB-cached MMIO returns
+        // stale reads and swallows writes), NX, no PTE_USER.
+        map_page_4k(
+            root,
+            va,
+            phys_page,
+            PTE_PRESENT | PTE_WRITE | PTE_NX | PTE_PCD | PTE_PWT,
+        );
+        pages[slot] = (phys_page, va);
+        super::invlpg(va);
+        Ok(va)
+    }
+}
+
 /// [`map_user_page_4k`] against the kernel's own view — the M3.3a
 /// machinery tests run ring-3 code on user pages mapped here (the
 /// kernel view is what CR3 holds whenever no process is running).
@@ -803,11 +873,48 @@ pub unsafe fn build_kernel_view() -> Result<u64, &'static str> {
             phys += PAGE;
         }
 
+        // Kernel PCI window pre-wire (M5.2, ADR-0022): install the
+        // PML4 entry covering KPCI_WIN_BASE NOW, while the kernel view
+        // is the only address space. Process clones copy the
+        // kernel-half entries BY REFERENCE, but only entries PRESENT at
+        // clone time are shared — a window root first installed later
+        // would exist solely under the kernel CR3, and `SYS_IRQ_RELAY`
+        // (which programs the MSI-X table under the CALLER's CR3) would
+        // fault on it (observed live in 5.2 bring-up: #PF with
+        // cr2 = KPCI_WIN_BASE). Seeding the empty PDPT here hangs every
+        // later on-demand `kernel_pci_alias` mapping off a shared root,
+        // instantly visible under every CR3.
+        if kernel_alias_busy(pml4, KPCI_WIN_BASE) {
+            return Err("PCI window base is unexpectedly mapped");
+        }
+        let Some(kpci_pdpt) = new_table() else {
+            return Err("out of frames for the PCI-window PDPT");
+        };
+        let Some(kpci_pd) = new_table() else {
+            return Err("out of frames for the PCI-window PD");
+        };
+        let Some(kpci_pt) = new_table() else {
+            return Err("out of frames for the PCI-window PT");
+        };
+        // One PD/PT covers the window's first 2 MiB — 512 pages, far
+        // more than KPCI_SLOTS. With the whole hierarchy present at
+        // boot, `kernel_pci_alias` installs LEAVES only: zero runtime
+        // frame allocation, so the suites' frame-exact accounting stays
+        // exact across an IRQ arming (observed in 5.2 bring-up: the
+        // late-built PD+PT leaked exactly two frames from the m5
+        // block_service teardown).
+        (*kpci_pd).0[((KPCI_WIN_BASE >> 21) & 0x1FF) as usize] =
+            pte_of(kpci_pt) | PTE_PRESENT | PTE_WRITE;
+        (*kpci_pdpt).0[((KPCI_WIN_BASE >> 30) & 0x1FF) as usize] =
+            pte_of(kpci_pd) | PTE_PRESENT | PTE_WRITE;
+        (*pml4).0[((KPCI_WIN_BASE >> 39) & 0x1FF) as usize] =
+            pte_of(kpci_pdpt) | PTE_PRESENT | PTE_WRITE;
+
         *KERNEL_PML4_PHYS.get() = pte_of(pml4);
     }
     info!(
         "paging",
-        "kernel view built: pml4={:#x} (direct map + image window + RT identity + MMIO/APIC aliases; identity view of RAM deliberately absent)",
+        "kernel view built: pml4={:#x} (direct map + image window + RT identity + MMIO/APIC aliases + PCI-window root; identity view of RAM deliberately absent)",
         pte_of(pml4)
     );
     Ok(pte_of(pml4))

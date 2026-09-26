@@ -44,15 +44,21 @@ pub const MAX_INHERIT: usize = 4;
 /// explicitly forgotten).
 pub const MAX_SPAWN_RECS: usize = 8;
 
-/// The kernel-side image registry (ADR-0019/0020): image 0 is the
+/// The kernel-side image registry (ADR-0019/0020/0022): image 0 is the
 /// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
 /// load, and run; image 1 is the shell the boot sequence spawns as the
-/// initial service. A filesystem-backed source slots in here later
-/// without changing the cap shape.
+/// initial service; image 2 is `storaged`, the userspace virtio-blk
+/// driver spawned at boot as the block service; image 3 is `blktest`,
+/// the block-service client the m5 suite spawns to drive a
+/// write→read-back→verify cycle through storaged's service boundary.
+/// A filesystem-backed source slots in here later without changing the
+/// cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
     match img_id {
         0 => Some(elf::TEST_IMAGE),
         1 => Some(elf::SHELL_IMAGE),
+        2 => Some(elf::STORAGED_IMAGE),
+        3 => Some(elf::BLKTEST_IMAGE),
         _ => None,
     }
 }

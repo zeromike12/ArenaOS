@@ -26,6 +26,19 @@
 //!    EOI, `relay::handle`, `ipc::notify`, and the waiter waking with the
 //!    exact badge; a spurious delivery on an unregistered vector is counted
 //!    and survived.
+//! 5. `block_service` — M5.2 (ADR-0022): the REAL block service boundary.
+//!    The kernel spawns `storaged` (registry image 2, the userspace
+//!    virtio-blk driver) with a kernel-minted Mmio cap over the device's
+//!    structure BAR, an endpoint's serve side, and an interrupt
+//!    notification; then it spawns `blktest` (image 3) with the endpoint's
+//!    call side. The client allocates a buffer frame, lends it through
+//!    IPC, and drives a write→read-back→verify cycle against the scratch
+//!    disk THROUGH the service boundary — every completion arriving as a
+//!    device MSI-X interrupt relayed into the driver's `SYS_WAIT`. The
+//!    kernel proves the machine side: both exit badges, both exit codes
+//!    (42 = the client verified the pattern), exactly two relay-vector
+//!    deliveries (one per completed request), the dead driver's relay
+//!    swept by `proc::destroy`, and frame-exact teardown.
 //!
 //! Markers: `m5:test:<name>`, `m5: RESULT`.
 
@@ -41,11 +54,12 @@ use crate::sched;
 use crate::sync::SyncCell;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 4] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 5] = [
         ("pci_scan", test_pci_scan),
         ("untyped_alloc", test_untyped_alloc),
         ("mmio_user", test_mmio_user),
         ("irq_relay", test_irq_relay),
+        ("block_service", test_block_service),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -517,7 +531,7 @@ fn test_untyped_alloc() -> Result<(), &'static str> {
     }
     let c1 = cap::read(pid, 1).map_err(|_| "slot 1's untyped cap vanished")?;
     match c1.obj {
-        CapObj::Untyped { phys } if phys == phys2 => {}
+        CapObj::Untyped { phys, owned: true } if phys == phys2 => {}
         _ => return Err("slot 1 does not hold the second frame"),
     }
     // The ownership promise: destroying an owned cap returns exactly one
@@ -824,6 +838,222 @@ fn test_irq_relay() -> Result<(), &'static str> {
     info!(
         "m5",
         "irq_relay: vector {RELAY_VEC} → notification {nid} badge {RELAY_BADGE:#x} — a LAPIC self-IPI walked the live stub (dual EOI) into ipc::notify and woke the parked waiter with the exact badge (1 delivery, 1 notify, thread reaped); a spurious hit on unregistered vector {SPURIOUS_VEC} was counted and survived; register/release seams hold (range, empty badge, double-register, double-release all refused)"
+    );
+    Ok(())
+}
+
+// ---- 5. block_service: the real service boundary (M5.2, ADR-0022) -----------
+
+/// Exit badges for the two spawned children (distinct notifications, so
+/// each badge arrives unmerged and exact).
+const CLIENT_EXIT_BADGE: u64 = 0xB10C;
+const STORAGED_EXIT_BADGE: u64 = 0x57D0;
+/// Both images' success exit code (the client verifies the pattern
+/// before exiting; the driver exits cleanly on the client's poison).
+const BLK_EXIT_OK: u64 = 42;
+/// The relay vector the driver arms — the first free one, since
+/// `irq_relay` above released 48 and 49.
+const BLK_RELAY_VEC: u64 = 48;
+
+/// Drain while staying RUNNABLE and interruptible: the children park in
+/// blocking IPC/`SYS_WAIT`, and a device MSI-X is only TAKEN while some
+/// thread runs with IF=1 — the ring-3 children do, but the boot thread
+/// (the only thread left runnable between their blocking points) does
+/// not. The bounded `sti` window is the same discipline `irq_relay`
+/// used for its self-IPI; here it stays open for the whole drain.
+fn drain_interruptible(max_yields: usize) -> Result<usize, &'static str> {
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let r = m5_drain(max_yields);
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    r
+}
+
+fn test_block_service() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+
+    // The device and its structure BAR — the same record pci_scan proved.
+    let Some(v) = pci::find_virtio(pci::VIRTIO_TYPE_BLOCK) else {
+        return Err("no virtio-block device for the service test");
+    };
+    let Some(f) = pci::pci_function(v.pci_index) else {
+        return Err("recorded function vanished from the table");
+    };
+    let bar = v.common.bar as usize;
+    let bar_phys = f.bar_base[bar];
+    let bar_pages = (f.bar_size[bar] / 4096) as u32;
+    if bar_phys == 0 || bar_pages == 0 || bar_pages > 16 {
+        return Err("the structure BAR is unusable for a window grant");
+    }
+
+    // The service objects: one endpoint (driver serves, client calls)
+    // and three notifications — the driver's interrupt relay target and
+    // one exit-badge channel per child.
+    let eid = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let nid_irq = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_client = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_storaged = ipc::create_notification().map_err(|_| "notification table full")?;
+
+    // storaged (registry image 2): slot 0 = the device window (Mmio,
+    // READ|WRITE — the handshake writes registers), slot 1 = the serve
+    // side of the endpoint, slot 2 = the interrupt notification. The
+    // driver DISCOVERS the structure offsets through SYS_DEV_INFO — the
+    // kernel hands over its resolved scan, never config space.
+    let storaged_grants = [
+        Cap {
+            obj: CapObj::Mmio {
+                phys: bar_phys,
+                pages: bar_pages,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_READ,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_irq },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+    ];
+    let s_pid = crate::spawn::spawn_init(
+        2,
+        &storaged_grants,
+        Some((nid_storaged, STORAGED_EXIT_BADGE)),
+    )
+    .map_err(|_| "storaged (image 2) spawn failed")?;
+    // blktest (image 3): slot 0 = the call side of the same endpoint.
+    let client_grants = [Cap {
+        obj: CapObj::Endpoint { eid },
+        rights: cap::RIGHTS_WRITE,
+    }];
+    let c_pid = crate::spawn::spawn_init(3, &client_grants, Some((nid_client, CLIENT_EXIT_BADGE)))
+        .map_err(|_| "blktest (image 3) spawn failed")?;
+    info!(
+        "m5",
+        "block_service: storaged pid {s_pid} (window bar{} phys {bar_phys:#x} {bar_pages} pages, endpoint {eid} serve side, irq notification {nid_irq}), blktest pid {c_pid} (endpoint {eid} call side) — running the write/read-back cycle",
+        bar
+    );
+
+    // Run the two children to completion (client verifies, poisons;
+    // driver replies to the poison and exits). The bound is generous:
+    // each request is a handful of context switches plus one MSI.
+    drain_interruptible(16384).inspect_err(|_| {
+        // Diagnostics before the verdict: which side is still alive and
+        // what the relay saw.
+        error!(
+            "m5",
+            "block_service drain failed: storaged threads={}, client threads={}, relay deliveries on vector {BLK_RELAY_VEC}={}",
+            sched::proc_live_threads(s_pid),
+            sched::proc_live_threads(c_pid),
+            relay::delivery_count(BLK_RELAY_VEC),
+        );
+    })?;
+
+    // Both exit badges arrived, exact and unmerged.
+    let bc = ipc::wait(nid_client).map_err(|_| "the client's exit badge never arrived")?;
+    if bc != CLIENT_EXIT_BADGE {
+        return Err("the client's exit badge is not the granted word");
+    }
+    let bs = ipc::wait(nid_storaged).map_err(|_| "the driver's exit badge never arrived")?;
+    if bs != STORAGED_EXIT_BADGE {
+        return Err("the driver's exit badge is not the granted word");
+    }
+
+    // Both images exited with THEIR success code — the client only
+    // exits 42 after the read-back pattern verified, the driver only
+    // after replying to the poison request.
+    let recs = crate::spawn::records_snapshot();
+    let tid_of = |pid: u64| -> Option<u64> {
+        recs.iter()
+            .flatten()
+            .find(|&&(p, _)| p == pid)
+            .map(|&(_, t)| t)
+    };
+    let (Some(c_tid), Some(s_tid)) = (tid_of(c_pid), tid_of(s_pid)) else {
+        return Err("a spawned child has no record (spawn registry lost it)");
+    };
+    let client_status = syscall::exit_status_of(c_tid);
+    let driver_status = syscall::exit_status_of(s_tid);
+    if client_status != Some(BLK_EXIT_OK) {
+        return Err(match client_status {
+            Some(43) => "client: frame alloc/copy/map refused (43)",
+            Some(44) => "client: the WRITE call was refused (44)",
+            Some(45) => "client: the device reported a WRITE error status (45)",
+            Some(46) => "client: the READ call was refused (46)",
+            Some(47) => "client: the device reported a READ error status (47)",
+            Some(48) => "client: the read-back pattern MISMATCHED (48)",
+            Some(49) => "client: the poison shutdown call was refused (49)",
+            Some(other) if (60..=68).contains(&other) => {
+                "driver-side failure code surfaced on the client (60..68)"
+            }
+            _ => "the client exited with a code from nowhere in the contract",
+        });
+    }
+    if driver_status != Some(BLK_EXIT_OK) {
+        return Err(match driver_status {
+            Some(60) => "driver: SYS_DEV_INFO refused or short (60)",
+            Some(61) => "driver: a self-map (device window or ring frame) refused (61)",
+            Some(62) => "driver: the virtio handshake failed — FEATURES_OK did not stick (62)",
+            Some(63) => "driver: the virtqueue setup failed (63)",
+            Some(64) => "driver: SYS_IRQ_RELAY refused (64)",
+            Some(65) => "driver: SYS_IPC_RECV refused (65)",
+            Some(66) => "driver: SYS_CAP_PHYS on the landed buffer refused (66)",
+            Some(67) => "driver: a completion never arrived or was malformed (67)",
+            Some(68) => "driver: SYS_IPC_REPLY refused (68)",
+            Some(97) => "driver: the console refused an output write (97)",
+            Some(99) => "driver: the panic handler ran (99)",
+            _ => "the driver exited with a code from nowhere in the contract",
+        });
+    }
+
+    // The interrupt story, counted on the machine side: the driver
+    // armed vector 48 (the first free relay vector — irq_relay released
+    // both of its own, and `relay::register` restarts the delivery
+    // count at zero), and exactly TWO hardware deliveries walked the
+    // stub→relay→notify chain — one per completed request (WRITE,
+    // READ). No polling anywhere.
+    let deliveries = relay::delivery_count(BLK_RELAY_VEC);
+    if deliveries != 2 {
+        return Err(
+            "the relay vector did not deliver exactly two device interrupts (want WRITE + READ completions)",
+        );
+    }
+    if !relay::registered(BLK_RELAY_VEC) {
+        return Err("the driver's relay registration vanished while the process lived");
+    }
+
+    // Teardown: destroying the dead driver must SWEEP its owned relay
+    // (a dead driver may not leave a live vector notifying a dead
+    // notification), then both address spaces come back frame-exact —
+    // the driver's four ring frames, the client's buffer frame, every
+    // page table, and nothing else (the device window and the LENT
+    // landed caps free nothing, by construction).
+    proc::destroy(s_pid)?;
+    if relay::registered(BLK_RELAY_VEC) {
+        return Err("proc::destroy did not sweep the dead driver's relay vector");
+    }
+    proc::destroy(c_pid)?;
+    crate::spawn::forget(s_pid).map_err(|_| "driver spawn record forget refused")?;
+    crate::spawn::forget(c_pid).map_err(|_| "client spawn record forget refused")?;
+    ipc::destroy_endpoint(eid).map_err(|_| "endpoint teardown refused")?;
+    ipc::destroy_notification(nid_irq).map_err(|_| "irq notification teardown refused")?;
+    ipc::destroy_notification(nid_client).map_err(|_| "client notification teardown refused")?;
+    ipc::destroy_notification(nid_storaged).map_err(|_| "driver notification teardown refused")?;
+
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m5",
+            "block_service teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err("block-service teardown is not frame-exact");
+    }
+    info!(
+        "m5",
+        "block_service: blktest (pid {c_pid}) drove a write→read-back→verify cycle through storaged's (pid {s_pid}) endpoint — zero-copy (the buffer frame was LENT through IPC, the device DMA'd the caller's own page), {deliveries} interrupt-delivered completions on relay vector {BLK_RELAY_VEC} (exactly one per request), both children exited {BLK_EXIT_OK}, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames {after})"
     );
     Ok(())
 }

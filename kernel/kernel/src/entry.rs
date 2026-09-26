@@ -360,6 +360,20 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 5 suite failed");
     }
 
+    // --- M5.2: the production block service (ADR-0022) ----------------------
+    // storaged — the userspace virtio-blk driver — starts at boot as a
+    // resident service: the kernel mints its device window (an Mmio cap
+    // over the BAR carrying the virtio structures), hands it an
+    // endpoint's serve side and an interrupt notification, and the
+    // driver does EVERYTHING else (virtio handshake, virtqueue setup,
+    // IRQ relay arming, zero-copy DMA, completions) from ring 3. It
+    // parks in recv; 5.3's filesystem daemon will be its first
+    // production client. The m5 suite just proved the same image
+    // end-to-end on a short-lived test instance.
+    if let Err(reason) = spawn_storaged() {
+        crate::halt::halt_machine(reason);
+    }
+
     info!(
         "kernel",
         "milestone 4 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1 + spawn protocol + minimal shell) — spawning the shell"
@@ -414,6 +428,50 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         // and the interrupt gate masks IF again for the handler.
         unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
     }
+}
+
+/// Spawn the production block service (M5.2, ADR-0022): registry image 2
+/// with kernel-literal grants in slot order — the device window (Mmio,
+/// READ|WRITE: the handshake writes registers), the endpoint's serve
+/// side (READ), and its interrupt notification (READ|WRITE — the relay
+/// target `SYS_IRQ_RELAY` arms). The virtio record comes from the boot
+/// PCI scan; the driver re-discovers the structure offsets itself
+/// through `SYS_DEV_INFO` (config space is never exposed to ring 3).
+fn spawn_storaged() -> Result<u64, &'static str> {
+    let v = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_BLOCK)
+        .ok_or("storaged: no virtio-block function on bus 0")?;
+    let f = crate::drivers::pci::pci_function(v.pci_index)
+        .ok_or("storaged: recorded function vanished from the table")?;
+    let bar = v.common.bar as usize;
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 || f.bar_size[bar] < 4096 {
+        return Err("storaged: the virtio structure BAR is unusable");
+    }
+    let eid = crate::ipc::create_endpoint().map_err(|_| "storaged: endpoint table full")?;
+    let nid = crate::ipc::create_notification().map_err(|_| "storaged: notification table full")?;
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Mmio {
+                phys: f.bar_base[bar],
+                pages: (f.bar_size[bar] / 4096) as u32,
+            },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    let pid = crate::spawn::spawn_init(2, &grants, None)?;
+    info!(
+        "kernel",
+        "storaged spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the block service is live; its first production client arrives with the 5.3 filesystem",
+        f.bar_base[bar]
+    );
+    Ok(pid)
 }
 
 /// We are running in the kernel view: RIP and RSP are higher-half, CR3 is

@@ -457,6 +457,21 @@ returns when priorities do.
   boot-time PCI enumeration that resolves VirtIO capability structures
   and keeps config space / DMA authorization (MEM|BUS MASTER) as
   kernel policy. The VirtIO mechanism itself arrives in ring 3 (M5.2).
+- **Block service landed (M5.2, ADR-0022):** `userspace/storaged` is
+  the first resident driver SERVER — spawned at boot with an `Mmio`
+  cap over the virtio structure BAR, an endpoint's serve side, and an
+  interrupt notification. It discovers the device through
+  `SYS_DEV_INFO` (the kernel's resolved scan record, gated on the
+  Mmio cap; config space never crosses the boundary), runs the whole
+  virtio 1.0 handshake and one split virtqueue in ring 3, and arms
+  its MSI-X completions with `SYS_IRQ_RELAY` — the kernel programs
+  the table entry and enable bit through a pre-wired kernel PCI
+  window and registers a pid-OWNED relay swept at `proc::destroy`.
+  Data flows zero-copy: callers lend a buffer cap (an `Untyped` copy
+  is structurally LENT — `owned: false` — so it can never free or map
+  the frame), the driver points descriptors at the phys it learns via
+  `SYS_CAP_PHYS`, and the device DMAs the caller's own page. A driver
+  crash loses its own state; restart supervision is a later phase.
 
 ## 9. Security philosophy
 
@@ -548,6 +563,7 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Console input service: COM1 RX on IRQ4/vector 33, kernel line discipline (echo, backspace, CR/LF commit, oldest-drop queue, one-reader reservation), blocking SYS_CONSOLE_READ (slot 13), SYS_PROC_LIST (14), Power-gated SYS_SHUTDOWN (15, CapObj::Power) | **M4.6 — implemented, 9/9 in-guest + interactive session test (ADR-0020)** |
 | Minimal shell: the second real userspace image (`userspace/shell`, registry image 1), spawned at boot as the initial service via `spawn_init` (parentless creation, kernel-literal grants); builtins help/ps/echo/spawn/shutdown; the bootstrap thread becomes the idle thread | **M4.6 — implemented, end-to-end session proven from the harness (ADR-0020)** |
 | Driver substrate: owned Untyped frame caps + destroy-returns-frame, SYS_ALLOC_FRAME (16) / SYS_MAP_MEMORY (17, kernel-chosen self-map windows joined to the region table), kernel-minted Mmio caps (uncached, NX, never consumed), IRQ relay vectors 48..63 → notification badges (live LAPIC-IPI-proven), kernel-side PCI bus-0 enumeration with BAR sizing, the virtio capability walk, and MEM\|BUS MASTER as kernel policy — the harness attaches a fresh scratch virtio-blk disk every boot | **M5.1 — implemented, 4/4 in-guest (ADR-0021)** |
-| Userspace driver servers (`storaged` — M5.2 next), filesystem, networking, graphics, userspace programs beyond the shell and test image | not started |
+| Userspace block service: `storaged` (registry image 2, spawned at boot, resident) — ring-3 virtio 1.0 handshake + split virtqueue over self-allocated owned frames, SYS_DEV_INFO (22) discovery gated on the Mmio cap, SYS_IRQ_RELAY (18) MSI-X arming through the pre-wired kernel PCI window with pid-owned relays swept at proc::destroy, zero-copy protocol over IPC v1 (lent buffer caps: SYS_CAP_COPY (21) / SYS_CAP_PHYS (19) / SYS_CAP_DESTROY (20), `Untyped{phys, owned}` structurally single-owner), poison-shutdown lifecycle; `blktest` (image 3) proves the boundary with a write→clear→read-back→verify cycle, 2 interrupt-delivered completions counted, frame-exact teardown | **M5.2 — implemented, 5/5 in-guest (ADR-0022)** |
+| Filesystem (`fsd` — 5.3 next), networking, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

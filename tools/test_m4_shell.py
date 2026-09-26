@@ -87,12 +87,25 @@ def main() -> int:
     # kernel echo + shell response on the same wire).
     check("hello-arena" in serial, "echo returned the typed line")
 
-    # ps: SYS_PROC_LIST saw the shell itself — exactly one live process
-    # at that point, with exactly one thread.
-    m = re.search(r"^  pid (\d+)  threads (\d+)$", serial, re.MULTILINE)
-    check(m is not None, "ps printed a (pid, threads) line")
+    # ps: SYS_PROC_LIST — since M5.2 the machine has TWO resident
+    # processes: storaged (the block service, spawned at boot before
+    # the shell, parked in recv) and the shell itself. Both are
+    # single-threaded; the shell's pid is the one the kernel announced.
+    ps_lines = re.findall(r"^  pid (\d+)  threads (\d+)$", serial, re.MULTILINE)
+    check(len(ps_lines) >= 2,
+          f"ps listed both resident processes (got {len(ps_lines)})")
+    m = re.search(r"shell spawned: pid (\d+)", serial)
+    check(m is not None, "the kernel announced the shell's pid")
     if m:
-        check(m.group(2) == "1", f"the shell is single-threaded (got {m.group(2)})")
+        shell_rows = [t for (p, t) in ps_lines if p == m.group(1)]
+        check(len(shell_rows) >= 1, "ps listed the shell itself")
+        check(all(t == "1" for t in shell_rows),
+              f"the shell is single-threaded (got {shell_rows})")
+    ms = re.search(r"storaged spawned: pid (\d+)", serial)
+    check(ms is not None, "the kernel announced the spawned block service")
+    if ms:
+        check(any(p == ms.group(1) and t == "1" for (p, t) in ps_lines),
+              "ps listed storaged, single-threaded and parked in recv")
 
     # spawn: the shell created a process from its Image cap — the
     # untouched M4.3 payload ran mid-session (its pinned message on the

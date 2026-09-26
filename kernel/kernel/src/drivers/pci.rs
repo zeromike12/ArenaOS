@@ -113,6 +113,10 @@ pub struct MsixInfo {
     pub table_size: u16,
     pub table_bar: u8,
     pub table_offset: u32,
+    /// Config-space offset of the capability itself — its message-control
+    /// word (at `cap_ptr + 2`) carries the MSI-X Enable bit the kernel
+    /// sets when `SYS_IRQ_RELAY` arms an entry (M5.2, ADR-0022).
+    pub cap_ptr: u8,
 }
 
 const NO_MSIX: MsixInfo = MsixInfo {
@@ -120,6 +124,7 @@ const NO_MSIX: MsixInfo = MsixInfo {
     table_size: 0,
     table_bar: 0,
     table_offset: 0,
+    cap_ptr: 0,
 };
 
 /// One recorded bus-0 function.
@@ -275,6 +280,100 @@ pub fn config_read16_of(pci_index: usize, reg: u8) -> Option<u16> {
         // SAFETY: ring 0, IF=0, recorded function on bus 0.
         unsafe { Some(config_read16(0, f.dev, f.func, reg)) }
     })
+}
+
+/// Public 16-bit config-field WRITE to a recorded function (RMW through
+/// the dword window — mechanism #1 has dword granularity at the data
+/// port, so the sibling field of the same dword is preserved). `reg`
+/// must be 2-aligned. `None` for an unrecorded index or a misaligned
+/// reg. Called from syscall dispatch (IF=0, ring 0).
+pub fn config_write16_of(pci_index: usize, reg: u8, value: u16) -> Option<()> {
+    if reg & 1 != 0 {
+        return None;
+    }
+    let f = pci_function(pci_index)?;
+    without_interrupts(|| {
+        // SAFETY: ring 0, IF=0, recorded function on bus 0.
+        unsafe {
+            let aligned = reg & 0xFE;
+            let dword = config_read32(0, f.dev, f.func, aligned);
+            let shift = 8 * u32::from(reg & 2);
+            let merged = (dword & !(0xFFFFu32 << shift)) | (u32::from(value) << shift);
+            config_write32(0, f.dev, f.func, aligned, merged);
+        }
+        Some(())
+    })
+}
+
+// ---- MSI-X arming (M5.2, ADR-0022) ------------------------------------------
+
+/// MSI-X message-control bits (PCI Local Bus Spec §6.8.2).
+const MSIX_CTL_FMASK: u16 = 1 << 14;
+const MSIX_CTL_ENABLE: u16 = 1 << 15;
+
+/// Program one MSI-X table entry to deliver `vector` to THIS CPU's LAPIC
+/// (physical destination, fixed delivery, unmasked) through the kernel
+/// PCI window. The table page is never exposed to ring 3 — this write is
+/// the kernel-policy half of interrupt routing, the sibling of the
+/// scan-time BUS MASTER write. `table_phys` comes from the kernel's own
+/// BAR record (`bar_base[table_bar] + table_offset`).
+///
+/// Called from syscall dispatch: ring 0, IF=0, single CPU.
+pub fn msix_write_entry(table_phys: u64, entry: u16, vector: u64) -> Result<(), &'static str> {
+    use crate::arch::x86_64::paging;
+    use crate::drivers::intc;
+    // MSI message encoding: address 0xFEE0_0000 | (dest APIC ID << 12),
+    // data = vector — the same fixed-delivery encoding the m5 irq_relay
+    // test fires through the ICR, arriving through the same LAPIC path.
+    let lapic_va = paging::mmio_alias_va(paging::apic_base_phys());
+    // SAFETY: ring 0, IF=0; the LAPIC alias is mapped (entry.rs programs
+    // through the same alias); LAPIC_ID's xAPIC destination field is
+    // bits 31:24.
+    let apic_id = unsafe { intc::lapic_read(lapic_va, intc::LAPIC_ID) >> 24 };
+    let addr = 0xFEE0_0000u32 | (apic_id << 12);
+    let data = vector as u32;
+    // One table entry is 16 bytes: msg addr lo/hi, msg data, vector ctl.
+    let entry_phys = table_phys + u64::from(entry) * 16;
+    let page = entry_phys & !0xFFF;
+    // SAFETY: ring 0, IF=0; the page derives from the kernel's own BAR
+    // record — never from a user-supplied number (the syscall handler
+    // resolves the table location itself).
+    let va = unsafe { paging::kernel_pci_alias(page) }?;
+    let off = entry_phys & 0xFFF;
+    // SAFETY: `va + off` is the mapped 16-byte MSI-X table entry (an
+    // entry never crosses a page boundary: 16 divides 4096 and the spec
+    // aligns the table); volatile MMIO writes at IF=0.
+    unsafe {
+        let e = (va + off) as *mut u32;
+        core::ptr::write_volatile(e, addr);
+        core::ptr::write_volatile(e.add(1), 0); // address high (unused: 32-bit message)
+        core::ptr::write_volatile(e.add(2), data);
+        core::ptr::write_volatile(e.add(3), 0); // vector control: unmasked
+    }
+    log_info!(
+        "pci",
+        "msix entry {entry} armed → vector {vector} (addr {addr:#x} data {data:#x}) at table phys {table_phys:#x}"
+    );
+    Ok(())
+}
+
+/// Set MSI-X Enable (and clear Function Mask) in the capability's
+/// message-control word — the last config-space write of `SYS_IRQ_RELAY`
+/// (the entry is programmed before the capability is enabled, so no
+/// half-armed message can fire). Read-back verified: a bit that does not
+/// stick is a loud refusal, never a silent miss.
+pub fn msix_enable(pci_index: usize, cap_ptr: u8) -> Result<(), &'static str> {
+    let reg = cap_ptr
+        .checked_add(2)
+        .ok_or("msix_enable: cap_ptr overflow")?;
+    let ctl = config_read16_of(pci_index, reg).ok_or("msix_enable: function vanished")?;
+    config_write16_of(pci_index, reg, (ctl | MSIX_CTL_ENABLE) & !MSIX_CTL_FMASK)
+        .ok_or("msix_enable: word write refused")?;
+    let back = config_read16_of(pci_index, reg).ok_or("msix_enable: re-read failed")?;
+    if back & MSIX_CTL_ENABLE == 0 {
+        return Err("msix_enable: enable bit did not stick");
+    }
+    Ok(())
 }
 
 // ---- BAR sizing -------------------------------------------------------------
@@ -458,6 +557,7 @@ unsafe fn record_virtio(pci_index: usize, f: &PciFunction) -> VirtioDevice {
                         table_size: (ctl & 0x7FF) + 1,
                         table_bar: (tbl & 7) as u8,
                         table_offset: tbl & 0xFFFF_FFF8,
+                        cap_ptr: next,
                     };
                 }
                 _ => {}

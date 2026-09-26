@@ -67,13 +67,17 @@ pub enum CapObj {
     /// (recv/reply). The object lives in `ipc::ENDPOINTS`; the cap
     /// references it by index — destroying the cap frees nothing.
     Endpoint { eid: u32 },
-    /// OWNED physical frame (ADR-0021) — the driver-substrate primitive.
-    /// The holder owns exactly one allocator frame: `destroy` returns it;
-    /// `map_memory` TRANSFERS ownership into the target's address space
-    /// and consumes the cap (the teardown walk then reclaims the frame
-    /// when the process dies). Exactly one owner at any time, so a frame
-    /// is freed exactly once either way.
-    Untyped { phys: u64 },
+    /// Physical frame (ADR-0021/0022) — the driver-substrate primitive.
+    /// `owned` marks the ONE cap that owns the frame: `destroy` returns
+    /// it to the allocator and `map_memory` TRANSFERS ownership into the
+    /// target's address space, consuming the cap (the teardown walk then
+    /// reclaims the frame when the process dies). Copies and IPC-landed
+    /// caps are LENT (`owned: false`, structural — `copy` and the IPC
+    /// installer force it): they describe the frame for zero-copy DMA
+    /// (`SYS_CAP_PHYS`) but freeing or mapping through them is refused,
+    /// so a frame is owned by exactly one cap at any time and freed
+    /// exactly once either way.
+    Untyped { phys: u64, owned: bool },
     /// Kernel-minted device register window (ADR-0021): MMIO physical
     /// base + page count. Descriptive — never owned, frees nothing, never
     /// executable; ring 3 can only receive one from a kernel scan or the
@@ -206,14 +210,16 @@ pub fn copy(
         if !matches!(dst.obj, CapObj::None) {
             return Err("cap copy: destination slot occupied");
         }
-        install(
-            dst_pid,
-            dst_slot,
-            Cap {
-                obj: src.obj,
-                rights,
-            },
-        )
+        // Ownership is NEVER duplicated (ADR-0022): a copy of an Untyped
+        // cap is a LENT reference — it names the frame (so a driver can
+        // point a device at it) but destroying it frees nothing and
+        // mapping through it is refused. The one owned cap stays with
+        // its original holder.
+        let obj = match src.obj {
+            CapObj::Untyped { phys, .. } => CapObj::Untyped { phys, owned: false },
+            other => other,
+        };
+        install(dst_pid, dst_slot, Cap { obj, rights })
     })
 }
 
@@ -228,9 +234,29 @@ pub fn move_cap(
     rights: u32,
 ) -> Result<(), &'static str> {
     without_interrupts(|| {
-        copy(src_pid, src_slot, dst_pid, dst_slot, rights)?;
-        // The copy proved the source occupied and COPY-righted; the
-        // clear cannot fail. `move` semantics: rights go with the cap.
+        let src = read(src_pid, src_slot)?;
+        if src.rights & RIGHTS_COPY == 0 {
+            return Err("cap move: source lacks the COPY right");
+        }
+        if rights & !src.rights != 0 {
+            return Err("cap move: rights amplification refused");
+        }
+        let dst = read_or_empty(dst_pid, dst_slot)?;
+        if !matches!(dst.obj, CapObj::None) {
+            return Err("cap move: destination slot occupied");
+        }
+        // A move transfers the object AS-IS — unlike `copy`, ownership
+        // travels with it (an owned Untyped cap stays owned; the source
+        // slot is emptied in the same IF=0 window, so the frame never
+        // has two owners and is never ownerless).
+        install(
+            dst_pid,
+            dst_slot,
+            Cap {
+                obj: src.obj,
+                rights,
+            },
+        )?;
         install(src_pid, src_slot, Cap::EMPTY)
     })
 }
@@ -273,13 +299,35 @@ pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
         if cap.rights & RIGHTS_DESTROY == 0 {
             return Err("cap destroy: cap lacks the DESTROY right");
         }
-        // Owned frame: return it. If the allocator refuses (a state bug —
-        // the frame is not ours to free), the slot is NOT cleared: the
-        // loud refusal beats a silent leak.
-        if let CapObj::Untyped { phys } = cap.obj {
+        // Owned frame: return it. A LENT Untyped cap (a copy or an
+        // IPC-landed reference, ADR-0022) frees nothing — its frame
+        // belongs to the original owner's cap. If the allocator refuses
+        // (a state bug — the frame is not ours to free), the slot is NOT
+        // cleared: the loud refusal beats a silent leak.
+        if let CapObj::Untyped { phys, owned: true } = cap.obj {
             crate::frames::free(phys).map_err(|_| "cap destroy: untyped frame free refused")?;
         }
         install(pid, slot, Cap::EMPTY)
+    })
+}
+
+/// Gated query (ADR-0022): the physical base of a memory-kind cap —
+/// `Untyped` (one frame, owned or lent), `Memory`/`Mmio` (a range).
+/// Requires `READ`. This is what makes zero-copy DMA safe: a driver
+/// learns a caller's buffer address ONLY through a cap the caller
+/// handed over — a phys in a message word without a cap would let any
+/// process aim a bus master at any frame.
+pub fn phys_of(pid: u64, slot: usize) -> Result<u64, &'static str> {
+    without_interrupts(|| {
+        let cap = read(pid, slot)?;
+        if cap.rights & RIGHTS_READ == 0 {
+            return Err("cap phys: cap lacks the READ right");
+        }
+        match cap.obj {
+            CapObj::Untyped { phys, .. } => Ok(phys),
+            CapObj::Memory { phys, .. } | CapObj::Mmio { phys, .. } => Ok(phys),
+            _ => Err("cap phys: cap does not name a memory kind"),
+        }
     })
 }
 
@@ -332,12 +380,18 @@ pub fn map_memory(
     without_interrupts(|| {
         let mem = read(pid, mem_slot)?;
         // Normalize the memory kinds (ADR-0021): Memory/Mmio describe
-        // (phys, pages); Untyped is one OWNED frame — mapping it
-        // transfers ownership, so success consumes the cap.
+        // (phys, pages); Untyped is one frame — mapping it transfers
+        // ownership, so success consumes the cap. A LENT Untyped cap
+        // (copy/IPC-landed, ADR-0022) can never be mapped: consuming it
+        // would hand the address space a frame its teardown would later
+        // free out from under the real owner.
         let (phys, pages, owned) = match mem.obj {
             CapObj::Memory { phys, pages } => (phys, pages, false),
             CapObj::Mmio { phys, pages } => (phys, pages, false),
-            CapObj::Untyped { phys } => (phys, 1, true),
+            CapObj::Untyped { phys, owned: true } => (phys, 1, true),
+            CapObj::Untyped { owned: false, .. } => {
+                return Err("map_memory: lent frame — only the owning cap may map it");
+            }
             _ => return Err("map_memory: memory slot does not name a memory cap"),
         };
         // The access mode decides the right (ADR-0021): a writable

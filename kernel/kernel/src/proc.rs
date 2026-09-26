@@ -168,6 +168,16 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             let freed = paging::destroy_user_half(p.pml4_phys) as u64;
             frames::free(p.pml4_phys).map_err(|_| "destroy: root frame free rejected")?;
             procs[idx] = None;
+            // Sweep the process's owned IRQ relays (M5.2, ADR-0022): a
+            // dead driver's armed vectors must not keep notifying a dead
+            // notification — the relay table entries die with the owner.
+            let swept = crate::relay::release_by_owner(pid);
+            if swept > 0 {
+                crate::log::log_info!(
+                    "proc",
+                    "destroy pid {pid}: released {swept} owned IRQ relay vector(s)"
+                );
+            }
             Ok(freed + 1)
         }
     })

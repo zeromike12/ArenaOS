@@ -5,9 +5,12 @@
 //! STAYS in the kernel by design (ADR-0021): the PCI enumerator — it owns
 //! config space, BAR sizing, the virtio capability walk, and DMA
 //! authorization (MEM|BUS MASTER), recording what the userspace driver
-//! servers need; the VirtIO mechanism itself lives in ring 3 from M5.2 on.
-//! Everything beyond panic diagnostics and this policy layer moves to
-//! userspace driver servers (ADR-0002).
+//! servers need. Since M5.2 (ADR-0022) the mechanism side is real: the
+//! VirtIO protocol itself runs in ring 3 (`userspace/storaged`), and
+//! this module's PCI layer adds the arming half of `SYS_IRQ_RELAY` —
+//! MSI-X table writes through paging's pre-wired kernel PCI window and
+//! the config-space enable bit. Everything beyond panic diagnostics and
+//! this policy layer lives in userspace driver servers (ADR-0002).
 
 pub mod intc;
 pub mod pci;

@@ -88,6 +88,23 @@ pub static TEST_IMAGE: &[u8] =
 pub static SHELL_IMAGE: &[u8] =
     include_bytes!("../../../userspace/shell/target/x86_64-unknown-none/release/arena-shell");
 
+/// The block service (M5.2, ADR-0022): spawn-registry image 2, the
+/// userspace virtio-blk driver `storaged`, built by `tools/build.sh`
+/// from `userspace/storaged` under the same strict-subset contract
+/// (fixed 0x400000/0x410000 window, two PT_LOAD segments). Spawned at
+/// boot after the m5 suite; the suite itself spawns a short-lived test
+/// instance to prove the service boundary.
+pub static STORAGED_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/storaged/target/x86_64-unknown-none/release/arena-storaged");
+
+/// The block-service test client (M5.2): spawn-registry image 3,
+/// `blktest` — built from the same crate as `storaged` (shared ABI
+/// module). It allocates a buffer frame, lends it through IPC, and
+/// verifies a write→read-back cycle against the scratch disk. Only the
+/// m5 suite spawns it.
+pub static BLKTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/storaged/target/x86_64-unknown-none/release/blktest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

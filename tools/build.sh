@@ -45,6 +45,22 @@ if [[ ! -f "$SHELL_ELF" ]]; then
 fi
 echo "shell image: ${SHELL_ELF#"$REPO_ROOT"/} ($(stat -c%s "$SHELL_ELF") bytes)"
 
+# M5.2 (ADR-0022): the block service — ONE crate, TWO images: the
+# storaged driver (spawn-registry image 2, spawned at boot) and blktest
+# (image 3, the m5 suite's service-boundary client). Both embed into the
+# kernel via include_bytes!, so both must exist before it compiles.
+echo "== building userspace storaged (userspace/storaged, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/storaged" && cargo build --release )
+for STORAGED_ELF in \
+    "$REPO_ROOT/userspace/storaged/target/x86_64-unknown-none/release/arena-storaged" \
+    "$REPO_ROOT/userspace/storaged/target/x86_64-unknown-none/release/blktest"; do
+    if [[ ! -f "$STORAGED_ELF" ]]; then
+        echo "error: storaged image not produced at $STORAGED_ELF" >&2
+        exit 1
+    fi
+    echo "storaged image: ${STORAGED_ELF#"$REPO_ROOT"/} ($(stat -c%s "$STORAGED_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG
