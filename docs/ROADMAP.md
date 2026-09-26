@@ -263,11 +263,59 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       were written as (base,len) — the typed -3 the payload reported
       through its own exit code located it immediately. m4 6/6,
       m1/m2/m3 regressions green.
-- 4.4 **IPC v1**: endpoints, sync call/reply, notifications; capability
+- [x] 4.4 **IPC v1**: endpoints, sync call/reply, notifications; capability
       transfer in messages; echo-server demo (two processes).
-- 4.5 **Root task + spawn protocol**: process creation from image
+      DONE (ADR-0018): endpoint + notification kernel objects reached
+      only through caps (WRITE = call/notify side, READ = serve/wait
+      side); five frozen registry slots (7 ipc_call, 8 ipc_recv,
+      9 ipc_reply, 10 notify, 11 wait); two-word inline messages with
+      at most one transferred cap per message (copy-only under the
+      ADR-0015 attenuation rule, first-free-slot placement, landing
+      index reported in the message); STATUS_BUSY (-4) for bounded
+      refusals (queue depth 4, one server per endpoint, one waiter per
+      notification). The scheduler grew State::Blocked +
+      block_current/wake + spawn_in_proc (threads now know their
+      process — the dispatcher resolves cap spaces through it, no
+      global names). The echo demo: two real address spaces, the server
+      parks in recv first, the client's call delivers both words + a
+      Memory cap and blocks, the reply echoes (verified IN RING 3), the
+      badge rides notify → wait's immediate path; cap landed
+      rights-intact, sender kept its copy, counters exact, teardown
+      frame-exact. Bring-up caught one deep bug: the per-CPU GS pair is
+      flipped by the syscall stub and NOT saved by switch_context — a
+      thread blocking inside the dispatcher resumed on the wrong side
+      after another thread's exit-swapgs and triple-faulted silently
+      (the GS-side capture/normalize/restore now lives in
+      block_current, with the whole cascade documented there). m4 7/7,
+      m1/m2/m3 regressions green.
+- [x] 4.5 **Root task + spawn protocol**: process creation from image
       capabilities with explicit handle inheritance; supervisor restart demo
       (kill a service, watch it restart) — the recovery story proven early.
+      DONE (ADR-0019): SYS_SPAWN (frozen registry slot 12) — the parent
+      presents an Image cap (READ; kernel registry, v1 = the embedded
+      rust-lld test image), an inheritance spec read under STAC from the
+      parent's own memory (≤4 (slot, rights) pairs; source must hold
+      COPY; any amplification is a typed refusal, never a clamp), an
+      optional notification cap (WRITE) + nonzero badge registered as
+      the child's exit notification (fires when the child's last live
+      thread exits — hooked into thread-exit before the diverging
+      swapgs), and receives the child's pid as a positive status; the
+      parent's Process handle (READ|DESTROY — DESTROY powers rollback
+      and future user-driven reaping) lands at its first free slot. The
+      child's first thread reads its start facts (image entry, the
+      stack page derived from the image's top segment VA, page-granular
+      user regions) from its spawn record — the same records the suite
+      reads as machine-state witnesses. Every partial failure rolls
+      back to exactly zero frames and zero objects. The restart demo:
+      a ring-3 supervisor spawns the untouched M4.3 image twice, each
+      child inheriting one attenuated Memory cap at its slot 0; the
+      child's console message appears twice (the restart, visible on
+      the wire), both lives badge the supervisor at exit, both children
+      exit with the image's own success code, handles land in spawn
+      order, the supervisor keeps its originals (copy, not move),
+      counters exact (9 dispatches, 2 notifies, 2 parked waits),
+      teardown frame-exact across three address spaces. m4 8/8,
+      m1/m2/m3 regressions green.
 - 4.6 **Minimal shell**: line input from console service, spawn builtins +
       images, `help/ps/echo/shutdown`. First "real" userspace surface.
 

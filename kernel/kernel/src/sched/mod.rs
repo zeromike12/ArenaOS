@@ -70,6 +70,10 @@ const DIRECT_MAP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 pub enum State {
     Ready,
     Running,
+    /// Waiting for an explicit [`wake`] — parked by IPC (ADR-0018) or a
+    /// future blocking operation. Never enqueued, never preempt-picked;
+    /// counts as live until woken or (later milestones) killed.
+    Blocked,
     /// Exited; awaiting reap by the next scheduler entry.
     Zombie,
 }
@@ -94,6 +98,12 @@ pub struct KThread {
     /// Never 0 (write_cr3(0) would be fatal; plan_switch keeps a
     /// belt-and-braces zero check).
     cr3: u64,
+    /// The process this thread belongs to (pid; 0 = kernel thread —
+    /// the bootstrap and plain `spawn`s). The syscall dispatcher
+    /// resolves the caller's capability space through exactly this
+    /// field (ADR-0018: no global names — a call finds its space
+    /// through the thread the kernel already knows).
+    proc_id: u64,
     /// Registered user-memory regions ((lo, hi) page-granular pairs;
     /// (0,0) = slot unused) — the syscall dispatcher validates every
     /// user pointer against exactly these (ADR-0014). Kernel-only
@@ -208,6 +218,7 @@ pub fn init() -> Result<(), &'static str> {
             // The bootstrap thread owns the kernel view: every switch
             // back to it restores the canonical CR3 (M3.3b).
             cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
+            proc_id: 0,
             regions: [(0, 0); USER_REGIONS_MAX],
         });
         // SAFETY: same discipline; fresh scheduler, known values.
@@ -228,6 +239,7 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
         entry,
         arg,
         crate::arch::x86_64::paging::kernel_cr3_phys(),
+        0,
     )
 }
 
@@ -246,7 +258,21 @@ pub fn spawn_with_cr3(
     if cr3_phys == 0 || cr3_phys % crate::arch::x86_64::paging::PAGE != 0 {
         return Err("spawn_with_cr3: not a valid PML4 root");
     }
-    spawn_inner(name, entry, arg, cr3_phys)
+    spawn_inner(name, entry, arg, cr3_phys, 0)
+}
+
+/// Spawn a thread that belongs to process `pid`: the address space is
+/// resolved from the process itself (`proc::pml4_of`) and the thread
+/// records its `proc_id`, which is how the syscall dispatcher finds the
+/// process's capability space (ADR-0018). Fails if the process is dead.
+pub fn spawn_in_proc(
+    name: &'static str,
+    entry: fn(usize),
+    arg: usize,
+    pid: u64,
+) -> Result<u64, &'static str> {
+    let cr3 = crate::proc::pml4_of(pid).ok_or("spawn_in_proc: no such process")?;
+    spawn_inner(name, entry, arg, cr3, pid)
 }
 
 fn spawn_inner(
@@ -254,6 +280,7 @@ fn spawn_inner(
     entry: fn(usize),
     arg: usize,
     cr3: u64,
+    proc_id: u64,
 ) -> Result<u64, &'static str> {
     without_interrupts(|| {
         reap();
@@ -293,6 +320,7 @@ fn spawn_inner(
                 stack_base: phys,
                 stack_frames: THREAD_STACK_FRAMES,
                 cr3,
+                proc_id,
                 regions: [(0, 0); USER_REGIONS_MAX],
             });
             (*CTX.get())[idx] = rsp0;
@@ -337,6 +365,151 @@ pub fn yield_now() {
         // until our own frame is switched back to.
         unsafe { context::switch_context(plan.save, plan.restore) };
     });
+}
+
+/// Park the current thread: it leaves the ready ring in [`State::Blocked`]
+/// and does not run again until [`wake`] re-enqueues it. Returns only
+/// when the thread has been woken and rescheduled (the resume lands
+/// exactly here, on this thread's own kernel stack — the yield/switch
+/// machinery, ADR-0012/0013, with a different decision-phase verdict).
+///
+/// If blocking would leave NO runnable thread, the machine halts with an
+/// explicit deadlock diagnostic — an honest crash, never a silent hang
+/// (ADR-0018).
+pub fn block_current() {
+    // GS-side capture and normalization (ADR-0018): the per-CPU GS pair
+    // (GS.base ↔ KERNEL_GS_BASE) is flipped by the syscall stub and is
+    // NOT part of switch_context's saved state. A thread blocking inside
+    // the dispatcher is kernel-side; another thread's stub crossing —
+    // SYS_THREAD_EXIT's diverging swapgs in particular — flips the shared
+    // pair while it sleeps, and resuming on the wrong side sends the
+    // thread back to ring 3 flipped: its next syscall entry writes
+    // through GS.base=0 and triple-faults (the M4.4 bring-up caught
+    // exactly that, as a silent -no-reboot exit). So: capture the side,
+    // switch canonical (the invariant every plan_switch caller else
+    // already satisfies), and restore the captured side on resume.
+    //
+    // SAFETY: ring 0; the helpers are IF=0-guarded below.
+    let kernel_side = without_interrupts(|| unsafe {
+        let ks = crate::arch::x86_64::syscall::gs_is_kernel_side();
+        if ks {
+            crate::arch::x86_64::syscall::gs_to_canonical_side();
+        }
+        ks
+    });
+    without_interrupts(|| {
+        let plan = {
+            check_canary_current();
+            // SAFETY: single writer under IF=0.
+            unsafe {
+                let cur = (*CPUS.get())[this_cpu()].current;
+                // as_mut() — expect() on a Copy place assigns to a
+                // discarded temporary (see exit_now).
+                (*THREADS.get())[cur]
+                    .as_mut()
+                    .expect("current thread vanished")
+                    .state = State::Blocked;
+                plan_switch(false)
+            }
+        };
+        let Some(plan) = plan else {
+            error!(
+                "sched",
+                "block_current with an empty ready ring — nothing left to run"
+            );
+            crate::halt::halt_machine("ipc deadlock: every thread is blocked");
+        };
+        SWITCH_COUNT.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: as in yield_now — raw plan values, borrows ended, IF=0.
+        // The resume happens when a waker's ring entry brings this thread
+        // back; its saved frame (this stack) is intact by construction.
+        unsafe { context::switch_context(plan.save, plan.restore) };
+    });
+    // Resumed: put the GS pair back on the side this thread blocked on
+    // BEFORE any code that assumes it (the stub's teardown swapgs runs
+    // with the kernel side restored, exactly as when it blocked).
+    if kernel_side {
+        without_interrupts(|| {
+            // SAFETY: ring 0, IF=0; the scheduler switches canonical,
+            // so the pair is one swapgs away from the kernel side.
+            unsafe { crate::arch::x86_64::syscall::gs_to_kernel_side() };
+        });
+    }
+}
+
+/// Re-enqueue a [`State::Blocked`] thread on this CPU's ready ring. The
+/// waker does NOT switch — the woken thread runs when the scheduler next
+/// picks it (round-robin). Refuses anything that is not blocked: waking
+/// a Ready/Running thread is a caller bug, and double-wakes must never
+/// corrupt the ring.
+pub fn wake(tid: u64) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0; all accesses complete here.
+        unsafe {
+            let threads = &mut *THREADS.get();
+            let Some(idx) = threads
+                .iter()
+                .position(|slot| matches!(slot, Some(t) if t.id == tid))
+            else {
+                return Err("wake: no such thread");
+            };
+            let t = threads[idx].as_mut().expect("slot located above");
+            if t.state != State::Blocked {
+                return Err("wake: thread is not blocked");
+            }
+            t.state = State::Ready;
+            let cpu = &mut (*CPUS.get())[this_cpu()];
+            if !cpu.ready.push(idx) {
+                return Err("wake: ready ring overflow");
+            }
+            Ok(())
+        }
+    })
+}
+
+/// Live (non-zombie) threads belonging to process `pid`. The spawn
+/// protocol's exit-notification hook asks exactly one question with
+/// this: "am I the last thread of my process?" (ADR-0019).
+pub fn proc_live_threads(pid: u64) -> usize {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*THREADS.get())
+                .iter()
+                .filter(
+                    |slot| matches!(slot, Some(t) if t.proc_id == pid && t.state != State::Zombie),
+                )
+                .count()
+        }
+    })
+}
+
+/// The process the current thread belongs to (`None` for kernel threads,
+/// which have no capability space — IPC syscalls from them are refused).
+pub fn current_proc_id() -> Option<u64> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let pid = (*THREADS.get())[cur]
+                .expect("current thread vanished")
+                .proc_id;
+            (pid != 0).then_some(pid)
+        }
+    })
+}
+
+/// The process a thread belongs to, by id (`None` if unknown/kernel).
+pub fn proc_id_of(tid: u64) -> Option<u64> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*THREADS.get()).iter().find_map(|slot| match slot {
+                Some(t) if t.id == tid && t.proc_id != 0 => Some(t.proc_id),
+                _ => None,
+            })
+        }
+    })
 }
 
 /// Trampoline target (ADR-0012): runs the current thread's entry, then

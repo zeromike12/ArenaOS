@@ -313,14 +313,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // status codes, and the callee-saved promise proven from ring 3.
     // And then the milestone capstone: the first user process — the
     // real image loaded into its own address space runs in ring 3,
-    // writes through debug_write, and exits through thread_exit.
+    // writes through debug_write, and exits through thread_exit. IPC v1
+    // (ADR-0018) follows: two processes rendezvous over an endpoint —
+    // blocking call/reply, a transferred capability, badged
+    // notifications — with the GS-side invariant now part of the
+    // context switch.
     if !crate::m4::run_suite() {
         crate::halt::halt_machine("milestone 4 suite failed");
     }
 
     info!(
         "kernel",
-        "milestone 4 step 4.3 complete (executable format + image loader + syscall ABI v1 + first user process) — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 4 step 4.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1 + spawn protocol) — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }

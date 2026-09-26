@@ -62,6 +62,19 @@ pub enum CapObj {
     /// the cap *describes* them — it never owns them, so destroying the
     /// cap frees nothing and teardown stays exact.
     Memory { phys: u64, pages: u32 },
+    /// An IPC endpoint (ADR-0018): rendezvous point for synchronous
+    /// call/reply. Rights: WRITE = call side, READ = serve side
+    /// (recv/reply). The object lives in `ipc::ENDPOINTS`; the cap
+    /// references it by index — destroying the cap frees nothing.
+    Endpoint { eid: u32 },
+    /// A badged, merged notification flag word (ADR-0018, ARCHITECTURE
+    /// §7.2). Rights: WRITE = notify, READ = wait.
+    Notification { nid: u32 },
+    /// A registered executable image (ADR-0019): the thing `SYS_SPAWN`
+    /// builds processes from. Rights: READ = may spawn from it. v1's
+    /// registry is kernel-side and fixed; a filesystem-backed source
+    /// arrives later without changing this shape.
+    Image { img_id: u32 },
 }
 
 /// One capability: an object reference plus its rights mask.

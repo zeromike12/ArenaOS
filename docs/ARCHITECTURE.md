@@ -427,6 +427,15 @@ No global names. Service discovery is capability introduction: the root
 namespace service is itself reached by a capability given to processes at
 spawn. This is the Plan 9/seL4 lesson: names are data, not ambient magic.
 
+**Implementation status (M4.4, ADR-0018):** primitives 1 and 2 are
+implemented and proven in-guest across two real processes — endpoints
+with blocking call/reply (bounded queues, typed refusals, the scheduler's
+`Blocked` state), badged merged notifications, and one-capability
+transfer per message (copy-only, attenuation enforced). Primitive 3
+(shared-memory channels) is deliberately absent until a bulk-data
+consumer exists; priority donation is moot under strict round-robin and
+returns when priorities do.
+
 ## 8. Driver philosophy
 
 - Drivers are **userspace servers**. The kernel provides: interrupt
@@ -524,8 +533,9 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Capability spaces: per-process slot tables, attenuation-only rights, copy/move/destroy, gated invokes (`process_root`, `map_memory`) | **M3.4 — implemented, 13/13 in-guest + 100/100-boot stability (ADR-0015)** |
 | Executable format + image loader: ELF64 container with ArenaOS strict-subset semantics (ET_EXEC-only validator, W^X segments, zero-fill BSS, exact-accounting load into a process space) | **M4.1 — implemented, in-guest (ADR-0016)** |
 | Syscall ABI v1: six argument registers, typed i64 status (0/positive/negative), frozen call registry (debug_write, thread_exit, suite proofs), callee-saved promise proven from ring 3 | **M4.2 — implemented, in-guest (ADR-0017)** |
-| First user process: the real rust-lld image, loaded into its own address space (per-thread CR3), runs in ring 3 — verifies its META and zero-filled bss from the user side, writes its pinned message through debug_write, exits through thread_exit; message byte-identical to the file, exact frame teardown | **M4.3 — implemented, 6/6 in-guest** |
-| IPC, endpoints | not started (roadmap M4) |
+| First user process: the real rust-lld image, loaded into its own address space (per-thread CR3), runs in ring 3 — verifies its META and zero-filled bss from the user side, writes its pinned message through debug_write, exits through thread_exit; message byte-identical to the file, exact frame teardown | **M4.3 — implemented, in-guest** |
+| IPC v1: endpoint objects (sync call/reply rendezvous, two-word messages), badged merged notifications, capability transfer inside messages (copy with attenuation, first-free-slot placement), Blocked scheduler state with GS-side normalization across the switch — echo-server demo across two real processes | **M4.4 — implemented, 7/7 in-guest (ADR-0018)** |
+| Spawn protocol: SYS_SPAWN from image capabilities (kernel registry, v1 = the embedded test image), explicit attenuating handle inheritance (COPY-gated, amplification refused), Process handles with READ\|DESTROY, exit-badge notifications wired into thread-exit, spawn registry as machine-state witness — supervisor restart demo across three address spaces | **M4.5 — implemented, 8/8 in-guest (ADR-0019)** |
 | Userspace programs beyond the first test image (`userspace/payload`), drivers, FS, net, graphics | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

@@ -39,6 +39,10 @@ pub struct Process {
     pub pml4_phys: u64,
     /// Capability slots — see [`crate::cap`] for every operation.
     pub caps: cap::CapSpace,
+    /// Registered exit notification `(nid, badge)` — fired when this
+    /// process's LAST live thread exits (spawn protocol, ADR-0019).
+    /// `nid == u32::MAX` = none registered.
+    exit_notif: (u32, u64),
 }
 
 /// The process table. Slots are `Option<Process>`; occupancy is the only
@@ -77,9 +81,45 @@ pub fn create(name: &'static str) -> Result<u64, &'static str> {
                 name,
                 pml4_phys: pml4,
                 caps: cap::CapSpace::new(),
+                exit_notif: (u32::MAX, 0),
             });
             CREATED_TOTAL.fetch_add(1, Ordering::Relaxed);
             Ok(id)
+        }
+    })
+}
+
+/// Register the child's exit notification (ADR-0019): when `pid`'s last
+/// live thread exits, the kernel fires `ipc::notify(nid, badge)`.
+/// Called by the spawn path before the child's first thread starts.
+pub fn set_exit_notif(pid: u64, nid: u32, badge: u64) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let Some(p) = (*PROCESSES.get())
+                .iter_mut()
+                .flatten()
+                .find(|p| p.id == pid)
+            else {
+                return Err("set_exit_notif: no such process");
+            };
+            p.exit_notif = (nid, badge);
+            Ok(())
+        }
+    })
+}
+
+/// The registered exit notification of a live process (`None` when
+/// unknown or none registered).
+pub fn exit_notif_of(pid: u64) -> Option<(u32, u64)> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*PROCESSES.get())
+                .iter()
+                .flatten()
+                .find(|p| p.id == pid)
+                .and_then(|p| (p.exit_notif.0 != u32::MAX).then_some(p.exit_notif))
         }
     })
 }

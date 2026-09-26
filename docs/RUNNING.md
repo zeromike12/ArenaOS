@@ -93,12 +93,15 @@ machine-checkable landmarks, in order:
 6. 13 `m3:test:<name>: PASS` lines — kernel threads, preemption, ring 3
    + syscalls, processes as address spaces, capability spaces
    (ADR-0012…0015) — ending with `m3: RESULT PASS (13/13)`
-7. 6 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
+7. 8 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
    corpus, the image loader (ADR-0016), the syscall ABI v1 proven from
-   ring 3 (ADR-0017), and the first user process (its
+   ring 3 (ADR-0017), the first user process (its
    `ARENAOS-M43-FIRST-USER-PROCESS…` message on the console is the
-   payload's own debug_write) — ending with
-   `m4: RESULT PASS (6/6)`
+   payload's own debug_write), the IPC v1 echo-server demo — two
+   processes rendezvousing over an endpoint (ADR-0018) — and the spawn
+   protocol's supervisor restart demo: the same image spawned twice
+   through SYS_SPAWN, its message on the console once per life
+   (ADR-0019) — ending with `m4: RESULT PASS (8/8)`
 8. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
 9. QEMU exits on its own with status 0
 

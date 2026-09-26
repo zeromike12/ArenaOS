@@ -20,25 +20,38 @@
 //! user side, writes its pinned message through `debug_write`, and
 //! exits through `thread_exit`; the kernel proves the captured message
 //! byte-identical to the image file, the ring-3 bss stamp readable
-//! under the process CR3, and exact frame teardown.
+//! under the process CR3, and exact frame teardown. Test 7 is IPC v1
+//! (M4.4, ADR-0018): two processes, one endpoint, one notification,
+//! one transferred capability — a real echo-server rendezvous driven
+//! from ring 3 on both sides, with blocking, waking, and cap movement
+//! asserted as counted machine events. Test 8 is the spawn protocol
+//! (M4.5, ADR-0019): a ring-3 supervisor spawns the real image twice
+//! through SYS_SPAWN — explicit attenuated inheritance, Process handles,
+//! exit badges — and the restart is visible as the child's console
+//! message appearing twice.
 //! Markers: `m4:test:<name>`, `m4: RESULT`.
 
 use crate::arch::x86_64::{self, paging, syscall};
+use crate::cap::{self, Cap, CapObj};
 use crate::elf::{self, PF_R, PF_W, PF_X};
 use crate::frames;
+use crate::ipc;
 use crate::log::{log_error as error, log_info as info, write_marker};
 use crate::proc;
 use crate::sched;
+use crate::spawn;
 use crate::sync::SyncCell;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 6] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 8] = [
         ("elf_parse", test_elf_parse),
         ("elf_reject", test_elf_reject),
         ("elf_load", test_elf_load),
         ("syscall_abi", test_syscall_abi),
         ("thread_exit_abi", test_thread_exit_abi),
         ("first_process", test_first_process),
+        ("ipc_echo", test_ipc_echo),
+        ("spawn_restart", test_spawn_restart),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -616,6 +629,56 @@ impl Payload {
         self.emit(&[0; 4]);
         at
     }
+    /// `mov r64, [rbx+disp8]` for rax(0)/rdx(2)/rsi(6); disp 0 uses the
+    /// mod-00 form (rm=011 is rbx — no SIB/disp needed).
+    fn mov_r64_mem_rbx(&mut self, dst: u8, disp: u8) {
+        let modrm = (dst << 3) | 3;
+        if disp == 0 {
+            self.emit(&[0x48, 0x8B, modrm]);
+        } else {
+            self.emit(&[0x48, 0x8B, modrm | 0x40, disp]);
+        }
+    }
+    /// `cmp rax, rsrc` + `jne rel32` patchable hole (src = reg number).
+    fn cmp_rax_reg_jne(&mut self, src: u8) -> usize {
+        self.emit(&[0x48, 0x39, 0xC8 | (src << 3)]);
+        self.emit(&[0x0F, 0x85]);
+        let at = self.n;
+        self.emit(&[0; 4]);
+        at
+    }
+    /// `cmp rax, rsrc` + `je rel32` patchable hole.
+    fn cmp_rax_reg_je(&mut self, src: u8) -> usize {
+        self.emit(&[0x48, 0x39, 0xC8 | (src << 3)]);
+        self.emit(&[0x0F, 0x84]);
+        let at = self.n;
+        self.emit(&[0; 4]);
+        at
+    }
+    /// `thread_exit(code)` + a belt-and-braces halt loop: the never-
+    /// returned-from block every fail path ends in.
+    fn exit_with(&mut self, code: u64) {
+        self.mov_eax(syscall::SYS_THREAD_EXIT as u32);
+        self.movabs(7, code);
+        self.do_syscall();
+        self.emit(&[0xEB, 0xFE]); // jmp $ (unreachable)
+    }
+    /// `mov [rbx+disp8], rax` (disp 0 uses the mod-00 form).
+    fn mov_mem_rbx_from_rax(&mut self, disp: u8) {
+        if disp == 0 {
+            self.emit(&[0x48, 0x89, 0x03]);
+        } else {
+            self.emit(&[0x48, 0x89, 0x43, disp]);
+        }
+    }
+    /// `cmp rax, imm8` (sign-extended) + `je rel32` patchable hole.
+    fn cmp_rax_i8_je(&mut self, v: i8) -> usize {
+        self.emit(&[0x48, 0x83, 0xF8, v as u8]);
+        self.emit(&[0x0F, 0x84]);
+        let at = self.n;
+        self.emit(&[0; 4]);
+        at
+    }
     fn here(&self) -> usize {
         self.n
     }
@@ -1129,6 +1192,628 @@ fn test_first_process() -> Result<(), &'static str> {
         msg_len,
         stamp,
         status
+    );
+    Ok(())
+}
+
+// ---- 7. IPC v1: the echo-server demo (M4.4, ADR-0018) ---------------------
+
+/// The IPC demo window — BOTH processes use these same VAs (distinct
+/// address spaces; identical layout keeps one entry fn and one region
+/// set valid for server and client alike).
+const I_CODE: u64 = 0x510000;
+const I_DATA: u64 = 0x511000;
+const I_STACK: u64 = 0x512000;
+const I_STACK_TOP: u64 = 0x513000;
+const I_REGIONS: [(u64, u64); 3] = [
+    (I_CODE, I_CODE + 0x1000),
+    (I_DATA, I_DATA + 0x1000),
+    (I_STACK, I_STACK_TOP),
+];
+
+// Cap slots the payloads spell — cap::grant fills in order, and the
+// test asserts the order held before the dance starts.
+const IPC_EP_SLOT: u64 = 0; // both spaces: the endpoint
+const IPC_NOTIF_SLOT: u64 = 1; // both spaces: the notification
+const IPC_MEM_SLOT: u64 = 2; // client only: the cap it transfers
+
+// The message identity: two recognizable words and one badge.
+const IPC_PAT0: u64 = 0x434C_4945_4E54_3031; // "CLIENT01"
+const IPC_PAT1: u64 = 0x574F_5244_4F4E_4531; // "WORDONE1"
+const IPC_BADGE: u64 = 0xBEEF;
+
+// Exit codes (both payloads): 42 = every ring-3 check held.
+// Client diagnostics: 43 call status, 44 echoed w0, 45 echoed w1,
+// 46 a reply cap arrived though none was sent, 47 wrong badge.
+// Server diagnostics: 53 recv status, 54 transferred cap did not land,
+// 55 reply status, 56 notify status.
+
+/// The IPC CLIENT payload: `ipc_call` with two pattern words and its
+/// Memory cap (slot 2) staged for transfer, verify the echoed words and
+/// the ABSENT reply cap in ring 3, `wait` for the server's badge, and
+/// exit 42 only if everything held. rbx carries the buffer VA across
+/// the syscalls — callee-saved, and ABI v1 PROMISES it (ADR-0017).
+fn build_ipc_client() -> Payload {
+    let mut p = Payload::new();
+    let mut holes: [(usize, u64); 8] = [(0, 0); 8];
+    let mut nh = 0usize;
+    p.movabs(3, I_DATA); // rbx = reply buffer base
+    // SYS_IPC_CALL(ep 0, PAT0, PAT1, send-cap slot 2, reply buf)
+    p.mov_eax(syscall::SYS_IPC_CALL as u32);
+    p.movabs(7, IPC_EP_SLOT);
+    p.movabs(6, IPC_PAT0);
+    p.movabs(2, IPC_PAT1);
+    p.movabs(10, IPC_MEM_SLOT);
+    p.movabs(8, I_DATA);
+    p.do_syscall();
+    holes[nh] = (p.cmp_rax_i8_jne(0), 43);
+    nh += 1;
+    // buf[0] == PAT0
+    p.mov_r64_mem_rbx(0, 0);
+    p.movabs(1, IPC_PAT0);
+    holes[nh] = (p.cmp_rax_reg_jne(1), 44);
+    nh += 1;
+    // buf[1] == PAT1
+    p.mov_r64_mem_rbx(0, 8);
+    p.movabs(1, IPC_PAT1);
+    holes[nh] = (p.cmp_rax_reg_jne(1), 45);
+    nh += 1;
+    // buf[2] == CAP_NONE — the server sends no cap back
+    p.mov_r64_mem_rbx(0, 16);
+    p.movabs(1, u64::MAX);
+    holes[nh] = (p.cmp_rax_reg_jne(1), 46);
+    nh += 1;
+    // SYS_WAIT(notification slot 1) must hand back the badge.
+    p.mov_eax(syscall::SYS_WAIT as u32);
+    p.movabs(7, IPC_NOTIF_SLOT);
+    p.do_syscall();
+    p.movabs(1, IPC_BADGE);
+    holes[nh] = (p.cmp_rax_reg_jne(1), 47);
+    nh += 1;
+    p.exit_with(42);
+    for i in 0..nh {
+        let (h, code) = holes[i];
+        let target = p.here();
+        p.exit_with(code);
+        p.patch_rel32(h, target);
+    }
+    p
+}
+
+/// The IPC SERVER payload: park in `ipc_recv` (the parked-server half
+/// of the rendezvous), demand the transferred cap landed (buf[2] !=
+/// CAP_NONE), echo both request words via `ipc_reply` with no cap,
+/// `notify` the badge, exit 42 only if every step held.
+fn build_ipc_server() -> Payload {
+    let mut p = Payload::new();
+    let mut holes: [(usize, u64); 8] = [(0, 0); 8];
+    let mut nh = 0usize;
+    p.movabs(3, I_DATA); // rbx = recv buffer base
+    // SYS_IPC_RECV(ep 0, buf) — blocks until the client calls.
+    p.mov_eax(syscall::SYS_IPC_RECV as u32);
+    p.movabs(7, IPC_EP_SLOT);
+    p.movabs(6, I_DATA);
+    p.do_syscall();
+    holes[nh] = (p.cmp_rax_i8_jne(0), 53);
+    nh += 1;
+    // The client's Memory cap must have landed: buf[2] != CAP_NONE.
+    p.mov_r64_mem_rbx(0, 16);
+    p.movabs(1, u64::MAX);
+    holes[nh] = (p.cmp_rax_reg_je(1), 54); // je: == MAX means NOT landed
+    nh += 1;
+    // SYS_IPC_REPLY(ep 0, echoed w0, echoed w1, no cap).
+    p.mov_eax(syscall::SYS_IPC_REPLY as u32);
+    p.movabs(7, IPC_EP_SLOT);
+    p.mov_r64_mem_rbx(6, 0); // rsi = buf[0]
+    p.mov_r64_mem_rbx(2, 8); // rdx = buf[1]
+    p.movabs(10, u64::MAX); // r10 = CAP_NONE
+    p.do_syscall();
+    holes[nh] = (p.cmp_rax_i8_jne(0), 55);
+    nh += 1;
+    // SYS_NOTIFY(notification slot 1, badge) — wakes the client's wait.
+    p.mov_eax(syscall::SYS_NOTIFY as u32);
+    p.movabs(7, IPC_NOTIF_SLOT);
+    p.movabs(6, IPC_BADGE);
+    p.do_syscall();
+    holes[nh] = (p.cmp_rax_i8_jne(0), 56);
+    nh += 1;
+    p.exit_with(42);
+    for i in 0..nh {
+        let (h, code) = holes[i];
+        let target = p.here();
+        p.exit_with(code);
+        p.patch_rel32(h, target);
+    }
+    p
+}
+
+/// The shared user-thread entry for both IPC processes: the per-process
+/// code page (copied at setup) is what makes one a server and the other
+/// a client — the VA layout, and therefore this entry, is identical.
+fn ipc_thread_entry(_arg: usize) {
+    crate::sync::without_interrupts(|| {
+        sched::set_current_user_regions(&I_REGIONS).expect("ipc regions rejected");
+        // SAFETY: the window pages are mapped U/S in this process's
+        // space by ipc_proc_setup; RIP/RSP are canonical and inside the
+        // registered regions; RSP0/scratch describe this thread
+        // (programmed at switch-in, re-checked by enter_user).
+        unsafe { syscall::enter_user(I_CODE, I_STACK_TOP) };
+    });
+}
+
+/// Map the code/data/stack window into a process root, copy the payload
+/// into the code page, zero data+stack. Three leaf frames — the tables
+/// come with the first mapping (root + 3 tables + 3 leaves = 7 frames
+/// per process, the same accounting test 6 asserts).
+///
+/// # Safety
+/// IF=0; `root` is a live, owned PML4; every frame is freshly allocated
+/// and written only through its direct-map alias.
+unsafe fn ipc_proc_setup(root: u64, code: &[u8]) -> Result<(), &'static str> {
+    let mut phys = [0u64; 3];
+    for slot in phys.iter_mut() {
+        *slot = frames::alloc().ok_or("frame exhaustion for the ipc window")?;
+    }
+    // SAFETY: caller contract; W^X pairs — code RX, data/stack RW+NX.
+    unsafe {
+        paging::map_user_page_4k(root, I_CODE, phys[0], false, true)
+            .map_err(|_| "ipc code page map failed")?;
+        paging::map_user_page_4k(root, I_DATA, phys[1], true, false)
+            .map_err(|_| "ipc data page map failed")?;
+        paging::map_user_page_4k(root, I_STACK, phys[2], true, false)
+            .map_err(|_| "ipc stack page map failed")?;
+        core::ptr::copy_nonoverlapping(
+            code.as_ptr(),
+            (phys[0] + paging::KERNEL_OFFSET) as *mut u8,
+            code.len(),
+        );
+        core::ptr::write_bytes((phys[1] + paging::KERNEL_OFFSET) as *mut u8, 0, 4096);
+        core::ptr::write_bytes((phys[2] + paging::KERNEL_OFFSET) as *mut u8, 0, 4096);
+    }
+    Ok(())
+}
+
+/// M4.4 — IPC v1 end to end (ADR-0018): two processes, one endpoint,
+/// one notification, one transferred capability. The server parks in
+/// `ipc_recv` first; the client's `ipc_call` delivers two words plus
+/// its Memory cap and blocks; the server echoes the words via
+/// `ipc_reply` and badges the client via `notify`; both exit 42 only if
+/// every check held *in ring 3*. The kernel side independently asserts:
+/// dispatcher and IPC counters exact, the cap landed in the server's
+/// space with rights intact while the sender KEPT its original (copy,
+/// never move), both threads reaped, objects destroyed without refusal,
+/// frames exact.
+fn test_ipc_echo() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+
+    let srv = proc::create("ipcServer")?;
+    let cli = proc::create("ipcClient")?;
+    let sroot = proc::pml4_of(srv).ok_or("server lost its pml4")?;
+    let croot = proc::pml4_of(cli).ok_or("client lost its pml4")?;
+    let server = build_ipc_server();
+    let client = build_ipc_client();
+    // SAFETY: IF=0 suite discipline; owned live roots; fresh frames.
+    unsafe {
+        ipc_proc_setup(sroot, &server.b[..server.n])?;
+        ipc_proc_setup(croot, &client.b[..client.n])?;
+    }
+
+    // The IPC objects and the caps that reach them (WRITE = call side,
+    // READ = serve side, ADR-0018). The transferred cap needs COPY —
+    // transfer is a copy under the attenuation rule (ADR-0015).
+    let eid = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let nid = ipc::create_notification().map_err(|_| "notification table full")?;
+    let mem_frame = frames::alloc().ok_or("no frame for the transfer cap")?;
+    let s_ep = cap::grant(
+        srv,
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_READ,
+        },
+    )
+    .map_err(|_| "server endpoint grant failed")?;
+    let s_nf = cap::grant(
+        srv,
+        Cap {
+            obj: CapObj::Notification { nid },
+            rights: cap::RIGHTS_WRITE,
+        },
+    )
+    .map_err(|_| "server notification grant failed")?;
+    let c_ep = cap::grant(
+        cli,
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+    )
+    .map_err(|_| "client endpoint grant failed")?;
+    let c_nf = cap::grant(
+        cli,
+        Cap {
+            obj: CapObj::Notification { nid },
+            rights: cap::RIGHTS_READ,
+        },
+    )
+    .map_err(|_| "client notification grant failed")?;
+    let c_mem = cap::grant(
+        cli,
+        Cap {
+            obj: CapObj::Memory {
+                phys: mem_frame,
+                pages: 1,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY,
+        },
+    )
+    .map_err(|_| "client memory grant failed")?;
+    if (s_ep, s_nf, c_ep, c_nf, c_mem) != (0, 1, 0, 1, 2) {
+        return Err("cap slots did not fill in the order the payloads spell");
+    }
+
+    let st0 = syscall::stats();
+    let i0 = ipc::stats();
+    let threads0 = sched::live_threads();
+    let sid = sched::spawn_in_proc("ipc-serv", ipc_thread_entry, 0, srv)?;
+    sched::yield_now(); // the server parks in recv FIRST (the parked-server path)
+    let cid = sched::spawn_in_proc("ipc-cli", ipc_thread_entry, 0, cli)?;
+    sched::yield_now();
+    m4_drain(256)?;
+
+    // Verdicts — the payloads' exit codes are their diagnostic channel.
+    let Some(ss) = syscall::exit_status_of(sid) else {
+        return Err("the server never exited");
+    };
+    if ss != 42 {
+        return Err(match ss {
+            53 => "server: ipc_recv returned a nonzero status (53)",
+            54 => "server: the transferred cap did not land (54)",
+            55 => "server: ipc_reply returned a nonzero status (55)",
+            56 => "server: notify returned a nonzero status (56)",
+            _ => "server exited with a code from nowhere in the contract",
+        });
+    }
+    let Some(cs) = syscall::exit_status_of(cid) else {
+        return Err("the client never exited");
+    };
+    if cs != 42 {
+        return Err(match cs {
+            43 => "client: ipc_call returned a nonzero status (43)",
+            44 => "client: echoed word 0 mismatch (44)",
+            45 => "client: echoed word 1 mismatch (45)",
+            46 => "client: a reply cap arrived though none was sent (46)",
+            47 => "client: the waited badge was wrong (47)",
+            _ => "client exited with a code from nowhere in the contract",
+        });
+    }
+
+    // Counters: client syscalls = call, wait, exit; server = recv,
+    // reply, notify, exit → exactly 7 dispatches, none invalid.
+    let st = syscall::stats();
+    if st.calls - st0.calls != 7 {
+        return Err("ipc demo dispatch count wrong (want 7)");
+    }
+    if st.invalid_nr != st0.invalid_nr {
+        return Err("a demo syscall number was invalid");
+    }
+    let i = ipc::stats();
+    if (
+        i.calls - i0.calls,
+        i.recvs - i0.recvs,
+        i.replies - i0.replies,
+    ) != (1, 1, 1)
+    {
+        return Err("endpoint operation counters wrong");
+    }
+    if (i.notifies - i0.notifies, i.waits - i0.waits) != (1, 1) {
+        return Err("notification counters wrong");
+    }
+    if i.cap_transfers - i0.cap_transfers != 1 || i.cap_drops != i0.cap_drops {
+        return Err("cap-transfer accounting wrong (want 1 transfer, 0 drops)");
+    }
+    // Two blocks, not three: the server parks in recv and the client
+    // parks in call — but the client's wait finds the badge ALREADY
+    // pending. That ordering is inherent: reply's wake enqueues the
+    // client without switching, so the server runs notify + exit before
+    // the client resumes. The immediate path of wait gets the coverage;
+    // the parked path is proven by the two blocks that did happen.
+    if i.blocks - i0.blocks != 2 {
+        return Err("blocking events wrong (want server recv + client call)");
+    }
+    if sched::live_threads() != threads0 {
+        return Err("demo threads were not reaped — live count off");
+    }
+
+    // The transferred cap landed in the server's space (first free slot
+    // = 2) describing the same frame with the same rights — and the
+    // sender KEPT its original: transfer is a copy, never a move.
+    let landed = cap::read(srv, 2).map_err(|_| "no cap landed in the server's space")?;
+    match landed.obj {
+        CapObj::Memory { phys, pages } if phys == mem_frame && pages == 1 => {}
+        _ => return Err("the landed cap is not the client's Memory cap"),
+    }
+    if landed.rights != cap::RIGHTS_READ | cap::RIGHTS_COPY {
+        return Err("the transferred cap's rights changed in flight");
+    }
+    let kept = cap::read(cli, c_mem as usize)
+        .map_err(|_| "the sender LOST its original cap (move, not copy)")?;
+    if !matches!(kept.obj, CapObj::Memory { .. }) {
+        return Err("the sender's slot no longer holds the Memory cap");
+    }
+
+    // Teardown: objects must destroy without refusal (no stranded
+    // state), both address spaces reclaim exactly, the described frame
+    // returns to the allocator.
+    ipc::destroy_endpoint(eid).map_err(|_| "endpoint teardown refused (state left behind?)")?;
+    ipc::destroy_notification(nid).map_err(|_| "notification teardown refused")?;
+    proc::destroy(srv)?;
+    proc::destroy(cli)?;
+    frames::free(mem_frame).map_err(|_| "transfer frame free rejected")?;
+    let after = frames::free_frames();
+    if after != baseline {
+        return Err("ipc demo teardown is not frame-exact");
+    }
+    info!(
+        "m4",
+        "ipc_echo: two processes talked — the server parked in recv, the client's call delivered 2 words + a Memory cap (landed rights-intact at the server's first free slot, sender kept its copy), the reply echoed both words (verified IN RING 3), notify/wait carried badge {:#x}; 7 dispatches + 3 blocking events counted, threads reaped, frames {} (teardown exact)",
+        IPC_BADGE,
+        after
+    );
+    Ok(())
+}
+
+// ---- 8. the spawn protocol: supervisor restart demo (M4.5, ADR-0019) -------
+
+/// The badge the supervisor lends to its children's exit notifications
+/// (distinct from the IPC demo's badge — cosmetic, keeps the two tests'
+/// console stories unambiguous).
+const SPAWN_BADGE: u64 = 0xE7E7;
+
+/// The SUPERVISOR payload — the root task of its own little subtree.
+/// Cap slots (granted in order by the test): 0 = Image (READ),
+/// 1 = Notification (READ|WRITE), 2 = Memory (READ|COPY — the handle it
+/// delegates). Program: write the inheritance spec [(slot 2, READ|COPY)]
+/// to its data page, SYS_SPAWN the real image with the spec + its
+/// notification + a badge, wait for the child's exit badge, then RESTART:
+/// spawn again and wait again. Exit 42 only if both lives came back
+/// badged; 73/74/75/76 name the failed step.
+fn build_spawn_supervisor() -> Payload {
+    let mut p = Payload::new();
+    let mut holes: [(usize, u64); 8] = [(0, 0); 8];
+    let mut nh = 0usize;
+    p.movabs(3, I_DATA); // rbx = spec buffer (callee-saved across syscalls)
+    // spec[0] = (src slot 2, rights READ|COPY) — explicit, attenuated.
+    p.movabs(0, IPC_MEM_SLOT);
+    p.mov_mem_rbx_from_rax(0);
+    p.movabs(0, (cap::RIGHTS_READ | cap::RIGHTS_COPY) as u64);
+    p.mov_mem_rbx_from_rax(8);
+    // --- spawn worker #1 ---
+    p.mov_eax(syscall::SYS_SPAWN as u32);
+    p.movabs(7, 0); // image cap slot
+    p.movabs(6, I_DATA); // spec buffer
+    p.movabs(2, 1); // one entry
+    p.movabs(10, IPC_NOTIF_SLOT); // exit-badge target
+    p.movabs(8, SPAWN_BADGE);
+    p.do_syscall();
+    holes[nh] = (p.js_hole(), 73); // negative status
+    nh += 1;
+    holes[nh] = (p.cmp_rax_i8_je(0), 73); // pid must be positive
+    nh += 1;
+    // --- wait for its exit badge ---
+    p.mov_eax(syscall::SYS_WAIT as u32);
+    p.movabs(7, IPC_NOTIF_SLOT);
+    p.do_syscall();
+    p.movabs(1, SPAWN_BADGE);
+    holes[nh] = (p.cmp_rax_reg_jne(1), 74);
+    nh += 1;
+    // --- RESTART: spawn worker #2 (same spec, same badge) ---
+    p.mov_eax(syscall::SYS_SPAWN as u32);
+    p.movabs(7, 0);
+    p.movabs(6, I_DATA);
+    p.movabs(2, 1);
+    p.movabs(10, IPC_NOTIF_SLOT);
+    p.movabs(8, SPAWN_BADGE);
+    p.do_syscall();
+    holes[nh] = (p.js_hole(), 75);
+    nh += 1;
+    holes[nh] = (p.cmp_rax_i8_je(0), 75);
+    nh += 1;
+    // --- and its badge ---
+    p.mov_eax(syscall::SYS_WAIT as u32);
+    p.movabs(7, IPC_NOTIF_SLOT);
+    p.do_syscall();
+    p.movabs(1, SPAWN_BADGE);
+    holes[nh] = (p.cmp_rax_reg_jne(1), 76);
+    nh += 1;
+    p.exit_with(42);
+    for i in 0..nh {
+        let (h, code) = holes[i];
+        let target = p.here();
+        p.exit_with(code);
+        p.patch_rel32(h, target);
+    }
+    p
+}
+
+/// M4.5 — the spawn protocol end to end (ADR-0019): a ring-3 supervisor
+/// creates processes from an IMAGE CAPABILITY with EXPLICIT HANDLE
+/// INHERITANCE, and restarts a worker through its exit badge. The child
+/// is the untouched M4.3 image — its console message appearing TWICE is
+/// the restart, visible on the wire. Kernel-side: both children exited
+/// with the image's own success code (via spawn-registry thread ids),
+/// the inherited cap landed attenuated in each child's first slot, the
+/// parent's Process handles landed in order, the parent kept its
+/// original (copy, not move), counters exact, threads reaped, frames
+/// exact across three address spaces.
+fn test_spawn_restart() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+
+    // The child's message length — derived from the image's own META
+    // (self-describing, as in test 6), for the byte-accounting verdict.
+    let parsed_img = elf::validate(elf::TEST_IMAGE)?;
+    let mo = parsed_img.segs[1].offset as usize;
+    let msg_len = le64_at(elf::TEST_IMAGE, mo + 48) as u64;
+
+    let sup = proc::create("supervisor")?;
+    let sroot = proc::pml4_of(sup).ok_or("supervisor lost its pml4")?;
+    let p = build_spawn_supervisor();
+    // SAFETY: IF=0 suite discipline; owned live root; fresh frames.
+    unsafe {
+        ipc_proc_setup(sroot, &p.b[..p.n])?;
+    }
+
+    // The supervisor's initial handles: an image to spawn from, a
+    // notification to lend its children's exits to, and one COPY-able
+    // Memory cap to delegate.
+    let nid = ipc::create_notification().map_err(|_| "notification table full")?;
+    let mem_frame = frames::alloc().ok_or("no frame for the inheritable cap")?;
+    let s_img = cap::grant(
+        sup,
+        Cap {
+            obj: CapObj::Image { img_id: 0 },
+            rights: cap::RIGHTS_READ,
+        },
+    )
+    .map_err(|_| "image grant failed")?;
+    let s_nf = cap::grant(
+        sup,
+        Cap {
+            obj: CapObj::Notification { nid },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+    )
+    .map_err(|_| "notification grant failed")?;
+    let s_mem = cap::grant(
+        sup,
+        Cap {
+            obj: CapObj::Memory {
+                phys: mem_frame,
+                pages: 1,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY,
+        },
+    )
+    .map_err(|_| "memory grant failed")?;
+    if (s_img, s_nf, s_mem) != (0, 1, 2) {
+        return Err("supervisor cap slots did not fill in the order the payload spells");
+    }
+
+    let st0 = syscall::stats();
+    let i0 = ipc::stats();
+    let threads0 = sched::live_threads();
+    let sup_tid = sched::spawn_in_proc("supervisor", ipc_thread_entry, 0, sup)?;
+    sched::yield_now();
+    m4_drain(512)?;
+
+    // The supervisor's exit code is its diagnostic channel.
+    let Some(ss) = syscall::exit_status_of(sup_tid) else {
+        return Err("the supervisor never exited");
+    };
+    if ss != 42 {
+        return Err(match ss {
+            73 => "supervisor: first spawn refused or returned a non-positive pid (73)",
+            74 => "supervisor: the first exit badge never arrived intact (74)",
+            75 => "supervisor: the restart spawn was refused (75)",
+            76 => "supervisor: the second exit badge never arrived intact (76)",
+            _ => "supervisor exited with a code from nowhere in the contract",
+        });
+    }
+
+    // The spawn registry is the machine-state witness: exactly two
+    // children, both exited with the image's own success code, both
+    // holding the inherited cap at their first free slot.
+    let recs = spawn::records_snapshot();
+    let live: [(u64, u64); 8] = {
+        let mut out = [(0u64, 0u64); 8];
+        let mut n = 0;
+        for r in recs.iter().flatten() {
+            out[n] = *r;
+            n += 1;
+        }
+        out
+    };
+    let nkids = recs.iter().flatten().count();
+    if nkids != 2 {
+        return Err("the spawn registry does not hold exactly the two children");
+    }
+    for &(cpid, ctid) in live[..nkids].iter() {
+        if syscall::exit_status_of(ctid) != Some(42) {
+            return Err("a spawned child did not exit with the image's success code");
+        }
+        let landed = cap::read(cpid, 0).map_err(|_| "no inherited cap in the child's space")?;
+        match landed.obj {
+            CapObj::Memory { phys, pages } if phys == mem_frame && pages == 1 => {}
+            _ => return Err("the inherited cap is not the supervisor's Memory cap"),
+        }
+        if landed.rights != cap::RIGHTS_READ | cap::RIGHTS_COPY {
+            return Err("inherited rights wrong (want exactly READ|COPY)");
+        }
+    }
+    // The parent's Process handles landed in spawn order (first free
+    // slots after its own three), each naming its child.
+    for (i, &(cpid, _)) in live[..nkids].iter().enumerate() {
+        let h = cap::read(sup, 3 + i)
+            .map_err(|_| "a Process handle did not land in the supervisor's space")?;
+        match h.obj {
+            CapObj::Process { pid } if pid == cpid => {}
+            _ => return Err("a Process handle does not name the spawned child"),
+        }
+    }
+    if cap::read(sup, s_mem as usize).is_err() {
+        return Err("the supervisor LOST its original Memory cap (move, not copy)");
+    }
+
+    // Counters: supervisor = spawn, wait, spawn, wait, exit (5); each
+    // child = debug_write + exit (2 × 2) → 9 dispatches, 3 exits, and
+    // the child's message hit the console once per life. Both waits
+    // parked: without preemption a worker runs only while the
+    // supervisor sleeps, so the badges could not have been pending.
+    let st = syscall::stats();
+    if st.calls - st0.calls != 9 {
+        return Err("spawn demo dispatch count wrong (want 9)");
+    }
+    if st.exit_calls - st0.exit_calls != 3 {
+        return Err("exit count wrong (want supervisor + two children)");
+    }
+    if st.write_calls - st0.write_calls != 2 {
+        return Err("child debug_write count wrong (want 2 — one per life)");
+    }
+    if st.write_bytes - st0.write_bytes != 2 * msg_len {
+        return Err("child message byte accounting wrong (want two lives' worth)");
+    }
+    let i = ipc::stats();
+    if i.notifies - i0.notifies != 2 {
+        return Err("exit notifications not fired exactly twice");
+    }
+    if i.waits - i0.waits != 2 {
+        return Err("supervisor wait count wrong");
+    }
+    if i.blocks - i0.blocks != 2 {
+        return Err("both supervisor waits should have parked (no preemption)");
+    }
+    if sched::live_threads() != threads0 {
+        return Err("demo threads were not reaped — live count off");
+    }
+
+    // Teardown: forget the records, reclaim the children (dead, reaped)
+    // and the supervisor, retire the notification, free the described
+    // frame — back to the exact baseline.
+    for &(cpid, _) in live[..nkids].iter() {
+        spawn::forget(cpid).map_err(|_| "spawn record forget refused")?;
+        proc::destroy(cpid)?;
+    }
+    ipc::destroy_notification(nid).map_err(|_| "notification teardown refused")?;
+    proc::destroy(sup)?;
+    frames::free(mem_frame).map_err(|_| "inheritable frame free rejected")?;
+    let after = frames::free_frames();
+    if after != baseline {
+        return Err("spawn demo teardown is not frame-exact");
+    }
+    info!(
+        "m4",
+        "spawn_restart: a ring-3 supervisor spawned the real image TWICE through SYS_SPAWN — each child inherited the attenuated Memory cap at its slot 0, ran the M4.3 program (its {}-byte message on the console twice: the restart, visible), and badged the supervisor at exit; both children exited 42, Process handles landed in order, the supervisor kept its original, counters exact (9 dispatches / 2 notifies / 2 parked waits), frames {} (teardown exact)",
+        msg_len,
+        after
     );
     Ok(())
 }

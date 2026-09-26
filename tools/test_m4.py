@@ -77,6 +77,46 @@ Current coverage:
                      first 8 bytes (LE), call accounting exact, thread
                      reaped, destroy reclaims everything.
 
+  M4.4 — IPC v1 (ADR-0018: endpoints, sync call/reply, badged merged
+  notifications, cap transfer in messages; registry slots 7-11):
+  * ipc_echo       — the echo-server demo across TWO real processes:
+                     the server parks in ipc_recv (Blocked state), the
+                     client's ipc_call delivers two pattern words plus
+                     its Memory cap and blocks; the server echoes both
+                     words via ipc_reply (the client verifies the echo
+                     IN RING 3), then badges the client via notify; the
+                     client's wait takes the badge on the immediate
+                     path. Both exit 42 only if every ring-3 check
+                     held (43-47 client / 53-56 server diagnostics
+                     name any failure). Kernel-side: dispatch and IPC
+                     counters exact (7 syscalls, 2 blocking events),
+                     the cap landed in the server's space with rights
+                     intact while the sender kept its original (copy,
+                     never move), threads reaped, objects destroyed
+                     without refusal, frames exact.
+
+  M4.5 — spawn protocol (ADR-0019: SYS_SPAWN registry slot 12, image
+  capabilities, explicit attenuating inheritance, exit notifications):
+  * spawn_restart  — the supervisor restart demo across THREE real
+                     address spaces: a ring-3 supervisor writes its
+                     inheritance spec to its data page, spawns the
+                     untouched M4.3 image through SYS_SPAWN (its
+                     notification cap + a badge lent to the child's
+                     exit), waits for the badge, then RESTARTS: spawns
+                     again and waits again. The child's console message
+                     appearing TWICE is the restart, visible on the
+                     wire. The supervisor exits 42 only if both lives
+                     came back badged (73-76 name the failed step).
+                     Kernel-side: the spawn registry witnesses both
+                     children exited with the image's own success code,
+                     the inherited Memory cap landed attenuated
+                     (exactly READ|COPY) at each child's slot 0, the
+                     parent's Process handles (READ|DESTROY) landed in
+                     spawn order, the parent kept its original (copy,
+                     not move), counters exact (9 dispatches, 2 exit
+                     notifications, 2 parked waits), threads reaped,
+                     frames exact.
+
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
@@ -93,6 +133,8 @@ EXPECTED_TESTS = [
     "syscall_abi",
     "thread_exit_abi",
     "first_process",
+    "ipc_echo",
+    "spawn_restart",
 ]
 
 if __name__ == "__main__":

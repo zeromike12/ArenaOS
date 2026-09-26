@@ -34,6 +34,8 @@ Rules:
 | [0015](0015-capability-spaces.md) | Capability spaces — slots, rights, attenuation-only delegation, and the first gated invokes | accepted |
 | [0016](0016-executable-format-loader.md) | Executable format and image loader — ELF64 container, ArenaOS strict-subset semantics, W^X segments | accepted |
 | [0017](0017-syscall-abi-v1.md) | Syscall ABI v1 — six-register encoding, typed status codes, frozen call-number registry | accepted |
+| [0018](0018-ipc-v1.md) | IPC v1 — endpoints, synchronous call/reply, badged notifications, capability transfer in messages | accepted |
+| [0019](0019-spawn-protocol-v1.md) | Spawn protocol v1 — process creation from image capabilities, explicit attenuating inheritance, exit-badge notifications | accepted |
 
 ## Template
 

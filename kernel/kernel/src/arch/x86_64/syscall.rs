@@ -35,7 +35,14 @@
 //! payload then executes faults at CPL 3 and resumes, which cannot
 //! happen at CPL 0; `SYS_PROVE_DONE` records whether that fault was
 //! actually observed), and `SYS_ABI_ECHO6` (fingerprint of all six
-//! received argument registers — the stub's marshalling proof).
+//! received argument registers — the stub's marshalling proof). IPC v1
+//! (M4.4, ADR-0018) adds `SYS_IPC_CALL`/`SYS_IPC_RECV`/`SYS_IPC_REPLY`
+//! (endpoint rendezvous: two-word messages, one transferred capability,
+//! blocking call/reply) and `SYS_NOTIFY`/`SYS_WAIT` (badged, merged
+//! notification flags). The spawn protocol (M4.5, ADR-0019) adds
+//! `SYS_SPAWN`: build a process from an image capability, hand the
+//! child an explicit, attenuated inheritance list, register an exit
+//! badge, and start its first thread at the image entry.
 
 use super::gdt;
 use core::arch::global_asm;
@@ -80,11 +87,25 @@ pub const SYS_THREAD_EXIT: u64 = 2;
 pub const SYS_PROVE_RING3: u64 = 4;
 pub const SYS_PROVE_DONE: u64 = 5;
 pub const SYS_ABI_ECHO6: u64 = 6;
+// IPC v1 (M4.4, ADR-0018): endpoint rendezvous and notifications.
+pub const SYS_IPC_CALL: u64 = 7;
+pub const SYS_IPC_RECV: u64 = 8;
+pub const SYS_IPC_REPLY: u64 = 9;
+pub const SYS_NOTIFY: u64 = 10;
+pub const SYS_WAIT: u64 = 11;
+// Spawn protocol v1 (M4.5, ADR-0019): create a process from an image
+// capability with explicit handle inheritance and an exit notification.
+pub const SYS_SPAWN: u64 = 12;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
 /// milestone.
 const WRITE_MAX: u64 = 256;
+
+/// IPC message buffers are exactly three u64 words — [w0, w1, cap-slot]
+/// — in both directions (ADR-0018). x86-64 tolerates the unaligned word
+/// stores, so the ABI imposes no buffer alignment.
+const IPC_BUF_BYTES: u64 = 24;
 
 /// ABI v1 typed status (ADR-0017): `0` plain OK, positive a
 /// call-specific success payload, negative a typed error — dense from
@@ -94,6 +115,10 @@ pub const STATUS_OK: Status = 0;
 pub const STATUS_BAD_CALL: Status = -1;
 pub const STATUS_BAD_ARG: Status = -2;
 pub const STATUS_BAD_ADDRESS: Status = -3;
+/// IPC v1 (ADR-0018): a bounded object refused rather than blocked —
+/// the endpoint's caller queue is full, a second server parked on one
+/// endpoint, or a second waiter parked on one notification.
+pub const STATUS_BUSY: Status = -4;
 
 /// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
 /// so the m4 suite computes its expectation with the very function the
@@ -144,6 +169,63 @@ pub unsafe fn set_cpu_kernel_stack(top: u64) {
     // SAFETY: single writer under IF=0; fixed CPU index until SMP.
     unsafe {
         (*SCRATCH.get())[crate::sched::this_cpu()].kernel_rsp = top;
+    }
+}
+
+/// IA32_GS_BASE — the current GS.base, readable in ring 0.
+const MSR_GS_BASE: u32 = 0xC000_0101;
+
+/// This CPU's scratch address — the kernel-side GS.base value (the
+/// stub's swapgs target).
+///
+/// # Safety
+/// IF=0.
+pub unsafe fn cpu_scratch_addr() -> u64 {
+    // SAFETY: pointer arithmetic on a 'static cell; fixed CPU index.
+    unsafe { SCRATCH.get().add(crate::sched::this_cpu()) as u64 }
+}
+
+/// Whether the per-CPU GS pair is currently flipped to the stub's
+/// kernel side (GS.base = scratch; KERNEL_GS_BASE = the user-side
+/// value). The pair is per-CPU, NOT per-thread — `switch_context` does
+/// not save it — so the scheduler normalizes it around every block
+/// (ADR-0018): all kernel code outside the stub runs canonical
+/// (GS.base ≠ scratch), and a thread that blocks inside the stub
+/// restores its flipped side when it resumes.
+///
+/// # Safety
+/// Ring 0, IF=0.
+pub unsafe fn gs_is_kernel_side() -> bool {
+    // SAFETY: caller contract; rdmsr is ring-0 only.
+    unsafe { super::rdmsr(MSR_GS_BASE) == cpu_scratch_addr() }
+}
+
+/// Flip the GS pair to the stub's kernel side (no-op if already there).
+///
+/// # Safety
+/// Ring 0, IF=0, and the pair one `swapgs` away from canonical.
+pub unsafe fn gs_to_kernel_side() {
+    // SAFETY: caller contract.
+    unsafe {
+        if !gs_is_kernel_side() {
+            core::arch::asm!("swapgs", options(nostack, preserves_flags));
+        }
+    }
+}
+
+/// Flip the GS pair back to canonical (scratch parked in
+/// KERNEL_GS_BASE — the state `enter_user`, the preempt path, and
+/// `SYS_THREAD_EXIT`'s diverging swapgs all leave behind). No-op if
+/// already canonical.
+///
+/// # Safety
+/// Ring 0, IF=0, and the pair one `swapgs` away from the kernel side.
+pub unsafe fn gs_to_canonical_side() {
+    // SAFETY: caller contract.
+    unsafe {
+        if gs_is_kernel_side() {
+            core::arch::asm!("swapgs", options(nostack, preserves_flags));
+        }
     }
 }
 
@@ -463,6 +545,12 @@ extern "C" fn syscall_dispatch(
             unsafe { (*STATS.get()).echo_calls += 1 };
             echo6_fingerprint([a0, a1, a2, a3, a4, a5])
         }
+        SYS_IPC_CALL => sys_ipc_call(a0, a1, a2, a3, a4) as u64,
+        SYS_IPC_RECV => sys_ipc_recv(a0, a1) as u64,
+        SYS_IPC_REPLY => sys_ipc_reply(a0, a1, a2, a3) as u64,
+        SYS_NOTIFY => sys_notify(a0, a1) as u64,
+        SYS_WAIT => sys_wait(a0) as u64,
+        SYS_SPAWN => sys_spawn(a0, a1, a2, a3, a4) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -527,6 +615,21 @@ fn sys_thread_exit(status: u64) -> ! {
     }
     let id = crate::sched::current_thread_id();
     record_exit(id, status);
+    // Spawn-protocol hook (ADR-0019): if this is the LAST live thread of
+    // a process with a registered exit notification, badge it now — the
+    // supervisor's `wait` consumes the badge through the ADR-0018
+    // primitive (merged, so it survives even if the supervisor is
+    // mid-syscall). This thread is still Running, so "last" means the
+    // live count is exactly 1: us.
+    if let Some(pid) = crate::sched::current_proc_id() {
+        if crate::sched::proc_live_threads(pid) == 1 {
+            if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
+                if let Err(e) = crate::ipc::notify(nid, badge) {
+                    error!("syscall", "exit notification failed for pid {pid}: {e}");
+                }
+            }
+        }
+    }
     // This syscall diverges: the stub's exit-side `swapgs` never runs.
     // Restore the canonical user-side GS state HERE (GS.base = 0,
     // KERNEL_GS_BASE = scratch) before the scheduler takes over —
@@ -542,6 +645,251 @@ fn sys_thread_exit(status: u64) -> ! {
         core::arch::asm!("swapgs", options(nostack, preserves_flags));
     }
     crate::sched::terminate()
+}
+
+// ---- IPC v1 handlers (ADR-0018) -------------------------------------------
+//
+// The handlers own the ABI surface: caller identity (thread → process),
+// cap resolution (slot → object + rights), user-buffer validation, and
+// every STAC-bracketed user-memory touch — always in the owner thread's
+// own context. Object logic lives in `crate::ipc`.
+
+/// Resolve an endpoint cap: in-bounds slot, occupied, `CapObj::Endpoint`,
+/// and holding `right` (WRITE = call side, READ = serve side).
+fn endpoint_of(pid: u64, slot: u64, right: u32) -> Result<u32, Status> {
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return Err(STATUS_BAD_ARG);
+    }
+    // SAFETY: IF=0 dispatch context; cap::read is bounds/occupancy-safe.
+    let c = crate::cap::read(pid, slot as usize).map_err(|_| STATUS_BAD_ARG)?;
+    if c.rights & right == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    match c.obj {
+        crate::cap::CapObj::Endpoint { eid } => Ok(eid),
+        _ => Err(STATUS_BAD_ARG),
+    }
+}
+
+/// Resolve a notification cap (WRITE = notify, READ = wait).
+fn notification_of(pid: u64, slot: u64, right: u32) -> Result<u32, Status> {
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let c = crate::cap::read(pid, slot as usize).map_err(|_| STATUS_BAD_ARG)?;
+    if c.rights & right == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    match c.obj {
+        crate::cap::CapObj::Notification { nid } => Ok(nid),
+        _ => Err(STATUS_BAD_ARG),
+    }
+}
+
+/// The optional per-message transferred cap: `CAP_NONE` = none sent;
+/// otherwise the slot must hold a cap with COPY (transfer is a copy —
+/// attenuation-only, ADR-0015/0018).
+fn send_cap_of(pid: u64, slot: u64) -> Result<Option<crate::cap::Cap>, Status> {
+    if slot == crate::ipc::CAP_NONE {
+        return Ok(None);
+    }
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let c = crate::cap::read(pid, slot as usize).map_err(|_| STATUS_BAD_ARG)?;
+    if c.rights & crate::cap::RIGHTS_COPY == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    Ok(Some(c))
+}
+
+/// Write the three message words to a validated user buffer.
+///
+/// # Safety
+/// `[buf, buf+24)` was validated by `user_range_ok` against the CURRENT
+/// thread's regions, the thread's own address space is live, and IF=0.
+unsafe fn write_user_words(buf: u64, words: [u64; 3]) {
+    // SAFETY: caller contract; STAC brackets the SMAP-guarded writes.
+    unsafe {
+        super::stac();
+        let p = buf as *mut u64;
+        core::ptr::write_volatile(p, words[0]);
+        core::ptr::write_volatile(p.add(1), words[1]);
+        core::ptr::write_volatile(p.add(2), words[2]);
+        super::clac();
+    }
+}
+
+/// SYS_IPC_CALL(ep slot, w0, w1, send-cap slot, reply buf): block until
+/// the server replies; the reply lands in the buffer as
+/// `[w0, w1, cap-slot-or-CAP_NONE]`. Needs WRITE on the endpoint cap.
+fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_WRITE) else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(send_cap) = send_cap_of(pid, a3) else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_ok(a4, IPC_BUF_BYTES) {
+        return STATUS_BAD_ADDRESS;
+    }
+    match crate::ipc::call(pid, eid, [a1, a2], send_cap) {
+        Ok((words, landed)) => {
+            // SAFETY: validated above; `ipc::call` resumes in THIS
+            // thread's own context and address space (ADR-0018: user
+            // memory is only touched by its owner).
+            unsafe { write_user_words(a4, [words[0], words[1], landed]) };
+            STATUS_OK
+        }
+        Err(e) => e,
+    }
+}
+
+/// SYS_IPC_RECV(ep slot, buf): take the oldest request, blocking while
+/// the queue is empty; buf receives `[w0, w1, landed-cap-slot]`. Needs
+/// READ on the endpoint cap.
+fn sys_ipc_recv(a0: u64, a1: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_ok(a1, IPC_BUF_BYTES) {
+        return STATUS_BAD_ADDRESS;
+    }
+    match crate::ipc::recv(pid, eid) {
+        Ok((words, landed)) => {
+            // SAFETY: as in sys_ipc_call — own context, validated range.
+            unsafe { write_user_words(a1, [words[0], words[1], landed]) };
+            STATUS_OK
+        }
+        Err(e) => e,
+    }
+}
+
+/// SYS_IPC_REPLY(ep slot, w0, w1, send-cap slot): stage the reply into
+/// this server's delivered slot and wake the caller. Needs READ.
+fn sys_ipc_reply(a0: u64, a1: u64, a2: u64, a3: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(send_cap) = send_cap_of(pid, a3) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::ipc::reply(eid, [a1, a2], send_cap) {
+        Ok(()) => STATUS_OK,
+        Err(e) => e,
+    }
+}
+
+/// SYS_NOTIFY(notif slot, badge): OR a nonzero badge into the pending
+/// word, wake a parked waiter. Non-blocking. Needs WRITE.
+fn sys_notify(a0: u64, a1: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(nid) = notification_of(pid, a0, crate::cap::RIGHTS_WRITE) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::ipc::notify(nid, a1) {
+        Ok(()) => STATUS_OK,
+        Err(e) => e,
+    }
+}
+
+/// SYS_WAIT(notif slot): take the pending badge word (clearing it),
+/// blocking while zero. Returns the badge as a positive payload. Needs
+/// READ.
+fn sys_wait(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(nid) = notification_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::ipc::wait(nid) {
+        Ok(badge) => badge as Status, // positive payload: the merged badge word
+        Err(e) => e,
+    }
+}
+
+/// SYS_SPAWN(image slot, spec ptr, spec count, notif slot | CAP_NONE,
+/// badge): the spawn protocol of ADR-0019 — validate the image cap and
+/// the inheritance spec (an array of `(src_slot, rights)` pairs in the
+/// caller's memory, at most `spawn::MAX_INHERIT`), then hand the whole
+/// creation sequence to `spawn::spawn_from`. Returns the child's pid as
+/// a positive payload. The child's Process cap lands in the caller's
+/// first free slot.
+fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    // The image cap: READ = may spawn from it.
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(img_cap) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if img_cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let crate::cap::CapObj::Image { img_id } = img_cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    // The inheritance spec lives in the caller's memory: page-validate,
+    // then read it under STAC in THIS (the caller's own) context.
+    if a2 > crate::spawn::MAX_INHERIT as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let n = a2 as usize;
+    let mut spec = [(0u64, 0u64); crate::spawn::MAX_INHERIT];
+    if n > 0 {
+        if !user_range_ok(a1, a2 * 16) {
+            return STATUS_BAD_ADDRESS;
+        }
+        // SAFETY: the span was validated against this thread's regions;
+        // own address space live; STAC brackets the SMAP-guarded reads;
+        // IF=0. Unaligned u64 loads are fine on x86-64.
+        unsafe {
+            super::stac();
+            for i in 0..n {
+                let p = (a1 + (i * 16) as u64) as *const u64;
+                spec[i] = (
+                    core::ptr::read_volatile(p),
+                    core::ptr::read_volatile(p.add(1)),
+                );
+            }
+            super::clac();
+        }
+    }
+    // The exit notification: the parent lends the notify side (WRITE)
+    // of one of its notification caps; the badge must be nonzero.
+    let notif = if a3 == crate::ipc::CAP_NONE {
+        if a4 != 0 {
+            return STATUS_BAD_ARG; // a badge with nowhere to send it
+        }
+        None
+    } else {
+        let Ok(nid) = notification_of(pid, a3, crate::cap::RIGHTS_WRITE) else {
+            return STATUS_BAD_ARG;
+        };
+        if a4 == 0 {
+            return STATUS_BAD_ARG;
+        }
+        Some((nid, a4))
+    };
+    match crate::spawn::spawn_from(pid, img_id, &spec[..n], notif) {
+        Ok(child_pid) => child_pid as Status, // pid > 0 = success payload
+        Err(status) => status,
+    }
 }
 
 /// SYS_PROVE_RING3: arm a #GP expectation whose resume address is the
