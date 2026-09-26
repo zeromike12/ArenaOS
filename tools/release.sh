@@ -106,7 +106,9 @@ if [[ "$MODE" == "--publish" ]]; then
         # an extracted copy before publishing it — no untested artifacts.
         echo "== asset upload failed — falling back to in-repo bundle =="
         mkdir -p "releases/$TAG"
-        ( cd "$REL" && tar czf "../releases/$TAG/$BUNDLE" \
+        # Absolute output path: the subshell's cwd is $REL, so a relative
+        # "releases/..." would resolve inside build/ (v0.3.0 first attempt).
+        ( cd "$REL" && tar czf "$REPO_ROOT/releases/$TAG/$BUNDLE" \
             arena-esp.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt )
         ( cd "releases/$TAG" && sha256sum "$BUNDLE" > "$BUNDLE.sha256" )
         blob_sha="$(git hash-object "releases/$TAG/$BUNDLE")"
