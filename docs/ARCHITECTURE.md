@@ -395,10 +395,12 @@ exact to the unit.
 ## 6. Kernel/user boundary
 
 - Ring 3 for all userspace; ring 0 for the kernel only. Single syscall entry
-  via `syscall`/`sysret` on x86-64 (MSRs set up in M3/M4), with a well-defined
-  register ABI (ADR-0006): syscall number + capability handle + arguments in
-  registers; small structured arguments inline, anything larger via IPC
-  buffers. Typed status codes returned — no errno namespace.
+  via `syscall`/`sysret` on x86-64 (MSRs set up in M3.3a), with a well-defined
+  register ABI (philosophy: ADR-0006; frozen encoding since M4.2: ADR-0017):
+  number in RAX, up to six arguments in RDI/RSI/RDX/R10/R8/R9, typed i64
+  status out (0 = OK, positive = payload, negative = dense error codes) — no
+  errno namespace; capability handles are arguments like any other; small
+  structured arguments inline, anything larger via IPC buffers (M4.4).
 - SMAP/SMEP enabled when the CPU supports it; supervisor never dereferences
   user pointers except through explicit, checked copy routines.
 - The kernel ABI is versioned and small on purpose (~30 calls target): object
@@ -520,7 +522,8 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Privilege machinery: ring-3 threads, syscall/sysret, TSS RSP0, SMAP/SMEP | **M3.3a — implemented, 9/9 in-guest (ADR-0014)** |
 | Processes = address-space objects (private PML4, cloned kernel half, per-thread CR3, exact teardown) | **M3.3b — implemented, 11/11 in-guest + 100/100-boot stability (ADR-0014 addendum)** |
 | Capability spaces: per-process slot tables, attenuation-only rights, copy/move/destroy, gated invokes (`process_root`, `map_memory`) | **M3.4 — implemented, 13/13 in-guest + 100/100-boot stability (ADR-0015)** |
-| Executable format + image loader: ELF64 container with ArenaOS strict-subset semantics (ET_EXEC-only validator, W^X segments, zero-fill BSS, exact-accounting load into a process space) | **M4.1 — implemented, 3/3 in-guest (ADR-0016)** |
+| Executable format + image loader: ELF64 container with ArenaOS strict-subset semantics (ET_EXEC-only validator, W^X segments, zero-fill BSS, exact-accounting load into a process space) | **M4.1 — implemented, in-guest (ADR-0016)** |
+| Syscall ABI v1: six argument registers, typed i64 status (0/positive/negative), frozen call registry (debug_write, thread_exit, suite proofs), callee-saved promise proven from ring 3 | **M4.2 — implemented, 5/5 in-guest (ADR-0017)** |
 | IPC, endpoints | not started (roadmap M4) |
 | Userspace programs beyond the first test image (`userspace/payload`), drivers, FS, net, graphics | not started |
 

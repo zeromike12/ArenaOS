@@ -305,17 +305,19 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 3 suite failed");
     }
 
-    // --- M4.1: userspace images — ELF strict-subset validator + loader
-    // (ADR-0016): the embedded rust-lld artifact parsed, its rejection
-    // corpus attacked, and a real process address space loaded, verified
-    // under its own CR3, and reclaimed exactly.
+    // --- M4.1/M4.2: userspace images — ELF strict-subset validator +
+    // loader (ADR-0016): the embedded rust-lld artifact parsed, its
+    // rejection corpus attacked, and a real process address space
+    // loaded, verified under its own CR3, and reclaimed exactly. Then
+    // the syscall ABI v1 (ADR-0017): six-register marshalling, typed
+    // status codes, and the callee-saved promise proven from ring 3.
     if !crate::m4::run_suite() {
         crate::halt::halt_machine("milestone 4 suite failed");
     }
 
     info!(
         "kernel",
-        "milestone 4 step 4.1 complete (executable format + image loader) — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 4 step 4.2 complete (executable format + image loader + syscall ABI v1) — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }

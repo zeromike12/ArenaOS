@@ -38,6 +38,28 @@ Current coverage:
                  EB FE, META magic + entry fact, all 4096 bss bytes
                  zero; proc::destroy reclaims every frame exactly.
 
+  M4.2 — syscall ABI v1 (ADR-0017: RAX = call number, six arguments in
+  RDI/RSI/RDX/R10/R8/R9, typed i64 status out, RBX/RBP/R12-R15
+  preserved; registry: 1 debug_write, 2 thread_exit, 4/5 the M3 proof
+  calls, 6 abi_echo6):
+  * syscall_abi    — a hand-assembled ring-3 payload proves the v1
+                     contract from the user side: abi_echo6's
+                     fingerprint (non-negative by construction) arrives
+                     and is stored to the data page, where the kernel
+                     side compares it against echo6_fingerprint itself;
+                     six callee-saved canaries survive the call;
+                     debug_write returns the exact byte count (and the
+                     kernel-side capture buffer holds the message);
+                     an out-of-region buffer answers -3, len=0 and
+                     oversized len answer -2, an unknown number answers
+                     -1 — every typed status OBSERVED IN RING 3 (the
+                     payload exits 43 on any violation and only 42
+                     passes); dispatcher accounting exact; frames exact.
+  * thread_exit_abi — a payload exits with a full-width 64-bit code
+                     (0xBEEFC0DE0042): recorded faithfully, the thread
+                     reaped through the scheduler (live count back to
+                     baseline), dispatch counted once, frames exact.
+
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
@@ -51,6 +73,8 @@ EXPECTED_TESTS = [
     "elf_parse",
     "elf_reject",
     "elf_load",
+    "syscall_abi",
+    "thread_exit_abi",
 ]
 
 if __name__ == "__main__":

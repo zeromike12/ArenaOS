@@ -93,9 +93,9 @@ machine-checkable landmarks, in order:
 6. 13 `m3:test:<name>: PASS` lines — kernel threads, preemption, ring 3
    + syscalls, processes as address spaces, capability spaces
    (ADR-0012…0015) — ending with `m3: RESULT PASS (13/13)`
-7. 3 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
-   corpus, and the image loader (ADR-0016) — ending with
-   `m4: RESULT PASS (3/3)`
+7. 5 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
+   corpus, the image loader (ADR-0016), and the syscall ABI v1 proven
+   from ring 3 (ADR-0017) — ending with `m4: RESULT PASS (5/5)`
 8. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
 9. QEMU exits on its own with status 0
 

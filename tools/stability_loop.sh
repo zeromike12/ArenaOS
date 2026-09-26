@@ -2,7 +2,7 @@
 # Boot-stability loop (docs/TESTING.md): boot the *prebuilt* ESP image N
 # times with fresh NVRAM each run and require the full green verdict on
 # every single boot — m2 RESULT PASS (21/21), m3 RESULT PASS (13/13), m4
-# RESULT PASS (3/3), the canonical clean-halt
+# RESULT PASS (5/5), the canonical clean-halt
 # line, no PANIC, QEMU exit 0, under a per-boot timeout.
 #
 # A single green boot proves correctness; a hundred prove the kernel is
@@ -42,7 +42,7 @@ SERIAL="$REPO_ROOT/build/stability-serial.log"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
-RESULT_LINE_M4='m4: RESULT PASS (3/3)'
+RESULT_LINE_M4='m4: RESULT PASS (5/5)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0

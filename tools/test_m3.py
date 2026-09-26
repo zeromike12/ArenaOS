@@ -56,9 +56,9 @@ Current coverage:
                               read-backs; a payload whose privileged `cli`
                               faults #GP and resumes (impossible at CPL 0),
                               whose invalid syscall number is rejected with
-                              -1 *observed in ring 3*, whose SYS_WRITE
+                              -1 *observed in ring 3*, whose SYS_DEBUG_WRITE
                               bytes are verified in a kernel-side buffer,
-                              and whose SYS_EXIT(42) reaps through the
+                              and whose SYS_THREAD_EXIT(42) reaps through the
                               scheduler; SMAP: bare kernel read of a user
                               page → recovered #PF with CR2 asserted;
                               TSS RSP0 names the user thread's kernel
@@ -70,7 +70,7 @@ Current coverage:
                               tick hook rotates the user thread mid-spin
                               and resumes it back into ring 3, a kernel
                               write into the process's own data page
-                              releases the spin, and SYS_WRITE+SYS_EXIT(7)
+                              releases the spin, and SYS_DEBUG_WRITE+SYS_THREAD_EXIT(7)
                               verify afterwards — interrupts, preemption,
                               and shared memory all compose with ring 3.
   M3.3b — process address spaces (ADR-0014; proc.rs: a process = owned

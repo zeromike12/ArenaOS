@@ -220,9 +220,29 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       (7 frames exact, PTE W^X flags, contents under the target's CR3
       through STAC, double-load/dead-target refusals, exact teardown) —
       m4 3/3, m1/m2/m3 regressions green.
-- 4.2 **Syscall ABI v1** (register encoding ADR), dispatch, typed status
+- [x] 4.2 **Syscall ABI v1** (register encoding ADR), dispatch, typed status
       codes; first calls: debug-write (temporary console backdoor),
       thread_exit.
+      DONE (ADR-0017): the v0 boundary formalized and frozen — RAX = call
+      number; six arguments in RDI/RSI/RDX/R10/R8/R9 (stub marshals all
+      six plus the recorded frame through Win64 to the dispatcher); typed
+      i64 status out: 0 = OK, positive = call payload, negative = dense
+      error codes (`STATUS_BAD_CALL` -1 — the v0-compatible wire value —
+      `STATUS_BAD_ARG` -2, `STATUS_BAD_ADDRESS` -3); RBX/RBP/R12–R15
+      preserved, user RFLAGS restored, kernel side IF=0. Registry:
+      1 `debug_write` (validated SMAP-aware copy-out, temporary console
+      backdoor), 2 `thread_exit` (full-width code through the scheduler
+      reap), 3 unallocated forever, 4/5 the M3 ring-3 proof calls, 6
+      `abi_echo6` (six-register marshalling probe). Renames only for m3
+      (`SYS_WRITE`→`SYS_DEBUG_WRITE`, `SYS_EXIT`→`SYS_THREAD_EXIT`) —
+      wire-identical, m3's ring-3 assertions untouched. m4 suite: the
+      ring-3 payload proves the echo fingerprint across all six argument
+      registers, six callee-saved canaries, the success count, all three
+      typed refusals *observed in ring 3*, unknown nr → -1, and
+      thread_exit's 64-bit code fidelity; bring-up caught three live
+      bugs (Win64 stack-arg alignment, REX.B-vs-REX.R cmp encodings,
+      rel8 overflow) — each now a comment where it was fixed. m4 5/5,
+      m1/m2/m3 regressions green.
 - 4.3 **First user process**: statically linked ring-3 binary executes,
       writes via syscall, exits. Test proves ring transition (RIP/CS checks
       in both directions, SMAP faults if kernel touches user memory wrong).

@@ -577,8 +577,8 @@ fn test_preempt_coexist() -> Result<(), &'static str> {
 //   CPL 0) — armed-fault protocol extended to ring-3 sites;
 // * an invalid syscall number is rejected with -1, observed *in ring 3*
 //   (the payload branches to a wrong-status exit if not);
-// * SYS_WRITE copies exactly the user's bytes (kernel-side buffer +
-//   console), SYS_EXIT terminates through the scheduler's zombie/reap
+// * SYS_DEBUG_WRITE copies exactly the user's bytes (kernel-side buffer +
+//   console), SYS_THREAD_EXIT terminates through the scheduler's zombie/reap
 //   path with the recorded status;
 // * timer ticks land on ring-3 code (TSS RSP0 path) and the preemptive
 //   tick rotates the user thread mid-execution — the payload survives N
@@ -652,8 +652,8 @@ impl Payload {
 
 /// Payload A — the syscall contract proof:
 /// invalid nr → -1 (branch to failure exit if not), PROVE_RING3 + `cli`
-/// (#GP at CPL 3, resumed by the armed-fault handler), SYS_WRITE(msg)
-/// with a returned-count check, SYS_EXIT(42). Any violation exits 43.
+/// (#GP at CPL 3, resumed by the armed-fault handler), SYS_DEBUG_WRITE(msg)
+/// with a returned-count check, SYS_THREAD_EXIT(42). Any violation exits 43.
 fn build_payload_a() -> (Payload, usize) {
     let mut p = Payload::new();
     p.emit(&[0xB8]);
@@ -675,20 +675,20 @@ fn build_payload_a() -> (Payload, usize) {
     p.emit(&[0xBE]);
     p.emit_u32(U3_MSG_A.len() as u32); // mov esi, msg_len
     p.emit(&[0xB8]);
-    p.emit_u32(syscall::SYS_WRITE as u32);
+    p.emit_u32(syscall::SYS_DEBUG_WRITE as u32);
     p.emit(&[0x0F, 0x05]); // syscall
     p.emit(&[0x48, 0x83, 0xF8, U3_MSG_A.len() as u8]); // cmp rax, msg_len
     p.emit(&[0x75]);
     let j_fail2 = p.rel8_hole(); // jnz fail
     p.emit(&[0xB8]);
-    p.emit_u32(syscall::SYS_EXIT as u32);
+    p.emit_u32(syscall::SYS_THREAD_EXIT as u32);
     p.emit(&[0xBF]);
     p.emit_u32(42); // mov edi, 42
     p.emit(&[0x0F, 0x05]); // syscall
     p.emit(&[0xEB, 0xFE]); // jmp $ (unreachable)
     let fail = p.here();
     p.emit(&[0xB8]);
-    p.emit_u32(syscall::SYS_EXIT as u32);
+    p.emit_u32(syscall::SYS_THREAD_EXIT as u32);
     p.emit(&[0xBF]);
     p.emit_u32(43); // mov edi, 43 (contract violation)
     p.emit(&[0x0F, 0x05]); // syscall
@@ -703,8 +703,8 @@ fn build_payload_a() -> (Payload, usize) {
 
 /// Payload B — the interrupt/preemption proof: spin reading the flag
 /// qword at `U3_DATA_VA` (absolute moffs64 read) with `pause`, bounded by
-/// `ecx`; flag set → SYS_WRITE(msg) + SYS_EXIT(7); bound exhausted →
-/// SYS_EXIT(99) (anti-hang).
+/// `ecx`; flag set → SYS_DEBUG_WRITE(msg) + SYS_THREAD_EXIT(7); bound exhausted →
+/// SYS_THREAD_EXIT(99) (anti-hang).
 fn build_payload_b(spin_bound: u32) -> (Payload, usize) {
     let mut p = Payload::new();
     p.emit(&[0xB9]);
@@ -720,7 +720,7 @@ fn build_payload_b(spin_bound: u32) -> (Payload, usize) {
     p.emit(&[0x75]);
     let j_loop = p.rel8_hole(); // jnz loop_top
     p.emit(&[0xB8]);
-    p.emit_u32(syscall::SYS_EXIT as u32);
+    p.emit_u32(syscall::SYS_THREAD_EXIT as u32);
     p.emit(&[0xBF]);
     p.emit_u32(99); // timeout exit (anti-hang)
     p.emit(&[0x0F, 0x05]); // syscall
@@ -731,10 +731,10 @@ fn build_payload_b(spin_bound: u32) -> (Payload, usize) {
     p.emit(&[0xBE]);
     p.emit_u32(U3_MSG_B.len() as u32); // mov esi, msg_len
     p.emit(&[0xB8]);
-    p.emit_u32(syscall::SYS_WRITE as u32);
+    p.emit_u32(syscall::SYS_DEBUG_WRITE as u32);
     p.emit(&[0x0F, 0x05]); // syscall
     p.emit(&[0xB8]);
-    p.emit_u32(syscall::SYS_EXIT as u32);
+    p.emit_u32(syscall::SYS_THREAD_EXIT as u32);
     p.emit(&[0xBF]);
     p.emit_u32(7); // mov edi, 7
     p.emit(&[0x0F, 0x05]); // syscall
@@ -754,7 +754,7 @@ fn build_payload_b(spin_bound: u32) -> (Payload, usize) {
 /// *direct-map alias* of the frames (supervisor RW): writing through the
 /// fresh R+X user mapping would #PF under CR0.WP — the kernel honors its
 /// own read-only pages (a first bring-up attempt proved exactly that).
-/// The STAC positive path is exercised by SYS_WRITE's copy and test 9's
+/// The STAC positive path is exercised by SYS_DEBUG_WRITE's copy and test 9's
 /// flag release. Returns the three frame PHYS addresses and the
 /// post-setup free-frame count (teardown asserts against it).
 unsafe fn u3_setup(
@@ -832,7 +832,7 @@ unsafe fn u3_teardown(phys: [u64; 3], after_setup_free: u64) -> Result<u64, &'st
 /// RSP0 evidence, captured by the user thread itself at entry (the last
 /// instant before ring 3 where it matters): TSS RSP0 must name exactly
 /// this thread's kernel stack top — plan_switch programmed it at
-/// switch-in. (Checking *after* SYS_EXIT is impossible by design: the
+/// switch-in. (Checking *after* SYS_THREAD_EXIT is impossible by design: the
 /// exit path reaps the exiting thread's own slot before switching away —
 /// M3.1 semantics.)
 static U3_RSP0_ENTRY: AtomicU64 = AtomicU64::new(0);
@@ -934,7 +934,7 @@ fn test_user_ring3_syscall() -> Result<(), &'static str> {
         "SMAP absent on this CPU (enforcement skipped, STAC/CLAC no-ops)"
     };
     // (e) Run the payload: one cooperative yield hands the CPU to the user
-    //     thread; it returns only through SYS_EXIT.
+    //     thread; it returns only through SYS_THREAD_EXIT.
     let st0 = syscall::stats();
     U3_RSP0_ENTRY.store(0, Ordering::Relaxed);
     U3_TOP_ENTRY.store(0, Ordering::Relaxed);
@@ -943,7 +943,7 @@ fn test_user_ring3_syscall() -> Result<(), &'static str> {
     drain(64)?;
     // (f) Verdicts — every claim is dispatcher-recorded machine state.
     let Some(status) = syscall::exit_status_of(id) else {
-        return Err("no SYS_EXIT recorded for the user thread");
+        return Err("no SYS_THREAD_EXIT recorded for the user thread");
     };
     if status != 42 {
         return Err("payload took a failure exit (ring-3 contract violated)");
@@ -952,13 +952,13 @@ fn test_user_ring3_syscall() -> Result<(), &'static str> {
     if st.write_calls - st0.write_calls != 1
         || st.write_bytes - st0.write_bytes != U3_MSG_A.len() as u64
     {
-        return Err("SYS_WRITE accounting wrong");
+        return Err("SYS_DEBUG_WRITE accounting wrong");
     }
     if st.invalid_nr - st0.invalid_nr != 1 {
         return Err("invalid syscall number not rejected exactly once");
     }
     if st.exit_calls - st0.exit_calls != 1 {
-        return Err("SYS_EXIT accounting wrong");
+        return Err("SYS_THREAD_EXIT accounting wrong");
     }
     if !st.ring3_proved {
         return Err("ring-3 #GP proof not recorded (cli did not fault -> not CPL 3?)");
@@ -968,7 +968,7 @@ fn test_user_ring3_syscall() -> Result<(), &'static str> {
     }
     let (buf, n) = syscall::last_write();
     if n != U3_MSG_A.len() || buf[..n] != U3_MSG_A[..] {
-        return Err("SYS_WRITE kernel-side copy mismatch");
+        return Err("SYS_DEBUG_WRITE kernel-side copy mismatch");
     }
     let rsp0 = U3_RSP0_ENTRY.load(Ordering::Relaxed);
     let top = U3_TOP_ENTRY.load(Ordering::Relaxed);
@@ -979,7 +979,7 @@ fn test_user_ring3_syscall() -> Result<(), &'static str> {
     let free_now = unsafe { u3_teardown(phys, free_after_setup) }?;
     info!(
         "m3",
-        "user_ring3_syscall: hand-assembled payload ran at CPL 3 — cli -> #GP(ec=0) recovered, invalid nr -> -1 seen in ring 3, SYS_WRITE copied {} bytes, SYS_EXIT(42); RSP0 exact; {}; frames {} (teardown exact)",
+        "user_ring3_syscall: hand-assembled payload ran at CPL 3 — cli -> #GP(ec=0) recovered, invalid nr -> -1 seen in ring 3, SYS_DEBUG_WRITE copied {} bytes, SYS_THREAD_EXIT(42); RSP0 exact; {}; frames {} (teardown exact)",
         U3_MSG_A.len(),
         smap_proof,
         free_now
@@ -1053,13 +1053,13 @@ fn test_user_ring3_interrupted() -> Result<(), &'static str> {
         || n != U3_MSG_B.len()
         || buf[..n] != U3_MSG_B[..]
     {
-        return Err("post-spin SYS_WRITE payload mismatch");
+        return Err("post-spin SYS_DEBUG_WRITE payload mismatch");
     }
     // SAFETY: IF=0; user thread reaped; contract per u3_teardown.
     let free_now = unsafe { u3_teardown(phys, free_after_setup) }?;
     info!(
         "m3",
-        "user_ring3_interrupted: ring-3 spin survived {ticks} ticks and {switches} timer rotations (RSP0 path + mid-user preemption, resume-to-user via iretq); kernel-released flag ended the spin; SYS_WRITE+SYS_EXIT(7) verified; frames {free_now} (teardown exact)"
+        "user_ring3_interrupted: ring-3 spin survived {ticks} ticks and {switches} timer rotations (RSP0 path + mid-user preemption, resume-to-user via iretq); kernel-released flag ended the spin; SYS_DEBUG_WRITE+SYS_THREAD_EXIT(7) verified; frames {free_now} (teardown exact)"
     );
     Ok(())
 }
@@ -1077,7 +1077,7 @@ fn test_user_ring3_interrupted() -> Result<(), &'static str> {
 //     refusal) reclaims every frame, and payload A runs at ring 3 INSIDE
 //     a process address space (user pages mapped only in the process
 //     PML4, thread cr3 = the process root), with CR3 restored to the
-//     kernel view on the switch back after SYS_EXIT.
+//     kernel view on the switch back after SYS_THREAD_EXIT.
 
 /// User VA mapped in BOTH test processes — over different frames.
 const P10_VA: u64 = 0x0041_0000;
@@ -1357,7 +1357,7 @@ fn test_process_accounting() -> Result<(), &'static str> {
     sched::yield_now();
     drain(64)?;
     let Some(status) = syscall::exit_status_of(id) else {
-        return Err("no SYS_EXIT recorded for the in-process user thread");
+        return Err("no SYS_THREAD_EXIT recorded for the in-process user thread");
     };
     if status != 42 {
         return Err("in-process payload took a failure exit (ring-3 contract violated)");
@@ -1366,11 +1366,11 @@ fn test_process_accounting() -> Result<(), &'static str> {
     if st.write_calls - st0.write_calls != 1
         || st.write_bytes - st0.write_bytes != U3_MSG_A.len() as u64
     {
-        return Err("in-process SYS_WRITE accounting wrong");
+        return Err("in-process SYS_DEBUG_WRITE accounting wrong");
     }
     let (buf, n) = syscall::last_write();
     if n != U3_MSG_A.len() || buf[..n] != U3_MSG_A[..] {
-        return Err("in-process SYS_WRITE kernel-side copy mismatch");
+        return Err("in-process SYS_DEBUG_WRITE kernel-side copy mismatch");
     }
     let rsp0 = U3_RSP0_ENTRY.load(Ordering::Relaxed);
     let top = U3_TOP_ENTRY.load(Ordering::Relaxed);
@@ -1397,7 +1397,7 @@ fn test_process_accounting() -> Result<(), &'static str> {
     }
     info!(
         "m3",
-        "process_accounting: 8 create/map/destroy rounds ({} frames back each) + a {}-process full-table refusal reclaimed every frame (free {} exact); payload A ran at ring 3 INSIDE a process address space (SYS_WRITE {} bytes, SYS_EXIT(42), RSP0 exact, CR3 restored on exit); final teardown freed {} frames incl. the root",
+        "process_accounting: 8 create/map/destroy rounds ({} frames back each) + a {}-process full-table refusal reclaimed every frame (free {} exact); payload A ran at ring 3 INSIDE a process address space (SYS_DEBUG_WRITE {} bytes, SYS_THREAD_EXIT(42), RSP0 exact, CR3 restored on exit); final teardown freed {} frames incl. the root",
         last_freed,
         proc::MAX_PROCESSES,
         f0,

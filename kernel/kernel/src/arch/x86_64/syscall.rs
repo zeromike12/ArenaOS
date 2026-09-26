@@ -21,16 +21,21 @@
 //!   therefore preemptible, from its first instruction. Interrupts that
 //!   land in ring 3 take TSS RSP0 (hardware path), not the scratch.
 //!
-//! The syscall ABI (ours, deliberately not POSIX): RAX = number,
-//! RDI/RSI/RDX = up to three arguments, result in RAX, `-1` (all ones) =
-//! rejected. All caller-saved registers clobber; RCX/R11 are consumed by
-//! the hardware. The 3.3 surface: `SYS_WRITE` (validated, SMAP-aware
-//! copy-out to the serial console), `SYS_EXIT` (terminate through the
-//! scheduler), and the two ring-3 *proof* calls the M3 suite uses
-//! (`SYS_PROVE_RING3` arms a #GP expectation at the user's next
-//! instruction — a privileged `cli` the payload then executes faults at
-//! CPL 3 and resumes, which cannot happen at CPL 0; `SYS_PROVE_DONE`
-//! records whether that fault was actually observed).
+//! The syscall ABI (v1, ADR-0017 — ours, deliberately not POSIX): RAX =
+//! call number, RDI/RSI/RDX/R10/R8/R9 = up to six arguments, result in
+//! RAX as a typed `i64` status (0 = OK, positive = call-specific success
+//! payload, negative = dense typed error); RBX/RBP/R12–R15 are preserved
+//! across the call, RCX/R11 are consumed by the hardware, and the user's
+//! RFLAGS is restored on return. The v1 registry: `SYS_DEBUG_WRITE`
+//! (validated, SMAP-aware copy-out to the serial console — the temporary
+//! diagnostics backdoor until a console service exists),
+//! `SYS_THREAD_EXIT` (terminate through the scheduler), the two ring-3
+//! *proof* calls the M3 suite uses (`SYS_PROVE_RING3` arms a #GP
+//! expectation at the user's next instruction — a privileged `cli` the
+//! payload then executes faults at CPL 3 and resumes, which cannot
+//! happen at CPL 0; `SYS_PROVE_DONE` records whether that fault was
+//! actually observed), and `SYS_ABI_ECHO6` (fingerprint of all six
+//! received argument registers — the stub's marshalling proof).
 
 use super::gdt;
 use core::arch::global_asm;
@@ -67,20 +72,44 @@ const SFMASK_VALUE: u64 = (1 << 10) | // DF
 /// ring 3 exactly like ring 0 — the M3 suite proves both).
 const USER_RFLAGS: u64 = 0x202;
 
-// ---- syscall numbers (ABI v0 — ADR-0014) ----------------------------------
+// ---- call numbers (ABI v1 registry — ADR-0017; frozen: additive only) -----
 
-pub const SYS_WRITE: u64 = 1;
-pub const SYS_EXIT: u64 = 2;
+pub const SYS_DEBUG_WRITE: u64 = 1;
+pub const SYS_THREAD_EXIT: u64 = 2;
+// 3 is deliberately unallocated — v0's gap stays a gap forever (ADR-0017).
 pub const SYS_PROVE_RING3: u64 = 4;
 pub const SYS_PROVE_DONE: u64 = 5;
+pub const SYS_ABI_ECHO6: u64 = 6;
 
-/// Largest `SYS_WRITE` the dispatcher accepts (bytes). The console is a
-/// diagnostic surface in M3; a real byte-stream API arrives with the FS
+/// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
+/// is a diagnostic surface; a real byte-stream API arrives with the FS
 /// milestone.
 const WRITE_MAX: u64 = 256;
 
-/// The value returned to user code for a rejected syscall.
-const SYS_REJECTED: u64 = u64::MAX;
+/// ABI v1 typed status (ADR-0017): `0` plain OK, positive a
+/// call-specific success payload, negative a typed error — dense from
+/// `-1`, allocated once, never reused, never renumbered.
+pub type Status = i64;
+pub const STATUS_OK: Status = 0;
+pub const STATUS_BAD_CALL: Status = -1;
+pub const STATUS_BAD_ARG: Status = -2;
+pub const STATUS_BAD_ADDRESS: Status = -3;
+
+/// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
+/// so the m4 suite computes its expectation with the very function the
+/// dispatcher returns — the six-register marshalling proof shares no
+/// duplicated arithmetic. The top bit is masked off: EVERY call result
+/// honors the status sign domain (ADR-0017) — a success payload with
+/// the MSB set would be indistinguishable from a typed error.
+pub fn echo6_fingerprint(a: [u64; 6]) -> u64 {
+    (a[0]
+        ^ a[1].rotate_left(11)
+        ^ a[2].rotate_left(22)
+        ^ a[3].rotate_left(33)
+        ^ a[4].rotate_left(44)
+        ^ a[5].rotate_left(55))
+        & 0x7FFF_FFFF_FFFF_FFFF
+}
 
 // ---- per-CPU scratch (the swapgs target) ----------------------------------
 
@@ -140,6 +169,7 @@ pub struct SyscallStats {
     pub write_rejected: u64,
     pub exit_calls: u64,
     pub invalid_nr: u64,
+    pub echo_calls: u64,
     pub prove_ring3_calls: u64,
     /// Set when SYS_PROVE_DONE found the armed #GP actually delivered.
     pub ring3_proved: bool,
@@ -154,6 +184,7 @@ static STATS: SyncCell<SyscallStats> = SyncCell::new(SyscallStats {
     write_rejected: 0,
     exit_calls: 0,
     invalid_nr: 0,
+    echo_calls: 0,
     prove_ring3_calls: 0,
     ring3_proved: false,
     ring3_gp_ec: 0,
@@ -166,7 +197,7 @@ pub fn stats() -> SyscallStats {
     unsafe { *STATS.get() }
 }
 
-/// Most recent SYS_WRITE payload (first bytes + length) — the test side
+/// Most recent SYS_DEBUG_WRITE payload (first bytes + length) — the test side
 /// asserts on the *copied* buffer, not on serial text.
 static WRITE_BUF: SyncCell<[u8; WRITE_MAX as usize]> = SyncCell::new([0; WRITE_MAX as usize]);
 static WRITE_BUF_LEN: SyncCell<usize> = SyncCell::new(0);
@@ -176,7 +207,7 @@ pub fn last_write() -> ([u8; WRITE_MAX as usize], usize) {
     unsafe { (*WRITE_BUF.get(), *WRITE_BUF_LEN.get()) }
 }
 
-/// (thread id, exit status) pairs recorded by SYS_EXIT, in order.
+/// (thread id, exit status) pairs recorded by SYS_THREAD_EXIT, in order.
 const EXIT_LOG_CAP: usize = 16;
 static EXIT_LOG: SyncCell<[(u64, u64); EXIT_LOG_CAP]> = SyncCell::new([(0, 0); EXIT_LOG_CAP]);
 static EXIT_LOG_LEN: SyncCell<usize> = SyncCell::new(0);
@@ -293,7 +324,7 @@ pub unsafe fn init() -> Result<(), &'static str> {
 /// user selectors, RFLAGS IF=1, and the recorded entry RIP/stack. NEVER
 /// RETURNS — the thread comes back to ring 0 only through the syscall
 /// stub (or dies with an exception), and leaves existence through
-/// `SYS_EXIT`.
+/// `SYS_THREAD_EXIT`.
 ///
 /// # Safety
 /// Ring 0, IF=0, syscall MSRs initialized ([`init`]), the current thread
@@ -344,11 +375,17 @@ global_asm!(
     // `swapgs` pair assumes GS.base=0 in user mode and the scratch in
     // KERNEL_GS_BASE. The kernel never executes SYSCALL itself.
     //
-    // Stack discipline: kernel_rsp is the thread's stack top (16-aligned).
-    // Pushes: frame (3 qwords) + 5th arg (1) + Win64 shadow (4) = 8 qwords,
-    // so RSP is 16-aligned at the `call` and the callee sees the standard
-    // [ret][shadow][arg5] layout. SFMASK already cleared IF — the whole
-    // path is non-preemptible.
+    // Stack discipline (ABI v1, ADR-0017): kernel_rsp is the thread's
+    // stack top (16-aligned). Layout, from the frame base F (= top-24):
+    // pad at F-8 (the frame's 3 pushes make the arg count odd — WITHOUT
+    // this pad every stack arg lands 8 bytes off its Win64 slot, a bug
+    // the M4.2 bring-up caught live), arg8 &frame at F-16, arg7 a5 at
+    // F-24, arg6 a4 at F-32, arg5 a3 at F-40, Win64 shadow below →
+    // RSP = F-72, 16-aligned at the `call`, and the callee reads
+    // [rsp+40..64] = a3, a4, a5, frame exactly. The four Win64 register
+    // args are moved ONLY after the pushes that consume r8/r9 have
+    // happened. SFMASK already cleared IF — the whole path is
+    // non-preemptible.
     ".p2align 4",
     ".globl arena_syscall_entry",
     "arena_syscall_entry:",
@@ -358,19 +395,23 @@ global_asm!(
     "push r11",                 // frame: user RFLAGS
     "push rcx",                 //        user RIP
     "mov rcx, gs:[0]",
-    "push rcx",                 //        user RSP   (frame base = RSP now)
-    "mov rcx, rsp",
-    "push rcx",                 // 5th arg: &SyscallFrame
-    "sub rsp, 32",              // Win64 shadow space
-    "mov r9, rdx",              // a2 (before rdx is overwritten)
-    "mov rcx, rax",             // nr
+    "push rcx",                 //        user RSP   (frame base F = RSP now)
+    "mov rcx, rsp",             // rcx = F (captured BEFORE the pad push)
+    "push rax",                 // pad at F-8 (aligns the arg slots; rax=nr survives)
+    "push rcx",                 // arg8: &SyscallFrame (F)   at F-16
+    "push r9",                  // arg7: a5 (user's r9 — before it is reused)
+    "push r8",                  // arg6: a4 (user's r8 — before it is reused)
+    "push r10",                 // arg5: a3                            at F-40
+    "sub rsp, 32",              // Win64 shadow space → RSP = F-72 (aligned)
+    "mov r9, rdx",              // a2 (before rdx becomes a0's target)
     "mov rdx, rdi",             // a0
     "mov r8, rsi",              // a1
+    "mov rcx, rax",             // nr
     "call {dispatch}",
-    // RAX = user-visible result. Tear down: skip shadow + arg5, reload the
-    // recorded user state (never a user-supplied target — ADR-0014), leave
-    // the kernel stack, swap back, and sysretq.
-    "add rsp, 40",
+    // RAX = user-visible status. Tear down: skip shadow (32), args (32)
+    // and pad (8), reload the recorded user state (never a user-supplied
+    // target — ADR-0014), leave the kernel stack, swap back, sysretq.
+    "add rsp, 72",
     "mov rcx, [rsp + 8]",       // user RIP
     "mov r11, [rsp + 16]",      // user RFLAGS
     "mov rsp, [rsp]",           // user RSP
@@ -393,13 +434,18 @@ fn syscall_entry_addr() -> u64 {
 // ---- the dispatcher ---------------------------------------------------------
 
 /// Rust half of the boundary: validate, act, return the user-visible
-/// result in RAX. Runs at IF=0 on the calling thread's kernel stack with
-/// the frame the stub built. SYS_EXIT diverges through the scheduler.
+/// typed status in RAX (ADR-0017). Runs at IF=0 on the calling thread's
+/// kernel stack with the frame the stub built; all six user argument
+/// registers arrive marshalled per the Win64 convention. SYS_THREAD_EXIT
+/// diverges through the scheduler.
 extern "C" fn syscall_dispatch(
     nr: u64,
     a0: u64,
     a1: u64,
-    _a2: u64,
+    a2: u64,
+    a3: u64,
+    a4: u64,
+    a5: u64,
     frame: *const SyscallFrame,
 ) -> u64 {
     // SAFETY: stats writes are single-writer at IF=0 (SyncCell contract);
@@ -408,23 +454,31 @@ extern "C" fn syscall_dispatch(
         (*STATS.get()).calls += 1;
     }
     match nr {
-        SYS_WRITE => sys_write(a0, a1),
-        SYS_EXIT => sys_exit(a0),
+        SYS_DEBUG_WRITE => sys_debug_write(a0, a1) as u64,
+        SYS_THREAD_EXIT => sys_thread_exit(a0),
         SYS_PROVE_RING3 => sys_prove_ring3(frame),
         SYS_PROVE_DONE => sys_prove_done(),
+        SYS_ABI_ECHO6 => {
+            // SAFETY: as above.
+            unsafe { (*STATS.get()).echo_calls += 1 };
+            echo6_fingerprint([a0, a1, a2, a3, a4, a5])
+        }
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
-            SYS_REJECTED
+            STATUS_BAD_CALL as u64
         }
     }
 }
 
-/// SYS_WRITE(buf, len): copy `buf[..len]` from the *calling thread's*
-/// address space (SMAP-aware) to the serial console, raw. Validation is
-/// per page against the thread's registered user regions — a span
-/// crossing an unmapped hole is rejected, never faulted (ADR-0014).
-fn sys_write(buf: u64, len: u64) -> u64 {
+/// SYS_DEBUG_WRITE(buf, len): copy `buf[..len]` from the *calling
+/// thread's* address space (SMAP-aware) to the serial console, raw —
+/// the temporary diagnostics backdoor (ADR-0017). Returns the accepted
+/// byte count, `STATUS_BAD_ARG` (null buf / len 0 / len over cap), or
+/// `STATUS_BAD_ADDRESS`. Validation is per page against the thread's
+/// registered user regions — a span crossing an unmapped hole is
+/// rejected with a typed status, never faulted (ADR-0014).
+fn sys_debug_write(buf: u64, len: u64) -> Status {
     // SAFETY: stats/record writes single-writer at IF=0.
     unsafe {
         (*STATS.get()).write_calls += 1;
@@ -434,12 +488,12 @@ fn sys_write(buf: u64, len: u64) -> u64 {
     if len == 0 || len > WRITE_MAX || buf == 0 {
         // SAFETY: as above.
         unsafe { (*STATS.get()).write_rejected += 1 };
-        return SYS_REJECTED;
+        return STATUS_BAD_ARG;
     }
     if !user_range_ok(buf, len) {
         // SAFETY: as above.
         unsafe { (*STATS.get()).write_rejected += 1 };
-        return SYS_REJECTED;
+        return STATUS_BAD_ADDRESS;
     }
     let mut tmp = [0u8; WRITE_MAX as usize];
     let n = len as usize;
@@ -459,13 +513,14 @@ fn sys_write(buf: u64, len: u64) -> u64 {
         (*STATS.get()).write_bytes += n as u64;
     }
     crate::log::write_raw(&tmp[..n]);
-    n as u64
+    n as Status
 }
 
-/// SYS_EXIT(status): record (id, status), then terminate through the
-/// scheduler's normal zombie/reap path. Diverges — the kernel stack frame
-/// this call sits on dies with the thread (the stub never resumes).
-fn sys_exit(status: u64) -> ! {
+/// SYS_THREAD_EXIT(code): record (id, code), then terminate through the
+/// scheduler's normal zombie/reap path (ADR-0017 call 2). Diverges — the
+/// kernel stack frame this call sits on dies with the thread (the stub
+/// never resumes).
+fn sys_thread_exit(status: u64) -> ! {
     // SAFETY: single writer at IF=0.
     unsafe {
         (*STATS.get()).exit_calls += 1;
@@ -502,7 +557,7 @@ fn sys_prove_ring3(frame: *const SyscallFrame) -> u64 {
     crate::arch::x86_64::faults::arm_with_resume(13, usr_rip + 1);
     // SAFETY: single writer at IF=0.
     unsafe { (*STATS.get()).prove_ring3_calls += 1 };
-    0
+    STATUS_OK as u64
 }
 
 /// SYS_PROVE_DONE: record whether the armed #GP was actually delivered

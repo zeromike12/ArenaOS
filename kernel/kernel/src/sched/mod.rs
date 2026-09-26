@@ -668,7 +668,7 @@ pub fn set_current_user_regions(regions: &[(u64, u64)]) -> Result<(), &'static s
     })
 }
 
-/// Terminate the current thread from kernel context — the SYS_EXIT door
+/// Terminate the current thread from kernel context — the SYS_THREAD_EXIT door
 /// into the normal zombie/reap path (ADR-0014). Diverges like `exit_now`.
 pub fn terminate() -> ! {
     exit_now()

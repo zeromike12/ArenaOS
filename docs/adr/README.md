@@ -33,6 +33,7 @@ Rules:
 | [0014](0014-processes-ring3-syscall.md) | Processes, ring 3, and the syscall boundary — address-space objects, syscall/sysret, SMAP/SMEP (+ M3.3b addendum: kernel-half MMIO alias rule) | accepted |
 | [0015](0015-capability-spaces.md) | Capability spaces — slots, rights, attenuation-only delegation, and the first gated invokes | accepted |
 | [0016](0016-executable-format-loader.md) | Executable format and image loader — ELF64 container, ArenaOS strict-subset semantics, W^X segments | accepted |
+| [0017](0017-syscall-abi-v1.md) | Syscall ABI v1 — six-register encoding, typed status codes, frozen call-number registry | accepted |
 
 ## Template
 

@@ -51,7 +51,7 @@ pub fn write_marker(args: core::fmt::Arguments<'_>) {
 }
 
 /// Raw bytes to the console — no level tag, no newline, no formatting.
-/// The SYS_WRITE path (ADR-0014) uses this so *user* output appears
+/// The SYS_DEBUG_WRITE path (ADR-0014) uses this so *user* output appears
 /// exactly as the user emitted it. Caller discipline: only with IF=0
 /// (inside a syscall, or boot-serialized contexts) — concurrent writers
 /// would interleave bytes (same phase rule as ADR-0013).
