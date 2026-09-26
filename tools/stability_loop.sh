@@ -40,7 +40,7 @@ VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
-RESULT_LINE_M3='m3: RESULT PASS (11/11)'
+RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0

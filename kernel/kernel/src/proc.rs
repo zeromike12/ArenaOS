@@ -6,13 +6,16 @@
 //! space; private user halves mean the same user VA in two processes
 //! names two different frames.
 //!
-//! The capability-space half of the process object arrives in 3.4; real
-//! program loading (image format, loader, spawn-from-file) in 4.1. Until
-//! then a process is a kernel-internal object, exercised by the M3
-//! self-tests with exact frame accounting and a ring-3 payload actually
-//! running inside a process address space.
+//! Since 3.4 the process also anchors its capability space ([`crate::cap`],
+//! ADR-0015): `caps` below is born empty at `create` and dies with the
+//! slot at `destroy`. Real program loading (image format, loader,
+//! spawn-from-file) arrives in 4.1. Until then a process is a
+//! kernel-internal object, exercised by the M3 self-tests with exact
+//! frame accounting and a ring-3 payload actually running inside a
+//! process address space.
 
 use crate::arch::x86_64::paging;
+use crate::cap;
 use crate::frames;
 use crate::sync::{SyncCell, without_interrupts};
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -22,7 +25,10 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// heap-backed object story matures.
 pub const MAX_PROCESSES: usize = 32;
 
-/// A live process: identity plus the address space it owns.
+/// A live process: identity, the address space it owns, and its
+/// capability space (ADR-0014 §5 anchor: process = address space +
+/// capability space; the ADR-0015 half lives inline so both die with
+/// the table slot).
 #[derive(Clone, Copy)]
 pub struct Process {
     pub id: u64,
@@ -31,6 +37,8 @@ pub struct Process {
     /// cloned at creation ([`paging::build_process_pml4`]). Never 0 while
     /// the slot is occupied; freed exactly once, by [`destroy`].
     pub pml4_phys: u64,
+    /// Capability slots — see [`crate::cap`] for every operation.
+    pub caps: cap::CapSpace,
 }
 
 /// The process table. Slots are `Option<Process>`; occupancy is the only
@@ -68,6 +76,7 @@ pub fn create(name: &'static str) -> Result<u64, &'static str> {
                 id,
                 name,
                 pml4_phys: pml4,
+                caps: cap::CapSpace::new(),
             });
             CREATED_TOTAL.fetch_add(1, Ordering::Relaxed);
             Ok(id)
@@ -120,6 +129,36 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             frames::free(p.pml4_phys).map_err(|_| "destroy: root frame free rejected")?;
             procs[idx] = None;
             Ok(freed + 1)
+        }
+    })
+}
+
+/// Run `f` against a live process's capability space (ADR-0015: the cap
+/// layer reaches spaces only through this pair, so the process table is
+/// borrowed exactly once per operation). `None` for an unknown pid.
+pub fn with_caps<R>(pid: u64, f: impl FnOnce(&cap::CapSpace) -> R) -> Option<R> {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*PROCESSES.get())
+                .iter()
+                .flatten()
+                .find(|p| p.id == pid)
+                .map(|p| f(&p.caps))
+        }
+    })
+}
+
+/// Mutable twin of [`with_caps`] — the only path that writes cap slots.
+pub fn with_caps_mut<R>(pid: u64, f: impl FnOnce(&mut cap::CapSpace) -> R) -> Option<R> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            (*PROCESSES.get())
+                .iter_mut()
+                .flatten()
+                .find(|p| p.id == pid)
+                .map(|p| f(&mut p.caps))
         }
     })
 }

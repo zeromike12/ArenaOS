@@ -37,6 +37,7 @@ echo "== release $TAG: building image =="
 echo "== release $TAG: gating on the full test suite =="
 python3 tools/test_m1.py
 python3 tools/test_m2.py
+python3 tools/test_m3.py
 
 echo "== release $TAG: staging assets =="
 REL="build/release"
@@ -58,8 +59,9 @@ GIT_SHA="$(git rev-parse --short HEAD)"
 {
     echo "ArenaOS $TAG — build ${GIT_SHA} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo
-    echo "Milestone status: M1 8/8 PASS, M2 21/21 PASS (tools/test_m2.py),"
-    echo "100-boot stability loop green (tools/stability_loop.sh, ADR-0011)."
+    echo "Milestone status: M1 8/8, M2 21/21, M3 13/13 PASS"
+    echo "(tools/test_m{1,2,3}.py); 100-boot stability loop green"
+    echo "(tools/stability_loop.sh, ADR-0011)."
     echo
     echo "Run it: see RUNNING.md (bundled) — one cp + one qemu-system-x86_64"
     echo "command; the VM boots, runs the milestone suite on serial, and"

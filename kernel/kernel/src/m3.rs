@@ -18,6 +18,7 @@
 //! lock), and re-mask + disarm before asserting.
 
 use crate::arch::x86_64::{self, faults, gdt, idt, paging, syscall, tss};
+use crate::cap;
 use crate::frames;
 use crate::log::{log_error as error, log_info as info, write_marker};
 use crate::proc;
@@ -26,7 +27,7 @@ use crate::sync::SyncCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 11] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 13] = [
         ("thread_spawn_run", test_thread_spawn_run),
         ("thread_rr_interleave", test_thread_rr_interleave),
         ("thread_callee_saved", test_thread_callee_saved),
@@ -38,6 +39,8 @@ pub fn run_suite() -> bool {
         ("user_ring3_interrupted", test_user_ring3_interrupted),
         ("process_address_spaces", test_process_address_spaces),
         ("process_accounting", test_process_accounting),
+        ("capability_spaces", test_capability_spaces),
+        ("capability_invoke", test_capability_invoke),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -1083,6 +1086,9 @@ const P10_VA: u64 = 0x0041_0000;
 const P10_HOLE_VA: u64 = 0x0050_0000;
 /// Base VA for the accounting test's per-process user pages.
 const P11_VA: u64 = 0x0042_0000;
+/// Base VA for the capability-invoke test's mapped page (a distinct
+/// hole from P10_VA/P11_VA — every test's VAs stay disjoint).
+const P13_VA: u64 = 0x0043_0000;
 
 /// Kernel-half data probe: written once under the kernel view, read back
 /// under each process CR3 — same value proves the cloned kernel half is
@@ -1397,6 +1403,286 @@ fn test_process_accounting() -> Result<(), &'static str> {
         f0,
         U3_MSG_A.len(),
         freed
+    );
+    Ok(())
+}
+
+/// Capability-space mechanics (ADR-0015): fixed slots, rights,
+/// attenuation-only delegation (copy/move), destroy-the-reference,
+/// space isolation, capacity, dangling process caps — every refusal
+/// asserted as a loud `Err`, teardown frame-exact.
+fn test_capability_spaces() -> Result<(), &'static str> {
+    let f0 = frames::free_frames();
+    let pa = proc::create("capA")?;
+    let pb = proc::create("capB")?;
+    if cap::occupancy(pa) != Some((0, cap::CAP_SLOTS as u32)) {
+        return Err("fresh capability space is not empty");
+    }
+    // Grant is the kernel trust path: any object, any rights, first
+    // empty slot, in order.
+    let mem_frame = frames::alloc().ok_or("frame exhaustion (cap memory)")?;
+    let s_proc = cap::grant(
+        pa,
+        cap::Cap {
+            obj: cap::CapObj::Process { pid: pb },
+            rights: cap::RIGHTS_ALL,
+        },
+    )?;
+    let s_mem = cap::grant(
+        pa,
+        cap::Cap {
+            obj: cap::CapObj::Memory {
+                phys: mem_frame,
+                pages: 1,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE | cap::RIGHTS_COPY,
+        },
+    )?;
+    let s_ro = cap::grant(
+        pa,
+        cap::Cap {
+            obj: cap::CapObj::Process { pid: pa },
+            rights: cap::RIGHTS_READ,
+        },
+    )?;
+    if s_proc != 0 || s_mem != 1 || s_ro != 2 {
+        return Err("grant did not fill the first empty slots in order");
+    }
+    let mem_cap = cap::Cap {
+        obj: cap::CapObj::Memory {
+            phys: mem_frame,
+            pages: 1,
+        },
+        rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE | cap::RIGHTS_COPY,
+    };
+    if cap::read(pa, s_mem)? != mem_cap {
+        return Err("cap read-back does not equal the grant");
+    }
+    if cap::read(pa, cap::CAP_SLOTS).is_ok() {
+        return Err("out-of-bounds slot accepted");
+    }
+    if cap::read(pa, 15).is_ok() {
+        return Err("empty slot read as a cap");
+    }
+    // Attenuating copy A -> B: WRITE dropped, object preserved.
+    cap::copy(pa, s_mem, pb, 0, cap::RIGHTS_READ | cap::RIGHTS_COPY)?;
+    let cb = cap::read(pb, 0)?;
+    if cb.obj != mem_cap.obj || cb.rights != cap::RIGHTS_READ | cap::RIGHTS_COPY {
+        return Err("attenuated copy wrong (object or rights)");
+    }
+    // Amplification refused: the B copy lacks WRITE, requesting it errs.
+    if cap::copy(pb, 0, pa, 5, cap::RIGHTS_READ | cap::RIGHTS_WRITE).is_ok() {
+        return Err("rights amplification was not refused");
+    }
+    // Source without COPY refused.
+    if cap::copy(pa, s_ro, pb, 1, cap::RIGHTS_READ).is_ok() {
+        return Err("copy from a COPY-less cap was not refused");
+    }
+    // Occupied destination refused.
+    if cap::copy(pa, s_mem, pb, 0, cap::RIGHTS_READ).is_ok() {
+        return Err("copy into an occupied slot was not refused");
+    }
+    // Move (attenuating): source empties, destination exact.
+    cap::move_cap(pa, s_proc, pb, 3, cap::RIGHTS_READ | cap::RIGHTS_COPY)?;
+    if cap::read(pa, s_proc).is_ok() {
+        return Err("move left the source slot occupied");
+    }
+    if cap::read(pb, 3)?.rights != cap::RIGHTS_READ | cap::RIGHTS_COPY {
+        return Err("moved cap rights wrong");
+    }
+    // Destroy is right-gated; double destroy refused.
+    if cap::destroy(pb, 3).is_ok() {
+        return Err("destroy without the DESTROY right was not refused");
+    }
+    let s_d = cap::grant(
+        pb,
+        cap::Cap {
+            obj: cap::CapObj::Process { pid: pa },
+            rights: cap::RIGHTS_DESTROY,
+        },
+    )?;
+    cap::destroy(pb, s_d)?;
+    if cap::read(pb, s_d).is_ok() {
+        return Err("destroyed slot still reads as a cap");
+    }
+    if cap::destroy(pb, s_d).is_ok() {
+        return Err("double destroy was not refused");
+    }
+    // Cross-space isolation: B's churn left A exactly as measured.
+    if cap::read(pa, s_mem)? != mem_cap {
+        return Err("space A changed while operating on space B");
+    }
+    if cap::occupancy(pa) != Some((2, cap::CAP_SLOTS as u32)) {
+        return Err("A occupancy wrong (expected s_mem + s_ro)");
+    }
+    if cap::occupancy(pb) != Some((2, cap::CAP_SLOTS as u32)) {
+        return Err("B occupancy wrong (expected slot 0 + slot 3)");
+    }
+    // Capacity: fill A, next grant refused (fillers carry DESTROY so
+    // the dangling phase below can open a slot again).
+    while cap::occupancy(pa).map(|(u, _)| u).unwrap_or(0) < cap::CAP_SLOTS as u32 {
+        cap::grant(
+            pa,
+            cap::Cap {
+                obj: cap::CapObj::Process { pid: pa },
+                rights: cap::RIGHTS_DESTROY,
+            },
+        )?;
+    }
+    if cap::grant(
+        pa,
+        cap::Cap {
+            obj: cap::CapObj::Process { pid: pa },
+            rights: 0,
+        },
+    )
+    .is_ok()
+    {
+        return Err("grant into a full space was not refused");
+    }
+    // Dangling: destroy the target process; a live cap to it fails its
+    // invoke cleanly while the reference itself remains readable
+    // (destroy removes references, never objects).
+    cap::destroy(pa, s_ro + 3)?; // open a slot (filler, DESTROY-righted)
+    let s_dang = cap::grant(
+        pa,
+        cap::Cap {
+            obj: cap::CapObj::Process { pid: pb },
+            rights: cap::RIGHTS_ALL,
+        },
+    )?;
+    let freed_b = proc::destroy(pb)?;
+    if freed_b != 1 {
+        return Err("capB teardown did not free exactly its root");
+    }
+    if cap::process_root(pa, s_dang).is_ok() {
+        return Err("invoke through a dangling process cap was not refused");
+    }
+    if cap::read(pa, s_dang).is_err() {
+        return Err("dangling cap's reference vanished (destroy is reference-removal only)");
+    }
+    // Teardown: the memory frame was never mapped (caps describe, they
+    // do not own) — free it by hand; capA frees exactly its root.
+    frames::free(mem_frame).map_err(|_| "frame free rejected")?;
+    let freed_a = proc::destroy(pa)?;
+    if freed_a != 1 {
+        return Err("capA teardown did not free exactly its root");
+    }
+    let f1 = frames::free_frames();
+    if f1 != f0 {
+        return Err("capability-space teardown is not frame-exact");
+    }
+    info!(
+        "m3",
+        "capability_spaces: {} slots/space, grant fills in order; copy attenuates only \
+         (amplification, COPY-less source, occupied dst all refused); move clears the \
+         source; destroy right-gated (double destroy refused); spaces isolated; full \
+         space refuses; dangling cap fails invoke while its reference remains; \
+         teardown exact ({})",
+        cap::CAP_SLOTS,
+        f1
+    );
+    Ok(())
+}
+
+/// Capability-gated invokes (ADR-0015): rights must gate *real* kernel
+/// actions — `process_root` (READ; the root PHYS is information) and
+/// `map_memory` (WRITE on the memory cap AND on a live process cap),
+/// observed by reading the mapped pattern under the target's CR3.
+fn test_capability_invoke() -> Result<(), &'static str> {
+    let f0 = frames::free_frames();
+    let owner = proc::create("capOwner")?;
+    let target = proc::create("capTarget")?;
+    let root_t = proc::pml4_of(target).ok_or("capTarget's PML4 vanished")?;
+    let frame = frames::alloc().ok_or("frame exhaustion (invoke memory)")?;
+    // Pattern the untyped frame carries (through the direct-map alias;
+    // the frame is kernel-owned until granted).
+    // SAFETY: IF=0; fresh owned frame inside the direct map.
+    unsafe {
+        core::ptr::write_bytes((frame + paging::KERNEL_OFFSET) as *mut u8, 0xC3, 4096);
+    }
+    let s_p = cap::grant(
+        owner,
+        cap::Cap {
+            obj: cap::CapObj::Process { pid: target },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
+    )?;
+    let s_m = cap::grant(
+        owner,
+        cap::Cap {
+            obj: cap::CapObj::Memory {
+                phys: frame,
+                pages: 1,
+            },
+            rights: cap::RIGHTS_WRITE | cap::RIGHTS_COPY,
+        },
+    )?;
+    // READ gate: the live root comes out; a COPY-only attenuated copy
+    // of the same cap gets nothing; a memory cap is the wrong kind.
+    if cap::process_root(owner, s_p)? != root_t {
+        return Err("process_root did not return the live root");
+    }
+    cap::copy(owner, s_p, owner, 3, cap::RIGHTS_COPY)?;
+    if cap::process_root(owner, 3).is_ok() {
+        return Err("process_root without READ was not refused");
+    }
+    if cap::process_root(owner, s_m).is_ok() {
+        return Err("process_root accepted a memory cap");
+    }
+    // WRITE gates on BOTH caps: attenuated copies refuse to map.
+    cap::copy(owner, s_m, owner, 4, cap::RIGHTS_COPY)?;
+    if cap::map_memory(owner, 4, s_p, P13_VA, true, false).is_ok() {
+        return Err("map_memory without WRITE on the memory cap was not refused");
+    }
+    if cap::map_memory(owner, s_m, 3, P13_VA, true, false).is_ok() {
+        return Err("map_memory without WRITE on the process cap was not refused");
+    }
+    if cap::map_memory(owner, s_p, s_m, P13_VA, true, false).is_ok() {
+        return Err("map_memory with swapped cap kinds was not refused");
+    }
+    // The real invoke: the untyped frame lands in the target's user
+    // half — observed under the target's own CR3 (stac-bracketed read;
+    // SMAP is live).
+    cap::map_memory(owner, s_m, s_p, P13_VA, true, false)?;
+    // SAFETY: IF=0; root_t owned and fully built; the kernel view is
+    // restored before the block ends, on the only exit path.
+    let seen = unsafe {
+        x86_64::write_cr3(root_t);
+        let b = stac_read(core::hint::black_box(P13_VA));
+        x86_64::write_cr3(paging::kernel_cr3_phys());
+        b
+    };
+    if seen != 0xC3 {
+        return Err("invoke-mapped page not visible under the target's CR3");
+    }
+    // Dangling gates: killing the target refuses both invokes (and its
+    // teardown frees the mapped frame — leaf + 3 intermediates + root).
+    let freed_t = proc::destroy(target)?;
+    if freed_t != 5 {
+        return Err("target teardown did not free leaf + intermediates + root (5)");
+    }
+    if cap::map_memory(owner, s_m, s_p, P13_VA, true, false).is_ok() {
+        return Err("map_memory into a dead process was not refused");
+    }
+    if cap::process_root(owner, s_p).is_ok() {
+        return Err("process_root of a dead process was not refused");
+    }
+    let freed_o = proc::destroy(owner)?;
+    if freed_o != 1 {
+        return Err("owner teardown did not free exactly its root");
+    }
+    let f1 = frames::free_frames();
+    if f1 != f0 {
+        return Err("invoke round is not frame-exact");
+    }
+    info!(
+        "m3",
+        "capability_invoke: READ gate returned the live root (refused without it, wrong \
+         kind refused); map_memory demanded WRITE on BOTH caps (three refusals measured); \
+         the real invoke mapped the untyped frame — 0xC3 read back under the target's \
+         CR3; dangling caps refuse cleanly; teardown exact ({})",
+        f1
     );
     Ok(())
 }

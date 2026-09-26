@@ -79,7 +79,7 @@ files instead, e.g. on Debian/Ubuntu:
 
 (copy `OVMF_VARS.fd` to a writable location first, as above).
 
-## What a healthy Milestone-2 boot looks like
+## What a healthy boot looks like (current: Milestone 3 complete)
 
 The serial output is a boot stage log followed by kernel log lines. The
 machine-checkable landmarks, in order:
@@ -90,8 +90,11 @@ machine-checkable landmarks, in order:
 4. `timer chain reclaimed: ... ioapic pin 2 ...` — the kernel took the
    PIT→IOAPIC→LAPIC chain back from firmware
 5. 21 `m2:test:<name>: PASS` lines, ending with `m2: RESULT PASS (21/21)`
-6. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
-7. QEMU exits on its own with status 0
+6. 13 `m3:test:<name>: PASS` lines — kernel threads, preemption, ring 3
+   + syscalls, processes as address spaces, capability spaces
+   (ADR-0012…0015) — ending with `m3: RESULT PASS (13/13)`
+7. `halting via UEFI ResetSystem(shutdown)` — the clean-halt declaration
+8. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to

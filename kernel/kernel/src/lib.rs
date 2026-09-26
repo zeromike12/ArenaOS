@@ -15,6 +15,7 @@
 #![no_std]
 
 pub mod arch;
+pub mod cap;
 pub mod drivers;
 pub mod entry;
 pub mod frames;

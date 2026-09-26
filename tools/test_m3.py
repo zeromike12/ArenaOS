@@ -112,6 +112,8 @@ EXPECTED_TESTS = [
     "user_ring3_interrupted",
     "process_address_spaces",
     "process_accounting",
+    "capability_spaces",
+    "capability_invoke",
 ]
 
 if __name__ == "__main__":

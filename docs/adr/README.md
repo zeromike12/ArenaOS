@@ -30,6 +30,8 @@ Rules:
 | [0011](0011-boot-split-kernel-entry.md) | Boot split — ExitBootServices, kernel entry, and the reclaimed timer chain (PIT on IOAPIC pin 2) | accepted |
 | [0012](0012-kernel-threads-context-switch.md) | Kernel threads and the context switch — callee-saved frame, no FPU state (build-enforced) | accepted |
 | [0013](0013-preemptive-scheduling.md) | Preemptive scheduling — nested cooperative switch from the timer-tick hook, IF=0 invariant | accepted |
+| [0014](0014-processes-ring3-syscall.md) | Processes, ring 3, and the syscall boundary — address-space objects, syscall/sysret, SMAP/SMEP (+ M3.3b addendum: kernel-half MMIO alias rule) | accepted |
+| [0015](0015-capability-spaces.md) | Capability spaces — slots, rights, attenuation-only delegation, and the first gated invokes | accepted |
 
 ## Template
 

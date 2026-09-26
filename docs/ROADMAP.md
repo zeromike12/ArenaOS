@@ -172,8 +172,31 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       round inside a process (SYS_WRITE byte-exact, SYS_EXIT(42), RSP0
       evidence, CR3 restored, frame accounting exact). m3 11/11 +
       100/100-boot stability.
-- 3.4 **Capability spaces** (minimal): slots, rights, copy/move/destroy —
+- [x] 3.4 **Capability spaces** (minimal): slots, rights, copy/move/destroy —
       kernel-internal use only at first.
+      DONE (ADR-0015): `cap.rs` — a 16-slot table per process, embedded in
+      `Process` (born with `create`, dies with `destroy`). A cap is
+      `(object, rights)` over the two real object kinds that exist today:
+      `Process{pid}` and untyped-style `Memory{phys, pages}`. Rights:
+      READ / WRITE / COPY / DESTROY. `grant` is the only creation path
+      (the boot/root-task trust primitive); `copy`/`move` attenuate only
+      — amplification is a loud error and the source must hold COPY;
+      `destroy` removes the *reference*, never the object, so caps can
+      dangle and every invoke re-validates liveness. Rights gate real
+      actions: `process_root` (READ — a target's root PHYS is
+      information) and `map_memory` (WRITE on the memory cap *and* on a
+      live process cap — the untyped → address-space binding, W^X per
+      ADR-0008). Tests: the mechanics round (ordered grants, attenuated
+      copy, amplification/COPY-less/occupied-slot refusals, move clears
+      the source, right-gated + double-destroy refusals, cross-space
+      isolation, capacity refusal at 16, dangling reference survives its
+      target) and the invoke round (READ gate returns the live root;
+      three map refusals measured; a 0xC3 pattern in the untyped frame
+      read back under the target's CR3 through the cap-mapped page;
+      exact frame accounting throughout). m3 13/13 + 100/100-boot
+      stability. **Milestone 3 complete** — threads, preemption,
+      processes, ring 3, capability spaces: the object model M4 puts
+      userspace on top of.
 
 ## Milestone 4 — Userspace & first program 🎯 (assignment's "first userspace program")
 
