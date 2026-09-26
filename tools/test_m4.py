@@ -60,6 +60,23 @@ Current coverage:
                      reaped through the scheduler (live count back to
                      baseline), dispatch counted once, frames exact.
 
+  M4.3 — first user process (the milestone capstone):
+  * first_process — the real rust-lld image is loaded into its own
+                     address space (proc::create + elf::load + a stack
+                     leaf at 0x203000 — 8 frames) and RUNS in ring 3
+                     via spawn_with_cr3 + enter_user at e_entry. The
+                     payload itself verifies META's magic and the
+                     zero-filled bss from the user side, stamps bss
+                     slot 0, writes its linker-pinned message through
+                     debug_write, and exits with META.exit_ok (42;
+                     43/44/45/99 are its diagnostic codes). The kernel
+                     derives every expectation from the image FILE:
+                     the captured console bytes must equal the pinned
+                     message as stored in the file, the bss stamp must
+                     read back under the process CR3 as META_MAGIC's
+                     first 8 bytes (LE), call accounting exact, thread
+                     reaped, destroy reclaims everything.
+
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
@@ -75,6 +92,7 @@ EXPECTED_TESTS = [
     "elf_load",
     "syscall_abi",
     "thread_exit_abi",
+    "first_process",
 ]
 
 if __name__ == "__main__":

@@ -311,13 +311,16 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // loaded, verified under its own CR3, and reclaimed exactly. Then
     // the syscall ABI v1 (ADR-0017): six-register marshalling, typed
     // status codes, and the callee-saved promise proven from ring 3.
+    // And then the milestone capstone: the first user process — the
+    // real image loaded into its own address space runs in ring 3,
+    // writes through debug_write, and exits through thread_exit.
     if !crate::m4::run_suite() {
         crate::halt::halt_machine("milestone 4 suite failed");
     }
 
     info!(
         "kernel",
-        "milestone 4 step 4.2 complete (executable format + image loader + syscall ABI v1) — handing off to the farewell island (post-ExitBootServices)"
+        "milestone 4 step 4.3 complete (executable format + image loader + syscall ABI v1 + first user process) — handing off to the farewell island (post-ExitBootServices)"
     );
     crate::halt::reset_shutdown()
 }

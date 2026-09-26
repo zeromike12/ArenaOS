@@ -1,12 +1,14 @@
-/* ArenaOS M4 test payload — fixed, self-describing layout (ADR-0016).
+/* ArenaOS userspace test payload — fixed, self-describing layout
+ * (ADR-0016).
  *
- *   0x200000  _start entry stub            (PT_LOAD #1: R+X)
+ *   0x200000  _start, the real program     (PT_LOAD #1: R+X)
+ *   0x200800  MSG_BUF, pinned message      (inside PT_LOAD #1: R+X)
  *   0x201000  META manifest                (PT_LOAD #2: R+W, file-backed)
  *   0x202000  4 KiB .bss, NOLOAD           (inside PT_LOAD #2: memsz only —
  *                                           the loader must zero-fill it)
  *
- * The kernel's loader tests assert these addresses; change them only
- * together with kernel/kernel/src/m4.rs.
+ * The kernel's loader/process tests assert these addresses; change them
+ * only together with kernel/kernel/src/m4.rs and the payload's META.
  */
 ENTRY(_start)
 
@@ -23,6 +25,15 @@ SECTIONS
     .text : ALIGN(0x1000) {
         *(.text .text.*)
         *(.rodata .rodata.*)
+    } :text
+
+    /* The message the program writes through SYS_DEBUG_WRITE, pinned so
+     * META can describe it as a plain (va, len) fact and the kernel can
+     * locate its bytes in the image file. */
+    ASSERT(. <= 0x200800, "text overflowed into the pinned message at 0x200800")
+    . = 0x200800;
+    .msg : {
+        *(.payload_msg)
     } :text
 
     . = 0x201000;

@@ -7,4 +7,9 @@ target = "x86_64-unknown-none"
 [target.x86_64-unknown-none]
 # -no-pie: lld defaults to PIE on this target (ET_DYN + a GOT). ADR-0016
 # accepts ET_EXEC only — static images at fixed addresses.
-rustflags = ["-C", "link-arg=-Tpayload.ld", "-C", "link-arg=-no-pie"]
+# relocation-model=static: the target also defaults to PIC CODEGEN, so
+# every static access becomes a GOTPCREL load and lld grows a .got right
+# after .bss (M4.3 caught it landing at 0x203000 — the test process's
+# stack page). Static relocation model = direct rip-relative access to
+# our own statics, no GOT, no runtime relocation machinery.
+rustflags = ["-C", "link-arg=-Tpayload.ld", "-C", "link-arg=-no-pie", "-C", "relocation-model=static"]

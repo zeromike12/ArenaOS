@@ -523,7 +523,8 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Processes = address-space objects (private PML4, cloned kernel half, per-thread CR3, exact teardown) | **M3.3b — implemented, 11/11 in-guest + 100/100-boot stability (ADR-0014 addendum)** |
 | Capability spaces: per-process slot tables, attenuation-only rights, copy/move/destroy, gated invokes (`process_root`, `map_memory`) | **M3.4 — implemented, 13/13 in-guest + 100/100-boot stability (ADR-0015)** |
 | Executable format + image loader: ELF64 container with ArenaOS strict-subset semantics (ET_EXEC-only validator, W^X segments, zero-fill BSS, exact-accounting load into a process space) | **M4.1 — implemented, in-guest (ADR-0016)** |
-| Syscall ABI v1: six argument registers, typed i64 status (0/positive/negative), frozen call registry (debug_write, thread_exit, suite proofs), callee-saved promise proven from ring 3 | **M4.2 — implemented, 5/5 in-guest (ADR-0017)** |
+| Syscall ABI v1: six argument registers, typed i64 status (0/positive/negative), frozen call registry (debug_write, thread_exit, suite proofs), callee-saved promise proven from ring 3 | **M4.2 — implemented, in-guest (ADR-0017)** |
+| First user process: the real rust-lld image, loaded into its own address space (per-thread CR3), runs in ring 3 — verifies its META and zero-filled bss from the user side, writes its pinned message through debug_write, exits through thread_exit; message byte-identical to the file, exact frame teardown | **M4.3 — implemented, 6/6 in-guest** |
 | IPC, endpoints | not started (roadmap M4) |
 | Userspace programs beyond the first test image (`userspace/payload`), drivers, FS, net, graphics | not started |
 

@@ -243,9 +243,26 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       bugs (Win64 stack-arg alignment, REX.B-vs-REX.R cmp encodings,
       rel8 overflow) — each now a comment where it was fixed. m4 5/5,
       m1/m2/m3 regressions green.
-- 4.3 **First user process**: statically linked ring-3 binary executes,
+- [x] 4.3 **First user process**: statically linked ring-3 binary executes,
       writes via syscall, exits. Test proves ring transition (RIP/CS checks
       in both directions, SMAP faults if kernel touches user memory wrong).
+      DONE: the M4.1 loader, M4.2 ABI, and M3.3a per-thread-CR3 scheduler
+      (`spawn_with_cr3`) compose into the full lifecycle — `proc::create`
+      + `elf::load` + one stack leaf (8 frames total) + `enter_user` at
+      the image's `e_entry`. The payload became a real program: it
+      verifies META's magic and the zero-filled NOLOAD bss FROM ring 3,
+      stamps bss slot 0, writes its linker-pinned message through
+      `debug_write`, and exits with META.exit_ok — diagnostic codes
+      43/44/45/99 name any failed check. The payload grew a
+      self-describing META (msg_va/msg_len/exit_ok): the kernel derives
+      every expectation from the image FILE — captured bytes compared
+      against the pinned message in the file, stamp derived from
+      META_MAGIC, success code from META. Bring-up caught two live
+      bugs: the target's default PIC codegen grew a .got at 0x203000
+      (fixed with relocation-model=static) and (lo,hi) user regions
+      were written as (base,len) — the typed -3 the payload reported
+      through its own exit code located it immediately. m4 6/6,
+      m1/m2/m3 regressions green.
 - 4.4 **IPC v1**: endpoints, sync call/reply, notifications; capability
       transfer in messages; echo-server demo (two processes).
 - 4.5 **Root task + spawn protocol**: process creation from image

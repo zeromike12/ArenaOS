@@ -13,7 +13,14 @@
 //! registers proven through `abi_echo6`, the six callee-saved registers
 //! proven preserved, `debug_write`'s success payload and all three typed
 //! refusals observed *in ring 3*, and `thread_exit` recording a
-//! full-width 64-bit code through the scheduler's reap path.
+//! full-width 64-bit code through the scheduler's reap path. Test 6 is
+//! the milestone capstone (M4.3): the FIRST USER PROCESS — the real
+//! rust-lld image loaded into its own address space runs in ring 3
+//! (`spawn_with_cr3`), verifies its META and zero-filled bss from the
+//! user side, writes its pinned message through `debug_write`, and
+//! exits through `thread_exit`; the kernel proves the captured message
+//! byte-identical to the image file, the ring-3 bss stamp readable
+//! under the process CR3, and exact frame teardown.
 //! Markers: `m4:test:<name>`, `m4: RESULT`.
 
 use crate::arch::x86_64::{self, paging, syscall};
@@ -25,12 +32,13 @@ use crate::sched;
 use crate::sync::SyncCell;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 5] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 6] = [
         ("elf_parse", test_elf_parse),
         ("elf_reject", test_elf_reject),
         ("elf_load", test_elf_load),
         ("syscall_abi", test_syscall_abi),
         ("thread_exit_abi", test_thread_exit_abi),
+        ("first_process", test_first_process),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -59,13 +67,36 @@ pub fn run_suite() -> bool {
 // ---- script and these constants change together, ADR-0016) -----------
 
 const PAYLOAD_ENTRY: u64 = 0x200000;
+/// The linker-pinned message the running payload writes (inside the
+/// file-backed text span; META describes it as a (va, len) fact).
+const PAYLOAD_MSG_VA: u64 = 0x200800;
 const PAYLOAD_META_VA: u64 = 0x201000;
 const PAYLOAD_BSS_VA: u64 = 0x202000;
 const PAYLOAD_BSS_LEN: u64 = 0x1000;
 const META_MAGIC: &[u8; 16] = b"ARENAOS-PAYLOAD!";
+/// META is magic + six u64 facts = 64 bytes (payload `Meta` struct).
+const META_SIZE: u64 = 64;
 
-/// The payload's `_start` stub is `jmp self` — two bytes, EB FE.
-const ENTRY_STUB: [u8; 2] = [0xeb, 0xfe];
+/// The process stack for test 6 — one page above the image's bss, so
+/// the loader's own page tables serve it (exactly 1 extra leaf frame).
+const PROC_STACK_VA: u64 = 0x203000;
+const PROC_STACK_TOP: u64 = 0x204000;
+/// User regions registered for the first process's thread: text (with
+/// the pinned message), data+bss, stack. `(lo, hi)` pairs — the same
+/// exclusive-high convention `user_range_ok` validates against.
+const PROC_REGIONS: [(u64, u64); 3] = [
+    (PAYLOAD_ENTRY, PAYLOAD_ENTRY + 0x1000),
+    (PAYLOAD_META_VA, PAYLOAD_META_VA + 0x2000),
+    (PROC_STACK_VA, PROC_STACK_TOP),
+];
+
+// The payload's diagnostic exit codes (mirrored in
+// userspace/payload/src/main.rs — the success code itself comes from
+// META.exit_ok, read out of the image file, not from here).
+const PAYLOAD_EXIT_BAD_MAGIC: u64 = 43;
+const PAYLOAD_EXIT_BSS_NOT_ZERO: u64 = 44;
+const PAYLOAD_EXIT_BAD_WRITE: u64 = 45;
+const PAYLOAD_EXIT_PANIC: u64 = 99;
 
 // ---- 1. parse: the real artifact, field by field ------------------------
 
@@ -87,8 +118,11 @@ fn test_elf_parse() -> Result<(), &'static str> {
     if text.vaddr != PAYLOAD_ENTRY || text.flags != PF_R | PF_X {
         return Err("text segment identity wrong (want 0x200000 R+X)");
     }
-    if text.memsz < ENTRY_STUB.len() as u64 || text.filesz > text.memsz {
-        return Err("text segment sizes wrong");
+    // The single text page holds the real program plus the pinned
+    // message; both must be file-backed (memsz == filesz) and fit the
+    // page the loader maps.
+    if text.filesz > text.memsz || text.memsz > paging::PAGE {
+        return Err("text segment sizes wrong (want file-backed within one page)");
     }
     if data.vaddr != PAYLOAD_META_VA || data.flags != PF_R | PF_W {
         return Err("data segment identity wrong (want 0x201000 R+W)");
@@ -96,7 +130,7 @@ fn test_elf_parse() -> Result<(), &'static str> {
     // The data segment is file-backed for META only; the bss canary is
     // NOLOAD, so filesz MUST be strictly below memsz — that gap is the
     // loader's zero-fill contract.
-    if data.filesz < 40 || data.filesz >= data.memsz {
+    if data.filesz < META_SIZE || data.filesz >= data.memsz {
         return Err("data segment must be partly file-backed with NOLOAD bss beyond");
     }
     if data.memsz < PAYLOAD_BSS_VA + PAYLOAD_BSS_LEN - data.vaddr {
@@ -106,7 +140,7 @@ fn test_elf_parse() -> Result<(), &'static str> {
     // META cross-check, read straight out of the image file at the data
     // segment's offset (META is its first content by linker script).
     let mo = data.offset as usize;
-    if img.len() < mo + 40 {
+    if img.len() < mo + META_SIZE as usize {
         return Err("data segment offset does not leave room for META");
     }
     if &img[mo..mo + 16] != META_MAGIC {
@@ -124,10 +158,28 @@ fn test_elf_parse() -> Result<(), &'static str> {
     if m_bss_va < data.vaddr || m_bss_va + m_bss_len > data.vaddr + data.memsz {
         return Err("META bss span lies outside its own segment");
     }
+    // M4.3 facts: the pinned message and the success exit code. The
+    // message must live inside the FILE-BACKED text span — test 6 reads
+    // its expected bytes straight out of the image file.
+    let m_msg_va = le64_at(img, mo + 40);
+    let m_msg_len = le64_at(img, mo + 48);
+    let m_exit_ok = le64_at(img, mo + 56);
+    if m_msg_va != PAYLOAD_MSG_VA {
+        return Err("META.msg_va disagrees with the linker-pinned message VA");
+    }
+    if m_msg_len == 0 || m_msg_len > 256 {
+        return Err("META.msg_len outside the debug_write window (1..=256)");
+    }
+    if m_msg_va + m_msg_len > text.vaddr + text.filesz {
+        return Err("the pinned message is not inside the file-backed text span");
+    }
+    if m_exit_ok == 0 {
+        return Err("META.exit_ok must be a nonzero success code");
+    }
 
     info!(
         "m4",
-        "elf_parse: {}-byte rust-lld artifact — ET_EXEC entry {:#x}, {} PT_LOADs: text RX {:#x}+{:#x}, data RW {:#x}+{:#x} (filesz {:#x} < memsz: NOLOAD bss), META manifest cross-check agrees",
+        "elf_parse: {}-byte rust-lld artifact — ET_EXEC entry {:#x}, {} PT_LOADs: text RX {:#x}+{:#x}, data RW {:#x}+{:#x} (filesz {:#x} < memsz: NOLOAD bss), META cross-check agrees ({}-byte message pinned at {:#x}, exit_ok {})",
         img.len(),
         parsed.entry,
         parsed.nsegs,
@@ -135,7 +187,10 @@ fn test_elf_parse() -> Result<(), &'static str> {
         text.memsz,
         data.vaddr,
         data.memsz,
-        data.filesz
+        data.filesz,
+        m_msg_len,
+        m_msg_va,
+        m_exit_ok
     );
     Ok(())
 }
@@ -357,14 +412,22 @@ fn test_elf_load() -> Result<(), &'static str> {
     }
 
     // Contents under the target's CR3 through STAC-bracketed reads:
-    // entry stub EB FE, META magic + entry fact, and every byte of the
-    // NOLOAD bss canary zero.
+    // the FULL file-backed text span byte-for-byte against the image
+    // file (the real program plus the pinned message), META magic +
+    // entry fact, and every byte of the NOLOAD bss canary zero.
+    let text = elf::validate(elf::TEST_IMAGE)?.segs[0];
     // SAFETY: IF=0; `root` is the live owned PML4 whose user pages were
     // just loaded and PTE-verified; the kernel view is restored before
     // the block ends, on the only exit path.
     let seen = unsafe {
         x86_64::write_cr3(root);
-        let stub = [stac_read(PAYLOAD_ENTRY), stac_read(PAYLOAD_ENTRY + 1)];
+        let mut text_ok = true;
+        for i in 0..text.filesz {
+            if stac_read(text.vaddr + i) != elf::TEST_IMAGE[(text.offset + i) as usize] {
+                text_ok = false;
+                break;
+            }
+        }
         let mut magic_ok = true;
         for (i, want) in META_MAGIC.iter().enumerate() {
             if stac_read(PAYLOAD_META_VA + i as u64) != *want {
@@ -380,10 +443,10 @@ fn test_elf_load() -> Result<(), &'static str> {
             }
         }
         x86_64::write_cr3(paging::kernel_cr3_phys());
-        (stub, magic_ok, m_entry, bss_zero)
+        (text_ok, magic_ok, m_entry, bss_zero)
     };
-    if seen.0 != ENTRY_STUB {
-        return Err("entry stub bytes wrong under the target's CR3 (want EB FE)");
+    if !seen.0 {
+        return Err("text segment bytes wrong under the target's CR3 (file fidelity broken)");
     }
     if !seen.1 {
         return Err("META magic wrong under the target's CR3");
@@ -405,7 +468,8 @@ fn test_elf_load() -> Result<(), &'static str> {
 
     info!(
         "m4",
-        "elf_load: 3 pages into 'elfLoad' (7 frames spent: root+3 tables+3 leaves), PTEs W^X-exact (text RX, data/bss RW+NX), double-load refused at zero cost, dead target refused, EB FE + META + 4 KiB zeroed NOLOAD bss read under the target's CR3, teardown exact ({after})"
+        "elf_load: 3 pages into 'elfLoad' (7 frames spent: root+3 tables+3 leaves), PTEs W^X-exact (text RX, data/bss RW+NX), double-load refused at zero cost, dead target refused, {}-byte text span byte-identical to the file + META + 4 KiB zeroed NOLOAD bss read under the target's CR3, teardown exact ({after})",
+        text.filesz
     );
     Ok(())
 }
@@ -902,6 +966,169 @@ fn test_thread_exit_abi() -> Result<(), &'static str> {
         EXIT_CODE_WIDE,
         threads0,
         free_now
+    );
+    Ok(())
+}
+
+// ---- 6. the first user process (M4.3) ------------------------------------
+
+/// The first process's user-thread entry: the scheduler already put us
+/// on the process's CR3 (`spawn_with_cr3` → `plan_switch`), so this only
+/// registers the user regions the dispatcher validates syscall buffers
+/// against, then hands the machine to the loaded image's `_start`.
+fn first_proc_entry(_arg: usize) {
+    crate::sync::without_interrupts(|| {
+        sched::set_current_user_regions(&PROC_REGIONS).expect("first-process regions rejected");
+        // SAFETY: pages mapped U/S in the process address space (text/
+        // data/bss by the loader, the stack page by the test); RIP is
+        // the image entry and RSP the stack top — both canonical and
+        // inside the registered regions; RSP0/scratch describe this
+        // thread (programmed at switch-in, re-checked by enter_user).
+        unsafe { syscall::enter_user(PAYLOAD_ENTRY, PROC_STACK_TOP) };
+    });
+}
+
+/// M4.3 — the milestone capstone: the real rust-lld image, loaded into
+/// its own address space, RUNS in ring 3. The payload proves the
+/// user-side facts (META reads back with its linked content, NOLOAD bss
+/// reads zero, the stamp lands, `debug_write` returns the exact count)
+/// and reports through its exit code — META.exit_ok on success, a
+/// diagnostic code otherwise. The kernel proves the dispatcher-side
+/// facts: the captured message is byte-identical to the bytes pinned in
+/// the image FILE (expectations derived from META in the file — nothing
+/// duplicated across the boundary), the ring-3 bss stamp reads back
+/// under the process CR3, call accounting is exact, the thread is
+/// reaped, and `proc::destroy` reclaims image+stack+tables to the exact
+/// baseline.
+fn test_first_process() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+    let img = elf::TEST_IMAGE;
+
+    // The image's self-description: text span (to locate the message's
+    // file bytes) and the META facts the verdicts are derived from.
+    let parsed = elf::validate(img)?;
+    let text = parsed.segs[0];
+    let mo = parsed.segs[1].offset as usize;
+    if img.len() < mo + META_SIZE as usize {
+        return Err("image too short for META");
+    }
+    let msg_va = le64_at(img, mo + 40);
+    let msg_len = le64_at(img, mo + 48) as usize;
+    let exit_ok = le64_at(img, mo + 56);
+    if msg_va < text.vaddr || msg_va + msg_len as u64 > text.vaddr + text.filesz {
+        return Err("META message span outside the file-backed text segment");
+    }
+    let msg_off = (text.offset + (msg_va - text.vaddr)) as usize;
+
+    let pid = proc::create("m4First")?;
+    let loaded = elf::load(img, pid)?;
+    if loaded.entry != PAYLOAD_ENTRY || loaded.pages != 3 {
+        return Err("loader did not place the image at its linked identity");
+    }
+    let root = proc::pml4_of(pid).ok_or("process lost its pml4")?;
+
+    // The stack page: one leaf frame above the bss — the loader's own
+    // PT serves it (0x200000..0x203000 share PDPT[0]/PD[1]/PT), so the
+    // whole address space costs exactly 8 frames.
+    let stack_phys = frames::alloc().ok_or("no frame for the process stack")?;
+    // SAFETY: IF=0; `stack_phys` was just allocated (exclusive owner);
+    // RAM frames are direct-mapped at phys+KERNEL_OFFSET.
+    unsafe {
+        core::ptr::write_bytes((stack_phys + paging::KERNEL_OFFSET) as *mut u8, 0, 4096);
+        // SAFETY: the process root is live and owned; the VA is free
+        // (the image ends at 0x203000); RW+NX is the stack's W^X pair.
+        paging::map_user_page_4k(root, PROC_STACK_VA, stack_phys, true, false)
+            .map_err(|_| "stack page map failed")?;
+    }
+    let spent = baseline - frames::free_frames();
+    if spent != 8 {
+        return Err("create+load+stack did not spend exactly 8 frames (root+3 tables+4 leaves)");
+    }
+
+    let st0 = syscall::stats();
+    let threads0 = sched::live_threads();
+    let id = sched::spawn_with_cr3("first-proc", first_proc_entry, 0, root)?;
+    sched::yield_now();
+    m4_drain(64)?;
+
+    // The exit code IS the payload's diagnostic channel: anything other
+    // than META.exit_ok names the ring-3 check that failed.
+    let Some(status) = syscall::exit_status_of(id) else {
+        return Err("no thread_exit recorded — the process never reached its exit");
+    };
+    if status != exit_ok {
+        return Err(match status {
+            PAYLOAD_EXIT_BAD_MAGIC => "payload: META magic read back wrong in ring 3 (43)",
+            PAYLOAD_EXIT_BSS_NOT_ZERO => "payload: NOLOAD bss not zero in ring 3 (44)",
+            PAYLOAD_EXIT_BAD_WRITE => "payload: debug_write returned the wrong count (45)",
+            PAYLOAD_EXIT_PANIC => "payload: its panic handler ran (99)",
+            _ => "payload exited with a code from nowhere in the contract",
+        });
+    }
+    let st = syscall::stats();
+    if st.write_calls - st0.write_calls != 1 {
+        return Err("debug_write not dispatched exactly once");
+    }
+    if st.write_rejected != st0.write_rejected {
+        return Err("the process's debug_write was rejected — but it succeeded");
+    }
+    if st.write_bytes - st0.write_bytes != msg_len as u64 {
+        return Err("debug_write byte accounting wrong");
+    }
+    if st.exit_calls - st0.exit_calls != 1 {
+        return Err("thread_exit accounting wrong");
+    }
+    if sched::live_threads() != threads0 {
+        return Err("the process thread was not reaped — live count off");
+    }
+    // The captured console bytes must equal the message AS PINNED IN THE
+    // IMAGE FILE — the expectation never passed through the payload.
+    let (buf, n) = syscall::last_write();
+    if n != msg_len || buf[..n] != img[msg_off..msg_off + msg_len] {
+        return Err("captured message != the message pinned in the image file");
+    }
+
+    // The ring-3 bss stamp, read back under the process CR3: slot 0 =
+    // the META magic's first 8 bytes as a LE u64; the rest of the 4 KiB
+    // canary must still be zero (the program wrote exactly one slot).
+    let mut want_bytes = [0u8; 8];
+    want_bytes.copy_from_slice(&META_MAGIC[..8]);
+    let want_stamp = u64::from_le_bytes(want_bytes);
+    // SAFETY: IF=0; `root` is the live process's owned PML4 whose user
+    // pages were just written by the (now reaped) payload thread; the
+    // kernel view is restored on the block's only exit path.
+    let (stamp, rest_zero) = unsafe {
+        x86_64::write_cr3(root);
+        let s = stac_le64(PAYLOAD_BSS_VA);
+        let mut z = true;
+        for i in 8..PAYLOAD_BSS_LEN {
+            if stac_read(PAYLOAD_BSS_VA + i) != 0 {
+                z = false;
+                break;
+            }
+        }
+        x86_64::write_cr3(paging::kernel_cr3_phys());
+        (s, z)
+    };
+    if stamp != want_stamp {
+        return Err("the payload's ring-3 bss stamp did not land (want the magic's LE u64)");
+    }
+    if !rest_zero {
+        return Err("the payload wrote outside its stamp slot");
+    }
+
+    proc::destroy(pid)?;
+    let after = frames::free_frames();
+    if after != baseline {
+        return Err("destroy did not reclaim image+stack+tables exactly");
+    }
+    info!(
+        "m4",
+        "first_process: the {}-byte rust-lld image RAN in ring 3 inside 'm4First' (spawn_with_cr3, 8 frames) — META verified and bss found zero FROM the user side, the {}-byte pinned message arrived byte-identical to the file, stamp {:#x} read back under the process CR3, thread_exit({}) recorded, thread reaped, teardown exact ({after})",
+        img.len(),
+        msg_len,
+        stamp,
+        status
     );
     Ok(())
 }
