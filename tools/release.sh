@@ -61,13 +61,17 @@ GIT_SHA="$(git rev-parse --short HEAD)"
 {
     echo "ArenaOS $TAG — build ${GIT_SHA} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo
-    echo "Milestone status: M1 8/8, M2 21/21, M3 13/13 PASS"
-    echo "(tools/test_m{1,2,3}.py); 100-boot stability loop green"
-    echo "(tools/stability_loop.sh, ADR-0011)."
+    echo "Milestone status: M1 8/8, M2 21/21, M3 13/13, M4 9/9 PASS"
+    echo "(tools/test_m{1,2,3,4}.py) + the interactive shell session"
+    echo "(tools/test_m4_shell.py); 100-boot stability loop green — every"
+    echo "boot ends by typing 'shutdown' into the running shell"
+    echo "(tools/stability_loop.sh, ADR-0011/0020)."
     echo
     echo "Run it: see RUNNING.md (bundled) — one cp + one qemu-system-x86_64"
-    echo "command; the VM boots, runs the milestone suite on serial, and"
-    echo "shuts itself down cleanly."
+    echo "command; the VM boots, runs the full milestone suite on serial,"
+    echo "then hands the console to the ArenaOS shell: type 'help' (and"
+    echo "'shutdown' to stop the machine). Serial is the console in both"
+    echo "directions (ADR-0020)."
 } > "$REL/RELEASE-NOTES.txt"
 
 ls -la "$REL"
@@ -146,11 +150,14 @@ qemu-system-x86_64 \\
     -display none -serial mon:stdio -no-reboot
 \`\`\`
 
-Serial is the console; the VM runs the milestone suite and shuts itself
-down cleanly. Full details: RUNNING.md inside the tarball (same as
-docs/RUNNING.md). Bundle contents: arena-esp.img (boot disk),
-edk2-x86_64-code.fd + ovmf-vars-template.img (tested EDK2 firmware
-pair), RUNNING.md, sha256sums.txt.
+Serial is the console in BOTH directions: the VM runs the milestone
+suite, then the kernel spawns the shell and waits at the \`arena> \`
+prompt — type \`help\`, \`ps\`, \`echo hi\`, \`spawn\` (runs the test
+payload as a child process), and \`shutdown\` to stop the machine.
+Full details: RUNNING.md inside the tarball (same as docs/RUNNING.md).
+Bundle contents: arena-esp.img (boot disk), edk2-x86_64-code.fd +
+ovmf-vars-template.img (tested EDK2 firmware pair), RUNNING.md,
+sha256sums.txt.
 EOF
         verify_dir="$(mktemp -d)"
         tar xzf "releases/$TAG/$BUNDLE" -C "$verify_dir"
@@ -163,14 +170,23 @@ import arena_env
 print(f"QEMU=({' '.join(repr(x) for x in arena_env.qemu_cmd() + arena_env.qemu_data_args())})")
 EOF
 )"
+        # ADR-0020: the verification boot ends at the shell, so the
+        # verifier must TYPE the shutdown — marker-paced, exactly like
+        # the stability loop (a feed-free boot would hang at the prompt
+        # and fail the timeout).
         ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
-          timeout 120 "${QEMU[@]}" \
+          {
+            while ! grep -aq 'arena>' verify-serial.log 2>/dev/null; do sleep 0.2; done
+            printf 'shutdown\r'
+            while ! grep -aqF 'halting via UEFI ResetSystem(shutdown)' verify-serial.log 2>/dev/null; do sleep 0.2; done
+          } | timeout 120 "${QEMU[@]}" \
             -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
             -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
             -drive if=pflash,format=raw,file=ovmf-vars.img \
             -drive format=raw,file=arena-esp.img \
-            -display none -serial file:verify-serial.log -no-reboot )
-        grep -aqF 'RESULT PASS' "$verify_dir/verify-serial.log" \
+            -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
+            -no-reboot > verify-serial.log )
+        grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"
