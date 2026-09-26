@@ -179,8 +179,8 @@ EOF
             cat "$NOTES"
             echo
             echo "**Asset uploads to uploads.github.com failed from the build"
-            "environment; the identical run bundle is delivered through the"
-            "repo instead:**"
+            echo "environment; the identical run bundle is delivered through the"
+            echo "repo instead:**"
             echo
             echo "- Download: $RAW_URL"
             echo "- Checksum: ${RAW_URL}.sha256"
