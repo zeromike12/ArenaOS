@@ -46,7 +46,11 @@
 //! and shell step (M4.6, ADR-0020) adds `SYS_CONSOLE_READ` (blocking
 //! line read from the kernel's console input service), `SYS_PROC_LIST`
 //! (the live process table's public shape, for `ps`), and
-//! `SYS_SHUTDOWN` (machine halt, gated on a Power capability).
+//! `SYS_SHUTDOWN` (machine halt, gated on a Power capability). The
+//! driver substrate (M5.1, ADR-0021) adds `SYS_ALLOC_FRAME` (the
+//! allocator mints an OWNED untyped-frame capability) and
+//! `SYS_MAP_MEMORY` (self-map a memory cap at a kernel-chosen VA —
+//! windows join the calling thread's registered region table).
 
 use super::gdt;
 use core::arch::global_asm;
@@ -105,6 +109,10 @@ pub const SYS_SPAWN: u64 = 12;
 pub const SYS_CONSOLE_READ: u64 = 13;
 pub const SYS_PROC_LIST: u64 = 14;
 pub const SYS_SHUTDOWN: u64 = 15;
+// Driver substrate v1 (M5.1, ADR-0021): owned frames for DMA-capable
+// userspace drivers and self-map windows at kernel-chosen VAs.
+pub const SYS_ALLOC_FRAME: u64 = 16;
+pub const SYS_MAP_MEMORY: u64 = 17;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -563,6 +571,8 @@ extern "C" fn syscall_dispatch(
         SYS_CONSOLE_READ => sys_console_read(a0, a1) as u64,
         SYS_PROC_LIST => sys_proc_list(a0, a1) as u64,
         SYS_SHUTDOWN => sys_shutdown(a0) as u64,
+        SYS_ALLOC_FRAME => sys_alloc_frame(a0) as u64,
+        SYS_MAP_MEMORY => sys_map_memory(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -989,6 +999,197 @@ fn sys_shutdown(a0: u64) -> Status {
         "shutdown requested by pid {pid} through its Power cap — goodnight"
     );
     crate::halt::reset_shutdown()
+}
+
+// ---- driver substrate handlers (M5.1, ADR-0021) ----------------------------
+
+/// `SYS_MAP_MEMORY`'s window allocator bounds: the kernel hands VAs out
+/// linearly from 1 GiB in 2 MiB strides — far above any v1 image/stack
+/// layout, far below the kernel-half bound. The stride keeps small
+/// windows from sharing a 2 MiB block with unrelated mappings; the
+/// limit contains a runaway scan.
+const MMAP_BASE: u64 = 0x0000_0000_4000_0000;
+const MMAP_STRIDE: u64 = 2 * 1024 * 1024;
+const MMAP_LIMIT: u64 = 0x0000_0100_0000_0000;
+
+/// SYS_ALLOC_FRAME(slot): take one physical frame from the kernel
+/// allocator and mint an OWNED `Untyped` cap (full rights) in the
+/// caller's `slot`, which must be empty. Returns the frame's physical
+/// address as a positive payload (no secret: the holder is about to
+/// map it). `STATUS_BUSY` when the allocator is exhausted or the slot
+/// is occupied — on issuance failure the frame goes straight back
+/// (no leak through the error path).
+fn sys_alloc_frame(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Some(phys) = crate::frames::alloc() else {
+        return STATUS_BUSY; // frame allocator exhausted
+    };
+    let cap = crate::cap::Cap {
+        obj: crate::cap::CapObj::Untyped { phys },
+        rights: crate::cap::RIGHTS_ALL,
+    };
+    match crate::cap::issue(pid, a0 as usize, cap) {
+        Ok(()) => phys as Status,
+        Err(_) => {
+            // Rollback: the frame never left kernel ownership.
+            if crate::frames::free(phys).is_err() {
+                error!("syscall", "alloc_frame rollback: free of {phys:#x} refused");
+            }
+            STATUS_BUSY
+        }
+    }
+}
+
+/// SYS_MAP_MEMORY(slot, writable): map the memory cap in the caller's
+/// own `slot` into the caller's OWN address space at a kernel-chosen VA
+/// (self-map only — cross-process binding stays the `cap::map_memory`
+/// invoke). Accepted kinds: `Untyped` (one frame; ownership TRANSFERS
+/// to the address space and the cap slot goes empty — teardown reclaims
+/// the frame) and `Mmio` (uncached, NX; the cap survives). Rights: the
+/// access mode decides — `writable` needs WRITE, read-only needs READ —
+/// plus DESTROY for Untyped.
+/// Executable windows are never handed out. Returns the window VA as a
+/// positive payload; `STATUS_BUSY` when the region table is full or no
+/// VA is left under the limit.
+fn sys_map_memory(a0: u64, a1: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let writable = a1 != 0;
+    let Ok(c) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let (phys, pages, owned) = match c.obj {
+        crate::cap::CapObj::Untyped { phys } => (phys, 1u32, true),
+        crate::cap::CapObj::Mmio { phys, pages } => (phys, pages, false),
+        _ => return STATUS_BAD_ARG, // only owned/device memory self-maps
+    };
+    if pages == 0 {
+        return STATUS_BAD_ARG;
+    }
+    // The access mode decides the right (ADR-0021, same rule as the
+    // cap::map_memory invoke): writable needs WRITE, read-only READ.
+    let need = if writable {
+        crate::cap::RIGHTS_WRITE
+    } else {
+        crate::cap::RIGHTS_READ
+    };
+    if c.rights & need == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if owned && c.rights & crate::cap::RIGHTS_DESTROY == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let Some(root) = crate::proc::pml4_of(pid) else {
+        return STATUS_BAD_ARG; // own space must be live; defensive
+    };
+    let span = u64::from(pages) * crate::arch::x86_64::paging::PAGE;
+
+    // Region-table capacity FIRST: a window that cannot be registered
+    // must never be mapped (the dispatcher validates user pointers
+    // against exactly that table — an unregistered window would be a
+    // leak no legitimate syscall buffer can reach).
+    if !crate::sched::current_user_regions()
+        .iter()
+        .any(|&(lo, hi)| lo == 0 && hi == 0)
+    {
+        return STATUS_BUSY;
+    }
+
+    // The kernel-chosen VA: first stride-aligned window overlapping
+    // neither a registered region nor a live page-table leaf. Runs at
+    // IF=0 (the stub's SFMASK guarantee), so scan → map → register is
+    // one non-preemptible decision for this thread; two threads of one
+    // process scanning on different CPUs is a documented v1 limitation
+    // (ADR-0021 — driver processes are single-threaded).
+    let regions = crate::sched::current_user_regions();
+    let mut va = MMAP_BASE;
+    let chosen = loop {
+        let Some(end) = va.checked_add(span) else {
+            return STATUS_BUSY;
+        };
+        if end > MMAP_LIMIT {
+            return STATUS_BUSY;
+        }
+        let overlaps = regions
+            .iter()
+            .any(|&(lo, hi)| (lo != 0 || hi != 0) && va < hi && lo < end);
+        // SAFETY: IF=0; `root` is this thread's own live address space
+        // (the probe reads its tables through the kernel-view aliases).
+        let mapped = (0..u64::from(pages))
+            .any(|i| unsafe { crate::arch::x86_64::paging::user_va_mapped(root, va + i * 4096) });
+        if !overlaps && !mapped {
+            break va;
+        }
+        va += MMAP_STRIDE;
+    };
+
+    // Install the leaves: RAM frames through the normal user mapper,
+    // device registers through the uncached/NX MMIO mapper (ADR-0021).
+    for i in 0..u64::from(pages) {
+        // SAFETY: IF=0; `root` is the caller's own live space; the VA
+        // was just probed unmapped; phys comes from a validated cap.
+        let r = unsafe {
+            if owned {
+                crate::arch::x86_64::paging::map_user_page_4k(
+                    root,
+                    chosen + i * 4096,
+                    phys + i * 4096,
+                    writable,
+                    false,
+                )
+            } else {
+                crate::arch::x86_64::paging::map_mmio_page_4k(
+                    root,
+                    chosen + i * 4096,
+                    phys + i * 4096,
+                    writable,
+                )
+            }
+        };
+        if r.is_err() {
+            // Unreachable with kernel-chosen arguments (fresh VA,
+            // aligned, never exec); if it ever fires, the window stays
+            // partial and UNREGISTERED — unreachable to the caller and
+            // accounted at teardown. Loud, not decorative.
+            error!(
+                "syscall",
+                "map_memory: page {i} of window at {chosen:#x} refused"
+            );
+            return STATUS_BUSY;
+        }
+        // SAFETY: the VA belongs to this CPU's live address space;
+        // invlpg drops any stale not-present caching of the fresh leaf.
+        unsafe { super::invlpg(chosen + i * 4096) };
+    }
+
+    if let Err(e) = crate::sched::append_current_user_region(chosen, chosen + span) {
+        // Unreachable under IF=0 (capacity and overlap were checked
+        // against the same snapshot above); loud on the impossible.
+        error!("syscall", "map_memory: region registration failed: {e}");
+        return STATUS_BUSY;
+    }
+    if owned {
+        // Ownership transferred: the frame now belongs to this address
+        // space (teardown reclaims it); the cap slot goes empty.
+        if let Err(e) = crate::cap::consume(pid, a0 as usize) {
+            error!("syscall", "map_memory: untyped consume failed: {e}");
+        }
+    }
+    info!(
+        "syscall",
+        "map_memory: pid {pid} window va={chosen:#x} pages={pages} writable={writable} mmio={}",
+        !owned
+    );
+    chosen as Status
 }
 
 /// SYS_PROVE_RING3: arm a #GP expectation whose resume address is the

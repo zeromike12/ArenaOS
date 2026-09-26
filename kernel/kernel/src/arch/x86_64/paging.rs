@@ -58,6 +58,11 @@ pub const PTE_WRITE: u64 = 1 << 1;
 pub const PTE_USER: u64 = 1 << 2;
 /// Bit 63 — honored because EFER.NXE=1 (set in `init()`).
 pub const PTE_NX: u64 = 1 << 63;
+/// Page-level write-through (SDM Vol. 3 §12.12): with PCD, selects the
+/// UC cache type for MMIO windows (ADR-0021).
+pub const PTE_PWT: u64 = 1 << 3;
+/// Page-level cache disable; `PTE_PCD | PTE_PWT` = uncached.
+pub const PTE_PCD: u64 = 1 << 4;
 /// Page Size bit in PD/PDPT entries (2 MiB / 1 GiB page).
 pub const PTE_HUGE: u64 = 1 << 7;
 /// Address mask for table/leaf entries (bits 12..51).
@@ -407,6 +412,47 @@ pub unsafe fn map_user_page_4k(
     Ok(())
 }
 
+/// [`map_user_page_4k`] for DEVICE REGISTER windows (ADR-0021): forces
+/// the uncached cache type (PCD|PWT — WB-cached MMIO returns stale
+/// reads and swallows writes) and forces NX (device memory is never
+/// code). Otherwise identical, including the lower-half and alignment
+/// gates; `writable` is the caller's policy choice.
+///
+/// # Safety
+/// As [`map_user_page_4k`]; additionally `phys` must name real device
+/// registers (kernel-minted Mmio caps only — ring 3 cannot forge one).
+pub unsafe fn map_mmio_page_4k(
+    pml4_phys: u64,
+    va: u64,
+    phys: u64,
+    writable: bool,
+) -> Result<(), &'static str> {
+    // SAFETY: forwarded to caller contract; exec is structurally false.
+    unsafe { map_user_page_4k(pml4_phys, va, phys, writable, false) }?;
+    // SAFETY: IF=0 construction context; the leaf was just installed —
+    // rewrite its flags to add PCD|PWT without touching the address.
+    unsafe {
+        if let Some(pte) = find_pte(pml4_phys, va) {
+            *pte |= PTE_PCD | PTE_PWT;
+        } else {
+            return Err("mmio map: leaf vanished after install (construction bug)");
+        }
+    }
+    Ok(())
+}
+
+/// Whether `va` currently resolves to a live 4 KiB leaf under the given
+/// root (false when any level is missing or a huge page covers it) —
+/// the SYS_MAP_MEMORY window scan's "already mapped" probe (ADR-0021).
+///
+/// # Safety
+/// IF=0; `pml4_phys` a reachable, owned root (live CR3 is fine — this
+/// only reads tables through their kernel-view aliases).
+pub unsafe fn user_va_mapped(pml4_phys: u64, va: u64) -> bool {
+    // SAFETY: caller contract.
+    unsafe { find_pte(pml4_phys, va).is_some() }
+}
+
 /// [`map_user_page_4k`] against the kernel's own view — the M3.3a
 /// machinery tests run ring-3 code on user pages mapped here (the
 /// kernel view is what CR3 holds whenever no process is running).
@@ -562,8 +608,11 @@ pub unsafe fn destroy_user_half(pml4_phys: u64) -> usize {
                         continue;
                     }
                     if e2 & PTE_HUGE != 0 {
-                        halt_free(frames::free_contiguous(e2 & ADDR_MASK, 512));
-                        freed += 512;
+                        let leaf = e2 & ADDR_MASK;
+                        if frames::is_ram(leaf) {
+                            halt_free(frames::free_contiguous(leaf, 512));
+                            freed += 512;
+                        }
                         (*pd).0[i2] = 0;
                         continue;
                     }
@@ -574,8 +623,18 @@ pub unsafe fn destroy_user_half(pml4_phys: u64) -> usize {
                         if e1 & PTE_PRESENT == 0 {
                             continue;
                         }
-                        halt_free(frames::free(e1 & ADDR_MASK));
-                        freed += 1;
+                        // MMIO windows (ADR-0021) map device registers —
+                        // physical addresses outside the allocator's
+                        // conventional RAM (note: the APIC/HPET/PCI
+                        // apertures all sit BELOW the 4 GiB span limit,
+                        // so only frames::is_ram can tell them apart).
+                        // Those pages are never ours to free; RAM leaves
+                        // are reclaimed exactly as before.
+                        let leaf = e1 & ADDR_MASK;
+                        if frames::is_ram(leaf) {
+                            halt_free(frames::free(leaf));
+                            freed += 1;
+                        }
                         (*pt).0[i1] = 0;
                     }
                     halt_free(frames::free(pt_phys));

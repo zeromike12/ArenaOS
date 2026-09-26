@@ -84,6 +84,17 @@ shutdown) and asserts every response, including the spawned payload's pinned
 message appearing mid-session. `tools/stability_loop.sh` feeds the same way
 from bash (marker-paced, never sleep-based).
 
+Since M5.1 (ADR-0021) every harness boot also attaches the **scratch-disk
+fixture**: `arena_env.scratch_disk_args()` re-creates a fresh zero-filled
+8 MiB `build/scratch.img` per run and attaches it as `virtio-blk-pci` —
+the device the kernel's bus-0 PCI scan must find (`m5:test:pci_scan`)
+and, from M5.2 on, the medium the userspace storage driver reads and
+writes. Fresh-per-run is deliberate: no boot may silently inherit
+another boot's disk contents until step 5.4 makes persistence an
+explicit two-boot test. Interactive boots (`tools/run.sh`), the
+stability loop, and the release-bundle verification attach the same
+fixture; the ESP stays the boot medium throughout.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

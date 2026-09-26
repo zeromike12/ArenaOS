@@ -34,6 +34,7 @@ import arena_env
 print(f"QEMU=({' '.join(repr(x) for x in arena_env.qemu_cmd() + arena_env.qemu_data_args())})")
 print(f"OVMF_CODE={arena_env.ovmf_code()}")
 print(f"OVMF_VARS={arena_env.ovmf_vars_template()}")
+print(f"SCRATCH=({' '.join(repr(x) for x in arena_env.scratch_disk_args())})")
 EOF
 )"
 
@@ -43,6 +44,7 @@ BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 RESULT_LINE_M4='m4: RESULT PASS (9/9)'
+RESULT_LINE_M5='m5: RESULT PASS (4/4)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -67,6 +69,7 @@ for i in $(seq 1 "$N"); do
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$VARS" \
         -drive format=raw,file="$ESP" \
+        "${SCRATCH[@]}" \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
         -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
 
@@ -83,6 +86,8 @@ for i in $(seq 1 "$N"); do
         why="missing '$RESULT_LINE_M3'"
     elif ! grep -aqF "$RESULT_LINE_M4" "$SERIAL"; then
         why="missing '$RESULT_LINE_M4'"
+    elif ! grep -aqF "$RESULT_LINE_M5" "$SERIAL"; then
+        why="missing '$RESULT_LINE_M5'"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then
         why="missing clean-halt declaration"
     fi

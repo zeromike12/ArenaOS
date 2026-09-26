@@ -116,6 +116,35 @@ def build_dir() -> Path:
     return d
 
 
+# ---- the Milestone-5 scratch disk (ADR-0021) --------------------------------
+#
+# The harness fixture every boot attaches as virtio-blk-pci: the kernel's
+# PCI scan must find it (m5 pci_scan) and, from M5.2 on, the userspace
+# storage driver reads/writes it. Fresh zero-filled image per run: until
+# step 5.4 makes persistence an explicit two-boot test, no run may inherit
+# another run's disk contents. The ESP stays the BOOT medium — this disk
+# is never bootable.
+
+SCRATCH_MIB = 8
+
+
+def make_scratch_disk() -> Path:
+    """Create (or re-create) the fresh zero-filled scratch disk image."""
+    p = build_dir() / "scratch.img"
+    with open(p, "wb") as f:
+        f.truncate(SCRATCH_MIB * 1024 * 1024)
+    return p
+
+
+def scratch_disk_args() -> list[str]:
+    """QEMU args attaching the fresh scratch disk as virtio-blk-pci."""
+    p = make_scratch_disk()
+    return [
+        "-drive", f"file={p},format=raw,if=none,id=scr0",
+        "-device", "virtio-blk-pci,drive=scr0",
+    ]
+
+
 if __name__ == "__main__":
     print("repo root :", REPO_ROOT)
     print("rust bin  :", rust_bin())

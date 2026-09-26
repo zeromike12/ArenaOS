@@ -80,6 +80,11 @@ def run_qemu(label: str, esp: Path,
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
             "-drive", f"format=raw,file={esp}",
+        ]
+        # Milestone-5 fixture (ADR-0021): fresh scratch disk attached as
+        # virtio-blk-pci — the kernel's bus-0 scan must find it.
+        + arena_env.scratch_disk_args()
+        + [
             "-display", "none",
             # Serial on a stdio chardev: output captured to the log file,
             # input written by the feeder. NOT mon:stdio — the monitor's

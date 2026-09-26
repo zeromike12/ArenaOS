@@ -346,12 +346,52 @@ Each step boots and adds markers (`m2:test:...`), previous tests re-run.
       interactive session (26 checks). m4 9/9, m1/m2/m3 regressions
       green.
 
-## Phase 5 — Storage (outline)
+## Milestone 5 — Storage 🔨
 
-Block-device abstraction over VirtIO-blk (userspace driver, kernel
-notification caps) → extent/transactional filesystem server (own design,
-ADR) → namespace/mount service → persistent root FS with crash-consistency
-tests (kill VM mid-write, verify recovery).
+The phase-5 outline, decomposed (per ARCHITECTURE §10: filesystems are
+userspace servers on top of block-device capabilities; the kernel stores
+no file semantics; the scratch VirtIO-blk disk is the milestone's
+medium — the ESP stays the boot medium throughout).
+
+- [x] 5.1 **Driver substrate** (DONE — m5 suite 4/4 in-guest: pci_scan,
+      untyped_alloc, mmio_user, irq_relay; m1–m4 green on the same boot;
+      the scratch-disk fixture attached in every harness path — mtest,
+      run.sh, stability loop, release verification): the kernel primitives userspace drivers
+      run on (ADR-0021) — Untyped frame caps (`SYS_ALLOC_FRAME`; destroy
+      RETURNS the frame — the first owned cap kind), self-service
+      mapping (`SYS_MAP_MEMORY`: Untyped/Mmio cap → the caller's own
+      user half at a kernel-chosen window VA, appended to its region
+      table), Mmio caps + ring-3 MMIO proof (the HPET main counter,
+      read-only, observed ticking from a user process), IRQ relay
+      vectors (MSI-range IDT stubs → registered notification + badge),
+      and kernel-side PCI enumeration with the virtio-pci capability
+      walk (config space, bus-master/DMA authorization, and interrupt
+      vector allocation stay kernel POLICY; the virtio protocol itself
+      is userspace MECHANISM). Harness grows a scratch `virtio-blk-pci`
+      disk. Exit: m5 suite green in-guest, every prior suite unaffected.
+- [ ] 5.2 **Userspace VirtIO-blk driver**: `userspace/storaged` — the
+      third real userspace image (registry image 2, spawned at boot
+      with a VirtioDevice cap): modern virtio 1.0 handshake, one split
+      virtqueue living in Untyped frames, MSI-X completions through the
+      relay, synchronous sector read/write on the scratch disk, and a
+      block-service endpoint (IPC v1: request words + a data-buffer
+      cap). Exit: a write→read-back→verify cycle driven THROUGH the
+      service boundary from another process, interrupt-delivered
+      completions counted; markers on the wire.
+- [ ] 5.3 **Filesystem v1 — own design**: extent-based data,
+      copy-on-write + transactional metadata (ADR-0022); host-side
+      `mkfs`; `userspace/fsd` server on a block-endpoint cap:
+      superblock, object table, extent tree, transaction commit. Exit:
+      create/write/read/close files served entirely from ring 3; the
+      on-disk layout survives reopen; shell builtins `ls`/`cat`/`write`
+      against it.
+- [ ] 5.4 **Persistence + namespace + crash consistency**: file caps
+      and minimal path→cap resolution at open (then direct I/O — paths
+      are UI, per ARCHITECTURE §10); two-boot persistence (the same
+      scratch.img: written in boot N, read in boot N+1); the
+      crash-consistency gate from the phase outline — the harness kills
+      QEMU mid-write, reboots, and verifies recovery WITHOUT an fsck
+      ritual. Exit: all three proven by harness tests; v0.5.0 ships.
 
 ## Phase 6 — Drivers (outline)
 

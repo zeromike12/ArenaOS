@@ -53,14 +53,23 @@ copy** of the template:
 
 ```sh
 cp ovmf-vars-template.img ovmf-vars.img
+truncate -s 8M scratch.img      # Milestone-5 fixture disk (ADR-0021);
+                                # dd if=/dev/zero of=scratch.img bs=1m count=8 works too
 
 qemu-system-x86_64 \
     -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
     -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
     -drive if=pflash,format=raw,file=ovmf-vars.img \
     -drive format=raw,file=arena-esp.img \
+    -drive file=scratch.img,format=raw,if=none,id=scr0 \
+    -device virtio-blk-pci,drive=scr0 \
     -display none -serial mon:stdio -no-reboot
 ```
+
+Since M5.1 the scratch disk is **required**: the boot-time m5 suite
+asserts the kernel's PCI scan finds a virtio-blk device, and a boot
+without one halts after the m4 suite by design (its contents are not
+yet used — that arrives with the storage driver in 5.2).
 
 Serial is the console — in **both directions**. Everything ArenaOS logs
 goes there, and since Milestone 4.6 (ADR-0020) your keystrokes come

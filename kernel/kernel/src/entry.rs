@@ -307,6 +307,19 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     // --- M3.3: the ring-3 boundary (ADR-0014) -----------------------------
     // syscall/sysret MSRs, STAR selectors, SFMASK, KERNEL_GS_BASE scratch,
+    // --- M5.1: kernel-side PCI enumeration (ADR-0021) ---------------------
+    // The policy half of the driver split: record bus 0, size the BARs,
+    // resolve every VirtIO function's capability structures, and set
+    // MEM|BUS MASTER (DMA authorization stays a kernel decision; config
+    // space itself is never exposed to ring 3). Non-fatal by design — a
+    // machine with nothing on bus 0 still boots; the m5 suite is what
+    // asserts the fixture disk.
+    let (pci_funcs, virtio_devs) = crate::drivers::pci::enumerate();
+    info!(
+        "kernel",
+        "pci enumeration: {pci_funcs} bus-0 function(s), {virtio_devs} virtio"
+    );
+
     // SMEP/SMAP when the CPU has them — every write verified by read-back
     // inside init (a control MSR that did not take is a dead boundary).
     // SAFETY: ring 0, IF=0, our GDT (with the ring-3 pair) and scheduler
@@ -335,6 +348,16 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // context switch.
     if !crate::m4::run_suite() {
         crate::halt::halt_machine("milestone 4 suite failed");
+    }
+
+    // --- M5.1: the driver substrate suite (ADR-0021) ----------------------
+    // The PCI record asserted against the harness's virtio-blk fixture,
+    // owned untyped frames through ring 3 (alloc / self-map / consume /
+    // destroy-returns-frame / exact teardown), a kernel-minted Mmio cap
+    // putting the HPET counter under ring-3 eyes, and the IRQ relay's
+    // live stub→notify→wake chain proven with a LAPIC self-IPI.
+    if !crate::m5::run_suite() {
+        crate::halt::halt_machine("milestone 5 suite failed");
     }
 
     info!(

@@ -174,7 +174,11 @@ EOF
         # verifier must TYPE the shutdown — marker-paced, exactly like
         # the stability loop (a feed-free boot would hang at the prompt
         # and fail the timeout).
+        # Milestone-5 fixture (ADR-0021): the verification boot attaches
+        # the same fresh scratch disk the harness uses — without it the
+        # m5 suite (and therefore the boot) fails by design.
         ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
+          truncate -s 8M scratch.img && \
           {
             while ! grep -aq 'arena>' verify-serial.log 2>/dev/null; do sleep 0.2; done
             printf 'shutdown\r'
@@ -184,9 +188,12 @@ EOF
             -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
             -drive if=pflash,format=raw,file=ovmf-vars.img \
             -drive format=raw,file=arena-esp.img \
+            -drive file=scratch.img,format=raw,if=none,id=scr0 \
+            -device virtio-blk-pci,drive=scr0 \
             -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
             -no-reboot > verify-serial.log )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm5: RESULT PASS (4/4)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"

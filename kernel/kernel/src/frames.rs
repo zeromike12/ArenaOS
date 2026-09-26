@@ -171,6 +171,15 @@ fn free_irq0(base: u64) -> Result<(), &'static str> {
         if !*READY.get() {
             return Err("free: allocator not initialized");
         }
+        // Managed-RAM check (ADR-0021): the bitmap's set bits cover BOTH
+        // allocated frames and never-allocatable reserved/MMIO space —
+        // without this, freeing a device address below PHYS_LIMIT would
+        // silently launder it into the RAM pool. The module contract
+        // ("freeing an unmanaged address is a checked error") is now
+        // actually enforced.
+        if !is_ram(base) {
+            return Err("free: address is not managed RAM");
+        }
         let map = BITMAP.0.get();
         let idx = (base / FRAME_BYTES) as usize;
         let bit = 1u64 << (idx % 64);
@@ -292,6 +301,16 @@ pub fn reconcile_final_map() -> Result<u64, &'static str> {
         }
         Ok(leaked)
     }
+}
+
+/// Whether `phys` lies inside a Conventional (allocatable-RAM) region of
+/// the handoff memory map — i.e. a frame the allocator can own at all.
+/// ADR-0021: reserved/MMIO addresses BELOW `PHYS_LIMIT` (the APIC page,
+/// HPET, PCI windows all live under 4 GiB) pass the naive span check but
+/// are never RAM; page-table teardown and `free` itself must tell the
+/// two apart. Containment check — any address, not just frame bases.
+pub fn is_ram(phys: u64) -> bool {
+    in_final_conventional(phys)
 }
 
 /// Is `frame`'s physical address inside a Conventional region of the

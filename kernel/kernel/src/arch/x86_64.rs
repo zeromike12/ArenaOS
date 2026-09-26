@@ -104,6 +104,32 @@ pub unsafe fn inb(port: u16) -> u8 {
     value
 }
 
+/// x86 I/O port write (32-bit) — the PCI config-space pair (0xCF8/0xCFC)
+/// requires dword-width accesses (ADR-0021).
+///
+/// # Safety
+/// As [`outb`].
+pub unsafe fn outl(port: u16, value: u32) {
+    // SAFETY: forwarded to caller contract.
+    unsafe {
+        core::arch::asm!("out dx, eax", in("dx") port, in("eax") value, options(nostack, preserves_flags, nomem))
+    };
+}
+
+/// x86 I/O port read (32-bit).
+///
+/// # Safety
+/// As [`inb`]: reading some ports has side effects; the caller must own
+/// the port's semantics.
+pub unsafe fn inl(port: u16) -> u32 {
+    let value: u32;
+    // SAFETY: forwarded to caller contract.
+    unsafe {
+        core::arch::asm!("in eax, dx", out("eax") value, in("dx") port, options(nostack, preserves_flags, nomem));
+    }
+    value
+}
+
 pub fn read_cr0() -> u64 {
     let v: u64;
     // SAFETY: reading CR0 has no side effects and we are in ring 0 long mode.

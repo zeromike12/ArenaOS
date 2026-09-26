@@ -160,6 +160,23 @@ extern "C" fn arena_serial_handler() {
     }
 }
 
+/// Rust half of the relay stubs (vectors 48..63, M5.1 / ADR-0021).
+/// Dual-controller EOI FIRST — same discipline and rationale as the
+/// timer/serial halves: the relay delivery may wake a thread, and the
+/// controller must not be left with a vector in service across any
+/// scheduler work. Then the vector goes to the relay table, which
+/// notifies the registered (notification, badge) pair.
+extern "C" fn arena_relay_handler(vector: u64) {
+    // SAFETY: fixed ports; LAPIC_EOI_ADDR contract as in the timer half.
+    unsafe {
+        super::outb(0xA0, 0x20);
+        super::outb(0x20, 0x20);
+        let eoi = LAPIC_EOI_ADDR.load(Ordering::Relaxed);
+        (eoi as *mut u32).write_volatile(0);
+    }
+    crate::relay::handle(vector);
+}
+
 global_asm!(
     // ---- exception stubs: 32 slots at a fixed 16-byte stride -------------
     // Each stub body is at most 9 bytes (push imm8 ×2 = 4, jmp rel32 = 5),
@@ -319,6 +336,68 @@ global_asm!(
     "pop rax",
     "pop rbp",
     "iretq",
+    // ---- IRQ relay stubs (vectors 48..63, M5.1 / ADR-0021) -----------------
+    // 16 slots at a fixed 16-byte stride, same construction contract as the
+    // exception stubs: each body is at most 12 bytes (mov rcx, imm32 = 7,
+    // jmp rel32 = 5 — gas may relax the jmp shorter, never longer), so
+    // `.p2align 4` puts stub N exactly at base + 16*N and `relay_stub_addr`
+    // can do the arithmetic. The vector arrives in rcx (Win64 arg 1) to the
+    // common half, which saves every caller-saved register (the relay can
+    // fire into ANY thread, ring 0 or ring 3, mid-anything), EOIs both
+    // controllers, and hands the vector to the relay table (`crate::relay`).
+    ".p2align 4",
+    ".globl arena_relay_stubs",
+    "arena_relay_stubs:",
+    ".macro RELAY_STUB vec",
+    ".p2align 4",
+    "mov rcx, \\vec",
+    "jmp arena_relay_common",
+    ".endm",
+    "RELAY_STUB 48",
+    "RELAY_STUB 49",
+    "RELAY_STUB 50",
+    "RELAY_STUB 51",
+    "RELAY_STUB 52",
+    "RELAY_STUB 53",
+    "RELAY_STUB 54",
+    "RELAY_STUB 55",
+    "RELAY_STUB 56",
+    "RELAY_STUB 57",
+    "RELAY_STUB 58",
+    "RELAY_STUB 59",
+    "RELAY_STUB 60",
+    "RELAY_STUB 61",
+    "RELAY_STUB 62",
+    "RELAY_STUB 63",
+    ".p2align 4",
+    "arena_relay_common:",
+    "push rbp",
+    "mov rbp, rsp",
+    "push rcx",                 // the vector (stub-loaded rcx) first
+    "push rax",
+    "push rdx",
+    "push rsi",
+    "push rdi",
+    "push r8",
+    "push r9",
+    "push r10",
+    "push r11",
+    "and rsp, -16",
+    "sub rsp, 32",
+    "mov rcx, [rbp - 8]",       // reload the vector as arg 1
+    "call {relay_handler}",
+    "lea rsp, [rbp - 72]",
+    "pop r11",
+    "pop r10",
+    "pop r9",
+    "pop r8",
+    "pop rdi",
+    "pop rsi",
+    "pop rdx",
+    "pop rax",
+    "pop rcx",
+    "pop rbp",
+    "iretq",
     // ---- common exception path --------------------------------------------
     // Stack here: [vector][error_code][RIP][CS][RFLAGS][RSP][SS]
     // Hand (vector, error_code, &mut frame) to Rust in rcx/rdx/r8 (win64
@@ -367,6 +446,7 @@ global_asm!(
     handler = sym arena_exception_handler,
     timer_handler = sym arena_timer_handler,
     serial_handler = sym arena_serial_handler,
+    relay_handler = sym arena_relay_handler,
 );
 
 /// Hardware-pushed interrupt frame (SDM Vol. 3 §6.12.1, Figure 6-9): the
@@ -554,6 +634,9 @@ unsafe extern "C" {
     static arena_irq_timer_stub: u8;
     /// Full-frame serial RX stub for vector 33 (M4.6, ADR-0020).
     static arena_irq_serial_stub: u8;
+    /// First of the 16 IRQ relay stubs (vectors 48..63), RELAY_STUB_STRIDE
+    /// apart (M5.1, ADR-0021).
+    static arena_relay_stubs: u8;
 }
 
 /// Vector carrying the PIT tick (`drivers::intc::PIT_VECTOR`; literal
@@ -585,6 +668,32 @@ fn timer_stub_addr() -> u64 {
 
 fn serial_stub_addr() -> u64 {
     core::ptr::addr_of!(arena_irq_serial_stub) as u64
+}
+
+/// First vector of the IRQ relay range (M5.1, ADR-0021). The relay
+/// stubs turn these vectors into notification deliveries (`crate::relay`).
+pub const RELAY_VECTOR_BASE: usize = 48;
+
+/// Size of the IRQ relay range: vectors 48..63 inclusive.
+pub const RELAY_VECTOR_COUNT: usize = 16;
+
+/// Stride between consecutive relay stubs (asm guarantees `.p2align 4`
+/// and bodies ≤ 12 bytes, so each stub fits its 16-byte slot — the same
+/// construction contract as the exception stubs, and `audit_gates`
+/// checks every gate against it).
+const RELAY_STUB_STRIDE: usize = 16;
+
+/// Whether `vector` is one of the relay vectors (48..63).
+pub const fn is_relay_vector(vector: usize) -> bool {
+    vector >= RELAY_VECTOR_BASE && vector < RELAY_VECTOR_BASE + RELAY_VECTOR_COUNT
+}
+
+fn relay_stub_addr(vector: usize) -> u64 {
+    debug_assert!(is_relay_vector(vector));
+    // Address arithmetic within the 16-stub block is in-bounds by the
+    // stride contract at the asm site (`.p2align 4`, ≤12-byte bodies).
+    core::ptr::addr_of!(arena_relay_stubs) as u64
+        + ((vector - RELAY_VECTOR_BASE) * RELAY_STUB_STRIDE) as u64
 }
 
 /// IST index per vector (SDM Vol. 3 §6.14.5): the exceptions that must
@@ -627,6 +736,8 @@ pub unsafe fn init() {
                 timer_stub_addr()
             } else if vector == SERIAL_RX_VECTOR {
                 serial_stub_addr() // M4.6: console RX (ADR-0020)
+            } else if is_relay_vector(vector) {
+                relay_stub_addr(vector) // M5.1: IRQ relays (ADR-0021)
             } else {
                 irq_stub_addr()
             };
@@ -725,6 +836,8 @@ pub fn audit_gates() -> (usize, usize, usize) {
             timer_stub_addr() // M3.2: the tick gets the hook-capable stub
         } else if v == SERIAL_RX_VECTOR {
             serial_stub_addr() // M4.6: console RX gets its own stub
+        } else if is_relay_vector(v) {
+            relay_stub_addr(v) // M5.1: IRQ relays get their own stubs
         } else {
             irq_stub_addr()
         };

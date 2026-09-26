@@ -57,8 +57,11 @@ const THREAD_STACK_BYTES: u64 = (THREAD_STACK_FRAMES * 4096) as u64;
 const STACK_CANARY: u64 = 0x4152_454E_4153_544B;
 
 /// Per-thread user regions the syscall dispatcher validates against
-/// (code / data / stack / spare — ADR-0014).
-pub const USER_REGIONS_MAX: usize = 4;
+/// (code / data / stack / driver windows — ADR-0014). Raised 4 → 16 by
+/// ADR-0021: a VirtIO driver maps one window per queue frame plus
+/// descriptor buffers. The cost is a few hundred bytes per (already
+/// static) thread slot.
+pub const USER_REGIONS_MAX: usize = 16;
 
 /// M3.1 stacks come from the direct map's first 2 GiB (ADR-0008); a frame
 /// beyond that has no kernel-view alias yet, so `spawn` refuses it rather
@@ -836,6 +839,36 @@ pub fn set_current_user_regions(regions: &[(u64, u64)]) -> Result<(), &'static s
             for (i, r) in regions.iter().enumerate() {
                 t.regions[i] = *r;
             }
+        }
+        Ok(())
+    })
+}
+
+/// Append one region to the CURRENT thread's user-region table — the
+/// SYS_MAP_MEMORY registration path (ADR-0021: self-mapped windows join
+/// the same table the syscall dispatcher validates user pointers
+/// against). Fails when the table is full or the span overlaps a
+/// registered region.
+pub fn append_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let t = (*THREADS.get())[cur]
+                .as_mut()
+                .expect("current thread vanished");
+            for r in t.regions.iter() {
+                if r.0 == 0 && r.1 == 0 {
+                    continue;
+                }
+                if lo < r.1 && r.0 < hi {
+                    return Err("append region: overlaps a registered region");
+                }
+            }
+            let Some(slot) = t.regions.iter_mut().find(|r| r.0 == 0 && r.1 == 0) else {
+                return Err("append region: user-region table is full");
+            };
+            *slot = (lo, hi);
         }
         Ok(())
     })

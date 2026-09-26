@@ -33,6 +33,15 @@ pub const HPET_GEN_CONF: u64 = 0x10;
 /// source, so this bit must be off.
 pub const HPET_LEGACY_ENABLE: u32 = 1 << 1;
 
+/// HPET general-config bit 0: main counter run/stop (ENABLE_CNF).
+pub const HPET_ENABLE_CNF: u32 = 1 << 0;
+
+/// HPET main counter value register. 64-bit wide; `hpet_read`'s 32-bit
+/// access returns the low dword — sufficient for the monotonicity
+/// evidence the m5 suite needs (the counter runs at ~14 MHz, so the low
+/// half wraps only after minutes).
+pub const HPET_MAIN_COUNTER: u64 = 0xF0;
+
 /// The vector the PIT is delivered on — the first slot of the IDT's
 /// absorbed-IRQ range (32..255), matching the firmware's pre-handover
 /// routing so both eras share one chain.
