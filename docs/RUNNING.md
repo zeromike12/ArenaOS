@@ -68,6 +68,7 @@ qemu-system-x86_64 \
     -device virtio-blk-pci,drive=scr0 \
     -netdev user,id=net0 \
     -device virtio-net-pci,netdev=net0 \
+    -device virtio-rng-pci \
     -display none -serial mon:stdio -no-reboot
 ```
 
@@ -80,13 +81,20 @@ with the layout's source of truth: `python3 -c 'import sys;
 sys.path.insert(0, "tools"); import afs1; afs1.mkfs("scratch.img",
 16384)'`.
 
-The two `-netdev`/`-device virtio-net-pci` lines are **new in v0.6.0
-and optional**: they attach QEMU's built-in user-mode network, which
-the `netd` driver (M6.1) proves with a real ARP round trip every boot.
-Boot without them (e.g. an older saved command) and the machine stays
-green — the network test reports an honest `SKIP` and the kernel logs
-that the network service is offline. No host setup or privileges are
-needed either way.
+The two `-netdev`/`-device virtio-net-pci` lines (new in v0.6.0) and
+the `-device virtio-rng-pci` line (new in v0.7.0) are **optional**:
+they attach QEMU's built-in user-mode network, which the `netd` driver
+(M6.1) proves with a real ARP round trip every boot, and QEMU's
+built-in entropy source, which the `rngd` driver (M6.2) proves by
+drawing randomness straight into a client's pages. Boot without either
+(e.g. an older saved command) and the machine stays green — the
+corresponding test reports an honest `SKIP` and the kernel logs the
+service as offline. No host setup or privileges are needed either way:
+`virtio-rng-pci` with no backend uses QEMU's own `rng-builtin`
+(the platform CSPRNG), which works on Linux, macOS, and Windows hosts
+alike. On a museum-piece QEMU that predates that default (pre-4.1),
+add `-object rng-random,filename=/dev/urandom,id=rng0` and write
+`-device virtio-rng-pci,rng=rng0`.
 
 Serial is the console — in **both directions**. Everything ArenaOS logs
 goes there, and since Milestone 4.6 (ADR-0020) your keystrokes come
@@ -176,24 +184,34 @@ machine-checkable landmarks, in order:
     10.0.2.2, sends it zero-copy through the transmit queue, and
     verifies the reply that arrives — by interrupt — on the receive
     queue, field by field at exact wire offsets — ending with
-    `m6: RESULT PASS (1/1)`. Booted WITHOUT the `-netdev`/NIC lines?
-    An honest `m6: RESULT SKIP` instead, and everything else is
-    unchanged
-11. `storaged spawned: pid …`, `fsd spawned: pid …`, then
-    `fsd: mounted AFS1 — commit seq …`, and (with the NIC)
+    `m6:test:rng_service: PASS` right after it
+11. `m6:test:rng_service: PASS` — the entropy proof (ADR-0025):
+    `rngd` (the ring-3 virtio-rng driver, built on the shared virtio
+    core) plus `rngtest`, which draws two 4 KiB frames of randomness —
+    the device DMAs them straight into the client's own pages — and
+    checks that both are full-length, not all-zero, not one repeated
+    byte, and different from each other, with the kernel counting
+    exactly one interrupt per draw. The line
+    `rngtest: draw A … vs draw B …` shows fresh bytes every boot.
+    Together these end with `m6: RESULT PASS (2/2)`. Booted WITHOUT
+    the NIC or rng lines? An honest `m6: RESULT SKIP` instead, and
+    everything else is unchanged
+12. `storaged spawned: pid …`, `fsd spawned: pid …`, then
+    `fsd: mounted AFS1 — commit seq …`, and (with the fixtures)
     `netd spawned: pid …` + `netd: virtio-net ready — DRIVER_OK,
-    mac …` — the production services come up on the same devices the
-    suite just proved (ADR-0022/0023/0024)
-12. `milestones 5–6.1 complete … spawning the shell`, then
+    mac …` and `rngd spawned: pid …` + `rngd: virtio-rng ready —
+    DRIVER_OK …` — the production services come up on the same
+    devices the suite just proved (ADR-0022/0023/0024/0025)
+13. `milestones 5–6.2 complete … spawning the shell`, then
     `shell spawned: pid …` — the hand-off
-13. `ArenaOS shell v0.6 …` and the `arena> ` prompt — the machine is
+14. `ArenaOS shell v0.7 …` and the `arena> ` prompt — the machine is
     now an interactive system with a real filesystem; type into it
     (see "The shell" above)
-14. After `shutdown`: `shutdown requested by pid … through its Power
+15. After `shutdown`: `shutdown requested by pid … through its Power
     cap` and `halting via UEFI ResetSystem(shutdown)` — the clean-halt
     declaration (the automated harnesses type `shutdown` for you,
     marker-paced)
-15. QEMU exits on its own with status 0
+16. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to

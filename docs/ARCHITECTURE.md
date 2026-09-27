@@ -492,6 +492,27 @@ driver, so file data DMAs disk ↔ client page with no copy in any ring.
   structurally impossible, and the full-frame buffer-handoff design
   belongs to the stack that needs it. Absent device → the service is
   honestly offline and the suite SKIPs (never fakes a PASS).
+- **The driver family became a family (M6.2, ADR-0025):** with a
+  third instance the common code stopped being a guess, so
+  `userspace/virtio.rs` now owns the virtio 1.0 core every driver
+  server shares — discovery, the window map, the §3.1 handshake, the
+  frame budget, the split-queue setup and ring primitives — while
+  each driver keeps its grant layout, its exit-code contract, its
+  serve loop, and its device specifics. The core reports typed stage
+  failures (`VErr`); the driver maps them to ITS codes, so the
+  suites' diagnostics are unchanged. The extraction ran mechanically
+  under the full suite (11/11 green before the third driver existed)
+  — the discipline this project applies to every refactor: prove
+  sameness first, add behavior second.
+- **Entropy service (M6.2):** `userspace/rngd` is the third resident
+  driver and the first WRITE-into-caller-memory service — `RNG_GET`
+  points a device-writable descriptor at the caller's LENT frame, so
+  the device DMAs randomness straight into the client's own page. The
+  proof is variance, not expected values (a fixed expectation would
+  be fixed entropy — a fake): two draws must be full-length,
+  non-zero, non-constant, and different, with the kernel counting one
+  interrupt per draw. Quality of the entropy itself is the host
+  backend's responsibility and is stated as such, never claimed.
 
 ## 9. Security philosophy
 
@@ -587,6 +608,7 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Filesystem service: `fsd` (registry image 4, spawned at boot, resident) — AFS1 own-design layout (checksummed superblock + ping-pong commit records + CoW object-table/bitmap runs + chained extent blocks with implicit file offsets; host mirror + mkfs in `tools/afs1.py`), transactional commits with two-generation-delayed freeing, IPC v1.1 inline 64-byte messages (names/dirents; NULL-compatible), block protocol v1.1 bounds-checked in-frame offsets, end-to-end zero-copy file I/O by forwarding clients' lent caps to storaged, FS protocol (CREATE/OPEN/READ/WRITE/CLOSE/LS/SHUTDOWN + typed FS_ERR_* statuses), 8-handle open-file table; `fstest` (image 5) proves create→write→close→re-open→read→verify→ls in ring 3 with the derived 33-delivery contract; `test_m5.py` verifies the committed on-disk bytes post-boot; shell builtins `ls`/`cat`/`write` on grant slot 3 (the shell now shares `userspace/abi.rs`) | **M5.3 — implemented, 6/6 in-guest (ADR-0023)** |
 | Filesystem persistence & crash consistency (M5.4): two-boot persistence proven (written in boot N → read byte-exact in boot N+1, host-parsed after each boot); the crash-consistency gate — five SIGKILL-mid-write rounds, every reboot recovers with NO repair tool (the crashed write returns never-committed, committed-empty, or committed-full, never torn; host `afs1.audit()` fsck-lite clean after each); fstest's branch probe gives the suite two derived contracts (fresh: 34 device ops, exit 42 — persisted: 14, exit 43, zero writes); transactional UNLINK (`FS_OP_UNLINK` 8, `FS_ERR_BUSY` for open files) behind the shell's `rm`; mount-time reclamation of the superseded ping-pong generation; path→handle resolution at OPEN with handle-direct I/O (the fh is the file capability, scoped by the granted endpoint cap — ADR-0023 addendum) | **M5.4 — implemented and gated (v0.5.0)** |
 | Network service (M6.1): `netd` (registry image 6, spawned at boot when the virtio-net fixture is attached) — the ring-3 virtio-net driver, LINK-LAYER ONLY (raw Ethernet frames in/out, no protocols): two split virtqueues (receiveq/transmitq) packed one frame per queue under the CAP_SLOTS budget at modern-virtio alignments, two MSI-X relay badges (bit-disjoint, one notification), VERSION_1+MAC-only feature negotiation, the config-space MAC through DEV_INFO word [6], zero-copy TX (caller's LENT frame chained behind netd's own virtio header), RX buffers posted/harvested interrupt-driven with a first-frame hold slot, RECV delivery through the reply's inline 64-byte message (lent caps cannot be mapped — the full-frame handoff is Phase 7's design); order-independent device discovery (storaged adopted the same probe loop + type assert); `nettest` (image 7) proves the wire: hand-built 42-byte ARP request → slirp reply verified field-by-field, one counted relay delivery per vector; absent fixture → honest SKIP + the network service offline (pre-v0.6.0 invocations stay green) | **M6.1 — implemented, 1/1 in-guest + the no-net SKIP boot (ADR-0024)** |
-| Truncate/append-overwrite (v1 refuses to clobber), directories, per-file permissions/kernel file caps (security phase), power-loss-grade barriers (`cache=none` + virtio FUA/FLUSH — v1's proven model is process-crash prefixes), full mark-sweep fsck (interrupted generations leak conservatively), the network PROTOCOL stack (Ethernet/ARP/IP/UDP/TCP services — the link layer landed in M6.1), virtio rng/console/input drivers, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
+| Entropy service (M6.2): `rngd` (registry image 8, spawned at boot when a virtio-rng function exists) — the ring-3 virtio-rng driver on the SHARED virtio core (`userspace/virtio.rs`): one request queue packed into a single owned frame, `RNG_GET` filling the caller's LENT frame by device DMA (zero-copy, the write direction of storaged's read path), MSI-X completion relayed into `SYS_WAIT`, typed refusals that never leak the landed cap; `rngtest` (image 9) proves real variance — two 4 KiB draws, full-length by the device's own count, non-zero, non-constant, mutually different, two counted relay deliveries; absent fixture → honest SKIP + the entropy service offline | **M6.2 — implemented, 2/2 in-guest with all four fixture combinations green (ADR-0025)** |
+| Truncate/append-overwrite (v1 refuses to clobber), directories, per-file permissions/kernel file caps (security phase), power-loss-grade barriers (`cache=none` + virtio FUA/FLUSH — v1's proven model is process-crash prefixes), full mark-sweep fsck (interrupted generations leak conservatively), the network PROTOCOL stack (Ethernet/ARP/IP/UDP/TCP services — the link layer landed in M6.1), virtio console/input drivers, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

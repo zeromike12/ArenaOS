@@ -177,6 +177,35 @@ no netd instance at all, and m1–m5 green in the same boot. A skip is
 never laundered into a pass count, and a compatibility regression
 never hides.
 
+Since M6.2 (ADR-0025) the family gained the **entropy fixture**:
+`arena_env.rng_args()` adds a bare `-device virtio-rng-pci`, which
+QEMU backs with its own `rng-builtin` source (the platform CSPRNG) —
+no host files, no privileges, portable across host OSes.
+`m6:test:rng_service` spawns rngd (image 8) and rngtest (image 9):
+the client takes TWO 4 KiB draws into SEPARATE frames, each LENT
+through IPC so the device DMAs entropy directly into the client's own
+page (zero-copy fill — the write direction of storaged's read path).
+Randomness cannot be asserted against expected values — a fixed
+expectation would be fixed entropy, i.e. a fake — so the client
+asserts what every genuine source satisfies and every broken one
+fails: the device wrote the FULL length (its own used-ring count),
+neither draw is all-zero (an ignored descriptor), neither is a single
+repeated byte (a stuck source), and the two draws DIFFER (a looping
+or cached source). The kernel witnesses the mechanics: exactly TWO
+relay deliveries on the driver's vector (one MSI per draw — no
+polling), both exit badges exact, both children exit 42, the dead
+driver's relay swept by `proc::destroy`, teardown frame-exact. The
+serial line `rngtest: draw A … vs draw B …` prints fresh fingerprints
+every boot, and `test_m6.py` asserts they are present and different —
+evidence in the log, not a claim. Entropy QUALITY (distribution,
+unpredictability) belongs to the host backend and is deliberately NOT
+claimed by the suite. This fixture is optional too: the no-fixture
+boot (`run_qemu(..., net=False, rng=False)`) must show BOTH honest
+SKIPs, both "service stays offline" lines, no driver instance of
+either kind, and m1–m5 green in the same boot. All four fixture
+combinations (both / net-only / rng-only / neither) are verified to
+boot green.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to
@@ -264,10 +293,10 @@ figures are `conventional=`/`reclaimable=`.
   to parsers, double-frees against debug allocators.
 - **Stress loops**: the 100-boot stability loop shipped in M2.7
   (`tools/stability_loop.sh`, ADR-0011) — every boot must show every
-  milestone's RESULT line (`m2: RESULT PASS (21/21)` … since v0.6.0
-  `m6: RESULT PASS (1/1)`), the clean-halt declaration, no PANIC, QEMU
+  milestone's RESULT line (`m2: RESULT PASS (21/21)` … since v0.7.0
+  `m6: RESULT PASS (2/2)`), the clean-halt declaration, no PANIC, QEMU
   exit 0, with the full fixture family attached (scratch disk + slirp
-  NIC — stability means the SHIPPING configuration). The v0.6.0 loop
+  NIC + entropy source — stability means the SHIPPING configuration). The v0.6.0 loop
   caught its first host-coupled flake at 1-in-100: the device-bound
   suite drains were bounded by a *yield count*, which under host load
   burns out before QEMU's iothread delivers the awaited MSI — they are

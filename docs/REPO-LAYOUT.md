@@ -58,10 +58,26 @@ Layout rules:
   `userspace/shell` (the minimal shell, ADR-0020: same toolchain
   contract, its own address window at 0x400000, embedded as
   spawn-registry image 1 and spawned at boot as the initial service).
-  Servers and apps join here in later phases.
+  Phases 5–6 added the service crates, one per server, each building
+  its driver/client pair of images from a single crate:
+  `userspace/storaged` (virtio-blk, ADR-0022 — images 2/3),
+  `userspace/fsd` (the AFS1 filesystem service, ADR-0023 — images
+  4/5), `userspace/netd` (virtio-net, ADR-0024 — images 6/7), and
+  `userspace/rngd` (virtio-rng, ADR-0025 — images 8/9).
+- **Shared userspace code is single-file and included by `#[path]`,
+  not linked as crates:** `userspace/abi.rs` (the syscall/IPC/wire
+  surface every image mirrors — one wire contract, all programs) and,
+  since M6.2, `userspace/virtio.rs` (the virtio 1.0 core every driver
+  server shares: discovery, window map, handshake, frame budget,
+  split-queue setup, ring primitives). Each image compiles its own
+  copy of the subset it uses; ADR-0025 records why a cargo library
+  crate was rejected for v1 and what would trigger revisiting it.
 - Future top-level directories, added only when their phase begins:
-  `libs/` (shared userspace libraries), `drivers/` (userspace driver
-  servers, Phase 6). Not created empty — directories appear with code.
+  `libs/` (shared userspace libraries — the destination if the
+  `#[path]` modules ever outgrow single files). Driver servers live in
+  `userspace/`, not a separate `drivers/` tree: they are ordinary
+  ring-3 programs, and the layout should say so. Not created empty —
+  directories appear with code.
 - `tools/` may use external packages (pip/npm); it is explicitly outside the
   OS image. `tests/` holds assets consumed by `tools/test_*.py`.
 - Docs are peers of code: a change that alters an architectural fact must

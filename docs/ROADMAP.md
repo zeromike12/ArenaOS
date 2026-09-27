@@ -500,15 +500,39 @@ restart under fault injection, capability re-grant tests.
       the awaited MSI, so all three (m5 block/fs, m6 net) are now
       bounded by an HPET wall-clock deadline (~21 s,
       DRAIN_DEADLINE_TICKS); the fixed kernel re-ran 100/100 clean.
-- [ ] **6.2 virtio-rng: `rngd` + the shared-library extraction.**
-      The third driver triggers ADR-0024's third-driver rule: extract
-      the common virtio core (handshake, queue setup, descriptor
-      helpers) into `userspace/virtio.rs` shared by storaged, netd,
-      and rngd — mechanically, under the full suite. rngd: one queue,
-      `RNG_GET` filling a caller-lent frame with device entropy;
-      suite proof asserts real variance across draws (no constant
-      bytes, no all-zero pages). Raises `MAX_IMAGES` (registry full
-      at 8 after 6.1).
+- [x] 6.2 **virtio-rng: `rngd` + the shared-library extraction** —
+      DONE (ADR-0025). ADR-0024's third-driver rule executed in two
+      steps, each gated: (a) the extraction — `userspace/virtio.rs`
+      now owns discovery, the window map, the §3.1 handshake, the
+      frame budget loop, `ring_offsets`/`Queue`(publish/used_idx/
+      used_entry)/`queue_setup`/`driver_ok`/`w64`/`desc_write`, with
+      typed stage errors (`VErr`) each driver maps to ITS exit codes
+      and a `RingMem` seam recording the one genuine difference
+      (netd/rngd pack a queue into one frame; storaged's 256-entry
+      rings take a frame each). storaged −268 lines, netd −268, zero
+      behavior change: 11/11 scripts green before rngd existed.
+      (b) `rngd` (registry image 8): one queue, `RNG_GET` pointing a
+      device-writable descriptor at the caller's LENT frame so the
+      device DMAs entropy into the client's own page — zero-copy
+      fill, interrupt-completed. Proof: `rngtest` (image 9) draws two
+      4 KiB frames and asserts real variance — full length (the
+      device's own count), not all-zero, not one repeated byte, and
+      the two draws different; the kernel witnesses exactly two relay
+      deliveries (one MSI per draw), exact badges, both exits 42, and
+      frame-exact teardown. Entropy QUALITY is the host backend's
+      business and is never claimed by the suite. Fixture: bare
+      `-device virtio-rng-pci` (QEMU's `rng-builtin` default backend
+      — no host files, no privileges); absent → honest SKIP, and all
+      four fixture combinations (both / net-only / rng-only /
+      neither) boot green. `MAX_IMAGES` and `MAX_SPAWN_RECS` raised
+      8 → 12, the consequence ADR-0024 named. Two bugs the FIRST BOOT
+      caught, not the reading: QEMU presents the transitional entropy
+      ID 0x1005 (the legacy IDs are a hand-assigned list, not
+      0x1000+type), and the client's first cut self-mapped its frame
+      before copying the lend — the map CONSUMES the cap, so the copy
+      must come first. Gates: run_tests 11/11, clippy + fmt clean on
+      all three drivers, entropy verified different across boots, and
+      the stability loop 100/100 with the full fixture family.
 - [ ] **6.3 virtio-input keyboard: `inputd` + live typing.** ADR
       decides the transport (virtio-input-hid expected; i8042 PS/2
       as the documented fallback if virtio-input disappoints). The

@@ -444,7 +444,7 @@ fn do_spawn() {
 // ---- texts -----------------------------------------------------------------
 
 const BANNER: &str =
-    "ArenaOS shell v0.6 (M4.6 + M5.3/5.4, ADR-0020/0023) — the first input-driven program.\r\n";
+    "ArenaOS shell v0.7 (M4.6 + M5.3/5.4 + M6.2, ADR-0020/0023/0025) — the first input-driven program.\r\n";
 const PROMPT: &str = "arena> ";
 /// One debug_write chunk (<= WRITE_MAX = 256): the help text hits the
 /// wire atomically — and Out::push DROPS bytes past WRITE_MAX, so an

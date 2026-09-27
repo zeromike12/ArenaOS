@@ -2,7 +2,7 @@
 # Boot-stability loop (docs/TESTING.md): boot the *prebuilt* ESP image N
 # times with fresh NVRAM each run and require the full green verdict on
 # every single boot — m2 RESULT PASS (21/21), m3 RESULT PASS (13/13), m4
-# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (1/1), the
+# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (2/2), the
 # canonical clean-halt line, no PANIC, QEMU exit 0, under a per-boot
 # timeout. Both fixtures ride along (the AFS1 scratch disk and, since
 # M6.1, the slirp NIC) — stability means the SHIPPING configuration.
@@ -38,6 +38,7 @@ print(f"OVMF_CODE={arena_env.ovmf_code()}")
 print(f"OVMF_VARS={arena_env.ovmf_vars_template()}")
 print(f"SCRATCH=({' '.join(repr(x) for x in arena_env.scratch_disk_args())})")
 print(f"NET=({' '.join(repr(x) for x in arena_env.net_args())})")
+print(f"RNG=({' '.join(repr(x) for x in arena_env.rng_args())})")
 EOF
 )"
 
@@ -48,7 +49,7 @@ RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 RESULT_LINE_M4='m4: RESULT PASS (9/9)'
 RESULT_LINE_M5='m5: RESULT PASS (6/6)'
-RESULT_LINE_M6='m6: RESULT PASS (1/1)'
+RESULT_LINE_M6='m6: RESULT PASS (2/2)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -91,6 +92,7 @@ for i in $(seq 1 "$N"); do
         -drive format=raw,file="$ESP" \
         "${SCRATCH[@]}" \
         "${NET[@]}" \
+        "${RNG[@]}" \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
         -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
 
