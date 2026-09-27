@@ -57,6 +57,10 @@ use core::panic::PanicInfo;
 mod abi;
 use abi::*;
 
+#[path = "../../virtio.rs"]
+mod virtio;
+use virtio::*;
+
 // ---- the grant layout (kernel-literal, entry.rs / m6.rs) ---------------------
 
 const SLOT_MMIO: u64 = 0;
@@ -90,36 +94,11 @@ const EXIT_PHYS: u64 = 76;
 const EXIT_COMPLETE: u64 = 77;
 const EXIT_REPLY: u64 = 78;
 
-// ---- virtio 1.0 common-config register offsets (§4.1.4.3) --------------------
+// ---- virtio-net specifics (the shared 1.0 core lives in userspace/virtio.rs) --
 
-const ST_ACK: u8 = 1;
-const ST_DRIVER: u8 = 2;
-const ST_DRIVER_OK: u8 = 4;
-const ST_FEATURES_OK: u8 = 8;
-
-/// The modern driver's one mandatory feature bit (word 1, bit 0).
-const FEATURE_VERSION_1: u32 = 1 << 0;
 /// VIRTIO_NET_F_MAC (word 0, bit 5) — without it the config-space MAC
 /// is not guaranteed meaningful.
 const FEATURE_NET_MAC: u32 = 1 << 5;
-
-const CFG_DEV_FEATURE_SELECT: u64 = 0x00;
-const CFG_DEV_FEATURE: u64 = 0x04;
-const CFG_DRV_FEATURE_SELECT: u64 = 0x08;
-const CFG_DRV_FEATURE: u64 = 0x0C;
-const CFG_NUM_QUEUES: u64 = 0x12;
-const CFG_STATUS: u64 = 0x14;
-const CFG_QUEUE_SELECT: u64 = 0x16;
-const CFG_QUEUE_SIZE: u64 = 0x18;
-const CFG_QUEUE_MSIX_VECTOR: u64 = 0x1A;
-const CFG_QUEUE_ENABLE: u64 = 0x1C;
-const CFG_QUEUE_NOTIFY_OFF: u64 = 0x1E;
-const CFG_QUEUE_DESC: u64 = 0x20;
-const CFG_QUEUE_DRIVER: u64 = 0x28;
-const CFG_QUEUE_DEVICE: u64 = 0x30;
-
-const DESC_F_NEXT: u16 = 1;
-const DESC_F_WRITE: u16 = 2;
 
 /// The queue size netd picks (bounded so all three ring areas of a
 /// queue pack into ONE frame — the CAP_SLOTS=16 budget, ADR-0024).
@@ -138,15 +117,6 @@ const RX_BUF_LEN: u32 = VNET_HDR_LEN + NET_FRAME_MAX as u32;
 /// transitional net ID.
 const DEV_ID_NET_MODERN: u64 = 0x1041;
 const DEV_ID_NET_TRANSITIONAL: u64 = 0x1000;
-
-/// SYS_DEV_INFO's word count (the ADR-0022 layout — netd adds no
-/// words; word [6]'s device-config location carries the MAC).
-const INFO_WORDS: usize = 12;
-
-/// How many device-index probes the order-independent discovery makes
-/// before giving up (the kernel's virtio table is small; the gate
-/// refuses everything but THIS driver's device anyway).
-const DEV_IDX_PROBES: u64 = 8;
 
 /// Defensive bound on re-waits for one specific completion (a device
 /// that raises the interrupt without publishing the used entry is
@@ -173,6 +143,19 @@ fn log(s: &str) {
     log_line(|o| o.str(s));
 }
 
+/// The shared virtio core's typed stage failure → netd's exit-code
+/// contract (the m6 suite maps every code): same five stages, same
+/// order as storaged's 60..64 — netd's are 70..74.
+fn vfail(e: VErr) -> ! {
+    match e {
+        VErr::DevInfo(r) => fail(EXIT_DEV_INFO, r),
+        VErr::Map(r) => fail(EXIT_MAP, r),
+        VErr::Handshake(r) => fail(EXIT_HANDSHAKE, r),
+        VErr::Queue(r) => fail(EXIT_QUEUE, r),
+        VErr::Relay(r) => fail(EXIT_RELAY, r),
+    }
+}
+
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     write_str("netd: PANIC\r\n");
@@ -180,140 +163,6 @@ fn panic(_info: &PanicInfo) -> ! {
     unsafe { syscall1(SYS_THREAD_EXIT, EXIT_PANIC) };
     loop {
         core::hint::spin_loop();
-    }
-}
-
-// ---- device/ring access primitives (volatile, single-threaded image) ---------
-
-/// # Safety
-/// `reg_va` is inside netd's own self-mapped windows (the device BAR or
-/// an owned frame); the access is volatile and non-speculative.
-unsafe fn r8(reg_va: u64) -> u8 {
-    // SAFETY: caller contract.
-    unsafe { core::ptr::read_volatile(reg_va as *const u8) }
-}
-/// # Safety
-/// As `r8`.
-unsafe fn r16(reg_va: u64) -> u16 {
-    // SAFETY: caller contract; the virtio registers and ring fields are
-    // naturally aligned by construction.
-    unsafe { core::ptr::read_volatile(reg_va as *const u16) }
-}
-/// # Safety
-/// As `r8`.
-unsafe fn r32(reg_va: u64) -> u32 {
-    // SAFETY: caller contract.
-    unsafe { core::ptr::read_volatile(reg_va as *const u32) }
-}
-/// # Safety
-/// As `r8`.
-unsafe fn w8(reg_va: u64, v: u8) {
-    // SAFETY: caller contract.
-    unsafe { core::ptr::write_volatile(reg_va as *mut u8, v) }
-}
-/// # Safety
-/// As `r8`.
-unsafe fn w16(reg_va: u64, v: u16) {
-    // SAFETY: caller contract.
-    unsafe { core::ptr::write_volatile(reg_va as *mut u16, v) }
-}
-/// # Safety
-/// As `r8`.
-unsafe fn w32(reg_va: u64, v: u32) {
-    // SAFETY: caller contract.
-    unsafe { core::ptr::write_volatile(reg_va as *mut u32, v) }
-}
-/// # Safety
-/// As `r8`; two volatile dword writes (lo first, §4.1.4.3).
-unsafe fn w64(reg_va: u64, v: u64) {
-    // SAFETY: caller contract.
-    unsafe {
-        w32(reg_va, v as u32);
-        w32(reg_va + 4, (v >> 32) as u32);
-    }
-}
-
-/// Write one split-ring descriptor (16 bytes, little-endian fields).
-///
-/// # Safety
-/// `desc_va` is netd's own mapped ring frame.
-unsafe fn desc_write(desc_va: u64, i: u16, addr: u64, len: u32, flags: u16, next: u16) {
-    // SAFETY: caller contract; 16-byte-aligned entry inside our frame.
-    unsafe {
-        let base = desc_va + 16 * u64::from(i);
-        core::ptr::write_volatile(base as *mut u64, addr);
-        w32(base + 8, len);
-        w16(base + 12, flags);
-        w16(base + 14, next);
-    }
-}
-
-// ---- the packed ring geometry (ADR-0024's CAP_SLOTS budget) -------------------
-
-/// The three ring-area offsets inside ONE frame for a queue of `qsz`
-/// entries: desc 16B-aligned at 0, avail 2B-aligned right after, used
-/// 4B-aligned after that. For qsz=64: 0 / 1024 / 1160 — used ends at
-/// 1678, far below the q1 frame's TX header at 3072.
-fn ring_offsets(qsz: u16) -> (u64, u64, u64) {
-    let desc = 0u64;
-    let avail = 16 * u64::from(qsz);
-    let used_raw = avail + 6 + 2 * u64::from(qsz);
-    let used = (used_raw + 3) & !3;
-    (desc, avail, used)
-}
-
-/// One split virtqueue's driver-side state.
-struct Queue {
-    qsz: u16,
-    desc_va: u64,
-    avail_va: u64,
-    used_va: u64,
-    doorbell: u64,
-    avail_idx: u16,
-    used_seen: u16,
-}
-
-impl Queue {
-    /// Publish descriptor head `id` in the next avail slot and ring the
-    /// doorbell (fence discipline as storaged's: slot → fence → index →
-    /// fence → doorbell).
-    ///
-    /// # Safety
-    /// The queue's VAs are netd's own mapped frames.
-    unsafe fn publish(&mut self, id: u16) {
-        // SAFETY: method contract.
-        unsafe {
-            w16(
-                self.avail_va + 4 + 2 * u64::from(self.avail_idx % self.qsz),
-                id,
-            );
-            store_fence();
-            self.avail_idx = self.avail_idx.wrapping_add(1);
-            w16(self.avail_va + 2, self.avail_idx);
-            store_fence();
-            w16(self.doorbell, 0);
-        }
-    }
-
-    /// The used ring's current index (volatile read).
-    ///
-    /// # Safety
-    /// The queue's VAs are netd's own mapped frames.
-    unsafe fn used_idx(&self) -> u16 {
-        // SAFETY: method contract.
-        unsafe { r16(self.used_va + 2) }
-    }
-
-    /// Read used entry `slot` → (descriptor id, device-written length).
-    ///
-    /// # Safety
-    /// The queue's VAs are netd's own mapped frames.
-    unsafe fn used_entry(&self, slot: u16) -> (u32, u32) {
-        // SAFETY: method contract.
-        unsafe {
-            let base = self.used_va + 4 + 8 * u64::from(slot);
-            (r32(base), r32(base + 4))
-        }
     }
 }
 
@@ -495,222 +344,81 @@ pub unsafe extern "C" fn _start() -> ! {
     unsafe {
         log("netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)");
 
-        // 1. Order-independent discovery: probe device indices upward
-        //    and adopt the first one SYS_DEV_INFO answers — the
+        // 1. Order-independent discovery (the shared virtio core —
+        //    userspace/virtio.rs, ADR-0025): probe device indices
+        //    upward and adopt the first one SYS_DEV_INFO answers — the
         //    Mmio-cap gate inside the kernel guarantees the answer is
         //    OUR device (the cap names its structure BAR), so fixture
-        //    order on the QEMU command line is not load-bearing. Then
-        //    assert virtio-NET from the device_id (a mis-spawn must
-        //    fail loudly, not drive the wrong device).
-        let mut dev_idx = u64::MAX;
-        let mut info = [0u64; INFO_WORDS];
-        for idx in 0..DEV_IDX_PROBES {
-            let r = syscall2(SYS_DEV_INFO, idx, info.as_mut_ptr() as u64);
-            if r == INFO_WORDS as i64 {
-                dev_idx = idx;
-                break;
-            }
-        }
-        if dev_idx == u64::MAX {
-            log("netd: SYS_DEV_INFO refused every device index probe");
-            fail(EXIT_DEV_INFO, "SYS_DEV_INFO refused (no granted device)");
-        }
-        let pci_index = info[0];
-        let common_off = info[2] & 0xFFFF_FFFF;
-        let notify_off = info[3] & 0xFFFF_FFFF;
-        let notify_mult = info[4];
-        let devcfg_off = info[6] & 0xFFFF_FFFF;
-        let msix_present = info[7] & 0xFFFF_FFFF;
-        let msix_size = (info[7] >> 32) as u16;
-        let device_id = info[8] & 0xFFFF;
-        let transitional = (info[8] >> 32) & 0xFFFF;
-        if device_id != DEV_ID_NET_MODERN && device_id != DEV_ID_NET_TRANSITIONAL {
-            log_line(|o| {
-                o.str("netd: granted device_id ");
-                o.hex(device_id);
-                o.str(" is neither virtio-net modern 0x1041 nor transitional 0x1000");
-            });
-            fail(
-                EXIT_DEV_INFO,
-                "the granted device is not a virtio-net function",
-            );
-        }
-        if msix_present == 0 || msix_size < 2 {
-            fail(
-                EXIT_RELAY,
-                "the device has no MSI-X table with two entries — the relay plan needs RX + TX vectors",
-            );
-        }
+        //    order on the QEMU command line is not load-bearing. The
+        //    core asserts virtio-NET from the device_id (a mis-spawn
+        //    must fail loudly, not drive the wrong device) and the
+        //    two-entry MSI-X table the RX+TX relay plan needs.
+        let info = virtio::discover(
+            "netd",
+            "virtio-net",
+            DEV_ID_NET_MODERN,
+            DEV_ID_NET_TRANSITIONAL,
+            2,
+        )
+        .unwrap_or_else(|e| vfail(e));
 
         // 2. The device window: self-map the granted Mmio cap WRITABLE
         //    (the handshake writes registers; the cap survives — Mmio
-        //    is descriptive).
-        let win = syscall2(SYS_MAP_MEMORY, SLOT_MMIO, 1);
-        if win <= 0 {
-            log_line(|o| {
-                o.str("netd: window map returned ");
-                o.i64(win);
-            });
-            fail(EXIT_MAP, "the device-window self-map refused");
-        }
-        let win = win as u64;
-        let cfg = win + common_off;
-        log_line(|o| {
-            o.str("netd: virtio-net device_id ");
-            o.hex(device_id);
-            if transitional != 0 {
-                o.str(" (transitional)");
-            }
-            o.str(" pci_index ");
-            o.u64(pci_index);
-            o.str(" dev_idx ");
-            o.u64(dev_idx);
-            o.str(" — window ");
-            o.hex(win);
-            o.str(", common +");
-            o.hex(common_off);
-            o.str(", notify +");
-            o.hex(notify_off);
-            o.str(" mult ");
-            o.u64(notify_mult);
-            o.str(", devcfg +");
-            o.hex(devcfg_off);
-            o.str(", msix ");
-            o.u64(u64::from(msix_size));
-        });
+        //    is descriptive). The shared core logs the resolved
+        //    geometry: identity first, geometry second.
+        let w =
+            virtio::map_window("netd", "virtio-net", &info, SLOT_MMIO).unwrap_or_else(|e| vfail(e));
 
-        // 3. The virtio 1.0 handshake (§3.1): reset, ACK|DRIVER,
-        //    features VERSION_1 + MAC and NOTHING else (no csum/GSO
-        //    offload, no mergeable buffers, no control queue), then
-        //    FEATURES_OK must stick. Both bits are mandatory for this
-        //    driver: without VERSION_1 the 12-byte header and modern
-        //    ring rules do not hold; without MAC the config-space
-        //    address is not guaranteed meaningful.
-        w8(cfg + CFG_STATUS, 0); // reset
-        let mut spins = 0u32;
-        while r8(cfg + CFG_STATUS) != 0 && spins < 100_000 {
-            spins += 1;
-            core::hint::spin_loop();
-        }
-        if r8(cfg + CFG_STATUS) != 0 {
-            fail(
-                EXIT_HANDSHAKE,
-                "device status did not read back 0 after reset",
-            );
-        }
-        w8(cfg + CFG_STATUS, ST_ACK);
-        w8(cfg + CFG_STATUS, ST_ACK | ST_DRIVER);
-        w32(cfg + CFG_DEV_FEATURE_SELECT, 0);
-        let f0 = r32(cfg + CFG_DEV_FEATURE);
-        w32(cfg + CFG_DEV_FEATURE_SELECT, 1);
-        let f1 = r32(cfg + CFG_DEV_FEATURE);
-        if f0 & FEATURE_NET_MAC == 0 {
-            fail(EXIT_HANDSHAKE, "the device does not offer VIRTIO_NET_F_MAC");
-        }
-        if f1 & FEATURE_VERSION_1 == 0 {
-            fail(
-                EXIT_HANDSHAKE,
-                "legacy-only virtio-net (no VERSION_1) — unsupported in v1",
-            );
-        }
-        w32(cfg + CFG_DRV_FEATURE_SELECT, 0);
-        w32(cfg + CFG_DRV_FEATURE, f0 & FEATURE_NET_MAC);
-        w32(cfg + CFG_DRV_FEATURE_SELECT, 1);
-        w32(cfg + CFG_DRV_FEATURE, f1 & FEATURE_VERSION_1);
-        w8(cfg + CFG_STATUS, ST_ACK | ST_DRIVER | ST_FEATURES_OK);
-        if r8(cfg + CFG_STATUS) & ST_FEATURES_OK == 0 {
-            log_line(|o| {
-                o.str("netd: device features ");
-                o.hex(u64::from(f1) << 32 | u64::from(f0));
-                o.str(" — FEATURES_OK did not stick");
-            });
-            fail(EXIT_HANDSHAKE, "feature negotiation refused by the device");
-        }
-        if r16(cfg + CFG_NUM_QUEUES) < 2 {
-            fail(
-                EXIT_HANDSHAKE,
-                "the device offers fewer than two virtqueues (need receiveq + transmitq)",
-            );
-        }
+        // 3. The virtio 1.0 handshake (§3.1), shared core: reset,
+        //    ACK|DRIVER, features VERSION_1 + MAC and NOTHING else (no
+        //    csum/GSO offload, no mergeable buffers, no control
+        //    queue), then FEATURES_OK must stick. Both bits are
+        //    mandatory for this driver: without VERSION_1 the 12-byte
+        //    header and modern ring rules do not hold; without MAC the
+        //    config-space address is not guaranteed meaningful. Two
+        //    virtqueues minimum: receiveq + transmitq.
+        virtio::handshake("netd", &w, FEATURE_NET_MAC, FEATURE_VERSION_1, 2)
+            .unwrap_or_else(|e| vfail(e));
 
         // 4. The five owned frames (ADR-0024's budget): q0 rings, three
         //    RX buffers, q1 rings + TX header. Allocation pays the phys
         //    (the queue registers need it); self-map consumes each cap
         //    (ownership moves to this address space — teardown exact).
+        //    The shared core zeroes every mapping: rings must START
+        //    zeroed (idx 0, no descriptors, no used entries).
         let mut phys = [0u64; FRAMES_TOTAL];
         let mut va = [0u64; FRAMES_TOTAL];
-        for i in 0..FRAMES_TOTAL {
-            let slot = SLOT_FRAME_BASE + i as u64;
-            let p = syscall1(SYS_ALLOC_FRAME, slot);
-            if p <= 0 {
-                log_line(|o| {
-                    o.str("netd: frame alloc ");
-                    o.u64(i as u64);
-                    o.str(" returned ");
-                    o.i64(p);
-                });
-                fail(EXIT_QUEUE, "a ring/buffer frame allocation refused");
-            }
-            phys[i] = p as u64;
-            let m = syscall2(SYS_MAP_MEMORY, slot, 1);
-            if m <= 0 {
-                fail(EXIT_MAP, "a frame self-map refused");
-            }
-            va[i] = m as u64;
-            // The allocator does not zero: rings must START zeroed
-            // (idx 0, no descriptors, no used entries).
-            core::ptr::write_bytes(va[i] as *mut u8, 0, 4096);
-        }
+        virtio::alloc_frames("netd", SLOT_FRAME_BASE, FRAMES_TOTAL, &mut phys, &mut va)
+            .unwrap_or_else(|e| vfail(e));
 
-        // 5. Both queues: packed ring areas in ONE frame each (modern
-        //    virtio needs no page alignment — desc 16B / avail 2B /
-        //    used 4B), size capped at QUEUE_MAX, one MSI-X entry per
-        //    queue armed through the kernel relay BEFORE enable.
+        // 5. Both queues through the shared core: packed ring areas in
+        //    ONE frame each (the core computes the desc/avail/used
+        //    offsets from the CLAMPED size — qsz cap 64), one MSI-X
+        //    entry per queue armed through the kernel relay BEFORE
+        //    enable.
         let mut qvecs = [0i64; 2];
         let mut qs: [Option<Queue>; 2] = [None, None];
         for (q, frame, entry, badge) in [
             (0u16, FRAME_Q0_RING, 0u16, IRQ_BADGE_RX),
             (1u16, FRAME_Q1_RING, 1u16, IRQ_BADGE_TX),
         ] {
-            w16(cfg + CFG_QUEUE_SELECT, q);
-            let qmax = r16(cfg + CFG_QUEUE_SIZE);
-            if qmax == 0 {
-                fail(EXIT_QUEUE, "the device advertises queue size 0");
-            }
-            let qsz = if qmax > QUEUE_MAX { QUEUE_MAX } else { qmax };
-            w16(cfg + CFG_QUEUE_SIZE, qsz);
-            let (desc_off, avail_off, used_off) = ring_offsets(qsz);
-            let ring = phys[frame];
-            w64(cfg + CFG_QUEUE_DESC, ring + desc_off);
-            w64(cfg + CFG_QUEUE_DRIVER, ring + avail_off);
-            w64(cfg + CFG_QUEUE_DEVICE, ring + used_off);
-            let vec = syscall4(SYS_IRQ_RELAY, dev_idx, u64::from(entry), SLOT_NOTIF, badge);
-            if !(48..=63).contains(&vec) {
-                log_line(|o| {
-                    o.str("netd: irq_relay(entry ");
-                    o.u64(u64::from(entry));
-                    o.str(") returned ");
-                    o.i64(vec);
-                });
-                fail(EXIT_RELAY, "SYS_IRQ_RELAY refused");
-            }
+            let (qv, vec) = virtio::queue_setup(
+                "netd",
+                &w,
+                &info,
+                q,
+                QUEUE_MAX,
+                RingMem::Packed {
+                    frame_phys: phys[frame],
+                    frame_va: va[frame],
+                },
+                entry,
+                SLOT_NOTIF,
+                badge,
+            )
+            .unwrap_or_else(|e| vfail(e));
             qvecs[q as usize] = vec;
-            w16(cfg + CFG_QUEUE_MSIX_VECTOR, entry);
-            let qnoff = u64::from(r16(cfg + CFG_QUEUE_NOTIFY_OFF));
-            let doorbell = win + notify_off + qnoff * notify_mult;
-            w16(cfg + CFG_QUEUE_ENABLE, 1);
-            if r16(cfg + CFG_QUEUE_ENABLE) != 1 {
-                fail(EXIT_QUEUE, "queue_enable did not stick");
-            }
-            qs[q as usize] = Some(Queue {
-                qsz,
-                desc_va: va[frame] + desc_off,
-                avail_va: va[frame] + avail_off,
-                used_va: va[frame] + used_off,
-                doorbell,
-                avail_idx: 0,
-                used_seen: 0,
-            });
+            qs[q as usize] = Some(qv);
         }
         let (Some(q0), Some(q1)) = (qs[0].take(), qs[1].take()) else {
             fail(EXIT_QUEUE, "a queue was not constructed (internal)");
@@ -724,7 +432,7 @@ pub unsafe extern "C" fn _start() -> ! {
         //    space). An all-zero MAC means the config region is not
         //    what the scan promised — fail instead of sending frames
         //    nobody would answer.
-        let devcfg = win + devcfg_off;
+        let devcfg = w.devcfg;
         let mut mac = [0u8; 6];
         for (i, m) in mac.iter_mut().enumerate() {
             *m = r8(devcfg + i as u64);
@@ -741,10 +449,7 @@ pub unsafe extern "C" fn _start() -> ! {
             0,
             VNET_HDR_LEN as usize,
         );
-        w8(
-            cfg + CFG_STATUS,
-            ST_ACK | ST_DRIVER | ST_FEATURES_OK | ST_DRIVER_OK,
-        );
+        virtio::driver_ok(&w);
         // Two lines, both well inside WRITE_MAX=256 (Out::push drops
         // past the limit silently — the line budget is an invariant,
         // ADR-0023's HELP lesson): identity first, geometry second.

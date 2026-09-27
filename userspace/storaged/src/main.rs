@@ -31,6 +31,10 @@ use core::panic::PanicInfo;
 mod abi;
 use abi::*;
 
+#[path = "../../virtio.rs"]
+mod virtio;
+use virtio::*;
+
 // ---- the grant layout (kernel-literal: entry.rs / m5.rs) --------------------
 
 const SLOT_MMIO: u64 = 0;
@@ -56,37 +60,7 @@ const EXIT_PHYS: u64 = 66;
 const EXIT_COMPLETE: u64 = 67;
 const EXIT_REPLY: u64 = 68;
 
-// ---- virtio constants (OASIS virtio 1.0 §4.1.4.3, §5.2) ---------------------
-
-/// Device status bits (§2.1).
-const ST_ACK: u8 = 1;
-const ST_DRIVER: u8 = 2;
-const ST_DRIVER_OK: u8 = 4;
-const ST_FEATURES_OK: u8 = 8;
-
-/// `VIRTIO_F_VERSION_1` — bit 32 of the feature word, i.e. bit 0 of
-/// device_feature with select = 1 (§6.2).
-const FEATURE_VERSION_1: u32 = 1 << 0;
-
-/// `virtio_pci_common_cfg` register offsets (§4.1.4.3).
-const CFG_DEV_FEATURE_SELECT: u64 = 0x00;
-const CFG_DEV_FEATURE: u64 = 0x04;
-const CFG_DRV_FEATURE_SELECT: u64 = 0x08;
-const CFG_DRV_FEATURE: u64 = 0x0C;
-const CFG_NUM_QUEUES: u64 = 0x12;
-const CFG_STATUS: u64 = 0x14;
-const CFG_QUEUE_SELECT: u64 = 0x16;
-const CFG_QUEUE_SIZE: u64 = 0x18;
-const CFG_QUEUE_MSIX_VECTOR: u64 = 0x1A;
-const CFG_QUEUE_ENABLE: u64 = 0x1C;
-const CFG_QUEUE_NOTIFY_OFF: u64 = 0x1E;
-const CFG_QUEUE_DESC: u64 = 0x20;
-const CFG_QUEUE_DRIVER: u64 = 0x28;
-const CFG_QUEUE_DEVICE: u64 = 0x30;
-
-/// Split-ring descriptor flags (§2.7.5).
-const DESC_F_NEXT: u16 = 1;
-const DESC_F_WRITE: u16 = 2;
+// ---- virtio-blk specifics (the shared 1.0 core lives in userspace/virtio.rs) --
 
 /// virtio-blk request types (§5.2.6.1).
 const BLK_T_IN: u32 = 0;
@@ -107,18 +81,10 @@ const STATUS_SENTINEL: u8 = 0xFF;
 /// per ring. The device's advertised maximum is clamped to this.
 const QUEUE_MAX: u16 = 256;
 
-/// SYS_DEV_INFO's word count (the ADR-0022 layout).
-const INFO_WORDS: usize = 12;
-
 /// virtio-blk PCI device IDs: modern (0x1040 + type 2) and the
 /// transitional block ID — the discovery assert (ADR-0024).
 const DEV_ID_BLK_MODERN: u64 = 0x1042;
 const DEV_ID_BLK_TRANSITIONAL: u64 = 0x1001;
-
-/// How many device-index probes the order-independent discovery makes
-/// before giving up (the kernel's virtio table is small; the gate
-/// refuses everything but THIS driver's device anyway).
-const DEV_IDX_PROBES: u64 = 8;
 
 // ---- diagnostics -------------------------------------------------------------
 
@@ -142,6 +108,19 @@ fn log(s: &str) {
     log_line(|o| o.str(s));
 }
 
+/// The shared virtio core's typed stage failure → storaged's
+/// exit-code contract (the m5 suite maps every code): the five setup
+/// stages in order, 60..64.
+fn vfail(e: VErr) -> ! {
+    match e {
+        VErr::DevInfo(r) => fail(EXIT_DEV_INFO, r),
+        VErr::Map(r) => fail(EXIT_MAP, r),
+        VErr::Handshake(r) => fail(EXIT_HANDSHAKE, r),
+        VErr::Queue(r) => fail(EXIT_QUEUE, r),
+        VErr::Relay(r) => fail(EXIT_RELAY, r),
+    }
+}
+
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // No panicking path exists by construction (checked arithmetic, no
@@ -155,50 +134,15 @@ fn panic(_info: &PanicInfo) -> ! {
     }
 }
 
-// ---- ring/register helpers ----------------------------------------------------
-
-/// Write one split-ring descriptor (16 bytes: addr, len, flags, next).
-///
-/// # Safety
-/// `desc_va` is the driver's own mapped desc-table frame; `i < qsz`.
-unsafe fn desc_write(desc_va: u64, i: u16, addr: u64, len: u32, flags: u16, next: u16) {
-    // SAFETY: caller contract; all four field writes are volatile and
-    // inside the mapped frame (i*16 + 16 <= 4096 for i < 256).
-    unsafe {
-        let d = desc_va + u64::from(i) * 16;
-        core::ptr::write_volatile(d as *mut u64, addr);
-        w32(d + 8, len);
-        w16(d + 12, flags);
-        w16(d + 14, next);
-    }
-}
-
-/// 64-bit register write as the spec's lo-then-hi pair (§4.1.4.3: the
-/// low half is written first).
-///
-/// # Safety
-/// `reg_va` is a mapped 8-byte common-cfg register.
-unsafe fn w64(reg_va: u64, v: u64) {
-    // SAFETY: caller contract; two volatile dword writes.
-    unsafe {
-        w32(reg_va, v as u32);
-        w32(reg_va + 4, (v >> 32) as u32);
-    }
-}
-
 // ---- the program ----------------------------------------------------------------
 
-/// The service loop's per-request state.
+/// The service loop's per-request state: the shared core's virtqueue
+/// (userspace/virtio.rs) plus the block request page and the
+/// completion count.
 struct Queue {
-    qsz: u16,
-    desc_va: u64,
-    avail_va: u64,
-    used_va: u64,
+    vq: virtio::Queue,
     req_va: u64,
     req_phys: u64,
-    doorbell: u64,
-    avail_idx: u16,
-    used_seen: u16,
     completions: u64,
 }
 
@@ -221,28 +165,32 @@ fn serve(q: &mut Queue, op: u64, sector: u64, buf_phys: u64) -> Result<(u64, u32
         w8(q.req_va + REQ_STATUS_OFF, STATUS_SENTINEL);
         // Chain: 0 header (device-readable) → 1 data (readable for a
         // write, WRITABLE for a read) → 2 status (device-writable).
-        desc_write(q.desc_va, 0, q.req_phys, REQ_HEADER_LEN, DESC_F_NEXT, 1);
+        desc_write(q.vq.desc_va, 0, q.req_phys, REQ_HEADER_LEN, DESC_F_NEXT, 1);
         let data_flags = if op == OP_READ {
             DESC_F_NEXT | DESC_F_WRITE
         } else {
             DESC_F_NEXT
         };
-        desc_write(q.desc_va, 1, buf_phys, SECTOR_BYTES as u32, data_flags, 2);
         desc_write(
-            q.desc_va,
+            q.vq.desc_va,
+            1,
+            buf_phys,
+            SECTOR_BYTES as u32,
+            data_flags,
+            2,
+        );
+        desc_write(
+            q.vq.desc_va,
             2,
             q.req_phys + REQ_STATUS_OFF,
             1,
             DESC_F_WRITE,
             0,
         );
-        // Publish: ring slot → fence → avail index → fence → doorbell.
-        w16(q.avail_va + 4 + 2 * u64::from(q.avail_idx % q.qsz), 0);
-        store_fence();
-        q.avail_idx = q.avail_idx.wrapping_add(1);
-        w16(q.avail_va + 2, q.avail_idx);
-        store_fence();
-        w16(q.doorbell, 0); // queue 0
+        // Publish (the shared core's fence discipline: ring slot →
+        // fence → avail index → fence → doorbell) — head 0, the only
+        // chain in flight.
+        q.vq.publish(0);
     }
 
     // The completion is an interrupt, never a poll: the device's MSI-X
@@ -262,14 +210,13 @@ fn serve(q: &mut Queue, op: u64, sector: u64, buf_phys: u64) -> Result<(u64, u32
     // SAFETY: q's VAs are the driver's own mapped frames; volatile ring
     // reads after the device's completion interrupt.
     unsafe {
-        let used_idx = r16(q.used_va + 2);
-        if used_idx == q.used_seen {
+        let used_idx = q.vq.used_idx();
+        if used_idx == q.vq.used_seen {
             log("storaged: completion interrupt without a used entry");
             return Err(());
         }
-        let slot = u64::from(used_idx.wrapping_sub(1) % q.qsz);
-        let id = r32(q.used_va + 4 + 8 * slot);
-        let len = r32(q.used_va + 4 + 8 * slot + 4);
+        let slot = used_idx.wrapping_sub(1) % q.vq.qsz;
+        let (id, len) = q.vq.used_entry(slot);
         if id != 0 {
             // One synchronous request at a time, so the head is always
             // descriptor 0 — anything else is a device contract break.
@@ -280,7 +227,7 @@ fn serve(q: &mut Queue, op: u64, sector: u64, buf_phys: u64) -> Result<(u64, u32
             });
             return Err(());
         }
-        q.used_seen = used_idx;
+        q.vq.used_seen = used_idx;
         let status = r8(q.req_va + REQ_STATUS_OFF);
         if status == STATUS_SENTINEL {
             log("storaged: device never wrote the status byte");
@@ -310,192 +257,73 @@ pub unsafe extern "C" fn _start() -> ! {
     unsafe {
         log("storaged: starting — ArenaOS block service (M5.2, ADR-0022)");
 
-        // 1. The kernel's resolved record of our device (SYS_DEV_INFO,
-        //    gated on the Mmio cap in slot 0 — config space itself is
-        //    never exposed to ring 3).
-        // Order-independent discovery (ADR-0024): probe device indices
-        // upward and adopt the first one the kernel answers — the
-        // Mmio-cap gate guarantees the answer is OUR device (the cap
-        // names its structure BAR), so fixture order on the QEMU
-        // command line is not load-bearing. Then assert virtio-BLOCK
-        // from the device_id: a mis-spawn must fail loudly, not drive
-        // the wrong device.
-        let mut dev_idx = u64::MAX;
-        let mut info = [0u64; INFO_WORDS];
-        for idx in 0..DEV_IDX_PROBES {
-            let r = syscall2(SYS_DEV_INFO, idx, info.as_mut_ptr() as u64);
-            if r == INFO_WORDS as i64 {
-                dev_idx = idx;
-                break;
-            }
-        }
-        if dev_idx == u64::MAX {
-            log("storaged: SYS_DEV_INFO refused every device index probe");
-            fail(EXIT_DEV_INFO, "SYS_DEV_INFO refused (no granted device)");
-        }
-        let pci_index = info[0];
-        let common_off = info[2] & 0xFFFF_FFFF;
-        let notify_off = info[3] & 0xFFFF_FFFF;
-        let notify_mult = info[4];
-        let msix_present = info[7] & 0xFFFF_FFFF;
-        let msix_size = (info[7] >> 32) as u16;
-        let device_id = info[8] & 0xFFFF;
-        let transitional = (info[8] >> 32) & 0xFFFF;
-        if device_id != DEV_ID_BLK_MODERN && device_id != DEV_ID_BLK_TRANSITIONAL {
-            log_line(|o| {
-                o.str("storaged: granted device_id ");
-                o.hex(device_id);
-                o.str(" is neither virtio-blk modern 0x1042 nor transitional 0x1001");
-            });
-            fail(
-                EXIT_DEV_INFO,
-                "the granted device is not a virtio-block function",
-            );
-        }
-        if msix_present == 0 || msix_size == 0 {
-            fail(
-                EXIT_RELAY,
-                "the device has no MSI-X table — the relay plan needs it",
-            );
-        }
+        // 1. Order-independent discovery (the shared virtio core —
+        //    userspace/virtio.rs, ADR-0025): probe device indices
+        //    upward and adopt the first one SYS_DEV_INFO answers — the
+        //    Mmio-cap gate inside the kernel guarantees the answer is
+        //    OUR device (the cap names its structure BAR), so fixture
+        //    order on the QEMU command line is not load-bearing. The
+        //    core asserts virtio-BLOCK from the device_id: a mis-spawn
+        //    must fail loudly, not drive the wrong device.
+        let info = virtio::discover(
+            "storaged",
+            "virtio-blk",
+            DEV_ID_BLK_MODERN,
+            DEV_ID_BLK_TRANSITIONAL,
+            1,
+        )
+        .unwrap_or_else(|e| vfail(e));
 
         // 2. The device window: self-map the granted Mmio cap WRITABLE
         //    (the handshake writes registers; access mode decides the
-        //    right, and the cap survives — Mmio is descriptive).
-        let win = syscall2(SYS_MAP_MEMORY, SLOT_MMIO, 1);
-        if win <= 0 {
-            log_line(|o| {
-                o.str("storaged: window map returned ");
-                o.i64(win);
-            });
-            fail(EXIT_MAP, "the device-window self-map refused");
-        }
-        let win = win as u64;
-        let cfg = win + common_off;
-        log_line(|o| {
-            o.str("storaged: virtio-blk device_id ");
-            o.hex(device_id);
-            if transitional != 0 {
-                o.str(" (transitional)");
-            }
-            o.str(" pci_index ");
-            o.u64(pci_index);
-            o.str(" — window ");
-            o.hex(win);
-            o.str(", common +");
-            o.hex(common_off);
-            o.str(", notify +");
-            o.hex(notify_off);
-            o.str(" mult ");
-            o.u64(notify_mult);
-            o.str(", msix ");
-            o.u64(u64::from(msix_size));
-        });
+        //    right, and the cap survives — Mmio is descriptive). The
+        //    shared core logs the resolved geometry: identity first,
+        //    geometry second.
+        let w = virtio::map_window("storaged", "virtio-blk", &info, SLOT_MMIO)
+            .unwrap_or_else(|e| vfail(e));
 
-        // 3. The virtio 1.0 handshake (§3.1), all through the window.
-        w8(cfg + CFG_STATUS, 0); // reset
-        let mut spins = 0u32;
-        while r8(cfg + CFG_STATUS) != 0 && spins < 100_000 {
-            spins += 1;
-            core::hint::spin_loop();
-        }
-        if r8(cfg + CFG_STATUS) != 0 {
-            fail(
-                EXIT_HANDSHAKE,
-                "device status did not read back 0 after reset",
-            );
-        }
-        w8(cfg + CFG_STATUS, ST_ACK);
-        w8(cfg + CFG_STATUS, ST_ACK | ST_DRIVER);
-        // Features: accept VERSION_1 iff offered (the modern driver's
-        // one mandatory bit); no optional blk features in v1.
-        w32(cfg + CFG_DEV_FEATURE_SELECT, 0);
-        let f0 = r32(cfg + CFG_DEV_FEATURE);
-        w32(cfg + CFG_DEV_FEATURE_SELECT, 1);
-        let f1 = r32(cfg + CFG_DEV_FEATURE);
-        w32(cfg + CFG_DRV_FEATURE_SELECT, 0);
-        w32(cfg + CFG_DRV_FEATURE, 0);
-        w32(cfg + CFG_DRV_FEATURE_SELECT, 1);
-        w32(cfg + CFG_DRV_FEATURE, f1 & FEATURE_VERSION_1);
-        w8(cfg + CFG_STATUS, ST_ACK | ST_DRIVER | ST_FEATURES_OK);
-        if r8(cfg + CFG_STATUS) & ST_FEATURES_OK == 0 {
-            log_line(|o| {
-                o.str("storaged: device features ");
-                o.hex(u64::from(f1) << 32 | u64::from(f0));
-                o.str(" — FEATURES_OK did not stick");
-            });
-            fail(EXIT_HANDSHAKE, "feature negotiation refused by the device");
-        }
-        if r16(cfg + CFG_NUM_QUEUES) < 1 {
-            fail(EXIT_HANDSHAKE, "the device offers no virtqueues");
-        }
+        // 3. The virtio 1.0 handshake (§3.1), shared core: accept
+        //    VERSION_1 (the modern driver's one mandatory bit) and
+        //    NOTHING else — no optional blk features in v1; one
+        //    virtqueue minimum; FEATURES_OK must stick.
+        virtio::handshake("storaged", &w, 0, FEATURE_VERSION_1, 1).unwrap_or_else(|e| vfail(e));
 
         // 4. Queue 0: one split virtqueue over three OWNED frames, plus
-        //    a request page (header + status). Allocation pays the phys
-        //    (the queue registers need it); self-map consumes each cap
-        //    (ownership moves to this address space — teardown exact).
-        w16(cfg + CFG_QUEUE_SELECT, 0);
-        let qmax = r16(cfg + CFG_QUEUE_SIZE);
-        if qmax == 0 {
-            fail(EXIT_QUEUE, "the device advertises queue size 0");
-        }
-        let qsz = if qmax > QUEUE_MAX { QUEUE_MAX } else { qmax };
-        w16(cfg + CFG_QUEUE_SIZE, qsz);
-        // Frame order: 0 desc, 1 avail (driver area), 2 used (device
-        // area), 3 request page.
+        //    a request page (header + status). Frame order: 0 desc,
+        //    1 avail (driver area), 2 used (device area), 3 request
+        //    page. Allocation pays the phys (the queue registers need
+        //    it); self-map consumes each cap (ownership moves to this
+        //    address space — teardown exact). The shared core zeroes
+        //    every mapping: rings must START zeroed (idx 0, no
+        //    descriptors, no used entries).
         let mut phys = [0u64; 4];
         let mut va = [0u64; 4];
-        for i in 0..4usize {
-            let slot = SLOT_FRAME_BASE + i as u64;
-            let p = syscall1(SYS_ALLOC_FRAME, slot);
-            if p <= 0 {
-                log_line(|o| {
-                    o.str("storaged: frame alloc ");
-                    o.u64(i as u64);
-                    o.str(" returned ");
-                    o.i64(p);
-                });
-                fail(EXIT_QUEUE, "a ring-frame allocation refused");
-            }
-            phys[i] = p as u64;
-            let m = syscall2(SYS_MAP_MEMORY, slot, 1);
-            if m <= 0 {
-                fail(EXIT_MAP, "a ring-frame self-map refused");
-            }
-            va[i] = m as u64;
-            // The allocator does not zero: rings must START zeroed
-            // (idx 0, no descriptors, no used entries).
-            core::ptr::write_bytes(va[i] as *mut u8, 0, 4096);
-        }
-        // SAFETY: the queue_* registers are mapped common-cfg dwords;
-        // lo half first, per §4.1.4.3.
-        w64(cfg + CFG_QUEUE_DESC, phys[0]);
-        w64(cfg + CFG_QUEUE_DRIVER, phys[1]);
-        w64(cfg + CFG_QUEUE_DEVICE, phys[2]);
+        virtio::alloc_frames("storaged", SLOT_FRAME_BASE, 4, &mut phys, &mut va)
+            .unwrap_or_else(|e| vfail(e));
 
-        // 5. The interrupt story: arm MSI-X entry 0 through the kernel
-        //    (it programs the table — ring 3 never touches it — and
-        //    enables MSI-X in config space), then point queue 0 at
-        //    entry 0. The config-change vector stays NO_VECTOR.
-        let vec = syscall4(SYS_IRQ_RELAY, dev_idx, 0, SLOT_NOTIF, IRQ_BADGE);
-        if !(48..=63).contains(&vec) {
-            log_line(|o| {
-                o.str("storaged: irq_relay returned ");
-                o.i64(vec);
-            });
-            fail(EXIT_RELAY, "SYS_IRQ_RELAY refused");
-        }
-        w16(cfg + CFG_QUEUE_MSIX_VECTOR, 0);
-        let qnoff = u64::from(r16(cfg + CFG_QUEUE_NOTIFY_OFF));
-        let doorbell = win + notify_off + qnoff * notify_mult;
-        w16(cfg + CFG_QUEUE_ENABLE, 1);
-        if r16(cfg + CFG_QUEUE_ENABLE) != 1 {
-            fail(EXIT_QUEUE, "queue_enable did not stick");
-        }
-        w8(
-            cfg + CFG_STATUS,
-            ST_ACK | ST_DRIVER | ST_FEATURES_OK | ST_DRIVER_OK,
-        );
+        // 5. The interrupt story, shared core: arm MSI-X entry 0
+        //    through the kernel (it programs the table — ring 3 never
+        //    touches it — and enables MSI-X in config space), point
+        //    queue 0 at entry 0, resolve the doorbell, enable
+        //    (sticky-checked). The config-change vector stays
+        //    NO_VECTOR. Then DRIVER_OK.
+        let (vq, vec) = virtio::queue_setup(
+            "storaged",
+            &w,
+            &info,
+            0,
+            QUEUE_MAX,
+            RingMem::Split {
+                phys: (phys[0], phys[1], phys[2]),
+                va: (va[0], va[1], va[2]),
+            },
+            0,
+            SLOT_NOTIF,
+            IRQ_BADGE,
+        )
+        .unwrap_or_else(|e| vfail(e));
+        virtio::driver_ok(&w);
+        let (qsz, doorbell) = (vq.qsz, vq.doorbell);
         log_line(|o| {
             o.str("storaged: virtio-blk ready — DRIVER_OK, queue 0 size ");
             o.u64(u64::from(qsz));
@@ -516,15 +344,9 @@ pub unsafe extern "C" fn _start() -> ! {
         // 6. The service loop: recv → zero-copy request → interrupt →
         //    reply. One request in flight at a time (synchronous IPC).
         let mut q = Queue {
-            qsz,
-            desc_va: va[0],
-            avail_va: va[1],
-            used_va: va[2],
+            vq,
             req_va: va[3],
             req_phys: phys[3],
-            doorbell,
-            avail_idx: 0,
-            used_seen: 0,
             completions: 0,
         };
         let mut msg = [0u64; 3];
@@ -630,7 +452,7 @@ pub unsafe extern "C" fn _start() -> ! {
                         o.str(" bytes (completion #");
                         o.u64(q.completions);
                         o.str(", used idx ");
-                        o.u64(u64::from(q.used_seen));
+                        o.u64(u64::from(q.vq.used_seen));
                         o.str(")");
                     });
                 }

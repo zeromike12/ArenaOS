@@ -41,6 +41,7 @@ Rules:
 | [0022](0022-userspace-block-service.md) | The userspace block service — storaged's ring-3 VirtIO driver, the zero-copy block protocol over IPC v1, owned vs. lent Untyped caps, SYS_IRQ_RELAY/DEV_INFO, poison-shutdown lifecycle | accepted |
 | [0023](0023-afs1-filesystem-service.md) | AFS1 — the own-design filesystem v1 (extent data, CoW transactional metadata, ping-pong commit), IPC v1.1 inline messages, the block protocol's in-frame offset, fsd's forwarded-cap zero-copy chain, host-side mkfs + post-boot disk verification (+ M5.4 addendum: persistence, the crash model, fh-as-capability, transactional UNLINK) | accepted |
 | [0024](0024-virtio-net-driver.md) | virtio-net in ring 3 — `netd`, the link-only driver server: two packed virtqueues under the cap-slot budget, two MSI-X relay badges, zero-copy TX over LENT caps, inline-message RX v1, the ARP link proof against slirp, order-independent DEV_INFO discovery, graceful absence (honest SKIP) | accepted |
+| [0025](0025-shared-virtio-core-rngd.md) | The shared virtio core (`userspace/virtio.rs`, ADR-0024's third-driver rule executed) and `rngd`, the zero-copy entropy service: typed stage errors mapped per driver, Packed/Split ring layouts, RNG_GET filling a caller-LENT frame by device DMA, the variance proof (no zeros, no constants, draws differ), bare `virtio-rng-pci` fixture via QEMU's rng-builtin default, registry caps raised to 12 | accepted |
 
 ## Template
 
