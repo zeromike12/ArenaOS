@@ -70,17 +70,20 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "ArenaOS $TAG — build ${GIT_SHA} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo
     echo "Milestone status: M1 8/8, M2 21/21, M3 13/13, M4 9/9, M5 6/6,"
-    echo "M6 1/1 PASS (tools/test_m*.py) + the interactive shell session"
+    echo "M6 2/2 PASS (tools/test_m*.py) + the interactive shell session"
     echo "+ the two-boot persistence proof (test_m5_persist.py: written"
     echo "in boot N, read back byte-exact in boot N+1) + the"
     echo "crash-consistency gate (test_m5_crash.py: five"
     echo "SIGKILL-mid-write rounds, every reboot recovers with NO repair"
     echo "tool — fsd just mounts) + the virtio-net link proof"
     echo "(test_m6.py: a hand-built ARP request goes out over the NIC and"
-    echo "slirp's reply is verified field-by-field — and a boot WITHOUT"
-    echo "the NIC stays green with an honest SKIP);"
-    echo "100-boot stability loop green — every boot ends by typing"
-    echo "'shutdown' into the running shell (ADR-0011/0020/0022/0023/0024)."
+    echo "slirp's reply is verified field-by-field) + the entropy proof"
+    echo "(two 4 KiB draws DMA'd into the client's own pages, asserted"
+    echo "non-zero, non-constant, and different — and a boot WITHOUT"
+    echo "either device stays green with honest SKIPs);"
+    echo "100-boot stability loop green with the full fixture family —"
+    echo "every boot ends by typing 'shutdown' into the running shell"
+    echo "(ADR-0011/0020/0022/0023/0024/0025)."
     echo
     echo "This release has a FILESYSTEM: AFS1 (original design, ADR-0023)"
     echo "served entirely from ring 3 — extent-based data, copy-on-write"
@@ -93,6 +96,14 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "proves it on the wire with a real ARP round trip against QEMU's"
     echo "built-in network. The protocol stack (IP/UDP/TCP services) is"
     echo "Phase 7, built on this driver."
+    echo
+    echo "This release has an ENTROPY SERVICE and a SHARED DRIVER CORE"
+    echo "(ADR-0025): rngd (virtio-rng, ring 3) fills a client's own page"
+    echo "by device DMA — zero copy — and the virtio 1.0 core that"
+    echo "storaged, netd, and rngd all run on now lives in ONE place"
+    echo "(userspace/virtio.rs), extracted mechanically under the full"
+    echo "suite. Watch for 'rngtest: draw A ... vs draw B ...' on serial:"
+    echo "fresh bytes every boot."
     echo
     echo "Run it: see RUNNING.md (bundled) — two cps + one"
     echo "qemu-system-x86_64 command; the VM boots, runs the full"
@@ -186,6 +197,7 @@ qemu-system-x86_64 \\
     -device virtio-blk-pci,drive=scr0 \\
     -netdev user,id=net0 \\
     -device virtio-net-pci,netdev=net0 \\
+    -device virtio-rng-pci \\
     -display none -serial mon:stdio -no-reboot
 \`\`\`
 
@@ -251,11 +263,12 @@ EOF
             -device virtio-blk-pci,drive=scr0 \
             -netdev user,id=net0 \
             -device virtio-net-pci,netdev=net0 \
+            -device virtio-rng-pci \
             -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
             -no-reboot > verify-serial.log )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'm5: RESULT PASS (6/6)' "$verify_dir/verify-serial.log" \
-            && grep -aqF 'm6: RESULT PASS (1/1)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm6: RESULT PASS (2/2)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"
