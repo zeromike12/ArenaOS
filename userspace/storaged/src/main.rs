@@ -317,9 +317,11 @@ pub unsafe extern "C" fn _start() -> ! {
                 phys: (phys[0], phys[1], phys[2]),
                 va: (va[0], va[1], va[2]),
             },
-            0,
-            SLOT_NOTIF,
-            IRQ_BADGE,
+            IrqPlan {
+                msix_entry: 0,
+                slot_notif: SLOT_NOTIF,
+                badge: IRQ_BADGE,
+            },
         )
         .unwrap_or_else(|e| vfail(e));
         virtio::driver_ok(&w);

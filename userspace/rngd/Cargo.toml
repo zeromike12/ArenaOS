@@ -1,0 +1,30 @@
+[package]
+name = "arena-rngd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS entropy service (M6.2, ADR-0025) — the userspace virtio-rng driver built on the shared virtio core. Two images from one crate: `arena-rngd` (spawn-registry image 8, the resident driver: virtio 1.0 handshake on a kernel-granted Mmio window, ONE split virtqueue packed into a single frame, RNG_GET filling a caller-LENT frame by device DMA — zero-copy entropy — with MSI-X completions relayed into SYS_WAIT) and `rngtest` (image 9, the m6 suite's variance-probe client: two 4 KiB draws into separate frames, asserted non-zero, non-constant, and different — real variance, never expected values)."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+# The entropy driver (registry image 8), spawned at boot when the
+# virtio-rng fixture is attached.
+[[bin]]
+name = "arena-rngd"
+path = "src/main.rs"
+
+# The entropy-service test client (registry image 9), spawned only by
+# the m6 suite's rng_service test. Shares the userspace ABI surface
+# (userspace/abi.rs) with every other image via #[path] — one wire
+# contract, all programs.
+[[bin]]
+name = "rngtest"
+path = "src/rngtest.rs"

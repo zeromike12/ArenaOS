@@ -177,6 +177,19 @@ def net_args() -> list[str]:
     ]
 
 
+# ---- the Milestone-6.2 entropy fixture (ADR-0025) ----------------------------
+#
+# Bare `-device virtio-rng-pci`: QEMU auto-creates its `rng-builtin` default
+# backend (the platform CSPRNG via qemu_guest_getrandom) when no -object is
+# given — the default since QEMU 4.1, and portable across host OSes with no
+# host files and no privileges. rngd drives it; rngtest proves real variance.
+
+
+def rng_args() -> list[str]:
+    """QEMU args attaching the entropy source as virtio-rng-pci (M6.2)."""
+    return ["-device", "virtio-rng-pci"]
+
+
 if __name__ == "__main__":
     print("repo root :", REPO_ROOT)
     print("rust bin  :", rust_bin())

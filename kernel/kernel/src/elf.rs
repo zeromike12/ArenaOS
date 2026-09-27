@@ -139,6 +139,25 @@ pub static NETD_IMAGE: &[u8] =
 pub static NETTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/netd/target/x86_64-unknown-none/release/nettest");
 
+/// The entropy service (M6.2, ADR-0025): spawn-registry image 8,
+/// `rngd` — the userspace virtio-rng driver, built on the SHARED
+/// virtio core (`userspace/virtio.rs`). Built by `tools/build.sh`
+/// from `userspace/rngd` under the same strict-subset contract.
+/// Spawned at boot after netd when a virtio-rng function exists; the
+/// m6 suite spawns its own short-lived instance for the rng_service
+/// test.
+pub static RNGD_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/rngd/target/x86_64-unknown-none/release/arena-rngd");
+
+/// The entropy-service test client (M6.2): spawn-registry image 9,
+/// `rngtest` — built from the same crate as `rngd` (shared ABI
+/// module). It takes two 4 KiB draws into SEPARATE frames through the
+/// service and asserts real variance: neither draw all-zero, neither
+/// a single repeated byte, and the two draws different. Only the m6
+/// suite spawns it.
+pub static RNGTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/rngd/target/x86_64-unknown-none/release/rngtest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

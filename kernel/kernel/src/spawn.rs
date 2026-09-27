@@ -35,14 +35,14 @@ use crate::sync::{SyncCell, without_interrupts};
 /// Image-registry capacity. v1 populates two entries (the embedded
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
-pub const MAX_IMAGES: usize = 8;
+pub const MAX_IMAGES: usize = 12;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
 /// excess is a typed refusal).
 pub const MAX_INHERIT: usize = 4;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten).
-pub const MAX_SPAWN_RECS: usize = 8;
+pub const MAX_SPAWN_RECS: usize = 12;
 
 /// The kernel-side image registry (ADR-0019/0020/0022): image 0 is the
 /// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
@@ -56,7 +56,10 @@ pub const MAX_SPAWN_RECS: usize = 8;
 /// suite's filesystem client (create/write/read/close/ls in ring 3).
 /// Image 6 is `netd`, the userspace virtio-net driver (M6.1,
 /// ADR-0024), spawned at boot when the fixture NIC is attached; image
-/// 7 is `nettest`, the m6 suite's ARP link-probe client.
+/// 7 is `nettest`, the m6 suite's ARP link-probe client. Image 8 is
+/// `rngd`, the userspace virtio-rng driver on the shared virtio core
+/// (M6.2, ADR-0025), spawned at boot when an rng function exists;
+/// image 9 is `rngtest`, the m6 suite's variance probe.
 /// A filesystem-backed source slots in here later without changing the
 /// cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
@@ -69,6 +72,8 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         5 => Some(elf::FSTEST_IMAGE),
         6 => Some(elf::NETD_IMAGE),
         7 => Some(elf::NETTEST_IMAGE),
+        8 => Some(elf::RNGD_IMAGE),
+        9 => Some(elf::RNGTEST_IMAGE),
         _ => None,
     }
 }

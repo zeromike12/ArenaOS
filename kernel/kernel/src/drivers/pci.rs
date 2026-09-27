@@ -68,6 +68,9 @@ const VIRTIO_MODERN_BASE: u16 = 0x1040;
 pub const VIRTIO_TYPE_BLOCK: u16 = 2;
 /// VirtIO device type: network card (M6.1, ADR-0024 — `netd` drives it).
 pub const VIRTIO_TYPE_NET: u16 = 1;
+/// VirtIO device type: entropy source (M6.2, ADR-0025 — `rngd` drives
+/// it). Transitional ID 0x1004, modern 0x1044.
+pub const VIRTIO_TYPE_ENTROPY: u16 = 4;
 
 /// PCI capability ID: vendor-specific — VirtIO structures live in these.
 const CAP_ID_VENDOR: u8 = 0x09;
@@ -580,6 +583,8 @@ fn log_virtio(v: &VirtioDevice) {
             "block"
         } else if v.virtio_type == VIRTIO_TYPE_NET {
             "net"
+        } else if v.virtio_type == VIRTIO_TYPE_ENTROPY {
+            "entropy"
         } else {
             "other"
         },

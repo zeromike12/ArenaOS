@@ -210,6 +210,34 @@ pub const NET_FRAME_MAX: u64 = 1514;
 /// be addressing anything).
 pub const NET_FRAME_MIN: u64 = 14;
 
+// ---- the entropy-service protocol (M6.2, ADR-0025) ---------------------------
+//
+// rngd (registry image 8) serves device entropy from virtio-rng's single
+// request queue. A GET LENDs the caller's frame: rngd points ONE
+// device-writable descriptor at the frame's PHYS (through SYS_CAP_PHYS,
+// never a message word) and the device DMAs entropy directly into the
+// caller's own page — zero-copy fill. The completion's used-ring length is
+// the device's own count of bytes written; rngd returns it, and the caller
+// reads its page (already mapped RW in its own space).
+//
+//   SHUTDOWN  no cap; reply w1 = the completions served by interrupt.
+//   GET       w0 = requested bytes (1..=RNG_DRAW_MAX); send cap = the
+//             LENT frame (the device-writable target). Reply w1 = the
+//             bytes the device actually wrote.
+//
+// Reply word 0 is RNG_S_*; word 1 as above.
+pub const RNG_OP_SHUTDOWN: u64 = 0;
+pub const RNG_OP_GET: u64 = 1;
+
+pub const RNG_S_OK: u64 = 0;
+pub const RNG_S_BAD_OP: u64 = (-1i64) as u64;
+pub const RNG_S_BAD_LEN: u64 = (-2i64) as u64;
+pub const RNG_S_NO_BUF: u64 = (-3i64) as u64;
+
+/// The largest single draw RNG_GET accepts — one frame: the caller
+/// LENDs a 4 KiB page and the descriptor covers at most all of it.
+pub const RNG_DRAW_MAX: u64 = 4096;
+
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 
 pub const EXIT_OK: u64 = 42;

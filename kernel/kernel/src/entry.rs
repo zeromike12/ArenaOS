@@ -416,9 +416,26 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
+    // --- M6.2: the production entropy service (ADR-0025) --------------------
+    // rngd parks serving RNG_GET (a caller-LENT frame filled by device
+    // DMA) on its endpoint — the third driver on the shared virtio core.
+    // ABSENT virtio-rng function → the entropy service is simply
+    // offline, exactly as netd's fixture is optional.
+    let _rng_eid = match spawn_rngd() {
+        Ok(Some((_pid, eid))) => Some(eid),
+        Ok(None) => {
+            info!(
+                "kernel",
+                "rngd: no virtio-rng function on bus 0 — the entropy service stays offline (attach it with: -device virtio-rng-pci)"
+            );
+            None
+        }
+        Err(reason) => crate::halt::halt_machine(reason),
+    };
+
     info!(
         "kernel",
-        "milestones 5–6.1 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot) — spawning the shell"
+        "milestones 5–6.2 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames) — spawning the shell"
     );
 
     // --- M4.6: the hand-off (ADR-0020) -----------------------------------
@@ -588,6 +605,52 @@ fn spawn_netd() -> Result<Option<(u64, u32)>, &'static str> {
     info!(
         "kernel",
         "netd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the link-layer network service is live; Phase 7's stack will be its first production client",
+        f.bar_base[bar]
+    );
+    Ok(Some((pid, eid)))
+}
+
+/// Spawn the production entropy service (M6.2, ADR-0025): registry
+/// image 8 with the SAME grant shape as storaged and netd — an `Mmio`
+/// cap over the virtio-rng structure BAR (R|W: the handshake writes),
+/// its own endpoint's serve side (READ), and an interrupt notification
+/// (READ|WRITE, the MSI-X relay badge's target). Returns `Ok(None)`
+/// when bus 0 carries no virtio-rng function: the entropy service is
+/// optional (an honest offline note, never a fake init — the caller
+/// logs the absence).
+fn spawn_rngd() -> Result<Option<(u64, u32)>, &'static str> {
+    let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_ENTROPY) else {
+        return Ok(None);
+    };
+    let f = crate::drivers::pci::pci_function(v.pci_index)
+        .ok_or("rngd: recorded function vanished from the table")?;
+    let bar = v.common.bar as usize;
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 || f.bar_size[bar] < 4096 {
+        return Err("rngd: the virtio structure BAR is unusable");
+    }
+    let eid = crate::ipc::create_endpoint().map_err(|_| "rngd: endpoint table full")?;
+    let nid = crate::ipc::create_notification().map_err(|_| "rngd: notification table full")?;
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Mmio {
+                phys: f.bar_base[bar],
+                pages: (f.bar_size[bar] / 4096) as u32,
+            },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    let pid = crate::spawn::spawn_init(8, &grants, None)?;
+    info!(
+        "kernel",
+        "rngd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the entropy service is live; RNG_GET fills a caller-LENT frame by device DMA",
         f.bar_base[bar]
     );
     Ok(Some((pid, eid)))

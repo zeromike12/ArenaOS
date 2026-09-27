@@ -412,9 +412,11 @@ pub unsafe extern "C" fn _start() -> ! {
                     frame_phys: phys[frame],
                     frame_va: va[frame],
                 },
-                entry,
-                SLOT_NOTIF,
-                badge,
+                IrqPlan {
+                    msix_entry: entry,
+                    slot_notif: SLOT_NOTIF,
+                    badge,
+                },
             )
             .unwrap_or_else(|e| vfail(e));
             qvecs[q as usize] = vec;

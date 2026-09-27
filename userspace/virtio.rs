@@ -447,6 +447,17 @@ pub enum RingMem {
     },
 }
 
+/// The driver's interrupt plan for one queue: which MSI-X table entry
+/// to arm, the cap slot holding the notification the relay delivers
+/// to, and the badge word that names THIS queue in the merged
+/// notification (netd decodes two by bit; single-queue drivers just
+/// compare).
+pub struct IrqPlan {
+    pub msix_entry: u16,
+    pub slot_notif: u64,
+    pub badge: u64,
+}
+
 /// Set up one split virtqueue end to end: select it, clamp its size
 /// to `qmax_cap` (the driver's frame budget — ring areas must fit the
 /// frames it owns), write the three ring addresses (PHYS — the device
@@ -469,9 +480,7 @@ pub unsafe fn queue_setup(
     qidx: u16,
     qmax_cap: u16,
     rings: RingMem,
-    msix_entry: u16,
-    slot_notif: u64,
-    badge: u64,
+    irq: IrqPlan,
 ) -> Result<(Queue, i64), VErr> {
     // SAFETY: mapped common-config registers; volatile accessors.
     unsafe {
@@ -501,21 +510,21 @@ pub unsafe fn queue_setup(
         let vec = syscall4(
             SYS_IRQ_RELAY,
             info.dev_idx,
-            u64::from(msix_entry),
-            slot_notif,
-            badge,
+            u64::from(irq.msix_entry),
+            irq.slot_notif,
+            irq.badge,
         );
         if !(48..=63).contains(&vec) {
             log_line(|o| {
                 o.str(prefix);
                 o.str(": irq_relay(entry ");
-                o.u64(u64::from(msix_entry));
+                o.u64(u64::from(irq.msix_entry));
                 o.str(") returned ");
                 o.i64(vec);
             });
             return Err(VErr::Relay("SYS_IRQ_RELAY refused"));
         }
-        w16(w.cfg + CFG_QUEUE_MSIX_VECTOR, msix_entry);
+        w16(w.cfg + CFG_QUEUE_MSIX_VECTOR, irq.msix_entry);
         let qnoff = u64::from(r16(w.cfg + CFG_QUEUE_NOTIFY_OFF));
         let doorbell = w.win + info.notify_off + qnoff * info.notify_mult;
         w16(w.cfg + CFG_QUEUE_ENABLE, 1);

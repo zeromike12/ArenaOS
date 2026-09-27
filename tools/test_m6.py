@@ -8,6 +8,21 @@ the virtio-blk scratch disk and, since M6.1, the slirp NIC:
 arena_env.net_args).
 
 Current coverage:
+  M6.2 — the shared virtio core + the entropy proof (ADR-0025):
+  * rng_service   — the kernel spawns rngd (registry image 8, the
+                    userspace virtio-rng driver built on the SHARED
+                    virtio core) and rngtest (image 9). The client
+                    takes two 4 KiB draws into SEPARATE frames, each
+                    LENT through IPC so the device DMAs entropy
+                    straight into the client's own page, and asserts
+                    real variance: neither draw all-zero, neither a
+                    single repeated byte, and the two different.
+                    The kernel witnesses the mechanics: exactly two
+                    relay deliveries (one MSI per draw), exact exit
+                    badges, exit 42 from both, frame-exact teardown.
+                    Entropy QUALITY is the host backend's business —
+                    the suite proves transport and fill, honestly.
+
   M6.1 — the virtio-net link proof (ADR-0024):
   * net_service   — the kernel spawns netd (registry image 6, the
                     userspace virtio-net driver: Mmio-cap window
@@ -54,7 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mtest  # noqa: E402
 import arena_env  # noqa: E402
 
-EXPECTED_TESTS = ["net_service"]
+EXPECTED_TESTS = ["net_service", "rng_service"]
 
 
 def check_with_net_extras(serial: str) -> bool:
@@ -82,15 +97,38 @@ def check_with_net_extras(serial: str) -> bool:
     check(serial.count("virtio-net ready") == 2,
           "netd reached DRIVER_OK twice (the suite's instance + the "
           "production service)")
+
+    # --- M6.2: the entropy service (ADR-0025) ---
+    check("rngtest: PASS — two device-filled draws" in serial,
+          "rngtest verified both draws and reported its PASS line")
+    check("2 interrupt deliveries on relay vector 48 (one per draw"
+          in serial,
+          "the kernel counted exactly two hardware deliveries — one "
+          "MSI per draw (no polling)")
+    check("rngd spawned: pid" in serial,
+          "the PRODUCTION rngd spawned at boot with the fixture attached")
+    check(serial.count("virtio-rng ready") == 2,
+          "rngd reached DRIVER_OK twice (the suite's instance + the "
+          "production service)")
+    # The draws are real device entropy: the fingerprints the client
+    # logs must differ from each other (a cached or looping source
+    # would repeat). The in-guest checks already failed the boot if
+    # not; this asserts the EVIDENCE is in the log, not just a claim.
+    m = re.search(r"draw A ([0-9a-f]{8})\u2026 vs draw B ([0-9a-f]{8})\u2026",
+                  serial)
+    check(m is not None and m.group(1) != m.group(2),
+          "the logged draw fingerprints are present and differ "
+          f"({m.group(1)} vs {m.group(2)})" if m else
+          "the logged draw fingerprints are present and differ")
     return ok
 
 
 def boot_without_net() -> bool:
-    """The compatibility-window boot (ADR-0024): NO virtio-net fixture.
+    """The compatibility-window boot (ADR-0024/0025): NO optional fixtures.
 
-    A pre-v0.6.0 QEMU invocation must stay bootable-green with an
-    honest SKIP — the network service was new in v0.6.0, and users'
-    saved commands predate it.
+    A pre-v0.6.0 QEMU invocation must stay bootable-green with honest
+    SKIPs — the network service was new in v0.6.0 and the entropy
+    service in v0.7.0, and users' saved commands predate both.
     """
     label = "test-m6-nonet"
     ok = True
@@ -102,7 +140,7 @@ def boot_without_net() -> bool:
 
     try:
         esp = mtest.build(label)
-        rc, serial, dt = mtest.run_qemu(label, esp, net=False)
+        rc, serial, dt = mtest.run_qemu(label, esp, net=False, rng=False)
     except Exception as e:  # noqa: BLE001 — any harness fault is a FAIL
         print(f"[test-m6-nonet] FAIL: the no-net boot crashed the harness: {e}")
         return False
@@ -121,6 +159,15 @@ def boot_without_net() -> bool:
           "production netd was NOT spawned without the device")
     check("netd: starting" not in serial,
           "no netd instance ran at all without the device")
+    check(re.search(r"^m6:test:rng_service: SKIP \(no virtio-rng device",
+                    serial, re.MULTILINE) is not None,
+          "the rng_service test reported an HONEST SKIP too")
+    check("entropy service stays offline" in serial,
+          "the kernel logged the entropy service offline")
+    check("rngd spawned" not in serial,
+          "production rngd was NOT spawned without the device")
+    check("rngd: starting" not in serial,
+          "no rngd instance ran at all without the device")
     for prior, tests in (("m1", 8), ("m2", 21), ("m3", 13), ("m4", 9),
                          ("m5", 6)):
         check(f"{prior}: RESULT PASS" in serial,
@@ -142,6 +189,6 @@ if __name__ == "__main__":
         if not boot_without_net():
             rc = 1
     print(f"[test-m6] {'=' * 46}")
-    print(f"[test-m6] MILESTONE 6.1: {'PASS' if rc == 0 else 'FAIL'} "
-          "(with-net link proof + no-net honest SKIP)")
+    print(f"[test-m6] MILESTONE 6.1+6.2: {'PASS' if rc == 0 else 'FAIL'} "
+          "(link proof + entropy proof, and honest SKIPs with no fixtures)")
     sys.exit(rc)

@@ -93,6 +93,22 @@ for NETD_ELF in \
     echo "netd image: ${NETD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$NETD_ELF") bytes)"
 done
 
+# M6.2 (ADR-0025): the entropy service — ONE crate, TWO images: rngd
+# (spawn-registry image 8, the resident virtio-rng driver on the shared
+# virtio core) and rngtest (image 9, the m6 suite's variance probe).
+# Both embed into the kernel via include_bytes!.
+echo "== building userspace rngd (userspace/rngd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/rngd" && cargo build --release )
+for RNGD_ELF in \
+    "$REPO_ROOT/userspace/rngd/target/x86_64-unknown-none/release/arena-rngd" \
+    "$REPO_ROOT/userspace/rngd/target/x86_64-unknown-none/release/rngtest"; do
+    if [[ ! -f "$RNGD_ELF" ]]; then
+        echo "error: rngd image not produced at $RNGD_ELF" >&2
+        exit 1
+    fi
+    echo "rngd image: ${RNGD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$RNGD_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

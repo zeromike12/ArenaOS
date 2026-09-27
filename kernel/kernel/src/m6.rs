@@ -47,7 +47,10 @@ enum Outcome {
 }
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Outcome); 1] = [("net_service", test_net_service)];
+    let checks: [(&str, fn() -> Outcome); 2] = [
+        ("net_service", test_net_service),
+        ("rng_service", test_rng_service),
+    ];
     let mut passed = 0u32;
     let mut skipped = 0u32;
     for (name, test) in checks {
@@ -379,6 +382,232 @@ fn net_service_inner() -> NetResult {
     info!(
         "m6",
         "net_service: nettest (pid {c_pid}) sent a hand-built ARP request for 10.0.2.2 and verified the reply byte-for-byte through netd's (pid {s_pid}) endpoint — zero-copy TX (the frame was LENT through IPC, the device DMA'd the caller's own page behind netd's virtio header), {rx_deliveries} RX + {tx_deliveries} TX interrupt deliveries on relay vectors {NET_RELAY_VEC_RX}/{NET_RELAY_VEC_TX} (no polling), both children exited {NET_EXIT_OK}, both exit badges exact, the dead driver's relays were swept by proc::destroy, teardown frame-exact (frames {after})"
+    );
+    Ok(())
+}
+
+// ---- test 2: rng_service (M6.2, ADR-0025) -----------------------------------
+
+/// The rng_service exit badges (distinct from every other suite's — a
+/// merged or crossed badge must fail the exactness check, not pass it).
+const RNGTEST_EXIT_BADGE: u64 = 0x727C;
+const RNGD_EXIT_BADGE: u64 = 0x72D0;
+
+/// rngd arms ONE MSI-X entry (entry 0, the request queue). The
+/// net_service test above released and swept both vectors it armed, so
+/// the relay pool's first free vector is 48 again — deterministic, and
+/// asserted: exactly two counted hardware deliveries (one per draw).
+const RNG_RELAY_VEC: u64 = 48;
+
+/// rngtest's verified-success exit (the house number, abi's 42).
+const RNG_EXIT_OK: u64 = 42;
+
+fn test_rng_service() -> Outcome {
+    match rng_service_inner() {
+        Ok(()) => Outcome::Pass,
+        Err(SkipOrFail::Skip(reason)) => Outcome::Skip(reason),
+        Err(SkipOrFail::Fail(reason)) => Outcome::Fail(reason),
+    }
+}
+
+fn rng_service_inner() -> NetResult {
+    let baseline = frames::free_frames();
+
+    // The fixture is OPTIONAL (the ADR-0024 discipline, kept): no
+    // virtio-rng function on the bus → an honest SKIP, never a fake
+    // pass. Boots without the device stay green.
+    let Some(v) = pci::find_virtio(pci::VIRTIO_TYPE_ENTROPY) else {
+        return Err(SkipOrFail::Skip(
+            "no virtio-rng device — attach it with: -device virtio-rng-pci",
+        ));
+    };
+    let Some(f) = pci::pci_function(v.pci_index) else {
+        return Err(fail("recorded function vanished from the table"));
+    };
+    let bar = v.common.bar as usize;
+    let bar_phys = f.bar_base[bar];
+    let bar_pages = (f.bar_size[bar] / 4096) as u32;
+    if bar_phys == 0 || bar_pages == 0 || bar_pages > 16 {
+        return Err(fail("the structure BAR is unusable for a window grant"));
+    }
+
+    // The service objects: one endpoint (driver serves, client calls)
+    // and three notifications — the driver's interrupt relay target and
+    // one exit-badge channel per child.
+    let eid = ipc::create_endpoint().map_err(|_| fail("endpoint table full"))?;
+    let nid_irq = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_rngd = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+
+    // rngd (registry image 8): the same grant shape as storaged and
+    // netd — slot 0 = the device window (Mmio, READ|WRITE), slot 1 =
+    // the serve side of the endpoint, slot 2 = the interrupt
+    // notification. Everything else the driver discovers through
+    // SYS_DEV_INFO.
+    let rngd_grants = [
+        Cap {
+            obj: CapObj::Mmio {
+                phys: bar_phys,
+                pages: bar_pages,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_READ,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_irq },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+    ];
+    let s_pid = crate::spawn::spawn_init(8, &rngd_grants, Some((nid_rngd, RNGD_EXIT_BADGE)))
+        .map_err(|_| fail("rngd (image 8) spawn failed"))?;
+    // rngtest (image 9): slot 0 = the call side of the same endpoint.
+    let client_grants = [Cap {
+        obj: CapObj::Endpoint { eid },
+        rights: cap::RIGHTS_WRITE,
+    }];
+    let c_pid = crate::spawn::spawn_init(9, &client_grants, Some((nid_client, RNGTEST_EXIT_BADGE)))
+        .map_err(|_| fail("rngtest (image 9) spawn failed"))?;
+    info!(
+        "m6",
+        "rng_service: rngd pid {s_pid} (window bar{} phys {bar_phys:#x} {bar_pages} pages, endpoint {eid} serve side, irq notification {nid_irq}), rngtest pid {c_pid} (endpoint {eid} call side) — running two device-filled draws with variance checks",
+        bar
+    );
+
+    // Run both children to completion (client draws twice, checks
+    // variance, poisons; driver replies to the poison and exits). The
+    // bound is wall-clock: each draw is a handful of context switches
+    // plus one MSI from the host's entropy backend.
+    if let Err(reason) = drain_interruptible() {
+        error!(
+            "m6",
+            "rng_service drain failed: rngd threads={}, client threads={}, relay deliveries (vector {RNG_RELAY_VEC})={}",
+            sched::proc_live_threads(s_pid),
+            sched::proc_live_threads(c_pid),
+            relay::delivery_count(RNG_RELAY_VEC),
+        );
+        return Err(fail(reason));
+    }
+
+    // Both exit badges arrived, exact and unmerged.
+    let bc = ipc::wait(nid_client).map_err(|_| fail("the client's exit badge never arrived"))?;
+    if bc != RNGTEST_EXIT_BADGE {
+        return Err(fail("the client's exit badge is not the granted word"));
+    }
+    let bs = ipc::wait(nid_rngd).map_err(|_| fail("the driver's exit badge never arrived"))?;
+    if bs != RNGD_EXIT_BADGE {
+        return Err(fail("the driver's exit badge is not the granted word"));
+    }
+
+    // Both images exited with THEIR success code — the client only
+    // exits 42 after both draws verified (full length, non-zero,
+    // non-constant, mutually different) and the driver's completion
+    // count came back exactly two; the driver only after replying to
+    // the poison request.
+    let recs = crate::spawn::records_snapshot();
+    let tid_of = |pid: u64| -> Option<u64> {
+        recs.iter()
+            .flatten()
+            .find(|&&(p, _)| p == pid)
+            .map(|&(_, t)| t)
+    };
+    let (Some(c_tid), Some(s_tid)) = (tid_of(c_pid), tid_of(s_pid)) else {
+        return Err(fail(
+            "a spawned child has no record (spawn registry lost it)",
+        ));
+    };
+    let client_status = syscall::exit_status_of(c_tid);
+    let driver_status = syscall::exit_status_of(s_tid);
+    if client_status != Some(RNG_EXIT_OK) {
+        return Err(fail(match client_status {
+            Some(52) => "client: frame alloc/copy/map refused (52)",
+            Some(53) => "client: an RNG_GET call was refused (53)",
+            Some(54) => "client: the driver reported a GET error status (54)",
+            Some(55) => "client: the device wrote fewer bytes than requested (55)",
+            Some(56) => {
+                "client: a draw FAILED the variance checks — all-zero, constant, or two identical draws (56)"
+            }
+            Some(57) => {
+                "client: the poison shutdown was refused or its completion count was not two (57)"
+            }
+            Some(other) if (80..=88).contains(&other) => {
+                "driver-side failure code surfaced on the client (80..88)"
+            }
+            _ => "the client exited with a code from nowhere in the contract",
+        }));
+    }
+    if driver_status != Some(RNG_EXIT_OK) {
+        return Err(fail(match driver_status {
+            Some(80) => "driver: SYS_DEV_INFO refused or short (80)",
+            Some(81) => "driver: a self-map (device window or ring frame) refused (81)",
+            Some(82) => {
+                "driver: the virtio handshake failed — FEATURES_OK did not stick or VERSION_1 missing (82)"
+            }
+            Some(83) => "driver: the virtqueue setup failed (83)",
+            Some(84) => "driver: SYS_IRQ_RELAY refused (84)",
+            Some(85) => "driver: SYS_IPC_RECV refused (85)",
+            Some(86) => "driver: SYS_CAP_PHYS on the landed buffer refused (86)",
+            Some(87) => "driver: a completion never arrived or was malformed (87)",
+            Some(88) => "driver: SYS_IPC_REPLY refused (88)",
+            Some(97) => "driver: the console refused an output write (97)",
+            Some(99) => "driver: the panic handler ran (99)",
+            _ => "the driver exited with a code from nowhere in the contract",
+        }));
+    }
+
+    // The interrupt story, counted on the machine side: rngd armed one
+    // MSI-X entry, and EXACTLY TWO hardware deliveries walked the
+    // stub→relay→notify chain — one per draw. No polling anywhere.
+    let deliveries = relay::delivery_count(RNG_RELAY_VEC);
+    if deliveries != 2 {
+        error!(
+            "m6",
+            "rng_service: relay vector {RNG_RELAY_VEC} delivered {deliveries} interrupts, expected 2 (one per draw)"
+        );
+        return Err(fail(
+            "the relay vector did not deliver exactly two device interrupts (one per draw)",
+        ));
+    }
+    if !relay::registered(RNG_RELAY_VEC) {
+        return Err(fail(
+            "the driver's relay registration vanished while the process lived",
+        ));
+    }
+
+    // Teardown: destroying the dead driver must SWEEP its relay vector,
+    // then both address spaces come back frame-exact — the driver's ONE
+    // ring frame, the client's TWO draw frames, every page table, and
+    // nothing else (the device window and the LENT landed caps free
+    // nothing, by construction).
+    proc::destroy(s_pid)?;
+    if relay::registered(RNG_RELAY_VEC) {
+        return Err(fail(
+            "proc::destroy did not sweep the dead driver's relay vector",
+        ));
+    }
+    proc::destroy(c_pid)?;
+    crate::spawn::forget(s_pid).map_err(|_| fail("driver spawn record forget refused"))?;
+    crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
+    ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_irq).map_err(|_| fail("irq notification teardown refused"))?;
+    ipc::destroy_notification(nid_client)
+        .map_err(|_| fail("client notification teardown refused"))?;
+    ipc::destroy_notification(nid_rngd)
+        .map_err(|_| fail("driver notification teardown refused"))?;
+
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m6",
+            "rng_service teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err(fail("rng-service teardown is not frame-exact"));
+    }
+    info!(
+        "m6",
+        "rng_service: rngtest (pid {c_pid}) drew two 4 KiB frames of device entropy through rngd's (pid {s_pid}) endpoint — the device DMA'd directly into the client's OWN pages (each frame LENT through IPC, zero copy), both draws non-zero, non-constant, and mutually different, {deliveries} interrupt deliveries on relay vector {RNG_RELAY_VEC} (one per draw, no polling), both children exited {RNG_EXIT_OK}, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames {after})"
     );
     Ok(())
 }

@@ -68,6 +68,7 @@ DEFAULT_FEED: list[tuple[bytes, int, bytes]] = [(b"arena>", 1, b"shutdown\r")]
 def run_qemu(label: str, esp: Path,
              feed: list[tuple[bytes, int, bytes]] | None = None,
              net: bool = True,
+             rng: bool = True,
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     vars_img = bdir / "ovmf-vars.img"
@@ -95,6 +96,10 @@ def run_qemu(label: str, esp: Path,
         # net=False reproduces a pre-v0.6.0 invocation (the honest-SKIP
         # compatibility window test).
         + (arena_env.net_args() if net else [])
+        # Milestone-6.2 fixture (ADR-0025): the entropy source for
+        # rngd's variance proof. rng=False reproduces an invocation
+        # without it (the honest-SKIP compatibility window test).
+        + (arena_env.rng_args() if rng else [])
         + [
             "-display", "none",
             # Serial on a stdio chardev: output captured to the log file,
@@ -188,9 +193,11 @@ def boot(label: str, esp: Path,
             "-drive", f"format=raw,file={esp}",
             "-drive", f"file={scratch},format=raw,if=none,id=scr0",
             "-device", "virtio-blk-pci,drive=scr0",
-            # M6 fixture (ADR-0024): the slirp NIC — multi-boot scripts
-            # (persistence, crash) carry it too so every boot is uniform.
+            # M6 fixtures (ADR-0024/0025): the slirp NIC and the entropy
+            # source — multi-boot scripts (persistence, crash) carry them
+            # too so every boot is uniform.
             *arena_env.net_args(),
+            *arena_env.rng_args(),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",
             "-serial", "chardev:con0",
