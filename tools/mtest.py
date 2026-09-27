@@ -24,10 +24,19 @@ Verdict logic (three distinct failure modes):
   * nonzero QEMU exit  -> kernel crashed / reset loop
   * markers            -> kernel ran but a self-test failed or panicked
 
+Since M6.3 (ADR-0026) a boot has a SECOND input channel: the virtual
+keyboard. `keys` is a typing script in the same (marker, count,
+payload) shape, injected through QMP (tools/qmp.py) one keystroke at a
+time — the path a user's keyboard in a QEMU window takes. The default
+script types the m6 input fixture, because that suite's test waits on
+real key events rather than answering itself.
+
 Fixtures (arena_env): every boot attaches the fresh AFS1-formatted
-scratch disk as virtio-blk-pci (M5, ADR-0021/0023) and — since M6.1
-(ADR-0024) — the slirp NIC as virtio-net-pci (run_qemu(net=False)
-reproduces a pre-v0.6.0 invocation for the honest-SKIP test).
+scratch disk as virtio-blk-pci (M5, ADR-0021/0023), the slirp NIC as
+virtio-net-pci (M6.1, ADR-0024), the entropy source (M6.2, ADR-0025),
+and the virtio keyboard (M6.3, ADR-0026). `run_qemu(net=False,
+rng=False, kbd=False)` reproduces a pre-v0.6.0 invocation for the
+honest-SKIP compatibility tests.
 
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
@@ -42,6 +51,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arena_env  # noqa: E402
+import qmp  # noqa: E402
 
 TIMEOUT_S = 120  # TCG is slow; a healthy boot takes <10s
 MEM_MIB = 512
@@ -64,13 +74,64 @@ def build(label: str) -> Path:
 # machine down (ADR-0020 — boots end at the shell, never by themselves).
 DEFAULT_FEED: list[tuple[bytes, int, bytes]] = [(b"arena>", 1, b"shutdown\r")]
 
+# A typing script item is (marker bytes, occurrence count, text): once
+# the marker has appeared that many times on the serial, the text is
+# typed on the VIRTUAL KEYBOARD through QMP (M6.3, ADR-0026) — one
+# keystroke at a time, exactly as a user would. Marker-paced, never
+# sleep-based: the usual harness discipline, applied to a second
+# channel.
+KeyScript = list[tuple[bytes, int, str]]
+
+# The default typing script, symmetric with DEFAULT_FEED: the m6 suite's
+# input_service test blocks until REAL key events arrive (unlike the net
+# and rng fixtures, which answer by themselves), so every boot that
+# attaches the keyboard must also type on it. `arena` is the fixture
+# sequence inputtest verifies byte-for-byte — which means every
+# milestone boot now proves the whole keyboard chain too (device
+# interrupt -> evdev event -> keymap -> IPC), just as every boot has
+# proved the serial console chain since M4.6.
+DEFAULT_KEYS: KeyScript = [(b"inputd: virtio-input ready", 1, "arena")]
+
+
+def _typist(script: KeyScript, serial_log: Path, sock: Path,
+            stop: threading.Event, label: str) -> None:
+    """Watch the serial log and type each script item at its marker."""
+    if not script:
+        return
+    session: qmp.Qmp | None = None
+    try:
+        for marker, nth, text in script:
+            while not stop.is_set():
+                try:
+                    data = serial_log.read_bytes()
+                except OSError:
+                    data = b""
+                if data.count(marker) >= nth:
+                    break
+                time.sleep(0.02)
+            if stop.is_set():
+                return
+            if session is None:
+                session = qmp.Qmp(str(sock))
+            session.type_text(text)
+    except Exception as e:  # noqa: BLE001 — a typist fault must not hang the run
+        print(f"[{label}] NOTE: the QMP typist failed: {e}")
+    finally:
+        if session is not None:
+            session.close()
+
 
 def run_qemu(label: str, esp: Path,
              feed: list[tuple[bytes, int, bytes]] | None = None,
              net: bool = True,
              rng: bool = True,
+             kbd: bool = True,
+             keys: KeyScript | None = None,
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
+    qmp_sock = bdir / f"qmp-{label}.sock"
+    if keys is None:
+        keys = DEFAULT_KEYS if kbd else []
     vars_img = bdir / "ovmf-vars.img"
     shutil.copyfile(arena_env.ovmf_vars_template(), vars_img)  # fresh NVRAM every run
     serial_log = bdir / "serial.log"
@@ -100,6 +161,12 @@ def run_qemu(label: str, esp: Path,
         # rngd's variance proof. rng=False reproduces an invocation
         # without it (the honest-SKIP compatibility window test).
         + (arena_env.rng_args() if rng else [])
+        # Milestone-6.3 fixture (ADR-0026): the virtual keyboard inputd
+        # drives, plus the QMP control socket the typist injects
+        # keystrokes through. kbd=False reproduces an invocation
+        # without a keyboard (the honest-SKIP compatibility window).
+        + (arena_env.input_args() if kbd else [])
+        + arena_env.qmp_args(qmp_sock)
         + [
             "-display", "none",
             # Serial on a stdio chardev: output captured to the log file,
@@ -139,6 +206,11 @@ def run_qemu(label: str, esp: Path,
 
         th = threading.Thread(target=feeder, daemon=True)
         th.start()
+        typist = threading.Thread(
+            target=_typist, args=(keys, serial_log, qmp_sock, stop,
+                                  label),
+            daemon=True)
+        typist.start()
         try:
             rc = proc.wait(timeout=TIMEOUT_S)
         except subprocess.TimeoutExpired:
@@ -177,6 +249,7 @@ def boot(label: str, esp: Path,
     bdir = arena_env.build_dir()
     vars_img = bdir / f"ovmf-vars-{label}.img"
     shutil.copyfile(arena_env.ovmf_vars_template(), vars_img)
+    qmp_sock = bdir / f"qmp-{label}.sock"
     serial_log = bdir / f"serial-{label}.log"
     if serial_log.exists():
         serial_log.unlink()
@@ -198,6 +271,8 @@ def boot(label: str, esp: Path,
             # too so every boot is uniform.
             *arena_env.net_args(),
             *arena_env.rng_args(),
+            *arena_env.input_args(),
+            *arena_env.qmp_args(qmp_sock),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",
             "-serial", "chardev:con0",
@@ -250,6 +325,13 @@ def boot(label: str, esp: Path,
 
         th = threading.Thread(target=feeder, daemon=True)
         th.start()
+        # The keyboard fixture: these boots run the full suite too, so
+        # they type the input_service sequence like every other boot.
+        typist = threading.Thread(
+            target=_typist, args=(DEFAULT_KEYS, serial_log, qmp_sock, stop,
+                                  label),
+            daemon=True)
+        typist.start()
         try:
             rc: int | None = proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
@@ -327,7 +409,8 @@ def evaluate(label: str, milestone: str, expected_tests: list[str],
 
 
 def run_milestone(milestone: str, expected_tests: list[str],
-                  feed: list[tuple[bytes, int, bytes]] | None = None) -> int:
+                  feed: list[tuple[bytes, int, bytes]] | None = None,
+                  keys: KeyScript | None = None) -> int:
     """Full pipeline for one milestone's markers. Returns process exit code."""
     label = f"test-{milestone}"
     try:
@@ -336,7 +419,7 @@ def run_milestone(milestone: str, expected_tests: list[str],
         print(f"[{label}] FAIL: kernel build failed:\n{e.stdout}\n{e.stderr}")
         return 1
     try:
-        rc, serial, dt = run_qemu(label, esp, feed)
+        rc, serial, dt = run_qemu(label, esp, feed, keys=keys)
     except subprocess.TimeoutExpired:
         print(f"[{label}] FAIL: VM did not terminate within {TIMEOUT_S}s (kernel hang?)")
         return 1

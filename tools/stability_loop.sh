@@ -2,10 +2,14 @@
 # Boot-stability loop (docs/TESTING.md): boot the *prebuilt* ESP image N
 # times with fresh NVRAM each run and require the full green verdict on
 # every single boot — m2 RESULT PASS (21/21), m3 RESULT PASS (13/13), m4
-# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (2/2), the
+# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (3/3), the
 # canonical clean-halt line, no PANIC, QEMU exit 0, under a per-boot
-# timeout. Both fixtures ride along (the AFS1 scratch disk and, since
-# M6.1, the slirp NIC) — stability means the SHIPPING configuration.
+# timeout. Every fixture rides along (the AFS1 scratch disk, the slirp
+# NIC, the entropy source, and — since M6.3 — the virtio keyboard) —
+# stability means the SHIPPING configuration. Boots therefore use BOTH
+# input channels: `shutdown` typed on the serial chardev, and the m6
+# input fixture typed on the KEYBOARD through QMP (tools/qmp.py), each
+# paced by its own serial marker.
 #
 # A single green boot proves correctness; a hundred prove the kernel is
 # not winning a race (fresh-vars nondeterminism, TCG timing jitter).
@@ -39,17 +43,23 @@ print(f"OVMF_VARS={arena_env.ovmf_vars_template()}")
 print(f"SCRATCH=({' '.join(repr(x) for x in arena_env.scratch_disk_args())})")
 print(f"NET=({' '.join(repr(x) for x in arena_env.net_args())})")
 print(f"RNG=({' '.join(repr(x) for x in arena_env.rng_args())})")
+print(f"KBD=({' '.join(repr(x) for x in arena_env.input_args())})")
 EOF
 )"
 
 VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
+QMP_SOCK="$REPO_ROOT/build/qmp-stability.sock"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 RESULT_LINE_M4='m4: RESULT PASS (9/9)'
 RESULT_LINE_M5='m5: RESULT PASS (6/6)'
-RESULT_LINE_M6='m6: RESULT PASS (2/2)'
+RESULT_LINE_M6='m6: RESULT PASS (3/3)'
+# The keystrokes the m6 input_service test waits for, typed on the
+# virtual keyboard once inputd announces DRIVER_OK.
+KEY_MARKER='inputd: virtio-input ready'
+KEY_TEXT='arena'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -67,8 +77,13 @@ for i in $(seq 1 "$N"); do
     # filename — a disk inherited from the previous boot answers
     # FS_ERR_EXISTS and fails the suite by design).
     ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk()' >/dev/null )
-    rm -f "$SERIAL"
+    rm -f "$SERIAL" "$QMP_SOCK"
     rc=0
+    # The keyboard typist: waits for inputd's ready marker on the
+    # serial log, then types the input fixture through QMP. Bounded by
+    # the boot timeout so a dead boot can never leave it behind.
+    ( python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
+        "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 & )
     # ADR-0020: a healthy boot no longer halts by itself — it ends at
     # the shell. The feeder subshell types 'shutdown' when the shell's
     # prompt appears (marker-paced, never sleep-based), then holds
@@ -93,6 +108,8 @@ for i in $(seq 1 "$N"); do
         "${SCRATCH[@]}" \
         "${NET[@]}" \
         "${RNG[@]}" \
+        "${KBD[@]}" \
+        -qmp unix:"$QMP_SOCK",server=on,wait=off \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
         -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
 

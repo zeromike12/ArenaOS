@@ -33,6 +33,7 @@ pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;
 pub const SYS_CAP_COPY: u64 = 21;
 pub const SYS_DEV_INFO: u64 = 22;
+pub const SYS_CONSOLE_PUSH: u64 = 23;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 
@@ -237,6 +238,52 @@ pub const RNG_S_NO_BUF: u64 = (-3i64) as u64;
 /// The largest single draw RNG_GET accepts — one frame: the caller
 /// LENDs a 4 KiB page and the descriptor covers at most all of it.
 pub const RNG_DRAW_MAX: u64 = 4096;
+
+// ---- the input protocol (M6.3, ADR-0026) ------------------------------------
+//
+// inputd serves DECODED key bytes, not raw evdev events: the keymap is
+// the driver's business, and every client speaks the same ASCII the
+// console line discipline does.
+//
+// Request words:  w0 = op, w1 = op-specific
+//   READ      w1 = max bytes wanted (1..=INPUT_READ_MAX). Blocks until
+//             at least one key is buffered; replies with the count in
+//             word 1 and the bytes in the reply's INLINE MESSAGE.
+//   SHUTDOWN  the poison request: inputd replies (word 1 = the count of
+//             interrupt-delivered event batches) and exits.
+// Reply word 0 is INPUT_S_*.
+pub const INPUT_OP_SHUTDOWN: u64 = 0;
+pub const INPUT_OP_READ: u64 = 1;
+
+pub const INPUT_S_OK: u64 = 0;
+pub const INPUT_S_BAD_OP: u64 = (-1i64) as u64;
+pub const INPUT_S_BAD_LEN: u64 = (-2i64) as u64;
+/// A READ was abandoned because nobody typed: the service's SPAWNER
+/// decided to stop waiting (see [`INPUT_BADGE_GIVE_UP`]). Not an
+/// error — an honest "there is nothing to give you".
+pub const INPUT_S_NO_KEYS: u64 = (-3i64) as u64;
+
+/// The relay notification carries the device's interrupt badge — and
+/// ONE other word, by contract: whoever spawned inputd (and therefore
+/// owns the write side of that notification) may send
+/// `INPUT_BADGE_GIVE_UP` to abandon a pending READ. A keyboard driver
+/// cannot time out by itself — a key that never comes is
+/// indistinguishable from one that comes later — so the decision to
+/// stop waiting belongs to the supervisor that knows whether anyone is
+/// expected to type. The m6 suite uses it so that a boot with a
+/// keyboard attached and nobody at it reports an honest SKIP instead of
+/// hanging (ADR-0026).
+pub const INPUT_BADGE_GIVE_UP: u64 = 0x7302;
+
+/// Largest READ the service answers in one reply — the inline message
+/// is MSG_BYTES (64) and the count rides in a register, so the whole
+/// payload fits with room to spare.
+pub const INPUT_READ_MAX: u64 = 48;
+
+/// Largest byte run one `SYS_CONSOLE_PUSH` accepts (mirrors the
+/// kernel's own bound: a keyboard produces bytes one keystroke at a
+/// time, so this is generous).
+pub const CONSOLE_PUSH_MAX: u64 = 64;
 
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 

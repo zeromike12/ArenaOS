@@ -433,9 +433,28 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
+    // --- M6.3: the production input service (ADR-0026) ----------------------
+    // inputd decodes virtio-input keycodes and pushes the bytes into
+    // the kernel's console line discipline through a ConsoleInput-gated
+    // SYS_CONSOLE_PUSH — the SAME queue the COM1 RX ISR feeds, so the
+    // shell needs no changes and serial stays live beside the keyboard.
+    // ABSENT virtio-input function → typing simply is not available and
+    // the serial console remains the only input, exactly as before.
+    let _input_pid = match spawn_inputd() {
+        Ok(Some(pid)) => Some(pid),
+        Ok(None) => {
+            info!(
+                "kernel",
+                "inputd: no virtio-input function on bus 0 — the keyboard service stays offline (attach it with: -device virtio-keyboard-pci)"
+            );
+            None
+        }
+        Err(reason) => crate::halt::halt_machine(reason),
+    };
+
     info!(
         "kernel",
-        "milestones 5–6.2 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames) — spawning the shell"
+        "milestones 5–6.3 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port) — spawning the shell"
     );
 
     // --- M4.6: the hand-off (ADR-0020) -----------------------------------
@@ -654,6 +673,62 @@ fn spawn_rngd() -> Result<Option<(u64, u32)>, &'static str> {
         f.bar_base[bar]
     );
     Ok(Some((pid, eid)))
+}
+
+/// Spawn the production input service (M6.3, ADR-0026): registry image
+/// 10 with the three-cap driver shape every service gets — an `Mmio`
+/// cap over the virtio-input structure BAR (R|W), its own endpoint's
+/// serve side (READ), and an interrupt notification (READ|WRITE) —
+/// plus a FOURTH grant no other driver holds: `ConsoleInput` (WRITE),
+/// the singleton authority to inject bytes into the console's line
+/// discipline. That cap is both the permission and the mode switch:
+/// inputd probes for it with a zero-length `SYS_CONSOLE_PUSH` and,
+/// finding it, runs as the console feeder instead of an IPC service.
+/// Exactly ONE process ever receives it — this one.
+///
+/// Returns `Ok(None)` when bus 0 carries no virtio-input function: the
+/// keyboard is optional (an honest offline note, never a fake init),
+/// and the serial console keeps the machine fully usable without it.
+fn spawn_inputd() -> Result<Option<u64>, &'static str> {
+    let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_INPUT) else {
+        return Ok(None);
+    };
+    let f = crate::drivers::pci::pci_function(v.pci_index)
+        .ok_or("inputd: recorded function vanished from the table")?;
+    let bar = v.common.bar as usize;
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 || f.bar_size[bar] < 4096 {
+        return Err("inputd: the virtio structure BAR is unusable");
+    }
+    let eid = crate::ipc::create_endpoint().map_err(|_| "inputd: endpoint table full")?;
+    let nid = crate::ipc::create_notification().map_err(|_| "inputd: notification table full")?;
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Mmio {
+                phys: f.bar_base[bar],
+                pages: (f.bar_size[bar] / 4096) as u32,
+            },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::ConsoleInput,
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    let pid = crate::spawn::spawn_init(10, &grants, None)?;
+    info!(
+        "kernel",
+        "inputd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=ConsoleInput/W) — the keyboard is live; keystrokes feed the shell's line discipline beside the serial port",
+        f.bar_base[bar]
+    );
+    Ok(Some(pid))
 }
 
 /// We are running in the kernel view: RIP and RSP are higher-half, CR3 is

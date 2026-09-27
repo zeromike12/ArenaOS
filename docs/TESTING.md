@@ -206,6 +206,56 @@ either kind, and m1–m5 green in the same boot. All four fixture
 combinations (both / net-only / rng-only / neither) are verified to
 boot green.
 
+### The second input channel: the virtual keyboard (M6.3, ADR-0026)
+
+Until v0.8.0 every automated boot drove ArenaOS through ONE channel —
+bytes written to the serial chardev. The input milestone adds a
+second: `arena_env.input_args()` attaches `-device
+virtio-keyboard-pci`, `arena_env.qmp_args()` exposes a QMP unix
+socket, and `tools/qmp.py` types on that keyboard the same way a
+person at a QEMU window does (press/release pairs, shift held around
+capitals, one keystroke per QMP command). It is TEST infrastructure
+only — nothing inside ArenaOS knows QMP exists; the guest sees device
+interrupts and evdev events.
+
+A typing script has the same shape as a serial feed — `(marker,
+count, text)` — and is injected once the marker has appeared that many
+times: **marker-paced, never sleep-based**, the discipline the serial
+feeder has always used. `mtest.DEFAULT_KEYS` types the m6 input
+fixture at inputd's DRIVER_OK marker, so every boot in the gate now
+exercises the whole keyboard chain (device interrupt → evdev event →
+keymap → IPC), just as every boot has exercised the serial console
+chain since M4.6.
+
+`m6:test:input_service` spawns inputd (image 10) and inputtest (image
+11), and deliberately WITHHOLDS the `ConsoleInput` capability from the
+driver — so the same binary that feeds the console in production runs
+as an IPC service here, and the capability probe that chooses between
+them is itself under test. The harness types `arena`; the client reads
+the DECODED bytes back through the service and verifies them
+byte-for-byte. The interrupt assertion is a LOWER bound (≥1 delivery),
+unlike net's and rng's exact counts: the device coalesces events per
+`EV_SYN`, so an exact number would assert QEMU's batching policy
+rather than our driver's behavior.
+
+**A keyboard is the one fixture that needs a typist**, which makes
+"nobody typed" a real configuration rather than an error. The suite
+waits a bounded window (~1 s of HPET wall clock) and then sends
+inputd's spawner-only give-up badge; the children wind themselves up
+and the test reports an honest SKIP. `test_m6.py`'s THIRD boot asserts
+exactly that: keyboard attached, `keys=[]`, and the machine must still
+reach the shell prompt, halt cleanly, and report SKIP — never FAIL,
+never a fake PASS. Attaching a device must never make a machine
+unusable.
+
+`tools/test_m6_typing.py` is the milestone's real claim, asserted: a
+boot with `feed=[]` — the serial input channel completely dead — where
+`echo Hello-From-The-Keyboard` (capitals prove modifier tracking),
+`psX<backspace>` (the line discipline erases the typo before the shell
+reads the line, so `ps` runs and `psX` never does), and `shutdown` are
+all typed on the virtual keyboard. The machine halts because someone
+typed it.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

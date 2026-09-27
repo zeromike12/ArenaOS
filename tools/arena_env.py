@@ -190,6 +190,32 @@ def rng_args() -> list[str]:
     return ["-device", "virtio-rng-pci"]
 
 
+# ---- the Milestone-6.3 keyboard fixture (ADR-0026) --------------------------
+#
+# `virtio-keyboard-pci`: QEMU forces MODERN virtio on the input class, so the
+# guest sees PCI id 0x1052 (0x1040 + type 18) with no transitional alias. The
+# device speaks 8-byte evdev events on a device-writable event queue, and the
+# harness types on it through QMP (tools/qmp.py) — the same path a user's
+# keystrokes in a QEMU window take. NEW in v0.8.0: boots without it stay green
+# (the m6 suite reports an honest SKIP and the serial console is unaffected).
+
+
+def input_args() -> list[str]:
+    """QEMU args attaching the virtual keyboard (M6.3 fixture)."""
+    return ["-device", "virtio-keyboard-pci"]
+
+
+def qmp_args(sock: Path) -> list[str]:
+    """QEMU args exposing the QMP control socket the typist uses.
+
+    Test-only: nothing inside ArenaOS is aware of it. `wait=off` keeps
+    the boot from blocking on a client that may never connect.
+    """
+    if sock.exists():
+        sock.unlink()
+    return ["-qmp", f"unix:{sock},server=on,wait=off"]
+
+
 if __name__ == "__main__":
     print("repo root :", REPO_ROOT)
     print("rust bin  :", rust_bin())

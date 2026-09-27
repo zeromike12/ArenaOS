@@ -533,15 +533,51 @@ restart under fault injection, capability re-grant tests.
       must come first. Gates: run_tests 11/11, clippy + fmt clean on
       all three drivers, entropy verified different across boots, and
       the stability loop 100/100 with the full fixture family.
-- [ ] **6.3 virtio-input keyboard: `inputd` + live typing.** ADR
-      decides the transport (virtio-input-hid expected; i8042 PS/2
-      as the documented fallback if virtio-input disappoints). The
-      shell's console read path switches from the kernel's serial
-      poll to event-driven key events from the input server — users
-      type into `arena>` in real QEMU sessions. Done when: keystrokes
-      drive the shell interactively (harness feeds via the same
-      device), the serial console remains for logs/panic.
-- [ ] **6.4 virtio-console: `consoled`.** A second console channel
+- [x] 6.3 **virtio-input keyboard: `inputd` + live typing** — DONE
+      (ADR-0026). Transport: virtio-input-hid
+      (`-device virtio-keyboard-pci`), modern-only — QEMU forces
+      virtio 1.0 on the class, so the only id is 0x1052 (0x1040 + 18)
+      with no transitional alias. i8042 PS/2 stays the DOCUMENTED
+      fallback and was not needed: it would have cost a new I/O-port
+      capability kind for ring 3, an 8042 mode-byte state machine, and
+      nothing reusable (real hardware is USB HID). `inputd` (registry
+      image 10) is the fourth driver on the shared virtio core, and
+      the first with a device-writable queue that must stay stocked:
+      32 event buffers posted from the same frame as the rings,
+      because QEMU's virtio-input drops an ENTIRE event batch it
+      cannot place, flushes only on `EV_SYN`, and raises one interrupt
+      per batch — so every wake drains the used ring to its end.
+      **The roadmap's own plan was rejected here and the ADR records
+      why:** switching the shell's read path off serial would have
+      broken every automated boot and every headless user. Instead a
+      new `SYS_CONSOLE_PUSH` (23), gated on a new `CapObj::ConsoleInput`
+      singleton (the `Power` pattern, second use), lets inputd feed
+      DECODED bytes into the kernel's existing line discipline — the
+      identical entry point the COM1 RX ISR uses. One line editor, one
+      blocking read contract, two hardware sources; the shell needed
+      ZERO changes. A zero-length push is the documented capability
+      PROBE, so one image discovers whether it is the production
+      console feeder or a suite's IPC service — the m6 instance is
+      deliberately denied the cap, making the mode switch part of the
+      test. Proofs, both real: `m6:test:input_service` (the harness
+      types `arena` on the virtual keyboard over QMP; inputtest reads
+      the decoded bytes back through the service and verifies them
+      byte-for-byte, with counted interrupt batches, exact badges,
+      both exits 42, relay swept, frame-exact teardown) and
+      `tools/test_m6_typing.py` — the PRODUCTION path with the serial
+      input channel dead: `echo Hello-From-The-Keyboard` (capitals
+      prove modifier tracking), `psX<backspace>` (the line discipline
+      erases the typo before the shell sees it), and `shutdown` — the
+      machine halts because someone typed it. The harness gained a
+      second channel for this (`tools/qmp.py`, test-only), and every
+      boot in the gate now types on the keyboard as well as the
+      serial port. Registry images 10 + 11 fill `MAX_IMAGES`
+      exactly — 6.4 must raise it. Gates: run_tests 12/12 (311
+      assertions), fmt + clippy clean on the new code, and the
+      stability loop 100/100 with the full fixture family.
+- [ ] **6.4 virtio-console: `consoled`.** First task: raise
+      `MAX_IMAGES`/`MAX_SPAWN_RECS` (6.3 filled the registry exactly —
+      ADR-0026, Consequences). A second console channel
       (virtio-serial port) as a userspace service: the shell's
       stdout/stdin can live on it, serial stays the kernel's
       panic/diagnostic path. Decision recorded on whether the desktop

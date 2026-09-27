@@ -59,7 +59,12 @@ pub const MAX_SPAWN_RECS: usize = 12;
 /// 7 is `nettest`, the m6 suite's ARP link-probe client. Image 8 is
 /// `rngd`, the userspace virtio-rng driver on the shared virtio core
 /// (M6.2, ADR-0025), spawned at boot when an rng function exists;
-/// image 9 is `rngtest`, the m6 suite's variance probe.
+/// image 9 is `rngtest`, the m6 suite's variance probe. Image 10 is
+/// `inputd`, the userspace virtio-input keyboard driver (M6.3,
+/// ADR-0026), spawned at boot when a keyboard exists; image 11 is
+/// `inputtest`, the m6 suite's decoded-keystroke client. Images 10
+/// and 11 fill `MAX_IMAGES` exactly — 6.4's `consoled` must raise it
+/// (ADR-0026, Consequences).
 /// A filesystem-backed source slots in here later without changing the
 /// cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
@@ -74,6 +79,8 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         7 => Some(elf::NETTEST_IMAGE),
         8 => Some(elf::RNGD_IMAGE),
         9 => Some(elf::RNGTEST_IMAGE),
+        10 => Some(elf::INPUTD_IMAGE),
+        11 => Some(elf::INPUTTEST_IMAGE),
         _ => None,
     }
 }

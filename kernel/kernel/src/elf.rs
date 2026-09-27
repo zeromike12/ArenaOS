@@ -158,6 +158,26 @@ pub static RNGD_IMAGE: &[u8] =
 pub static RNGTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/rngd/target/x86_64-unknown-none/release/rngtest");
 
+/// The input service (M6.3, ADR-0026): spawn-registry image 10,
+/// `inputd` — the userspace virtio-input keyboard driver, the fourth
+/// on the SHARED virtio core (`userspace/virtio.rs`). Built by
+/// `tools/build.sh` from `userspace/inputd` under the same
+/// strict-subset contract. Spawned at boot after rngd when a
+/// virtio-input function exists — with the ConsoleInput capability,
+/// so its decoded keystrokes feed the console's line discipline; the
+/// m6 suite spawns its own instance WITHOUT that cap, which puts the
+/// same image in service mode.
+pub static INPUTD_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/inputd/target/x86_64-unknown-none/release/arena-inputd");
+
+/// The input-service test client (M6.3): spawn-registry image 11,
+/// `inputtest` — built from the same crate as `inputd` (shared ABI
+/// module). It reads DECODED key bytes through the service boundary
+/// and verifies the sequence the harness typed on the virtual
+/// keyboard, byte for byte. Only the m6 suite spawns it.
+pub static INPUTTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/inputd/target/x86_64-unknown-none/release/inputtest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

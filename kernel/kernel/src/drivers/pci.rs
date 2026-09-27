@@ -71,6 +71,11 @@ pub const VIRTIO_TYPE_NET: u16 = 1;
 /// VirtIO device type: entropy source (M6.2, ADR-0025 — `rngd` drives
 /// it). Transitional ID 0x1004, modern 0x1044.
 pub const VIRTIO_TYPE_ENTROPY: u16 = 4;
+/// VirtIO device type: input device (M6.3, ADR-0026 — `inputd` drives
+/// `virtio-keyboard-pci`). QEMU forces MODERN virtio on this class
+/// (`virtio_pci_force_virtio_1`), so the only PCI id it ever presents
+/// is 0x1040 + 18 = 0x1052 — there is no transitional alias to accept.
+pub const VIRTIO_TYPE_INPUT: u16 = 18;
 
 /// PCI capability ID: vendor-specific — VirtIO structures live in these.
 const CAP_ID_VENDOR: u8 = 0x09;
@@ -86,10 +91,13 @@ const VIRTIO_CFG_DEVICE: u8 = 4;
 // ---- recorded tables -------------------------------------------------------
 
 /// How many bus-0 functions the kernel records (the reference machine has
-/// a handful; overflow is logged, not fatal).
-pub const MAX_PCI_FUNCTIONS: usize = 8;
+/// a handful; overflow is logged, not fatal). The M6.3 fixture set
+/// (blk + net + rng + keyboard, plus q35's own bridges and VGA) reaches
+/// seven, so the bound carries headroom for 6.4's virtio-console and a
+/// user's extra devices rather than silently dropping the last one.
+pub const MAX_PCI_FUNCTIONS: usize = 12;
 /// How many VirtIO functions the kernel records.
-pub const MAX_VIRTIO_DEVICES: usize = 4;
+pub const MAX_VIRTIO_DEVICES: usize = 6;
 /// Capability-list walk bound (a corrupt loop must not hang the boot).
 const CAP_WALK_BOUND: usize = 48;
 
@@ -585,6 +593,8 @@ fn log_virtio(v: &VirtioDevice) {
             "net"
         } else if v.virtio_type == VIRTIO_TYPE_ENTROPY {
             "entropy"
+        } else if v.virtio_type == VIRTIO_TYPE_INPUT {
+            "input"
         } else {
             "other"
         },

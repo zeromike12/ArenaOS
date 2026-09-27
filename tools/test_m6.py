@@ -69,7 +69,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mtest  # noqa: E402
 import arena_env  # noqa: E402
 
-EXPECTED_TESTS = ["net_service", "rng_service"]
+EXPECTED_TESTS = ["net_service", "rng_service", "input_service"]
+
+# The keystrokes the harness types on the VIRTUAL KEYBOARD (M6.3,
+# ADR-0026), paced by a serial marker like every other harness action:
+# once the m6 suite's inputd instance announces DRIVER_OK — after which
+# the device has buffers to fill — `arena` is typed through QMP,
+# keystroke by keystroke. The sequence is a documented fixture
+# contract, exactly like the slirp gateway's 10.0.2.2 in the net test;
+# inputtest verifies the decoded bytes against it.
+KEY_SCRIPT = [(b"inputd: virtio-input ready", 1, "arena")]
 
 
 def check_with_net_extras(serial: str) -> bool:
@@ -120,6 +129,26 @@ def check_with_net_extras(serial: str) -> bool:
           "the logged draw fingerprints are present and differ "
           f"({m.group(1)} vs {m.group(2)})" if m else
           "the logged draw fingerprints are present and differ")
+
+    # --- M6.3: the input service (ADR-0026) ---
+    check("inputtest: PASS — the injected keystrokes arrived decoded "
+          "and in order: \"arena\"" in serial,
+          "inputtest read back the exact sequence typed on the virtual "
+          "keyboard")
+    check("service mode — no console authority" in serial,
+          "the suite's inputd instance detected the WITHHELD ConsoleInput "
+          "capability and ran as a service")
+    check("console mode — keystrokes feed the shell" in serial,
+          "the PRODUCTION inputd instance found the capability and ran as "
+          "the console feeder")
+    check("inputd spawned: pid" in serial,
+          "the PRODUCTION inputd spawned at boot with the keyboard attached")
+    check(serial.count("virtio-input ready") == 2,
+          "inputd reached DRIVER_OK twice (the suite's instance + the "
+          "production service)")
+    check("virtio device_id 0x1052 \u2192 type 18 (input), modern" in serial,
+          "the kernel's PCI scan classified the keyboard as modern "
+          "virtio-input (no transitional alias exists for this class)")
     return ok
 
 
@@ -140,7 +169,8 @@ def boot_without_net() -> bool:
 
     try:
         esp = mtest.build(label)
-        rc, serial, dt = mtest.run_qemu(label, esp, net=False, rng=False)
+        rc, serial, dt = mtest.run_qemu(label, esp, net=False,
+                                        rng=False, kbd=False)
     except Exception as e:  # noqa: BLE001 — any harness fault is a FAIL
         print(f"[test-m6-nonet] FAIL: the no-net boot crashed the harness: {e}")
         return False
@@ -168,6 +198,18 @@ def boot_without_net() -> bool:
           "production rngd was NOT spawned without the device")
     check("rngd: starting" not in serial,
           "no rngd instance ran at all without the device")
+    check(re.search(r"^m6:test:input_service: SKIP \(no virtio-input device",
+                    serial, re.MULTILINE) is not None,
+          "the input_service test reported an HONEST SKIP too")
+    check("keyboard service stays offline" in serial,
+          "the kernel logged the keyboard service offline")
+    check("inputd spawned" not in serial,
+          "production inputd was NOT spawned without the device")
+    check("inputd: starting" not in serial,
+          "no inputd instance ran at all without the device")
+    check("arena>" in serial,
+          "the shell still reached its prompt on the SERIAL console with "
+          "no keyboard attached (the keyboard is additive, never required)")
     for prior, tests in (("m1", 8), ("m2", 21), ("m3", 13), ("m4", 9),
                          ("m5", 6)):
         check(f"{prior}: RESULT PASS" in serial,
@@ -179,8 +221,64 @@ def boot_without_net() -> bool:
     return ok
 
 
+def boot_with_keyboard_but_nobody_typing() -> bool:
+    """A keyboard attached and NO typist (ADR-0026).
+
+    This is the configuration a real user gets: they add
+    `-device virtio-keyboard-pci`, boot, and go get coffee while the
+    suite runs. A keyboard produces nothing unless someone types —
+    unlike slirp, which answers ARP by itself, and the entropy source,
+    which fills buffers by itself — so the suite cannot simply wait
+    forever. It waits a bounded window, calls the driver's wait off,
+    and reports an HONEST SKIP: attaching a device must never make a
+    machine unusable, and a test that proved nothing must never claim
+    it did.
+    """
+    label = "test-m6-notypist"
+    ok = True
+
+    def check(cond: bool, msg: str) -> None:
+        nonlocal ok
+        print(f"[{label}] {'PASS' if cond else 'FAIL'}: {msg}")
+        ok = ok and cond
+
+    try:
+        esp = mtest.build(label)
+        # keys=[] is the whole point: the keyboard is THERE, nobody
+        # uses it. The serial feeder still types `shutdown` at the
+        # prompt — which only happens if the machine survived the
+        # suite.
+        rc, serial, dt = mtest.run_qemu(label, esp, keys=[])
+    except Exception as e:  # noqa: BLE001 — any harness fault is a FAIL
+        print(f"[{label}] FAIL: the no-typist boot crashed the harness: {e}")
+        return False
+    arena_env.build_dir().joinpath("serial-m6-notypist.log").write_text(serial)
+
+    check("PANIC" not in serial, "no kernel panic when nobody types")
+    check(re.search(r"^m6:test:input_service: SKIP \(no keystrokes arrived",
+                    serial, re.MULTILINE) is not None,
+          "the input_service test reported an HONEST SKIP (not a FAIL, "
+          "not a fake PASS)")
+    check(re.search(r"^m6: RESULT SKIP ", serial, re.MULTILINE) is not None,
+          "the m6 RESULT line says SKIP")
+    check("calling the driver's wait off" in serial,
+          "the suite ended the wait deliberately after its window "
+          "(the driver cannot time itself out — ADR-0026)")
+    check("nobody typed during this boot" in serial,
+          "inputtest reported the honest outcome instead of hanging")
+    check("inputd spawned: pid" in serial,
+          "the production keyboard service still came up for the user")
+    check("arena>" in serial,
+          "the machine reached the shell prompt — attaching a keyboard "
+          "nobody uses does NOT make the machine unusable")
+    check("halting via UEFI ResetSystem(shutdown)" in serial,
+          "the kernel declared its clean halt after a serial `shutdown`")
+    check(rc == 0, f"QEMU exited cleanly (rc={rc}, {dt:.1f}s)")
+    return ok
+
+
 if __name__ == "__main__":
-    rc = mtest.run_milestone("m6", EXPECTED_TESTS)
+    rc = mtest.run_milestone("m6", EXPECTED_TESTS, keys=KEY_SCRIPT)
     if rc == 0:
         serial = arena_env.build_dir().joinpath("serial-m6.log").read_text()
         if not check_with_net_extras(serial):
@@ -188,7 +286,11 @@ if __name__ == "__main__":
     if rc == 0:
         if not boot_without_net():
             rc = 1
+    if rc == 0:
+        if not boot_with_keyboard_but_nobody_typing():
+            rc = 1
     print(f"[test-m6] {'=' * 46}")
-    print(f"[test-m6] MILESTONE 6.1+6.2: {'PASS' if rc == 0 else 'FAIL'} "
-          "(link proof + entropy proof, and honest SKIPs with no fixtures)")
+    print(f"[test-m6] MILESTONE 6.1+6.2+6.3: {'PASS' if rc == 0 else 'FAIL'} "
+          "(link + entropy + input proofs, and honest SKIPs with no "
+          "fixtures)")
     sys.exit(rc)

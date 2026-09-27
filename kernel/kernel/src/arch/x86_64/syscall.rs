@@ -126,6 +126,11 @@ pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;
 pub const SYS_CAP_COPY: u64 = 21;
 pub const SYS_DEV_INFO: u64 = 22;
+// Input substrate (M6.3, ADR-0026): a capability-gated injection point
+// into the console's line discipline, so a ring-3 keyboard driver
+// feeds the SAME queue the UART RX ISR does — one line editor, one
+// blocking read contract, two hardware sources.
+pub const SYS_CONSOLE_PUSH: u64 = 23;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -602,6 +607,7 @@ extern "C" fn syscall_dispatch(
         SYS_CAP_DESTROY => sys_cap_destroy(a0) as u64,
         SYS_CAP_COPY => sys_cap_copy(a0, a1, a2) as u64,
         SYS_DEV_INFO => sys_dev_info(a0, a1) as u64,
+        SYS_CONSOLE_PUSH => sys_console_push(a0, a1, a2) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1103,6 +1109,68 @@ fn sys_shutdown(a0: u64) -> Status {
         "shutdown requested by pid {pid} through its Power cap — goodnight"
     );
     crate::halt::reset_shutdown()
+}
+
+/// Largest byte run one `SYS_CONSOLE_PUSH` accepts. A keyboard
+/// produces bytes one keystroke at a time; the bound exists so the
+/// copy lands in a fixed stack buffer with no allocator and no
+/// unbounded loop under IF=0.
+pub const CONSOLE_PUSH_MAX: u64 = 64;
+
+/// SYS_CONSOLE_PUSH(slot, buf, len): feed `len` bytes from the
+/// caller's buffer into the console's line discipline — byte for byte
+/// the path COM1's RX ISR takes (`console::feed`), so echo, backspace,
+/// the line queue, and the parked reader's wake all behave identically
+/// whether the byte came from the serial port or from a keyboard
+/// driver in ring 3 (M6.3, ADR-0026).
+///
+/// Gated on [`crate::cap::CapObj::ConsoleInput`] + `RIGHTS_WRITE` in
+/// `slot`: without it any process could forge the keystrokes the shell
+/// trusts. `len == 0` is the documented CAPABILITY PROBE — it pushes
+/// nothing and returns 0 when the cap is valid, a typed refusal when
+/// it is not, which is how one driver image discovers whether it was
+/// spawned as the production console feeder or as a suite's service
+/// instance. Returns the byte count pushed.
+fn sys_console_push(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if !matches!(c.obj, crate::cap::CapObj::ConsoleInput)
+        || c.rights & crate::cap::RIGHTS_WRITE == 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    if a2 == 0 {
+        return 0; // the capability probe: authority confirmed, nothing pushed
+    }
+    if a2 > CONSOLE_PUSH_MAX {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(a1, a2) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let mut buf = [0u8; CONSOLE_PUSH_MAX as usize];
+    // SAFETY: the span was validated against this thread's regions;
+    // own address space live; STAC brackets the SMAP-guarded read;
+    // IF=0. The destination is this stack's own scratch.
+    unsafe {
+        super::stac();
+        core::ptr::copy_nonoverlapping(a1 as *const u8, buf.as_mut_ptr(), a2 as usize);
+        super::clac();
+    }
+    for &b in &buf[..a2 as usize] {
+        // Exactly what rx_isr does per byte: the discipline's own
+        // entry point. `commit`'s wake only ENQUEUES the parked
+        // reader (no switch), so this stays a plain syscall return.
+        crate::console::feed(b);
+    }
+    a2 as Status
 }
 
 // ---- driver substrate handlers (M5.1, ADR-0021) ----------------------------

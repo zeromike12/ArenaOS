@@ -69,8 +69,17 @@ qemu-system-x86_64 \
     -netdev user,id=net0 \
     -device virtio-net-pci,netdev=net0 \
     -device virtio-rng-pci \
+    -device virtio-keyboard-pci \
     -display none -serial mon:stdio -no-reboot
 ```
+
+**Want to actually type on a keyboard?** Drop `-display none` and use
+`-display gtk` (or `sdl`/`cocoa`, whatever your QEMU has) with
+`-device virtio-keyboard-pci` attached: a QEMU window opens, and since
+v0.8.0 (M6.3) your keystrokes in that window drive the `arena>` prompt
+directly through the `inputd` driver. The serial console keeps working
+at the same time — both feed the same line discipline, so you can type
+in either and read the log in your terminal.
 
 The scratch disk is **required** and must be **AFS1-formatted**: since
 M5.3 the filesystem service (`fsd`, ring 3) mounts it during the boot
@@ -81,30 +90,37 @@ with the layout's source of truth: `python3 -c 'import sys;
 sys.path.insert(0, "tools"); import afs1; afs1.mkfs("scratch.img",
 16384)'`.
 
-The two `-netdev`/`-device virtio-net-pci` lines (new in v0.6.0) and
-the `-device virtio-rng-pci` line (new in v0.7.0) are **optional**:
-they attach QEMU's built-in user-mode network, which the `netd` driver
-(M6.1) proves with a real ARP round trip every boot, and QEMU's
-built-in entropy source, which the `rngd` driver (M6.2) proves by
-drawing randomness straight into a client's pages. Boot without either
-(e.g. an older saved command) and the machine stays green — the
-corresponding test reports an honest `SKIP` and the kernel logs the
-service as offline. No host setup or privileges are needed either way:
+The two `-netdev`/`-device virtio-net-pci` lines (new in v0.6.0), the
+`-device virtio-rng-pci` line (new in v0.7.0), and the
+`-device virtio-keyboard-pci` line (new in v0.8.0) are all
+**optional**: they attach QEMU's built-in user-mode network, which the
+`netd` driver (M6.1) proves with a real ARP round trip every boot;
+QEMU's built-in entropy source, which the `rngd` driver (M6.2) proves
+by drawing randomness straight into a client's pages; and a virtual
+keyboard, which the `inputd` driver (M6.3) turns into live typing at
+the shell prompt. Boot without any of them (e.g. an older saved
+command) and the machine stays green — the corresponding test reports
+an honest `SKIP`, the kernel logs the service as offline, and the
+serial console remains a complete way to use the machine. No host setup or privileges are needed either way:
 `virtio-rng-pci` with no backend uses QEMU's own `rng-builtin`
 (the platform CSPRNG), which works on Linux, macOS, and Windows hosts
 alike. On a museum-piece QEMU that predates that default (pre-4.1),
 add `-object rng-random,filename=/dev/urandom,id=rng0` and write
 `-device virtio-rng-pci,rng=rng0`.
 
-Serial is the console — in **both directions**. Everything ArenaOS logs
+Serial is *a* console — in **both directions**. Everything ArenaOS logs
 goes there, and since Milestone 4.6 (ADR-0020) your keystrokes come
 back in through the same port: after the boot-time test suites pass (a
 few seconds), the kernel spawns the storage service, the filesystem
-service, the network service (when the NIC is attached), and the
-**shell**, and the machine waits for you at the
-`arena> ` prompt. Type `help`. The VM stops only when you type
-`shutdown` (or kill QEMU with `Ctrl-A X`) — a boot that ends by itself
-would mean the shell never came up.
+service, the network service (when the NIC is attached), the entropy
+service, the keyboard service (when a keyboard is attached), and the
+**shell**, and the machine waits for you at the `arena> ` prompt.
+Type `help`. The VM stops only when you type `shutdown` (or kill QEMU
+with `Ctrl-A X`) — a boot that ends by itself would mean the shell
+never came up. Since v0.8.0 the prompt answers to a real keyboard as
+well: `inputd` decodes the keycodes and feeds them into the SAME line
+discipline, so echo, backspace, and the blocking read behave
+identically whichever way you type.
 
 ### Using your distro's OVMF instead
 
@@ -193,18 +209,32 @@ machine-checkable landmarks, in order:
     byte, and different from each other, with the kernel counting
     exactly one interrupt per draw. The line
     `rngtest: draw A … vs draw B …` shows fresh bytes every boot.
-    Together these end with `m6: RESULT PASS (2/2)`. Booted WITHOUT
-    the NIC or rng lines? An honest `m6: RESULT SKIP` instead, and
-    everything else is unchanged
+    `rngtest: draw A … vs draw B …` shows fresh bytes every boot
+12. `m6:test:input_service` — the input proof (ADR-0026): `inputd`
+    (the ring-3 virtio-input keyboard driver) plus `inputtest`, which
+    reads DECODED key bytes back through the service boundary. A
+    keyboard is the one fixture that produces nothing unless someone
+    uses it, so this test needs a typist: in an automated run the
+    harness types `arena` on the virtual keyboard over QMP and the
+    test PASSes. In YOUR run nobody is typing during the boot suite,
+    so after about a second the suite calls the wait off and reports
+    an honest **SKIP** — the machine carries on to the shell exactly
+    as normal. (Want to see it pass? Type `arena` in the QEMU window
+    while the suite is running.) Together these end with
+    `m6: RESULT PASS (3/3)` — or a `RESULT SKIP` line naming whatever
+    was missing, which is equally green: booting without the NIC,
+    rng, or keyboard changes nothing else
 12. `storaged spawned: pid …`, `fsd spawned: pid …`, then
     `fsd: mounted AFS1 — commit seq …`, and (with the fixtures)
     `netd spawned: pid …` + `netd: virtio-net ready — DRIVER_OK,
-    mac …` and `rngd spawned: pid …` + `rngd: virtio-rng ready —
-    DRIVER_OK …` — the production services come up on the same
-    devices the suite just proved (ADR-0022/0023/0024/0025)
-13. `milestones 5–6.2 complete … spawning the shell`, then
+    mac …`, `rngd spawned: pid …` + `rngd: virtio-rng ready —
+    DRIVER_OK …`, and `inputd spawned: pid …` + `inputd: console mode
+    — keystrokes feed the shell's line discipline` — the production
+    services come up on the same devices the suite just proved
+    (ADR-0022/0023/0024/0025/0026)
+13. `milestones 5–6.3 complete … spawning the shell`, then
     `shell spawned: pid …` — the hand-off
-14. `ArenaOS shell v0.7 …` and the `arena> ` prompt — the machine is
+14. `ArenaOS shell v0.8 …` and the `arena> ` prompt — the machine is
     now an interactive system with a real filesystem; type into it
     (see "The shell" above)
 15. After `shutdown`: `shutdown requested by pid … through its Power

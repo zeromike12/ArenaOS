@@ -97,6 +97,15 @@ pub enum CapObj {
     /// own panic/suite halt paths are ring-0 internals, not invokes of
     /// this object.
     Power,
+    /// The console-input singleton (M6.3, ADR-0026): WRITE = may inject
+    /// bytes into the kernel's console line discipline through
+    /// `SYS_CONSOLE_PUSH`. Like `Power`, one kernel object with no
+    /// identity — holding the cap with the right IS the authority, and
+    /// the kernel hands it to exactly ONE process (the production
+    /// `inputd`). Without the gate any ring-3 process could forge the
+    /// keystrokes the shell trusts; the kernel's own UART RX ISR feeds
+    /// the same discipline as a ring-0 internal, not an invoke.
+    ConsoleInput,
 }
 
 /// One capability: an object reference plus its rights mask.

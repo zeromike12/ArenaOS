@@ -109,6 +109,23 @@ for RNGD_ELF in \
     echo "rngd image: ${RNGD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$RNGD_ELF") bytes)"
 done
 
+# M6.3 (ADR-0026): the input service — ONE crate, TWO images: inputd
+# (spawn-registry image 10, the resident virtio-input keyboard driver,
+# the fourth on the shared virtio core) and inputtest (image 11, the m6
+# suite's decoded-keystroke client). Both embed into the kernel via
+# include_bytes!.
+echo "== building userspace inputd (userspace/inputd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/inputd" && cargo build --release )
+for INPUTD_ELF in \
+    "$REPO_ROOT/userspace/inputd/target/x86_64-unknown-none/release/arena-inputd" \
+    "$REPO_ROOT/userspace/inputd/target/x86_64-unknown-none/release/inputtest"; do
+    if [[ ! -f "$INPUTD_ELF" ]]; then
+        echo "error: inputd image not produced at $INPUTD_ELF" >&2
+        exit 1
+    fi
+    echo "inputd image: ${INPUTD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$INPUTD_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG
