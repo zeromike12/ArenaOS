@@ -54,6 +54,9 @@ pub const MAX_SPAWN_RECS: usize = 8;
 /// image 4 is `fsd`, the AFS1 filesystem service (M5.3, ADR-0023)
 /// spawned at boot on top of storaged; image 5 is `fstest`, the m5
 /// suite's filesystem client (create/write/read/close/ls in ring 3).
+/// Image 6 is `netd`, the userspace virtio-net driver (M6.1,
+/// ADR-0024), spawned at boot when the fixture NIC is attached; image
+/// 7 is `nettest`, the m6 suite's ARP link-probe client.
 /// A filesystem-backed source slots in here later without changing the
 /// cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
@@ -64,6 +67,8 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         3 => Some(elf::BLKTEST_IMAGE),
         4 => Some(elf::FSD_IMAGE),
         5 => Some(elf::FSTEST_IMAGE),
+        6 => Some(elf::NETD_IMAGE),
+        7 => Some(elf::NETTEST_IMAGE),
         _ => None,
     }
 }

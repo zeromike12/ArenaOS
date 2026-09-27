@@ -360,6 +360,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 5 suite failed");
     }
 
+    // --- M6.1: the network link proof (ADR-0024) ---------------------------
+    // The m6 suite spawns its own short-lived netd (the userspace
+    // virtio-net driver, image 6) plus nettest (image 7): a hand-built
+    // ARP request for the slirp gateway goes out over the transmit
+    // queue and the reply comes back over the receive queue — both
+    // completions as MSI-X interrupts relayed into the driver's wait.
+    // No virtio-net fixture on the bus → an honest SKIP, never a FAIL
+    // (pre-v0.6.0 QEMU invocations stay bootable-green).
+    if !crate::m6::run_suite() {
+        crate::halt::halt_machine("milestone 6 suite failed");
+    }
+
     // --- M5.2: the production block service (ADR-0022) ----------------------
     // storaged — the userspace virtio-blk driver — starts at boot as a
     // resident service: the kernel mints its device window (an Mmio cap
@@ -387,9 +399,26 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
+    // --- M6.1: the production network service (ADR-0024) --------------------
+    // netd parks serving raw Ethernet frames (NET_SEND/NET_RECV/NET_MAC)
+    // on its endpoint — Phase 7's stack will be its first production
+    // client. ABSENT virtio-net function → the network service is simply
+    // offline: pre-v0.6.0 QEMU invocations boot green without it.
+    let _net_eid = match spawn_netd() {
+        Ok(Some((_pid, eid))) => Some(eid),
+        Ok(None) => {
+            info!(
+                "kernel",
+                "netd: no virtio-net function on bus 0 — the network service stays offline (attach it with: -netdev user,id=net0 -device virtio-net-pci,netdev=net0)"
+            );
+            None
+        }
+        Err(reason) => crate::halt::halt_machine(reason),
+    };
+
     info!(
         "kernel",
-        "milestone 5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven) — spawning the shell"
+        "milestones 5–6.1 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot) — spawning the shell"
     );
 
     // --- M4.6: the hand-off (ADR-0020) -----------------------------------
@@ -516,6 +545,52 @@ fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32), &'static str> {
         "fsd spawned: pid {pid} (caps: 0=Endpoint{blk_eid}/W 1=Endpoint{eid}/R) — AFS1 mount and serve from ring 3"
     );
     Ok((pid, eid))
+}
+
+/// Spawn the production network service (M6.1, ADR-0024): registry
+/// image 6 with the SAME grant shape as storaged — an `Mmio` cap over
+/// the virtio-net structure BAR (R|W: the handshake writes), its own
+/// endpoint's serve side (READ), and an interrupt notification
+/// (READ|WRITE, the target of BOTH MSI-X relay badges). Returns
+/// `Ok(None)` when bus 0 carries no virtio-net function: the network
+/// service is optional until Phase 7 (an honest SKIP, never a fake
+/// init — the caller logs the absence).
+fn spawn_netd() -> Result<Option<(u64, u32)>, &'static str> {
+    let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_NET) else {
+        return Ok(None);
+    };
+    let f = crate::drivers::pci::pci_function(v.pci_index)
+        .ok_or("netd: recorded function vanished from the table")?;
+    let bar = v.common.bar as usize;
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 || f.bar_size[bar] < 4096 {
+        return Err("netd: the virtio structure BAR is unusable");
+    }
+    let eid = crate::ipc::create_endpoint().map_err(|_| "netd: endpoint table full")?;
+    let nid = crate::ipc::create_notification().map_err(|_| "netd: notification table full")?;
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Mmio {
+                phys: f.bar_base[bar],
+                pages: (f.bar_size[bar] / 4096) as u32,
+            },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    let pid = crate::spawn::spawn_init(6, &grants, None)?;
+    info!(
+        "kernel",
+        "netd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the link-layer network service is live; Phase 7's stack will be its first production client",
+        f.bar_base[bar]
+    );
+    Ok(Some((pid, eid)))
 }
 
 /// We are running in the kernel view: RIP and RSP are higher-half, CR3 is

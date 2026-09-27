@@ -165,6 +165,51 @@ pub const VIRTIO_BLK_S_OK: u64 = 0;
 pub const VIRTIO_BLK_S_IOERR: u64 = 1;
 pub const VIRTIO_BLK_S_UNSUPP: u64 = 2;
 
+// ---- the network-service protocol (M6.1, ADR-0024) ---------------------------
+//
+// netd owns the virtio-net device and serves it on its own endpoint,
+// LINK-LAYER ONLY: raw Ethernet frames in, raw Ethernet frames out — no
+// protocols of any kind (those are the callers' business until Phase 7
+// gives them a home). The caller's frames travel as LENT Untyped caps
+// attached to the call — the block discipline verbatim: netd learns the
+// phys through SYS_CAP_PHYS and the device DMAs the CALLER's own page
+// (zero-copy TX, chained behind netd's own virtio header; RX v1 copies
+// the held frame into the caller's buffer — the documented ADR-0024 v1
+// simplification).
+//
+// Request word 0 depends on the op; word 1 = op:
+//   SEND      w0 = frame length (NET_FRAME_MIN..=NET_FRAME_MAX); send
+//             cap = the caller's LENT frame, frame bytes at offset 0
+//   RECV      w0 = 0, no send cap; blocks until netd holds an
+//             undelivered received frame, which returns in the REPLY's
+//             inline message (the fstest-LS pattern). v1 delivers
+//             frames up to MSG_BYTES; a longer held frame is dropped
+//             with a typed refusal and an honest log — full-frame
+//             delivery needs the Phase 7 buffer-handoff design
+//             (ADR-0024 records the limitation)
+//   MAC       no cap (a landed cap is refused, not leaked)
+//   SHUTDOWN  poison: netd replies FIRST, then exits by its own hand
+// Reply word 0 is NET_S_*; word 1:
+//   SEND -> bytes transmitted, RECV -> frame length in the inline
+//   message, MAC -> the six MAC bytes packed little-endian,
+//   SHUTDOWN -> netd's lifetime interrupt-delivered completion count.
+
+pub const NET_OP_SHUTDOWN: u64 = 0;
+pub const NET_OP_SEND: u64 = 1;
+pub const NET_OP_RECV: u64 = 2;
+pub const NET_OP_MAC: u64 = 3;
+
+pub const NET_S_OK: u64 = 0;
+pub const NET_S_BAD_OP: u64 = (-1i64) as u64;
+pub const NET_S_BAD_LEN: u64 = (-2i64) as u64;
+pub const NET_S_NO_BUF: u64 = (-3i64) as u64;
+
+/// Largest Ethernet frame NET_SEND accepts (no jumbos in v1).
+pub const NET_FRAME_MAX: u64 = 1514;
+/// Smallest legal Ethernet frame (a bare header — nothing shorter can
+/// be addressing anything).
+pub const NET_FRAME_MIN: u64 = 14;
+
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 
 pub const EXIT_OK: u64 = 42;
@@ -401,6 +446,14 @@ impl Out {
             let d = ((v >> (i * 4)) & 0xF) as u8;
             self.push(if d < 10 { b'0' + d } else { b'a' + d - 10 });
         }
+    }
+    /// Two ASCII hex digits for one byte (zero-padded, lowercase) —
+    /// compact byte dumps (MAC addresses) that stay inside WRITE_MAX
+    /// where `hex`'s full 64-bit form would overflow the line.
+    pub fn hex2(&mut self, b: u8) {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        self.push(HEX[(b >> 4) as usize]);
+        self.push(HEX[(b & 0xF) as usize]);
     }
     /// CRLF — debug_write copies raw bytes (no \n translation), and the
     /// console is a terminal.

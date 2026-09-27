@@ -77,6 +77,22 @@ for FSD_ELF in \
     echo "fsd image: ${FSD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$FSD_ELF") bytes)"
 done
 
+# M6.1 (ADR-0024): the network service — ONE crate, TWO images: netd
+# (spawn-registry image 6, the resident virtio-net driver, link layer
+# only) and nettest (image 7, the m6 suite's ARP link-probe client).
+# Both embed into the kernel via include_bytes!.
+echo "== building userspace netd (userspace/netd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/netd" && cargo build --release )
+for NETD_ELF in \
+    "$REPO_ROOT/userspace/netd/target/x86_64-unknown-none/release/arena-netd" \
+    "$REPO_ROOT/userspace/netd/target/x86_64-unknown-none/release/nettest"; do
+    if [[ ! -f "$NETD_ELF" ]]; then
+        echo "error: netd image not produced at $NETD_ELF" >&2
+        exit 1
+    fi
+    echo "netd image: ${NETD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$NETD_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

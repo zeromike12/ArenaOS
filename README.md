@@ -19,6 +19,7 @@ automated tests that boot the real system in QEMU.
 | **Milestone 2 — Kernel foundations** (exceptions, timers, frames, paging, heap, locks, boot split) | ✅ **complete** — 2.1 (TSS/IST, exception recovery) · 2.2 (PIT/TSC, monotonic clock, 100 Hz tick) · 2.3 (frame allocator, ADR-0007) · 2.4 (own page tables, higher-half, W^X/WP/NX enforced, ADR-0008) · 2.5 (kernel heap, ADR-0009) · 2.6 (spinlocks, irqsave critical sections, ADR-0010) · 2.7 (boot split: ExitBootServices → kernel proper, reclaimed timer chain, farewell-island shutdown, ADR-0011) | `tools/test_m2.py` (21/21) + 100/100-boot stability loop + host suites (arena-heap 12/12, arena-sync 6/6) |
 | **Milestone 3 — Multitasking** (threads, scheduler, processes, capabilities) | ✅ **complete** — 3.1 (kernel threads + context switch: callee-saved frame, no-FPU invariant build-enforced, canaried 32 KiB stacks, exact-accounting reap, ADR-0012) · 3.2 (timer-driven preemption: tick hook, nested cooperative switch, per-CPU run queues, exact-RR proof on yield-free threads, ADR-0013) · 3.3 (ring-3 threads, syscall/sysret boundary, TSS RSP0, SMEP/SMAP armed and fault-tested; processes = address-space objects: private PML4, cloned kernel half, exact teardown, ADR-0014) · 3.4 (capability spaces: per-process slot tables, attenuation-only delegation, right-gated destroy, gated `process_root`/`map_memory` invokes, ADR-0015) | `tools/test_m3.py` (13/13) + m1/m2 regressions green + 100/100-boot stability + release [v0.3.0](https://github.com/zeromike12/ArenaOS/releases/tag/v0.3.0) |
 | **Milestone 5 — Storage** (userspace VirtIO-blk driver → own filesystem design → persistence & crash consistency) | ✅ **complete** — 5.1 done (driver substrate: Untyped/Mmio capability kinds, `SYS_ALLOC_FRAME`/`SYS_MAP_MEMORY` self-map windows, IRQ relay vectors 48..63 → notifications, kernel-side PCI enumeration with the virtio capability walk and MEM\|BUS MASTER as kernel policy; the harness grows a fresh scratch `virtio-blk-pci` disk, ADR-0021) · **5.2 done** (`userspace/storaged`: the resident userspace virtio-blk driver — full ring-3 virtio 1.0 handshake, one split virtqueue over self-allocated frames, zero-copy DMA through LENT buffer caps, MSI-X completions relayed into `SYS_WAIT`, block service spawned at boot; write→read-back→verify proven THROUGH the service boundary by `blktest`, ADR-0022) · **5.3 done** (`userspace/fsd`: AFS1 — the own-design filesystem with extent-based data and CoW transactional metadata, host-side `mkfs`, IPC v1.1 inline messages, end-to-end zero-copy file I/O by cap forwarding, shell `ls`/`cat`/`write`, ADR-0023) · **5.4 done** (two-boot persistence — written in boot N, read byte-exact in boot N+1 with the host parsing the committed sectors; the crash-consistency gate — five SIGKILL-mid-write rounds, every reboot recovers with NO repair tool, crashed writes return never-committed/committed-empty/committed-full and never torn; transactional UNLINK behind the shell's `rm`; mount-time reclamation of superseded commits; fstest's dual fresh/persisted op contracts → **v0.5.0**) | `tools/test_m5.py` (6/6) + `test_m5_persist.py` (two boots) + `test_m5_crash.py` (5 crash rounds) + m1–m4 regressions green in the same boot + release [v0.5.0](https://github.com/zeromike12/ArenaOS/releases/tag/v0.5.0) |
+| **Milestone 6 — Drivers** (VirtIO family: net → rng → input → console, then supervised restarts) | 🚧 **in progress** — **6.1 done** (`userspace/netd`: the resident userspace virtio-net driver — link layer only, raw Ethernet frames; two split virtqueues packed one frame per queue under the cap-slot budget, two MSI-X relay badges into one notification, zero-copy TX chaining the caller's LENT frame behind the driver's own virtio header, the config-space MAC through DEV_INFO word [6], and order-independent device discovery that storaged adopted too; the m6 suite proves the wire — a hand-built 42-byte ARP request to slirp's 10.0.2.2 and the reply verified field-by-field at exact wire offsets, exactly one counted interrupt per relay vector, frame-exact teardown; NO NIC attached → an honest SKIP with the service offline, so pre-v0.6.0 invocations stay green, ADR-0024) | `tools/test_m6.py` (1/1 + the no-net SKIP boot) + m1–m5 regressions green in BOTH boots + release [v0.6.0](https://github.com/zeromike12/ArenaOS/releases/tag/v0.6.0) |
 | Milestone 4 — Userspace & first program | ✅ complete — 4.1 (executable format + image loader: ELF64 container with ArenaOS strict-subset semantics — ET_EXEC-only validator, W^X segments, zero-filled NOLOAD bss, exact-accounting load into a process space; test image is a genuine cargo/rust-lld artifact in `userspace/payload`, ADR-0016) + 4.2 (syscall ABI v1: six argument registers, typed i64 status codes, frozen call registry — `debug_write`/`thread_exit` — with the marshalling and callee-saved promises proven from ring 3, ADR-0017) + 4.3 (first user process: the real rust-lld image runs at ring 3 in its own address space — writes its pinned message via debug_write byte-identical to the file, stamps bss from ring 3, exits via thread_exit with META's own success code) + 4.4 (IPC v1: endpoint rendezvous with blocking call/reply, badged merged notifications, capability transfer in messages — an echo-server demo across two real processes, ADR-0018) + 4.5 (spawn protocol v1: SYS_SPAWN from image capabilities with explicit attenuating inheritance, Process handles, exit-badge notifications — a ring-3 supervisor spawns the real image twice and the restart is visible as its console message appearing twice, ADR-0019) + 4.6 (minimal shell: interrupt-driven console input with a kernel line discipline, a real second userspace image spawned at boot as the initial service, builtins help/ps/echo/spawn/shutdown, the machine halt gated on a Power capability — every test boot now ends by typing `shutdown` into the running shell, ADR-0020) done | `tools/test_m4.py` (9/9) + `tools/test_m4_shell.py` (interactive session, 26 checks) + m1/m2/m3 regressions green |
 | Phases 5–10 — Storage, drivers, net, userspace maturity, graphics, desktop | ⬜ | `docs/ROADMAP.md` |
 
@@ -39,13 +40,13 @@ unmodified — see `docs/DEV-ENV.md` for resolution order and overrides.
 
 Every completed milestone ships as a GitHub release: a prebuilt boot
 image plus the exact EDK2 firmware pair it was tested against. See
-**[docs/RUNNING.md](docs/RUNNING.md)** — one `cp`, one
+**[docs/RUNNING.md](docs/RUNNING.md)** — two `cp`s, one
 `qemu-system-x86_64` command, serial is the console in BOTH directions:
 after the boot-time test suites pass, the kernel spawns the shell and
 the machine waits for you at the `arena> ` prompt — type `help`, and
 `shutdown` when you are done.
 
-## What just booted (current: Phase 5 complete — v0.5.0: an interactive shell over its own AFS1 filesystem, served entirely from ring 3 — files written in one boot come back byte-exact in the next, and crashes mid-write recover with no repair tool)
+## What just booted (current: Phase 6 in progress — v0.6.0: an interactive shell over its own AFS1 filesystem, served entirely from ring 3 — files written in one boot come back byte-exact in the next, crashes mid-write recover with no repair tool — and a ring-3 NIC driver that proves itself on the wire every boot with a real ARP round trip)
 
 QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It brings
 up serial, GDT/IDT/TSS, the 16550 UART, and the real UEFI memory map;
@@ -171,6 +172,23 @@ fsck-lite (`afs1.audit()`) finds zero problems. The shell grew `rm`
 flip; its sectors are reclaimed two generations later), and fsd's
 mount reclaims the superseded ping-pong generation, so long-lived
 volumes stop bleeding metadata sectors.
+
+Phase 6 opened with step 6.1: a real NIC driver (ADR-0024).
+`userspace/netd` — spawned at boot as the third resident service —
+drives virtio-net entirely in ring 3, link layer only: raw Ethernet
+frames in and out, two virtqueues packed into the capability-slot
+budget, two MSI-X interrupt badges into one notification, zero-copy
+transmit (the frame is LENT through IPC and the device DMAs the
+caller's own page, chained behind netd's own virtio header), and the
+MAC read from the device's config region — no new syscalls were
+needed, because the M5.2 substrate already generalized. Every boot
+proves it on the wire: the m6 suite's `nettest` hand-builds a 42-byte
+ARP request for QEMU's built-in gateway 10.0.2.2 and verifies the
+reply that comes back — field by field at exact wire offsets, one
+counted interrupt per relay vector, no polling anywhere. No NIC
+attached? An honest SKIP and the network service stays offline —
+pre-v0.6.0 invocations boot green, and a skip is never laundered into
+a pass count.
 
 The machine no longer shuts itself down: it ends the suites by handing
 the console to the shell and waits at the `arena> ` prompt. It stops

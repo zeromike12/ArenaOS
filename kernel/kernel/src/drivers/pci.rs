@@ -66,6 +66,8 @@ const VIRTIO_TRANSITIONAL_HI: u16 = 0x103F;
 const VIRTIO_MODERN_BASE: u16 = 0x1040;
 /// VirtIO device type: block device.
 pub const VIRTIO_TYPE_BLOCK: u16 = 2;
+/// VirtIO device type: network card (M6.1, ADR-0024 — `netd` drives it).
+pub const VIRTIO_TYPE_NET: u16 = 1;
 
 /// PCI capability ID: vendor-specific — VirtIO structures live in these.
 const CAP_ID_VENDOR: u8 = 0x09;
@@ -576,6 +578,8 @@ fn log_virtio(v: &VirtioDevice) {
         v.virtio_type,
         if v.virtio_type == VIRTIO_TYPE_BLOCK {
             "block"
+        } else if v.virtio_type == VIRTIO_TYPE_NET {
+            "net"
         } else {
             "other"
         },

@@ -158,6 +158,25 @@ def scratch_disk_args() -> list[str]:
     ]
 
 
+# ---- the Milestone-6 network fixture (ADR-0024) ------------------------------
+#
+# QEMU's user-mode netdev (slirp): no host privileges, deterministic, and it
+# answers ARP for its built-in gateway 10.0.2.2 — the peer for netd's link
+# proof. The device is NEW in v0.6.0: boots WITHOUT it stay green (the m6
+# suite reports an honest SKIP), boots with it attach exactly these args.
+
+SLIRP_GATEWAY = "10.0.2.2"
+SLIRP_GUEST = "10.0.2.15"
+
+
+def net_args() -> list[str]:
+    """QEMU args attaching the slirp NIC as virtio-net-pci (M6 fixture)."""
+    return [
+        "-netdev", "user,id=net0",
+        "-device", "virtio-net-pci,netdev=net0",
+    ]
+
+
 if __name__ == "__main__":
     print("repo root :", REPO_ROOT)
     print("rust bin  :", rust_bin())

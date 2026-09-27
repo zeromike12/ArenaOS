@@ -39,7 +39,8 @@ Rules:
 | [0020](0020-console-input-minimal-shell.md) | Console input and the minimal shell — COM1 RX line discipline, SYS_CONSOLE_READ/PROC_LIST/SHUTDOWN, Power capability, boot hand-off to the initial service | accepted |
 | [0021](0021-driver-substrate.md) | Driver substrate — owned Untyped frame caps, self-map windows, kernel-minted Mmio caps, IRQ relay vectors, kernel-side PCI enumeration as policy | accepted |
 | [0022](0022-userspace-block-service.md) | The userspace block service — storaged's ring-3 VirtIO driver, the zero-copy block protocol over IPC v1, owned vs. lent Untyped caps, SYS_IRQ_RELAY/DEV_INFO, poison-shutdown lifecycle | accepted |
-| [0023](0023-afs1-filesystem-service.md) | AFS1 — the own-design filesystem v1 (extent data, CoW transactional metadata, ping-pong commit), IPC v1.1 inline messages, the block protocol's in-frame offset, fsd's forwarded-cap zero-copy chain, host-side mkfs + post-boot disk verification | accepted |
+| [0023](0023-afs1-filesystem-service.md) | AFS1 — the own-design filesystem v1 (extent data, CoW transactional metadata, ping-pong commit), IPC v1.1 inline messages, the block protocol's in-frame offset, fsd's forwarded-cap zero-copy chain, host-side mkfs + post-boot disk verification (+ M5.4 addendum: persistence, the crash model, fh-as-capability, transactional UNLINK) | accepted |
+| [0024](0024-virtio-net-driver.md) | virtio-net in ring 3 — `netd`, the link-only driver server: two packed virtqueues under the cap-slot budget, two MSI-X relay badges, zero-copy TX over LENT caps, inline-message RX v1, the ARP link proof against slirp, order-independent DEV_INFO discovery, graceful absence (honest SKIP) | accepted |
 
 ## Template
 

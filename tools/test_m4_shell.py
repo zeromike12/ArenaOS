@@ -110,10 +110,13 @@ def main() -> int:
     # kernel echo + shell response on the same wire).
     check("hello-arena" in serial, "echo returned the typed line")
 
-    # ps: SYS_PROC_LIST — since M5.2 the machine has TWO resident
-    # processes: storaged (the block service, spawned at boot before
-    # the shell, parked in recv) and the shell itself. Both are
-    # single-threaded; the shell's pid is the one the kernel announced.
+    # ps: SYS_PROC_LIST — the machine has several resident processes:
+    # storaged (the block service), fsd (the filesystem service),
+    # since M6.1 netd (the network service, when the NIC fixture is
+    # attached — the checks below are >=-style so its presence is
+    # optional), all spawned at boot before the shell and parked in
+    # recv, plus the shell itself. All are single-threaded; the
+    # shell's pid is the one the kernel announced.
     ps_lines = re.findall(r"^  pid (\d+)  threads (\d+)$", serial, re.MULTILINE)
     check(len(ps_lines) >= 2,
           f"ps listed both resident processes (got {len(ps_lines)})")

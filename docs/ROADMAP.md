@@ -464,11 +464,74 @@ medium — the ESP stays the boot medium throughout).
       `scratch-template.img` — the FORMATTED volume — and the release
       verification boot runs on the shipped template itself.
 
-## Phase 6 — Drivers (outline)
+## Phase 6 — Drivers
 
 VirtIO family completion (net, console, rng, later gpu) → input (keyboard via
-VirtIO-console/PS2 fallback decision by ADR) → driver framework hardening:
+VirtIO-input/PS2 fallback decision by ADR) → driver framework hardening:
 restart under fault injection, capability re-grant tests.
+
+- [x] 6.1 **virtio-net: `netd` + the ARP link proof** — DONE
+      (ADR-0024). The link-only driver server (registry image 6):
+      two split virtqueues packed one frame per queue (the
+      CAP_SLOTS=16 budget), two MSI-X relay badges into one
+      notification, zero-copy TX chaining the caller's LENT frame
+      behind netd's own virtio header, the config-space MAC read
+      through DEV_INFO word [6], and order-independent device
+      discovery (storaged adopted the same probe loop + type assert).
+      Proof: the m6 suite spawns netd + nettest (image 7); nettest
+      hand-builds the 42-byte ARP request for slirp's 10.0.2.2,
+      sends it, and verifies the reply's ethertype/opcode/sender-IP/
+      target-MAC/sender-MAC-consistency at their exact wire offsets;
+      the kernel witnesses exactly ONE relay delivery per vector
+      (48 RX + 49 TX — no polling), both exit badges, both exit 42s,
+      and frame-exact teardown. Absent device → honest SKIP:
+      `tools/test_m6.py` boots BOTH ways — with the fixture (m6
+      RESULT PASS 1/1 + the production netd spawned) and without it
+      (the SKIP markers + "network service stays offline" + m1–m5 all
+      green in the same boot). Every harness boot path attaches
+      `-netdev user,id=net0 -device virtio-net-pci,netdev=net0`
+      (arena_env.net_args). Gates: run_tests 11/11 scripts, the
+      persistence + crash gates green with the NIC attached, fmt
+      clean + clippy clean on the new code, and the stability loop
+      100/100 with the full fixture family — whose first with-NIC run
+      earned its keep by catching a 1-in-100 host-coupled flake: the
+      device-bound suite drains were bounded by a *yield count*,
+      which under host load burns out before QEMU's iothread delivers
+      the awaited MSI, so all three (m5 block/fs, m6 net) are now
+      bounded by an HPET wall-clock deadline (~21 s,
+      DRAIN_DEADLINE_TICKS); the fixed kernel re-ran 100/100 clean.
+- [ ] **6.2 virtio-rng: `rngd` + the shared-library extraction.**
+      The third driver triggers ADR-0024's third-driver rule: extract
+      the common virtio core (handshake, queue setup, descriptor
+      helpers) into `userspace/virtio.rs` shared by storaged, netd,
+      and rngd — mechanically, under the full suite. rngd: one queue,
+      `RNG_GET` filling a caller-lent frame with device entropy;
+      suite proof asserts real variance across draws (no constant
+      bytes, no all-zero pages). Raises `MAX_IMAGES` (registry full
+      at 8 after 6.1).
+- [ ] **6.3 virtio-input keyboard: `inputd` + live typing.** ADR
+      decides the transport (virtio-input-hid expected; i8042 PS/2
+      as the documented fallback if virtio-input disappoints). The
+      shell's console read path switches from the kernel's serial
+      poll to event-driven key events from the input server — users
+      type into `arena>` in real QEMU sessions. Done when: keystrokes
+      drive the shell interactively (harness feeds via the same
+      device), the serial console remains for logs/panic.
+- [ ] **6.4 virtio-console: `consoled`.** A second console channel
+      (virtio-serial port) as a userspace service: the shell's
+      stdout/stdin can live on it, serial stays the kernel's
+      panic/diagnostic path. Decision recorded on whether the desktop
+      phase's terminal multiplexes over consoled or waits for GPU
+      text.
+- [ ] **6.5 driver framework hardening: supervised restart.** The
+      supervisor story ADR-0022 deferred: fault-injection tests kill
+      storaged/netd mid-I/O (`tools/` harness kills, in-guest poison
+      requests), a kernel-side or userspace supervisor restarts the
+      driver, re-grants its caps, and clients receive typed
+      "service restarted" errors — never silent corruption.
+      Capability re-grant tested explicitly (a restarted driver's new
+      Mmio/relay grants work; the dead pid's relays were swept).
+
 
 ## Phase 7 — Networking (outline)
 

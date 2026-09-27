@@ -17,7 +17,7 @@ verified against. This page explains how to boot it on your own machine.
   release itself:
 
 ```sh
-gh release download v0.5.0 --repo zeromike12/ArenaOS
+gh release download v0.6.0 --repo zeromike12/ArenaOS
 ```
 
   The build environment cannot reach GitHub's asset-upload endpoint
@@ -26,9 +26,9 @@ gh release download v0.5.0 --repo zeromike12/ArenaOS
   tarball, check its sha256, extract, and you have the same six files:
 
 ```sh
-curl -LO https://github.com/zeromike12/ArenaOS/raw/refs/heads/arena/01a0d6fd-arenaos/releases/v0.5.0/arenaos-v0.5.0-qemu-x86_64.tar.gz
-sha256sum -c arenaos-v0.5.0-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-v0.5.0-qemu-x86_64.tar.gz
+curl -LO https://github.com/zeromike12/ArenaOS/raw/refs/heads/arena/01a0d6fd-arenaos/releases/v0.6.0/arenaos-v0.6.0-qemu-x86_64.tar.gz
+sha256sum -c arenaos-v0.6.0-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-v0.6.0-qemu-x86_64.tar.gz
 ```
 
   (Each release's notes link its own bundle; after a branch merge the
@@ -66,6 +66,8 @@ qemu-system-x86_64 \
     -drive format=raw,file=arena-esp.img \
     -drive file=scratch.img,format=raw,if=none,id=scr0 \
     -device virtio-blk-pci,drive=scr0 \
+    -netdev user,id=net0 \
+    -device virtio-net-pci,netdev=net0 \
     -display none -serial mon:stdio -no-reboot
 ```
 
@@ -78,11 +80,20 @@ with the layout's source of truth: `python3 -c 'import sys;
 sys.path.insert(0, "tools"); import afs1; afs1.mkfs("scratch.img",
 16384)'`.
 
+The two `-netdev`/`-device virtio-net-pci` lines are **new in v0.6.0
+and optional**: they attach QEMU's built-in user-mode network, which
+the `netd` driver (M6.1) proves with a real ARP round trip every boot.
+Boot without them (e.g. an older saved command) and the machine stays
+green — the network test reports an honest `SKIP` and the kernel logs
+that the network service is offline. No host setup or privileges are
+needed either way.
+
 Serial is the console — in **both directions**. Everything ArenaOS logs
 goes there, and since Milestone 4.6 (ADR-0020) your keystrokes come
 back in through the same port: after the boot-time test suites pass (a
 few seconds), the kernel spawns the storage service, the filesystem
-service, and the **shell**, and the machine waits for you at the
+service, the network service (when the NIC is attached), and the
+**shell**, and the machine waits for you at the
 `arena> ` prompt. Type `help`. The VM stops only when you type
 `shutdown` (or kill QEMU with `Ctrl-A X`) — a boot that ends by itself
 would mean the shell never came up.
@@ -108,7 +119,7 @@ protocol with kernel-granted capabilities). What it understands:
 | Command | What happens |
 |---|---|
 | `help` | lists the builtins |
-| `ps` | live processes as `(pid, threads)` pairs — you will see the shell itself plus the resident `storaged` and `fsd` services |
+| `ps` | live processes as `(pid, threads)` pairs — you will see the shell itself plus the resident `storaged` and `fsd` services (and `netd` when the NIC is attached) |
 | `echo TEXT` | prints TEXT (the kernel line discipline echoes as you type; backspace works) |
 | `ls` | lists the files on the AFS1 volume with their committed sizes |
 | `cat NAME` | streams a file back through `fsd` + `storaged` (the device DMAs straight into the shell's own frame — zero-copy, ADR-0023) |
@@ -129,7 +140,7 @@ arena> shutdown
 
 …then boot the same `scratch.img` again and `cat note.txt`.
 
-## What a healthy boot looks like (current: Phase 5 complete — v0.5.0)
+## What a healthy boot looks like (current: Phase 6 in progress — v0.6.0)
 
 The serial output is a boot stage log followed by kernel log lines. The
 machine-checkable landmarks, in order:
@@ -159,19 +170,30 @@ machine-checkable landmarks, in order:
    (`PASS (fresh)`); on a volume that survived a reboot it re-finds and
    verifies the committed file with zero writes (`PASS (persisted)`) —
    ending with `m5: RESULT PASS (6/6)`
-10. `storaged spawned: pid …`, `fsd spawned: pid …`, then
-    `fsd: mounted AFS1 — commit seq …` — the production services come
-    up on the same disk the suite just proved (ADR-0022/0023)
-11. `milestone 5 complete … spawning the shell`, then
+10. `m6:test:net_service: PASS` — the virtio-net link proof
+    (ADR-0024): `netd` (the ring-3 NIC driver) plus `nettest`, which
+    hand-builds a 42-byte ARP request for QEMU's built-in gateway
+    10.0.2.2, sends it zero-copy through the transmit queue, and
+    verifies the reply that arrives — by interrupt — on the receive
+    queue, field by field at exact wire offsets — ending with
+    `m6: RESULT PASS (1/1)`. Booted WITHOUT the `-netdev`/NIC lines?
+    An honest `m6: RESULT SKIP` instead, and everything else is
+    unchanged
+11. `storaged spawned: pid …`, `fsd spawned: pid …`, then
+    `fsd: mounted AFS1 — commit seq …`, and (with the NIC)
+    `netd spawned: pid …` + `netd: virtio-net ready — DRIVER_OK,
+    mac …` — the production services come up on the same devices the
+    suite just proved (ADR-0022/0023/0024)
+12. `milestones 5–6.1 complete … spawning the shell`, then
     `shell spawned: pid …` — the hand-off
-12. `ArenaOS shell v0.5 …` and the `arena> ` prompt — the machine is
+13. `ArenaOS shell v0.6 …` and the `arena> ` prompt — the machine is
     now an interactive system with a real filesystem; type into it
     (see "The shell" above)
-13. After `shutdown`: `shutdown requested by pid … through its Power
+14. After `shutdown`: `shutdown requested by pid … through its Power
     cap` and `halting via UEFI ResetSystem(shutdown)` — the clean-halt
     declaration (the automated harnesses type `shutdown` for you,
     marker-paced)
-14. QEMU exits on its own with status 0
+15. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to
@@ -195,6 +217,10 @@ be a diagnostic artifact, not decoration.
 # Faster on Linux hosts (untested configuration — the project's
 # reference environment is TCG):
     -enable-kvm
+
+# Boot WITHOUT the network (pre-v0.6.0 style — stays green: the m6
+# suite reports an honest SKIP and netd is not spawned): drop the
+# -netdev and -device virtio-net-pci lines
 ```
 
 ## Building from source instead

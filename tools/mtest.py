@@ -24,6 +24,11 @@ Verdict logic (three distinct failure modes):
   * nonzero QEMU exit  -> kernel crashed / reset loop
   * markers            -> kernel ran but a self-test failed or panicked
 
+Fixtures (arena_env): every boot attaches the fresh AFS1-formatted
+scratch disk as virtio-blk-pci (M5, ADR-0021/0023) and — since M6.1
+(ADR-0024) — the slirp NIC as virtio-net-pci (run_qemu(net=False)
+reproduces a pre-v0.6.0 invocation for the honest-SKIP test).
+
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
@@ -62,6 +67,7 @@ DEFAULT_FEED: list[tuple[bytes, int, bytes]] = [(b"arena>", 1, b"shutdown\r")]
 
 def run_qemu(label: str, esp: Path,
              feed: list[tuple[bytes, int, bytes]] | None = None,
+             net: bool = True,
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     vars_img = bdir / "ovmf-vars.img"
@@ -84,6 +90,11 @@ def run_qemu(label: str, esp: Path,
         # Milestone-5 fixture (ADR-0021): fresh scratch disk attached as
         # virtio-blk-pci — the kernel's bus-0 scan must find it.
         + arena_env.scratch_disk_args()
+        # Milestone-6 fixture (ADR-0024): the slirp NIC for netd's link
+        # proof — nettest's ARP request goes to 10.0.2.2 and comes back.
+        # net=False reproduces a pre-v0.6.0 invocation (the honest-SKIP
+        # compatibility window test).
+        + (arena_env.net_args() if net else [])
         + [
             "-display", "none",
             # Serial on a stdio chardev: output captured to the log file,
@@ -177,6 +188,9 @@ def boot(label: str, esp: Path,
             "-drive", f"format=raw,file={esp}",
             "-drive", f"file={scratch},format=raw,if=none,id=scr0",
             "-device", "virtio-blk-pci,drive=scr0",
+            # M6 fixture (ADR-0024): the slirp NIC — multi-boot scripts
+            # (persistence, crash) carry it too so every boot is uniform.
+            *arena_env.net_args(),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",
             "-serial", "chardev:con0",

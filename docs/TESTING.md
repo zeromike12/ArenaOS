@@ -149,6 +149,34 @@ always exercises the fresh contract), and the release-bundle
 verification (which boots the SHIPPED `scratch-template.img`) attach
 the same fixture family; the ESP stays the boot medium throughout.
 
+Since M6.1 (ADR-0024) every harness boot also attaches the **slirp NIC
+fixture**: `arena_env.net_args()` adds `-netdev user,id=net0 -device
+virtio-net-pci,netdev=net0` — QEMU's user-mode networking, no host
+privileges, and it answers ARP for its built-in gateway 10.0.2.2, the
+one peer netd's link proof needs. `m6:test:net_service` spawns netd
+(image 6) and nettest (image 7): the client fetches the device MAC
+through the service (the device-config read path, DEV_INFO word [6]),
+hand-builds the 42-byte Ethernet/ARP frame (who-has 10.0.2.2 tell
+10.0.2.15), and SENDs it — the frame is LENT through IPC and the
+device DMAs the client's own page chained behind netd's virtio header
+(zero-copy TX). slirp's reply arrives on the receive queue as an MSI-X
+interrupt (never a poll), is held in netd's single-frame hold slot,
+and is delivered in the REPLY's inline 64-byte message; the client
+verifies ethertype, opcode, sender IP, target MAC, and the
+sender-MAC==Ethernet-source consistency at their exact wire offsets.
+The kernel counts the machine side: exactly ONE hardware delivery per
+relay vector (48 RX + 49 TX), both exit badges, both exit 42s, the
+dead driver's relays swept, frame-exact teardown.
+The fixture is OPTIONAL by design: the net device is new in v0.6.0 and
+pre-v0.6.0 invocations must stay bootable-green, so `test_m6.py` boots
+TWICE — with the NIC (the full proof above, plus the production netd
+spawn asserted) and WITHOUT it (`run_qemu(..., net=False)`), where the
+boot must show the honest SKIP markers (`m6:test:net_service: SKIP`,
+`m6: RESULT SKIP`), the kernel's "network service stays offline" line,
+no netd instance at all, and m1–m5 green in the same boot. A skip is
+never laundered into a pass count, and a compatibility regression
+never hides.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to
@@ -234,10 +262,17 @@ figures are `conventional=`/`reclaimable=`.
 
 - **Fault injection** (M2+): deliberate exceptions, corrupted structures fed
   to parsers, double-frees against debug allocators.
-- **Stress loops**: the 100-boot stability loop for the ExitBootServices
-  transition shipped in M2.7 (`tools/stability_loop.sh`, ADR-0011 — every
-  boot must show `m2: RESULT PASS`, the clean-halt declaration, no PANIC,
-  QEMU exit 0); allocator churn tests.
+- **Stress loops**: the 100-boot stability loop shipped in M2.7
+  (`tools/stability_loop.sh`, ADR-0011) — every boot must show every
+  milestone's RESULT line (`m2: RESULT PASS (21/21)` … since v0.6.0
+  `m6: RESULT PASS (1/1)`), the clean-halt declaration, no PANIC, QEMU
+  exit 0, with the full fixture family attached (scratch disk + slirp
+  NIC — stability means the SHIPPING configuration). The v0.6.0 loop
+  caught its first host-coupled flake at 1-in-100: the device-bound
+  suite drains were bounded by a *yield count*, which under host load
+  burns out before QEMU's iothread delivers the awaited MSI — they are
+  now bounded by an HPET wall-clock deadline (~21 s; see
+  `DRAIN_DEADLINE_TICKS` in `m5.rs`/`m6.rs`); allocator churn tests.
 - **Host fuzzing** (Phase 5+): boot-info parser, FS metadata parser, image
   loader — all reachable from host unit-test binaries.
 - **KVM acceleration** when the host allows it; test semantics unchanged.

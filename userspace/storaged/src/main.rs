@@ -110,6 +110,16 @@ const QUEUE_MAX: u16 = 256;
 /// SYS_DEV_INFO's word count (the ADR-0022 layout).
 const INFO_WORDS: usize = 12;
 
+/// virtio-blk PCI device IDs: modern (0x1040 + type 2) and the
+/// transitional block ID — the discovery assert (ADR-0024).
+const DEV_ID_BLK_MODERN: u64 = 0x1042;
+const DEV_ID_BLK_TRANSITIONAL: u64 = 0x1001;
+
+/// How many device-index probes the order-independent discovery makes
+/// before giving up (the kernel's virtio table is small; the gate
+/// refuses everything but THIS driver's device anyway).
+const DEV_IDX_PROBES: u64 = 8;
+
 // ---- diagnostics -------------------------------------------------------------
 
 /// The honest failure path: say what broke, exit with the stage code.
@@ -303,19 +313,25 @@ pub unsafe extern "C" fn _start() -> ! {
         // 1. The kernel's resolved record of our device (SYS_DEV_INFO,
         //    gated on the Mmio cap in slot 0 — config space itself is
         //    never exposed to ring 3).
-        // The virtio-DEVICE index this service drives (v1: the boot
-        // scan's first virtio-block function — the same index space
-        // SYS_DEV_INFO and SYS_IRQ_RELAY take; word[0]'s pci_index is
-        // a function-table index, informational only).
-        let dev_idx = 0u64;
+        // Order-independent discovery (ADR-0024): probe device indices
+        // upward and adopt the first one the kernel answers — the
+        // Mmio-cap gate guarantees the answer is OUR device (the cap
+        // names its structure BAR), so fixture order on the QEMU
+        // command line is not load-bearing. Then assert virtio-BLOCK
+        // from the device_id: a mis-spawn must fail loudly, not drive
+        // the wrong device.
+        let mut dev_idx = u64::MAX;
         let mut info = [0u64; INFO_WORDS];
-        let r = syscall2(SYS_DEV_INFO, dev_idx, info.as_mut_ptr() as u64);
-        if r != INFO_WORDS as i64 {
-            log_line(|o| {
-                o.str("storaged: dev_info returned ");
-                o.i64(r);
-            });
-            fail(EXIT_DEV_INFO, "SYS_DEV_INFO refused");
+        for idx in 0..DEV_IDX_PROBES {
+            let r = syscall2(SYS_DEV_INFO, idx, info.as_mut_ptr() as u64);
+            if r == INFO_WORDS as i64 {
+                dev_idx = idx;
+                break;
+            }
+        }
+        if dev_idx == u64::MAX {
+            log("storaged: SYS_DEV_INFO refused every device index probe");
+            fail(EXIT_DEV_INFO, "SYS_DEV_INFO refused (no granted device)");
         }
         let pci_index = info[0];
         let common_off = info[2] & 0xFFFF_FFFF;
@@ -325,6 +341,17 @@ pub unsafe extern "C" fn _start() -> ! {
         let msix_size = (info[7] >> 32) as u16;
         let device_id = info[8] & 0xFFFF;
         let transitional = (info[8] >> 32) & 0xFFFF;
+        if device_id != DEV_ID_BLK_MODERN && device_id != DEV_ID_BLK_TRANSITIONAL {
+            log_line(|o| {
+                o.str("storaged: granted device_id ");
+                o.hex(device_id);
+                o.str(" is neither virtio-blk modern 0x1042 nor transitional 0x1001");
+            });
+            fail(
+                EXIT_DEV_INFO,
+                "the granted device is not a virtio-block function",
+            );
+        }
         if msix_present == 0 || msix_size == 0 {
             fail(
                 EXIT_RELAY,

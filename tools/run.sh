@@ -21,6 +21,7 @@ print(f"QEMU=({' '.join(repr(x) for x in arena_env.qemu_cmd() + arena_env.qemu_d
 print(f"OVMF_CODE={arena_env.ovmf_code()}")
 print(f"OVMF_VARS={arena_env.ovmf_vars_template()}")
 print(f"SCRATCH=({' '.join(repr(x) for x in arena_env.scratch_disk_args())})")
+print(f"NET=({' '.join(repr(x) for x in arena_env.net_args())})")
 EOF
 )"
 
@@ -33,4 +34,5 @@ exec "${QEMU[@]}" \
     -drive if=pflash,format=raw,file="$REPO_ROOT/build/ovmf-vars-interactive.img" \
     -drive format=raw,file="$REPO_ROOT/build/arena-esp.img" \
     "${SCRATCH[@]}" \
+    "${NET[@]}" \
     -display none -serial mon:stdio -no-reboot

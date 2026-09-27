@@ -874,20 +874,63 @@ const BLK_EXIT_OK: u64 = 42;
 /// `irq_relay` above released 48 and 49.
 const BLK_RELAY_VEC: u64 = 48;
 
+/// The wall-clock bound for the device-bound drains, in HPET main-counter
+/// ticks (the register's low 32 bits — wrapping arithmetic below; the
+/// wrap window is ~298 s at QEMU's ~14.4 MHz, far above the bound).
+/// 300M ticks ≈ 21 s there, less at any plausibly faster counter rate —
+/// orders of magnitude beyond a healthy suite's device traffic (<1 s)
+/// and still inside every harness boot timeout (60/120 s).
+///
+/// Why not a yield count (the flake this replaces, caught by the
+/// v0.6.0 100-boot stability loop at 1-in-100): the boot thread's
+/// yields elapse in microseconds of HOST time, but what these drains
+/// wait for — a virtio completion — depends on the host scheduling
+/// QEMU's iothread. Under host load a count bound (even 32768) can
+/// burn out before a late MSI lands, and the suite then reports a
+/// "stuck scheduler" that is not stuck. A deadline measures the only
+/// thing the drain genuinely depends on: elapsed time. The HPET
+/// counter is provably running long before the first drain —
+/// `test_mmio_user` asserts it advances (and the m6 suite runs after
+/// this one).
+const DRAIN_DEADLINE_TICKS: u32 = 300_000_000;
+
 /// Drain while staying RUNNABLE and interruptible: the children park in
 /// blocking IPC/`SYS_WAIT`, and a device MSI-X is only TAKEN while some
 /// thread runs with IF=1 — the ring-3 children do, but the boot thread
 /// (the only thread left runnable between their blocking points) does
 /// not. The bounded `sti` window is the same discipline `irq_relay`
-/// used for its self-IPI; here it stays open for the whole drain.
-fn drain_interruptible(max_yields: usize) -> Result<usize, &'static str> {
+/// used for its self-IPI; here it stays open for the whole drain. The
+/// bound is wall-clock, not yield count — see `DRAIN_DEADLINE_TICKS`.
+fn drain_interruptible() -> Result<(), &'static str> {
     let if_before = crate::arch::x86_64::interrupts_enabled();
     crate::arch::x86_64::sti();
-    let r = m5_drain(max_yields);
+    let r = drain_to_deadline();
     if !if_before {
         crate::arch::x86_64::cli();
     }
     r
+}
+
+/// The deadline-bound drain body: yield until only the boot thread
+/// remains, then one more pass so the last zombie is reaped (the
+/// m3/m4 drain discipline). Caller holds IF=1.
+fn drain_to_deadline() -> Result<(), &'static str> {
+    let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
+    // SAFETY: ring 0; `hpet_va` is the mapped MMIO alias of the HPET
+    // page; 32-bit register reads of the main counter's low half.
+    let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+    while sched::live_threads() > 1 {
+        // SAFETY: the same alias, the same register.
+        let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+        if now.wrapping_sub(t0) >= DRAIN_DEADLINE_TICKS {
+            return Err(
+                "threads still live after the wall-clock deadline (a device completion or the scheduler is stuck)",
+            );
+        }
+        sched::yield_now();
+    }
+    sched::yield_now();
+    Ok(())
 }
 
 fn test_block_service() -> Result<(), &'static str> {
@@ -957,9 +1000,10 @@ fn test_block_service() -> Result<(), &'static str> {
     );
 
     // Run the two children to completion (client verifies, poisons;
-    // driver replies to the poison and exits). The bound is generous:
-    // each request is a handful of context switches plus one MSI.
-    drain_interruptible(16384).inspect_err(|_| {
+    // driver replies to the poison and exits). The bound is wall-clock
+    // (DRAIN_DEADLINE_TICKS): each request is a handful of context
+    // switches plus one MSI whose arrival is host-coupled.
+    drain_interruptible().inspect_err(|_| {
         // Diagnostics before the verdict: which side is still alive and
         // what the relay saw.
         error!(
@@ -1210,10 +1254,12 @@ fn test_fs_service() -> Result<(), &'static str> {
         bar
     );
 
-    // Run the three children to completion. The bound is generous:
-    // FS_DISK_OPS block calls, each a handful of context switches plus
-    // one MSI, plus the mount/commit logging.
-    drain_interruptible(32768).inspect_err(|_| {
+    // Run the three children to completion. The bound is wall-clock
+    // (DRAIN_DEADLINE_TICKS): FS_DISK_OPS block calls, each a handful
+    // of context switches plus one host-coupled MSI, plus the
+    // mount/commit logging — the drain that exposed why a yield COUNT
+    // is the wrong unit here.
+    drain_interruptible().inspect_err(|_| {
         error!(
             "m5",
             "fs_service drain failed: storaged threads={}, fsd threads={}, fstest threads={}, relay deliveries on vector {BLK_RELAY_VEC}={}",

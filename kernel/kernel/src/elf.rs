@@ -121,6 +121,24 @@ pub static FSD_IMAGE: &[u8] =
 pub static FSTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/fsd/target/x86_64-unknown-none/release/fstest");
 
+/// The network service (M6.1, ADR-0024): spawn-registry image 6,
+/// `netd` — the userspace virtio-net driver, link-layer only (raw
+/// Ethernet frames in/out). Built by `tools/build.sh` from
+/// `userspace/netd` under the same strict-subset contract. Spawned at
+/// boot after fsd when a virtio-net function exists; the m6 suite
+/// spawns its own short-lived instance for the net_service test.
+pub static NETD_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/netd/target/x86_64-unknown-none/release/arena-netd");
+
+/// The network-service test client (M6.1): spawn-registry image 7,
+/// `nettest` — built from the same crate as `netd` (shared ABI
+/// module). It fetches the device MAC, hand-builds a 42-byte ARP
+/// request for the slirp gateway, sends it through the service, and
+/// verifies the reply's protocol fields byte-for-byte. Only the m6
+/// suite spawns it.
+pub static NETTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/netd/target/x86_64-unknown-none/release/nettest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {
