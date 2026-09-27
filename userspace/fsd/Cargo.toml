@@ -1,0 +1,30 @@
+[package]
+name = "arena-fsd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS filesystem service (M5.3, ADR-0023) — AFS1, the own-design extent-based filesystem with copy-on-write transactional metadata, served entirely from ring 3. Two images from one crate: `fsd` (spawn-registry image 4, the resident server: mounts the AFS1 superblock + newest ping-pong commit, keeps the object table and allocation bitmap in RAM, CoWs metadata per transaction, and FORWARDS client buffer caps to storaged so file data DMAs end-to-end zero-copy) and `fstest` (image 5, the m5 suite's client: create → write → close → re-open → read → verify → ls walk → clean shutdowns)."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+# The filesystem server (registry image 4), spawned at boot after
+# storaged and before the shell.
+[[bin]]
+name = "fsd"
+path = "src/main.rs"
+
+# The filesystem-service test client (registry image 5), spawned only
+# by the m5 suite's fs_service test. Shares the userspace ABI surface
+# (userspace/abi.rs) with fsd, storaged, and blktest via #[path] — one
+# wire contract, four programs.
+[[bin]]
+name = "fstest"
+path = "src/fstest.rs"

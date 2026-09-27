@@ -39,7 +39,12 @@
 //! (M4.4, ADR-0018) adds `SYS_IPC_CALL`/`SYS_IPC_RECV`/`SYS_IPC_REPLY`
 //! (endpoint rendezvous: two-word messages, one transferred capability,
 //! blocking call/reply) and `SYS_NOTIFY`/`SYS_WAIT` (badged, merged
-//! notification flags). The spawn protocol (M4.5, ADR-0019) adds
+//! notification flags). IPC v1.1 (M5.3, ADR-0023) extends those three
+//! calls with an OPTIONAL trailing 64-byte inline message buffer
+//! (`CALL` a5 in/out, `RECV` a2 out, `REPLY` a4 in); a NULL pointer
+//! keeps exact v1.0 behavior. Every non-null buffer is range-checked
+//! against the calling process's regions and touched ONLY in its
+//! owner's context (ADR-0018 discipline), under STAC. The spawn protocol (M4.5, ADR-0019) adds
 //! `SYS_SPAWN`: build a process from an image capability, hand the
 //! child an explicit, attenuated inheritance list, register an exit
 //! badge, and start its first thread at the image entry. The console
@@ -314,19 +319,28 @@ pub fn last_write() -> ([u8; WRITE_MAX as usize], usize) {
     unsafe { (*WRITE_BUF.get(), *WRITE_BUF_LEN.get()) }
 }
 
-/// (thread id, exit status) pairs recorded by SYS_THREAD_EXIT, in order.
-const EXIT_LOG_CAP: usize = 16;
+/// (thread id, exit status) pairs recorded by SYS_THREAD_EXIT — a
+/// NEWEST-WINS ring (M5.3): one full boot (m1–m5 suites + production
+/// spawn) records far more exits than the original 16-entry prefix
+/// log held, and the suites always query their OWN just-exited
+/// children. Oldest entries are overwritten; `exit_status_of` scans
+/// newest-first, so the latest exit of a thread id always wins.
+const EXIT_LOG_CAP: usize = 64;
 static EXIT_LOG: SyncCell<[(u64, u64); EXIT_LOG_CAP]> = SyncCell::new([(0, 0); EXIT_LOG_CAP]);
 static EXIT_LOG_LEN: SyncCell<usize> = SyncCell::new(0);
+static EXIT_LOG_POS: SyncCell<usize> = SyncCell::new(0);
 
-/// The status thread `id` exited with (None = not exited / log overflowed
-/// before recording — the suite sizes its runs far below the cap).
+/// The status thread `id` exited with (None = not exited, or evicted
+/// from the ring by `EXIT_LOG_CAP` newer exits — a suite that queries
+/// its children promptly never sees eviction).
 pub fn exit_status_of(id: u64) -> Option<u64> {
     // SAFETY: read-only; SyncCell contract.
     unsafe {
         let len = *EXIT_LOG_LEN.get();
-        for i in 0..len {
-            let (tid, status) = (*EXIT_LOG.get())[i];
+        let pos = *EXIT_LOG_POS.get();
+        for k in 0..len {
+            let idx = (pos + EXIT_LOG_CAP - 1 - k) % EXIT_LOG_CAP;
+            let (tid, status) = (*EXIT_LOG.get())[idx];
             if tid == id {
                 return Some(status);
             }
@@ -336,11 +350,13 @@ pub fn exit_status_of(id: u64) -> Option<u64> {
 }
 
 fn record_exit(id: u64, status: u64) {
-    // SAFETY: single writer at IF=0 (dispatcher); capped log.
+    // SAFETY: single writer at IF=0 (dispatcher); ring write.
     unsafe {
+        let pos = &mut *EXIT_LOG_POS.get();
+        (*EXIT_LOG.get())[*pos] = (id, status);
+        *pos = (*pos + 1) % EXIT_LOG_CAP;
         let len = &mut *EXIT_LOG_LEN.get();
         if *len < EXIT_LOG_CAP {
-            (*EXIT_LOG.get())[*len] = (id, status);
             *len += 1;
         }
     }
@@ -570,9 +586,9 @@ extern "C" fn syscall_dispatch(
             unsafe { (*STATS.get()).echo_calls += 1 };
             echo6_fingerprint([a0, a1, a2, a3, a4, a5])
         }
-        SYS_IPC_CALL => sys_ipc_call(a0, a1, a2, a3, a4) as u64,
-        SYS_IPC_RECV => sys_ipc_recv(a0, a1) as u64,
-        SYS_IPC_REPLY => sys_ipc_reply(a0, a1, a2, a3) as u64,
+        SYS_IPC_CALL => sys_ipc_call(a0, a1, a2, a3, a4, a5) as u64,
+        SYS_IPC_RECV => sys_ipc_recv(a0, a1, a2) as u64,
+        SYS_IPC_REPLY => sys_ipc_reply(a0, a1, a2, a3, a4) as u64,
         SYS_NOTIFY => sys_notify(a0, a1) as u64,
         SYS_WAIT => sys_wait(a0) as u64,
         SYS_SPAWN => sys_spawn(a0, a1, a2, a3, a4) as u64,
@@ -738,6 +754,35 @@ fn send_cap_of(pid: u64, slot: u64) -> Result<Option<crate::cap::Cap>, Status> {
     Ok(Some(c))
 }
 
+/// Copy a user inline-message buffer into kernel scratch (IPC v1.1).
+///
+/// # Safety
+/// `[a, a+64)` was validated by `user_range_ok` against the CURRENT
+/// thread's regions and the thread's own address space is live.
+unsafe fn read_user_msg(a: u64) -> [u8; crate::ipc::MSG_BYTES] {
+    let mut msg = [0u8; crate::ipc::MSG_BYTES];
+    // SAFETY: caller contract; STAC brackets the SMAP-guarded reads.
+    unsafe {
+        super::stac();
+        core::ptr::copy_nonoverlapping(a as *const u8, msg.as_mut_ptr(), crate::ipc::MSG_BYTES);
+        super::clac();
+    }
+    msg
+}
+
+/// Copy a kernel inline-message buffer to validated user memory (v1.1).
+///
+/// # Safety
+/// As [`read_user_msg`].
+unsafe fn write_user_msg(a: u64, msg: &[u8; crate::ipc::MSG_BYTES]) {
+    // SAFETY: caller contract.
+    unsafe {
+        super::stac();
+        core::ptr::copy_nonoverlapping(msg.as_ptr(), a as *mut u8, crate::ipc::MSG_BYTES);
+        super::clac();
+    }
+}
+
 /// Write the three message words to a validated user buffer.
 ///
 /// # Safety
@@ -755,10 +800,12 @@ unsafe fn write_user_words(buf: u64, words: [u64; 3]) {
     }
 }
 
-/// SYS_IPC_CALL(ep slot, w0, w1, send-cap slot, reply buf): block until
-/// the server replies; the reply lands in the buffer as
-/// `[w0, w1, cap-slot-or-CAP_NONE]`. Needs WRITE on the endpoint cap.
-fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
+/// SYS_IPC_CALL(ep slot, w0, w1, send-cap slot, reply buf, msg buf):
+/// block until the server replies; the reply lands in the buffer as
+/// `[w0, w1, cap-slot-or-CAP_NONE]` and the server's inline reply
+/// message overwrites `msg buf` (NULL = none; IPC v1.1). Needs WRITE
+/// on the endpoint cap.
+fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG; // kernel threads have no cap space
     };
@@ -771,22 +818,41 @@ fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     if !user_range_ok(a4, IPC_BUF_BYTES) {
         return STATUS_BAD_ADDRESS;
     }
-    match crate::ipc::call(pid, eid, [a1, a2], send_cap) {
-        Ok((words, landed)) => {
+    // IPC v1.1: optional inline message; the buffer is IN/OUT —
+    // snapshotted now (caller context), reply written on resume (same
+    // context: `ipc::call` blocks and wakes THIS thread).
+    let has_msg = a5 != 0;
+    if has_msg && !user_range_ok(a5, crate::ipc::MSG_BYTES as u64) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let msg = if has_msg {
+        // SAFETY: validated above; own context.
+        unsafe { read_user_msg(a5) }
+    } else {
+        [0u8; crate::ipc::MSG_BYTES]
+    };
+    match crate::ipc::call(pid, eid, [a1, a2], send_cap, msg) {
+        Ok((words, landed, reply_msg)) => {
             // SAFETY: validated above; `ipc::call` resumes in THIS
             // thread's own context and address space (ADR-0018: user
             // memory is only touched by its owner).
-            unsafe { write_user_words(a4, [words[0], words[1], landed]) };
+            unsafe {
+                write_user_words(a4, [words[0], words[1], landed]);
+                if has_msg {
+                    write_user_msg(a5, &reply_msg);
+                }
+            }
             STATUS_OK
         }
         Err(e) => e,
     }
 }
 
-/// SYS_IPC_RECV(ep slot, buf): take the oldest request, blocking while
-/// the queue is empty; buf receives `[w0, w1, landed-cap-slot]`. Needs
-/// READ on the endpoint cap.
-fn sys_ipc_recv(a0: u64, a1: u64) -> Status {
+/// SYS_IPC_RECV(ep slot, buf, msg buf): take the oldest request,
+/// blocking while the queue is empty; buf receives
+/// `[w0, w1, landed-cap-slot]` and the request's inline message lands
+/// in `msg buf` (NULL = not wanted; IPC v1.1). Needs READ.
+fn sys_ipc_recv(a0: u64, a1: u64, a2: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG;
     };
@@ -796,19 +862,32 @@ fn sys_ipc_recv(a0: u64, a1: u64) -> Status {
     if !user_range_ok(a1, IPC_BUF_BYTES) {
         return STATUS_BAD_ADDRESS;
     }
+    // IPC v1.1: optional inline-message out buffer. Validated BEFORE
+    // blocking so a bad pointer fails fast with a typed status.
+    let has_msg = a2 != 0;
+    if has_msg && !user_range_ok(a2, crate::ipc::MSG_BYTES as u64) {
+        return STATUS_BAD_ADDRESS;
+    }
     match crate::ipc::recv(pid, eid) {
-        Ok((words, landed)) => {
+        Ok((words, landed, msg)) => {
             // SAFETY: as in sys_ipc_call — own context, validated range.
-            unsafe { write_user_words(a1, [words[0], words[1], landed]) };
+            unsafe {
+                write_user_words(a1, [words[0], words[1], landed]);
+                if has_msg {
+                    write_user_msg(a2, &msg);
+                }
+            }
             STATUS_OK
         }
         Err(e) => e,
     }
 }
 
-/// SYS_IPC_REPLY(ep slot, w0, w1, send-cap slot): stage the reply into
-/// this server's delivered slot and wake the caller. Needs READ.
-fn sys_ipc_reply(a0: u64, a1: u64, a2: u64, a3: u64) -> Status {
+/// SYS_IPC_REPLY(ep slot, w0, w1, send-cap slot, msg buf): stage the
+/// reply into this server's delivered slot and wake the caller; the
+/// inline reply message is snapshotted from `msg buf` in the SERVER's
+/// context now (NULL = none; IPC v1.1). Needs READ.
+fn sys_ipc_reply(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG;
     };
@@ -818,7 +897,19 @@ fn sys_ipc_reply(a0: u64, a1: u64, a2: u64, a3: u64) -> Status {
     let Ok(send_cap) = send_cap_of(pid, a3) else {
         return STATUS_BAD_ARG;
     };
-    match crate::ipc::reply(eid, [a1, a2], send_cap) {
+    // IPC v1.1: optional inline reply message, snapshotted in the
+    // server's own context (ADR-0018: never touch foreign memory).
+    let has_msg = a4 != 0;
+    if has_msg && !user_range_ok(a4, crate::ipc::MSG_BYTES as u64) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let msg = if has_msg {
+        // SAFETY: validated above; own context.
+        unsafe { read_user_msg(a4) }
+    } else {
+        [0u8; crate::ipc::MSG_BYTES]
+    };
+    match crate::ipc::reply(eid, [a1, a2], send_cap, msg) {
         Ok(()) => STATUS_OK,
         Err(e) => e,
     }

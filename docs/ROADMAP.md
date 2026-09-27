@@ -392,20 +392,56 @@ medium — the ESP stays the boot medium throughout).
       relay swept, teardown frame-exact; markers on the wire; the
       PRODUCTION storaged instance spawns after the suite and parks
       resident (`ps` shows it beside the shell). ADR-0022.
-- [ ] 5.3 **Filesystem v1 — own design**: extent-based data,
-      copy-on-write + transactional metadata (ADR-0023); host-side
-      `mkfs`; `userspace/fsd` server on a block-endpoint cap:
-      superblock, object table, extent tree, transaction commit. Exit:
-      create/write/read/close files served entirely from ring 3; the
-      on-disk layout survives reopen; shell builtins `ls`/`cat`/`write`
-      against it.
+- [x] 5.3 **Filesystem v1 — own design**: AFS1 (ADR-0023) —
+      extent-based data written in place; copy-on-write transactional
+      metadata: the object table (32 × 64 B records) and allocation
+      bitmap are CoW'd to fresh contiguous runs per commit, and a
+      ping-pong commit record (sectors 1/2, slot = seq % 2, FNV-1a
+      checksummed) flips generations in ONE sector write;
+      two-generation-delayed freeing makes every crash a leak, never
+      corruption. Host-side `mkfs` (`tools/afs1.py` — the layout's
+      single source of truth, mirrored byte-for-byte by fsd; the
+      harness formats the scratch disk every run). IPC v1.1: CALL/
+      RECV/REPLY gained an OPTIONAL 64-byte inline message buffer
+      (NULL = v1.0 behavior, wire-compatible) carrying names and
+      dirents; block protocol v1.1: `w1 = op | offset << 8` with a
+      bounds-checked in-frame buffer offset. `userspace/fsd`
+      (registry image 4, spawned at boot between storaged and the
+      shell; grants: block endpoint WRITE + FS endpoint READ — no
+      Mmio, no IRQ: fsd never sees the device): superblock + newest-
+      commit mount, RAM metadata, per-write transactions, 8-handle
+      open-file table, typed FS_ERR_* statuses, poison-shutdown
+      lifecycle — and the end-to-end zero-copy chain: clients LEND
+      their buffer frame, fsd FORWARDS the untouched cap to storaged,
+      the device DMAs between disk and the CLIENT's page (a lent cap
+      cannot be mapped — the cap system enforces the zero copy).
+      Exit: m5 `fs_service` (6/6) — `fstest` (image 5) ran
+      create→write→close→RE-OPEN→read→byte-for-byte verify→ls-walk
+      entirely in ring 3; three exact exit badges/codes; relay
+      deliveries EXACTLY 33 = the derived disk-op contract (fsd's own
+      count and storaged's completions agree — three counters, one
+      number); dead driver's relay swept; frame-exact teardown across
+      all three children. AFTER the boot, `test_m5.py` parses the
+      committed image: newest commit seq 3, `arena.txt` size 512,
+      extents resolved to bitmap-marked sectors, pattern bytes
+      verified ON DISK. The production fsd mounts the suite-committed
+      volume in the same boot — the in-boot persistence-across-re-open
+      proof — and the shell (migrated onto the shared
+      `userspace/abi.rs`) serves `ls` / `cat NAME` / `write NAME TXT`
+      through its new slot-3 endpoint cap; the shell session test
+      drives all three (write creates only — v1 has no truncate;
+      honest refusal over silent clobber).
 - [ ] 5.4 **Persistence + namespace + crash consistency**: file caps
       and minimal path→cap resolution at open (then direct I/O — paths
       are UI, per ARCHITECTURE §10); two-boot persistence (the same
       scratch.img: written in boot N, read in boot N+1); the
       crash-consistency gate from the phase outline — the harness kills
       QEMU mid-write, reboots, and verifies recovery WITHOUT an fsck
-      ritual. Exit: all three proven by harness tests; v0.5.0 ships.
+      ritual. (The v0.5.0 run bundle must ship a FORMATTED scratch
+      image — since 5.3 a zero-filled disk fails fsd's mount by
+      design; either a preformatted `scratch.img` or `tools/afs1.py`
+      travels with the bundle's run script.) Exit: all three proven by
+      harness tests; v0.5.0 ships.
 
 ## Phase 6 — Drivers (outline)
 

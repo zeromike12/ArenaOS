@@ -31,7 +31,7 @@
 
 use core::panic::PanicInfo;
 
-#[path = "abi.rs"]
+#[path = "../../abi.rs"]
 mod abi;
 use abi::*;
 
@@ -50,16 +50,12 @@ const EXIT_READ_STATUS: u64 = 47;
 const EXIT_MISMATCH: u64 = 48;
 const EXIT_POISON: u64 = 49;
 
-/// The sector this test drives (the scratch disk is zero-filled; any
-/// in-range sector proves the path — 0 is where fsd will put its
-/// superblock, so we claim it early).
-const TEST_SECTOR: u64 = 0;
-
-/// The deterministic pattern byte for offset `i` (no allocator, no
-/// randomness — the same function fills and verifies).
-fn pattern_byte(i: usize) -> u8 {
-    (i as u8).wrapping_mul(31).wrapping_add(0x5A) ^ ((i >> 3) as u8)
-}
+/// The sector this test drives: the LAST one on the scratch disk.
+/// Since M5.3 the host formats the image as AFS1 (metadata in sectors
+/// 0..10, fsd's allocations start at 11), and this raw-block cycle
+/// deliberately bypasses the filesystem — the neutral high sector
+/// proves the device path without touching FS state (ADR-0023).
+const TEST_SECTOR: u64 = SCRATCH_TOTAL_SECTORS - 1;
 
 fn fail(code: u64, what: &str) -> ! {
     log_line(|o| {
@@ -94,13 +90,14 @@ fn request(op: u64, sector: u64, send_slot: u64, call_fail: u64, status_fail: u6
     // SAFETY: wrapper contract; `reply` is on this thread's own
     // (registered) stack; the endpoint cap is the granted slot 0.
     let r = unsafe {
-        syscall5(
+        syscall6(
             SYS_IPC_CALL,
             SLOT_EP,
             sector,
-            op,
+            block_req_w1(op, 0),
             send_slot,
             reply.as_mut_ptr() as u64,
+            0, // no inline message (IPC v1.1 arg)
         )
     };
     if r < 0 {

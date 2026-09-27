@@ -1,9 +1,11 @@
-//! The shared ABI surface of the storaged crate (M5.2, ADR-0022) —
-//! included by BOTH binaries (`arena-storaged`, `blktest`) through
-//! `#[path]`, so the driver and its test client speak the exact same
-//! frozen syscall registry and block protocol. No libc, no allocator:
-//! fixed buffers, volatile MMIO/ring accessors, and the shell's
-//! chunked-console discipline.
+//! The shared userspace ABI surface (M5.2/M5.3, ADR-0022/0023) — one
+//! file, included by EVERY service crate binary (`arena-storaged`,
+//! `blktest`, `fsd`, `fstest`) through `#[path = "../../abi.rs"]`, so
+//! both sides of every wire protocol speak from the same frozen
+//! definitions: syscall registry, IPC v1.1 inline-message helpers,
+//! block protocol v1.1, and the filesystem-service protocol. No libc,
+//! no allocator: fixed buffers, volatile MMIO/ring accessors, and the
+//! shell's chunked-console discipline.
 //!
 //! ABI v1 (ADR-0017): RAX = call number, args RDI/RSI/RDX/R10/R8/R9;
 //! the kernel preserves only RBX/RBP/R12–R15, so every stub declares
@@ -20,6 +22,10 @@ pub const SYS_IPC_CALL: u64 = 7;
 pub const SYS_IPC_RECV: u64 = 8;
 pub const SYS_IPC_REPLY: u64 = 9;
 pub const SYS_WAIT: u64 = 11;
+pub const SYS_SPAWN: u64 = 12;
+pub const SYS_CONSOLE_READ: u64 = 13;
+pub const SYS_PROC_LIST: u64 = 14;
+pub const SYS_SHUTDOWN: u64 = 15;
 pub const SYS_ALLOC_FRAME: u64 = 16;
 pub const SYS_MAP_MEMORY: u64 = 17;
 pub const SYS_IRQ_RELAY: u64 = 18;
@@ -37,9 +43,26 @@ pub const RIGHTS_COPY: u64 = 1 << 2;
 pub const RIGHTS_DESTROY: u64 = 1 << 3;
 pub const RIGHTS_ALL: u64 = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
 
-// ---- the block protocol (ADR-0022) ------------------------------------------
+// ---- IPC v1.1 inline messages (M5.3, ADR-0023) -------------------------------
 //
-// Request words:  w0 = sector (512-byte units), w1 = op.
+// CALL/RECV/REPLY take an OPTIONAL trailing pointer to a 64-byte
+// buffer: the kernel snapshots it from the CALLER/REPLIER (owner
+// context), rides it in the call slot, and hands it to the other side.
+// A null pointer means "no inline message" (v1.0 behavior). Payloads
+// are opaque bytes — the FS protocol below defines its layouts.
+
+pub const MSG_BYTES: usize = 64;
+
+// ---- the block protocol (ADR-0022, extended v1.1 by ADR-0023) ----------------
+//
+// Request words:  w0 = sector (512-byte units),
+//                 w1 = op | (buf_offset << 8) — buf_offset selects the
+//                 sector's landing spot INSIDE the caller's lent 4 KiB
+//                 frame, so one frame can stage up to 8 sectors and
+//                 forwarded caps keep DMA'ing the client's own memory.
+//                 The driver MUST refuse offsets with
+//                 buf_offset + 512 > 4096 (a wild offset could aim the
+//                 device at an adjacent frame).
 // Reply words:    w0 = virtio status byte (0 = OK), w1 = device-written
 //                 byte count from the used ring (informational).
 // The caller's buffer travels as a LENT Untyped cap attached to the
@@ -53,6 +76,84 @@ pub const OP_WRITE: u64 = 1;
 /// parked threads must never be destroyed out from under them).
 pub const OP_SHUTDOWN: u64 = 2;
 pub const SECTOR_BYTES: usize = 512;
+/// Every lent buffer frame is one 4 KiB page (Untyped cap granularity).
+pub const BLOCK_FRAME_BYTES: u64 = 4096;
+
+/// Pack a block-protocol request word 1 (op + in-frame buffer offset).
+pub fn block_req_w1(op: u64, buf_offset: u64) -> u64 {
+    op | (buf_offset << 8)
+}
+
+// ---- the filesystem-service protocol (ADR-0023) --------------------------------
+//
+// fsd owns AFS1 (extent data + CoW/transactional metadata) and serves
+// it on its own endpoint. Client data buffers travel the same way as
+// block requests: a LENT Untyped cap attached to the call, which fsd
+// FORWARDS to storaged — the device DMAs straight between the disk and
+// the CLIENT's frame (zero-copy end to end; fsd never maps it — lent
+// caps cannot be mapped by design).
+//
+// Request word 0 is the op; word 1 depends on the op:
+//   CREATE / OPEN  w1 ignored; msg64 = name bytes (<= FS_NAME_MAX)
+//   READ / WRITE   w1 = fh | (file_offset << 8); msg64 [0..8] = length
+//                  (bytes, <= 3584); send cap = client's LENT frame.
+//                  v1 WRITE must start at or below EOF (gap/sparse
+//                  writes answer FS_ERR_RANGE — the extent mapping is
+//                  cumulative and only appends stay honest)
+//   CLOSE          w1 = fh
+//   LS             w1 = cursor (0 to start); msg64 OUT = dirent:
+//                  [0..4] next cursor (FS_CURSOR_END = done),
+//                  [4..12] size, [12..16] name length, [16..48] name
+//   SHUTDOWN       reply, then fsd exits (same discipline as storaged)
+// Reply word 0 is FS_OK or a negative FS_ERR_* status; word 1:
+//   CREATE/OPEN -> file handle, READ/WRITE -> byte count,
+//   SHUTDOWN -> fsd's lifetime disk-operation count, else 0.
+
+pub const FS_OP_CREATE: u64 = 1;
+pub const FS_OP_OPEN: u64 = 2;
+pub const FS_OP_READ: u64 = 3;
+pub const FS_OP_WRITE: u64 = 4;
+pub const FS_OP_CLOSE: u64 = 5;
+pub const FS_OP_LS: u64 = 6;
+pub const FS_OP_SHUTDOWN: u64 = 7;
+
+pub const FS_OK: u64 = 0;
+pub const FS_ERR_NOT_FOUND: u64 = (-1i64) as u64;
+pub const FS_ERR_EXISTS: u64 = (-2i64) as u64;
+pub const FS_ERR_BAD_FH: u64 = (-3i64) as u64;
+pub const FS_ERR_TABLE_FULL: u64 = (-4i64) as u64;
+pub const FS_ERR_IO: u64 = (-5i64) as u64;
+pub const FS_ERR_NO_SPACE: u64 = (-6i64) as u64;
+pub const FS_ERR_BAD_NAME: u64 = (-7i64) as u64;
+pub const FS_ERR_CORRUPT: u64 = (-8i64) as u64;
+pub const FS_ERR_RANGE: u64 = (-9i64) as u64;
+pub const FS_ERR_BAD_OP: u64 = (-10i64) as u64;
+
+pub const FS_NAME_MAX: usize = 32;
+
+/// The suite's scratch-disk geometry in 512-byte sectors — mirrors
+/// `tools/arena_env.py` (`SCRATCH_MIB = 8`). blktest's raw-block cycle
+/// claims the LAST sector: the host-side mkfs (ADR-0023) puts AFS1's
+/// metadata in sectors 0..10 and the suite's fsd allocates upward from
+/// 11, so a raw write there cannot touch filesystem state.
+pub const SCRATCH_TOTAL_SECTORS: u64 = 16384;
+
+/// The deterministic test pattern shared by blktest and fstest — and
+/// mirrored byte-for-byte by `tools/test_m5.py`'s on-disk verification
+/// (the host parses the real committed sectors after boot).
+pub fn pattern_byte(i: usize) -> u8 {
+    (i as u8).wrapping_mul(31).wrapping_add(0x5A) ^ ((i >> 3) as u8)
+}
+pub const FS_CURSOR_END: u32 = 0xFFFF_FFFF;
+/// Largest single READ/WRITE transfer: one 4 KiB frame minus the
+/// largest in-frame offset the protocol can express (512 * 1 = one
+/// sector alignment slack kept for the final partial sector).
+pub const FS_XFER_MAX: u64 = 3584;
+
+/// Pack the FS READ/WRITE request word 1 (handle + file offset).
+pub fn fs_rw_w1(fh: u64, file_offset: u64) -> u64 {
+    fh | (file_offset << 8)
+}
 /// virtio-blk status values (virtio 1.0 §5.2.6.1).
 pub const VIRTIO_BLK_S_OK: u64 = 0;
 pub const VIRTIO_BLK_S_IOERR: u64 = 1;
@@ -173,6 +274,29 @@ pub unsafe fn syscall5(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> 
     ret
 }
 
+pub unsafe fn syscall6(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64 {
+    let ret: i64;
+    // SAFETY: as syscall1 (a5 rides R9 per ABI v1). IPC v1.1 calls
+    // MUST use this stub (or explicitly zero R9): the kernel validates
+    // a stale r9 as an inline-message pointer.
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") nr as i64 => ret,
+            inlateout("rdi") a0 => _,
+            inlateout("rsi") a1 => _,
+            inlateout("rdx") a2 => _,
+            inlateout("r10") a3 => _,
+            inlateout("r8") a4 => _,
+            inlateout("r9") a5 => _,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack),
+        );
+    }
+    ret
+}
+
 // ---- console output (the shell's discipline: chunked, honest exits) ----------
 
 /// Dispatcher's largest accepted debug_write (kernel-side WRITE_MAX).
@@ -226,6 +350,11 @@ impl Out {
     }
     pub fn str(&mut self, s: &str) {
         for b in s.bytes() {
+            self.push(b);
+        }
+    }
+    pub fn bytes(&mut self, s: &[u8]) {
+        for &b in s {
             self.push(b);
         }
     }

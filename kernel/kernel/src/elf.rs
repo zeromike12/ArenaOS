@@ -105,6 +105,22 @@ pub static STORAGED_IMAGE: &[u8] =
 pub static BLKTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/storaged/target/x86_64-unknown-none/release/blktest");
 
+/// The filesystem service (M5.3, ADR-0023): spawn-registry image 4,
+/// `fsd` — AFS1 (extent data + CoW transactional metadata) served from
+/// ring 3 over the block service. Built by `tools/build.sh` from
+/// `userspace/fsd` under the same strict-subset contract. Spawned at
+/// boot after storaged, before the shell; the m5 suite spawns its own
+/// short-lived instance for the fs_service test.
+pub static FSD_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/fsd/target/x86_64-unknown-none/release/fsd");
+
+/// The filesystem-service test client (M5.3): spawn-registry image 5,
+/// `fstest` — built from the same crate as `fsd` (shared ABI module).
+/// It drives create → write → close → re-open → read → verify → ls
+/// through fsd's endpoint. Only the m5 suite spawns it.
+pub static FSTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/fsd/target/x86_64-unknown-none/release/fstest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

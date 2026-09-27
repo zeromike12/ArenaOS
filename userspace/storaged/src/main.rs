@@ -27,7 +27,7 @@
 
 use core::panic::PanicInfo;
 
-#[path = "abi.rs"]
+#[path = "../../abi.rs"]
 mod abi;
 use abi::*;
 
@@ -502,7 +502,7 @@ pub unsafe extern "C" fn _start() -> ! {
         };
         let mut msg = [0u64; 3];
         loop {
-            let r = syscall2(SYS_IPC_RECV, SLOT_EP, msg.as_mut_ptr() as u64);
+            let r = syscall3(SYS_IPC_RECV, SLOT_EP, msg.as_mut_ptr() as u64, 0);
             if r < 0 {
                 log_line(|o| {
                     o.str("storaged: recv returned ");
@@ -510,7 +510,12 @@ pub unsafe extern "C" fn _start() -> ! {
                 });
                 fail(EXIT_RECV, "SYS_IPC_RECV refused");
             }
-            let (sector, op, landed) = (msg[0], msg[1], msg[2]);
+            let (sector, w1, landed) = (msg[0], msg[1], msg[2]);
+            // v1.1: w1 = op | (buf_offset << 8). The offset is validated
+            // before it can aim the device anywhere: a request whose
+            // sector would run past the caller's 4 KiB frame is refused
+            // with a typed status (ADR-0022/0023 security seam).
+            let (op, buf_off) = (w1 & 0xFF, w1 >> 8);
             if op == OP_SHUTDOWN {
                 // The poison request: reply FIRST (the caller blocks),
                 // then exit — a process is never destroyed with parked
@@ -520,12 +525,13 @@ pub unsafe extern "C" fn _start() -> ! {
                     o.u64(q.completions);
                     o.str(" interrupt-delivered completion(s) — replying and exiting");
                 });
-                let rr = syscall4(
+                let rr = syscall5(
                     SYS_IPC_REPLY,
                     SLOT_EP,
                     VIRTIO_BLK_S_OK,
                     q.completions,
                     CAP_NONE,
+                    0,
                 );
                 if rr < 0 {
                     fail(EXIT_REPLY, "the shutdown reply refused");
@@ -535,14 +541,20 @@ pub unsafe extern "C" fn _start() -> ! {
             }
             if op > OP_WRITE {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
-                let rr = syscall4(SYS_IPC_REPLY, SLOT_EP, VIRTIO_BLK_S_UNSUPP, 0, CAP_NONE);
+                let rr = syscall5(SYS_IPC_REPLY, SLOT_EP, VIRTIO_BLK_S_UNSUPP, 0, CAP_NONE, 0);
                 if rr < 0 {
                     fail(EXIT_REPLY, "the unsupported-op reply refused");
                 }
                 continue;
             }
-            if landed == CAP_NONE {
-                let rr = syscall4(SYS_IPC_REPLY, SLOT_EP, VIRTIO_BLK_S_IOERR, 0, CAP_NONE);
+            if landed == CAP_NONE || buf_off + SECTOR_BYTES as u64 > BLOCK_FRAME_BYTES {
+                let _ = syscall1(SYS_CAP_DESTROY, landed);
+                let st = if landed == CAP_NONE {
+                    VIRTIO_BLK_S_IOERR
+                } else {
+                    VIRTIO_BLK_S_UNSUPP // out-of-frame buffer offset
+                };
+                let rr = syscall5(SYS_IPC_REPLY, SLOT_EP, st, 0, CAP_NONE, 0);
                 if rr < 0 {
                     fail(EXIT_REPLY, "the error reply refused");
                 }
@@ -561,7 +573,7 @@ pub unsafe extern "C" fn _start() -> ! {
                 });
                 fail(EXIT_PHYS, "SYS_CAP_PHYS on the landed buffer refused");
             }
-            match serve(&mut q, op, sector, bp as u64) {
+            match serve(&mut q, op, sector, bp as u64 + buf_off) {
                 Ok((status, len)) => {
                     // The request is done: discard the lent reference
                     // (frees nothing — the caller's owned cap and its
@@ -573,7 +585,7 @@ pub unsafe extern "C" fn _start() -> ! {
                             o.i64(dr);
                         });
                     }
-                    let rr = syscall4(SYS_IPC_REPLY, SLOT_EP, status, u64::from(len), CAP_NONE);
+                    let rr = syscall5(SYS_IPC_REPLY, SLOT_EP, status, u64::from(len), CAP_NONE, 0);
                     if rr < 0 {
                         fail(EXIT_REPLY, "SYS_IPC_REPLY refused");
                     }

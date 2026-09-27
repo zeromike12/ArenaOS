@@ -1256,13 +1256,17 @@ fn build_ipc_client() -> Payload {
     let mut holes: [(usize, u64); 8] = [(0, 0); 8];
     let mut nh = 0usize;
     p.movabs(3, I_DATA); // rbx = reply buffer base
-    // SYS_IPC_CALL(ep 0, PAT0, PAT1, send-cap slot 2, reply buf)
+    // SYS_IPC_CALL(ep 0, PAT0, PAT1, send-cap slot 2, reply buf, no
+    // inline message). v1.1 added the 6th arg (r9): it must be
+    // EXPLICITLY zeroed — a stale r9 would be validated as a pointer
+    // and the call would fail with STATUS_BAD_ADDRESS.
     p.mov_eax(syscall::SYS_IPC_CALL as u32);
     p.movabs(7, IPC_EP_SLOT);
     p.movabs(6, IPC_PAT0);
     p.movabs(2, IPC_PAT1);
     p.movabs(10, IPC_MEM_SLOT);
     p.movabs(8, I_DATA);
+    p.movabs(9, 0);
     p.do_syscall();
     holes[nh] = (p.cmp_rax_i8_jne(0), 43);
     nh += 1;
@@ -1307,10 +1311,12 @@ fn build_ipc_server() -> Payload {
     let mut holes: [(usize, u64); 8] = [(0, 0); 8];
     let mut nh = 0usize;
     p.movabs(3, I_DATA); // rbx = recv buffer base
-    // SYS_IPC_RECV(ep 0, buf) — blocks until the client calls.
+    // SYS_IPC_RECV(ep 0, buf, no inline-message buffer — v1.1's a2
+    // must be explicitly zeroed; stale rdx would read as a pointer).
     p.mov_eax(syscall::SYS_IPC_RECV as u32);
     p.movabs(7, IPC_EP_SLOT);
     p.movabs(6, I_DATA);
+    p.movabs(2, 0);
     p.do_syscall();
     holes[nh] = (p.cmp_rax_i8_jne(0), 53);
     nh += 1;
@@ -1319,12 +1325,14 @@ fn build_ipc_server() -> Payload {
     p.movabs(1, u64::MAX);
     holes[nh] = (p.cmp_rax_reg_je(1), 54); // je: == MAX means NOT landed
     nh += 1;
-    // SYS_IPC_REPLY(ep 0, echoed w0, echoed w1, no cap).
+    // SYS_IPC_REPLY(ep 0, echoed w0, echoed w1, no cap, no message —
+    // v1.1's a4 (r8) explicitly zeroed as above).
     p.mov_eax(syscall::SYS_IPC_REPLY as u32);
     p.movabs(7, IPC_EP_SLOT);
     p.mov_r64_mem_rbx(6, 0); // rsi = buf[0]
     p.mov_r64_mem_rbx(2, 8); // rdx = buf[1]
     p.movabs(10, u64::MAX); // r10 = CAP_NONE
+    p.movabs(8, 0); // r8 = no inline reply message
     p.do_syscall();
     holes[nh] = (p.cmp_rax_i8_jne(0), 55);
     nh += 1;

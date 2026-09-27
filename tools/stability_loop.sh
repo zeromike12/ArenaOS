@@ -44,14 +44,24 @@ BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 RESULT_LINE_M4='m4: RESULT PASS (9/9)'
-RESULT_LINE_M5='m5: RESULT PASS (5/5)'
+RESULT_LINE_M5='m5: RESULT PASS (6/6)'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
 fail=0
 t_start=$(date +%s)
+# 0.2 s polls per second of boot timeout: the feeder must never outlive
+# QEMU's timeout, or a boot that dies before the prompt wedges the
+# pipeline forever (timeout kills QEMU, not the grep loop).
+FEED_ITERS=$((BOOT_TIMEOUT * 5))
+
 for i in $(seq 1 "$N"); do
     cp "$OVMF_VARS" "$VARS"              # fresh NVRAM every boot
+    # Fresh AFS1 scratch disk EVERY boot (the fixture contract, and
+    # load-bearing since M5.3: fs_service's fstest CREATEs a fixed
+    # filename — a disk inherited from the previous boot answers
+    # FS_ERR_EXISTS and fails the suite by design).
+    ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk()' >/dev/null )
     rm -f "$SERIAL"
     rc=0
     # ADR-0020: a healthy boot no longer halts by itself — it ends at
@@ -61,9 +71,15 @@ for i in $(seq 1 "$N"); do
     # (panic/hang before the prompt) leaves the feeder spinning until
     # the timeout kills the pipeline — the failure verdict is unchanged.
     {
-        while ! grep -aq 'arena>' "$SERIAL" 2>/dev/null; do sleep 0.2; done
+        n=0
+        while ! grep -aq 'arena>' "$SERIAL" 2>/dev/null; do
+            sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
+        done
         printf 'shutdown\r'
-        while ! grep -aqF "$HALT_LINE" "$SERIAL" 2>/dev/null; do sleep 0.2; done
+        n=0
+        while ! grep -aqF "$HALT_LINE" "$SERIAL" 2>/dev/null; do
+            sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
+        done
     } | timeout "$BOOT_TIMEOUT" "${QEMU[@]}" \
         -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \

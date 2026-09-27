@@ -116,23 +116,34 @@ def build_dir() -> Path:
     return d
 
 
-# ---- the Milestone-5 scratch disk (ADR-0021) --------------------------------
+# ---- the Milestone-5 scratch disk (ADR-0021/0022/0023) -----------------------
 #
 # The harness fixture every boot attaches as virtio-blk-pci: the kernel's
-# PCI scan must find it (m5 pci_scan) and, from M5.2 on, the userspace
-# storage driver reads/writes it. Fresh zero-filled image per run: until
-# step 5.4 makes persistence an explicit two-boot test, no run may inherit
-# another run's disk contents. The ESP stays the BOOT medium — this disk
-# is never bootable.
+# PCI scan must find it (m5 pci_scan), the userspace storage driver
+# reads/writes it (M5.2), and — since M5.3 — it is FORMATTED as AFS1 by
+# tools/afs1.py so fsd mounts a real superblock + first commit every
+# boot. Fresh-per-run (re-formatted, never inherited): until step 5.4
+# makes persistence an explicit two-boot test, no run may inherit another
+# run's disk contents. The ESP stays the BOOT medium — this disk is
+# never bootable.
 
 SCRATCH_MIB = 8
 
 
 def make_scratch_disk() -> Path:
-    """Create (or re-create) the fresh zero-filled scratch disk image."""
+    """Create (or re-create) the scratch disk, FORMATTED as AFS1.
+
+    M5.2 handed QEMU a zero-filled image; M5.3 (ADR-0023) formats it
+    host-side (tools/afs1.py — the layout's single source of truth) so
+    fsd mounts a real superblock + first commit every boot. Fresh per
+    run: cross-BOOT persistence is 5.4's exit criterion.
+    """
+    import afs1
+
     p = build_dir() / "scratch.img"
     with open(p, "wb") as f:
         f.truncate(SCRATCH_MIB * 1024 * 1024)
+    afs1.mkfs(p, SCRATCH_MIB * 1024 * 1024 // afs1.SECTOR)
     return p
 
 

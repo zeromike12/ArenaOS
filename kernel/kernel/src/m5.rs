@@ -1,4 +1,5 @@
-//! Milestone 5 test suite, step 5.1 — the driver substrate (ADR-0021).
+//! Milestone 5 test suite (steps 5.1–5.3 — driver substrate, block
+//! service, filesystem service; ADR-0021/0022/0023).
 //! Runs in `kmain` after the M4 RESULT line; every test is a real machine
 //! effect, in the suite discipline of M3/M4 (self-contained, no imports
 //! from the other suites, ring-3 claims proven by payloads, kernel claims
@@ -39,6 +40,18 @@
 //!    (42 = the client verified the pattern), exactly two relay-vector
 //!    deliveries (one per completed request), the dead driver's relay
 //!    swept by `proc::destroy`, and frame-exact teardown.
+//! 6. `fs_service` — M5.3 (ADR-0023): the REAL filesystem boundary. The
+//!    kernel spawns `fsd` (registry image 4, the AFS1 server) with the
+//!    block endpoint's call side and its own FS endpoint's serve side,
+//!    then `fstest` (image 5) with the FS call side. fstest CREATEs a
+//!    file, WRITEs a pattern (its LENT frame forwarded through fsd to
+//!    storaged — the device DMAs the client's own page), CLOSEs,
+//!    re-OPENs by name, READs back, verifies byte-for-byte, and walks
+//!    LS; then both services shut down by their own hands. The kernel
+//!    proves the machine side: three exit badges, three exit codes
+//!    (42 = the client verified everything), relay deliveries exactly
+//!    equal to the derived disk-operation contract (33), the dead
+//!    driver's relay swept, frame-exact teardown.
 //!
 //! Markers: `m5:test:<name>`, `m5: RESULT`.
 
@@ -54,12 +67,13 @@ use crate::sched;
 use crate::sync::SyncCell;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 5] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 6] = [
         ("pci_scan", test_pci_scan),
         ("untyped_alloc", test_untyped_alloc),
         ("mmio_user", test_mmio_user),
         ("irq_relay", test_irq_relay),
         ("block_service", test_block_service),
+        ("fs_service", test_fs_service),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -1054,6 +1068,276 @@ fn test_block_service() -> Result<(), &'static str> {
     info!(
         "m5",
         "block_service: blktest (pid {c_pid}) drove a write→read-back→verify cycle through storaged's (pid {s_pid}) endpoint — zero-copy (the buffer frame was LENT through IPC, the device DMA'd the caller's own page), {deliveries} interrupt-delivered completions on relay vector {BLK_RELAY_VEC} (exactly one per request), both children exited {BLK_EXIT_OK}, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames {after})"
+    );
+    Ok(())
+}
+
+// ---- test 6: fs_service (M5.3, ADR-0023) -------------------------------------
+
+/// The fs_service exit badges (distinct from block_service's — a merged
+/// or crossed badge must fail the exactness check, not pass it).
+const FSTEST_EXIT_BADGE: u64 = 0xF57C;
+const FSD_EXIT_BADGE: u64 = 0xF5D0;
+const FS_STORAGED_EXIT_BADGE: u64 = 0x57D1;
+
+/// The exact number of block-service calls (hence MSI-X deliveries on
+/// the freshly re-registered relay vector) fstest's script forces
+/// through fsd — derived from the AFS1 layout, not observed once and
+/// frozen blindly:
+///
+/// ```text
+///   mount:      superblock 1 + commit slots 2 + object table 4
+///               + bitmap 4                                            = 11
+///   CREATE:     commit → objtab run 4 + bitmap run 4 + record 1       =  9
+///   WRITE 512B: fresh extent block 1 + data sector 1 + commit 9       = 11
+///   READ  512B: extent lookup 1 + data sector 1                       =  2
+///   CLOSE/LS/SHUTDOWN: served from RAM                                =  0
+///                                                                   -----
+///                                                                   = 33
+/// ```
+///
+/// fstest's poison of storaged rides the block protocol directly (no
+/// device op, no interrupt). fsd reports the same 33 as its lifetime
+/// disk-operation count in the shutdown reply, and storaged's used-ring
+/// completions must match — three independent counters, one number.
+const FS_DISK_OPS: u64 = 33;
+
+fn test_fs_service() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+
+    // The device and its structure BAR — the same record pci_scan
+    // proved (block_service tore its own instance down; this test
+    // spawns fresh children and storaged's reset-driven handshake
+    // re-initializes the device from scratch).
+    let Some(v) = pci::find_virtio(pci::VIRTIO_TYPE_BLOCK) else {
+        return Err("no virtio-block device for the fs test");
+    };
+    let Some(f) = pci::pci_function(v.pci_index) else {
+        return Err("recorded function vanished from the table");
+    };
+    let bar = v.common.bar as usize;
+    let bar_phys = f.bar_base[bar];
+    let bar_pages = (f.bar_size[bar] / 4096) as u32;
+    if bar_phys == 0 || bar_pages == 0 || bar_pages > 16 {
+        return Err("the structure BAR is unusable for a window grant");
+    }
+
+    // The service objects: TWO endpoints (storaged's block service and
+    // fsd's filesystem service) and four notifications — the driver's
+    // interrupt relay target plus one exit-badge channel per child.
+    let eid_blk = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let eid_fs = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let nid_irq = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_fstest = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_fsd = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_storaged = ipc::create_notification().map_err(|_| "notification table full")?;
+
+    // storaged (registry image 2), exactly as block_service grants it:
+    // the device window, the block endpoint's serve side, the irq
+    // notification.
+    let storaged_grants = [
+        Cap {
+            obj: CapObj::Mmio {
+                phys: bar_phys,
+                pages: bar_pages,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: eid_blk },
+            rights: cap::RIGHTS_READ,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_irq },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+    ];
+    let s_pid = crate::spawn::spawn_init(
+        2,
+        &storaged_grants,
+        Some((nid_storaged, FS_STORAGED_EXIT_BADGE)),
+    )
+    .map_err(|_| "storaged (image 2) spawn failed")?;
+
+    // fsd (registry image 4): slot 0 = the block endpoint's CALL side
+    // (every fsd disk op is a forwarded block call), slot 1 = the FS
+    // endpoint's serve side. No Mmio, no notification: fsd never sees
+    // the device and has no interrupt of its own — completions reach
+    // it through the synchronous block call.
+    let fsd_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid: eid_blk },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: eid_fs },
+            rights: cap::RIGHTS_READ,
+        },
+    ];
+    let f_pid = crate::spawn::spawn_init(4, &fsd_grants, Some((nid_fsd, FSD_EXIT_BADGE)))
+        .map_err(|_| "fsd (image 4) spawn failed")?;
+
+    // fstest (registry image 5): slot 0 = the FS endpoint's call side,
+    // slot 1 = the block endpoint's call side (the final poison only).
+    let fstest_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid: eid_fs },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: eid_blk },
+            rights: cap::RIGHTS_WRITE,
+        },
+    ];
+    let c_pid = crate::spawn::spawn_init(5, &fstest_grants, Some((nid_fstest, FSTEST_EXIT_BADGE)))
+        .map_err(|_| "fstest (image 5) spawn failed")?;
+    info!(
+        "m5",
+        "fs_service: storaged pid {s_pid} (window bar{} phys {bar_phys:#x}, block endpoint {eid_blk}), fsd pid {f_pid} (block call side {eid_blk}, fs endpoint {eid_fs}), fstest pid {c_pid} (fs call side {eid_fs}, poison side {eid_blk}) — running create→write→close→re-open→read→verify→ls",
+        bar
+    );
+
+    // Run the three children to completion. The bound is generous:
+    // FS_DISK_OPS block calls, each a handful of context switches plus
+    // one MSI, plus the mount/commit logging.
+    drain_interruptible(32768).inspect_err(|_| {
+        error!(
+            "m5",
+            "fs_service drain failed: storaged threads={}, fsd threads={}, fstest threads={}, relay deliveries on vector {BLK_RELAY_VEC}={}",
+            sched::proc_live_threads(s_pid),
+            sched::proc_live_threads(f_pid),
+            sched::proc_live_threads(c_pid),
+            relay::delivery_count(BLK_RELAY_VEC),
+        );
+    })?;
+
+    // All three exit badges arrived, exact and unmerged.
+    let bc = ipc::wait(nid_fstest).map_err(|_| "fstest's exit badge never arrived")?;
+    if bc != FSTEST_EXIT_BADGE {
+        return Err("fstest's exit badge is not the granted word");
+    }
+    let bf = ipc::wait(nid_fsd).map_err(|_| "fsd's exit badge never arrived")?;
+    if bf != FSD_EXIT_BADGE {
+        return Err("fsd's exit badge is not the granted word");
+    }
+    let bs = ipc::wait(nid_storaged).map_err(|_| "the driver's exit badge never arrived")?;
+    if bs != FS_STORAGED_EXIT_BADGE {
+        return Err("the driver's exit badge is not the granted word");
+    }
+
+    // All three images exited with THEIR success code: fstest only
+    // exits 42 after the read-back pattern verified AND the LS walk
+    // held, fsd only after replying to the shutdown, storaged only
+    // after replying to the poison.
+    let recs = crate::spawn::records_snapshot();
+    let tid_of = |pid: u64| -> Option<u64> {
+        recs.iter()
+            .flatten()
+            .find(|&&(p, _)| p == pid)
+            .map(|&(_, t)| t)
+    };
+    let (Some(c_tid), Some(f_tid), Some(s_tid)) = (tid_of(c_pid), tid_of(f_pid), tid_of(s_pid))
+    else {
+        return Err("a spawned child has no record (spawn registry lost it)");
+    };
+    let client_status = syscall::exit_status_of(c_tid);
+    let fsd_status = syscall::exit_status_of(f_tid);
+    let driver_status = syscall::exit_status_of(s_tid);
+    if client_status != Some(BLK_EXIT_OK) {
+        return Err(match client_status {
+            Some(69) => "fstest: buffer frame setup refused (69)",
+            Some(70) => "fstest: CREATE was not served (70)",
+            Some(71) => "fstest: WRITE was not served in full (71)",
+            Some(72) => "fstest: CLOSE was not served (72)",
+            Some(73) => "fstest: the file did not survive CLOSE→OPEN (73)",
+            Some(74) => "fstest: READ was not served in full (74)",
+            Some(75) => "fstest: the file contents MISMATCHED on read-back (75)",
+            Some(76) => "fstest: the LS walk was wrong (76)",
+            Some(77) => "fstest: the fsd shutdown was not served (77)",
+            Some(78) => "fstest: the storaged poison was refused (78)",
+            Some(other) if (80..=84).contains(&other) => {
+                "an fsd failure code surfaced as fstest's exit (80..84)"
+            }
+            _ => "fstest exited with a code from nowhere in the contract",
+        });
+    }
+    if fsd_status != Some(BLK_EXIT_OK) {
+        return Err(match fsd_status {
+            Some(80) => "fsd: the AFS1 mount was refused — corrupt or foreign image (80)",
+            Some(81) => "fsd: metadata disk I/O failed at the device or transport (81)",
+            Some(83) => "fsd: SYS_IPC_RECV refused (83)",
+            Some(84) => "fsd: SYS_IPC_REPLY refused (84)",
+            Some(97) => "fsd: the console refused an output write (97)",
+            Some(99) => "fsd: the panic handler ran (99)",
+            _ => "fsd exited with a code from nowhere in the contract",
+        });
+    }
+    if driver_status != Some(BLK_EXIT_OK) {
+        return Err(match driver_status {
+            Some(60) => "driver: SYS_DEV_INFO refused or short (60)",
+            Some(61) => "driver: a self-map (device window or ring frame) refused (61)",
+            Some(62) => "driver: the virtio handshake failed — FEATURES_OK did not stick (62)",
+            Some(63) => "driver: the virtqueue setup failed (63)",
+            Some(64) => "driver: SYS_IRQ_RELAY refused (64)",
+            Some(65) => "driver: SYS_IPC_RECV refused (65)",
+            Some(66) => "driver: SYS_CAP_PHYS on a landed buffer refused (66)",
+            Some(67) => "driver: a completion never arrived or was malformed (67)",
+            Some(68) => "driver: SYS_IPC_REPLY refused (68)",
+            Some(97) => "driver: the console refused an output write (97)",
+            Some(99) => "driver: the panic handler ran (99)",
+            _ => "the driver exited with a code from nowhere in the contract",
+        });
+    }
+
+    // The interrupt story, counted on the machine side: fsd's storaged
+    // re-armed vector 48 (`relay::register` restarts the delivery
+    // count at zero), and exactly FS_DISK_OPS hardware deliveries
+    // walked the stub→relay→notify chain — one per forwarded block
+    // call, derived above. No polling anywhere in the stack.
+    let deliveries = relay::delivery_count(BLK_RELAY_VEC);
+    if deliveries != FS_DISK_OPS {
+        error!(
+            "m5",
+            "fs_service: relay vector {BLK_RELAY_VEC} delivered {deliveries}, contract says {FS_DISK_OPS}"
+        );
+        return Err("the relay deliveries do not match the derived disk-operation count");
+    }
+    if !relay::registered(BLK_RELAY_VEC) {
+        return Err("the driver's relay registration vanished while the process lived");
+    }
+
+    // Teardown: destroying the dead driver must SWEEP its owned relay,
+    // then all three address spaces come back frame-exact — fsd's
+    // scratch frame, fstest's buffer frame, the driver's four ring
+    // frames, every page table, and nothing else (lent caps and the
+    // device window free nothing, by construction).
+    proc::destroy(s_pid)?;
+    if relay::registered(BLK_RELAY_VEC) {
+        return Err("proc::destroy did not sweep the dead driver's relay vector");
+    }
+    proc::destroy(f_pid)?;
+    proc::destroy(c_pid)?;
+    crate::spawn::forget(s_pid).map_err(|_| "driver spawn record forget refused")?;
+    crate::spawn::forget(f_pid).map_err(|_| "fsd spawn record forget refused")?;
+    crate::spawn::forget(c_pid).map_err(|_| "fstest spawn record forget refused")?;
+    ipc::destroy_endpoint(eid_blk).map_err(|_| "block endpoint teardown refused")?;
+    ipc::destroy_endpoint(eid_fs).map_err(|_| "fs endpoint teardown refused")?;
+    ipc::destroy_notification(nid_irq).map_err(|_| "irq notification teardown refused")?;
+    ipc::destroy_notification(nid_fstest).map_err(|_| "fstest notification teardown refused")?;
+    ipc::destroy_notification(nid_fsd).map_err(|_| "fsd notification teardown refused")?;
+    ipc::destroy_notification(nid_storaged).map_err(|_| "driver notification teardown refused")?;
+
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m5",
+            "fs_service teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err("fs-service teardown is not frame-exact");
+    }
+    info!(
+        "m5",
+        "fs_service: fstest (pid {c_pid}) created, wrote, closed, RE-OPENED, read back and verified a file through fsd (pid {f_pid}) — AFS1 mounted from the host-formatted image, metadata CoW'd per transaction, file data DMA'd end-to-end zero-copy (fstest's frame → forwarded cap → storaged (pid {s_pid}) → device), {deliveries} interrupt-delivered block calls matching the derived contract, all three children exited {BLK_EXIT_OK}, all exit badges exact, the dead driver's relay swept, teardown frame-exact (frames {after})"
     );
     Ok(())
 }

@@ -10,7 +10,13 @@ command paced on the shell's own prompt (marker-paced, never sleeps):
 
   help       the builtin list comes back
   echo X     the line discipline's edit/commit and the shell's echo
-  ps         SYS_PROC_LIST: the shell sees itself (pid N, threads 1)
+  ps         SYS_PROC_LIST: the shell sees itself + the resident
+             services (storaged, fsd) parked in recv
+  ls / write / cat  the M5.3 filesystem builtins: the shell lists the
+             suite-committed arena.txt, creates note.txt, and streams
+             it back — all through fsd's endpoint (slot 3), with file
+             data DMA'd by storaged straight into/out of the shell's
+             own lent frame
   spawn      SYS_SPAWN of registry image 0 (the untouched M4.3
              payload) from the shell: the child's pinned message
              appears MID-SESSION and its exit badge comes back
@@ -37,9 +43,18 @@ FEED: list[tuple[bytes, int, bytes]] = [
     (b"arena>", 1, b"help\r"),
     (b"arena>", 2, b"echo hello-arena\r"),
     (b"arena>", 3, b"ps\r"),
-    (b"arena>", 4, b"spawn\r"),
-    (b"arena>", 5, b"bogus\r"),
-    (b"arena>", 6, b"shutdown\r"),
+    # M5.3: the filesystem builtins — the suite's fs_service committed
+    # arena.txt earlier IN THIS BOOT, so `ls` must already show it
+    # (production fsd mounted the same disk the suite wrote: the
+    # in-boot persistence-across-re-open proof), then the shell creates
+    # its own file and reads it back through fsd + storaged.
+    (b"arena>", 4, b"ls\r"),
+    (b"arena>", 5, b"write note.txt hello-fs\r"),
+    (b"arena>", 6, b"cat note.txt\r"),
+    (b"arena>", 7, b"ls\r"),
+    (b"arena>", 8, b"spawn\r"),
+    (b"arena>", 9, b"bogus\r"),
+    (b"arena>", 10, b"shutdown\r"),
 ]
 
 LABEL = "test-m4-shell"
@@ -78,8 +93,9 @@ def main() -> int:
     check("shell spawned: pid" in serial, "kernel announced the spawned shell")
     check("ArenaOS shell" in serial, "the shell's banner reached the console")
 
-    # help: the builtin list, all five verbs named.
-    for verb in ("help", "ps", "echo", "spawn", "shutdown"):
+    # help: the builtin list, all eight verbs named (the text is one
+    # debug_write chunk, so line starts survive the shared console).
+    for verb in ("help", "ps", "echo", "ls", "cat", "write", "spawn", "shutdown"):
         check(re.search(rf"^  {verb}\b", serial, re.MULTILINE) is not None,
               f"help lists the '{verb}' builtin")
 
@@ -103,9 +119,36 @@ def main() -> int:
               f"the shell is single-threaded (got {shell_rows})")
     ms = re.search(r"storaged spawned: pid (\d+)", serial)
     check(ms is not None, "the kernel announced the spawned block service")
+    mf = re.search(r"fsd spawned: pid (\d+)", serial)
+    check(mf is not None, "the kernel announced the spawned filesystem service")
+    check("fsd: mounted AFS1" in serial,
+          "the production fsd mounted the AFS1 volume the suite committed")
     if ms:
         check(any(p == ms.group(1) and t == "1" for (p, t) in ps_lines),
               "ps listed storaged, single-threaded and parked in recv")
+
+    # M5.3 filesystem builtins: ls sees the SUITE's committed file
+    # (production fsd mounted the same on-disk state — persistence
+    # across re-open, in one boot), write creates a new file, cat
+    # streams it back through fsd + storaged, and the second ls shows
+    # both files.
+    check(re.search(r"arena\.txt  512 bytes", serial) is not None,
+          "ls listed the suite's committed arena.txt (512 bytes)")
+    check("wrote 8 bytes to 'note.txt'" in serial,
+          "write created note.txt with 8 bytes through fsd")
+    # the harness normalizes CRLF to LF; the leading newline separates
+    # cat's output from the kernel's echo of the typed command line.
+    check(re.search(r"\nhello-fs\n", serial) is not None,
+          "cat streamed note.txt's contents back byte-for-byte")
+    check(re.search(r"note\.txt  8 bytes", serial) is not None,
+          "the second ls listed note.txt (8 bytes)")
+    check("  2 file(s)" in serial, "the second ls counted exactly 2 files")
+
+    # fsd and storaged are resident services: ps must list both,
+    # single-threaded and parked in recv.
+    if mf:
+        check(any(p == mf.group(1) and t == "1" for (p, t) in ps_lines),
+              "ps listed fsd, single-threaded and parked in recv")
 
     # spawn: the shell created a process from its Image cap — the
     # untouched M4.3 payload ran mid-session (its pinned message on the
@@ -131,7 +174,7 @@ def main() -> int:
           "kernel declared its clean halt (ResetSystem path reached)")
     check(rc == 0, f"QEMU exited cleanly via kernel ResetSystem shutdown "
                    f"(rc={rc}, {dt:.1f}s)")
-    check(serial.count("arena>") >= 6,
+    check(serial.count("arena>") >= 10,
           f"the shell served every typed line ({serial.count('arena>')} prompts)")
 
     print(f"[{LABEL}] {'=' * 46}")

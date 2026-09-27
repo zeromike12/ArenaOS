@@ -66,6 +66,29 @@ Current coverage:
                     request), proc::destroy sweeps the dead driver's
                     relay, and teardown is frame-exact.
 
+  M5.3 — the filesystem service (ADR-0023):
+  * fs_service    — the kernel spawns fsd (registry image 4, the AFS1
+                    server: block-endpoint call side + FS-endpoint serve
+                    side) and fstest (image 5, the client: FS call side
+                    + poison side). fstest CREATEs "arena.txt" (name in
+                    the IPC v1.1 inline message), WRITEs 512 pattern
+                    bytes — its LENT frame is FORWARDED by fsd to
+                    storaged so the device DMAs the client's own page
+                    (zero-copy end to end) — CLOSEs, re-OPENs by name,
+                    READs back into the cleared frame, verifies
+                    byte-for-byte, walks LS (exactly one file, right
+                    name and size), then shuts both services down by
+                    their own hands. Kernel-side proofs: three exit
+                    badges exact, three exit codes 42, relay deliveries
+                    exactly 33 (the derived disk-operation contract),
+                    proc::destroy sweeps the dead driver's relay, and
+                    teardown is frame-exact. AFTER the boot, this
+                    script parses the scratch image itself (tools/afs1.py):
+                    the newest commit must carry "arena.txt" with size
+                    512, its extents must resolve to real allocated
+                    sectors, and those sectors must hold the exact
+                    pattern fstest wrote — the on-disk layout proof.
+
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
@@ -81,7 +104,79 @@ EXPECTED_TESTS = [
     "mmio_user",
     "irq_relay",
     "block_service",
+    "fs_service",
 ]
 
+
+def verify_disk_state() -> list[str]:
+    """Parse the post-boot scratch image: the on-disk AFS1 proof.
+
+    The m5 suite's fstest committed exactly one file; the host-side
+    mirror of the layout (tools/afs1.py) must find it in the NEWEST
+    commit — name, size, extents, bitmap, and the literal pattern
+    bytes in the data sectors. Returns a list of failures (empty =
+    verified).
+    """
+    import afs1
+    import arena_env
+
+    problems: list[str] = []
+    path = arena_env.build_dir() / "scratch.img"
+    try:
+        disk = afs1.Disk(path.read_bytes())
+    except OSError as e:
+        return [f"cannot read {path}: {e}"]
+    try:
+        geo = disk.superblock()
+        seq, ot, bm = disk.commit()
+        if geo["total_sectors"] != afs1.SCRATCH_TOTAL_SECTORS_EXPECTED:
+            problems.append(f"superblock total_sectors {geo['total_sectors']}")
+        # mkfs's first commit is seq 1; fs_service commits CREATE and
+        # WRITE → the newest generation must be seq 3.
+        if seq != 3:
+            problems.append(f"newest commit seq {seq}, expected 3 (mkfs + create + write)")
+        obj = disk.find(b"arena.txt", ot)
+        if obj is None:
+            problems.append("arena.txt is not in the committed object table")
+            return problems
+        if obj["size"] != 512:
+            problems.append(f"arena.txt size {obj['size']}, expected 512")
+        extents = disk.extents(obj["extent_head"])
+        covered = sum(length for _, length in extents) * afs1.SECTOR
+        if covered < 512:
+            problems.append(f"extents {extents} cover {covered} bytes, expected >= 512")
+        bitmap = disk.bitmap(bm)
+        for start, length in extents:
+            for s in range(start, start + length):
+                if not (bitmap[s // 8] >> (s % 8)) & 1:
+                    problems.append(f"data sector {s} is not marked used in the committed bitmap")
+        # The data itself: fstest's pattern, byte-for-byte, on the platter.
+        data = bytearray()
+        for start, length in extents:
+            for s in range(start, start + length):
+                data += disk.sector(s)
+        for i in range(512):
+            want = afs1.pattern_byte(i)
+            if data[i] != want:
+                problems.append(
+                    f"sector data byte {i} is {data[i]:#04x}, expected {want:#04x} (the committed pattern mismatched)"
+                )
+                break
+        print(
+            f"[test-m5] disk proof: commit seq {seq}, objtab@{ot}, bitmap@{bm}, "
+            f"arena.txt size {obj['size']}, extents {extents}, pattern verified in the committed sectors"
+        )
+    except afs1.Afs1Error as e:
+        problems.append(f"AFS1 parse failed: {e}")
+    return problems
+
+
 if __name__ == "__main__":
-    sys.exit(mtest.run_milestone("m5", EXPECTED_TESTS))
+    rc = mtest.run_milestone("m5", EXPECTED_TESTS)
+    if rc == 0:
+        for problem in verify_disk_state():
+            print(f"[test-m5] FAIL: disk state: {problem}")
+            rc = 1
+        if rc == 0:
+            print("[test-m5] PASS: the post-boot scratch image holds the committed file (on-disk layout verified)")
+    sys.exit(rc)

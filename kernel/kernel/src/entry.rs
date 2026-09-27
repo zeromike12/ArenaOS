@@ -367,12 +367,25 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // endpoint's serve side and an interrupt notification, and the
     // driver does EVERYTHING else (virtio handshake, virtqueue setup,
     // IRQ relay arming, zero-copy DMA, completions) from ring 3. It
-    // parks in recv; 5.3's filesystem daemon will be its first
+    // parks in recv; the filesystem daemon below is its first
     // production client. The m5 suite just proved the same image
     // end-to-end on a short-lived test instance.
-    if let Err(reason) = spawn_storaged() {
-        crate::halt::halt_machine(reason);
-    }
+    let blk_eid = match spawn_storaged() {
+        Ok((_pid, eid)) => eid,
+        Err(reason) => crate::halt::halt_machine(reason),
+    };
+
+    // --- M5.3: the production filesystem service (ADR-0023) -----------------
+    // fsd mounts the AFS1 image the host tools formatted (and the m5
+    // suite's fs_service test already committed to — that mount, in
+    // THIS boot, is the persistence-across-re-open proof), then parks
+    // serving the shell's ls/cat/write. Every fsd disk operation is a
+    // forwarded block call to storaged; file data DMAs end-to-end
+    // between the disk and the CLIENT's frame (zero copy).
+    let fs_eid = match spawn_fsd(blk_eid) {
+        Ok((_pid, eid)) => eid,
+        Err(reason) => crate::halt::halt_machine(reason),
+    };
 
     info!(
         "kernel",
@@ -384,8 +397,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // protocol's kernel-internal entry point (image 1, no parent), with
     // kernel-literal grants in slot order — Power (WRITE, so `shutdown`
     // is an authority the shell HOLDS), Image 0 (READ, so `spawn` can
-    // start the test payload), and its own notification (READ|WRITE,
-    // the exit-badge channel for its children). From here the machine
+    // start the test payload), its own notification (READ|WRITE, the
+    // exit-badge channel for its children), and the filesystem
+    // endpoint's call side (WRITE, M5.3: `ls`/`cat`/`write`). From here the machine
     // stops only through the shell's Power-gated SYS_SHUTDOWN, a panic
     // path, or the harness killing QEMU — the boot sequence no longer
     // halts on its own.
@@ -406,11 +420,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             obj: crate::cap::CapObj::Notification { nid: shell_nid },
             rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
         },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid: fs_eid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
     ];
     match crate::spawn::spawn_init(1, &shell_grants, None) {
         Ok(pid) => info!(
             "kernel",
-            "shell spawned: pid {pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW) — the console is live; type 'help'"
+            "shell spawned: pid {pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
         ),
         Err(reason) => crate::halt::halt_machine(reason),
     }
@@ -437,7 +455,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 /// target `SYS_IRQ_RELAY` arms). The virtio record comes from the boot
 /// PCI scan; the driver re-discovers the structure offsets itself
 /// through `SYS_DEV_INFO` (config space is never exposed to ring 3).
-fn spawn_storaged() -> Result<u64, &'static str> {
+fn spawn_storaged() -> Result<(u64, u32), &'static str> {
     let v = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_BLOCK)
         .ok_or("storaged: no virtio-block function on bus 0")?;
     let f = crate::drivers::pci::pci_function(v.pci_index)
@@ -468,10 +486,36 @@ fn spawn_storaged() -> Result<u64, &'static str> {
     let pid = crate::spawn::spawn_init(2, &grants, None)?;
     info!(
         "kernel",
-        "storaged spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the block service is live; its first production client arrives with the 5.3 filesystem",
+        "storaged spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the block service is live; fsd is its first production client",
         f.bar_base[bar]
     );
-    Ok(pid)
+    Ok((pid, eid))
+}
+
+/// Spawn the production filesystem service (M5.3, ADR-0023): registry
+/// image 4 with kernel-literal grants in slot order — the block
+/// endpoint's CALL side (WRITE: every fsd disk operation is a
+/// forwarded block call) and its own FS endpoint's serve side (READ).
+/// Returns the fsd pid and its FS endpoint id (the shell gets the call
+/// side). No Mmio, no notification: fsd never sees the device.
+fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32), &'static str> {
+    let eid = crate::ipc::create_endpoint().map_err(|_| "fsd: endpoint table full")?;
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid: blk_eid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+    ];
+    let pid = crate::spawn::spawn_init(4, &grants, None)?;
+    info!(
+        "kernel",
+        "fsd spawned: pid {pid} (caps: 0=Endpoint{blk_eid}/W 1=Endpoint{eid}/R) — AFS1 mount and serve from ring 3"
+    );
+    Ok((pid, eid))
 }
 
 /// We are running in the kernel view: RIP and RSP are higher-half, CR3 is

@@ -35,7 +35,7 @@ use crate::sync::{SyncCell, without_interrupts};
 /// Image-registry capacity. v1 populates two entries (the embedded
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
-pub const MAX_IMAGES: usize = 4;
+pub const MAX_IMAGES: usize = 8;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
 /// excess is a typed refusal).
@@ -50,7 +50,10 @@ pub const MAX_SPAWN_RECS: usize = 8;
 /// initial service; image 2 is `storaged`, the userspace virtio-blk
 /// driver spawned at boot as the block service; image 3 is `blktest`,
 /// the block-service client the m5 suite spawns to drive a
-/// write→read-back→verify cycle through storaged's service boundary.
+/// write→read-back→verify cycle through storaged's service boundary;
+/// image 4 is `fsd`, the AFS1 filesystem service (M5.3, ADR-0023)
+/// spawned at boot on top of storaged; image 5 is `fstest`, the m5
+/// suite's filesystem client (create/write/read/close/ls in ring 3).
 /// A filesystem-backed source slots in here later without changing the
 /// cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
@@ -59,6 +62,8 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         1 => Some(elf::SHELL_IMAGE),
         2 => Some(elf::STORAGED_IMAGE),
         3 => Some(elf::BLKTEST_IMAGE),
+        4 => Some(elf::FSD_IMAGE),
+        5 => Some(elf::FSTEST_IMAGE),
         _ => None,
     }
 }

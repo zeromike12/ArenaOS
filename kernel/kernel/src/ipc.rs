@@ -1,5 +1,7 @@
-//! IPC v1 (M4.4, ADR-0018): endpoints, synchronous call/reply, badged
-//! merged notifications, and capability transfer inside messages.
+//! IPC v1.1 (M4.4 + M5.3, ADR-0018/0023): endpoints, synchronous
+//! call/reply, badged merged notifications, capability transfer, and a
+//! 64-byte inline message buffer for small payloads (names, dirents)
+//! that two words cannot carry.
 //!
 //! The object layer only — no user pointers cross this module. The
 //! syscall handlers (`arch::x86_64::syscall`) own ABI validation and
@@ -44,6 +46,13 @@ const QUEUE_DEPTH: usize = 4;
 /// The "no capability" marker in message buffers (ADR-0018): a cap word
 /// holds either a landing slot index (< `CAP_SLOTS`) or this.
 pub const CAP_NONE: u64 = u64::MAX;
+
+/// Inline message payload size, v1.1 (ADR-0023): CALL snapshots the
+/// caller's buffer into the request slot, RECV hands it to the server,
+/// REPLY stages the server's buffer, and the resumed CALL copies it
+/// back to the caller's SAME buffer. Null pointer = absent payload
+/// (zero-filled) — v1.0 callers stay wire-compatible.
+pub const MSG_BYTES: usize = 64;
 /// Sentinel for "no thread" — thread ids are small; MAX is unambiguous.
 const NO_TID: u64 = u64::MAX;
 
@@ -64,6 +73,9 @@ struct CallSlot {
     /// Blocked caller's thread id (drives the reply wake).
     caller: u64,
     words: [u64; 2],
+    /// Inline request payload, v1.1 (ADR-0023): snapshotted from the
+    /// caller's buffer at `call` time.
+    msg: [u8; MSG_BYTES],
     /// Staged at `call`, moved into the server's space at delivery
     /// (then `Cap::EMPTY` again).
     send_cap: Cap,
@@ -73,6 +85,9 @@ struct CallSlot {
     /// none sent, or dropped into a full space).
     landed_cap: u64,
     reply_words: [u64; 2],
+    /// Inline reply payload, v1.1: staged by `reply`, copied back to
+    /// the caller's (same) buffer when the caller resumes.
+    reply_msg: [u8; MSG_BYTES],
     /// Staged by `reply`, installed into the caller's space when the
     /// caller resumes (owner-context discipline).
     reply_cap: Cap,
@@ -82,10 +97,12 @@ const EMPTY_SLOT: CallSlot = CallSlot {
     state: SlotState::Empty,
     caller: 0,
     words: [0; 2],
+    msg: [0; MSG_BYTES],
     send_cap: Cap::EMPTY,
     server: NO_TID,
     landed_cap: CAP_NONE,
     reply_words: [0; 2],
+    reply_msg: [0; MSG_BYTES],
     reply_cap: Cap::EMPTY,
 };
 
@@ -285,7 +302,12 @@ fn install_cap(pid: u64, cap: Cap) -> u64 {
 /// index. Returns the request words. Three short IF=0 phases — the
 /// cap grant (which walks the process table) runs with the ENDPOINTS
 /// borrow ended, per the module discipline.
-fn take_request(eidx: usize, qi: usize, server_tid: u64, server_pid: u64) -> [u64; 2] {
+fn take_request(
+    eidx: usize,
+    qi: usize,
+    server_tid: u64,
+    server_pid: u64,
+) -> ([u64; 2], [u8; MSG_BYTES]) {
     // SAFETY: single writer under IF=0; slot indices come from a
     // just-completed scan of the same table.
     let send_cap = without_interrupts(|| unsafe {
@@ -305,7 +327,7 @@ fn take_request(eidx: usize, qi: usize, server_tid: u64, server_pid: u64) -> [u6
     without_interrupts(|| unsafe {
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
         slot.landed_cap = landed;
-        slot.words
+        (slot.words, slot.msg)
     })
 }
 
@@ -325,7 +347,8 @@ pub fn call(
     eid: u32,
     words: [u64; 2],
     send_cap: Option<Cap>,
-) -> Result<([u64; 2], u64), Status> {
+    msg: [u8; MSG_BYTES],
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // Phase 1 — enqueue; note a parked server (borrow ends here).
     // SAFETY: single writer under IF=0.
     let (eidx, qi, parked) = without_interrupts(|| -> Result<(usize, usize, u64), Status> {
@@ -343,6 +366,7 @@ pub fn call(
                 state: SlotState::Waiting,
                 caller: sched::current_thread_id(),
                 words,
+                msg,
                 send_cap: send_cap.unwrap_or(Cap::EMPTY),
                 ..EMPTY_SLOT
             };
@@ -359,7 +383,7 @@ pub fn call(
     if parked != NO_TID {
         let server_pid = sched::proc_id_of(parked).unwrap_or(0);
         if server_pid != 0 {
-            take_request(eidx, qi, parked, server_pid);
+            let _ = take_request(eidx, qi, parked, server_pid);
         } else {
             // Unreachable in v1 (only a cap-holding process thread can
             // park in recv) — refuse to guess; the machine is wrong.
@@ -379,7 +403,7 @@ pub fn call(
     // Phase 4 — resumed in our own context: take the reply, free the
     // slot, install the reply cap into our own space.
     // SAFETY: single writer under IF=0.
-    let (reply_words, reply_cap) = without_interrupts(|| unsafe {
+    let (reply_words, reply_cap, reply_msg) = without_interrupts(|| unsafe {
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
         if slot.state != SlotState::Replied {
             error!(
@@ -390,15 +414,16 @@ pub fn call(
         }
         let w = slot.reply_words;
         let c = slot.reply_cap;
+        let m = slot.reply_msg;
         *slot = EMPTY_SLOT;
-        (w, c)
+        (w, c, m)
     });
     let landed = if matches!(reply_cap.obj, CapObj::None) {
         CAP_NONE
     } else {
         install_cap(pid, reply_cap)
     };
-    Ok((reply_words, landed))
+    Ok((reply_words, landed, reply_msg))
 }
 
 /// Server side: take the oldest request on endpoint `eid`, blocking
@@ -408,7 +433,7 @@ pub fn call(
 ///
 /// Errors: `STATUS_BAD_ARG` (dead eid), `STATUS_BUSY` (a second server
 /// on one endpoint — v1 is single-server, ADR-0018).
-pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64), Status> {
+pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // Phase 1 — either a Waiting request exists (self-deliver) or park.
     // SAFETY: single writer under IF=0.
     let queued = without_interrupts(|| -> Result<Option<usize>, Status> {
@@ -433,8 +458,9 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64), Status> {
     let qi = match queued {
         Some(qi) => {
             // A caller was already blocked: deliver to ourselves (no
-            // wake — we ARE the server thread).
-            take_request(eid as usize, qi, tid, pid);
+            // wake — we ARE the server thread). The slot carries words
+            // + msg; phase 2 reads them back out.
+            let _ = take_request(eid as usize, qi, tid, pid);
             qi
         }
         None => {
@@ -460,11 +486,11 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64), Status> {
     // Phase 2 — copy the request facts out (the slot stays Delivered
     // until reply; the words are immutable after call staged them).
     // SAFETY: single reader under IF=0.
-    let (words, landed) = without_interrupts(|| unsafe {
+    let (words, landed, msg) = without_interrupts(|| unsafe {
         let slot = &(*ENDPOINTS.get())[eid as usize].q[qi];
-        (slot.words, slot.landed_cap)
+        (slot.words, slot.landed_cap, slot.msg)
     });
-    Ok((words, landed))
+    Ok((words, landed, msg))
 }
 
 /// Server side: stage the reply `[w0, w1]` (+ optional cap for the
@@ -472,7 +498,12 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64), Status> {
 /// caller. Errors: `STATUS_BAD_ARG` (dead eid, or no request delivered
 /// to this thread — a reply without a recv is a server bug, answered
 /// with a typed status, not a fault).
-pub fn reply(eid: u32, words: [u64; 2], send_cap: Option<Cap>) -> Result<(), Status> {
+pub fn reply(
+    eid: u32,
+    words: [u64; 2],
+    send_cap: Option<Cap>,
+    msg: [u8; MSG_BYTES],
+) -> Result<(), Status> {
     // Phase 1 — find our Delivered slot, stage the reply (borrow ends).
     // SAFETY: single writer under IF=0.
     let caller = without_interrupts(|| -> Result<u64, Status> {
@@ -490,6 +521,7 @@ pub fn reply(eid: u32, words: [u64; 2], send_cap: Option<Cap>) -> Result<(), Sta
                 return Err(STATUS_BAD_ARG);
             };
             slot.reply_words = words;
+            slot.reply_msg = msg;
             slot.reply_cap = send_cap.unwrap_or(Cap::EMPTY);
             slot.state = SlotState::Replied;
             Ok(slot.caller)

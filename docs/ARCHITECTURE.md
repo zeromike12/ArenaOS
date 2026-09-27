@@ -436,6 +436,15 @@ transfer per message (copy-only, attenuation enforced). Primitive 3
 consumer exists; priority donation is moot under strict round-robin and
 returns when priorities do.
 
+**IPC v1.1 (M5.3, ADR-0023)** added the inline half of "small messages
+copied inline": CALL/RECV/REPLY take an OPTIONAL trailing 64-byte
+buffer pointer (NULL = exact v1.0 behavior — wire-compatible),
+range-checked against the caller's regions, kernel-copied in the
+OWNER's context, and ridden inside the call slot. Names and dirents
+move through it; bulk data stays in capabilities — the filesystem
+service forwards its clients' LENT buffer caps untouched to the block
+driver, so file data DMAs disk ↔ client page with no copy in any ring.
+
 ## 8. Driver philosophy
 
 - Drivers are **userspace servers**. The kernel provides: interrupt
@@ -564,6 +573,7 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Minimal shell: the second real userspace image (`userspace/shell`, registry image 1), spawned at boot as the initial service via `spawn_init` (parentless creation, kernel-literal grants); builtins help/ps/echo/spawn/shutdown; the bootstrap thread becomes the idle thread | **M4.6 — implemented, end-to-end session proven from the harness (ADR-0020)** |
 | Driver substrate: owned Untyped frame caps + destroy-returns-frame, SYS_ALLOC_FRAME (16) / SYS_MAP_MEMORY (17, kernel-chosen self-map windows joined to the region table), kernel-minted Mmio caps (uncached, NX, never consumed), IRQ relay vectors 48..63 → notification badges (live LAPIC-IPI-proven), kernel-side PCI bus-0 enumeration with BAR sizing, the virtio capability walk, and MEM\|BUS MASTER as kernel policy — the harness attaches a fresh scratch virtio-blk disk every boot | **M5.1 — implemented, 4/4 in-guest (ADR-0021)** |
 | Userspace block service: `storaged` (registry image 2, spawned at boot, resident) — ring-3 virtio 1.0 handshake + split virtqueue over self-allocated owned frames, SYS_DEV_INFO (22) discovery gated on the Mmio cap, SYS_IRQ_RELAY (18) MSI-X arming through the pre-wired kernel PCI window with pid-owned relays swept at proc::destroy, zero-copy protocol over IPC v1 (lent buffer caps: SYS_CAP_COPY (21) / SYS_CAP_PHYS (19) / SYS_CAP_DESTROY (20), `Untyped{phys, owned}` structurally single-owner), poison-shutdown lifecycle; `blktest` (image 3) proves the boundary with a write→clear→read-back→verify cycle, 2 interrupt-delivered completions counted, frame-exact teardown | **M5.2 — implemented, 5/5 in-guest (ADR-0022)** |
-| Filesystem (`fsd` — 5.3 next), networking, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
+| Filesystem service: `fsd` (registry image 4, spawned at boot, resident) — AFS1 own-design layout (checksummed superblock + ping-pong commit records + CoW object-table/bitmap runs + chained extent blocks with implicit file offsets; host mirror + mkfs in `tools/afs1.py`), transactional commits with two-generation-delayed freeing, IPC v1.1 inline 64-byte messages (names/dirents; NULL-compatible), block protocol v1.1 bounds-checked in-frame offsets, end-to-end zero-copy file I/O by forwarding clients' lent caps to storaged, FS protocol (CREATE/OPEN/READ/WRITE/CLOSE/LS/SHUTDOWN + typed FS_ERR_* statuses), 8-handle open-file table; `fstest` (image 5) proves create→write→close→re-open→read→verify→ls in ring 3 with the derived 33-delivery contract; `test_m5.py` verifies the committed on-disk bytes post-boot; shell builtins `ls`/`cat`/`write` on grant slot 3 (the shell now shares `userspace/abi.rs`) | **M5.3 — implemented, 6/6 in-guest (ADR-0023)** |
+| Filesystem persistence & crash-consistency gate (5.4 next), file caps + path→cap resolution, truncate/append/delete, directories, networking, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

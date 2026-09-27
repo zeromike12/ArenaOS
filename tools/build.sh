@@ -61,6 +61,22 @@ for STORAGED_ELF in \
     echo "storaged image: ${STORAGED_ELF#"$REPO_ROOT"/} ($(stat -c%s "$STORAGED_ELF") bytes)"
 done
 
+# M5.3 (ADR-0023): the filesystem service — ONE crate, TWO images: fsd
+# (spawn-registry image 4, the AFS1 server spawned at boot on top of
+# storaged) and fstest (image 5, the m5 suite's filesystem client).
+# Both embed into the kernel via include_bytes!.
+echo "== building userspace fsd (userspace/fsd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/fsd" && cargo build --release )
+for FSD_ELF in \
+    "$REPO_ROOT/userspace/fsd/target/x86_64-unknown-none/release/fsd" \
+    "$REPO_ROOT/userspace/fsd/target/x86_64-unknown-none/release/fstest"; do
+    if [[ ! -f "$FSD_ELF" ]]; then
+        echo "error: fsd image not produced at $FSD_ELF" >&2
+        exit 1
+    fi
+    echo "fsd image: ${FSD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$FSD_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

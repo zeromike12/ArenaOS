@@ -79,21 +79,41 @@ types `shutdown` when the shell's first `arena> ` prompt appears. Every
 milestone boot thereby proves the full console chain: UART RX IRQ → kernel
 line discipline → blocking `SYS_CONSOLE_READ` → shell dispatch → Power-gated
 `SYS_SHUTDOWN` → `ResetSystem`. `tools/test_m4_shell.py` overrides the feed
-script to drive a full interactive session (help/echo/ps/spawn/unknown/
-shutdown) and asserts every response, including the spawned payload's pinned
-message appearing mid-session. `tools/stability_loop.sh` feeds the same way
+script to drive a full interactive session (help/echo/ps/ls/write/cat/ls/
+spawn/unknown/shutdown) and asserts every response — including the spawned
+payload's pinned message appearing mid-session, and, since M5.3, the
+filesystem builtins: `ls` must already show the m5 suite's committed
+`arena.txt` (the production fsd mounted the same on-disk state the suite
+wrote EARLIER IN THE SAME BOOT), `write note.txt hello-fs` creates a real
+file through fsd + storaged, `cat note.txt` streams the exact bytes back,
+and the second `ls` counts both files. `tools/stability_loop.sh` feeds the same way
 from bash (marker-paced, never sleep-based).
 
 Since M5.1 (ADR-0021) every harness boot also attaches the **scratch-disk
-fixture**: `arena_env.scratch_disk_args()` re-creates a fresh zero-filled
-8 MiB `build/scratch.img` per run and attaches it as `virtio-blk-pci` —
-the device the kernel's bus-0 PCI scan must find (`m5:test:pci_scan`)
-and, since M5.2 (ADR-0022), the medium the userspace block service
-really reads and writes: `m5:test:block_service` spawns storaged
-(image 2) and blktest (image 3), and the client's
-write→clear→read-back→verify cycle goes through the service boundary
-onto this disk — the pattern is cleared between the two calls, so the
-verified bytes can only have come from the device's DMA.
+fixture**: `arena_env.scratch_disk_args()` re-creates a fresh 8 MiB
+`build/scratch.img` per run — since M5.3 (ADR-0023) FORMATTED as AFS1 by
+`tools/afs1.py`'s host-side `mkfs` (checksummed superblock, first
+ping-pong commit, empty object table + allocation bitmap) — and attaches
+it as `virtio-blk-pci`: the device the kernel's bus-0 PCI scan must find
+(`m5:test:pci_scan`) and the medium the userspace services really read
+and write. `m5:test:block_service` spawns storaged (image 2) and blktest
+(image 3); the client's write→clear→read-back→verify cycle goes through
+the service boundary onto this disk — the pattern is cleared between the
+two calls, so the verified bytes can only have come from the device's
+DMA (the raw-block cycle claims the LAST sector: with a formatted
+filesystem on the image, a raw write must not touch FS structures).
+`m5:test:fs_service` then spawns a fresh storaged, fsd (image 4), and
+fstest (image 5): fstest creates `arena.txt`, writes 512 pattern bytes
+(its LENT frame forwarded through fsd — the device DMAs the CLIENT's
+page), closes, RE-OPENs by name, reads back, verifies byte-for-byte,
+walks `ls`, and shuts both services down; the kernel asserts three exact
+badges/exit codes and relay deliveries EXACTLY equal to the derived
+33-disk-operation contract (mount 11 + create-commit 9 + write 11 +
+read 2 — fsd's reported count and storaged's completions must agree).
+AFTER the boot, `test_m5.py` parses the committed image with the same
+host-side layout module: newest commit seq 3, `arena.txt` size 512,
+extents resolving to bitmap-marked sectors, and the literal pattern
+bytes in those sectors — the on-disk layout proven from the host side.
 Fresh-per-run is deliberate: no boot may silently inherit
 another boot's disk contents until step 5.4 makes persistence an
 explicit two-boot test. Interactive boots (`tools/run.sh`), the

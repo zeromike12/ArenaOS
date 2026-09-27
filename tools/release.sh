@@ -177,12 +177,22 @@ EOF
         # Milestone-5 fixture (ADR-0021): the verification boot attaches
         # the same fresh scratch disk the harness uses — without it the
         # m5 suite (and therefore the boot) fails by design.
+        # M5.3 (ADR-0023): the scratch disk must be FORMATTED as AFS1 —
+        # fsd mounts it during the m5 suite's fs_service test, and a
+        # zero-filled image fails the mount (suite fails by design).
+        # Format it from the repo's layout module before the boot.
+        ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import afs1; afs1.mkfs(sys.argv[1], 8 * 1024 * 1024 // afs1.SECTOR)' "$verify_dir/scratch.img" )
         ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
-          truncate -s 8M scratch.img && \
           {
-            while ! grep -aq 'arena>' verify-serial.log 2>/dev/null; do sleep 0.2; done
+            n=0
+            while ! grep -aq 'arena>' verify-serial.log 2>/dev/null; do
+              sleep 0.2; n=$((n + 1)); if (( n >= 600 )); then exit 0; fi
+            done
             printf 'shutdown\r'
-            while ! grep -aqF 'halting via UEFI ResetSystem(shutdown)' verify-serial.log 2>/dev/null; do sleep 0.2; done
+            n=0
+            while ! grep -aqF 'halting via UEFI ResetSystem(shutdown)' verify-serial.log 2>/dev/null; do
+              sleep 0.2; n=$((n + 1)); if (( n >= 600 )); then exit 0; fi
+            done
           } | timeout 120 "${QEMU[@]}" \
             -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
             -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
@@ -193,7 +203,7 @@ EOF
             -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
             -no-reboot > verify-serial.log )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
-            && grep -aqF 'm5: RESULT PASS (5/5)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm5: RESULT PASS (6/6)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"
