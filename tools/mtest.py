@@ -136,6 +136,117 @@ def run_qemu(label: str, esp: Path,
     return rc, serial, dt
 
 
+def boot(label: str, esp: Path,
+         feed: list[tuple[bytes, int, bytes]],
+         scratch: Path,
+         kill: tuple[bytes, int, float] | None = None,
+         timeout_s: int = TIMEOUT_S,
+         ) -> tuple[int | None, str, float]:
+    """One QEMU boot against an EXPLICIT scratch-disk path (M5.4).
+
+    Unlike `run_qemu`, this never reformats: multi-boot scripts own
+    the disk's lifecycle (two-boot persistence, crash rounds).
+
+    `kill` arms the crash gate: `(marker, nth, delay_s)`. Once the
+    feeder has sent its LAST payload, the killer waits until `marker`
+    appears `nth` more times in the serial AFTER that point, sleeps
+    `delay_s`, then SIGKILLs QEMU — the harness's process-crash
+    model. Completed writes are in the host page cache and survive
+    the process death; unsubmitted ones are lost. The guest therefore
+    sees a strict PREFIX of its issued device operations — exactly
+    the failure mode AFS1's ping-pong commit (superblock record
+    written last) is designed to survive. Returns rc=None for a
+    killed boot.
+    """
+    bdir = arena_env.build_dir()
+    vars_img = bdir / f"ovmf-vars-{label}.img"
+    shutil.copyfile(arena_env.ovmf_vars_template(), vars_img)
+    serial_log = bdir / f"serial-{label}.log"
+    if serial_log.exists():
+        serial_log.unlink()
+
+    cmd = (
+        arena_env.qemu_cmd()
+        + arena_env.qemu_data_args()
+        + [
+            "-M", "q35",
+            "-m", f"{MEM_MIB}M",
+            "-cpu", "qemu64,+nx,+smep,+smap",
+            "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
+            "-drive", f"if=pflash,format=raw,file={vars_img}",
+            "-drive", f"format=raw,file={esp}",
+            "-drive", f"file={scratch},format=raw,if=none,id=scr0",
+            "-device", "virtio-blk-pci,drive=scr0",
+            "-display", "none",
+            "-chardev", "stdio,id=con0,signal=off",
+            "-serial", "chardev:con0",
+            "-no-reboot",
+        ]
+    )
+    t0 = time.monotonic()
+    killed = False
+    with open(serial_log, "wb") as logf:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logf,
+                                stderr=subprocess.DEVNULL)
+        stop = threading.Event()
+
+        def feeder() -> None:
+            nonlocal killed
+            sent = 0
+            armed_at: int | None = None
+            marker, nth, delay = kill if kill else (b"", 0, 0.0)
+            while not stop.is_set():
+                try:
+                    data = serial_log.read_bytes()
+                except OSError:
+                    data = b""
+                while sent < len(feed):
+                    m, n, payload = feed[sent]
+                    if data.count(m) < n:
+                        break
+                    try:
+                        assert proc.stdin is not None
+                        proc.stdin.write(payload)
+                        proc.stdin.flush()
+                    except (BrokenPipeError, OSError):
+                        return
+                    sent += 1
+                    if sent == len(feed):
+                        # arm the killer at the CURRENT serial length:
+                        # only guest output produced from here on can
+                        # trigger the crash.
+                        armed_at = len(data)
+                if kill and armed_at is not None:
+                    window = data[armed_at:]
+                    if window.count(marker) >= nth:
+                        time.sleep(delay)
+                        proc.kill()  # SIGKILL: the crash itself
+                        killed = True
+                        return
+                if sent >= len(feed) and not kill:
+                    return  # nothing left to do; the guest shuts down
+                time.sleep(0.02)
+
+        th = threading.Thread(target=feeder, daemon=True)
+        th.start()
+        try:
+            rc: int | None = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            rc = None
+            killed = True
+            print(f"[{label}] NOTE: boot timed out before a clean exit — "
+                  f"SIGKILLed (treated as a crash)")
+        stop.set()
+        th.join(timeout=2)
+    if killed:
+        rc = None
+    dt = time.monotonic() - t0
+    serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
+    return rc, serial, dt
+
+
 def evaluate(label: str, milestone: str, expected_tests: list[str],
              rc: int, serial: str, dt: float) -> bool:
     ok = True

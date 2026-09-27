@@ -136,7 +136,9 @@ def make_scratch_disk() -> Path:
     M5.2 handed QEMU a zero-filled image; M5.3 (ADR-0023) formats it
     host-side (tools/afs1.py — the layout's single source of truth) so
     fsd mounts a real superblock + first commit every boot. Fresh per
-    run: cross-BOOT persistence is 5.4's exit criterion.
+    run — the DEFAULT discipline. Since M5.4 the explicit multi-boot
+    scripts (test_m5_persist.py, test_m5_crash.py) own their disk's
+    lifecycle across paired boots via mtest.boot().
     """
     import afs1
 

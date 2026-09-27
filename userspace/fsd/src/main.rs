@@ -27,6 +27,19 @@
 //!   runs of the generation BEFORE LAST are reclaimed inside the
 //!   current transaction (two-generation delay), so no sector a valid
 //!   commit points at is ever overwritten.
+//! - **reclamation across reboots (M5.4)**: the dead lists are RAM
+//!   state, so mount additionally reclaims the SUPERSEDED ping-pong
+//!   generation — the newest valid commit won, so the other slot's
+//!   objtab/bitmap runs are unreferenced by definition and return to
+//!   the allocator in the RAM bitmap (persisted by the next commit; a
+//!   crash before it keeps them allocated — a leak, never damage).
+//!   Sectors freed by an INTERRUPTED transaction's dead list stay
+//!   conservatively allocated: v1 leaks honestly rather than guessing.
+//! - **transactional delete (M5.4)**: UNLINK clears the object record
+//!   and queues every sector of its extent chain on the dead list
+//!   inside one transaction — the namespace change is atomic with the
+//!   commit flip, and the sectors outlive any valid old commit that
+//!   could still reference them.
 //!
 //! Zero-copy end to end: a client LENDS its buffer frame with the FS
 //! call; fsd never maps it (lent caps cannot be mapped — by design)
@@ -773,6 +786,50 @@ unsafe fn mount(fs: &mut Fs) {
                 fail(EXIT_MOUNT, "the bitmap lost the live allocation bitmap");
             }
         }
+
+        // M5.4: reclaim the SUPERSEDED ping-pong generation. The
+        // newest valid commit won the mount, so whatever record sits
+        // in the other slot is unreferenced by definition — its
+        // objtab/bitmap runs return to the allocator in the RAM
+        // bitmap, and the NEXT commit persists that. A crash before
+        // the next commit leaves them allocated: a leak, never
+        // damage. The live generation's own sectors are guarded —
+        // a stale record can never free what the mount just chose.
+        disk_read(fs, COMMIT_BASE + (1 - fs.seq % 2) as u32);
+        let p = fs.scratch_ptr();
+        if rd32(p, 0) == COMMIT_MAGIC && rd32(p, 4) == AFS_VERSION && checksum_ok(p) {
+            let oseq = rd64(p, C_SEQ);
+            let (oot, obm) = (rd32(p, C_OBJTAB), rd32(p, C_BITMAP));
+            let in_live = |s: u32| -> bool {
+                s < 3
+                    || (fs.cur_ot..fs.cur_ot + OBJTAB_SECTORS).contains(&s)
+                    || (fs.cur_bm..fs.cur_bm + BITMAP_SECTORS).contains(&s)
+            };
+            if oseq < fs.seq
+                && oot + OBJTAB_SECTORS <= fs.total_sectors
+                && obm + BITMAP_SECTORS <= fs.total_sectors
+            {
+                let mut reclaimed = 0u32;
+                for s in oot..oot + OBJTAB_SECTORS {
+                    if !in_live(s) && bit_get(s) {
+                        bit_set(s, false);
+                        reclaimed += 1;
+                    }
+                }
+                for s in obm..obm + BITMAP_SECTORS {
+                    if !in_live(s) && bit_get(s) {
+                        bit_set(s, false);
+                        reclaimed += 1;
+                    }
+                }
+                log_line(|o| {
+                    o.str("fsd: reclaimed ");
+                    o.u64(u64::from(reclaimed));
+                    o.str(" superseded metadata sector(s) from commit seq ");
+                    o.u64(oseq);
+                });
+            }
+        }
     }
     let free = unsafe { free_count(fs) };
     let files = unsafe { (0..OBJ_COUNT).filter(|&i| obj_type(i) == OBJ_FILE).count() };
@@ -1046,6 +1103,82 @@ unsafe fn serve(
                 }
                 (FS_OK, idx as u64)
             }
+            FS_OP_UNLINK => {
+                // M5.4: transactional delete. The record and every
+                // sector of the extent chain die with two-generation
+                // delay (a valid superseded commit may still point at
+                // them); the commit flip removes the name atomically.
+                let Some(n) = parse_name(imsg) else {
+                    return (FS_ERR_BAD_NAME, 0);
+                };
+                let name = &imsg[..n];
+                let Some(i) = obj_find_name(name) else {
+                    return (FS_ERR_NOT_FOUND, 0);
+                };
+                if (0..OPEN_MAX).any(|k| fs.open[k] == (i + 1) as u16) {
+                    // v1: no unlink-at-last-close — deleting under a
+                    // live handle would surprise honest clients.
+                    return (FS_ERR_BUSY, 0);
+                }
+                // Snapshot the record for rollback: a commit refused
+                // for space must not persist as a deletion LATER.
+                let mut rec = [0u8; OBJ_RECORD];
+                core::ptr::copy_nonoverlapping(obj_ptr(i), rec.as_mut_ptr(), OBJ_RECORD);
+                let dead_mark = fs.dead_next_n;
+                begin_tx(fs);
+                // Walk the chain: every data run and every extent
+                // block dies. Bounded — a runaway chain stops early
+                // and the tail leaks honestly (never corruption).
+                let mut cur = obj_ehead(i);
+                let mut guard = 0u32;
+                let mut freed = 0u32;
+                while cur != 0 && cur < fs.total_sectors {
+                    guard += 1;
+                    if guard > 64 {
+                        break;
+                    }
+                    disk_read(fs, cur);
+                    let (next, count) = (
+                        rd32(fs.scratch_ptr(), EXT_NEXT),
+                        rd32(fs.scratch_ptr(), EXT_COUNT),
+                    );
+                    if count > EXT_PER_BLOCK {
+                        break;
+                    }
+                    for k in 0..count {
+                        let (st, len) = (
+                            rd32(fs.scratch_ptr(), EXT_ENTRIES + (k as usize) * 8),
+                            rd32(fs.scratch_ptr(), EXT_ENTRIES + (k as usize) * 8 + 4),
+                        );
+                        for s in st..st + len {
+                            if s < fs.total_sectors {
+                                push_dead(fs, s);
+                                freed += 1;
+                            }
+                        }
+                    }
+                    push_dead(fs, cur);
+                    cur = next;
+                }
+                obj_create_free(i);
+                if commit(fs, "unlink").is_err() {
+                    // Roll back: restore the record, un-die the chain
+                    // (truncate the dead list to the pre-tx mark).
+                    // begin_tx's own reclamation stays — it was due
+                    // regardless of THIS transaction's outcome.
+                    core::ptr::copy_nonoverlapping(rec.as_ptr(), obj_ptr(i), OBJ_RECORD);
+                    fs.dead_next_n = dead_mark;
+                    return (FS_ERR_NO_SPACE, 0);
+                }
+                log_line(|o| {
+                    o.str("fsd: UNLINK obj ");
+                    o.u64(i as u64);
+                    o.str(" → committed (");
+                    o.u64(u64::from(freed));
+                    o.str(" data sector(s) + the chain free at +2 generations)");
+                });
+                (FS_OK, 0)
+            }
             FS_OP_SHUTDOWN => {
                 log_line(|o| {
                     o.str("fsd: shutdown requested after ");
@@ -1072,7 +1205,7 @@ pub unsafe extern "C" fn _start() -> ! {
     // its own contract (own memory, validated inputs, checked helper
     // paths).
     unsafe {
-        log_line(|o| o.str("fsd: AFS1 filesystem service starting (M5.3, ADR-0023)"));
+        log_line(|o| o.str("fsd: AFS1 filesystem service starting (M5.3/5.4, ADR-0023)"));
 
         // The metadata scratch frame: owned, copied (the LENT copy
         // travels with every storaged call), self-mapped (the map

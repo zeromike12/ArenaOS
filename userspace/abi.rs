@@ -101,6 +101,10 @@ pub fn block_req_w1(op: u64, buf_offset: u64) -> u64 {
 //                  writes answer FS_ERR_RANGE — the extent mapping is
 //                  cumulative and only appends stay honest)
 //   CLOSE          w1 = fh
+//   UNLINK         w1 ignored; msg64 = name bytes. Transactional
+//                  delete (M5.4): the object and its extent chain die
+//                  with two-generation delay; an OPEN file answers
+//                  FS_ERR_BUSY (v1 has no unlink-at-last-close)
 //   LS             w1 = cursor (0 to start); msg64 OUT = dirent:
 //                  [0..4] next cursor (FS_CURSOR_END = done),
 //                  [4..12] size, [12..16] name length, [16..48] name
@@ -116,6 +120,7 @@ pub const FS_OP_WRITE: u64 = 4;
 pub const FS_OP_CLOSE: u64 = 5;
 pub const FS_OP_LS: u64 = 6;
 pub const FS_OP_SHUTDOWN: u64 = 7;
+pub const FS_OP_UNLINK: u64 = 8;
 
 pub const FS_OK: u64 = 0;
 pub const FS_ERR_NOT_FOUND: u64 = (-1i64) as u64;
@@ -128,6 +133,7 @@ pub const FS_ERR_BAD_NAME: u64 = (-7i64) as u64;
 pub const FS_ERR_CORRUPT: u64 = (-8i64) as u64;
 pub const FS_ERR_RANGE: u64 = (-9i64) as u64;
 pub const FS_ERR_BAD_OP: u64 = (-10i64) as u64;
+pub const FS_ERR_BUSY: u64 = (-11i64) as u64;
 
 pub const FS_NAME_MAX: usize = 32;
 
@@ -162,6 +168,12 @@ pub const VIRTIO_BLK_S_UNSUPP: u64 = 2;
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 
 pub const EXIT_OK: u64 = 42;
+/// fstest's SECOND verified-success code (M5.4): the volume already
+/// held the test file at mount — it was committed by an EARLIER boot
+/// and survived. The persisted branch verifies it byte-for-byte with
+/// no write at all, so its device-operation contract differs from the
+/// fresh-volume one; the code tells the m5 suite which contract held.
+pub const EXIT_OK_PERSISTED: u64 = 43;
 pub const EXIT_WRITE_REFUSED: u64 = 97;
 pub const EXIT_PANIC: u64 = 99;
 

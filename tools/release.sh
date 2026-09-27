@@ -35,11 +35,13 @@ echo "== release $TAG: building image =="
 ./tools/build.sh --image
 
 echo "== release $TAG: gating on the full test suite =="
-python3 tools/test_m1.py
-python3 tools/test_m2.py
-python3 tools/test_m3.py
-python3 tools/test_m4.py
-python3 tools/test_m4_shell.py
+# EVERY milestone harness (ADR-0005: old tests are never deleted) —
+# including the M5 suite, the two-boot persistence proof, and the
+# crash-consistency gate. A glob, so a new script is automatically
+# a release gate.
+for t_script in tools/test_m*.py; do
+    python3 "$t_script"
+done
 
 echo "== release $TAG: staging assets =="
 REL="build/release"
@@ -49,29 +51,47 @@ mkdir -p "$REL"
 cp build/arena-esp.img "$REL/arena-esp.img"
 cp docs/RUNNING.md "$REL/RUNNING.md"
 
+# M5.4 (ADR-0023): the data disk ships FORMATTED — since v0.5.0 a
+# zero-filled scratch fails fsd's mount by design, and the user's
+# files must persist across their own reboots. The template is the
+# pristine volume; the run instructions copy it once to scratch.img.
+python3 -c 'import sys; sys.path.insert(0, "tools"); import afs1; afs1.mkfs(sys.argv[1], 8 * 1024 * 1024 // afs1.SECTOR)' "$REL/scratch-template.img"
+
 # Firmware pair: exactly what arena_env resolves (the tested EDK2 build).
 OVMF_CODE="$(python3 -c 'import sys; sys.path.insert(0,"tools"); import arena_env; print(arena_env.ovmf_code())')"
 OVMF_VARS="$(python3 -c 'import sys; sys.path.insert(0,"tools"); import arena_env; print(arena_env.ovmf_vars_template())')"
 cp "$OVMF_CODE" "$REL/edk2-x86_64-code.fd"
 cp "$OVMF_VARS" "$REL/ovmf-vars-template.img"
 
-( cd "$REL" && sha256sum arena-esp.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md > sha256sums.txt )
+( cd "$REL" && sha256sum arena-esp.img scratch-template.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md > sha256sums.txt )
 
 GIT_SHA="$(git rev-parse --short HEAD)"
 {
     echo "ArenaOS $TAG — build ${GIT_SHA} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo
-    echo "Milestone status: M1 8/8, M2 21/21, M3 13/13, M4 9/9 PASS"
-    echo "(tools/test_m{1,2,3,4}.py) + the interactive shell session"
-    echo "(tools/test_m4_shell.py); 100-boot stability loop green — every"
-    echo "boot ends by typing 'shutdown' into the running shell"
-    echo "(tools/stability_loop.sh, ADR-0011/0020)."
+    echo "Milestone status: M1 8/8, M2 21/21, M3 13/13, M4 9/9, M5 6/6"
+    echo "PASS (tools/test_m*.py) + the interactive shell session + the"
+    echo "two-boot persistence proof (test_m5_persist.py: written in boot"
+    echo "N, read back byte-exact in boot N+1) + the crash-consistency"
+    echo "gate (test_m5_crash.py: five SIGKILL-mid-write rounds, every"
+    echo "reboot recovers with NO repair tool — fsd just mounts);"
+    echo "100-boot stability loop green — every boot ends by typing"
+    echo "'shutdown' into the running shell (ADR-0011/0020/0022/0023)."
     echo
-    echo "Run it: see RUNNING.md (bundled) — one cp + one qemu-system-x86_64"
-    echo "command; the VM boots, runs the full milestone suite on serial,"
-    echo "then hands the console to the ArenaOS shell: type 'help' (and"
-    echo "'shutdown' to stop the machine). Serial is the console in both"
-    echo "directions (ADR-0020)."
+    echo "This release has a FILESYSTEM: AFS1 (original design, ADR-0023)"
+    echo "served entirely from ring 3 — extent-based data, copy-on-write"
+    echo "transactional metadata, ping-pong commits. The shell lists,"
+    echo "reads, writes, and deletes real files, and they SURVIVE reboots"
+    echo "on your scratch.img."
+    echo
+    echo "Run it: see RUNNING.md (bundled) — two cps + one"
+    echo "qemu-system-x86_64 command; the VM boots, runs the full"
+    echo "milestone suite on serial, then hands the console to the"
+    echo "ArenaOS shell: type 'help' (and 'shutdown' to stop the"
+    echo "machine). Serial is the console in both directions"
+    echo "(ADR-0020). The bundled scratch-template.img is the formatted"
+    echo "AFS1 volume — copy it ONCE, then keep reusing your scratch.img:"
+    echo "that is where your files live."
 } > "$REL/RELEASE-NOTES.txt"
 
 ls -la "$REL"
@@ -87,8 +107,10 @@ if [[ "$MODE" == "--publish" ]]; then
         cat "$REL/RELEASE-NOTES.txt"
         echo
         echo "Run bundle: ${BUNDLE} — arena-esp.img (boot disk),"
-        echo "edk2-x86_64-code.fd + ovmf-vars-template.img (tested EDK2"
-        echo "firmware pair), RUNNING.md (how to boot), sha256sums.txt."
+        echo "scratch-template.img (formatted AFS1 data disk — files"
+        echo "persist across your reboots), edk2-x86_64-code.fd +"
+        echo "ovmf-vars-template.img (tested EDK2 firmware pair),"
+        echo "RUNNING.md (how to boot), sha256sums.txt."
     } > "$NOTES"
 
     # Create the release first, then upload assets one by one: if one
@@ -100,7 +122,7 @@ if [[ "$MODE" == "--publish" ]]; then
         --notes-file "$NOTES"
 
     assets_ok=1
-    for f in arena-esp.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt; do
+    for f in arena-esp.img scratch-template.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt; do
         gh release upload "$TAG" "$REL/$f" --repo zeromike12/ArenaOS --clobber \
             || assets_ok=0
     done
@@ -115,7 +137,7 @@ if [[ "$MODE" == "--publish" ]]; then
         # Absolute output path: the subshell's cwd is $REL, so a relative
         # "releases/..." would resolve inside build/ (v0.3.0 first attempt).
         ( cd "$REL" && tar czf "$REPO_ROOT/releases/$TAG/$BUNDLE" \
-            arena-esp.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt )
+            arena-esp.img scratch-template.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md sha256sums.txt )
         ( cd "releases/$TAG" && sha256sum "$BUNDLE" > "$BUNDLE.sha256" )
         blob_sha="$(git hash-object "releases/$TAG/$BUNDLE")"
         cat > "releases/$TAG/README.md" <<EOF
@@ -142,22 +164,30 @@ gh api repos/zeromike12/ArenaOS/git/blobs/${blob_sha} \\
 \`\`\`sh
 tar xzf ${BUNDLE}
 cp ovmf-vars-template.img ovmf-vars.img     # fresh NVRAM per boot
+cp scratch-template.img scratch.img         # FIRST boot only: the formatted
+                                            # AFS1 volume — then REUSE your
+                                            # scratch.img: files persist
 qemu-system-x86_64 \\
     -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \\
     -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \\
     -drive if=pflash,format=raw,file=ovmf-vars.img \\
     -drive format=raw,file=arena-esp.img \\
+    -drive file=scratch.img,format=raw,if=none,id=scr0 \\
+    -device virtio-blk-pci,drive=scr0 \\
     -display none -serial mon:stdio -no-reboot
 \`\`\`
 
 Serial is the console in BOTH directions: the VM runs the milestone
-suite, then the kernel spawns the shell and waits at the \`arena> \`
-prompt — type \`help\`, \`ps\`, \`echo hi\`, \`spawn\` (runs the test
-payload as a child process), and \`shutdown\` to stop the machine.
-Full details: RUNNING.md inside the tarball (same as docs/RUNNING.md).
-Bundle contents: arena-esp.img (boot disk), edk2-x86_64-code.fd +
-ovmf-vars-template.img (tested EDK2 firmware pair), RUNNING.md,
-sha256sums.txt.
+suite (including the real filesystem tests on scratch.img), then the
+kernel spawns the storaged + fsd services and the shell, and waits at
+the \`arena> \` prompt — type \`help\`, \`ls\`, \`write note.txt hello\`,
+\`cat note.txt\`, \`rm note.txt\`, \`ps\`, \`spawn\`, and \`shutdown\` to
+stop the machine. What you \`write\` is committed to scratch.img and
+comes back next boot. Full details: RUNNING.md inside the tarball
+(same as docs/RUNNING.md). Bundle contents: arena-esp.img (boot
+disk), scratch-template.img (formatted AFS1 data disk),
+edk2-x86_64-code.fd + ovmf-vars-template.img (tested EDK2 firmware
+pair), RUNNING.md, sha256sums.txt.
 EOF
         verify_dir="$(mktemp -d)"
         tar xzf "releases/$TAG/$BUNDLE" -C "$verify_dir"
@@ -177,12 +207,14 @@ EOF
         # Milestone-5 fixture (ADR-0021): the verification boot attaches
         # the same fresh scratch disk the harness uses — without it the
         # m5 suite (and therefore the boot) fails by design.
-        # M5.3 (ADR-0023): the scratch disk must be FORMATTED as AFS1 —
-        # fsd mounts it during the m5 suite's fs_service test, and a
-        # zero-filled image fails the mount (suite fails by design).
-        # Format it from the repo's layout module before the boot.
-        ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import afs1; afs1.mkfs(sys.argv[1], 8 * 1024 * 1024 // afs1.SECTOR)' "$verify_dir/scratch.img" )
+        # M5.3/5.4 (ADR-0023): the scratch disk must be FORMATTED as
+        # AFS1 — fsd mounts it during the m5 suite's fs_service test,
+        # and a zero-filled image fails the mount (suite fails by
+        # design). The verification boot uses the SHIPPED
+        # scratch-template.img from the extracted bundle itself: the
+        # artifact the user gets is the artifact that was tested.
         ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
+          cp scratch-template.img scratch.img && \
           {
             n=0
             while ! grep -aq 'arena>' verify-serial.log 2>/dev/null; do

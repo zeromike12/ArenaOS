@@ -40,18 +40,23 @@
 //!    (42 = the client verified the pattern), exactly two relay-vector
 //!    deliveries (one per completed request), the dead driver's relay
 //!    swept by `proc::destroy`, and frame-exact teardown.
-//! 6. `fs_service` — M5.3 (ADR-0023): the REAL filesystem boundary. The
-//!    kernel spawns `fsd` (registry image 4, the AFS1 server) with the
-//!    block endpoint's call side and its own FS endpoint's serve side,
-//!    then `fstest` (image 5) with the FS call side. fstest CREATEs a
-//!    file, WRITEs a pattern (its LENT frame forwarded through fsd to
-//!    storaged — the device DMAs the client's own page), CLOSEs,
-//!    re-OPENs by name, READs back, verifies byte-for-byte, and walks
-//!    LS; then both services shut down by their own hands. The kernel
-//!    proves the machine side: three exit badges, three exit codes
-//!    (42 = the client verified everything), relay deliveries exactly
-//!    equal to the derived disk-operation contract (33), the dead
-//!    driver's relay swept, frame-exact teardown.
+//! 6. `fs_service` — M5.3 + M5.4 (ADR-0023): the REAL filesystem
+//!    boundary. The kernel spawns `fsd` (registry image 4, the AFS1
+//!    server) with the block endpoint's call side and its own FS
+//!    endpoint's serve side, then `fstest` (image 5) with the FS call
+//!    side. fstest's BRANCH PROBE (M5.4) OPENs the test file first:
+//!    on a FRESH volume it CREATEs the file, WRITEs a pattern (its
+//!    LENT frame forwarded through fsd to storaged — the device DMAs
+//!    the client's own page), CLOSEs, re-OPENs by name, READs back,
+//!    verifies byte-for-byte, and walks LS (exit 42); on a volume
+//!    that PERSISTED from an earlier boot it verifies the committed
+//!    file with ZERO writes (exit 43) — the two-boot persistence
+//!    proof runs inside every dirty boot's suite. Both branches shut
+//!    both services down by their own hands. The kernel proves the
+//!    machine side: three exit badges, the client's exit code
+//!    SELECTING its contract (42 → 34 device ops, 43 → 14), relay
+//!    deliveries exactly equal to that contract, the dead driver's
+//!    relay swept, frame-exact teardown.
 //!
 //! Markers: `m5:test:<name>`, `m5: RESULT`.
 
@@ -1083,24 +1088,32 @@ const FS_STORAGED_EXIT_BADGE: u64 = 0x57D1;
 /// The exact number of block-service calls (hence MSI-X deliveries on
 /// the freshly re-registered relay vector) fstest's script forces
 /// through fsd — derived from the AFS1 layout, not observed once and
-/// frozen blindly:
+/// frozen blindly. M5.4 added the mount-time superseded-slot probe
+/// (one read) and the persisted branch:
 ///
 /// ```text
-///   mount:      superblock 1 + commit slots 2 + object table 4
-///               + bitmap 4                                            = 11
-///   CREATE:     commit → objtab run 4 + bitmap run 4 + record 1       =  9
-///   WRITE 512B: fresh extent block 1 + data sector 1 + commit 9       = 11
-///   READ  512B: extent lookup 1 + data sector 1                       =  2
-///   CLOSE/LS/SHUTDOWN: served from RAM                                =  0
+///   mount:      superblock 1 + commit slots 2 + superseded probe 1
+///               + object table 4 + bitmap 4                           = 12
+///   FRESH volume (fstest exit 42):
+///     CREATE:   commit → objtab run 4 + bitmap run 4 + record 1       =  9
+///     WRITE 512B: fresh extent block 1 + data sector 1 + commit 9     = 11
+///     READ 512B: extent lookup 1 + data sector 1                      =  2
 ///                                                                   -----
-///                                                                   = 33
+///                                                                   = 34
+///   PERSISTED volume (fstest exit 43 — committed by an earlier boot):
+///     OPEN 0 + READ 512B 2 (no write is issued at all)                = 14
+///   CLOSE/LS/SHUTDOWN: served from RAM                                =  0
 /// ```
 ///
 /// fstest's poison of storaged rides the block protocol directly (no
-/// device op, no interrupt). fsd reports the same 33 as its lifetime
-/// disk-operation count in the shutdown reply, and storaged's used-ring
-/// completions must match — three independent counters, one number.
-const FS_DISK_OPS: u64 = 33;
+/// device op, no interrupt). fstest asserts fsd's lifetime count AND
+/// storaged's used-ring completions against its branch's contract
+/// before exiting; the kernel's relay count is the third independent
+/// witness of the same number.
+const FS_DISK_OPS_FRESH: u64 = 34;
+const FS_DISK_OPS_PERSISTED: u64 = 14;
+/// fstest's persisted-volume verified-success exit (abi's 43).
+const FS_EXIT_OK_PERSISTED: u64 = 43;
 
 fn test_fs_service() -> Result<(), &'static str> {
     let baseline = frames::free_frames();
@@ -1193,7 +1206,7 @@ fn test_fs_service() -> Result<(), &'static str> {
         .map_err(|_| "fstest (image 5) spawn failed")?;
     info!(
         "m5",
-        "fs_service: storaged pid {s_pid} (window bar{} phys {bar_phys:#x}, block endpoint {eid_blk}), fsd pid {f_pid} (block call side {eid_blk}, fs endpoint {eid_fs}), fstest pid {c_pid} (fs call side {eid_fs}, poison side {eid_blk}) — running create→write→close→re-open→read→verify→ls",
+        "fs_service: storaged pid {s_pid} (window bar{} phys {bar_phys:#x}, block endpoint {eid_blk}), fsd pid {f_pid} (block call side {eid_blk}, fs endpoint {eid_fs}), fstest pid {c_pid} (fs call side {eid_fs}, poison side {eid_blk}) — running the branch probe, then create→write→verify (fresh) or read→verify (persisted)",
         bar
     );
 
@@ -1243,24 +1256,34 @@ fn test_fs_service() -> Result<(), &'static str> {
     let client_status = syscall::exit_status_of(c_tid);
     let fsd_status = syscall::exit_status_of(f_tid);
     let driver_status = syscall::exit_status_of(s_tid);
-    if client_status != Some(BLK_EXIT_OK) {
-        return Err(match client_status {
-            Some(69) => "fstest: buffer frame setup refused (69)",
-            Some(70) => "fstest: CREATE was not served (70)",
-            Some(71) => "fstest: WRITE was not served in full (71)",
-            Some(72) => "fstest: CLOSE was not served (72)",
-            Some(73) => "fstest: the file did not survive CLOSE→OPEN (73)",
-            Some(74) => "fstest: READ was not served in full (74)",
-            Some(75) => "fstest: the file contents MISMATCHED on read-back (75)",
-            Some(76) => "fstest: the LS walk was wrong (76)",
-            Some(77) => "fstest: the fsd shutdown was not served (77)",
-            Some(78) => "fstest: the storaged poison was refused (78)",
-            Some(other) if (80..=84).contains(&other) => {
-                "an fsd failure code surfaced as fstest's exit (80..84)"
-            }
-            _ => "fstest exited with a code from nowhere in the contract",
-        });
-    }
+    // fstest has TWO verified-success exits (M5.4), and the exit code
+    // SELECTS the device-operation contract the kernel then asserts:
+    // 42 = the fresh-volume create contract ran (34 ops), 43 = the
+    // volume persisted from an earlier boot and the committed file
+    // verified with zero writes (14 ops).
+    let expected_ops = match client_status {
+        Some(BLK_EXIT_OK) => FS_DISK_OPS_FRESH,
+        Some(FS_EXIT_OK_PERSISTED) => FS_DISK_OPS_PERSISTED,
+        _ => {
+            return Err(match client_status {
+                Some(69) => "fstest: buffer frame setup refused (69)",
+                Some(70) => "fstest: CREATE was not served (70)",
+                Some(71) => "fstest: WRITE was not served in full (71)",
+                Some(72) => "fstest: CLOSE was not served (72)",
+                Some(73) => "fstest: an OPEN was refused by a volume in no branch's state (73)",
+                Some(74) => "fstest: READ was not served in full (74)",
+                Some(75) => "fstest: the file contents MISMATCHED on read-back (75)",
+                Some(76) => "fstest: the LS walk was wrong (76)",
+                Some(77) => "fstest: the fsd shutdown was not served per contract (77)",
+                Some(78) => "fstest: the storaged poison was refused or off-contract (78)",
+                Some(other) if (80..=84).contains(&other) => {
+                    "an fsd failure code surfaced as fstest's exit (80..84)"
+                }
+                _ => "fstest exited with a code from nowhere in the contract",
+            });
+        }
+    };
+    let persisted = expected_ops == FS_DISK_OPS_PERSISTED;
     if fsd_status != Some(BLK_EXIT_OK) {
         return Err(match fsd_status {
             Some(80) => "fsd: the AFS1 mount was refused — corrupt or foreign image (80)",
@@ -1295,12 +1318,15 @@ fn test_fs_service() -> Result<(), &'static str> {
     // walked the stub→relay→notify chain — one per forwarded block
     // call, derived above. No polling anywhere in the stack.
     let deliveries = relay::delivery_count(BLK_RELAY_VEC);
-    if deliveries != FS_DISK_OPS {
+    if deliveries != expected_ops {
         error!(
             "m5",
-            "fs_service: relay vector {BLK_RELAY_VEC} delivered {deliveries}, contract says {FS_DISK_OPS}"
+            "fs_service: relay vector {BLK_RELAY_VEC} delivered {deliveries}, the {} contract says {expected_ops}",
+            if persisted { "persisted" } else { "fresh" }
         );
-        return Err("the relay deliveries do not match the derived disk-operation count");
+        return Err(
+            "the relay deliveries do not match the branch's derived disk-operation contract",
+        );
     }
     if !relay::registered(BLK_RELAY_VEC) {
         return Err("the driver's relay registration vanished while the process lived");
@@ -1335,9 +1361,14 @@ fn test_fs_service() -> Result<(), &'static str> {
         );
         return Err("fs-service teardown is not frame-exact");
     }
+    let branch_story = if persisted {
+        "RE-FOUND a file committed by an EARLIER BOOT and verified it byte-for-byte with ZERO writes (the two-boot persistence proof, exit 43)"
+    } else {
+        "created, wrote, closed, RE-OPENED, read back and verified a file (exit 42)"
+    };
     info!(
         "m5",
-        "fs_service: fstest (pid {c_pid}) created, wrote, closed, RE-OPENED, read back and verified a file through fsd (pid {f_pid}) — AFS1 mounted from the host-formatted image, metadata CoW'd per transaction, file data DMA'd end-to-end zero-copy (fstest's frame → forwarded cap → storaged (pid {s_pid}) → device), {deliveries} interrupt-delivered block calls matching the derived contract, all three children exited {BLK_EXIT_OK}, all exit badges exact, the dead driver's relay swept, teardown frame-exact (frames {after})"
+        "fs_service: fstest (pid {c_pid}) {branch_story} through fsd (pid {f_pid}) — AFS1 mounted from the host-formatted image, metadata CoW'd per transaction, file data DMA'd end-to-end zero-copy (fstest's frame → forwarded cap → storaged (pid {s_pid}) → device), {deliveries} interrupt-delivered block calls matching the branch's derived contract, all exit badges exact, the dead driver's relay swept, teardown frame-exact (frames {after})"
     );
     Ok(())
 }

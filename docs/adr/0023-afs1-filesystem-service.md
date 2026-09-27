@@ -300,3 +300,78 @@ delete need the dead-list machinery to grow file-extent freeing (the
 lists already exist). Larger disks resize the bitmap run; more files
 grow the object-table run (both are superblock geometry, not code).
 v0.5.0 ships after 5.4.
+
+## M5.4 addendum — persistence, crash consistency, and the completed v1 namespace
+
+5.4 delivered what this ADR's forward-looking section demanded, and
+made three design decisions worth recording.
+
+**The fh IS the file capability (no kernel file objects).** The
+roadmap's "file caps and minimal path→cap resolution at open" is
+realized as: OPEN resolves a name ONCE into a file handle, and every
+subsequent READ/WRITE/CLOSE is handle-direct — no path string crosses
+the wire after open (paths are UI, ARCHITECTURE §10). The handle is
+unforgeable in the only sense v1 needs: it is meaningful solely to
+holders of fsd's endpoint capability, which the kernel grants by
+spawn-time decision (the shell's slot 3, WRITE-righted) and which IPC
+transfers one-for-one. A dedicated kernel `CapObj::File` was
+considered and rejected as v1 scope creep: the namespace is flat, all
+clients of the endpoint are equally trusted today, and per-file
+permissions are the security phase's job — when they arrive, OPEN can
+start returning a rights-bearing cap in its reply slot (the protocol
+already has the slot; no wire change is needed until then).
+
+**Transactional UNLINK (`FS_OP_UNLINK` = 8, `FS_ERR_BUSY` = -11).**
+Delete does to file extents what the dead lists already did to
+metadata runs: one transaction clears the object record and queues
+every sector of the extent chain (blocks AND data runs) for
+two-generation-delayed freeing, so no valid superseded commit ever
+sees a reused sector. An open file is refused honestly (v1 has no
+unlink-at-last-close). A commit refused for space rolls the record
+back from a stack snapshot and truncates the dead list to its
+pre-transaction mark — a failed delete must not persist LATER.
+
+**Mount-time reclamation of the superseded generation.** The dead
+lists are RAM state, so before 5.4 every reboot orphaned the previous
+commit's object-table and bitmap runs (8 sectors per boot-cycle,
+forever). Mount now probes the OTHER ping-pong slot (one extra read —
+the mount contract grows 11 → 12 device ops): a valid record older
+than the winner is by definition unreferenced, and its runs return to
+the allocator in the RAM bitmap (persisted by the next commit; a crash
+before that keeps them allocated — a leak, never damage). The live
+generation's own sectors are guarded, so a stale record can never free
+what the mount just chose. What remains conservative: sectors freed by
+an INTERRUPTED transaction's dead list are unrecoverable without a
+mark-sweep pass — v1 leaks them honestly; a full fsck stays future
+work.
+
+**The crash-consistency argument, and its threat model.** The gate
+(`tools/test_m5_crash.py`) SIGKILLs QEMU mid-write. Under a process
+crash, writes QEMU submitted are in the host page cache and survive
+its death; unsubmitted ones are lost — the guest experiences a strict
+PREFIX of its issued operations, in submission order. AFS1's commit
+writes data sectors, extent blocks, and the new metadata runs BEFORE
+the single-sector commit-record flip, and mount takes the newest
+checksum-valid record: therefore every prefix lands on a complete
+generation — old or new, never blended. The gate verifies exactly
+this: five kill points across the write, and after each reboot the
+crashed file is never-committed, committed-empty (CREATE's flip
+landed, WRITE's did not), or committed-full — never torn — while the
+suite's persisted branch re-verifies the pre-crash file byte-for-byte
+with zero writes, and the host's `afs1.audit()` (fsck-lite: checksums,
+live-run bitmap marks, extent/bitmap agreement, no double-claims;
+leaks legal and never flagged) finds zero problems. Out of scope for
+v1, documented rather than pretended: true POWER loss (needs
+`cache=none` plus virtio FUA/FLUSH — the block protocol has no flush
+op yet) and a torn superblock (single copy in v1; practically
+unreachable under the prefix model, dual-superblock is future work).
+
+**The suite's branch probe.** fstest now OPENs the test file before
+anything else: NOT_FOUND selects the fresh contract (create → write →
+verify, 34 device ops, exit 42); OK selects the persisted contract
+(verify with ZERO writes, tolerant LS, 14 device ops, exit 43). The
+exit code SELECTS the relay-delivery contract the kernel asserts, and
+both branches additionally assert fsd's lifetime count and storaged's
+completions against the same number — three witnesses per contract.
+Consequence by design: every dirty boot's m5 suite is itself a
+persistence regression test.

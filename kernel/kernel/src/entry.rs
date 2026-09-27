@@ -389,7 +389,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     info!(
         "kernel",
-        "milestone 4 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1 + spawn protocol + minimal shell) — spawning the shell"
+        "milestone 5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven) — spawning the shell"
     );
 
     // --- M4.6: the hand-off (ADR-0020) -----------------------------------

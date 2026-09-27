@@ -52,9 +52,15 @@ FEED: list[tuple[bytes, int, bytes]] = [
     (b"arena>", 5, b"write note.txt hello-fs\r"),
     (b"arena>", 6, b"cat note.txt\r"),
     (b"arena>", 7, b"ls\r"),
-    (b"arena>", 8, b"spawn\r"),
-    (b"arena>", 9, b"bogus\r"),
-    (b"arena>", 10, b"shutdown\r"),
+    # M5.4: rm — transactional UNLINK through fsd. note.txt dies by
+    # name; an absent file is refused honestly; the final ls counts
+    # only the suite's arena.txt again.
+    (b"arena>", 8, b"rm note.txt\r"),
+    (b"arena>", 9, b"rm nosuch.txt\r"),
+    (b"arena>", 10, b"ls\r"),
+    (b"arena>", 11, b"spawn\r"),
+    (b"arena>", 12, b"bogus\r"),
+    (b"arena>", 13, b"shutdown\r"),
 ]
 
 LABEL = "test-m4-shell"
@@ -93,9 +99,10 @@ def main() -> int:
     check("shell spawned: pid" in serial, "kernel announced the spawned shell")
     check("ArenaOS shell" in serial, "the shell's banner reached the console")
 
-    # help: the builtin list, all eight verbs named (the text is one
+    # help: the builtin list, all nine verbs named (the text is one
     # debug_write chunk, so line starts survive the shared console).
-    for verb in ("help", "ps", "echo", "ls", "cat", "write", "spawn", "shutdown"):
+    for verb in ("help", "ps", "echo", "ls", "cat", "write", "rm",
+                 "spawn", "shutdown"):
         check(re.search(rf"^  {verb}\b", serial, re.MULTILINE) is not None,
               f"help lists the '{verb}' builtin")
 
@@ -143,6 +150,20 @@ def main() -> int:
     check(re.search(r"note\.txt  8 bytes", serial) is not None,
           "the second ls listed note.txt (8 bytes)")
     check("  2 file(s)" in serial, "the second ls counted exactly 2 files")
+
+    # M5.4: the rm exchanges — UNLINK removed note.txt transactionally
+    # (its sectors join the two-generation dead list inside fsd), the
+    # absent-file refusal is honest, and the final ls sees only the
+    # suite's arena.txt.
+    check("removed 'note.txt'" in serial,
+          "rm deleted note.txt through fsd's UNLINK transaction")
+    check("rm: no such file: 'nosuch.txt'" in serial,
+          "rm of an absent file was honestly refused")
+    tail = serial.split("removed 'note.txt'", 1)[1]
+    check("  1 file(s)" in tail,
+          "the final ls counted exactly 1 file after the rm")
+    check("note.txt  8 bytes" not in tail,
+          "the final ls no longer listed note.txt")
 
     # fsd and storaged are resident services: ps must list both,
     # single-threaded and parked in recv.

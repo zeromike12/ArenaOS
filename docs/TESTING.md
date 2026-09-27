@@ -86,8 +86,11 @@ filesystem builtins: `ls` must already show the m5 suite's committed
 `arena.txt` (the production fsd mounted the same on-disk state the suite
 wrote EARLIER IN THE SAME BOOT), `write note.txt hello-fs` creates a real
 file through fsd + storaged, `cat note.txt` streams the exact bytes back,
-and the second `ls` counts both files. `tools/stability_loop.sh` feeds the same way
-from bash (marker-paced, never sleep-based).
+and the second `ls` counts both files; since M5.4 `rm note.txt`
+unlinks it transactionally (and `rm nosuch.txt` gets an honest
+refusal) before the final `ls` counts only the suite's file.
+`tools/stability_loop.sh` feeds the same way from bash (marker-paced,
+never sleep-based).
 
 Since M5.1 (ADR-0021) every harness boot also attaches the **scratch-disk
 fixture**: `arena_env.scratch_disk_args()` re-creates a fresh 8 MiB
@@ -103,22 +106,48 @@ two calls, so the verified bytes can only have come from the device's
 DMA (the raw-block cycle claims the LAST sector: with a formatted
 filesystem on the image, a raw write must not touch FS structures).
 `m5:test:fs_service` then spawns a fresh storaged, fsd (image 4), and
-fstest (image 5): fstest creates `arena.txt`, writes 512 pattern bytes
-(its LENT frame forwarded through fsd — the device DMAs the CLIENT's
-page), closes, RE-OPENs by name, reads back, verifies byte-for-byte,
-walks `ls`, and shuts both services down; the kernel asserts three exact
-badges/exit codes and relay deliveries EXACTLY equal to the derived
-33-disk-operation contract (mount 11 + create-commit 9 + write 11 +
-read 2 — fsd's reported count and storaged's completions must agree).
-AFTER the boot, `test_m5.py` parses the committed image with the same
-host-side layout module: newest commit seq 3, `arena.txt` size 512,
-extents resolving to bitmap-marked sectors, and the literal pattern
-bytes in those sectors — the on-disk layout proven from the host side.
-Fresh-per-run is deliberate: no boot may silently inherit
-another boot's disk contents until step 5.4 makes persistence an
-explicit two-boot test. Interactive boots (`tools/run.sh`), the
-stability loop, and the release-bundle verification attach the same
-fixture; the ESP stays the boot medium throughout.
+fstest (image 5). Since M5.4 fstest PROBES the volume first (OPEN
+`arena.txt`), and the answer picks one of two derived contracts: on a
+FRESH volume it creates the file, writes 512 pattern bytes (its LENT
+frame forwarded through fsd — the device DMAs the CLIENT's page),
+closes, RE-OPENs by name, reads back, verifies byte-for-byte, walks a
+strict single-file `ls`, and exits 42 — 34 device ops (mount 12:
+superblock 1 + commit slots 2 + superseded-slot probe 1 + objtab 4 +
+bitmap 4; create-commit 9; write 11; read 2). On a volume that
+SURVIVED A REBOOT the persisted branch verifies the committed file
+with ZERO writes, walks a tolerant `ls` (other files legitimately
+share the namespace), and exits 43 — 14 device ops. The kernel asserts
+three exact badges and relay deliveries EXACTLY equal to the contract
+the exit code selects (fsd's reported count and storaged's completions
+must agree — three witnesses, one number). Every dirty boot's suite is
+thus a persistence witness. AFTER the boot, `test_m5.py` parses the
+committed image with the same host-side layout module: newest commit
+seq 3, `arena.txt` size 512, extents resolving to bitmap-marked
+sectors, and the literal pattern bytes in those sectors — the on-disk
+layout proven from the host side.
+Fresh-per-run remains the DEFAULT fixture discipline (no boot may
+silently inherit another's disk by accident); the two M5.4 scripts own
+their disk's lifecycle EXPLICITLY via `mtest.boot()` (an explicit
+scratch path, marker-paced feeding, and an arming kill switch):
+`test_m5_persist.py` formats once and boots twice — boot 1's shell
+writes `persist.txt`, boot 2's suite takes the persisted branch, the
+shell `cat`s the boot-1 bytes back exactly and `rm`s them across the
+reboot, and the host verifies the committed sectors after each boot.
+`test_m5_crash.py` is the crash-consistency gate: after a clean seed
+boot it SIGKILLs QEMU at five observed points of an in-flight shell
+write (the guest experiences a strict PREFIX of its issued device
+operations — the process-crash model AFS1's superblock-last commit is
+designed for) and verifies every reboot WITHOUT any repair tool: the
+suite passes 6/6 on the crashed volume, the crashed file comes back
+never-committed, committed-empty, or committed-full (never torn),
+older commits stay byte-exact, and `afs1.audit()` — the host-side
+fsck-lite over the newest committed generation (checksums, live-run
+bitmap marks, extent/bitmap agreement, no double-claims; leaks are
+legal and never flagged) — finds zero problems. Interactive boots
+(`tools/run.sh`), the stability loop (which reformats per boot, so it
+always exercises the fresh contract), and the release-bundle
+verification (which boots the SHIPPED `scratch-template.img`) attach
+the same fixture family; the ESP stays the boot medium throughout.
 
 ### Exception-path testing (M2.1+)
 

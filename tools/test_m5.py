@@ -78,9 +78,14 @@ Current coverage:
                     READs back into the cleared frame, verifies
                     byte-for-byte, walks LS (exactly one file, right
                     name and size), then shuts both services down by
-                    their own hands. Kernel-side proofs: three exit
-                    badges exact, three exit codes 42, relay deliveries
-                    exactly 33 (the derived disk-operation contract),
+                    their own hands — exit 42, the FRESH-volume
+                    contract (a volume that survived a reboot takes
+                    the persisted branch instead: verify with ZERO
+                    writes, exit 43 — exercised by test_m5_persist.py
+                    and test_m5_crash.py). Kernel-side proofs: three
+                    exit badges exact, and the client's exit code
+                    SELECTING its relay-delivery contract (42 → 34,
+                    43 → 14 — the derived disk-operation counts),
                     proc::destroy sweeps the dead driver's relay, and
                     teardown is frame-exact. AFTER the boot, this
                     script parses the scratch image itself (tools/afs1.py):

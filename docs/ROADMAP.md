@@ -431,17 +431,38 @@ medium — the ESP stays the boot medium throughout).
       through its new slot-3 endpoint cap; the shell session test
       drives all three (write creates only — v1 has no truncate;
       honest refusal over silent clobber).
-- [ ] 5.4 **Persistence + namespace + crash consistency**: file caps
-      and minimal path→cap resolution at open (then direct I/O — paths
-      are UI, per ARCHITECTURE §10); two-boot persistence (the same
-      scratch.img: written in boot N, read in boot N+1); the
-      crash-consistency gate from the phase outline — the harness kills
-      QEMU mid-write, reboots, and verifies recovery WITHOUT an fsck
-      ritual. (The v0.5.0 run bundle must ship a FORMATTED scratch
-      image — since 5.3 a zero-filled disk fails fsd's mount by
-      design; either a preformatted `scratch.img` or `tools/afs1.py`
-      travels with the bundle's run script.) Exit: all three proven by
-      harness tests; v0.5.0 ships.
+- [x] 5.4 **Persistence + namespace + crash consistency** — DONE
+      (ADR-0023 addendum). Two-boot persistence:
+      `tools/test_m5_persist.py` boots the SAME `scratch.img` twice —
+      boot N's shell writes `persist.txt`, boot N+1's shell `cat`s it
+      back byte-exact, `rm`s it transactionally across the reboot, and
+      the host parses the committed sectors after each boot. The suite
+      itself became a persistence witness: fstest now PROBES the
+      volume first — a fresh disk runs the create contract (34 device
+      ops, exit 42); a disk that survived a reboot runs the persisted
+      contract, verifying the committed file with ZERO writes (14
+      device ops, exit 43) — the exit code selects the relay-delivery
+      contract the kernel asserts. Crash-consistency gate:
+      `tools/test_m5_crash.py` SIGKILLs QEMU at five observed points
+      of an in-flight shell write (mid-CREATE-commit through
+      just-after-the-final-commit); every reboot recovers with NO
+      repair tool — fsd simply mounts, the suite verifies the
+      pre-crash file byte-for-byte, the crashed write returns
+      never-committed, committed-empty, or committed-full (never
+      torn), and the host-side `afs1.audit()` (an fsck-lite over the
+      newest committed generation) finds zero problems. Namespace:
+      OPEN exchanges a name for a handle exactly once; all I/O is
+      handle-direct (paths are UI, per ARCHITECTURE §10) — the fh is
+      the file capability, scoped by the client's granted fsd endpoint
+      cap (kernel file objects rejected as v1 scope; per-file
+      permissions belong to the security phase — ADR-0023 addendum).
+      FS_OP_UNLINK (8) completes the v1 namespace behind the shell's
+      `rm` (two-generation-delayed extent freeing; honest FS_ERR_BUSY
+      for open files), and fsd's mount reclaims the superseded
+      ping-pong generation so multi-boot volumes stop bleeding
+      metadata sectors. The v0.5.0 run bundle ships
+      `scratch-template.img` — the FORMATTED volume — and the release
+      verification boot runs on the shipped template itself.
 
 ## Phase 6 — Drivers (outline)
 

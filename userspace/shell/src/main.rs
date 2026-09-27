@@ -371,6 +371,38 @@ fn do_write(o: &mut Out, rest: &[u8]) {
     o.str("'\r\n");
 }
 
+/// `rm NAME` — UNLINK (M5.4): one transaction removes the name and
+/// queues every sector of the file's extent chain for reclamation two
+/// generations later (ADR-0023). An open file is refused honestly —
+/// v1 has no unlink-at-last-close.
+fn do_rm(o: &mut Out, name: &[u8]) {
+    if name.is_empty() || name.len() >= FS_NAME_MAX {
+        o.str("  usage: rm NAME (1..31 bytes)\r\n");
+        return;
+    }
+    let mut msg = [0u8; MSG_BYTES];
+    msg_zero(&mut msg);
+    msg[..name.len()].copy_from_slice(name);
+    let (r, st, _) = fs_call(FS_OP_UNLINK, 0, CAP_NONE, &mut msg);
+    if r < 0 || st != FS_OK {
+        if st == FS_ERR_NOT_FOUND {
+            o.str("  rm: no such file: '");
+            o.bytes(name);
+            o.str("'\r\n");
+        } else if st == FS_ERR_BUSY {
+            o.str("  rm: '");
+            o.bytes(name);
+            o.str("' is open — v1 deletes only closed files\r\n");
+        } else {
+            fs_error(o, "rm", r, st);
+        }
+        return;
+    }
+    o.str("  removed '");
+    o.bytes(name);
+    o.str("'\r\n");
+}
+
 fn do_spawn() {
     let mut o = Out::new();
     // Empty inheritance spec (null pointer, count 0 — the child needs
@@ -412,13 +444,12 @@ fn do_spawn() {
 // ---- texts -----------------------------------------------------------------
 
 const BANNER: &str =
-    "ArenaOS shell v0.5 (M4.6 + M5.3, ADR-0020/0023) — the first input-driven program.\r\n";
+    "ArenaOS shell v0.5 (M4.6 + M5.3/5.4, ADR-0020/0023) — the first input-driven program.\r\n";
 const PROMPT: &str = "arena> ";
-/// One debug_write chunk (<= WRITE_MAX): the help text hits the wire
-/// atomically — a longer HELP would chunk, and resident services
-/// (fsd's mount, storaged) share the console and may log between
-/// chunks, splitting lines mid-verb.
-const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file (new files only)\r\n  spawn - run image 0, await badge\r\n  shutdown - halt the machine\r\n";
+/// One debug_write chunk (<= WRITE_MAX = 256): the help text hits the
+/// wire atomically — and Out::push DROPS bytes past WRITE_MAX, so an
+/// over-long HELP would silently lose its tail. Budget: 251 bytes.
+const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -492,6 +523,8 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_cat(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"write ") {
                 do_write(&mut o, rest);
+            } else if let Some(rest) = strip_prefix(line, b"rm ") {
+                do_rm(&mut o, rest);
             } else if eq(line, b"spawn") {
                 o.flush();
                 do_spawn(); // does its own output (the child talks mid-flight)

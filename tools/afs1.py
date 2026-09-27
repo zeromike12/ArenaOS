@@ -252,12 +252,138 @@ class Disk:
         return None
 
 
+def audit(path) -> list[str]:
+    """fsck-lite for the crash-consistency gate (M5.4).
+
+    Verifies that the NEWEST COMMITTED generation of the image is
+    internally consistent — exactly the state fsd's mount trusts:
+
+    - the superblock parses and its checksum holds;
+    - a valid commit record exists and points inside the volume;
+    - every fixed/live metadata sector is marked used in the bitmap;
+    - every FILE object's name is well-formed, its extent chain is
+      walkable, in-range, non-looping, marked used, and claimed by
+      exactly ONE object (double-allocation is corruption);
+    - the extents cumulatively cover the object's size.
+
+    Deliberately CONSERVATIVE: sectors marked used but referenced by
+    nothing are legal (v1 leaks honestly — interrupted transactions
+    and superseded generations stay allocated), so they are never
+    flagged. Returns the list of problems; empty = healthy.
+    """
+    from pathlib import Path as _P
+
+    problems: list[str] = []
+    data = _P(path).read_bytes()
+    d = Disk(data)
+    try:
+        total = d.superblock()["total_sectors"]
+    except Afs1Error as e:
+        return [f"superblock: {e}"]
+    if len(data) < total * SECTOR:
+        return [f"image holds {len(data)} bytes, superblock claims {total} sectors"]
+    try:
+        seq, ot, bm = d.commit()
+    except Afs1Error as e:
+        return [f"commit records: {e}"]
+    if ot + OBJTAB_SECTORS > total or bm + BITMAP_SECTORS > total:
+        problems.append(f"commit seq {seq} points outside the volume (ot={ot}, bm={bm})")
+        return problems
+
+    bitmap = d.bitmap(bm)
+
+    def used(s: int) -> bool:
+        return bool(bitmap[s // 8] >> (s % 8) & 1)
+
+    for s in (0, 1, 2):
+        if not used(s):
+            problems.append(f"fixed metadata sector {s} is not marked used")
+    for s in range(ot, ot + OBJTAB_SECTORS):
+        if not used(s):
+            problems.append(f"live object-table sector {s} is not marked used")
+    for s in range(bm, bm + BITMAP_SECTORS):
+        if not used(s):
+            problems.append(f"live bitmap sector {s} is not marked used")
+
+    claimed: dict[int, str] = {}
+
+    def claim(s: int, who: str) -> None:
+        if s >= total:
+            problems.append(f"{who}: sector {s} lies outside the volume")
+            return
+        if not used(s):
+            problems.append(f"{who}: sector {s} is referenced but free in the bitmap")
+        if s in claimed:
+            problems.append(f"{who}: sector {s} is double-claimed (also by {claimed[s]})")
+        claimed[s] = who
+
+    for obj in d.objects(ot):
+        if obj["type"] == OBJ_FREE:
+            continue
+        name = obj["name"].decode(errors="replace")
+        if obj["type"] != OBJ_FILE:
+            problems.append(f"{name}: unknown object type {obj['type']}")
+            continue
+        if not (1 <= len(obj["name"]) < 32) or b"/" in obj["name"]:
+            problems.append(f"{name}: malformed stored name")
+        # walk the chain manually so the BLOCK sectors are audited too
+        blocks: list[int] = []
+        exts: list[tuple[int, int]] = []
+        cur = obj["extent_head"]
+        seen = set()
+        broken = False
+        while cur != 0:
+            if cur in seen:
+                problems.append(f"{name}: extent chain loops at sector {cur}")
+                broken = True
+                break
+            seen.add(cur)
+            if cur >= total:
+                problems.append(f"{name}: extent block {cur} outside the volume")
+                broken = True
+                break
+            blocks.append(cur)
+            blk = d.sector(cur)
+            next_, count = struct.unpack_from("<II", blk, 0)
+            if count > EXT_PER_BLOCK:
+                problems.append(f"{name}: extent count {count} over block capacity")
+                broken = True
+                break
+            for i in range(count):
+                start, length = struct.unpack_from("<II", blk, 8 + i * 8)
+                exts.append((start, length))
+            cur = next_
+        for s in blocks:
+            claim(s, f"{name} (extent block)")
+        covered = 0
+        for (st, ln) in exts:
+            if ln == 0:
+                problems.append(f"{name}: zero-length extent at {st}")
+            for s in range(st, st + ln):
+                claim(s, name)
+            covered += ln
+        need = -(-obj["size"] // SECTOR)  # ceil
+        if not broken and covered < need:
+            problems.append(
+                f"{name}: extents cover {covered} sector(s) but size "
+                f"{obj['size']} needs {need}"
+            )
+    return problems
+
+
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) == 3 and sys.argv[1] == "mkfs":
         size = 8 * 1024 * 1024
         mkfs(sys.argv[2], size // SECTOR)
+    elif len(sys.argv) == 3 and sys.argv[1] == "audit":
+        probs = audit(sys.argv[2])
+        if probs:
+            for p in probs:
+                print(f"PROBLEM: {p}")
+            sys.exit(1)
+        print("audit: the committed volume is internally consistent")
         print(f"afs1: formatted {sys.argv[2]} ({size // SECTOR} sectors)")
     elif len(sys.argv) == 3 and sys.argv[1] == "dump":
         d = Disk(open(sys.argv[2], "rb").read())

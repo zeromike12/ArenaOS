@@ -17,18 +17,18 @@ verified against. This page explains how to boot it on your own machine.
   release itself:
 
 ```sh
-gh release download v0.2.0 --repo zeromike12/ArenaOS
+gh release download v0.5.0 --repo zeromike12/ArenaOS
 ```
 
   The build environment cannot reach GitHub's asset-upload endpoint
   (`uploads.github.com`), so releases additionally ship the **identical
   bundle through the repository** under `releases/<tag>/` — download the
-  tarball, check its sha256, extract, and you have the same five files:
+  tarball, check its sha256, extract, and you have the same six files:
 
 ```sh
-curl -LO https://github.com/zeromike12/ArenaOS/raw/refs/heads/arena/01a0d6fd-arenaos/releases/v0.2.0/arenaos-v0.2.0-qemu-x86_64.tar.gz
-sha256sum -c arenaos-v0.2.0-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-v0.2.0-qemu-x86_64.tar.gz
+curl -LO https://github.com/zeromike12/ArenaOS/raw/refs/heads/arena/01a0d6fd-arenaos/releases/v0.5.0/arenaos-v0.5.0-qemu-x86_64.tar.gz
+sha256sum -c arenaos-v0.5.0-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-v0.5.0-qemu-x86_64.tar.gz
 ```
 
   (Each release's notes link its own bundle; after a branch merge the
@@ -37,6 +37,7 @@ tar xzf arenaos-v0.2.0-qemu-x86_64.tar.gz
 | Asset | What it is |
 |---|---|
 | `arena-esp.img` | The bootable disk: an EFI System Partition holding the ArenaOS boot stage + kernel (a UEFI application, ADR-0003) |
+| `scratch-template.img` | A **formatted AFS1 data disk** template (8 MiB, ADR-0023) — copy it to `scratch.img`; everything you `write` in the VM lives there and survives reboots |
 | `edk2-x86_64-code.fd` | EDK2/OVMF firmware **code** flash (read-only), the exact build the release was tested with |
 | `ovmf-vars-template.img` | Blank firmware **NVRAM** template (writable copy required per boot) |
 | `RUNNING.md` | This file |
@@ -49,12 +50,14 @@ tar xzf arenaos-v0.2.0-qemu-x86_64.tar.gz
 ## Boot it
 
 The vars flash is written by the firmware, so always boot from a **fresh
-copy** of the template:
+copy** of the template. The data disk is different: copy
+`scratch-template.img` **once** — then keep reusing your `scratch.img`
+across boots, because that is where your files live (copy the template
+over it again whenever you want a factory-fresh volume):
 
 ```sh
 cp ovmf-vars-template.img ovmf-vars.img
-truncate -s 8M scratch.img      # Milestone-5 fixture disk (ADR-0021);
-                                # dd if=/dev/zero of=scratch.img bs=1m count=8 works too
+cp scratch-template.img scratch.img    # only for the FIRST boot (or a reset)
 
 qemu-system-x86_64 \
     -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
@@ -66,18 +69,23 @@ qemu-system-x86_64 \
     -display none -serial mon:stdio -no-reboot
 ```
 
-Since M5.1 the scratch disk is **required**: the boot-time m5 suite
-asserts the kernel's PCI scan finds a virtio-blk device, and a boot
-without one halts after the m4 suite by design (its contents are not
-yet used — that arrives with the storage driver in 5.2).
+The scratch disk is **required** and must be **AFS1-formatted**: since
+M5.3 the filesystem service (`fsd`, ring 3) mounts it during the boot
+suite and again for the shell, and a zero-filled or foreign image is
+refused by design (`fsd: sector 0 is not an AFS1 superblock`) — the
+machine halts after the failed suite. Building from source? Format one
+with the layout's source of truth: `python3 -c 'import sys;
+sys.path.insert(0, "tools"); import afs1; afs1.mkfs("scratch.img",
+16384)'`.
 
 Serial is the console — in **both directions**. Everything ArenaOS logs
 goes there, and since Milestone 4.6 (ADR-0020) your keystrokes come
 back in through the same port: after the boot-time test suites pass (a
-few seconds), the kernel spawns the **shell** and the machine waits for
-you at the `arena> ` prompt. Type `help`. The VM stops only when you
-type `shutdown` (or kill QEMU with `Ctrl-A X`) — a boot that ends by
-itself would mean the shell never came up.
+few seconds), the kernel spawns the storage service, the filesystem
+service, and the **shell**, and the machine waits for you at the
+`arena> ` prompt. Type `help`. The VM stops only when you type
+`shutdown` (or kill QEMU with `Ctrl-A X`) — a boot that ends by itself
+would mean the shell never came up.
 
 ### Using your distro's OVMF instead
 
@@ -100,14 +108,28 @@ protocol with kernel-granted capabilities). What it understands:
 | Command | What happens |
 |---|---|
 | `help` | lists the builtins |
-| `ps` | live processes as `(pid, threads)` pairs — you will see the shell itself |
+| `ps` | live processes as `(pid, threads)` pairs — you will see the shell itself plus the resident `storaged` and `fsd` services |
 | `echo TEXT` | prints TEXT (the kernel line discipline echoes as you type; backspace works) |
+| `ls` | lists the files on the AFS1 volume with their committed sizes |
+| `cat NAME` | streams a file back through `fsd` + `storaged` (the device DMAs straight into the shell's own frame — zero-copy, ADR-0023) |
+| `write NAME TXT` | creates a new file with TXT as its contents and **commits it to the disk** — it is still there next boot. v1 refuses to overwrite an existing file (no truncate yet): an honest refusal, never a silent clobber |
+| `rm NAME` | deletes a file transactionally (its sectors return to the allocator two commits later — no valid old commit ever sees them reused) |
 | `spawn` | `SYS_SPAWN`s registry image 0 — the untouched M4.3 test payload — as a child process: its pinned message lands mid-session, then its exit badge comes back through the shell's notification |
 | `shutdown` | the Power-gated halt: the kernel logs the requesting pid and hands the machine to firmware's `ResetSystem` |
 
 Anything else answers `unknown command: '…' — try 'help'`.
 
-## What a healthy boot looks like (current: Milestone 4 complete)
+Try this — it is the whole storage stack, end to end, in ring 3:
+
+```
+arena> write note.txt hello from my own OS
+  wrote 26 bytes to 'note.txt'
+arena> shutdown
+```
+
+…then boot the same `scratch.img` again and `cat note.txt`.
+
+## What a healthy boot looks like (current: Phase 5 complete — v0.5.0)
 
 The serial output is a boot stage log followed by kernel log lines. The
 machine-checkable landmarks, in order:
@@ -121,29 +143,35 @@ machine-checkable landmarks, in order:
 6. 13 `m3:test:<name>: PASS` lines — kernel threads, preemption, ring 3
    + syscalls, processes as address spaces, capability spaces
    (ADR-0012…0015) — ending with `m3: RESULT PASS (13/13)`
-7. 9 `m4:test:<name>: PASS` lines — the ELF validator, its rejection
+7. 9 `m4:test:<name>: PASS` lines — the ELF validator and its rejection
    corpus, the image loader (ADR-0016), the syscall ABI v1 proven from
-   ring 3 (ADR-0017), the first user process (its
-   `ARENAOS-M43-FIRST-USER-PROCESS…` message on the console is the
-   payload's own debug_write), the IPC v1 echo-server demo — two
-   processes rendezvousing over an endpoint (ADR-0018), the spawn
-   protocol's supervisor restart demo — the same image spawned twice
-   through SYS_SPAWN, its message on the console once per life
-   (ADR-0019) — and the console input service: the line discipline
-   driven through the RX ISR's own entry point, with a ring-3 reader
-   parked and woken by a fed line (ADR-0020), ending with
+   ring 3 (ADR-0017), the first user process, the IPC v1 echo-server
+   demo (ADR-0018), the spawn protocol's supervisor restart demo
+   (ADR-0019), and the console input service (ADR-0020), ending with
    `m4: RESULT PASS (9/9)`
 8. `console input armed: com1 rx -> ioapic pin 4 -> vector 33` — the
    input half of the console (right after the timer-chain line, step 4)
-9. `milestone 4 complete … spawning the shell`, then
-   `shell spawned: pid …` — the hand-off (ADR-0020)
-10. `ArenaOS shell v0.4 …` and the `arena> ` prompt — the machine is
-    now an interactive system; type into it (see "The shell" above)
-11. After `shutdown`: `shutdown requested by pid … through its Power
+9. 6 `m5:test:<name>: PASS` lines — the PCI scan, the untyped-memory
+   grants, the ring-3 MMIO window, the IRQ relay (ADR-0021), the
+   resident block service driving the real virtio-blk device from
+   ring 3 (ADR-0022), and `fs_service`: the AFS1 filesystem boundary —
+   on a first-boot volume fstest creates, writes, and verifies a file
+   (`PASS (fresh)`); on a volume that survived a reboot it re-finds and
+   verifies the committed file with zero writes (`PASS (persisted)`) —
+   ending with `m5: RESULT PASS (6/6)`
+10. `storaged spawned: pid …`, `fsd spawned: pid …`, then
+    `fsd: mounted AFS1 — commit seq …` — the production services come
+    up on the same disk the suite just proved (ADR-0022/0023)
+11. `milestone 5 complete … spawning the shell`, then
+    `shell spawned: pid …` — the hand-off
+12. `ArenaOS shell v0.5 …` and the `arena> ` prompt — the machine is
+    now an interactive system with a real filesystem; type into it
+    (see "The shell" above)
+13. After `shutdown`: `shutdown requested by pid … through its Power
     cap` and `halting via UEFI ResetSystem(shutdown)` — the clean-halt
     declaration (the automated harnesses type `shutdown` for you,
     marker-paced)
-12. QEMU exits on its own with status 0
+14. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to
@@ -175,7 +203,9 @@ Releases are convenience artifacts; the repo builds everything itself:
 
 ```sh
 ./tools/dev-env/bootstrap.sh   # one-time: Rust, QEMU, EDK2 (see docs/DEV-ENV.md)
-./tools/run_tests.sh           # build + M1/M2 harnesses
+./tools/run_tests.sh           # build + ALL milestone harnesses (M1…M5,
+                               # incl. two-boot persistence and the
+                               # crash-consistency gate)
 ./tools/run.sh                 # interactive boot, serial on stdio
 ./tools/stability_loop.sh 100  # 100 clean boots (ADR-0011 gate)
 ```
