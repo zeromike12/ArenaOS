@@ -368,8 +368,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // completions as MSI-X interrupts relayed into the driver's wait.
     // No virtio-net fixture on the bus → an honest SKIP, never a FAIL
     // (pre-v0.6.0 QEMU invocations stay bootable-green).
+    // M7.0 (ADR-0029): the timer facility, installed before the suites
+    // that use it and before any protocol exists to need it.
+    if let Err(e) = crate::timer::init() {
+        crate::halt::halt_machine(e);
+    }
+    crate::timer::log_ready();
     if !crate::m6::run_suite() {
         crate::halt::halt_machine("milestone 6 suite failed");
+    }
+
+    if !crate::m7::run_suite() {
+        crate::halt::halt_machine("milestone 7 suite failed");
     }
 
     // --- M5.2: the production block service (ADR-0022) ----------------------
@@ -525,6 +535,21 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // return. Between wakes it halts the CPU with IF=1 — interrupts
     // must flow now: the UART RX path IS the input device.
     loop {
+        // M7.0: the idle thread is also the SUPERVISOR's hands
+        // (ADR-0028 built restart but left `poll` uncalled outside the
+        // suite, which made production supervision a promise rather
+        // than a fact). This is the right place for it: `poll` spawns,
+        // which allocates frames and maps pages, so it must run at
+        // plain thread context — never from the death notice inside
+        // `proc::destroy`, and never from a tick. It costs one relaxed
+        // scan of a small table per wake when nothing has died.
+        let restarted = crate::supervise::poll();
+        if restarted > 0 {
+            info!(
+                "kernel",
+                "supervisor: restarted {restarted} service(s) — a driver died and came back while the machine kept running"
+            );
+        }
         crate::sched::yield_now();
         // SAFETY: ring 0; `sti; hlt` is the canonical idle pair — any
         // pending or arriving interrupt resumes the loop right here,

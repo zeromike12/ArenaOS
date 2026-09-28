@@ -208,6 +208,12 @@ pub static FAULTD_IMAGE: &[u8] =
 pub static FAULTTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/faultd/target/x86_64-unknown-none/release/faulttest");
 
+/// The timer-facility proof (M7.0, ADR-0029): spawn-registry image 16,
+/// `timertest` — arms real timers from ring 3 and measures them
+/// against the monotonic clock. Only the m7 suite spawns it.
+pub static TIMERTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/timertest/target/x86_64-unknown-none/release/timertest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

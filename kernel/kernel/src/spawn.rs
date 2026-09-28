@@ -35,14 +35,14 @@ use crate::sync::{SyncCell, without_interrupts};
 /// Image-registry capacity. v1 populates two entries (the embedded
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
-pub const MAX_IMAGES: usize = 16;
+pub const MAX_IMAGES: usize = 20;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
 /// excess is a typed refusal).
 pub const MAX_INHERIT: usize = 4;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten).
-pub const MAX_SPAWN_RECS: usize = 16;
+pub const MAX_SPAWN_RECS: usize = 20;
 
 /// The kernel-side image registry (ADR-0019/0020/0022): image 0 is the
 /// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
@@ -89,6 +89,7 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         13 => Some(elf::CONTEST_IMAGE),
         14 => Some(elf::FAULTD_IMAGE),
         15 => Some(elf::FAULTTEST_IMAGE),
+        16 => Some(elf::TIMERTEST_IMAGE),
         _ => None,
     }
 }

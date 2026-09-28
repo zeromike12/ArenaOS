@@ -1,0 +1,17 @@
+[package]
+name = "arena-timertest"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS timer-facility proof (M7.0, ADR-0029) — spawn-registry image 16. Arms real timers from ring 3 and measures them against the monotonic clock: a deadline is never early, lands inside one tick of lag, a cancelled timer never fires, and timers left armed at exit are swept by the kernel."
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "timertest"
+path = "src/main.rs"

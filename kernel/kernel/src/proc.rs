@@ -195,6 +195,14 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             "destroy pid {pid}: a SUPERVISED service died — the supervisor will restart it"
         );
     }
+    // M7.0 (ADR-0029): a dead process must not keep signalling. The
+    // fourth thing swept here, after relay vectors (M5.2), the console
+    // mirror (M6.4) and blocked-thread references (M6.5) — the pattern
+    // is now the rule for anything that holds a pid.
+    let timers = crate::timer::release_by_owner(pid);
+    if timers > 0 {
+        crate::log::log_info!("proc", "destroy pid {pid}: swept {timers} armed timer(s)");
+    }
     let (servers, waiters) = crate::ipc::release_blocked_of(pid);
     let killed = crate::sched::kill_threads_of(pid);
     if killed > 0 {

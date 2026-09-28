@@ -159,6 +159,16 @@ for FAULTD_ELF in \
     echo "faultd image: ${FAULTD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$FAULTD_ELF") bytes)"
 done
 
+# M7.0 (ADR-0029): the timer-facility proof (spawn-registry image 16).
+echo "== building userspace timertest (userspace/timertest, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/timertest" && cargo build --release )
+TIMERTEST_ELF="$REPO_ROOT/userspace/timertest/target/x86_64-unknown-none/release/timertest"
+if [[ ! -f "$TIMERTEST_ELF" ]]; then
+    echo "error: timertest image not produced at $TIMERTEST_ELF" >&2
+    exit 1
+fi
+echo "timertest image: ${TIMERTEST_ELF#"$REPO_ROOT"/} ($(stat -c%s "$TIMERTEST_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

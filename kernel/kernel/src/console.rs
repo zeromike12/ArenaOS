@@ -138,10 +138,14 @@ pub fn pending_lines() -> usize {
 /// reclaim block does all three together — ADR-0011/0020).
 pub fn init() {
     idt::set_serial_hook(Some(rx_isr));
-    // M6.4 (ADR-0027): the output mirror's deferred wake. Installed
-    // unconditionally and harmless while no channel is attached — it
-    // reads one flag and returns.
-    idt::set_tick_aux_hook(Some(mirror_flush));
+    // M6.4 (ADR-0027): the output mirror's deferred wake, now one tick
+    // TASK among several (M7.0) rather than the sole owner of the
+    // auxiliary hook — the timer facility needs the same service, and
+    // "whoever registers last wins" is not a mechanism. Harmless while
+    // no channel is attached: it reads one flag and returns.
+    if let Err(e) = crate::tick::register(mirror_flush) {
+        crate::log::log_error!("console", "tick task registration failed: {e}");
+    }
     // SAFETY: ring 0; the console subsystem is the sole COM1 RX owner
     // from here on; EBS has passed (caller contract), so the
     // interrupt-driven model is legal now.

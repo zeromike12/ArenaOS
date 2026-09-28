@@ -37,6 +37,9 @@ pub const SYS_DEV_INFO: u64 = 22;
 pub const SYS_CONSOLE_PUSH: u64 = 23;
 pub const SYS_CONSOLE_ATTACH: u64 = 24;
 pub const SYS_CONSOLE_PULL: u64 = 25;
+pub const SYS_CLOCK_NOW: u64 = 26;
+pub const SYS_TIMER_ARM: u64 = 27;
+pub const SYS_TIMER_CANCEL: u64 = 28;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 
@@ -375,6 +378,26 @@ pub const FAULT_BADGE_HANGING: u64 = 1 << 16;
 /// rather than the status it dies of.
 pub const STATUS_SERVICE_GONE: i64 = -5;
 
+// ---- timers (M7.0, ADR-0029) ------------------------------------------------
+//
+// `SYS_TIMER_ARM(notif_slot, badge, delay_us)` delivers `badge` on a
+// notification the caller already holds, once `delay_us` of monotonic
+// time has passed; it returns a timer id, and `SYS_TIMER_CANCEL(id)`
+// disarms it. Nothing new to block on — a service already parks in
+// SYS_WAIT on one notification with merged badge bits, so a timeout is
+// just one more bit.
+//
+// A deadline means NOT BEFORE: timers are checked on the 100 Hz tick,
+// so expect up to ~10 ms of lag and never assume finer. When a program
+// needs to know how much time actually passed, it asks the clock.
+//
+// Badges are BITS (see CONSOLE_BADGE_GIVE_UP): a timeout that arrives
+// in the same wake as real work must not hide it.
+
+/// One tick of the kernel's timer, in microseconds — the granularity
+/// below which a delay is meaningless.
+pub const TICK_US: u64 = 10_000;
+
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 
 pub const EXIT_OK: u64 = 42;
@@ -388,6 +411,34 @@ pub const EXIT_WRITE_REFUSED: u64 = 97;
 pub const EXIT_PANIC: u64 = 99;
 
 // ---- syscall stubs (ABI v1; see the module header) ---------------------------
+
+/// A call with no arguments (M7.0: `SYS_CLOCK_NOW` is the first one —
+/// asking what time it is needs nothing but the question).
+///
+/// # Safety
+/// As the other stubs: ABI v1 register contract, kernel stack.
+pub unsafe fn syscall0(nr: u64) -> i64 {
+    let ret: i64;
+    // SAFETY: caller contract — ABI v1 register arguments; the clobber
+    // list is the documented caller-saved set; `nostack` (the stub runs
+    // on the kernel stack).
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") nr as i64 => ret,
+            lateout("rdi") _,
+            lateout("rsi") _,
+            lateout("rdx") _,
+            lateout("r8") _,
+            lateout("r9") _,
+            lateout("r10") _,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack)
+        );
+    }
+    ret
+}
 
 pub unsafe fn syscall1(nr: u64, a0: u64) -> i64 {
     let ret: i64;

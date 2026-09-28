@@ -136,6 +136,12 @@ pub const SYS_CONSOLE_PUSH: u64 = 23;
 pub const SYS_CONSOLE_ATTACH: u64 = 24;
 /// SYS_CONSOLE_PULL (M6.4, ADR-0027): drain mirrored console output.
 pub const SYS_CONSOLE_PULL: u64 = 25;
+/// SYS_CLOCK_NOW (M7.0, ADR-0029): monotonic microseconds.
+pub const SYS_CLOCK_NOW: u64 = 26;
+/// SYS_TIMER_ARM (M7.0, ADR-0029): deliver a badge after a delay.
+pub const SYS_TIMER_ARM: u64 = 27;
+/// SYS_TIMER_CANCEL (M7.0, ADR-0029).
+pub const SYS_TIMER_CANCEL: u64 = 28;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -632,6 +638,9 @@ extern "C" fn syscall_dispatch(
         SYS_CONSOLE_PUSH => sys_console_push(a0, a1, a2) as u64,
         SYS_CONSOLE_ATTACH => sys_console_attach(a0, a1, a2) as u64,
         SYS_CONSOLE_PULL => sys_console_pull(a0, a1, a2) as u64,
+        SYS_CLOCK_NOW => sys_clock_now() as u64,
+        SYS_TIMER_ARM => sys_timer_arm(a0, a1, a2) as u64,
+        SYS_TIMER_CANCEL => sys_timer_cancel(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1286,6 +1295,62 @@ fn sys_console_pull(a0: u64, a1: u64, a2: u64) -> Status {
         }
     }
     got as Status
+}
+
+/// SYS_CLOCK_NOW(): monotonic microseconds since boot.
+///
+/// No capability: a clock reading is not an authority over anything,
+/// and every timeout, RTT measurement and retry decision in Phase 7
+/// needs it. It is the SAME clock `timekeeping` calibrated in M2.2 and
+/// the m2 suite cross-checks every boot, so a client and the kernel
+/// cannot disagree about how much time passed.
+///
+/// The status domain is signed and this is a count, so it saturates at
+/// `i64::MAX` rather than ever returning a value that would read as an
+/// error — about 292,000 years of uptime, which is not the bug anyone
+/// will hit first.
+fn sys_clock_now() -> Status {
+    let us = crate::timekeeping::now_us();
+    if us > i64::MAX as u64 { i64::MAX } else { us as Status }
+}
+
+/// SYS_TIMER_ARM(notif slot, badge, delay_us): deliver `badge` on that
+/// notification once `delay_us` of monotonic time has passed. Returns
+/// the timer id (>= 0).
+///
+/// Gated by the NOTIFICATION, not by a new capability kind: WRITE on
+/// the notification is the notify side, exactly as `SYS_IRQ_RELAY`
+/// requires. A process can only aim a timer at something it was
+/// already trusted to signal.
+fn sys_timer_arm(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    let Ok(nid) = notification_of(pid, a0, crate::cap::RIGHTS_WRITE) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::timer::arm(pid, nid, a1, a2) {
+        Ok(id) => id as Status,
+        Err(_) => STATUS_BUSY,
+    }
+}
+
+/// SYS_TIMER_CANCEL(timer id): disarm a timer this process armed.
+///
+/// Cancelling a timer that already fired is an ERROR, not a silent
+/// success. A protocol cancelling a retransmission that has in fact
+/// already gone out needs to be able to tell the difference.
+fn sys_timer_cancel(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 > u32::MAX as u64 {
+        return STATUS_BAD_ARG;
+    }
+    match crate::timer::cancel(pid, a0 as u32) {
+        Ok(()) => STATUS_OK,
+        Err(_) => STATUS_BAD_ARG,
+    }
 }
 
 // ---- driver substrate handlers (M5.1, ADR-0021) ----------------------------
