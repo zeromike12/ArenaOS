@@ -192,6 +192,13 @@ def extra_checks(serial: str) -> bool:
           in serial,
           "the layers report distinctly: a ping to an unresolvable address "
           "fails at ARP, not as a silent host")
+    check("receive-parser self-test PASSED 7/7" in serial,
+          "the receive parser REFUSES what its specification forbids — "
+          "options headers, fragments, over-long declared lengths, bad "
+          "checksums, and an echo reply from the wrong host — while still "
+          "accepting the genuine article (C's v0.14.0 review; the wire "
+          "never sends these, so they would otherwise ship untested)")
+
     m = re.search(r"demux saw (\d+) frame\(s\): (\d+) ARP, (\d+) IPv4, "
                   r"(\d+) dropped, (\d+) bad checksum", serial)
     check(m is not None,

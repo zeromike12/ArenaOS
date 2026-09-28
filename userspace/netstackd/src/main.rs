@@ -102,6 +102,8 @@ const EXIT_SETUP: u64 = 80;
 const EXIT_MAC: u64 = 81;
 const EXIT_RECV: u64 = 85;
 const EXIT_REPLY: u64 = 88;
+/// The receive parser accepted something its specification forbids.
+const EXIT_SELFTEST: u64 = 90;
 
 /// Cached entries. Small on purpose: this is a fixture-scale stack,
 /// and a bound that fits on one screen is a bound that gets checked.
@@ -191,14 +193,23 @@ struct Stack {
     rx_ipv4: u64,
     rx_dropped: u64,
     rx_bad_checksum: u64,
+    /// Fragments seen and refused (v1 does not reassemble).
+    rx_fragments: u64,
+    /// Echo replies refused because they came from the wrong host.
+    rx_wrong_source: u64,
     /// The ARP answer this stack is currently waiting for, and the
     /// answer once it lands. Held here rather than on the call stack
     /// because the demultiplexer — not the caller — is what recognises
     /// a frame now (M7.2).
     want_arp: Option<[u8; 4]>,
     got_arp: Option<[u8; 6]>,
-    /// The echo this stack is waiting for: (identifier, sequence).
+    /// The echo this stack is waiting for: (identifier, sequence) AND
+    /// the address it was sent to. The address matters: identifier and
+    /// sequence alone can be satisfied by a reply from a DIFFERENT
+    /// host that happens to use the same pair, which on any shared
+    /// network is not a hypothetical (found in review of v0.14.0).
     want_icmp: Option<(u16, u16)>,
+    want_icmp_ip: Option<[u8; 4]>,
     got_icmp: bool,
     ping_seq: u16,
 }
@@ -326,12 +337,32 @@ pub unsafe extern "C" fn _start() -> ! {
             rx_ipv4: 0,
             rx_dropped: 0,
             rx_bad_checksum: 0,
+            rx_fragments: 0,
+            rx_wrong_source: 0,
             want_arp: None,
             got_arp: None,
             want_icmp: None,
+            want_icmp_ip: None,
             got_icmp: false,
             ping_seq: 0,
         };
+        let selftest = parser_selftest(&mut st8);
+        if selftest == 7 {
+            log(
+                "netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted",
+            );
+        } else {
+            log_line(|o| {
+                o.str("netstackd: receive-parser self-test FAILED (");
+                o.u64(selftest as u64);
+                o.str("/7) — the parser accepts something it must not");
+            });
+            fail(
+                EXIT_SELFTEST,
+                "the receive parser accepts more than its specification",
+            );
+        }
+
         log_line(|o| {
             o.str("netstackd: ready — ARP over IPv4 for ");
             for (i, b) in mac.iter().enumerate() {
@@ -652,7 +683,15 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
         let at = |i: usize| *ip.add(i);
         let version = at(0) >> 4;
         let ihl = (at(0) & 0x0F) as usize * 4;
-        if version != 4 || ihl < IP_HDR || len < ETH_HDR + ihl {
+
+        // STRICT, and strict in the same terms the ADR uses. v1 said
+        // "fixed 20-byte header, no options, no fragmentation"; the
+        // first parser then accepted IHL > 5, ignored the fragment
+        // bits, and measured the payload with the FRAME length
+        // instead of the header's own. A parser that accepts more
+        // than its specification is a specification nobody is
+        // keeping (found in review of v0.14.0).
+        if version != 4 || ihl != IP_HDR || len < ETH_HDR + IP_HDR {
             st8.rx_dropped += 1;
             return;
         }
@@ -661,6 +700,26 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
         // not trust.
         if checksum(ip, ihl) != 0 {
             st8.rx_bad_checksum += 1;
+            st8.rx_dropped += 1;
+            return;
+        }
+        // Fragments: not supported, so not accepted. MF set or a
+        // nonzero offset means this is a piece of something, and
+        // treating a piece as a whole datagram is how a parser gets
+        // told a lie it believes.
+        let flags_frag = ((at(6) as u16) << 8) | at(7) as u16;
+        if flags_frag & 0x2000 != 0 || flags_frag & 0x1FFF != 0 {
+            st8.rx_fragments += 1;
+            st8.rx_dropped += 1;
+            return;
+        }
+        // The DECLARED length governs, and must fit in what arrived.
+        // Ethernet pads short frames to 60 bytes, so the frame is
+        // routinely longer than the datagram; measuring the payload
+        // with the frame length feeds padding to the checksum and to
+        // whatever parses next.
+        let total = ((at(2) as usize) << 8) | at(3) as usize;
+        if total < IP_HDR || ETH_HDR + total > len {
             st8.rx_dropped += 1;
             return;
         }
@@ -676,15 +735,20 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
             st8.rx_dropped += 1;
             return;
         }
-        icmp_in(st8, ip.add(ihl), len - ETH_HDR - ihl);
+        let mut src = [0u8; 4];
+        for (i, b) in src.iter_mut().enumerate() {
+            *b = at(12 + i);
+        }
+        icmp_in(st8, src, ip.add(ihl), total - ihl);
     }
 }
 
-/// An ICMP message arrived inside an IPv4 packet addressed to us.
+/// An ICMP message arrived inside an IPv4 packet addressed to us,
+/// from `src`, carrying `len` DECLARED bytes.
 ///
 /// # Safety
 /// `icmp` points at `len` readable bytes.
-unsafe fn icmp_in(st8: &mut Stack, icmp: *const u8, len: usize) {
+unsafe fn icmp_in(st8: &mut Stack, src: [u8; 4], icmp: *const u8, len: usize) {
     // SAFETY: caller contract.
     unsafe {
         if len < ICMP_HDR {
@@ -697,24 +761,192 @@ unsafe fn icmp_in(st8: &mut Stack, icmp: *const u8, len: usize) {
             return;
         }
         let at = |i: usize| *icmp.add(i);
-        if at(0) != ICMP_ECHO_REPLY {
-            // Echo REQUESTS are not answered: nothing here has asked
-            // to be pingable, and shipping an untested reply path
-            // would be worse than not having one (M7.2, ADR-0031).
+        // Echo REQUESTS are not answered: nothing here has asked to be
+        // pingable, and shipping an untested reply path would be worse
+        // than not having one (M7.2, ADR-0031). Code must be 0 — an
+        // echo reply is only an echo reply at code 0.
+        if at(0) != ICMP_ECHO_REPLY || at(1) != 0 {
             st8.rx_dropped += 1;
             return;
         }
         let id = ((at(4) as u16) << 8) | at(5) as u16;
         let seq = ((at(6) as u16) << 8) | at(7) as u16;
+        // The SOURCE, the identifier and the sequence must all match
+        // what went out. Without the source, a reply from a different
+        // host carrying the same id/seq satisfies our ping — which on
+        // a shared network is not hypothetical (v0.14.0 review).
+        let from_expected = st8.want_icmp_ip == Some(src);
         match st8.want_icmp {
-            // The identifier AND sequence must match what we sent. An
-            // echo reply that merely arrived proves nothing — it could
-            // be an answer to somebody else's ping entirely.
-            Some((want_id, want_seq)) if want_id == id && want_seq == seq => {
+            Some((want_id, want_seq)) if from_expected && want_id == id && want_seq == seq => {
                 st8.got_icmp = true;
             }
-            _ => st8.rx_dropped += 1,
+            _ => {
+                if !from_expected {
+                    st8.rx_wrong_source += 1;
+                }
+                st8.rx_dropped += 1;
+            }
         }
+    }
+}
+
+/// Feed the receive parser frames the WIRE WILL NEVER SEND, and check
+/// it refuses each one (M7.2, after the v0.14.0 review).
+///
+/// Every reject path in `ipv4_in`/`icmp_in` exists for a hostile or
+/// broken peer, and slirp is neither: it will not send a fragment, an
+/// options header, a truncated datagram, a bad checksum, or somebody
+/// else's echo reply. So those paths would ship untested — which is
+/// exactly how a parser ends up accepting more than its specification
+/// while every test stays green.
+///
+/// Synthetic frames cost one function and run on every boot. Each
+/// case asserts the counter that should move, so a regression shows
+/// up as the parser silently ACCEPTING something, which is the
+/// direction that matters.
+///
+/// Returns the number of cases that behaved correctly.
+///
+/// # Safety
+/// As `_start`; operates only on a local buffer.
+unsafe fn parser_selftest(st8: &mut Stack) -> u32 {
+    // SAFETY: function contract; `f` is this frame's own stack array
+    // and every write below is inside it.
+    unsafe {
+        let mut passed = 0u32;
+        let mut f = [0u8; 64];
+
+        // A valid ICMP echo reply from 10.0.2.2, id 0x4152 seq 1,
+        // rebuilt from scratch for each case and then damaged.
+        // Every synthetic frame is VALID except for the one thing
+        // under test. That matters more than it sounds: the first
+        // version built its options case with a checksum covering only
+        // 20 bytes, so the frame was refused for a BAD CHECKSUM and
+        // the case passed while the IHL rule was not being exercised
+        // at all. Verified by injecting the old permissive check and
+        // watching the self-test still report 7/7 — a proof that
+        // cannot fail is not a proof, which this project has now
+        // learned twice.
+        let build = |f: &mut [u8; 64], src: [u8; 4], ihl_words: u8, frag: u16, total: u16| {
+            for b in f.iter_mut() {
+                *b = 0;
+            }
+            let ihl = ihl_words as usize * 4;
+            f[12] = (ETHERTYPE_IPV4 >> 8) as u8;
+            f[13] = (ETHERTYPE_IPV4 & 0xFF) as u8;
+            f[ETH_HDR] = 0x40 | ihl_words;
+            f[ETH_HDR + 2] = (total >> 8) as u8;
+            f[ETH_HDR + 3] = (total & 0xFF) as u8;
+            f[ETH_HDR + 6] = (frag >> 8) as u8;
+            f[ETH_HDR + 7] = (frag & 0xFF) as u8;
+            f[ETH_HDR + 8] = IP_TTL;
+            f[ETH_HDR + 9] = IP_PROTO_ICMP;
+            for i in 0..4 {
+                f[ETH_HDR + 12 + i] = src[i];
+                f[ETH_HDR + 16 + i] = SLIRP_GUEST_IP[i];
+            }
+            // Options (when ihl > 5) are NOPs, and the checksum covers
+            // the header that is actually there.
+            for i in IP_HDR..ihl {
+                f[ETH_HDR + i] = 1;
+            }
+            let ck = checksum(f.as_ptr().add(ETH_HDR), ihl);
+            f[ETH_HDR + 10] = (ck >> 8) as u8;
+            f[ETH_HDR + 11] = (ck & 0xFF) as u8;
+            let ic = ETH_HDR + ihl;
+            f[ic] = ICMP_ECHO_REPLY;
+            f[ic + 4] = 0x41;
+            f[ic + 5] = 0x52;
+            f[ic + 7] = 1;
+            let ck = checksum(f.as_ptr().add(ic), ICMP_HDR + PING_PAYLOAD);
+            f[ic + 2] = (ck >> 8) as u8;
+            f[ic + 3] = (ck & 0xFF) as u8;
+        };
+        let total_ok = (IP_HDR + ICMP_HDR + PING_PAYLOAD) as u16;
+        let frame_len = ETH_HDR + total_ok as usize;
+
+        // The stack must believe it is waiting for exactly this echo.
+        st8.want_icmp = Some((0x4152, 1));
+        st8.want_icmp_ip = Some(SLIRP_GATEWAY_IP);
+
+        // 1. OPTIONS (IHL 6) — refused: v1 says fixed 20-byte header.
+        //    Otherwise entirely valid: correct checksum over the
+        //    24-byte header, ICMP where the header says it is.
+        let with_options = (IP_HDR + 4 + ICMP_HDR + PING_PAYLOAD) as u16;
+        build(&mut f, SLIRP_GATEWAY_IP, 6, 0, with_options);
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), ETH_HDR + with_options as usize);
+        if !st8.got_icmp {
+            passed += 1;
+        }
+
+        // 2. A FRAGMENT (more-fragments set) — refused: no reassembly.
+        let before = st8.rx_fragments;
+        build(&mut f, SLIRP_GATEWAY_IP, 5, 0x2000, total_ok);
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), frame_len);
+        if !st8.got_icmp && st8.rx_fragments == before + 1 {
+            passed += 1;
+        }
+
+        // 3. A NONZERO FRAGMENT OFFSET — refused for the same reason.
+        let before = st8.rx_fragments;
+        build(&mut f, SLIRP_GATEWAY_IP, 5, 0x0001, total_ok);
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), frame_len);
+        if !st8.got_icmp && st8.rx_fragments == before + 1 {
+            passed += 1;
+        }
+
+        // 4. A DECLARED LENGTH LONGER THAN THE FRAME — refused.
+        build(&mut f, SLIRP_GATEWAY_IP, 5, 0, total_ok + 8);
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), frame_len);
+        if !st8.got_icmp {
+            passed += 1;
+        }
+
+        // 5. A CORRUPT HEADER CHECKSUM — refused and counted.
+        let before = st8.rx_bad_checksum;
+        build(&mut f, SLIRP_GATEWAY_IP, 5, 0, total_ok);
+        f[ETH_HDR + 10] ^= 0xFF;
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), frame_len);
+        if !st8.got_icmp && st8.rx_bad_checksum == before + 1 {
+            passed += 1;
+        }
+
+        // 6. THE RIGHT ECHO FROM THE WRONG HOST — refused. This is the
+        //    one a matching id/seq alone would have accepted.
+        let before = st8.rx_wrong_source;
+        build(&mut f, [10, 0, 2, 99], 5, 0, total_ok);
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), frame_len);
+        if !st8.got_icmp && st8.rx_wrong_source == before + 1 {
+            passed += 1;
+        }
+
+        // 7. THE CONTROL: the genuine article must still be accepted,
+        //    or the six refusals above prove only that nothing works.
+        build(&mut f, SLIRP_GATEWAY_IP, 5, 0, total_ok);
+        st8.got_icmp = false;
+        demux(st8, f.as_ptr(), frame_len);
+        if st8.got_icmp {
+            passed += 1;
+        }
+
+        // Leave no trace: the live counters describe the WIRE.
+        st8.want_icmp = None;
+        st8.want_icmp_ip = None;
+        st8.got_icmp = false;
+        st8.rx_frames = 0;
+        st8.rx_arp = 0;
+        st8.rx_ipv4 = 0;
+        st8.rx_dropped = 0;
+        st8.rx_bad_checksum = 0;
+        st8.rx_fragments = 0;
+        st8.rx_wrong_source = 0;
+        passed
     }
 }
 
@@ -842,6 +1074,7 @@ unsafe fn ping(st8: &mut Stack, ip: [u8; 4]) -> Result<u64, u64> {
             let seq = st8.ping_seq;
             build_echo(st8, mac, ip, id, seq);
             st8.want_icmp = Some((id, seq));
+            st8.want_icmp_ip = Some(ip);
             st8.got_icmp = false;
             let sent_us = syscall0(SYS_CLOCK_NOW).max(0) as u64;
             let status = transmit(st8, PING_FRAME_LEN);
@@ -850,10 +1083,12 @@ unsafe fn ping(st8: &mut Stack, ip: [u8; 4]) -> Result<u64, u64> {
                     continue;
                 }
                 st8.want_icmp = None;
+                st8.want_icmp_ip = None;
                 return Err(ARP_S_LINK_DOWN);
             }
             if status != NET_S_OK {
                 st8.want_icmp = None;
+                st8.want_icmp_ip = None;
                 return Err(ARP_S_LINK_DOWN);
             }
             while !st8.got_icmp {
@@ -864,6 +1099,7 @@ unsafe fn ping(st8: &mut Stack, ip: [u8; 4]) -> Result<u64, u64> {
             if st8.got_icmp {
                 let rtt = (syscall0(SYS_CLOCK_NOW).max(0) as u64).saturating_sub(sent_us);
                 st8.want_icmp = None;
+                st8.want_icmp_ip = None;
                 log_line(|o| {
                     o.str("netstackd: echo reply from ");
                     for (i, b) in ip.iter().enumerate() {

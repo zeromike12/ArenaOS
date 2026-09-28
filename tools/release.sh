@@ -96,89 +96,59 @@ cp "$OVMF_VARS" "$REL/ovmf-vars-template.img"
 ( cd "$REL" && sha256sum arena-esp.img scratch-template.img edk2-x86_64-code.fd ovmf-vars-template.img RUNNING.md > sha256sums.txt )
 
 GIT_SHA="$(git rev-parse --short HEAD)"
+
+# The notes are DERIVED, not maintained.
+#
+# They used to be paragraphs written by hand, and they rotted exactly
+# the way the stability loop's hardcoded verdicts did: v0.14.0 shipped
+# notes claiming "M6 2/2" (it is 6/6) and describing IP as future work
+# on the release that added IP. Anything restated by hand drifts from
+# what the build actually does, so:
+#
+#   * the suite verdicts come from a REAL BOOT of the image being
+#     shipped (the same boot that qualifies the bundle), and
+#   * the feature list comes from the completed milestones in
+#     docs/ROADMAP.md, which is where they are recorded anyway.
+#
+# If a milestone is not checked off in the ROADMAP it does not appear
+# in the notes, and if a suite does not pass in the boot it is not
+# claimed.
+NOTES_BOOT_LOG="$REPO_ROOT/build/release-verdicts.log"
+echo "== release $TAG: booting the image to derive its verdicts =="
+( cd "$REPO_ROOT" && python3 - "$NOTES_BOOT_LOG" <<'EOF'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("tools").resolve()))
+import mtest
+esp = Path("build/arena-esp.img")
+_, serial, _ = mtest.run_qemu("release-verdicts", esp)
+Path(sys.argv[1]).write_text(serial)
+EOF
+) >/dev/null 2>&1 || true
+
 {
     echo "ArenaOS $TAG — build ${GIT_SHA} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo
-    echo "Milestone status: M1 8/8, M2 21/21, M3 13/13, M4 9/9, M5 6/6,"
-    echo "M6 2/2 PASS (tools/test_m*.py) + the interactive shell session"
-    echo "+ the two-boot persistence proof (test_m5_persist.py: written"
-    echo "in boot N, read back byte-exact in boot N+1) + the"
-    echo "crash-consistency gate (test_m5_crash.py: five"
-    echo "SIGKILL-mid-write rounds, every reboot recovers with NO repair"
-    echo "tool — fsd just mounts) + the virtio-net link proof"
-    echo "(test_m6.py: a hand-built ARP request goes out over the NIC and"
-    echo "slirp's reply is verified field-by-field) + the entropy proof"
-    echo "(two 4 KiB draws DMA'd into the client's own pages, asserted"
-    echo "non-zero, non-constant, and different — and a boot WITHOUT"
-    echo "either device stays green with honest SKIPs);"
-    echo "100-boot stability loop green with the full fixture family —"
-    echo "every boot ends by typing 'shutdown' into the running shell"
-    echo "(ADR-0011/0020/0022/0023/0024/0025/0026/0027/0028)."
+    echo "Suite verdicts, read from a real boot of THIS image:"
+    if [[ -s "$NOTES_BOOT_LOG" ]]; then
+        grep -ao '^m[0-9]*: RESULT [A-Z]* ([^)]*)' "$NOTES_BOOT_LOG" \
+            | sed 's/\r//' | sort -u | sed 's/^/  * /'
+    else
+        echo "  * (the verdict boot produced no output — see the gate log)"
+    fi
     echo
-    echo "This release has a FILESYSTEM: AFS1 (original design, ADR-0023)"
-    echo "served entirely from ring 3 — extent-based data, copy-on-write"
-    echo "transactional metadata, ping-pong commits. The shell lists,"
-    echo "reads, writes, and deletes real files, and they SURVIVE reboots"
-    echo "on your scratch.img."
+    echo "What is in this build (the milestones checked off in"
+    echo "docs/ROADMAP.md, most recent first):"
+    grep -o '^- \[x\] [0-9][0-9.a-z]* \*\*[^*]*\*\*' "$REPO_ROOT/docs/ROADMAP.md" \
+        | sed 's/^- \[x\] /  * /; s/\*\*//g' | tail -12 | tac
     echo
-    echo "This release has a NETWORK DRIVER: netd (virtio-net, ring 3,"
-    echo "ADR-0024) — link layer only (raw Ethernet frames); every boot"
-    echo "proves it on the wire with a real ARP round trip against QEMU's"
-    echo "built-in network. The protocol stack (IP/UDP/TCP services) is"
-    echo "Phase 7, built on this driver."
+    echo "Every boot runs the whole milestone suite on real devices and"
+    echo "ends by typing 'shutdown' into the running shell; a build that"
+    echo "is not green is never staged. See docs/ROADMAP.md and"
+    echo "docs/adr/ for the decisions behind each item."
     echo
-    echo "This release SURVIVES A DEAD DRIVER (ADR-0028): a service that"
-    echo "dies now ANSWERS everyone it owed a reply to — clients get a"
-    echo "typed STATUS_SERVICE_GONE instead of blocking forever — a"
-    echo "process with parked threads can actually be killed, and the"
-    echo "supervisor respawns the image with its capabilities replayed"
-    echo "behind the SAME endpoint, so clients keep the capability they"
-    echo "already hold and a restart costs them one retry. Watch the boot"
-    echo "for m6:test:service_death and m6:test:service_restart: a real"
-    echo "service is killed mid-request on every boot, on purpose."
-    echo
-    echo "This release has a SECOND CONSOLE (ADR-0027): consoled, the"
-    echo "ring-3 virtio-console driver, attaches a virtio-serial port to"
-    echo "the machine's console in BOTH directions. Run with the"
-    echo "virtio-console lines in RUNNING.md, then from another terminal:"
-    echo "    nc -U /tmp/arena-console.sock"
-    echo "and you are on the console: what ArenaOS prints appears there"
-    echo "too, and what you type there drives the same arena> prompt."
-    echo "Serial remains the kernel's own channel for logs and panics —"
-    echo "this ADDS a channel, it never moves one."
-    echo
-    echo "This release has a KEYBOARD (ADR-0026): inputd, the ring-3"
-    echo "virtio-input driver, decodes real key events and feeds them"
-    echo "into the SAME console line discipline the serial port uses —"
-    echo "so if you run QEMU with a display (-display gtk instead of"
-    echo "-display none), you can type at the arena> prompt in the QEMU"
-    echo "window: echo, backspace, and shift all work, and the machine"
-    echo "halts when you type shutdown. Serial stays live at the same"
-    echo "time for logs and panics; a machine with no keyboard behaves"
-    echo "exactly as before. Note the boot suite's input test needs"
-    echo "someone to type: with nobody at the keyboard it reports an"
-    echo "honest SKIP after a moment and the boot continues normally."
-    echo
-    echo "This release has an ENTROPY SERVICE and a SHARED DRIVER CORE"
-    echo "(ADR-0025): rngd (virtio-rng, ring 3) fills a client's own page"
-    echo "by device DMA — zero copy — and the virtio 1.0 core that"
-    echo "storaged, netd, and rngd all run on now lives in ONE place"
-    echo "(userspace/virtio.rs), extracted mechanically under the full"
-    echo "suite. Watch for 'rngtest: draw A ... vs draw B ...' on serial:"
-    echo "fresh bytes every boot."
-    echo
-    echo "Run it: see RUNNING.md (bundled) — two cps + one"
-    echo "qemu-system-x86_64 command; the VM boots, runs the full"
-    echo "milestone suite on serial, then hands the console to the"
-    echo "ArenaOS shell: type 'help' (and 'shutdown' to stop the"
-    echo "machine). Serial is the console in both directions"
-    echo "(ADR-0020). The bundled scratch-template.img is the formatted"
-    echo "AFS1 volume — copy it ONCE, then keep reusing your scratch.img:"
-    echo "that is where your files live."
-    echo
-    echo "Qualification for THIS image (sha256 ${ESP_SHA:0:16}...):"
-    echo "  * every milestone test script, green (the release gate is the"
-    echo "    real suite — a build that is not green is never staged);"
+    echo "Qualification for THIS image (kernel ${ESP_SHA:0:16}...):"
+    echo "  * every milestone test script, green;"
     echo "  * boot-stability loop: $STABILITY boots fully green, verdicts"
     echo "    identical on every boot;"
     echo "  * the bundle below was extracted and BOOTED before publishing."
