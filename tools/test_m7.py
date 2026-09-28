@@ -30,7 +30,15 @@ Coverage:
                          already went out must be able to tell),
                        - two due timers on one notification both
                          deliver, which is what lets a service wait
-                         for "work OR timeout" in one blocking call.
+                         for "work OR timeout" in one blocking call,
+                       - a STALE id (whose slot has since been handed
+                         to a later timer) is REFUSED, and the timer
+                         it aliases still fires. Timer ids carry a
+                         generation for exactly this: a TCP stack
+                         holds dozens of retransmission timers in one
+                         process, so an owner check is no protection,
+                         and replaying stale bookkeeping would kill a
+                         stranger's timer silently.
 
                      The kernel then proves its own side: it counted
                      the arms, firings and cancellations the client
@@ -89,6 +97,10 @@ def extra_checks(serial: str) -> bool:
     check("two timers on one notification both delivered" in serial,
           "badges merge — a service can wait for work OR a timeout in one "
           "blocking call")
+    check("a stale id was refused and the live timer it aliased" in serial,
+          "a STALE timer id was refused — ids carry a generation, so a "
+          "reused slot cannot be cancelled by an old handle (C's review "
+          "of v0.11.0)")
     check("swept the timer the client abandoned" in serial,
           "the kernel swept a timer whose owner died (the fourth thing "
           "proc::destroy sweeps, after relays, the console mirror and "

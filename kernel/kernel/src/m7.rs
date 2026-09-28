@@ -138,22 +138,27 @@ fn test_timer_facility() -> Res {
         }
         Some(67) => return Err("client: a CANCELLED timer delivered its badge anyway (67)"),
         Some(68) => return Err("client: two due timers did not both deliver (68)"),
+        Some(69) => {
+            return Err(
+                "client: a STALE timer id was accepted — it could have cancelled a stranger's timer (69)",
+            );
+        }
         Some(99) => return Err("client: the panic handler ran (99)"),
         _ => return Err("the client exited with a code from nowhere in the contract"),
     }
 
     // The kernel's own accounting of what the client just did.
     let after = timer::stats();
-    if after.armed_total < before.armed_total + 6 {
+    if after.armed_total < before.armed_total + 8 {
         error!(
             "m7",
-            "timer_facility: armed_total {} → {}, expected at least 6 more",
+            "timer_facility: armed_total {} → {}, expected at least 8 more",
             before.armed_total,
             after.armed_total
         );
         return Err("the kernel counted fewer arms than the client made");
     }
-    if after.fired < before.fired + 4 {
+    if after.fired < before.fired + 6 {
         return Err("the kernel counted fewer firings than the client observed");
     }
     if after.cancelled != before.cancelled + 1 {

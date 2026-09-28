@@ -28,6 +28,15 @@
 //!    in Phase 7 will depend on to wait for "device OR client OR
 //!    timeout" in a single blocking call.
 //!
+//! 6. **A stale id cannot cancel a stranger.** Arm a timer, let it
+//!    fire, then arm another — which the kernel may hand the SAME
+//!    slot — and try to cancel the first one's id. It must be
+//!    refused, and the second timer must still fire. Without this,
+//!    a TCP stack holding dozens of retransmission timers in one
+//!    process could cancel the wrong one by replaying its own stale
+//!    bookkeeping, losing a retransmission in a way that only
+//!    appears under the interleaving that caused it.
+//!
 //! It then leaves a timer armed on purpose and exits, so the suite can
 //! prove the kernel sweeps it.
 //!
@@ -57,6 +66,9 @@ const EXIT_CANCEL: u64 = 65;
 const EXIT_CANCEL_TWICE: u64 = 66;
 const EXIT_GHOST: u64 = 67;
 const EXIT_MERGE: u64 = 68;
+/// A stale id — one whose slot has been handed to a LATER timer —
+/// was accepted, which means it cancelled a stranger's timer.
+const EXIT_STALE: u64 = 69;
 
 /// The delay under test: five ticks, far enough above the 10 ms
 /// granularity that lateness is meaningful and short enough that the
@@ -201,6 +213,41 @@ pub unsafe extern "C" fn _start() -> ! {
             fail(EXIT_MERGE, "two due timers did not both deliver");
         }
         log("timertest: PASS — two timers on one notification both delivered");
+
+        // ---- 6: a stale id must not cancel a stranger's timer ----
+        // Arm, let it FIRE (so the slot is freed and may be reused),
+        // then arm another and try the dead id. If ids were bare slot
+        // indices the second timer would die here silently.
+        let stale = arm(BADGE_A, DELAY_US);
+        let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
+        if badge < 0 || badge as u64 & BADGE_A == 0 {
+            fail(EXIT_BADGE, "the timer before the stale-id check misbehaved");
+        }
+        let fresh = arm(BADGE_B, DELAY_US);
+        if syscall1(SYS_TIMER_CANCEL, stale) >= 0 {
+            log_line(|o| {
+                o.str("timertest: a STALE id (");
+                o.u64(stale);
+                o.str(") was accepted; the live timer is ");
+                o.u64(fresh);
+            });
+            fail(
+                EXIT_STALE,
+                "a stale timer id was accepted — it could have cancelled a stranger",
+            );
+        }
+        let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
+        if badge < 0 || badge as u64 & BADGE_B == 0 {
+            fail(
+                EXIT_STALE,
+                "the timer armed after a stale cancel never fired (it was cancelled)",
+            );
+        }
+        log_line(|o| {
+            o.str("timertest: PASS — a stale id was refused and the live timer it aliased (");
+            o.u64(fresh);
+            o.str(") still fired");
+        });
 
         // Leave one armed on purpose: the suite proves the kernel
         // sweeps it when this process is destroyed.

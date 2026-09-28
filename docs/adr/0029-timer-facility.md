@@ -137,12 +137,51 @@ for now" gets written.
   with no other state. The stack must re-arm, which is the same
   re-establish rule already decided for netd's buffers.
 
+## Errata (found in review of v0.11.0)
+
+Two corrections, recorded here rather than edited away, because what
+an ADR got wrong is part of what it has to say.
+
+**1. Timer ids were bare slot indices, and that is an ABA bug.** As
+first shipped, `arm` returned the table index. Timer A fires and frees
+slot 3; slot 3 is handed to timer B; a cancel for A — perfectly
+ordinary bookkeeping in a protocol that drops an RTO after a late ACK
+— silently kills B. The ownership check in `cancel` does not help,
+because the case that matters is one process holding many timers,
+which is precisely what a TCP stack is. Fixed before any protocol
+used the ABI: an id is now `(generation << 32) | slot`, the
+generation belongs to the slot and only moves forward (bumped on arm
+AND on free), and a stale id is refused as "not armed" — the same
+answer an already-fired timer gives, which callers must handle
+anyway. `timertest` now proves it: arm, let it fire, arm again into
+the same slot, and the old id must be refused while the live timer
+still fires.
+
+**2. This facility does NOT bound a synchronous IPC call.** The
+original text claimed "arm, call, cancel on reply" closes ADR-0028's
+client-timeout gap. It does not. A thread blocked in `SYS_IPC_CALL`
+is parked on the endpoint; its notification's pending badge sits
+there untouched until the call returns, so the timer cannot rescue
+the caller from a server that never replies. What this facility
+actually gives is **event-loop timeouts** — which is what every
+Phase 7 service needs, and is why the milestone was still the right
+one to build first.
+
+Bounding a synchronous call needs one of: a call variant that takes a
+deadline (`SYS_IPC_CALL_TIMED`), making a thread blocked in a call
+interruptible by its own notification (a real change to what
+"blocked" means), or an asynchronous call/reply shape where waiting
+is always a `SYS_WAIT`. That is a decision with consequences for
+every existing client, so it gets its own ADR when something needs
+it — and until then, **no code may assume a synchronous call can time
+out**. The honest tools available today are `STATUS_SERVICE_GONE`
+(the server died) and supervision (something notices and restarts).
+
 ## Future implications
 
-- `STATUS_SERVICE_GONE` plus a timer is now enough for a client to
-  bound ANY IPC call: arm, call, cancel on reply. ADR-0028's noted
-  gap is closed in mechanism; making it a convenient library call is
-  userspace's job.
+- Bounding synchronous IPC remains OPEN (see the erratum above).
+  ADR-0028's gap is narrowed, not closed: event loops can time out,
+  callers blocked in `SYS_IPC_CALL` still cannot.
 - The netstack's main loop is now expressible: one notification,
   badges for device RX, device TX, client requests and every protocol
   timer. If a Phase 7 milestone ever finds itself spinning on

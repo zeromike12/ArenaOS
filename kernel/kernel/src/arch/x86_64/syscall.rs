@@ -1334,6 +1334,9 @@ fn sys_timer_arm(a0: u64, a1: u64, a2: u64) -> Status {
         return STATUS_BAD_ARG;
     };
     match crate::timer::arm(pid, nid, a1, a2) {
+        // The id carries a generation in its high bits (ADR-0029
+        // erratum): masked to 31 bits there, so it is always a
+        // positive status and never collides with the error domain.
         Ok(id) => id as Status,
         Err(_) => STATUS_BUSY,
     }
@@ -1344,14 +1347,17 @@ fn sys_timer_arm(a0: u64, a1: u64, a2: u64) -> Status {
 /// Cancelling a timer that already fired is an ERROR, not a silent
 /// success. A protocol cancelling a retransmission that has in fact
 /// already gone out needs to be able to tell the difference.
+///
+/// A STALE id — one whose slot has since been handed to another timer
+/// — is refused for the same reason and with the same status. Ids
+/// carry a generation precisely so that this case is distinguishable
+/// from "you just cancelled a stranger's timer", which is what a bare
+/// slot index would have silently done.
 fn sys_timer_cancel(a0: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG;
     };
-    if a0 > u32::MAX as u64 {
-        return STATUS_BAD_ARG;
-    }
-    match crate::timer::cancel(pid, a0 as u32) {
+    match crate::timer::cancel(pid, a0) {
         Ok(()) => STATUS_OK,
         Err(_) => STATUS_BAD_ARG,
     }

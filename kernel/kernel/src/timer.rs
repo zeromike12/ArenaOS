@@ -56,6 +56,10 @@ pub const MAX_TIMERS: usize = 32;
 #[derive(Clone, Copy)]
 struct Timer {
     live: bool,
+    /// Bumped every time this slot is handed out. The other half of a
+    /// timer id, and the reason a stale id is harmless — see
+    /// [`make_id`].
+    generation: u32,
     /// The process that armed it — the unit of ownership and sweeping.
     owner: u64,
     /// Notification to signal, and the badge bit to signal it with.
@@ -67,6 +71,7 @@ struct Timer {
 
 const EMPTY: Timer = Timer {
     live: false,
+    generation: 0,
     owner: 0,
     nid: 0,
     badge: 0,
@@ -74,6 +79,36 @@ const EMPTY: Timer = Timer {
 };
 
 static TIMERS: SyncCell<[Timer; MAX_TIMERS]> = SyncCell::new([EMPTY; MAX_TIMERS]);
+
+/// A timer id is `(generation << 32) | slot`, not a bare slot index.
+///
+/// The bare index had an ABA hole that ownership checks do not close,
+/// and the place it would have bitten is the worst one: a TCP stack
+/// holds dozens of retransmission timers in ONE process, so "same
+/// owner" is no protection at all. Timer A fires and frees slot 3;
+/// slot 3 is handed to timer B; a cancel for A — perfectly reasonable
+/// bookkeeping in a protocol that cancels an RTO after a late ACK —
+/// silently kills B instead. That is a lost retransmission, appearing
+/// only under the interleaving that produced it.
+///
+/// With a generation, a stale id names a slot whose generation has
+/// moved on, and `cancel` refuses it as "not armed" — which is the
+/// truthful answer and one the caller already has to handle, because
+/// a timer that has already fired gives the same one.
+///
+/// The generation is masked to 31 bits so an id is always a positive
+/// `Status` (the syscall returns it), and wraps after 2^31 reuses of a
+/// single slot — at the 100 Hz tick, several centuries.
+fn make_id(generation: u32, slot: usize) -> u64 {
+    ((generation as u64 & 0x7FFF_FFFF) << 32) | slot as u64
+}
+
+fn split_id(id: u64) -> (u32, usize) {
+    (
+        ((id >> 32) & 0x7FFF_FFFF) as u32,
+        (id & 0xFFFF_FFFF) as usize,
+    )
+}
 
 /// How many timers are armed, as a plain atomic so the tick's fast
 /// path costs one relaxed load when nothing is armed — which is every
@@ -119,7 +154,7 @@ pub fn init() -> Result<(), &'static str> {
 /// caller read the clock, do arithmetic, and then race whatever
 /// happens between the read and the call; "in 200 ms" cannot be stale
 /// by construction.
-pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u32, &'static str> {
+pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u64, &'static str> {
     if badge == 0 {
         return Err("timer: badge must be nonzero (the merged-badge protocol has no empty word)");
     }
@@ -134,8 +169,12 @@ pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u32, &'sta
             let Some(i) = timers.iter().position(|t| !t.live) else {
                 return Err("timer: table full (MAX_TIMERS)");
             };
+            // The generation belongs to the SLOT and only ever moves
+            // forward, so ids handed out for it are never reused.
+            let generation = timers[i].generation.wrapping_add(1);
             timers[i] = Timer {
                 live: true,
+                generation,
                 owner,
                 nid,
                 badge,
@@ -143,7 +182,7 @@ pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u32, &'sta
             };
             ARMED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             (*STATS.get()).armed_total += 1;
-            Ok(i as u32)
+            Ok(make_id(generation, i))
         }
     })
 }
@@ -152,21 +191,33 @@ pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u32, &'sta
 /// fired (or never existed) is an error, not a silent success: a
 /// protocol that cancels a retransmission which has in fact already
 /// gone out needs to know the difference.
-pub fn cancel(owner: u64, id: u32) -> Result<(), &'static str> {
+pub fn cancel(owner: u64, id: u64) -> Result<(), &'static str> {
+    let (generation, slot) = split_id(id);
     without_interrupts(|| {
         // SAFETY: single writer under IF=0.
         unsafe {
             let timers = &mut *TIMERS.get();
-            let Some(t) = timers.get_mut(id as usize) else {
+            let Some(t) = timers.get_mut(slot) else {
                 return Err("timer: id out of range");
             };
             if !t.live {
                 return Err("timer: not armed (already fired or cancelled)");
             }
+            // A STALE id: this slot has been handed out again since
+            // that id was issued, so the timer it names is long gone
+            // and the one sitting here belongs to somebody else's
+            // bookkeeping. Refusing is the truthful answer.
+            if t.generation != generation {
+                return Err("timer: stale id (the slot was reused by a later timer)");
+            }
             if t.owner != owner {
                 return Err("timer: not yours");
             }
+            // Bump on free as well as on arm, so an id cancelled here
+            // cannot be replayed against the next occupant either.
+            let next_generation = t.generation;
             *t = EMPTY;
+            t.generation = next_generation;
             ARMED.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
             (*STATS.get()).cancelled += 1;
             Ok(())
@@ -185,7 +236,12 @@ pub fn release_by_owner(pid: u64) -> usize {
             let mut n = 0;
             for t in timers.iter_mut() {
                 if t.live && t.owner == pid {
+                    let generation = t.generation;
                     *t = EMPTY;
+                    // Generations survive the slot being emptied:
+                    // they are what makes an old id stale rather than
+                    // ambiguous.
+                    t.generation = generation;
                     n += 1;
                 }
             }
@@ -221,7 +277,9 @@ extern "C" fn expire_due() {
                 if t.live && now >= t.deadline_us {
                     due[n] = (t.nid, t.badge);
                     n += 1;
+                    let generation = t.generation;
                     *t = EMPTY;
+                    t.generation = generation;
                 }
             }
             if n > 0 {
