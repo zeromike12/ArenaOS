@@ -411,6 +411,49 @@ pub const ICMP_OP_PING: u64 = 3;
 /// say what it dropped is not demultiplexing, it is guessing.
 pub const ICMP_OP_RXSTATS: u64 = 4;
 
+// ---- UDP (M7.4, ADR-0033) ---------------------------------------------
+//
+// BIND returns an opaque HANDLE and possession of it is the authority
+// to use that port. Not a port number the caller repeats back, and
+// not an index: a random 64-bit token the service drew from rngd.
+//
+// This is the same idea as a kernel capability, implemented one layer
+// down — authority by possession of an unforgeable reference, with
+// deliberate passing of the token being delegation. It is NOT proof of
+// identity: IPC v1 tells a server nothing about its caller, so the
+// stack cannot say WHO holds a handle, only that whoever presents it
+// holds it. (ADR-0033; the reasoning, and my earlier mistake about
+// it, are in ADR-0032's appendix.)
+//
+//   BIND    w0 = port. Replies with the handle in word 1.
+//   SEND    w0 = handle; inline = [dst ip(4) | dst port(2) | len(2) |
+//           payload]. Replies with the bytes sent.
+//   RECV    w0 = handle; inline = [timeout_us(8)]. Replies with the
+//           datagram's FULL length in word 1 and
+//           [src ip(4) | src port(2) | len(2) | payload…] inline —
+//           truncated to what one message carries (see UDP_INLINE).
+//   CLOSE   w0 = handle. Releases the binding.
+pub const UDP_OP_BIND: u64 = 5;
+pub const UDP_OP_SEND: u64 = 6;
+pub const UDP_OP_RECV: u64 = 7;
+pub const UDP_OP_CLOSE: u64 = 8;
+
+/// Bytes of datagram payload one request or reply message carries,
+/// after the 8-byte address header above.
+pub const UDP_INLINE: usize = MSG_BYTES - 8;
+
+/// The handle presented does not name a live binding — either it was
+/// never issued, or it has been closed. A forged one lands here too,
+/// which is the point.
+pub const UDP_S_BAD_HANDLE: u64 = (-5i64) as u64;
+/// That port is already bound. A namespace rule, and a separate
+/// question from authority.
+pub const UDP_S_IN_USE: u64 = (-6i64) as u64;
+/// Nothing arrived for this binding before the deadline.
+pub const UDP_S_NO_DATA: u64 = (-7i64) as u64;
+
+pub const IP_PROTO_UDP: u8 = 17;
+
 pub const ARP_S_OK: u64 = 0;
 pub const ARP_S_BAD_OP: u64 = (-1i64) as u64;
 /// Nobody answered before the deadline, after every retry. The

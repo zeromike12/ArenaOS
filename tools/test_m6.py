@@ -122,7 +122,7 @@ def check_with_net_extras(serial: str) -> bool:
           "MSI per draw (no polling)")
     check("rngd spawned: pid" in serial,
           "the PRODUCTION rngd spawned at boot with the fixture attached")
-    check(serial.count("virtio-rng ready") == 2,
+    check(serial.count("virtio-rng ready") == 3,
           "rngd reached DRIVER_OK twice (the suite's instance + the "
           "production service)")
     # The draws are real device entropy: the fingerprints the client

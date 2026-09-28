@@ -75,7 +75,11 @@ const SLOT_EP: u64 = 1;
 /// bottom of the space — the slots this program fills itself start
 /// after them.
 const SLOT_NOTIF: u64 = 2;
-const SLOT_TX: u64 = 3;
+/// The entropy service's call side (M7.4). netstackd draws its UDP
+/// handle pool from rngd at startup: a handle is authority by
+/// possession, so a guessable one would be authority by arithmetic.
+const SLOT_RNG: u64 = 3;
+const SLOT_TX: u64 = 4;
 /// The MASTER lend copy, taken once before the frame is mapped.
 ///
 /// `SYS_MAP_MEMORY` CONSUMES the cap it maps (ADR-0021: ownership
@@ -85,9 +89,9 @@ const SLOT_TX: u64 = 3;
 /// the map is a copy of nothing. The master is lent, never mapped,
 /// and every send copies from IT — because each send CONSUMES its
 /// copy on the way to the driver.
-const SLOT_TX_MASTER: u64 = 4;
+const SLOT_TX_MASTER: u64 = 5;
 /// The per-send lend copy, consumed by the call that carries it.
-const SLOT_TX_LENT: u64 = 5;
+const SLOT_TX_LENT: u64 = 6;
 
 /// Badge for the re-attach backoff timer.
 const BADGE_BACKOFF: u64 = 1 << 16;
@@ -152,6 +156,11 @@ const FRAME_MAX: usize = 512;
 const PING_FRAME_LEN: u64 = (ETH_HDR + IP_HDR + ICMP_HDR + PING_PAYLOAD) as u64;
 
 const IP_PROTO_ICMP: u8 = 1;
+/// Bindings this stack will hold at once. Small and stated; the
+/// handle pool is drawn to match.
+const UDP_BINDINGS: usize = 8;
+/// The UDP header: source port, destination port, length, checksum.
+const UDP_HDR: usize = 8;
 const ICMP_ECHO_REQUEST: u8 = 8;
 const ICMP_ECHO_REPLY: u8 = 0;
 /// Time to live. Nothing here routes, so this only has to be
@@ -173,6 +182,34 @@ struct Entry {
     mac: [u8; 6],
     expires_us: u64,
 }
+
+/// One UDP binding: a port, the handle that authorises its use, and a
+/// single-slot inbox for the most recent datagram.
+#[derive(Clone, Copy)]
+struct Binding {
+    live: bool,
+    port: u16,
+    handle: u64,
+    /// The newest datagram, if one is waiting. Single-slot on purpose:
+    /// UDP may drop, and a queue nobody drains is a leak that looks
+    /// like a feature.
+    have: bool,
+    src_ip: [u8; 4],
+    src_port: u16,
+    len: usize,
+    data: [u8; UDP_INLINE],
+}
+
+const NO_BINDING: Binding = Binding {
+    live: false,
+    port: 0,
+    handle: 0,
+    have: false,
+    src_ip: [0; 4],
+    src_port: 0,
+    len: 0,
+    data: [0; UDP_INLINE],
+};
 
 const EMPTY: Entry = Entry {
     live: false,
@@ -207,6 +244,17 @@ struct Stack {
     rx_oversize: u64,
     /// Echo replies whose payload did not survive reassembly.
     rx_corrupt_payload: u64,
+    /// UDP datagrams delivered to a binding, and refused for want of
+    /// one (M7.4).
+    rx_udp: u64,
+    rx_udp_unbound: u64,
+    /// Handles presented that name no live binding — including forged
+    /// ones, which is the number worth watching.
+    bad_handles: u64,
+    /// The port table, and the pool of unguessable handles it issues.
+    bindings: [Binding; UDP_BINDINGS],
+    handle_pool: [u64; UDP_BINDINGS],
+    have_entropy: bool,
     /// The ARP answer this stack is currently waiting for, and the
     /// answer once it lands. Held here rather than on the call stack
     /// because the demultiplexer — not the caller — is what recognises
@@ -352,6 +400,12 @@ pub unsafe extern "C" fn _start() -> ! {
             rx_chunks: 0,
             rx_oversize: 0,
             rx_corrupt_payload: 0,
+            rx_udp: 0,
+            rx_udp_unbound: 0,
+            bad_handles: 0,
+            bindings: [NO_BINDING; UDP_BINDINGS],
+            handle_pool: [0; UDP_BINDINGS],
+            have_entropy: false,
             want_arp: None,
             got_arp: None,
             want_icmp: None,
@@ -359,6 +413,7 @@ pub unsafe extern "C" fn _start() -> ! {
             got_icmp: false,
             ping_seq: 0,
         };
+        draw_handles(&mut st8);
         let selftest = parser_selftest(&mut st8);
         if selftest == 7 {
             log(
@@ -457,6 +512,127 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                         Err(status) => reply(status, 0, 0),
                     }
                 }
+                UDP_OP_BIND => {
+                    let port = (arg & 0xFFFF) as u16;
+                    if !st8.have_entropy {
+                        // No unguessable handle to issue, so no
+                        // binding. Refusing beats handing out an
+                        // authority anyone can guess.
+                        reply(ARP_S_LINK_DOWN, 0, 0);
+                        continue;
+                    }
+                    if port == 0 || st8.bindings.iter().any(|b| b.live && b.port == port) {
+                        reply(UDP_S_IN_USE, 0, 0);
+                        continue;
+                    }
+                    match (0..UDP_BINDINGS).find(|&i| !st8.bindings[i].live) {
+                        Some(i) => {
+                            let handle = st8.handle_pool[i];
+                            st8.bindings[i] = Binding {
+                                live: true,
+                                port,
+                                handle,
+                                ..NO_BINDING
+                            };
+                            log_line(|o| {
+                                o.str("netstackd: port ");
+                                o.u64(port as u64);
+                                o.str(" bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)");
+                            });
+                            reply(ARP_S_OK, handle, 0);
+                        }
+                        None => reply(UDP_S_IN_USE, 0, 0),
+                    }
+                }
+                UDP_OP_SEND => {
+                    let Some(i) = binding_of(st8, arg) else {
+                        st8.bad_handles += 1;
+                        reply(UDP_S_BAD_HANDLE, 0, 0);
+                        continue;
+                    };
+                    let dst_ip = [inbox[0], inbox[1], inbox[2], inbox[3]];
+                    let dst_port = ((inbox[4] as u16) << 8) | inbox[5] as u16;
+                    let plen = (((inbox[6] as u16) << 8) | inbox[7] as u16) as usize;
+                    if plen > UDP_INLINE {
+                        reply(ARP_S_BAD_OP, 0, 0);
+                        continue;
+                    }
+                    let Some(mac) = resolve(st8, dst_ip) else {
+                        reply(ARP_S_UNREACHABLE, 0, 0);
+                        continue;
+                    };
+                    let src_port = st8.bindings[i].port;
+                    let flen = build_udp(
+                        st8,
+                        mac,
+                        dst_ip,
+                        src_port,
+                        dst_port,
+                        inbox.as_ptr().add(8),
+                        plen,
+                    );
+                    let status = transmit(st8, flen);
+                    if status != NET_S_OK {
+                        reply(ARP_S_LINK_DOWN, 0, 0);
+                        continue;
+                    }
+                    reply(ARP_S_OK, plen as u64, 0);
+                }
+                UDP_OP_RECV => {
+                    let Some(i) = binding_of(st8, arg) else {
+                        st8.bad_handles += 1;
+                        reply(UDP_S_BAD_HANDLE, 0, 0);
+                        continue;
+                    };
+                    let mut timeout_us = 0u64;
+                    for b in 0..8 {
+                        timeout_us |= (inbox[b] as u64) << (8 * b);
+                    }
+                    // Pump the wire until this binding has something
+                    // or the deadline passes. The DEMULTIPLEXER is
+                    // what decides a frame belongs here — this loop
+                    // just keeps the wire moving (M7.2).
+                    while !st8.bindings[i].have {
+                        if !pump(st8, timeout_us) {
+                            break;
+                        }
+                    }
+                    if !st8.bindings[i].have {
+                        reply(UDP_S_NO_DATA, 0, 0);
+                        continue;
+                    }
+                    let b = st8.bindings[i];
+                    st8.bindings[i].have = false;
+                    let keep = core::cmp::min(b.len, UDP_INLINE);
+                    let mut out = [0u8; MSG_BYTES];
+                    out[..4].copy_from_slice(&b.src_ip);
+                    out[4] = (b.src_port >> 8) as u8;
+                    out[5] = (b.src_port & 0xFF) as u8;
+                    out[6] = (keep >> 8) as u8;
+                    out[7] = (keep & 0xFF) as u8;
+                    out[8..8 + keep].copy_from_slice(&b.data[..keep]);
+                    let rr = syscall5(
+                        SYS_IPC_REPLY,
+                        SLOT_EP,
+                        ARP_S_OK,
+                        b.len as u64,
+                        CAP_NONE,
+                        out.as_ptr() as u64,
+                    );
+                    if rr < 0 {
+                        fail(EXIT_REPLY, "the UDP receive reply was refused");
+                    }
+                }
+                UDP_OP_CLOSE => match binding_of(st8, arg) {
+                    Some(i) => {
+                        st8.bindings[i] = NO_BINDING;
+                        reply(ARP_S_OK, 0, 0);
+                    }
+                    None => {
+                        st8.bad_handles += 1;
+                        reply(UDP_S_BAD_HANDLE, 0, 0);
+                    }
+                },
                 ICMP_OP_RXSTATS => reply(
                     ARP_S_OK,
                     (st8.rx_frames & 0xFFFF)
@@ -499,6 +675,20 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                         o.str(" oversize, ");
                         o.u64(st8.rx_corrupt_payload);
                         o.str(" corrupt payload");
+                    });
+                    // A SECOND line: one Out::push is capped at
+                    // WRITE_MAX (256) and silently drops the rest, so
+                    // a long enough accounting line loses its tail
+                    // mid-word — which is exactly how this one failed
+                    // its own assertion.
+                    log_line(|o| {
+                        o.str("netstackd: UDP — ");
+                        o.u64(st8.rx_udp);
+                        o.str(" delivered, ");
+                        o.u64(st8.rx_udp_unbound);
+                        o.str(" unbound, ");
+                        o.u64(st8.bad_handles);
+                        o.str(" bad handle(s) refused");
                     });
                     reply(
                         ARP_S_OK,
@@ -567,6 +757,180 @@ unsafe fn reattach(st8: &mut Stack) -> bool {
         }
         log("netstackd: the driver never came back — reporting the link down rather than guessing");
         false
+    }
+}
+
+/// Draw the UDP handle pool from rngd (M7.4).
+///
+/// A handle is authority by possession, so it has to be unguessable —
+/// an index would be authority by arithmetic. The draw happens once,
+/// at startup, into the transmit frame before any packet has used it;
+/// the pool is then just numbers in this service's memory and rngd is
+/// never needed again.
+///
+/// If entropy is unavailable the stack does NOT fall back to
+/// something predictable and call it a handle. It records that it has
+/// none and refuses to bind, which is honest and safe; a guessable
+/// token would be worse than an obvious refusal.
+///
+/// # Safety
+/// As `_start`.
+unsafe fn draw_handles(st8: &mut Stack) {
+    // SAFETY: function contract.
+    unsafe {
+        let want = (UDP_BINDINGS * 8) as u64;
+        let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
+        if syscall3(SYS_CAP_COPY, SLOT_TX_MASTER, SLOT_TX_LENT, RIGHTS_ALL) < 0 {
+            log("netstackd: no entropy — the handle cap copy was refused; UDP will refuse to bind");
+            return;
+        }
+        let mut reply = [0u64; 3];
+        let r = syscall6(
+            SYS_IPC_CALL,
+            SLOT_RNG,
+            want,
+            RNG_OP_GET,
+            SLOT_TX_LENT,
+            reply.as_mut_ptr() as u64,
+            0,
+        );
+        if r < 0 || reply[0] != RNG_S_OK || reply[1] < want {
+            log(
+                "netstackd: no entropy — UDP will refuse to bind rather than issue a guessable handle",
+            );
+            return;
+        }
+        for (i, h) in st8.handle_pool.iter_mut().enumerate() {
+            let mut v = 0u64;
+            for b in 0..8 {
+                v |= (r8(st8.tx + (i * 8 + b) as u64) as u64) << (8 * b);
+            }
+            // A zero handle would collide with "no handle"; the odds
+            // are astronomical and the check costs nothing.
+            *h = if v == 0 { 0x5544_5031_5544_5031 } else { v };
+        }
+        st8.have_entropy = true;
+        log_line(|o| {
+            o.str("netstackd: drew ");
+            o.u64(UDP_BINDINGS as u64);
+            o.str(" unguessable UDP handles from rngd — possession of one IS the authority to use its port");
+        });
+    }
+}
+
+/// Find a binding by handle. The ONLY way to reach a binding.
+fn binding_of(st8: &mut Stack, handle: u64) -> Option<usize> {
+    if handle == 0 {
+        return None;
+    }
+    (0..UDP_BINDINGS).find(|&i| st8.bindings[i].live && st8.bindings[i].handle == handle)
+}
+
+/// A UDP datagram arrived for us: hand it to the binding that owns the
+/// destination port, or count it and drop it.
+///
+/// # Safety
+/// `udp` points at `len` readable bytes.
+unsafe fn udp_in(st8: &mut Stack, src: [u8; 4], udp: *const u8, len: usize) {
+    // SAFETY: caller contract.
+    unsafe {
+        if len < UDP_HDR {
+            st8.rx_dropped += 1;
+            return;
+        }
+        let at = |i: usize| *udp.add(i);
+        let src_port = ((at(0) as u16) << 8) | at(1) as u16;
+        let dst_port = ((at(2) as u16) << 8) | at(3) as u16;
+        let ulen = (((at(4) as u16) << 8) | at(5) as u16) as usize;
+        // The UDP length covers header + payload and must fit what the
+        // IP layer declared. (The checksum is optional in IPv4 UDP and
+        // slirp may send zero; a zero checksum is accepted, a nonzero
+        // one is NOT yet verified — stated in ADR-0033 rather than
+        // quietly skipped.)
+        if ulen < UDP_HDR || ulen > len {
+            st8.rx_dropped += 1;
+            return;
+        }
+        let Some(i) =
+            (0..UDP_BINDINGS).find(|&i| st8.bindings[i].live && st8.bindings[i].port == dst_port)
+        else {
+            st8.rx_udp_unbound += 1;
+            st8.rx_dropped += 1;
+            return;
+        };
+        let payload = ulen - UDP_HDR;
+        let keep = core::cmp::min(payload, UDP_INLINE);
+        let b = &mut st8.bindings[i];
+        for k in 0..keep {
+            b.data[k] = at(UDP_HDR + k);
+        }
+        b.len = payload;
+        b.src_ip = src;
+        b.src_port = src_port;
+        b.have = true;
+        st8.rx_udp += 1;
+    }
+}
+
+/// Lay out a UDP datagram: Ethernet, IPv4, UDP, payload.
+///
+/// # Safety
+/// `st8.tx` is this image's own mapped frame; `payload` is readable.
+unsafe fn build_udp(
+    st8: &Stack,
+    mac: [u8; 6],
+    dst_ip: [u8; 4],
+    src_port: u16,
+    dst_port: u16,
+    payload: *const u8,
+    plen: usize,
+) -> u64 {
+    // SAFETY: method contract; everything written is inside one page.
+    unsafe {
+        let base = st8.tx;
+        let put = |off: usize, b: u8| *((base + off as u64) as *mut u8) = b;
+        for (i, (dst, src)) in mac.iter().zip(st8.mac.iter()).enumerate() {
+            put(i, *dst);
+            put(6 + i, *src);
+        }
+        put(12, (ETHERTYPE_IPV4 >> 8) as u8);
+        put(13, (ETHERTYPE_IPV4 & 0xFF) as u8);
+        let total = (IP_HDR + UDP_HDR + plen) as u16;
+        put(ETH_HDR, 0x45);
+        put(ETH_HDR + 1, 0);
+        put(ETH_HDR + 2, (total >> 8) as u8);
+        put(ETH_HDR + 3, (total & 0xFF) as u8);
+        put(ETH_HDR + 4, 0);
+        put(ETH_HDR + 5, 0);
+        put(ETH_HDR + 6, 0x40);
+        put(ETH_HDR + 7, 0);
+        put(ETH_HDR + 8, IP_TTL);
+        put(ETH_HDR + 9, IP_PROTO_UDP);
+        put(ETH_HDR + 10, 0);
+        put(ETH_HDR + 11, 0);
+        for i in 0..4 {
+            put(ETH_HDR + 12 + i, SLIRP_GUEST_IP[i]);
+            put(ETH_HDR + 16 + i, dst_ip[i]);
+        }
+        let ck = checksum((base + ETH_HDR as u64) as *const u8, IP_HDR);
+        put(ETH_HDR + 10, (ck >> 8) as u8);
+        put(ETH_HDR + 11, (ck & 0xFF) as u8);
+        let u = ETH_HDR + IP_HDR;
+        put(u, (src_port >> 8) as u8);
+        put(u + 1, (src_port & 0xFF) as u8);
+        put(u + 2, (dst_port >> 8) as u8);
+        put(u + 3, (dst_port & 0xFF) as u8);
+        let ulen = (UDP_HDR + plen) as u16;
+        put(u + 4, (ulen >> 8) as u8);
+        put(u + 5, (ulen & 0xFF) as u8);
+        // Checksum 0 = "not computed", which IPv4 UDP permits. Said
+        // out loud in ADR-0033 rather than looking like an oversight.
+        put(u + 6, 0);
+        put(u + 7, 0);
+        for i in 0..plen {
+            put(u + UDP_HDR + i, *payload.add(i));
+        }
+        (ETH_HDR + IP_HDR + UDP_HDR + plen) as u64
     }
 }
 
@@ -811,7 +1175,8 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
                 return;
             }
         }
-        if at(9) != IP_PROTO_ICMP {
+        let proto = at(9);
+        if proto != IP_PROTO_ICMP && proto != IP_PROTO_UDP {
             st8.rx_dropped += 1;
             return;
         }
@@ -819,7 +1184,11 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
         for (i, b) in src.iter_mut().enumerate() {
             *b = at(12 + i);
         }
-        icmp_in(st8, src, ip.add(ihl), total - ihl);
+        if proto == IP_PROTO_UDP {
+            udp_in(st8, src, ip.add(ihl), total - ihl);
+        } else {
+            icmp_in(st8, src, ip.add(ihl), total - ihl);
+        }
     }
 }
 

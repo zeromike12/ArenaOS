@@ -83,6 +83,43 @@ const EXIT_PING: u64 = 68;
 const EXIT_PING_RTT: u64 = 69;
 const EXIT_PING_LAYER: u64 = 70;
 const EXIT_DEMUX: u64 = 71;
+const EXIT_BIND: u64 = 72;
+const EXIT_BIND_TWICE: u64 = 73;
+const EXIT_FORGED: u64 = 74;
+const EXIT_UDP_SEND: u64 = 75;
+const EXIT_UDP_RECV: u64 = 76;
+const EXIT_DNS_MISMATCH: u64 = 77;
+
+/// The transaction id this client puts in its query and demands back.
+const DNS_TXID: u16 = 0xA7E5;
+
+/// Lay out a minimal DNS query for "example.com" A IN. Returns its
+/// length.
+fn build_dns_query(out: &mut [u8]) -> usize {
+    out[0] = (DNS_TXID >> 8) as u8;
+    out[1] = (DNS_TXID & 0xFF) as u8;
+    out[2] = 0x01; // recursion desired
+    out[3] = 0x00;
+    out[4] = 0;
+    out[5] = 1; // one question
+    for b in out.iter_mut().take(12).skip(6) {
+        *b = 0;
+    }
+    let mut i = 12;
+    for label in [b"example".as_slice(), b"com".as_slice()] {
+        out[i] = label.len() as u8;
+        i += 1;
+        out[i..i + label.len()].copy_from_slice(label);
+        i += label.len();
+    }
+    out[i] = 0; // root label
+    i += 1;
+    out[i] = 0;
+    out[i + 1] = 1; // QTYPE A
+    out[i + 2] = 0;
+    out[i + 3] = 1; // QCLASS IN
+    i + 4
+}
 
 /// An address on the slirp network that nothing answers for. slirp
 /// replies for its own gateway and DNS; .77 is simply nobody.
@@ -90,6 +127,35 @@ const SILENT_IP: [u8; 4] = [10, 0, 2, 77];
 
 fn ip_word(ip: [u8; 4]) -> u64 {
     (ip[0] as u64) | ((ip[1] as u64) << 8) | ((ip[2] as u64) << 16) | ((ip[3] as u64) << 24)
+}
+
+/// A call carrying the inline message (IN and OUT — the kernel
+/// snapshots it as the request and overwrites it with the reply).
+///
+/// # Safety
+/// The endpoint cap is the granted slot 0; single-threaded.
+unsafe fn call_msg(op: u64, w0: u64, msg: &mut [u8; MSG_BYTES]) -> (u64, u64) {
+    let mut reply = [0u64; 3];
+    // SAFETY: wrapper contract.
+    let r = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            SLOT_EP,
+            w0,
+            op,
+            CAP_NONE,
+            reply.as_mut_ptr() as u64,
+            msg.as_mut_ptr() as u64,
+        )
+    };
+    if r < 0 {
+        log_line(|o| {
+            o.str("arptest: IPC_CALL returned ");
+            o.i64(r);
+        });
+        fail(EXIT_CALL, "the call to the stack was refused");
+    }
+    (reply[0], reply[1])
 }
 
 /// # Safety
@@ -342,6 +408,101 @@ pub unsafe extern "C" fn _start() -> ! {
             o.u64(dropped);
             o.str(" dropped and counted");
         });
+
+        // ---- 6: UDP, with a real server at the other end (M7.4) ----
+        let (status, handle) = call(UDP_OP_BIND, 5353);
+        if status != ARP_S_OK || handle == 0 {
+            log_line(|o| {
+                o.str("arptest: BIND status ");
+                o.i64(status as i64);
+            });
+            fail(EXIT_BIND, "binding a UDP port failed");
+        }
+        // Binding the same port again must be refused: a namespace
+        // rule, separate from the question of authority.
+        let (status, _) = call(UDP_OP_BIND, 5353);
+        if status != UDP_S_IN_USE {
+            fail(EXIT_BIND_TWICE, "the same port was bound twice");
+        }
+        // A FORGED handle must be refused. Possession of the real one
+        // is the authority, so a handle nobody issued is worth exactly
+        // nothing — this is the check that makes the token meaningful.
+        let (status, _) = call_msg(
+            UDP_OP_SEND,
+            handle ^ 0x5555_5555_5555_5555,
+            &mut [0u8; MSG_BYTES],
+        );
+        if status != UDP_S_BAD_HANDLE {
+            log_line(|o| {
+                o.str("arptest: a FORGED handle was answered with status ");
+                o.i64(status as i64);
+            });
+            fail(EXIT_FORGED, "a forged UDP handle was accepted");
+        }
+        log(
+            "arptest: PASS — a second bind of the same port was refused, and a FORGED handle bought nothing",
+        );
+
+        // A real DNS query to slirp's resolver: 12-byte header, one
+        // question for example.com, type A, class IN.
+        let mut msg = [0u8; MSG_BYTES];
+        msg[0..4].copy_from_slice(&SLIRP_DNS_IP);
+        msg[4] = 0;
+        msg[5] = 53;
+        let q = build_dns_query(&mut msg[8..]);
+        msg[6] = (q >> 8) as u8;
+        msg[7] = (q & 0xFF) as u8;
+        let (status, sent) = call_msg(UDP_OP_SEND, handle, &mut msg);
+        if status != ARP_S_OK || sent as usize != q {
+            log_line(|o| {
+                o.str("arptest: UDP SEND status ");
+                o.i64(status as i64);
+            });
+            fail(EXIT_UDP_SEND, "the DNS query did not go out");
+        }
+
+        let mut rx = [0u8; MSG_BYTES];
+        for b in 0..8 {
+            rx[b] = ((2_000_000u64 >> (8 * b)) & 0xFF) as u8;
+        }
+        let (status, total) = call_msg(UDP_OP_RECV, handle, &mut rx);
+        if status != ARP_S_OK {
+            log_line(|o| {
+                o.str("arptest: UDP RECV status ");
+                o.i64(status as i64);
+            });
+            fail(EXIT_UDP_RECV, "no DNS response came back");
+        }
+        // The transaction id must be the one we sent, and the response
+        // bit must be set: a datagram that merely arrived proves
+        // nothing about whose answer it is.
+        let src_port = ((rx[4] as u16) << 8) | rx[5] as u16;
+        let txid = ((rx[8] as u16) << 8) | rx[9] as u16;
+        let flags = ((rx[10] as u16) << 8) | rx[11] as u16;
+        if txid != DNS_TXID || flags & 0x8000 == 0 || src_port != 53 {
+            log_line(|o| {
+                o.str("arptest: DNS reply txid ");
+                o.u64(txid as u64);
+                o.str(" flags ");
+                o.hex(flags as u64);
+                o.str(" from port ");
+                o.u64(src_port as u64);
+            });
+            fail(
+                EXIT_DNS_MISMATCH,
+                "the DNS response does not answer our query",
+            );
+        }
+        log_line(|o| {
+            o.str("arptest: PASS — UDP round trip to 10.0.2.3:53, ");
+            o.u64(total);
+            o.str("-byte response with our transaction id ");
+            o.hex(txid as u64);
+            o.str(" and the response bit set");
+        });
+        if call(UDP_OP_CLOSE, handle).0 != ARP_S_OK {
+            fail(EXIT_BIND, "closing the binding failed");
+        }
 
         let (status, wire_total, hits_total) = shutdown();
         if status != ARP_S_OK {

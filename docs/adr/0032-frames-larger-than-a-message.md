@@ -116,7 +116,34 @@ per-client endpoints, which requires netstackd to serve several
 endpoints at once — a real piece of work with its own design
 (one endpoint per client, or a caller-identity word in the ABI).
 
-v1 of UDP will therefore enforce that a port is bound **once** and
-refuse a second bind, and will not claim per-client ownership it
-cannot implement. That limitation belongs in UDP's own ADR, stated
-as a limitation, rather than inherited as an assumption.
+### Correction (C's review of v0.15.0)
+
+The paragraph above overstated its case, and the correction is worth
+more than the original claim.
+
+**Per-binding AUTHORITY does not require per-client endpoints.** A
+shared endpoint can hand back an opaque, unforgeable **token** at
+BIND; later operations present it, and possession of the token *is*
+the authority. No pid, no caller identity, and no UDP knowledge in
+the kernel — which is exactly this system's model of a capability,
+implemented at the service layer instead of the kernel one.
+Deliberately passing the token to another program is then delegation,
+which is a feature rather than a hole.
+
+What I actually demonstrated was narrower: **per-client IDENTITY** —
+non-transferable, "this process and no other owns this port" — is not
+available on a shared endpoint under IPC v1, because `recv` reveals
+nothing about the caller. That remains true and is a real constraint
+on any policy phrased in terms of *who* rather than *what is held*.
+
+The distinction matters because ArenaOS is built on the second kind
+of answer everywhere else: a capability is authority by possession,
+not proof of identity. Reaching for identity here was the wrong
+instinct, and the token is the design that fits the rest of the
+system.
+
+So UDP v1 issues an rngd-backed random handle at BIND and treats
+possession as the authority, and enforces bind-once as a NAMESPACE
+rule, which is a separate question from authority. What it does not
+do is claim non-transferable ownership — stated as a limitation, and
+now as a deliberate one rather than an imagined impossibility.

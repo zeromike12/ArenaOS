@@ -135,6 +135,8 @@ fn test_arp_service() -> Res {
     let nid_backoff = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_sync = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_go = ipc::create_notification().map_err(|_| "notification table full")?;
+    let ep_rng = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let nid_rng = ipc::create_notification().map_err(|_| "notification table full")?;
 
     let netd_grants = [
         Cap {
@@ -155,6 +157,40 @@ fn test_arp_service() -> Res {
     ];
     let netd_pid = crate::spawn::spawn_init(6, &netd_grants, None)
         .map_err(|_| "netd (image 6) spawn failed")?;
+
+    // rngd (image 8) for the stack's UDP handles (M7.4). Optional
+    // like every other fixture: without it netstackd refuses to bind
+    // rather than issue a guessable handle.
+    let rng_pid = match crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_ENTROPY) {
+        Some(rv) => {
+            let Some(rf) = crate::drivers::pci::pci_function(rv.pci_index) else {
+                return Err("the entropy function vanished from the table");
+            };
+            let rbar = rv.common.bar as usize;
+            let rng_grants = [
+                Cap {
+                    obj: CapObj::Mmio {
+                        phys: rf.bar_base[rbar],
+                        pages: (rf.bar_size[rbar] / 4096) as u32,
+                    },
+                    rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: ep_rng },
+                    rights: cap::RIGHTS_READ,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: nid_rng },
+                    rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+                },
+            ];
+            Some(
+                crate::spawn::spawn_init(8, &rng_grants, None)
+                    .map_err(|_| "rngd (image 8) spawn failed")?,
+            )
+        }
+        None => None,
+    };
     // M7.1b: the driver runs under real supervision, so killing it is
     // survivable rather than terminal. The grant list is what gets
     // replayed — including the SAME endpoint, which is why the stack's
@@ -183,6 +219,14 @@ fn test_arp_service() -> Res {
         Cap {
             obj: CapObj::Notification { nid: nid_backoff },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+        // M7.4: the entropy service's call side. UDP handles are
+        // authority by possession, so they are drawn from rngd — a
+        // guessable handle would be authority by arithmetic. Still no
+        // device capability of its own.
+        Cap {
+            obj: CapObj::Endpoint { eid: ep_rng },
+            rights: cap::RIGHTS_WRITE,
         },
     ];
     let stack_pid =
@@ -336,6 +380,12 @@ fn test_arp_service() -> Res {
         Some(71) => {
             return Err("client: the demultiplexer did not see both protocols (71)");
         }
+        Some(72) => return Err("client: binding a UDP port failed (72)"),
+        Some(73) => return Err("client: the same UDP port was bound twice (73)"),
+        Some(74) => return Err("client: a FORGED UDP handle was accepted (74)"),
+        Some(75) => return Err("client: the DNS query did not go out (75)"),
+        Some(76) => return Err("client: no DNS response came back (76)"),
+        Some(77) => return Err("client: the DNS response does not answer our query (77)"),
         Some(99) => return Err("client: the panic handler ran (99)"),
         _ => return Err("the client exited with a code from nowhere in the contract"),
     }
@@ -353,6 +403,10 @@ fn test_arp_service() -> Res {
     // Teardown. netd's FIRST incarnation was reaped by the supervisor
     // when it respawned (ADR-0025's GC debt, closed in ADR-0028), so
     // only the live one is destroyed here.
+    if let Some(p) = rng_pid {
+        proc::destroy(p).map_err(|_| "destroying rngd failed")?;
+        crate::spawn::forget(p).map_err(|_| "rngd spawn record forget refused")?;
+    }
     crate::supervise::unregister(netd_pid2);
     proc::destroy(netd_pid2).map_err(|_| "destroying the restarted netd failed")?;
     proc::destroy(stack_pid).map_err(|_| "destroying netstackd failed")?;
@@ -362,6 +416,7 @@ fn test_arp_service() -> Res {
     }
     ipc::destroy_endpoint(ep_netd).map_err(|_| "endpoint teardown refused")?;
     ipc::destroy_endpoint(ep_stack).map_err(|_| "endpoint teardown refused")?;
+    ipc::destroy_endpoint(ep_rng).map_err(|_| "endpoint teardown refused")?;
     for n in [
         nid_irq,
         nid_stack,
@@ -369,6 +424,7 @@ fn test_arp_service() -> Res {
         nid_backoff,
         nid_sync,
         nid_go,
+        nid_rng,
     ] {
         ipc::destroy_notification(n).map_err(|_| "notification teardown refused")?;
     }

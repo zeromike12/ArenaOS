@@ -229,6 +229,32 @@ def extra_checks(serial: str) -> bool:
               "no frame failed a checksum (they are verified on receive, not "
               "assumed)")
 
+    # ---- M7.4: UDP, with authority by possession (ADR-0033) ----------
+    check("unguessable UDP handles from rngd" in serial,
+          "UDP handles are drawn from the entropy service — a handle is "
+          "authority by POSSESSION, so a guessable one would be authority "
+          "by arithmetic")
+    check("a second bind of the same port was refused, and a FORGED handle "
+          "bought nothing" in serial,
+          "bind-once is enforced (a namespace rule) and a forged handle is "
+          "refused (the authority rule) — the two are separate questions "
+          "and are tested separately")
+    m = re.search(r"UDP round trip to 10\.0\.2\.3:53, (\d+)-byte response "
+                  r"with our transaction id 0x0*([0-9a-f]+) and the response "
+                  r"bit set", serial)
+    check(m is not None,
+          "a real UDP round trip against slirp's resolver — the response is "
+          "matched on OUR transaction id, so a datagram that merely arrived "
+          "would not pass")
+    if m:
+        check(m.group(2) == "a7e5",
+              f"the transaction id came back as sent (0x{m.group(2)})")
+    mu = re.search(r"netstackd: UDP — (\d+) delivered, (\d+) unbound, "
+                   r"(\d+) bad handle\(s\) refused", serial)
+    check(mu is not None and int(mu.group(1)) >= 1 and int(mu.group(3)) >= 1,
+          "the stack's own accounting shows a datagram delivered to a "
+          "binding and a bad handle refused")
+
     # Phase 7's standing rule, checked the only way a log can: the
     # machine reached its prompt without a suite hanging on a clock.
     check("arena>" in serial,
@@ -242,7 +268,7 @@ def main() -> int:
         return rc
     serial = (arena_env.build_dir() / "serial-m7.log").read_text()
     ok = extra_checks(serial)
-    print(f"[test-m7] M7.0-7.2 TIMERS + ARP + IPv4/ICMP: {'PASS' if ok else 'FAIL'}  "
+    print(f"[test-m7] M7.0-7.4 TIMERS + ARP + IPv4/ICMP + UDP: {'PASS' if ok else 'FAIL'}  "
           f"(serial: build/serial-m7.log)")
     return 0 if ok else 1
 
