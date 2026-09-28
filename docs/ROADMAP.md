@@ -759,8 +759,18 @@ assertions).
       from 10.0.2.2 in 1281us, timed on the monotonic clock, demux
       sorting 2 ARP and 1 IPv4 with none dropped. The layering shows
       in the failures too — an unresolvable address fails UNREACHABLE
-      (no host), a silent resolved host would fail NO_REPLY. Gates:
-      run_tests 14/14 (414 assertions), fmt + clippy clean.
+      (no host), a silent resolved host would fail NO_REPLY.
+      **Reviewed and tightened before UDP** (v0.14.0 review): an echo
+      reply is now bound to the remote ADDRESS as well as the
+      identifier and sequence; IHL must be exactly 5; fragments are
+      refused; the payload is governed by the IPv4 header's
+      total_length rather than the Ethernet frame (padding was being
+      fed to the checksum and only passing because zero padding does
+      not change a ones-complement sum); and echo replies must carry
+      code 0. Those reject paths are exercised by a parser self-test
+      on synthetic frames, which itself had to be hardened after it
+      passed against a deliberately reintroduced regression. Gates:
+      run_tests 14/14 (415 assertions), fmt + clippy clean.
 - [ ] **7.3 UDP.** The demultiplexer grows one arm; the real design
       question is PORTS — who may bind one is a capability question,
       not a protocol one, and gets its own ADR. netd's 64-byte inline

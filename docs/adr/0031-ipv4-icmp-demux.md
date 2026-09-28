@@ -92,6 +92,54 @@ report the measurement, not the inference.
 - **The receive path is still one frame per IPC call.** Fine for ARP
   and ping, and the first thing UDP throughput will complain about.
 
+## Errata (found in review of v0.14.0)
+
+The section above said "the smallest thing that deserves the name…
+but what IS implemented is implemented properly". The parser did not
+live up to the second half, in four ways, all found in review before
+UDP was built on it:
+
+1. **An echo reply was matched on identifier and sequence alone.** A
+   reply from a different host carrying the same pair satisfied the
+   pending ping. The pending echo is now bound to the remote address
+   too.
+2. **`IHL > 5` was accepted** despite "no options".
+3. **Fragments were not rejected** despite "no fragmentation" — MF
+   and a nonzero offset were simply ignored.
+4. **The payload length came from the Ethernet frame, not from the
+   IPv4 header's `total_length`.** This is the one worth dwelling on,
+   because it *looked* correct: Ethernet pads short frames to 60
+   bytes, so the ICMP checksum was being computed over padding, and
+   zero padding happens not to change a ones-complement sum. It would
+   have begun failing the day a peer padded with anything else.
+
+All four are fixed, and `code == 0` is now required of an echo reply.
+The rule the errata point at: **a parser that accepts more than its
+specification is a specification nobody is keeping.**
+
+### Testing the negative space
+
+Every one of those reject paths exists for a peer that slirp will
+never be. Left alone they ship untested, which is how the four above
+survived being written in the first place. So netstackd now feeds its
+own parser seven synthetic frames at startup — options, two kinds of
+fragment, an over-long declared length, a corrupt checksum, a foreign
+echo reply, and one genuine article as a control — and asserts the
+counter each case should move.
+
+The first version of that self-test **passed 7/7 with the old
+permissive check deliberately restored**, because its options frame
+carried a checksum covering only 20 bytes and was therefore rejected
+as a bad checksum: the IHL rule was never exercised at all. Every
+synthetic frame is now valid except for the one thing under test, and
+the hardened version reports 6/7 against the injected regression.
+
+That is the second time this project has caught itself writing a
+proof that could not fail (the first is recorded in docs/TESTING.md
+under M7.1b). The lesson has earned its own rule: **when a test of a
+failure path passes, break the thing it tests and watch it fail
+before believing it.**
+
 ## Future implications
 
 - UDP is now a small step: the demultiplexer grows one arm, and the
@@ -105,3 +153,7 @@ report the measurement, not the inference.
 - The checksum routine is shared by IP and ICMP and will be shared by
   UDP and TCP, where it also covers a pseudo-header. Worth keeping in
   one place as that arrives.
+- The parser self-test is the template for every protocol added from
+  here: the wire cannot produce a hostile packet, so the stack must
+  produce them itself, and each new reject path arrives with the
+  synthetic frame that exercises it.

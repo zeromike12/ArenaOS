@@ -426,6 +426,20 @@ not inferred by the harness.
 When a test of a failure path passes on the first run, the right
 question is whether the failure actually happened.
 
+**It happened again in M7.2, so this is now a rule rather than an
+anecdote.** netstackd's receive parser gained a self-test that feeds
+it seven frames the wire will never send (options headers, fragments,
+truncated datagrams, bad checksums, an echo reply from the wrong
+host) and asserts each is refused. It passed 7/7 — and then passed
+7/7 again with the *old permissive parser deliberately restored*,
+because the options frame carried a 20-byte checksum and was being
+rejected for the wrong reason entirely.
+
+The rule: **when a test of a failure path passes, break the thing it
+tests and watch it fail before believing it.** Every synthetic frame
+is now valid except for the single thing under test, and the hardened
+self-test reports 6/7 against the injected regression.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to
