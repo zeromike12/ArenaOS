@@ -178,7 +178,8 @@ def extra_checks(serial: str) -> bool:
 
     # ---- M7.2: IPv4 + ICMP on the same boundary (ADR-0031) -----------
     m = re.search(r"netstackd: echo reply from 10\.0\.2\.2 seq (\d+) in "
-                  r"(\d+)us \(identifier and sequence both matched\)", serial)
+                  r"(\d+)us — identifier, sequence and all (\d+) payload "
+                  r"bytes matched across the chunked receive", serial)
     check(m is not None,
           "an ICMP echo reply came back and was MATCHED on identifier and "
           "sequence — a reply that merely arrived could be an answer to "
@@ -188,6 +189,22 @@ def extra_checks(serial: str) -> bool:
         check(0 < rtt < 2_000_000,
               f"the round-trip time is plausible and measured on the "
               f"monotonic clock ({rtt}us)")
+    # ---- M7.3: frames bigger than one message (ADR-0032) -------------
+    if m:
+        check(int(m.group(3)) >= 200,
+              f"the echo carried a {m.group(3)}-byte payload — a frame far "
+              f"larger than one 64-byte IPC message, which the driver used "
+              f"to DROP outright")
+    mm = re.search(r"(\d+) continuation chunk\(s\) read, (\d+) oversize, "
+                   r"(\d+) corrupt payload", serial)
+    check(mm is not None and int(mm.group(1)) >= 3,
+          "the frame really was reassembled from multiple chunks (not a "
+          "single message that happened to fit)")
+    check(mm is not None and int(mm.group(3)) == 0,
+          "every payload byte survived reassembly — the pattern is "
+          "position-dependent, so a dropped, duplicated or reordered chunk "
+          "could not pass")
+
     check("failed as UNREACHABLE (no host), not NO_REPLY (a silent host)"
           in serial,
           "the layers report distinctly: a ping to an unresolvable address "

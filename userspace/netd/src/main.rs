@@ -186,6 +186,12 @@ struct Drv {
     /// the hold is busy are dropped (logged, counted, buffer re-posted
     /// — the ring never shrinks).
     hold: Option<(u16, u32)>,
+    /// The frame currently being read out in chunks (M7.3): the
+    /// receive-ring buffer id and the frame's full length. Its buffer
+    /// is NOT re-posted until the last chunk has been taken, so the
+    /// caller is reading a frame that is still where the device put
+    /// it — no second copy anywhere in the driver.
+    staged: Option<(u16, u32)>,
     /// The caller's RECV deadline has passed (M7.1): sticky for the
     /// duration of that request so no further wait parks again.
     deadline_seen: bool,
@@ -511,6 +517,7 @@ pub unsafe extern "C" fn _start() -> ! {
             mac,
             pending: 0,
             hold: None,
+            staged: None,
             deadline_seen: false,
             timeouts: 0,
             completions: 0,
@@ -684,50 +691,41 @@ pub unsafe extern "C" fn _start() -> ! {
                         reply_err(NET_S_TIMEOUT);
                         continue;
                     };
-                    if flen > MSG_BYTES as u32 {
-                        // The documented v1 limit: inline delivery caps
-                        // at MSG_BYTES. Drop honestly (the buffer goes
-                        // straight back to the ring) and refuse typed.
-                        log_line(|o| {
-                            o.str("netd: received frame of ");
-                            o.u64(u64::from(flen));
-                            o.str(" bytes exceeds the v1 inline limit (");
-                            o.u64(MSG_BYTES as u64);
-                            o.str(") — dropped");
-                        });
-                        let p = drv.rx_phys[id as usize];
-                        drv.post_rx(id, p);
+                    // STAGE the frame; answer the first chunk.
+                    //
+                    // Until now a frame longer than one IPC message
+                    // was DROPPED — "the documented v1 limit" — which
+                    // was honest, and made every protocol above this
+                    // driver a protocol for small packets only. A DNS
+                    // answer does not fit in 64 bytes; a TCP segment
+                    // certainly does not.
+                    //
+                    // So the frame is staged here and read out in
+                    // chunks by offset, and its buffer returns to the
+                    // ring when the last chunk is taken. This is NOT
+                    // zero-copy and does not pretend to be: it costs
+                    // one IPC round trip per 64 bytes, which is fine
+                    // for a DNS answer and wrong for throughput. The
+                    // zero-copy path (the caller's own frame posted
+                    // into the receive ring) is a larger change and
+                    // gets its own milestone (ADR-0032).
+                    drv.staged = Some((id, flen));
+                    reply_chunk(&mut drv, 0, flen);
+                }
+                NET_OP_RECV_CHUNK => {
+                    // Continue reading the staged frame. Offsets are
+                    // the caller's business; netd only refuses ones
+                    // that are not inside the frame it is holding.
+                    let Some((_, flen)) = drv.staged else {
+                        reply_err(NET_S_BAD_LEN);
+                        continue;
+                    };
+                    let offset = w0 as u32;
+                    if offset >= flen {
                         reply_err(NET_S_BAD_LEN);
                         continue;
                     }
-                    // Copy the frame out of the RX buffer into the
-                    // reply's inline message, then re-post the buffer.
-                    let mut out = [0u64; MSG_BYTES / 8];
-                    core::ptr::copy_nonoverlapping(
-                        (drv.rx_va[id as usize] + VNET_HDR_LEN as u64) as *const u8,
-                        out.as_mut_ptr() as *mut u8,
-                        flen as usize,
-                    );
-                    let p = drv.rx_phys[id as usize];
-                    drv.post_rx(id, p);
-                    let rr = syscall5(
-                        SYS_IPC_REPLY,
-                        SLOT_EP,
-                        NET_S_OK,
-                        u64::from(flen),
-                        CAP_NONE,
-                        out.as_ptr() as u64,
-                    );
-                    if rr < 0 {
-                        fail(EXIT_REPLY, "SYS_IPC_REPLY refused");
-                    }
-                    log_line(|o| {
-                        o.str("netd: RECV → ");
-                        o.u64(u64::from(flen));
-                        o.str(" bytes delivered inline (completion #");
-                        o.u64(drv.completions);
-                        o.str(")");
-                    });
+                    reply_chunk(&mut drv, offset, flen);
                 }
                 _ => {
                     if landed != CAP_NONE {
@@ -746,6 +744,55 @@ fn reply_ok(w1: u64) {
     let rr = unsafe { syscall5(SYS_IPC_REPLY, SLOT_EP, NET_S_OK, w1, CAP_NONE, 0) };
     if rr < 0 {
         fail(EXIT_REPLY, "SYS_IPC_REPLY refused");
+    }
+}
+
+/// Answer one chunk of the staged frame, and release its buffer once
+/// the caller has read to the end.
+///
+/// Word 1 of the reply is always the frame's FULL length, so a caller
+/// knows from the first chunk how many more to ask for.
+///
+/// # Safety
+/// A reply is legal exactly once per received call; the staged buffer
+/// id indexes this driver's own receive ring.
+unsafe fn reply_chunk(drv: &mut Drv, offset: u32, flen: u32) {
+    // SAFETY: function contract; the copy stays inside one chunk and
+    // inside the frame.
+    unsafe {
+        let Some((id, _)) = drv.staged else {
+            reply_err(NET_S_BAD_LEN);
+            return;
+        };
+        let remaining = flen - offset;
+        let n = if remaining > NET_CHUNK as u32 {
+            NET_CHUNK as u32
+        } else {
+            remaining
+        };
+        let mut out = [0u64; NET_CHUNK / 8];
+        core::ptr::copy_nonoverlapping(
+            (drv.rx_va[id as usize] + VNET_HDR_LEN as u64 + u64::from(offset)) as *const u8,
+            out.as_mut_ptr() as *mut u8,
+            n as usize,
+        );
+        if offset + n >= flen {
+            // Last chunk: the device gets its buffer back.
+            let p = drv.rx_phys[id as usize];
+            drv.post_rx(id, p);
+            drv.staged = None;
+        }
+        let rr = syscall5(
+            SYS_IPC_REPLY,
+            SLOT_EP,
+            NET_S_OK,
+            u64::from(flen),
+            CAP_NONE,
+            out.as_ptr() as u64,
+        );
+        if rr < 0 {
+            fail(EXIT_REPLY, "SYS_IPC_REPLY refused");
+        }
     }
 }
 

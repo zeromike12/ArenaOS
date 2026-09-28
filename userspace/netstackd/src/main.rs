@@ -144,7 +144,11 @@ const ICMP_HDR: usize = 8;
 /// Bytes of payload carried in an echo request. Small on purpose: the
 /// whole frame must fit netd's 64-byte inline reply limit, and a
 /// 50-byte frame comes back padded to the 60-byte Ethernet minimum.
-const PING_PAYLOAD: usize = 8;
+const PING_PAYLOAD: usize = 200;
+/// Largest frame this stack will reassemble. One Ethernet MTU is the
+/// eventual answer; 512 is what the current receive path and this
+/// service's budget support, and it is stated rather than implied.
+const FRAME_MAX: usize = 512;
 const PING_FRAME_LEN: u64 = (ETH_HDR + IP_HDR + ICMP_HDR + PING_PAYLOAD) as u64;
 
 const IP_PROTO_ICMP: u8 = 1;
@@ -197,6 +201,12 @@ struct Stack {
     rx_fragments: u64,
     /// Echo replies refused because they came from the wrong host.
     rx_wrong_source: u64,
+    /// Continuation chunks read for frames larger than one message.
+    rx_chunks: u64,
+    /// Frames longer than this stack will reassemble.
+    rx_oversize: u64,
+    /// Echo replies whose payload did not survive reassembly.
+    rx_corrupt_payload: u64,
     /// The ARP answer this stack is currently waiting for, and the
     /// answer once it lands. Held here rather than on the call stack
     /// because the demultiplexer — not the caller — is what recognises
@@ -339,6 +349,9 @@ pub unsafe extern "C" fn _start() -> ! {
             rx_bad_checksum: 0,
             rx_fragments: 0,
             rx_wrong_source: 0,
+            rx_chunks: 0,
+            rx_oversize: 0,
+            rx_corrupt_payload: 0,
             want_arp: None,
             got_arp: None,
             want_icmp: None,
@@ -479,7 +492,13 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                         o.u64(st8.rx_dropped);
                         o.str(" dropped, ");
                         o.u64(st8.rx_bad_checksum);
-                        o.str(" bad checksum");
+                        o.str(" bad checksum; ");
+                        o.u64(st8.rx_chunks);
+                        o.str(" continuation chunk(s) read, ");
+                        o.u64(st8.rx_oversize);
+                        o.str(" oversize, ");
+                        o.u64(st8.rx_corrupt_payload);
+                        o.str(" corrupt payload");
                     });
                     reply(
                         ARP_S_OK,
@@ -551,6 +570,75 @@ unsafe fn reattach(st8: &mut Stack) -> bool {
     }
 }
 
+/// Read one whole frame from the driver into `buf`, in chunks.
+///
+/// netd hands back a frame's FULL length with its first chunk and the
+/// rest by offset (M7.3, ADR-0032). Before that a frame larger than
+/// one IPC message was dropped by the driver, which quietly made this
+/// a stack for small packets only.
+///
+/// Returns the frame length, or 0 for "nothing usable arrived".
+///
+/// # Safety
+/// As `_start`.
+unsafe fn recv_frame(st8: &mut Stack, buf: &mut [u8; FRAME_MAX], timeout_us: u64) -> usize {
+    // SAFETY: function contract.
+    unsafe {
+        let mut chunk = [0u64; MSG_BYTES / 8];
+        let (status, flen) =
+            netd_call(NET_OP_RECV, timeout_us, CAP_NONE, chunk.as_mut_ptr() as u64);
+        if status == NET_S_TIMEOUT {
+            st8.timeouts += 1;
+            return 0;
+        }
+        if status == ARP_S_LINK_DOWN {
+            reattach(st8);
+            return 0;
+        }
+        if status != NET_S_OK {
+            return 0;
+        }
+        let total = flen as usize;
+        let keep = core::cmp::min(total, FRAME_MAX);
+        if total > FRAME_MAX {
+            st8.rx_oversize += 1;
+        }
+        let first = core::cmp::min(total, MSG_BYTES);
+        core::ptr::copy_nonoverlapping(
+            chunk.as_ptr() as *const u8,
+            buf.as_mut_ptr(),
+            core::cmp::min(first, keep),
+        );
+        let mut off = first;
+        // Every remaining chunk is read even when the frame is too
+        // long to keep: the driver only returns its receive buffer to
+        // the ring when the LAST chunk is taken, so abandoning one
+        // here would leak a buffer per oversize frame.
+        while off < total {
+            let (st, _) = netd_call(
+                NET_OP_RECV_CHUNK,
+                off as u64,
+                CAP_NONE,
+                chunk.as_mut_ptr() as u64,
+            );
+            if st != NET_S_OK {
+                return 0;
+            }
+            let n = core::cmp::min(total - off, MSG_BYTES);
+            if off < keep {
+                core::ptr::copy_nonoverlapping(
+                    chunk.as_ptr() as *const u8,
+                    buf.as_mut_ptr().add(off),
+                    core::cmp::min(n, keep - off),
+                );
+            }
+            off += n;
+            st8.rx_chunks += 1;
+        }
+        if total > FRAME_MAX { 0 } else { total }
+    }
+}
+
 /// The receive demultiplexer (M7.2): pull ONE frame from the driver
 /// and give it to whoever it belongs to.
 ///
@@ -572,21 +660,13 @@ unsafe fn reattach(st8: &mut Stack) -> bool {
 unsafe fn pump(st8: &mut Stack, timeout_us: u64) -> bool {
     // SAFETY: function contract.
     unsafe {
-        let mut frame = [0u64; MSG_BYTES / 8];
-        let (status, flen) =
-            netd_call(NET_OP_RECV, timeout_us, CAP_NONE, frame.as_mut_ptr() as u64);
-        if status == NET_S_TIMEOUT {
-            st8.timeouts += 1;
-            return false;
-        }
-        if status == ARP_S_LINK_DOWN {
-            return reattach(st8);
-        }
-        if status != NET_S_OK {
+        let mut frame = [0u8; FRAME_MAX];
+        let len = recv_frame(st8, &mut frame, timeout_us);
+        if len == 0 {
             return false;
         }
         st8.rx_frames += 1;
-        demux(st8, frame.as_ptr() as *const u8, flen as usize);
+        demux(st8, frame.as_ptr(), len);
         true
     }
 }
@@ -778,7 +858,28 @@ unsafe fn icmp_in(st8: &mut Stack, src: [u8; 4], icmp: *const u8, len: usize) {
         let from_expected = st8.want_icmp_ip == Some(src);
         match st8.want_icmp {
             Some((want_id, want_seq)) if from_expected && want_id == id && want_seq == seq => {
-                st8.got_icmp = true;
+                // The PAYLOAD must come back byte-for-byte. This is
+                // what actually proves the chunked receive path
+                // (M7.3): a 200-byte echo crosses four IPC messages,
+                // and a reassembly that dropped, duplicated or
+                // reordered a chunk would still produce a frame with
+                // the right identifier and sequence. The pattern is
+                // position-dependent for the same reason.
+                let mut intact = len >= ICMP_HDR + PING_PAYLOAD;
+                if intact {
+                    for i in 0..PING_PAYLOAD {
+                        if at(ICMP_HDR + i) != b"arenaos!"[i % 8] ^ (i as u8) {
+                            intact = false;
+                            break;
+                        }
+                    }
+                }
+                if intact {
+                    st8.got_icmp = true;
+                } else {
+                    st8.rx_corrupt_payload += 1;
+                    st8.rx_dropped += 1;
+                }
             }
             _ => {
                 if !from_expected {
@@ -814,7 +915,7 @@ unsafe fn parser_selftest(st8: &mut Stack) -> u32 {
     // and every write below is inside it.
     unsafe {
         let mut passed = 0u32;
-        let mut f = [0u8; 64];
+        let mut f = [0u8; FRAME_MAX];
 
         // A valid ICMP echo reply from 10.0.2.2, id 0x4152 seq 1,
         // rebuilt from scratch for each case and then damaged.
@@ -827,41 +928,51 @@ unsafe fn parser_selftest(st8: &mut Stack) -> u32 {
         // watching the self-test still report 7/7 — a proof that
         // cannot fail is not a proof, which this project has now
         // learned twice.
-        let build = |f: &mut [u8; 64], src: [u8; 4], ihl_words: u8, frag: u16, total: u16| {
-            for b in f.iter_mut() {
-                *b = 0;
-            }
-            let ihl = ihl_words as usize * 4;
-            f[12] = (ETHERTYPE_IPV4 >> 8) as u8;
-            f[13] = (ETHERTYPE_IPV4 & 0xFF) as u8;
-            f[ETH_HDR] = 0x40 | ihl_words;
-            f[ETH_HDR + 2] = (total >> 8) as u8;
-            f[ETH_HDR + 3] = (total & 0xFF) as u8;
-            f[ETH_HDR + 6] = (frag >> 8) as u8;
-            f[ETH_HDR + 7] = (frag & 0xFF) as u8;
-            f[ETH_HDR + 8] = IP_TTL;
-            f[ETH_HDR + 9] = IP_PROTO_ICMP;
-            for i in 0..4 {
-                f[ETH_HDR + 12 + i] = src[i];
-                f[ETH_HDR + 16 + i] = SLIRP_GUEST_IP[i];
-            }
-            // Options (when ihl > 5) are NOPs, and the checksum covers
-            // the header that is actually there.
-            for i in IP_HDR..ihl {
-                f[ETH_HDR + i] = 1;
-            }
-            let ck = checksum(f.as_ptr().add(ETH_HDR), ihl);
-            f[ETH_HDR + 10] = (ck >> 8) as u8;
-            f[ETH_HDR + 11] = (ck & 0xFF) as u8;
-            let ic = ETH_HDR + ihl;
-            f[ic] = ICMP_ECHO_REPLY;
-            f[ic + 4] = 0x41;
-            f[ic + 5] = 0x52;
-            f[ic + 7] = 1;
-            let ck = checksum(f.as_ptr().add(ic), ICMP_HDR + PING_PAYLOAD);
-            f[ic + 2] = (ck >> 8) as u8;
-            f[ic + 3] = (ck & 0xFF) as u8;
-        };
+        let build =
+            |f: &mut [u8; FRAME_MAX], src: [u8; 4], ihl_words: u8, frag: u16, total: u16| {
+                for b in f.iter_mut() {
+                    *b = 0;
+                }
+                let ihl = ihl_words as usize * 4;
+                f[12] = (ETHERTYPE_IPV4 >> 8) as u8;
+                f[13] = (ETHERTYPE_IPV4 & 0xFF) as u8;
+                f[ETH_HDR] = 0x40 | ihl_words;
+                f[ETH_HDR + 2] = (total >> 8) as u8;
+                f[ETH_HDR + 3] = (total & 0xFF) as u8;
+                f[ETH_HDR + 6] = (frag >> 8) as u8;
+                f[ETH_HDR + 7] = (frag & 0xFF) as u8;
+                f[ETH_HDR + 8] = IP_TTL;
+                f[ETH_HDR + 9] = IP_PROTO_ICMP;
+                for i in 0..4 {
+                    f[ETH_HDR + 12 + i] = src[i];
+                    f[ETH_HDR + 16 + i] = SLIRP_GUEST_IP[i];
+                }
+                // Options (when ihl > 5) are NOPs, and the checksum covers
+                // the header that is actually there.
+                for i in IP_HDR..ihl {
+                    f[ETH_HDR + i] = 1;
+                }
+                let ck = checksum(f.as_ptr().add(ETH_HDR), ihl);
+                f[ETH_HDR + 10] = (ck >> 8) as u8;
+                f[ETH_HDR + 11] = (ck & 0xFF) as u8;
+                let ic = ETH_HDR + ihl;
+                f[ic] = ICMP_ECHO_REPLY;
+                f[ic + 4] = 0x41;
+                f[ic + 5] = 0x52;
+                f[ic + 7] = 1;
+                // The same position-dependent payload a real echo
+                // carries. The control case must be genuine in EVERY
+                // respect the parser checks or it stops being a
+                // control — adding the payload-integrity check
+                // immediately failed it, which is the self-test doing
+                // its job on itself.
+                for i in 0..PING_PAYLOAD {
+                    f[ic + ICMP_HDR + i] = b"arenaos!"[i % 8] ^ (i as u8);
+                }
+                let ck = checksum(f.as_ptr().add(ic), ICMP_HDR + PING_PAYLOAD);
+                f[ic + 2] = (ck >> 8) as u8;
+                f[ic + 3] = (ck & 0xFF) as u8;
+            };
         let total_ok = (IP_HDR + ICMP_HDR + PING_PAYLOAD) as u16;
         let frame_len = ETH_HDR + total_ok as usize;
 
@@ -1112,7 +1223,9 @@ unsafe fn ping(st8: &mut Stack, ip: [u8; 4]) -> Result<u64, u64> {
                     o.u64(seq as u64);
                     o.str(" in ");
                     o.u64(rtt);
-                    o.str("us (identifier and sequence both matched)");
+                    o.str("us — identifier, sequence and all ");
+                    o.u64(PING_PAYLOAD as u64);
+                    o.str(" payload bytes matched across the chunked receive");
                 });
                 return Ok(rtt);
             }
@@ -1174,8 +1287,12 @@ unsafe fn build_echo(st8: &Stack, mac: [u8; 6], ip: [u8; 4], id: u16, seq: u16) 
         put(ic + 5, (id & 0xFF) as u8);
         put(ic + 6, (seq >> 8) as u8);
         put(ic + 7, (seq & 0xFF) as u8);
+        // A repeating, POSITION-DEPENDENT pattern. Constant bytes
+        // would let a reassembly bug that duplicated or reordered a
+        // chunk pass unnoticed; this way the echoed payload only
+        // matches if every chunk came back in the right place.
         for i in 0..PING_PAYLOAD {
-            put(ic + ICMP_HDR + i, b"arenaos!"[i]);
+            put(ic + ICMP_HDR + i, b"arenaos!"[i % 8] ^ (i as u8));
         }
         let ck = checksum((base + ic as u64) as *const u8, ICMP_HDR + PING_PAYLOAD);
         put(ic + 2, (ck >> 8) as u8);

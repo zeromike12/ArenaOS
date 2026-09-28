@@ -216,6 +216,19 @@ pub const NET_OP_SEND: u64 = 1;
 /// is already held.
 pub const NET_OP_RECV: u64 = 2;
 pub const NET_OP_MAC: u64 = 3;
+/// RECV_CHUNK(w0 = byte offset): continue reading the frame that the
+/// last `RECV` staged (M7.3, ADR-0032).
+///
+/// A frame larger than one IPC message used to be dropped, which made
+/// every protocol above this driver a protocol for small packets: a
+/// DNS answer does not fit in 64 bytes. `RECV` now stages the frame
+/// and returns its FULL length with the first chunk; the caller reads
+/// the rest by offset, and the buffer returns to the receive ring
+/// when the last chunk is taken.
+pub const NET_OP_RECV_CHUNK: u64 = 4;
+
+/// Bytes of frame carried by one RECV or RECV_CHUNK reply.
+pub const NET_CHUNK: usize = MSG_BYTES;
 
 pub const NET_S_OK: u64 = 0;
 pub const NET_S_BAD_OP: u64 = (-1i64) as u64;
