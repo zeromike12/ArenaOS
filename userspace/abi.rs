@@ -387,6 +387,16 @@ pub const CONSOLE_BADGE_GIVE_UP: u64 = 1 << 19;
 pub const ARP_OP_SHUTDOWN: u64 = 0;
 pub const ARP_OP_RESOLVE: u64 = 1;
 pub const ARP_OP_STATS: u64 = 2;
+/// PING (M7.2): w0 = IPv4 address. Resolves the address if needed,
+/// sends an ICMP echo request, and replies with the round-trip time
+/// in MICROSECONDS in word 1 — measured with `SYS_CLOCK_NOW`, so it
+/// is the machine's own clock rather than a count of retries.
+pub const ICMP_OP_PING: u64 = 3;
+/// Receive-path counters (M7.2), packed into word 1: frames seen in
+/// the low 16 bits, ARP in the next 16, IPv4 in the next, and frames
+/// dropped by the demultiplexer in the top 16. A stack that cannot
+/// say what it dropped is not demultiplexing, it is guessing.
+pub const ICMP_OP_RXSTATS: u64 = 4;
 
 pub const ARP_S_OK: u64 = 0;
 pub const ARP_S_BAD_OP: u64 = (-1i64) as u64;
@@ -394,6 +404,12 @@ pub const ARP_S_BAD_OP: u64 = (-1i64) as u64;
 /// address may exist and be silent; this is "no answer", not "no
 /// such host".
 pub const ARP_S_UNREACHABLE: u64 = (-2i64) as u64;
+/// The echo request went out and nothing came back before the
+/// deadline. Distinct from UNREACHABLE, which means the address could
+/// not even be resolved: one is "no host", the other is "a host that
+/// did not answer", and a diagnostic tool needs the difference.
+pub const ICMP_S_NO_REPLY: u64 = (-4i64) as u64;
+
 /// The driver below refused or is gone (see STATUS_SERVICE_GONE).
 pub const ARP_S_LINK_DOWN: u64 = (-3i64) as u64;
 

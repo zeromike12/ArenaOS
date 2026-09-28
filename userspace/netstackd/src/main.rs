@@ -20,12 +20,27 @@
 //! living inside its driver would lose every connection each time the
 //! NIC wedged.
 //!
-//! **What v1 does.** ARP over IPv4, and nothing else: resolve an IPv4
-//! address to a MAC by putting a real request on the wire, cache the
-//! answer with a TTL, and hand cached answers back without touching
-//! the wire again. That is the smallest slice with a real protocol
-//! and a real cache, and it exercises every part of the boundary the
-//! rest of Phase 7 will use.
+//! **What it does.** ARP over IPv4 with a TTL cache (M7.1), and since
+//! M7.2 a receive DEMULTIPLEXER with IPv4 and ICMP echo on top of it:
+//! `ping` resolves the address if it has to, sends a real echo
+//! request, and times the answer with the monotonic clock.
+//!
+//! The demultiplexer is the structural change. With one protocol the
+//! receive path could live inside `resolve`, which read frames itself
+//! and discarded anything that was not an ARP reply. With two that is
+//! wrong: an echo reply arriving while the stack happened to be
+//! resolving would be thrown away, and the ping waiting for it would
+//! time out for no reason at all. Recognising a frame is now one job
+//! in one place, and operations wait on state the demultiplexer
+//! updates.
+//!
+//! IPv4 here is deliberately the smallest thing that deserves the
+//! name: fixed 20-byte header, no options, no fragmentation, no
+//! routing (every destination is on-link and resolved with ARP). What
+//! IS implemented is done properly — both checksums are computed on
+//! send and VERIFIED on receive, an echo reply must match the
+//! identifier AND sequence that went out, and anything else is
+//! counted and dropped rather than believed.
 //!
 //! **Why the deadline lives in netd.** A lost ARP reply must not park
 //! this service forever. It cannot bound its own wait, because a
@@ -104,8 +119,46 @@ const ARP_TRIES: u32 = 3;
 
 const ARP_FRAME_LEN: u64 = 42;
 const ETHERTYPE_ARP: u16 = 0x0806;
+const ETHERTYPE_IPV4: u16 = 0x0800;
 const ARP_OP_REQUEST: u16 = 1;
 const ARP_OP_REPLY: u16 = 2;
+
+// ---- IPv4 + ICMP (M7.2) -----------------------------------------------------
+//
+// Deliberately the smallest thing that can be called IPv4: a fixed
+// 20-byte header, no options, no fragmentation, no routing (every
+// destination is treated as on-link and resolved with ARP), and TTL
+// 64 because that is what everything else picks. What IS here is
+// done properly — the header checksum is computed on send and
+// VERIFIED on receive, and a frame that fails it is counted and
+// dropped rather than trusted.
+
+/// Ethernet header length: dst(6) + src(6) + ethertype(2).
+const ETH_HDR: usize = 14;
+/// IPv4 header without options.
+const IP_HDR: usize = 20;
+/// ICMP echo header: type, code, checksum, identifier, sequence.
+const ICMP_HDR: usize = 8;
+/// Bytes of payload carried in an echo request. Small on purpose: the
+/// whole frame must fit netd's 64-byte inline reply limit, and a
+/// 50-byte frame comes back padded to the 60-byte Ethernet minimum.
+const PING_PAYLOAD: usize = 8;
+const PING_FRAME_LEN: u64 = (ETH_HDR + IP_HDR + ICMP_HDR + PING_PAYLOAD) as u64;
+
+const IP_PROTO_ICMP: u8 = 1;
+const ICMP_ECHO_REQUEST: u8 = 8;
+const ICMP_ECHO_REPLY: u8 = 0;
+/// Time to live. Nothing here routes, so this only has to be
+/// plausible to whatever answers.
+const IP_TTL: u8 = 64;
+/// How long to wait for an echo reply before calling it silence.
+const PING_TIMEOUT_US: u64 = 500_000;
+/// How many echoes to send before giving up. ICMP is unreliable and a
+/// single lost packet is not an unreachable host — but note this is
+/// NOT the same licence as ARP's retry: an echo is idempotent because
+/// it is a diagnostic with a sequence number, not because retrying
+/// datagrams is generally safe.
+const PING_TRIES: u32 = 3;
 
 #[derive(Clone, Copy)]
 struct Entry {
@@ -132,6 +185,22 @@ struct Stack {
     timeouts: u64,
     /// Times the driver died under us and was picked back up.
     reattaches: u64,
+    // ---- the receive demultiplexer's own account of itself (M7.2) ----
+    rx_frames: u64,
+    rx_arp: u64,
+    rx_ipv4: u64,
+    rx_dropped: u64,
+    rx_bad_checksum: u64,
+    /// The ARP answer this stack is currently waiting for, and the
+    /// answer once it lands. Held here rather than on the call stack
+    /// because the demultiplexer — not the caller — is what recognises
+    /// a frame now (M7.2).
+    want_arp: Option<[u8; 4]>,
+    got_arp: Option<[u8; 6]>,
+    /// The echo this stack is waiting for: (identifier, sequence).
+    want_icmp: Option<(u16, u16)>,
+    got_icmp: bool,
+    ping_seq: u16,
 }
 
 impl Stack {
@@ -252,6 +321,16 @@ pub unsafe extern "C" fn _start() -> ! {
             replies_seen: 0,
             timeouts: 0,
             reattaches: 0,
+            rx_frames: 0,
+            rx_arp: 0,
+            rx_ipv4: 0,
+            rx_dropped: 0,
+            rx_bad_checksum: 0,
+            want_arp: None,
+            got_arp: None,
+            want_icmp: None,
+            got_icmp: false,
+            ping_seq: 0,
         };
         log_line(|o| {
             o.str("netstackd: ready — ARP over IPv4 for ");
@@ -322,6 +401,26 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                 // The first version read reply[2] on the client side,
                 // which is the LANDED CAP slot — it came back as
                 // 18446744073709551615 and looked like a counter.
+                ICMP_OP_PING => {
+                    let ip = [
+                        (arg & 0xFF) as u8,
+                        ((arg >> 8) & 0xFF) as u8,
+                        ((arg >> 16) & 0xFF) as u8,
+                        ((arg >> 24) & 0xFF) as u8,
+                    ];
+                    match ping(st8, ip) {
+                        Ok(rtt) => reply(ARP_S_OK, rtt, 0),
+                        Err(status) => reply(status, 0, 0),
+                    }
+                }
+                ICMP_OP_RXSTATS => reply(
+                    ARP_S_OK,
+                    (st8.rx_frames & 0xFFFF)
+                        | ((st8.rx_arp & 0xFFFF) << 16)
+                        | ((st8.rx_ipv4 & 0xFFFF) << 32)
+                        | ((st8.rx_dropped & 0xFFFF) << 48),
+                    0,
+                ),
                 ARP_OP_STATS => reply(
                     ARP_S_OK,
                     (st8.hits & 0xFFFF_FFFF) | (st8.wire_requests << 32),
@@ -339,7 +438,17 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                         o.u64(st8.timeouts);
                         o.str(" timeout(s), ");
                         o.u64(st8.reattaches);
-                        o.str(" re-attach(es)");
+                        o.str(" re-attach(es); demux saw ");
+                        o.u64(st8.rx_frames);
+                        o.str(" frame(s): ");
+                        o.u64(st8.rx_arp);
+                        o.str(" ARP, ");
+                        o.u64(st8.rx_ipv4);
+                        o.str(" IPv4, ");
+                        o.u64(st8.rx_dropped);
+                        o.str(" dropped, ");
+                        o.u64(st8.rx_bad_checksum);
+                        o.str(" bad checksum");
                     });
                     reply(
                         ARP_S_OK,
@@ -411,6 +520,225 @@ unsafe fn reattach(st8: &mut Stack) -> bool {
     }
 }
 
+/// The receive demultiplexer (M7.2): pull ONE frame from the driver
+/// and give it to whoever it belongs to.
+///
+/// ADR-0030 called the receive path "the seam everything else hangs
+/// from", and this is it. In 7.1 there was exactly one consumer, so
+/// `resolve` could read frames itself and drop anything that was not
+/// an ARP reply. The moment a second protocol exists that is wrong:
+/// an ICMP reply arriving while the stack happens to be resolving
+/// would be thrown away, and the ping that was waiting for it would
+/// time out for no reason. So recognising a frame is now one job, in
+/// one place, and the operations wait on STATE that this updates.
+///
+/// Returns false when the driver reported a timeout (nothing arrived)
+/// or is gone — the caller decides what that means for its own
+/// operation.
+///
+/// # Safety
+/// As `_start`.
+unsafe fn pump(st8: &mut Stack, timeout_us: u64) -> bool {
+    // SAFETY: function contract.
+    unsafe {
+        let mut frame = [0u64; MSG_BYTES / 8];
+        let (status, flen) =
+            netd_call(NET_OP_RECV, timeout_us, CAP_NONE, frame.as_mut_ptr() as u64);
+        if status == NET_S_TIMEOUT {
+            st8.timeouts += 1;
+            return false;
+        }
+        if status == ARP_S_LINK_DOWN {
+            return reattach(st8);
+        }
+        if status != NET_S_OK {
+            return false;
+        }
+        st8.rx_frames += 1;
+        demux(st8, frame.as_ptr() as *const u8, flen as usize);
+        true
+    }
+}
+
+/// Dispatch one received frame by ethertype.
+///
+/// # Safety
+/// `bytes` points at `len` readable bytes of this image's memory.
+unsafe fn demux(st8: &mut Stack, bytes: *const u8, len: usize) {
+    // SAFETY: caller contract; every read below is bounds-checked
+    // against `len` first.
+    unsafe {
+        if len < ETH_HDR {
+            st8.rx_dropped += 1;
+            return;
+        }
+        let at = |i: usize| *bytes.add(i);
+        let ethertype = ((at(12) as u16) << 8) | at(13) as u16;
+        match ethertype {
+            ETHERTYPE_ARP => {
+                st8.rx_arp += 1;
+                arp_in(st8, bytes, len);
+            }
+            ETHERTYPE_IPV4 => {
+                st8.rx_ipv4 += 1;
+                ipv4_in(st8, bytes, len);
+            }
+            _ => {
+                // Not ours. Counted, so "we dropped it" is a fact the
+                // stack can be asked about rather than a silence.
+                st8.rx_dropped += 1;
+            }
+        }
+    }
+}
+
+/// An ARP frame arrived: is it the reply we are waiting for?
+///
+/// # Safety
+/// As `demux`.
+unsafe fn arp_in(st8: &mut Stack, bytes: *const u8, len: usize) {
+    // SAFETY: caller contract.
+    unsafe {
+        let Some(want) = st8.want_arp else {
+            st8.rx_dropped += 1;
+            return;
+        };
+        match parse_reply(bytes, len, want) {
+            Some(mac) => {
+                st8.got_arp = Some(mac);
+                st8.replies_seen += 1;
+            }
+            None => st8.rx_dropped += 1,
+        }
+    }
+}
+
+/// The internet checksum (RFC 1071): ones' complement of the ones'
+/// complement sum of 16-bit words.
+///
+/// # Safety
+/// `bytes` points at `len` readable bytes.
+unsafe fn checksum(bytes: *const u8, len: usize) -> u16 {
+    // SAFETY: caller contract.
+    unsafe {
+        let mut sum: u32 = 0;
+        let mut i = 0;
+        while i + 1 < len {
+            sum += ((*bytes.add(i) as u32) << 8) | *bytes.add(i + 1) as u32;
+            i += 2;
+        }
+        if i < len {
+            sum += (*bytes.add(i) as u32) << 8;
+        }
+        while sum >> 16 != 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        !(sum as u16)
+    }
+}
+
+/// An IPv4 frame arrived. Verify it before believing any of it.
+///
+/// # Safety
+/// As `demux`.
+unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
+    // SAFETY: caller contract; offsets checked against `len`.
+    unsafe {
+        if len < ETH_HDR + IP_HDR {
+            st8.rx_dropped += 1;
+            return;
+        }
+        let ip = bytes.add(ETH_HDR);
+        let at = |i: usize| *ip.add(i);
+        let version = at(0) >> 4;
+        let ihl = (at(0) & 0x0F) as usize * 4;
+        if version != 4 || ihl < IP_HDR || len < ETH_HDR + ihl {
+            st8.rx_dropped += 1;
+            return;
+        }
+        // The header checksum, CHECKED. A stack that skips this is
+        // trusting the wire, and the wire is the one thing it must
+        // not trust.
+        if checksum(ip, ihl) != 0 {
+            st8.rx_bad_checksum += 1;
+            st8.rx_dropped += 1;
+            return;
+        }
+        // Addressed to us? (No forwarding: this is a host, not a
+        // router, and says so.)
+        for (i, b) in SLIRP_GUEST_IP.iter().enumerate() {
+            if at(16 + i) != *b {
+                st8.rx_dropped += 1;
+                return;
+            }
+        }
+        if at(9) != IP_PROTO_ICMP {
+            st8.rx_dropped += 1;
+            return;
+        }
+        icmp_in(st8, ip.add(ihl), len - ETH_HDR - ihl);
+    }
+}
+
+/// An ICMP message arrived inside an IPv4 packet addressed to us.
+///
+/// # Safety
+/// `icmp` points at `len` readable bytes.
+unsafe fn icmp_in(st8: &mut Stack, icmp: *const u8, len: usize) {
+    // SAFETY: caller contract.
+    unsafe {
+        if len < ICMP_HDR {
+            st8.rx_dropped += 1;
+            return;
+        }
+        if checksum(icmp, len) != 0 {
+            st8.rx_bad_checksum += 1;
+            st8.rx_dropped += 1;
+            return;
+        }
+        let at = |i: usize| *icmp.add(i);
+        if at(0) != ICMP_ECHO_REPLY {
+            // Echo REQUESTS are not answered: nothing here has asked
+            // to be pingable, and shipping an untested reply path
+            // would be worse than not having one (M7.2, ADR-0031).
+            st8.rx_dropped += 1;
+            return;
+        }
+        let id = ((at(4) as u16) << 8) | at(5) as u16;
+        let seq = ((at(6) as u16) << 8) | at(7) as u16;
+        match st8.want_icmp {
+            // The identifier AND sequence must match what we sent. An
+            // echo reply that merely arrived proves nothing — it could
+            // be an answer to somebody else's ping entirely.
+            Some((want_id, want_seq)) if want_id == id && want_seq == seq => {
+                st8.got_icmp = true;
+            }
+            _ => st8.rx_dropped += 1,
+        }
+    }
+}
+
+/// Send whatever is in the transmit frame, `len` bytes of it.
+///
+/// # Safety
+/// As `_start`.
+unsafe fn transmit(_st8: &mut Stack, len: u64) -> u64 {
+    // SAFETY: function contract.
+    unsafe {
+        // Clear the lend slot before copying into it: a CALL does not
+        // empty the caller's send-cap slot.
+        let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
+        if syscall3(SYS_CAP_COPY, SLOT_TX_MASTER, SLOT_TX_LENT, RIGHTS_ALL) < 0 {
+            fail(EXIT_SETUP, "the transmit cap copy refused");
+        }
+        let (status, _) = netd_call(NET_OP_SEND, len, SLOT_TX_LENT, 0);
+        if status != NET_S_OK {
+            let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
+        }
+        status
+    }
+}
+
 /// Resolve an IPv4 address: cache first, then the wire.
 ///
 /// # Safety
@@ -434,92 +762,188 @@ unsafe fn resolve(st8: &mut Stack, ip: [u8; 4]) -> Option<[u8; 6]> {
             return Some(mac);
         }
 
+        st8.want_arp = Some(ip);
+        st8.got_arp = None;
         for attempt in 1..=ARP_TRIES {
             build_request(st8, ip);
-            // Clear the lend slot before copying into it. A CALL does
-            // not empty the caller's send-cap slot — the receiver
-            // gets its own installed copy — so the second resolve
-            // found slot 4 still occupied and the copy was refused.
-            // Destroying a lent cap frees nothing (ADR-0022): it only
-            // drops this process's reference.
-            let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
-            if syscall3(SYS_CAP_COPY, SLOT_TX_MASTER, SLOT_TX_LENT, RIGHTS_ALL) < 0 {
-                fail(EXIT_SETUP, "the transmit cap copy refused");
-            }
-            let (status, _) = netd_call(NET_OP_SEND, ARP_FRAME_LEN, SLOT_TX_LENT, 0);
+            let status = transmit(st8, ARP_FRAME_LEN);
             if status == ARP_S_LINK_DOWN {
-                // The driver died holding this request. Re-establish
-                // and ask again — safe HERE and only here, because an
-                // ARP request is a broadcast query and repeating it
-                // costs nothing but a packet.
-                let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
                 if reattach(st8) {
                     continue;
                 }
+                st8.want_arp = None;
                 return None;
             }
             if status != NET_S_OK {
-                let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
+                st8.want_arp = None;
                 return None;
             }
             st8.wire_requests += 1;
 
-            // Wait for an answer, BOUNDED — netd enforces the
-            // deadline because we cannot (ADR-0029's erratum).
-            let mut frame = [0u64; MSG_BYTES / 8];
-            loop {
-                let (status, flen) = netd_call(
-                    NET_OP_RECV,
-                    REPLY_TIMEOUT_US,
-                    CAP_NONE,
-                    frame.as_mut_ptr() as u64,
-                );
-                if status == NET_S_TIMEOUT {
-                    st8.timeouts += 1;
-                    break; // retry, or give up after ARP_TRIES
+            // Wait for the DEMULTIPLEXER to recognise our answer,
+            // bounded by netd's deadline (a client blocked in
+            // SYS_IPC_CALL cannot bound itself — ADR-0029's erratum).
+            while st8.got_arp.is_none() {
+                if !pump(st8, REPLY_TIMEOUT_US) {
+                    break;
                 }
-                if status == ARP_S_LINK_DOWN {
-                    if reattach(st8) {
-                        break; // re-ask from the top of the retry loop
+            }
+            if let Some(mac) = st8.got_arp {
+                st8.want_arp = None;
+                let now = syscall0(SYS_CLOCK_NOW).max(0) as u64;
+                st8.insert(ip, mac, now);
+                log_line(|o| {
+                    o.str("netstackd: resolved ");
+                    for (i, b) in ip.iter().enumerate() {
+                        if i > 0 {
+                            o.str(".");
+                        }
+                        o.u64(*b as u64);
                     }
-                    return None;
-                }
-                if status != NET_S_OK {
-                    return None;
-                }
-                let bytes = frame.as_ptr() as *const u8;
-                if let Some(mac) = parse_reply(bytes, flen as usize, ip) {
-                    st8.replies_seen += 1;
-                    let now = syscall0(SYS_CLOCK_NOW).max(0) as u64;
-                    st8.insert(ip, mac, now);
-                    log_line(|o| {
-                        o.str("netstackd: resolved ");
-                        for (i, b) in ip.iter().enumerate() {
-                            if i > 0 {
-                                o.str(".");
-                            }
-                            o.u64(*b as u64);
+                    o.str(" → ");
+                    for (i, b) in mac.iter().enumerate() {
+                        if i > 0 {
+                            o.str(":");
                         }
-                        o.str(" → ");
-                        for (i, b) in mac.iter().enumerate() {
-                            if i > 0 {
-                                o.str(":");
-                            }
-                            o.hex2(*b);
-                        }
-                        o.str(" on attempt ");
-                        o.u64(attempt as u64);
-                        o.str(" (cached for 30s)");
-                    });
-                    return Some(mac);
-                }
-                // Some other frame: v1 has no other protocol to give
-                // it to, so it is dropped and the wait continues
-                // inside the same deadline.
+                        o.hex2(*b);
+                    }
+                    o.str(" on attempt ");
+                    o.u64(attempt as u64);
+                    o.str(" (cached for 30s)");
+                });
+                return Some(mac);
             }
         }
+        st8.want_arp = None;
         log("netstackd: no ARP reply after every retry — reporting unreachable, not guessing");
         None
+    }
+}
+
+/// Ping: resolve if needed, send an ICMP echo, time the answer.
+///
+/// Returns the round-trip time in microseconds, measured with the
+/// machine's monotonic clock rather than counted in retries.
+///
+/// # Safety
+/// As `_start`.
+unsafe fn ping(st8: &mut Stack, ip: [u8; 4]) -> Result<u64, u64> {
+    // SAFETY: function contract.
+    unsafe {
+        // Layering, visible: an echo needs a destination MAC, so a
+        // ping to an unresolved address is an ARP exchange first.
+        let Some(mac) = resolve(st8, ip) else {
+            return Err(ARP_S_UNREACHABLE);
+        };
+
+        let id = 0x4152; // 'AR' — this stack's echo identifier
+        for _ in 0..PING_TRIES {
+            st8.ping_seq = st8.ping_seq.wrapping_add(1);
+            let seq = st8.ping_seq;
+            build_echo(st8, mac, ip, id, seq);
+            st8.want_icmp = Some((id, seq));
+            st8.got_icmp = false;
+            let sent_us = syscall0(SYS_CLOCK_NOW).max(0) as u64;
+            let status = transmit(st8, PING_FRAME_LEN);
+            if status == ARP_S_LINK_DOWN {
+                if reattach(st8) {
+                    continue;
+                }
+                st8.want_icmp = None;
+                return Err(ARP_S_LINK_DOWN);
+            }
+            if status != NET_S_OK {
+                st8.want_icmp = None;
+                return Err(ARP_S_LINK_DOWN);
+            }
+            while !st8.got_icmp {
+                if !pump(st8, PING_TIMEOUT_US) {
+                    break;
+                }
+            }
+            if st8.got_icmp {
+                let rtt = (syscall0(SYS_CLOCK_NOW).max(0) as u64).saturating_sub(sent_us);
+                st8.want_icmp = None;
+                log_line(|o| {
+                    o.str("netstackd: echo reply from ");
+                    for (i, b) in ip.iter().enumerate() {
+                        if i > 0 {
+                            o.str(".");
+                        }
+                        o.u64(*b as u64);
+                    }
+                    o.str(" seq ");
+                    o.u64(seq as u64);
+                    o.str(" in ");
+                    o.u64(rtt);
+                    o.str("us (identifier and sequence both matched)");
+                });
+                return Ok(rtt);
+            }
+        }
+        st8.want_icmp = None;
+        log(
+            "netstackd: the host resolved but never answered an echo — NO_REPLY, which is not the same as unreachable",
+        );
+        Err(ICMP_S_NO_REPLY)
+    }
+}
+
+/// Lay out an ICMP echo request: Ethernet, then IPv4, then ICMP, with
+/// both checksums computed over what was actually written.
+///
+/// # Safety
+/// `st8.tx` is this image's own mapped frame.
+unsafe fn build_echo(st8: &Stack, mac: [u8; 6], ip: [u8; 4], id: u16, seq: u16) {
+    // SAFETY: method contract; the frame is one mapped page and every
+    // offset below is inside PING_FRAME_LEN.
+    unsafe {
+        let base = st8.tx;
+        let put = |off: usize, b: u8| *((base + off as u64) as *mut u8) = b;
+        // Ethernet
+        for i in 0..6 {
+            put(i, mac[i]);
+            put(6 + i, st8.mac[i]);
+        }
+        put(12, (ETHERTYPE_IPV4 >> 8) as u8);
+        put(13, (ETHERTYPE_IPV4 & 0xFF) as u8);
+        // IPv4
+        let total = (IP_HDR + ICMP_HDR + PING_PAYLOAD) as u16;
+        put(ETH_HDR, 0x45); // version 4, IHL 5 (no options)
+        put(ETH_HDR + 1, 0); // DSCP/ECN
+        put(ETH_HDR + 2, (total >> 8) as u8);
+        put(ETH_HDR + 3, (total & 0xFF) as u8);
+        put(ETH_HDR + 4, 0);
+        put(ETH_HDR + 5, 0); // identification
+        put(ETH_HDR + 6, 0x40); // don't fragment
+        put(ETH_HDR + 7, 0);
+        put(ETH_HDR + 8, IP_TTL);
+        put(ETH_HDR + 9, IP_PROTO_ICMP);
+        put(ETH_HDR + 10, 0);
+        put(ETH_HDR + 11, 0); // checksum, filled below
+        for i in 0..4 {
+            put(ETH_HDR + 12 + i, SLIRP_GUEST_IP[i]);
+            put(ETH_HDR + 16 + i, ip[i]);
+        }
+        let ck = checksum((base + ETH_HDR as u64) as *const u8, IP_HDR);
+        put(ETH_HDR + 10, (ck >> 8) as u8);
+        put(ETH_HDR + 11, (ck & 0xFF) as u8);
+        // ICMP
+        let ic = ETH_HDR + IP_HDR;
+        put(ic, ICMP_ECHO_REQUEST);
+        put(ic + 1, 0);
+        put(ic + 2, 0);
+        put(ic + 3, 0); // checksum, filled below
+        put(ic + 4, (id >> 8) as u8);
+        put(ic + 5, (id & 0xFF) as u8);
+        put(ic + 6, (seq >> 8) as u8);
+        put(ic + 7, (seq & 0xFF) as u8);
+        for i in 0..PING_PAYLOAD {
+            put(ic + ICMP_HDR + i, b"arenaos!"[i]);
+        }
+        let ck = checksum((base + ic as u64) as *const u8, ICMP_HDR + PING_PAYLOAD);
+        put(ic + 2, (ck >> 8) as u8);
+        put(ic + 3, (ck & 0xFF) as u8);
     }
 }
 

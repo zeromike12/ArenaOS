@@ -326,6 +326,16 @@ fn test_arp_service() -> Res {
                 "client: the stack could not resolve after the driver was RESTARTED under it (67)",
             );
         }
+        Some(68) => return Err("client: the gateway did not answer an ICMP echo (68)"),
+        Some(69) => return Err("client: the reported round-trip time is not plausible (69)"),
+        Some(70) => {
+            return Err(
+                "client: a ping to an unresolvable address did not fail at the ARP layer (70)",
+            );
+        }
+        Some(71) => {
+            return Err("client: the demultiplexer did not see both protocols (71)");
+        }
         Some(99) => return Err("client: the panic handler ran (99)"),
         _ => return Err("the client exited with a code from nowhere in the contract"),
     }
@@ -375,7 +385,7 @@ fn test_arp_service() -> Res {
     }
     info!(
         "m7",
-        "arp_service: arptest resolved 10.0.2.2 through netstackd (pid {stack_pid}) over netd (pid {netd_pid}) — a real ARP request on the wire ({tx} transmit and {rx} receive interrupt delivery/deliveries), a second lookup served from CACHE with the wire untouched, and a silent address reported UNREACHABLE after bounded retries instead of parking the stack; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames {after})"
+        "arp_service: arptest drove netstackd (pid {stack_pid}) over netd (pid {netd_pid}) through the whole Phase-7-so-far story — ARP resolved on the wire ({tx} transmit and {rx} receive interrupt delivery/deliveries), a cached lookup that touched no wire, a silent address reported UNREACHABLE, the driver KILLED and re-established with, and an ICMP echo answered over IPv4 with both checksums verified and the demultiplexer sorting each frame to its protocol; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames {after})"
     );
     Ok(())
 }

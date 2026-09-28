@@ -176,6 +176,35 @@ def extra_checks(serial: str) -> bool:
     check(m is not None and int(m.group(1)) >= 1,
           "the stack's own accounting records the re-attach")
 
+    # ---- M7.2: IPv4 + ICMP on the same boundary (ADR-0031) -----------
+    m = re.search(r"netstackd: echo reply from 10\.0\.2\.2 seq (\d+) in "
+                  r"(\d+)us \(identifier and sequence both matched\)", serial)
+    check(m is not None,
+          "an ICMP echo reply came back and was MATCHED on identifier and "
+          "sequence — a reply that merely arrived could be an answer to "
+          "somebody else's ping")
+    if m:
+        rtt = int(m.group(2))
+        check(0 < rtt < 2_000_000,
+              f"the round-trip time is plausible and measured on the "
+              f"monotonic clock ({rtt}us)")
+    check("failed as UNREACHABLE (no host), not NO_REPLY (a silent host)"
+          in serial,
+          "the layers report distinctly: a ping to an unresolvable address "
+          "fails at ARP, not as a silent host")
+    m = re.search(r"demux saw (\d+) frame\(s\): (\d+) ARP, (\d+) IPv4, "
+                  r"(\d+) dropped, (\d+) bad checksum", serial)
+    check(m is not None,
+          "the demultiplexer can account for every frame it saw")
+    if m:
+        arp_n, ipv4_n, bad = int(m.group(2)), int(m.group(3)), int(m.group(5))
+        check(arp_n > 0 and ipv4_n > 0,
+              f"it sorted BOTH protocols ({arp_n} ARP, {ipv4_n} IPv4) — with "
+              f"one consumer there is no demultiplexing to prove")
+        check(bad == 0,
+              "no frame failed a checksum (they are verified on receive, not "
+              "assumed)")
+
     # Phase 7's standing rule, checked the only way a log can: the
     # machine reached its prompt without a suite hanging on a clock.
     check("arena>" in serial,
@@ -189,7 +218,7 @@ def main() -> int:
         return rc
     serial = (arena_env.build_dir() / "serial-m7.log").read_text()
     ok = extra_checks(serial)
-    print(f"[test-m7] M7.0+7.1 TIMERS + ARP: {'PASS' if ok else 'FAIL'}  "
+    print(f"[test-m7] M7.0-7.2 TIMERS + ARP + IPv4/ICMP: {'PASS' if ok else 'FAIL'}  "
           f"(serial: build/serial-m7.log)")
     return 0 if ok else 1
 

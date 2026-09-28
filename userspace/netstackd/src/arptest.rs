@@ -27,7 +27,14 @@
 //!    through an instance that did not exist when the stack started.
 //!    Re-resolving the cached gateway would have proven nothing.
 //!
-//! Exit codes: 42 verified, 60..67 typed failures, 99 panic.
+//! 5. **IPv4 and ICMP ride the same boundary.** A ping to the gateway
+//!    is answered and timed on the monotonic clock; a ping to an
+//!    address nothing answers fails as UNREACHABLE (no host) rather
+//!    than NO_REPLY (a silent host), which is the layering made
+//!    visible; and the demultiplexer can say how many frames of each
+//!    protocol it sorted and how many it dropped.
+//!
+//! Exit codes: 42 verified, 60..71 typed failures, 99 panic.
 #![no_std]
 #![no_main]
 
@@ -72,6 +79,10 @@ const EXIT_STATS: u64 = 66;
 /// The stack could not resolve after the driver was restarted under
 /// it — the re-establish path failed.
 const EXIT_AFTER_RESTART: u64 = 67;
+const EXIT_PING: u64 = 68;
+const EXIT_PING_RTT: u64 = 69;
+const EXIT_PING_LAYER: u64 = 70;
+const EXIT_DEMUX: u64 = 71;
 
 /// An address on the slirp network that nothing answers for. slirp
 /// replies for its own gateway and DNS; .77 is simply nobody.
@@ -244,6 +255,92 @@ pub unsafe extern "C" fn _start() -> ! {
                 o.hex2(((packed >> (8 * i)) & 0xFF) as u8);
             }
             o.str(" through a driver that was RESTARTED under the stack");
+        });
+
+        // ---- 5: IPv4 + ICMP, on top of the same boundary (M7.2) ----
+        // The gateway is already in the ARP cache, so this exercises
+        // the IP and ICMP layers rather than re-proving resolution.
+        let (status, rtt) = call(ICMP_OP_PING, ip_word(SLIRP_GATEWAY_IP));
+        if status != ARP_S_OK {
+            log_line(|o| {
+                o.str("arptest: PING status ");
+                o.i64(status as i64);
+            });
+            fail(EXIT_PING, "the gateway did not answer an ICMP echo");
+        }
+        if rtt == 0 || rtt > 2_000_000 {
+            log_line(|o| {
+                o.str("arptest: implausible round-trip time ");
+                o.u64(rtt);
+                o.str("us");
+            });
+            fail(
+                EXIT_PING_RTT,
+                "the reported round-trip time is not plausible",
+            );
+        }
+        log_line(|o| {
+            o.str("arptest: PASS — ICMP echo to 10.0.2.2 answered in ");
+            o.u64(rtt);
+            o.str("us (measured on the monotonic clock, identifier and sequence matched)");
+        });
+
+        // A ping to an address nothing answers must fail at the ARP
+        // layer — UNREACHABLE, not NO_REPLY. The distinction is the
+        // layering made visible: there is no host to send an echo to.
+        let (status, _) = call(ICMP_OP_PING, ip_word(SILENT_IP));
+        if status != ARP_S_UNREACHABLE {
+            log_line(|o| {
+                o.str("arptest: pinging an unresolvable address returned ");
+                o.i64(status as i64);
+            });
+            fail(
+                EXIT_PING_LAYER,
+                "a ping to an unresolvable address did not fail at the ARP layer",
+            );
+        }
+        log(
+            "arptest: PASS — pinging an unresolvable address failed as UNREACHABLE (no host), not NO_REPLY (a silent host) — the layers report distinctly",
+        );
+
+        // The demultiplexer's own account: it must have seen both
+        // kinds of frame, and it must be able to say what it dropped.
+        let (status, packed) = call(ICMP_OP_RXSTATS, 0);
+        if status != ARP_S_OK {
+            fail(
+                EXIT_STATS,
+                "the stack would not report its receive counters",
+            );
+        }
+        let (frames, arp_n, ipv4_n, dropped) = (
+            packed & 0xFFFF,
+            (packed >> 16) & 0xFFFF,
+            (packed >> 32) & 0xFFFF,
+            (packed >> 48) & 0xFFFF,
+        );
+        if arp_n == 0 || ipv4_n == 0 {
+            log_line(|o| {
+                o.str("arptest: demux saw ");
+                o.u64(arp_n);
+                o.str(" ARP and ");
+                o.u64(ipv4_n);
+                o.str(" IPv4 frames");
+            });
+            fail(
+                EXIT_DEMUX,
+                "the demultiplexer did not see both protocols (it cannot have dispatched them)",
+            );
+        }
+        log_line(|o| {
+            o.str("arptest: PASS — the demultiplexer sorted ");
+            o.u64(frames);
+            o.str(" frame(s): ");
+            o.u64(arp_n);
+            o.str(" ARP, ");
+            o.u64(ipv4_n);
+            o.str(" IPv4, ");
+            o.u64(dropped);
+            o.str(" dropped and counted");
         });
 
         let (status, wire_total, hits_total) = shutdown();
