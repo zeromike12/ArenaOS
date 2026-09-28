@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Boot-stability loop (docs/TESTING.md): boot the *prebuilt* ESP image N
 # times with fresh NVRAM each run and require the full green verdict on
-# every single boot — m2 RESULT PASS (21/21), m3 RESULT PASS (13/13), m4
-# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (6/6), the
-# canonical clean-halt line, no PANIC, QEMU exit 0, under a per-boot
+# every single boot — every mN RESULT line, the TCP guest/host wire
+# proof, the canonical clean-halt line, no PANIC, QEMU exit 0, under a per-boot
 # timeout. Every fixture rides along (the AFS1 scratch disk, the slirp
 # NIC, the entropy source, the virtio keyboard, and — since M6.4 — the
 # virtio-console port) —
@@ -104,7 +103,17 @@ for i in $(seq 1 "$N"); do
     # filename — a disk inherited from the previous boot answers
     # FS_ERR_EXISTS and fails the suite by design).
     ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk()' >/dev/null )
-    rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK"
+    rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK" "$REPO_ROOT/build/tcp-stability.log"
+    # M7.6: bind the host TCP fixture BEFORE QEMU starts. READY is
+    # emitted only after listen() succeeds; no sleep/race and no
+    # in-guest fake peer. One actor, one boot, like the typist.
+    coproc TCP_PEER { python3 -u "$REPO_ROOT/tools/tcp_fixture.py" \
+        "$REPO_ROOT/build/tcp-stability.log"; }
+    tcp_pid=$TCP_PEER_PID
+    if ! read -r ready <&"${TCP_PEER[0]}" || [[ "$ready" != READY ]]; then
+        echo "boot $i: FAIL — TCP host actor could not bind port 54321" >&2
+        exit 1
+    fi
     rc=0
     # The keyboard typist: waits for inputd's ready marker on the
     # serial log, then types the input fixture through QMP. It is
@@ -157,6 +166,10 @@ for i in $(seq 1 "$N"); do
     wait "$typist_pid" 2>/dev/null || true
     kill "$vcon_pid" 2>/dev/null || true
     wait "$vcon_pid" 2>/dev/null || true
+    # The peer exits when it sees the guest's orderly FIN. Reap it so
+    # its listener cannot trespass into the next boot's fixture.
+    kill "$tcp_pid" 2>/dev/null || true
+    wait "$tcp_pid" 2>/dev/null || true
 
     why=""
     if (( rc != 0 )); then
@@ -165,6 +178,15 @@ for i in $(seq 1 "$N"); do
         why="no serial output"
     elif grep -aq 'PANIC' "$SERIAL"; then
         why="kernel PANIC on serial"
+    elif ! grep -aq 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' \
+        "$REPO_ROOT/build/tcp-stability.log"; then
+        why="TCP host peer did not verify request/200-byte response/FIN"
+    elif grep -aq 'TCP SKIP' "$SERIAL"; then
+        why="TCP was skipped although this is a fixture-equipped qualification"
+    elif ! grep -aq 'native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer' "$SERIAL"; then
+        why="native UDP library did not deliver/revoke its real-wire datagram"
+    elif ! grep -aq 'TCP FIN was acknowledged, the peer closed, and the bearer was revoked' "$SERIAL"; then
+        why="guest did not complete TCP FIN/close/revocation"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

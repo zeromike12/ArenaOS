@@ -386,6 +386,14 @@ fn test_arp_service() -> Res {
         Some(75) => return Err("client: the DNS query did not go out (75)"),
         Some(76) => return Err("client: no DNS response came back (76)"),
         Some(77) => return Err("client: the DNS response does not answer our query (77)"),
+        Some(78) => return Err("client: UDP continuation failed (78)"),
+        Some(79) => return Err("client: DNS resolution failed (79)"),
+        Some(80) => return Err("client: TCP active open refused (80)"),
+        Some(81) => return Err("client: TCP three-way handshake or authority failed (81)"),
+        Some(82) => return Err("client: TCP write refused (82)"),
+        Some(83) => return Err("client: TCP received a corrupt or incomplete stream (83)"),
+        Some(84) => return Err("client: TCP FIN/close/revocation failed (84)"),
+
         Some(99) => return Err("client: the panic handler ran (99)"),
         _ => return Err("the client exited with a code from nowhere in the contract"),
     }

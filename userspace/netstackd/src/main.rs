@@ -66,6 +66,7 @@ use core::panic::PanicInfo;
 mod abi;
 use abi::*;
 mod dns;
+mod tcp;
 
 const SLOT_NETD: u64 = 0;
 const SLOT_EP: u64 = 1;
@@ -225,6 +226,57 @@ const NO_BINDING: Binding = Binding {
 // stack. Only `_start` obtains a reference and this image has one thread.
 static mut BINDINGS: [Binding; UDP_BINDINGS] = [NO_BINDING; UDP_BINDINGS];
 
+/// One stop-and-wait TCP connection. The peer's advertised window is
+/// observed before WRITE; our MSS/window stay below FRAME_MAX. The
+/// pending segment is retained for sequence-identical retransmission.
+#[derive(Clone, Copy)]
+struct TcpConn {
+    live: bool,
+    handle: u64,
+    ip: [u8; 4],
+    mac: [u8; 6],
+    src_port: u16,
+    dst_port: u16,
+    state: u64,
+    snd_nxt: u32,
+    rcv_nxt: u32,
+    peer_window: u16,
+    peer_fin: bool,
+    pending: bool,
+    pending_seq: u32,
+    pending_flags: u8,
+    pending_len: usize,
+    pending_data: [u8; MSG_BYTES - 1],
+    sent_us: u64,
+    retries: u8,
+    rx_len: usize,
+    rx: [u8; tcp::MSS],
+    retransmits: u64,
+}
+const NO_TCP: TcpConn = TcpConn {
+    live: false,
+    handle: 0,
+    ip: [0; 4],
+    mac: [0; 6],
+    src_port: 0,
+    dst_port: 0,
+    state: TCP_CLOSED,
+    snd_nxt: 0,
+    rcv_nxt: 0,
+    peer_window: 0,
+    peer_fin: false,
+    pending: false,
+    pending_seq: 0,
+    pending_flags: 0,
+    pending_len: 0,
+    pending_data: [0; MSG_BYTES - 1],
+    sent_us: 0,
+    retries: 0,
+    rx_len: 0,
+    rx: [0; tcp::MSS],
+    retransmits: 0,
+};
+
 const EMPTY: Entry = Entry {
     live: false,
     ip: [0; 4],
@@ -285,6 +337,7 @@ struct Stack {
     want_icmp_ip: Option<[u8; 4]>,
     got_icmp: bool,
     ping_seq: u16,
+    tcp: TcpConn,
 }
 
 impl Stack {
@@ -430,6 +483,7 @@ pub unsafe extern "C" fn _start() -> ! {
             want_icmp_ip: None,
             got_icmp: false,
             ping_seq: 0,
+            tcp: NO_TCP,
         };
         draw_handles(&mut st8);
         let selftest = parser_selftest(&mut st8);
@@ -663,6 +717,98 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                     );
                     if rr < 0 {
                         fail(EXIT_REPLY, "the UDP receive reply was refused");
+                    }
+                }
+                TCP_OP_OPEN => {
+                    if arg >> 32 != 0 {
+                        reply(ARP_S_BAD_OP, 0, 0);
+                        continue;
+                    }
+                    let ip = [
+                        arg as u8,
+                        (arg >> 8) as u8,
+                        (arg >> 16) as u8,
+                        (arg >> 24) as u8,
+                    ];
+                    let port = u16::from_be_bytes([inbox[0], inbox[1]]);
+                    match tcp_open(st8, ip, port) {
+                        Ok(handle) => reply(ARP_S_OK, handle, 0),
+                        Err(code) => reply(code, 0, 0),
+                    }
+                }
+                TCP_OP_POLL => {
+                    if !st8.tcp.live || st8.tcp.handle != arg {
+                        reply(TCP_S_BAD_HANDLE, 0, 0);
+                        continue;
+                    }
+                    let timeout = u64::from_le_bytes(inbox[..8].try_into().unwrap());
+                    tcp_poll(st8, timeout);
+                    reply(ARP_S_OK, st8.tcp.state | ((st8.tcp.rx_len as u64) << 8), 0);
+                }
+                TCP_OP_WRITE => {
+                    if !st8.tcp.live || st8.tcp.handle != arg {
+                        reply(TCP_S_BAD_HANDLE, 0, 0);
+                        continue;
+                    }
+                    let n = inbox[0] as usize;
+                    if n == 0
+                        || n >= MSG_BYTES
+                        || st8.tcp.state != TCP_ESTABLISHED
+                        || st8.tcp.peer_fin
+                        || st8.tcp.pending
+                        || n > st8.tcp.peer_window as usize
+                    {
+                        reply(TCP_S_STATE, 0, 0);
+                        continue;
+                    }
+                    tcp_send_new(st8, tcp::ACK | tcp::PSH, &inbox[1..1 + n]);
+                    reply(ARP_S_OK, n as u64, 0);
+                }
+                TCP_OP_READ => {
+                    if !st8.tcp.live || st8.tcp.handle != arg {
+                        reply(TCP_S_BAD_HANDLE, 0, 0);
+                        continue;
+                    }
+                    let was_full = st8.tcp.rx_len == tcp::MSS;
+                    let n = core::cmp::min(st8.tcp.rx_len, MSG_BYTES);
+                    let mut out = [0u8; MSG_BYTES];
+                    out[..n].copy_from_slice(&st8.tcp.rx[..n]);
+                    st8.tcp.rx.copy_within(n..st8.tcp.rx_len, 0);
+                    st8.tcp.rx_len -= n;
+                    let rr = syscall5(
+                        SYS_IPC_REPLY,
+                        SLOT_EP,
+                        ARP_S_OK,
+                        n as u64,
+                        CAP_NONE,
+                        out.as_ptr() as u64,
+                    );
+                    if rr < 0 {
+                        fail(EXIT_REPLY, "TCP read reply refused");
+                    }
+                    if was_full && n != 0 {
+                        tcp_send_raw(st8, tcp::ACK, st8.tcp.snd_nxt, &[]);
+                    }
+                }
+                TCP_OP_CLOSE => {
+                    if !st8.tcp.live || st8.tcp.handle != arg {
+                        reply(TCP_S_BAD_HANDLE, 0, 0);
+                    } else if st8.tcp.state != TCP_ESTABLISHED || st8.tcp.pending {
+                        reply(TCP_S_STATE, 0, 0);
+                    } else {
+                        st8.tcp.state = TCP_CLOSING;
+                        tcp_send_new(st8, tcp::FIN | tcp::ACK, &[]);
+                        reply(ARP_S_OK, 0, 0);
+                    }
+                }
+                TCP_OP_RELEASE => {
+                    if !st8.tcp.live || st8.tcp.handle != arg {
+                        reply(TCP_S_BAD_HANDLE, 0, 0);
+                    } else if st8.tcp.state != TCP_CLOSED && st8.tcp.state != TCP_FAILED {
+                        reply(TCP_S_STATE, 0, 0);
+                    } else {
+                        st8.tcp = NO_TCP;
+                        reply(ARP_S_OK, 0, 0);
                     }
                 }
                 DNS_OP_LOOKUP => {
@@ -1168,6 +1314,309 @@ unsafe fn dns_lookup(st8: &mut Stack, name: &[u8]) -> Result<[u8; 4], u64> {
     }
 }
 
+/// Draw TCP authority, initial sequence and source port from rngd. No
+/// entropy means no active connection: a predictable bearer is not one.
+///
+/// # Safety
+/// As `_start`; rngd DMAs into our mapped transmit page.
+unsafe fn tcp_entropy(st8: &Stack) -> Option<(u64, u32, u16)> {
+    // SAFETY: the only thread owns these caps and the mapped frame.
+    unsafe {
+        let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
+        if syscall3(SYS_CAP_COPY, SLOT_TX_MASTER, SLOT_TX_LENT, RIGHTS_ALL) < 0 {
+            return None;
+        }
+        let mut reply = [0u64; 3];
+        let r = syscall6(
+            SYS_IPC_CALL,
+            SLOT_RNG,
+            16,
+            RNG_OP_GET,
+            SLOT_TX_LENT,
+            reply.as_mut_ptr() as u64,
+            0,
+        );
+        if r < 0 || reply[0] != RNG_S_OK || reply[1] < 16 {
+            return None;
+        }
+        let mut b = [0u8; 16];
+        for (i, v) in b.iter_mut().enumerate() {
+            *v = r8(st8.tx + i as u64);
+        }
+        let handle = u64::from_le_bytes(b[..8].try_into().ok()?);
+        if handle == 0 {
+            return None;
+        }
+        let seq = u32::from_le_bytes(b[8..12].try_into().ok()?);
+        let port = 49152 + (u16::from_le_bytes(b[12..14].try_into().ok()?) % 16384);
+        Some((handle, seq, port))
+    }
+}
+
+/// # Safety
+/// As `_start`.
+unsafe fn tcp_open(st8: &mut Stack, ip: [u8; 4], port: u16) -> Result<u64, u64> {
+    // SAFETY: caller contract; no externally reachable state before validation.
+    unsafe {
+        if port == 0 {
+            return Err(ARP_S_BAD_OP);
+        }
+        if st8.tcp.live {
+            return Err(TCP_S_BUSY);
+        }
+        let mac = resolve(st8, ip).ok_or(ARP_S_UNREACHABLE)?;
+        let (handle, seq, src_port) = tcp_entropy(st8).ok_or(ARP_S_LINK_DOWN)?;
+        st8.tcp = TcpConn {
+            live: true,
+            handle,
+            ip,
+            mac,
+            src_port,
+            dst_port: port,
+            state: TCP_CONNECTING,
+            snd_nxt: seq,
+            ..NO_TCP
+        };
+        tcp_send_new(st8, tcp::SYN, &[]);
+        Ok(handle)
+    }
+}
+
+/// Send one TCP segment. Caller owns the one mapped frame, and the
+/// driver accepts a lent COPY of it; it never gets device authority.
+/// # Safety
+/// As `_start`; data is a bounded slice of the caller's memory.
+unsafe fn tcp_send_raw(st8: &mut Stack, flags: u8, seq: u32, data: &[u8]) -> bool {
+    // SAFETY: the mapped page covers the entire Ethernet/IP/TCP segment.
+    unsafe {
+        let base = st8.tx;
+        let put = |i: usize, byte: u8| *((base + i as u64) as *mut u8) = byte;
+        for i in 0..6 {
+            put(i, st8.tcp.mac[i]);
+            put(6 + i, st8.mac[i]);
+        }
+        put(12, (ETHERTYPE_IPV4 >> 8) as u8);
+        put(13, ETHERTYPE_IPV4 as u8);
+        let start = ETH_HDR + IP_HDR;
+        let segment = core::slice::from_raw_parts_mut(
+            (base + start as u64) as *mut u8,
+            tcp::HDR + 4 + MSG_BYTES,
+        );
+        let ack = if flags & tcp::ACK != 0 {
+            st8.tcp.rcv_nxt
+        } else {
+            0
+        };
+        let len = tcp::write(
+            segment,
+            SLIRP_GUEST_IP,
+            st8.tcp.ip,
+            st8.tcp.src_port,
+            st8.tcp.dst_port,
+            seq,
+            ack,
+            flags,
+            (tcp::MSS - st8.tcp.rx_len) as u16,
+            data,
+        );
+        let total = (IP_HDR + len) as u16;
+        put(ETH_HDR, 0x45);
+        put(ETH_HDR + 1, 0);
+        put(ETH_HDR + 2, (total >> 8) as u8);
+        put(ETH_HDR + 3, total as u8);
+        put(ETH_HDR + 4, 0);
+        put(ETH_HDR + 5, 0);
+        put(ETH_HDR + 6, 0x40); // DF; v1 will not reassemble IP fragments
+        put(ETH_HDR + 7, 0);
+        put(ETH_HDR + 8, IP_TTL);
+        put(ETH_HDR + 9, IP_PROTO_TCP);
+        put(ETH_HDR + 10, 0);
+        put(ETH_HDR + 11, 0);
+        for (i, b) in SLIRP_GUEST_IP.iter().enumerate() {
+            put(ETH_HDR + 12 + i, *b);
+            put(ETH_HDR + 16 + i, st8.tcp.ip[i]);
+        }
+        let ck = checksum((base + ETH_HDR as u64) as *const u8, IP_HDR);
+        put(ETH_HDR + 10, (ck >> 8) as u8);
+        put(ETH_HDR + 11, ck as u8);
+        transmit(st8, (ETH_HDR + IP_HDR + len) as u64) == NET_S_OK
+    }
+}
+
+/// Create an outstanding segment before TX. If netd dies during SEND,
+/// outcome is unknown: retain the sequence and let the RTO retransmit
+/// after re-attachment. Never create a second sequence by blind retry.
+/// # Safety
+/// As `_start`.
+unsafe fn tcp_send_new(st8: &mut Stack, flags: u8, data: &[u8]) {
+    // SAFETY: single outstanding segment and one TX frame.
+    unsafe {
+        let seq = st8.tcp.snd_nxt;
+        st8.tcp.pending = true;
+        st8.tcp.pending_seq = seq;
+        st8.tcp.pending_flags = flags;
+        st8.tcp.pending_len = data.len();
+        st8.tcp.pending_data[..data.len()].copy_from_slice(data);
+        st8.tcp.snd_nxt = seq
+            .wrapping_add(data.len() as u32)
+            .wrapping_add(u32::from(flags & tcp::SYN != 0))
+            .wrapping_add(u32::from(flags & tcp::FIN != 0));
+        st8.tcp.sent_us = syscall0(SYS_CLOCK_NOW).max(0) as u64;
+        st8.tcp.retries = 0;
+        let _ = tcp_send_raw(st8, flags, seq, data);
+    }
+}
+
+/// One blocking device wait at most. POLL returns to the client after
+/// a state change or a bounded deadline, not a service-side busy loop.
+/// # Safety
+/// As `_start`.
+unsafe fn tcp_poll(st8: &mut Stack, timeout_us: u64) {
+    // SAFETY: the only thread pumps the shared receive demultiplexer.
+    unsafe {
+        if st8.tcp.state == TCP_CLOSED || st8.tcp.state == TCP_FAILED || st8.tcp.rx_len > 0 {
+            return;
+        }
+        let now = syscall0(SYS_CLOCK_NOW).max(0) as u64;
+        let wait = if st8.tcp.pending {
+            core::cmp::min(
+                timeout_us,
+                st8.tcp
+                    .sent_us
+                    .saturating_add(tcp::RTO_US)
+                    .saturating_sub(now),
+            )
+        } else {
+            timeout_us
+        };
+        // zero is netd's nonblocking poll, never an unbounded wait.
+        let _ = pump(st8, wait);
+        let now = syscall0(SYS_CLOCK_NOW).max(0) as u64;
+        if st8.tcp.pending {
+            match tcp::retry_action(st8.tcp.sent_us, now, st8.tcp.retries) {
+                tcp::Retry::Wait => {}
+                tcp::Retry::Fail => {
+                    st8.tcp.state = TCP_FAILED;
+                    st8.tcp.pending = false;
+                }
+                tcp::Retry::Resend => {
+                    st8.tcp.retries += 1;
+                    st8.tcp.retransmits += 1;
+                    let p = st8.tcp;
+                    st8.tcp.sent_us = now;
+                    let _ = tcp_send_raw(
+                        st8,
+                        p.pending_flags,
+                        p.pending_seq,
+                        &p.pending_data[..p.pending_len],
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The TCP arm of the IPv4 demultiplexer. Only an exact source tuple,
+/// valid pseudo-header checksum, and expected sequence can advance state.
+/// # Safety
+/// `wire` is the checked IP payload from a bounded frame.
+unsafe fn tcp_in(st8: &mut Stack, src: [u8; 4], wire: &[u8]) {
+    // SAFETY: parser bounds each header field before it is used.
+    unsafe {
+        let seg = match tcp::parse(src, SLIRP_GUEST_IP, wire) {
+            Ok(seg) => seg,
+            Err(tcp::ParseError::Checksum) => {
+                st8.rx_bad_checksum += 1;
+                st8.rx_dropped += 1;
+                return;
+            }
+            Err(_) => {
+                st8.rx_dropped += 1;
+                return;
+            }
+        };
+        if !st8.tcp.live
+            || src != st8.tcp.ip
+            || seg.src_port != st8.tcp.dst_port
+            || seg.dst_port != st8.tcp.src_port
+        {
+            st8.rx_dropped += 1;
+            return;
+        }
+        if seg.flags & tcp::RST != 0 {
+            // An RST in-window only; an unrelated injected RST does not
+            // cancel a connection by guessing its four-tuple.
+            if seg.seq == st8.tcp.rcv_nxt
+                || (st8.tcp.state == TCP_CONNECTING
+                    && seg.flags & tcp::ACK != 0
+                    && seg.ack == st8.tcp.snd_nxt)
+            {
+                st8.tcp.state = TCP_FAILED;
+                st8.tcp.pending = false;
+            }
+            return;
+        }
+        if st8.tcp.state == TCP_CONNECTING {
+            if seg.flags & (tcp::SYN | tcp::ACK) != (tcp::SYN | tcp::ACK)
+                || seg.ack != st8.tcp.snd_nxt
+                || !seg.data.is_empty()
+            {
+                st8.rx_dropped += 1;
+                return;
+            }
+            st8.tcp.rcv_nxt = seg.seq.wrapping_add(1);
+            st8.tcp.peer_window = seg.window;
+            st8.tcp.pending = false;
+            st8.tcp.state = TCP_ESTABLISHED;
+            let _ = tcp_send_raw(st8, tcp::ACK, st8.tcp.snd_nxt, &[]);
+            return;
+        }
+        if st8.tcp.state != TCP_ESTABLISHED && st8.tcp.state != TCP_CLOSING {
+            return;
+        }
+        if seg.flags & tcp::ACK == 0 {
+            st8.rx_dropped += 1;
+            return;
+        }
+        st8.tcp.peer_window = seg.window;
+        if st8.tcp.pending && seg.ack == st8.tcp.snd_nxt {
+            st8.tcp.pending = false;
+        } else if seg.ack != st8.tcp.snd_nxt && seg.ack != st8.tcp.pending_seq {
+            st8.rx_dropped += 1;
+            return;
+        }
+        if seg.seq != st8.tcp.rcv_nxt || seg.data.len() > tcp::MSS - st8.tcp.rx_len {
+            if seg.seq != st8.tcp.rcv_nxt || !seg.data.is_empty() {
+                let _ = tcp_send_raw(st8, tcp::ACK, st8.tcp.snd_nxt, &[]);
+            }
+            // ACK processing above is independent of inbound sequence.
+            // A peer may retransmit its already-ACKed FIN while ACKing
+            // OUR FIN. The duplicate consumes no sequence, but its ACK
+            // still completes the close; returning first hangs forever.
+            if st8.tcp.state == TCP_CLOSING && st8.tcp.peer_fin && !st8.tcp.pending {
+                st8.tcp.state = TCP_CLOSED;
+            }
+            return;
+        }
+        if !seg.data.is_empty() {
+            let start = st8.tcp.rx_len;
+            st8.tcp.rx[start..start + seg.data.len()].copy_from_slice(seg.data);
+            st8.tcp.rx_len += seg.data.len();
+            st8.tcp.rcv_nxt = st8.tcp.rcv_nxt.wrapping_add(seg.data.len() as u32);
+        }
+        if seg.flags & tcp::FIN != 0 && !st8.tcp.peer_fin {
+            st8.tcp.peer_fin = true;
+            st8.tcp.rcv_nxt = st8.tcp.rcv_nxt.wrapping_add(1);
+        }
+        if !seg.data.is_empty() || seg.flags & tcp::FIN != 0 {
+            let _ = tcp_send_raw(st8, tcp::ACK, st8.tcp.snd_nxt, &[]);
+        }
+        if st8.tcp.state == TCP_CLOSING && st8.tcp.peer_fin && !st8.tcp.pending {
+            st8.tcp.state = TCP_CLOSED;
+        }
+    }
+}
+
 /// Read one whole frame from the driver into `buf`, in chunks.
 ///
 /// netd hands back a frame's FULL length with its first chunk and the
@@ -1430,7 +1879,7 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
             }
         }
         let proto = at(9);
-        if proto != IP_PROTO_ICMP && proto != IP_PROTO_UDP {
+        if proto != IP_PROTO_ICMP && proto != IP_PROTO_UDP && proto != IP_PROTO_TCP {
             st8.rx_dropped += 1;
             return;
         }
@@ -1440,6 +1889,9 @@ unsafe fn ipv4_in(st8: &mut Stack, bytes: *const u8, len: usize) {
         }
         if proto == IP_PROTO_UDP {
             udp_in(st8, src, ip.add(ihl), total - ihl);
+        } else if proto == IP_PROTO_TCP {
+            let segment = core::slice::from_raw_parts(ip.add(ihl), total - ihl);
+            tcp_in(st8, src, segment);
         } else {
             icmp_in(st8, src, ip.add(ihl), total - ihl);
         }

@@ -273,6 +273,26 @@ def extra_checks(serial: str) -> bool:
     check("a malformed name was refused BEFORE sending" in serial,
           "bad DNS input was rejected before any network operation")
 
+    # ---- M7.7: public native library on the actual wire -------------
+    check("native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer"
+          in serial,
+          "the public library crossed the bearer/continuation/revocation boundary on real packets")
+
+    # ---- M7.6: independent Linux TCP peer, not an in-tree echo ------
+    check("TCP SKIP" not in serial and
+          "TCP active OPEN returned a bearer; POLL completed the real three-way handshake" in serial,
+          "OPEN returns a bearer; POLL completes the three-way handshake against a real host")
+    check("TCP read 200 position-dependent bytes from the host in IPC chunks "
+          "without loss or reordering" in serial,
+          "the TCP byte stream crosses several IPC messages and every position is checked")
+    check("TCP FIN was acknowledged, the peer closed, and the bearer was revoked" in serial,
+          "close is an acknowledged FIN, followed by revocation of the bearer")
+    peer = (arena_env.build_dir() / "tcp-test-m7.log").read_text()
+    check("TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True" in peer,
+          "the independent host TCP stack received the request, sent the bytes and saw EOF")
+    check("RX FIFO full" not in serial,
+          "netd retained all burst arrivals instead of dropping TCP data behind an ACK")
+
     # Phase 7's standing rule, checked the only way a log can: the
     # machine reached its prompt without a suite hanging on a clock.
     check("arena>" in serial,
@@ -286,7 +306,7 @@ def main() -> int:
         return rc
     serial = (arena_env.build_dir() / "serial-m7.log").read_text()
     ok = extra_checks(serial)
-    print(f"[test-m7] M7.0-7.5 TIMERS + ARP + IPv4/ICMP + UDP + DNS: {'PASS' if ok else 'FAIL'}  "
+    print(f"[test-m7] M7.0-7.7 TIMERS + ARP + IPv4/ICMP + UDP + DNS + TCP + NATIVE API: {'PASS' if ok else 'FAIL'}  "
           f"(serial: build/serial-m7.log)")
     return 0 if ok else 1
 

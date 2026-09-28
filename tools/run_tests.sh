@@ -33,6 +33,28 @@ else
     echo "!! host-side DNS parser tests FAILED"
 fi
 
+echo "== host-side TCP wire/timeout policy tests"
+if (cd "$REPO_ROOT" && rustc --test --edition 2024 \
+    userspace/netstackd/src/tcp.rs -o build/tcp-parser-tests && build/tcp-parser-tests); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! host-side TCP parser tests FAILED"
+fi
+
+# M7.7: exercise the actual no_std public networking API against a
+# strict fake transport; QEMU tests separately prove real packets.
+echo "== host-side networking API contract tests"
+if (cd "$REPO_ROOT" && rustc --test --edition 2024 tools/net_api_test.rs \
+    -o build/net-api-tests && build/net-api-tests); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! host-side networking API tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

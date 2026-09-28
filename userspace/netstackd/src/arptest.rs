@@ -43,6 +43,8 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+#[path = "../../net.rs"]
+mod net;
 
 const SLOT_EP: u64 = 0;
 /// The handshake with the suite (M7.1b): this client tells the suite
@@ -91,6 +93,11 @@ const EXIT_UDP_RECV: u64 = 76;
 const EXIT_DNS_MISMATCH: u64 = 77;
 const EXIT_DNS_CHUNK: u64 = 78;
 const EXIT_DNS_LOOKUP: u64 = 79;
+const EXIT_TCP_OPEN: u64 = 80;
+const EXIT_TCP_CONNECT: u64 = 81;
+const EXIT_TCP_WRITE: u64 = 82;
+const EXIT_TCP_READ: u64 = 83;
+const EXIT_TCP_CLOSE: u64 = 84;
 
 /// The transaction id this client puts in its query and demands back.
 const DNS_TXID: u16 = 0xA7E5;
@@ -194,16 +201,13 @@ pub unsafe extern "C" fn _start() -> ! {
     // image's own statics and stack. Single-threaded, no aliases.
     unsafe {
         log("arptest: asking the stack to resolve an address on the real wire");
+        let api = net::Client::new(SLOT_EP);
 
         // ---- 1: a real resolution ----
-        let (status, packed) = call(ARP_OP_RESOLVE, ip_word(SLIRP_GATEWAY_IP));
-        if status != ARP_S_OK {
-            log_line(|o| {
-                o.str("arptest: RESOLVE status ");
-                o.i64(status as i64);
-            });
-            fail(EXIT_RESOLVE, "the gateway did not resolve");
-        }
+        let mac = api
+            .resolve(SLIRP_GATEWAY_IP)
+            .unwrap_or_else(|_| fail(EXIT_RESOLVE, "the gateway did not resolve via API"));
+        let packed = u64::from_le_bytes([mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], 0, 0]);
         if packed == 0 {
             fail(EXIT_ZERO_MAC, "the stack returned an all-zero MAC");
         }
@@ -328,14 +332,9 @@ pub unsafe extern "C" fn _start() -> ! {
         // ---- 5: IPv4 + ICMP, on top of the same boundary (M7.2) ----
         // The gateway is already in the ARP cache, so this exercises
         // the IP and ICMP layers rather than re-proving resolution.
-        let (status, rtt) = call(ICMP_OP_PING, ip_word(SLIRP_GATEWAY_IP));
-        if status != ARP_S_OK {
-            log_line(|o| {
-                o.str("arptest: PING status ");
-                o.i64(status as i64);
-            });
-            fail(EXIT_PING, "the gateway did not answer an ICMP echo");
-        }
+        let rtt = api
+            .ping(SLIRP_GATEWAY_IP)
+            .unwrap_or_else(|_| fail(EXIT_PING, "the gateway did not answer an ICMP echo via API"));
         if rtt == 0 || rtt > 2_000_000 {
             log_line(|o| {
                 o.str("arptest: implausible round-trip time ");
@@ -583,35 +582,208 @@ pub unsafe extern "C" fn _start() -> ! {
             "arptest: PASS — closing and rebinding rotated the bearer; the old handle stayed revoked",
         );
 
-        // Now ask the STACK to resolve, rather than hand-parsing an
-        // opaque datagram as the M7.4 transport probe above did.
-        let mut lookup = [0u8; MSG_BYTES];
-        lookup[..11].copy_from_slice(b"example.com");
-        let (status, addr) = call_msg(DNS_OP_LOOKUP, 11, &mut lookup);
-        if status != ARP_S_OK || addr & 0xffff_ffff == 0 {
-            log_line(|o| {
-                o.str("arptest: DNS LOOKUP status ");
-                o.i64(status as i64);
-            });
-            fail(EXIT_DNS_LOOKUP, "the resolver failed to parse an A answer");
+        // The M7.7 library must exercise the real UDP continuation, not
+        // just pass host-side packet-layout tests. Send another query
+        // through its typed bearer API and drain the live DNS reply.
+        let mut socket = api
+            .bind_udp(5353)
+            .unwrap_or_else(|_| fail(EXIT_BIND, "API bind refused"));
+        let old_handle = socket.handle();
+        let mut query = [0u8; UDP_INLINE];
+        let qlen = build_dns_query(&mut query);
+        let peer = net::Address {
+            ip: SLIRP_DNS_IP,
+            port: 53,
+        };
+        if socket.send(peer, &query[..qlen]) != Ok(qlen) {
+            fail(EXIT_UDP_SEND, "API UDP query failed");
         }
-        let mut bad_name = [0u8; MSG_BYTES];
-        bad_name[..6].copy_from_slice(b"a..b.c");
-        let (status_bad, _) = call_msg(DNS_OP_LOOKUP, 6, &mut bad_name);
-        if status_bad != DNS_S_BAD_NAME {
-            fail(EXIT_DNS_LOOKUP, "a malformed name was accepted");
+        let mut answer = [0u8; net::UDP_PAYLOAD_MAX];
+        let datagram = socket
+            .recv(2_000_000, &mut answer)
+            .unwrap_or_else(|_| fail(EXIT_DNS_CHUNK, "API UDP continuation failed"));
+        if datagram.from != peer
+            || datagram.len <= UDP_INLINE
+            || u16::from_be_bytes([answer[0], answer[1]]) != DNS_TXID
+            || answer[2] & 0x80 == 0
+            || answer[datagram.len - 4..datagram.len]
+                .iter()
+                .all(|&b| b == 0)
+        {
+            fail(EXIT_DNS_CHUNK, "API delivered wrong/truncated datagram");
+        }
+        socket
+            .close()
+            .unwrap_or_else(|_| fail(EXIT_BIND, "API close refused"));
+        if api.adopt_udp(old_handle).send(peer, &query[..qlen])
+            != Err(net::Error::Status(UDP_S_BAD_HANDLE))
+        {
+            fail(EXIT_FORGED, "API closed bearer regained authority");
+        }
+        log(
+            "arptest: PASS — native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer",
+        );
+
+        // DNS via the library (the stack owns its own internal UDP binding).
+        let addr = api
+            .dns_a(b"example.com")
+            .unwrap_or_else(|_| fail(EXIT_DNS_LOOKUP, "API DNS A lookup failed"));
+        if addr == [0; 4] || api.dns_a(b"a..b.c") != Err(net::Error::Status(DNS_S_BAD_NAME)) {
+            fail(EXIT_DNS_LOOKUP, "API DNS answer or bad-name refusal failed");
         }
         log_line(|o| {
             o.str("arptest: PASS — DNS resolver returned example.com A = ");
-            for i in 0..4 {
+            for (i, byte) in addr.iter().enumerate() {
                 if i != 0 {
                     o.str(".");
                 }
-                o.u64((addr >> (8 * i)) & 0xff);
+                o.u64(*byte as u64);
             }
             o.str("; a malformed name was refused BEFORE sending");
         });
 
+        // ---- 7: active-open TCP against the HOST'S own TCP stack ----
+        // QEMU slirp routes 10.0.2.2:54321 to a fixture bound on the
+        // host loopback. OPEN returns before any receive: POLL drives
+        // the handshake and uses netd's real deadline, never spinning.
+        let mut conn = match api.tcp_open(net::Address {
+            ip: SLIRP_GATEWAY_IP,
+            port: 54321,
+        }) {
+            Ok(t) => t,
+            Err(s) => {
+                log_line(|o| {
+                    o.str("arptest: TCP OPEN status ");
+                    o.i64(match s {
+                        net::Error::Status(code) => code as i64,
+                        _ => -99,
+                    });
+                });
+                fail(EXIT_TCP_OPEN, "TCP active open refused");
+            }
+        };
+        let token = conn.handle();
+        let mut established = false;
+        let mut refused = false;
+        for _ in 0..12 {
+            let (state, _) = conn
+                .poll(300_000)
+                .unwrap_or_else(|_| fail(EXIT_TCP_CONNECT, "TCP POLL refused"));
+            if state == net::TcpState::Established {
+                established = true;
+                break;
+            }
+            if state == net::TcpState::Failed {
+                refused = true;
+                break;
+            }
+        }
+        if !established && !refused {
+            fail(EXIT_TCP_CONNECT, "three-way handshake did not complete");
+        }
+        if refused {
+            // A downloadable image has no host actor unless its owner
+            // starts one. Be explicit: the harness REQUIRES the PASS
+            // below and therefore fails if it forgot the fixture.
+            if conn.release().is_err() {
+                fail(EXIT_TCP_CONNECT, "failed TCP handle could not be released");
+            }
+            log(
+                "arptest: TCP SKIP — no host peer at 10.0.2.2:54321 (harness requires a live peer)",
+            );
+        } else {
+            if api.adopt_tcp(token ^ 1).poll(0) != Err(net::Error::Status(TCP_S_BAD_HANDLE))
+                || api
+                    .tcp_open(net::Address {
+                        ip: SLIRP_GATEWAY_IP,
+                        port: 54321,
+                    })
+                    .err()
+                    != Some(net::Error::Status(TCP_S_BUSY))
+            {
+                fail(
+                    EXIT_TCP_CONNECT,
+                    "a forged bearer or second connection was accepted",
+                );
+            }
+            log(
+                "arptest: PASS — TCP active OPEN returned a bearer; POLL completed the real three-way handshake",
+            );
+            if conn.write(b"arena-tcp") != Ok(9) {
+                fail(EXIT_TCP_WRITE, "TCP request was not accepted");
+            }
+            let mut stream = [0u8; 200];
+            let mut got = 0usize;
+            for _ in 0..20 {
+                let (state, available) = conn
+                    .poll(300_000)
+                    .unwrap_or_else(|_| fail(EXIT_TCP_READ, "TCP receive POLL refused"));
+                if state == net::TcpState::Failed {
+                    fail(EXIT_TCP_READ, "TCP connection failed mid-stream");
+                }
+                if available > 0 {
+                    let mut msg = [0u8; MSG_BYTES];
+                    let n = conn
+                        .read(&mut msg)
+                        .unwrap_or_else(|_| fail(EXIT_TCP_READ, "TCP READ refused"));
+                    if n == 0 || got + n > stream.len() {
+                        fail(EXIT_TCP_READ, "TCP stream was too long or empty");
+                    }
+                    stream[got..got + n].copy_from_slice(&msg[..n]);
+                    got += n;
+                }
+                if got == stream.len() {
+                    break;
+                }
+            }
+            if got != 200
+                || stream
+                    .iter()
+                    .enumerate()
+                    .any(|(i, &b)| b != b"arenaos!"[i % 8] ^ (i as u8))
+            {
+                fail(
+                    EXIT_TCP_READ,
+                    "TCP stream was truncated, corrupted or reordered",
+                );
+            }
+            log(
+                "arptest: PASS — TCP read 200 position-dependent bytes from the host in IPC chunks without loss or reordering",
+            );
+            // The host half-closes its send direction after the response;
+            // the guest replies with FIN and waits for the peer's ACK.
+            let mut closed = false;
+            for _ in 0..12 {
+                match conn.close() {
+                    Ok(()) => break,
+                    Err(net::Error::Status(TCP_S_STATE)) => {
+                        let _ = conn.poll(300_000);
+                    }
+                    _ => fail(EXIT_TCP_CLOSE, "TCP CLOSE refused"),
+                }
+            }
+            for _ in 0..12 {
+                let (state, _) = conn
+                    .poll(300_000)
+                    .unwrap_or_else(|_| fail(EXIT_TCP_CLOSE, "close POLL refused"));
+                if state == net::TcpState::Closed {
+                    closed = true;
+                    break;
+                }
+                if state == net::TcpState::Failed {
+                    fail(EXIT_TCP_CLOSE, "FIN not acknowledged");
+                }
+            }
+            if !closed
+                || conn.release().is_err()
+                || api.adopt_tcp(token).poll(0) != Err(net::Error::Status(TCP_S_BAD_HANDLE))
+            {
+                fail(EXIT_TCP_CLOSE, "TCP close/revoke did not complete");
+            }
+            log(
+                "arptest: PASS — TCP FIN was acknowledged, the peer closed, and the bearer was revoked",
+            );
+        }
         let (status, wire_total, hits_total) = shutdown();
         if status != ARP_S_OK {
             fail(EXIT_STATS, "the poison shutdown was refused");

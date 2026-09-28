@@ -465,6 +465,33 @@ pub const UDP_S_IN_USE: u64 = (-6i64) as u64;
 /// Nothing arrived for this binding before the deadline.
 pub const UDP_S_NO_DATA: u64 = (-7i64) as u64;
 
+// ---- TCP active-open v1 (M7.6, ADR-0035) -------------------------------
+// A single bounded outbound connection. Each operation requires the
+// service-issued random bearer handle; no kernel TCP capability or pid.
+// OPEN: w0 = dst IPv4 packed low-byte-first; inline[0..2] = dst port BE.
+//       Sends SYN and immediately returns handle (ARP is bounded first).
+// POLL: w0 = handle; inline[0..8] = max wait in microseconds. Advances
+//       receive/retransmit once; word1 = state | (queued bytes << 8).
+// WRITE: w0 = handle; inline[0] = length, [1..] = bytes (<=63).
+// READ: w0 = handle; word1 = bytes returned, inline = up to 64 bytes.
+// CLOSE: w0 = handle; initiates FIN after outstanding data is ACKed.
+// RELEASE: w0 = handle; revokes it after CLOSED/FAILED.
+pub const TCP_OP_OPEN: u64 = 11;
+pub const TCP_OP_POLL: u64 = 12;
+pub const TCP_OP_WRITE: u64 = 13;
+pub const TCP_OP_READ: u64 = 14;
+pub const TCP_OP_CLOSE: u64 = 15;
+pub const TCP_OP_RELEASE: u64 = 16;
+pub const TCP_CONNECTING: u64 = 1;
+pub const TCP_ESTABLISHED: u64 = 2;
+pub const TCP_CLOSING: u64 = 3;
+pub const TCP_CLOSED: u64 = 4;
+pub const TCP_FAILED: u64 = 5;
+pub const TCP_S_BAD_HANDLE: u64 = (-12i64) as u64;
+pub const TCP_S_BUSY: u64 = (-13i64) as u64;
+pub const TCP_S_STATE: u64 = (-14i64) as u64;
+pub const IP_PROTO_TCP: u8 = 6;
+
 pub const IP_PROTO_UDP: u8 = 17;
 
 pub const ARP_S_OK: u64 = 0;

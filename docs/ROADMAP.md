@@ -656,7 +656,7 @@ restart under fault injection, capability re-grant tests.
       the suite calls it). Gates: run_tests 13/13 (362 assertions),
       fmt clean.
 
-## Phase 7 — Networking
+## Phase 7 — Networking ✅ (bounded v1)
 
 NIC TX/RX via the virtio-net driver server (done, M6.1) → ARP → IPv4 →
 ICMP → UDP → DNS resolver service → TCP (own stack server, async API) →
@@ -832,6 +832,43 @@ assertions).
       DNSSEC, DHCP/configuration, or TCP fallback is claimed. Gates:
       run_tests 15/15 (two host parser cases + M1–M7 boots),
       netstackd fmt and clippy clean.
+- [x] **7.6 bounded TCP active-open** — DONE (ADR-0035). `netstackd`
+      exposes a client-driven OPEN/POLL/WRITE/READ/CLOSE/RELEASE state
+      machine behind an rngd-backed bearer: possession, not caller
+      identity, authorizes use. OPEN returns after bounded ARP and SYN
+      send; POLL advances handshakes, data and FIN without blocking the
+      service on an unbounded receive. Pseudo-header checksums, tuple
+      validation, MSS/window 400, in-order bounded receive, a
+      stop-and-wait transmit with same-sequence bounded retransmission,
+      and explicit failure/close/revocation are implemented. An
+      independent Linux TCP peer sees the exact request and orderly EOF;
+      the guest checks all 200 position-dependent response bytes across
+      IPC chunks, FIN acknowledgement and handle revocation. The TCP
+      burst exposed two driver bugs: a single held RX frame dropped
+      subsequent completions, and overlapping RX/TX notification badge
+      *masks* misclassified interrupts. netd now retains all three
+      completed buffers in order and uses disjoint single-bit badges.
+      No passive listening, concurrent connections, reordering queue,
+      congestion control or general sockets claimed. A no-peer boot
+      explicitly SKIPs TCP yet reaches the shell cleanly; qualification
+      boots require the real peer and refuse SKIP. Gates: run_tests
+      17/17, netstackd/netd fmt + clippy clean, artifact-bound 100/100
+      boots with host and guest wire/close proofs.
+- [x] **7.7 userspace networking API library** — DONE (ADR-0036).
+      The no_std `userspace/net.rs` now provides a typed endpoint Client,
+      explicit transferable UDP/TCP bearers, ARP resolve, ICMP ping, DNS
+      A, UDP bind/send/full-datagram receive/close, and TCP active-open/
+      poll/write/read/close/release. The library enforces request sizes,
+      validates replies and drains UDP IPC continuations under the same
+      bearer; `close`/`release` are explicit, not unreliable Drop-time
+      side effects. No kernel UDP capability or caller-identity claim.
+      Strict host tests verify byte-exact calls, offsets, errors and
+      authority lifecycle. The guest uses the public library against
+      real ARP, ICMP, DNS and Linux TCP peers and sends a second real
+      DNS query over its UDP API, checking all bytes beyond the inline
+      boundary and revocation. Gates: run_tests 18/18, final-image
+      100/100 boots, matching SHA-256 receipt. Phase 7 bounded v1 is
+      complete; this is NOT a POSIX sockets or unrestricted TCP claim.
 
 ### Three decisions taken BEFORE any protocol code
 

@@ -54,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arena_env  # noqa: E402
 import qmp  # noqa: E402
 import vcon as vconsole  # noqa: E402 — `vcon` is a run_qemu parameter
+import tcp_fixture  # noqa: E402
 
 TIMEOUT_S = 120  # TCG is slow; a healthy boot takes <10s
 MEM_MIB = 512
@@ -146,6 +147,7 @@ def run_qemu(label: str, esp: Path,
              keys: KeyScript | None = None,
              vcon: bool = True,
              console: ConsoleScript | None = None,
+             tcp_peer: bool = True,
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     qmp_sock = bdir / f"qmp-{label}.sock"
@@ -216,6 +218,15 @@ def run_qemu(label: str, esp: Path,
     # one-line explanation into a bisect. (Learned while chasing an
     # rc=1 that QEMU had explained perfectly the whole time.)
     err_log = arena_env.build_dir() / f"qemu-stderr-{label}.log"
+    peer_stop = threading.Event()
+    peer_listener = tcp_fixture.bind() if net and tcp_peer else None
+    peer_log = bdir / f"tcp-{label}.log"
+    peer_log.write_text("")
+    peer_thread = None
+    if peer_listener is not None:
+        peer_thread = threading.Thread(target=tcp_fixture.actor,
+            args=(peer_listener, peer_stop, peer_log), daemon=True)
+        peer_thread.start()
     with open(serial_log, "wb") as logf, open(err_log, "wb") as errf:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logf,
                                 stderr=errf)
@@ -257,8 +268,12 @@ def run_qemu(label: str, esp: Path,
             proc.kill()
             proc.wait()
             stop.set()
+            peer_stop.set()
+            if peer_thread is not None: peer_thread.join(timeout=2)
             raise
         stop.set()
+    peer_stop.set()
+    if peer_thread is not None: peer_thread.join(timeout=2)
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
     return rc, serial, dt
@@ -330,6 +345,11 @@ def boot(label: str, esp: Path,
     # one-line explanation into a bisect. (Learned while chasing an
     # rc=1 that QEMU had explained perfectly the whole time.)
     err_log = arena_env.build_dir() / f"qemu-stderr-{label}.log"
+    peer_stop = threading.Event()
+    peer_listener = tcp_fixture.bind()
+    peer_thread = threading.Thread(target=tcp_fixture.actor,
+        args=(peer_listener, peer_stop, bdir / f"tcp-{label}.log"), daemon=True)
+    peer_thread.start()
     with open(serial_log, "wb") as logf, open(err_log, "wb") as errf:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logf,
                                 stderr=errf)
@@ -404,6 +424,8 @@ def boot(label: str, esp: Path,
                   f"SIGKILLed (treated as a crash)")
         stop.set()
         th.join(timeout=2)
+    peer_stop.set()
+    peer_thread.join(timeout=2)
     if killed:
         rc = None
     dt = time.monotonic() - t0

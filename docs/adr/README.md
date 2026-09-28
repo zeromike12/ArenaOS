@@ -51,6 +51,8 @@ Rules:
 | [0032](0032-frames-larger-than-a-message.md) | Frames larger than one IPC message: netd STAGES a received frame in the ring where the device put it and serves it by offset, instead of dropping anything over 64 bytes — a limit that silently decided which protocols could exist (a DNS answer does not fit). Not zero-copy, and says so. Proven by making the EXISTING proof require it (the echo payload went 8 → 200 bytes, verified byte-for-byte with a position-dependent pattern). Also records why this came before UDP, and why a port must NOT be a kernel capability | accepted |
 | [0033](0033-udp-and-authority-by-possession.md) | UDP, and a port handle that is AUTHORITY rather than identity: `BIND` returns an rngd-drawn 64-bit token and possession of it is the right to use the port — a capability one layer below the kernel's, with deliberate passing as delegation. Records two wrong instincts first (a kernel `CapObj::UdpPort`, which would teach the kernel UDP; then per-client endpoints, which confused authority with identity — C's correction). Random on purpose: a guessable handle is authority by arithmetic, and without entropy the stack REFUSES to bind. Proven with a real DNS query matched on our transaction id | accepted |
 | [0034](0034-dns-resolver-and-udp-continuations.md) | DNS A lookup, UDP continuations, checksums and bearer revocation | Accepted |
+| [0035](0035-tcp-active-open.md) | Bounded TCP active open and disjoint netd RX/TX badges | Accepted |
+| [0036](0036-native-networking-api.md) | Native userspace API with explicit bearer delegation and real-wire proof | Accepted |
 
 ## Template
 

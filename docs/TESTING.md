@@ -470,6 +470,41 @@ compressed answer and malformed responses/queries, including a pointer
 cycle and truncation. Changing the matching logic must break one of
 these gates. A real external reply still proves the happy path.
 
+### TCP burst and two-sided wire proof (M7.6, ADR-0035)
+
+The guest OPEN must return a bearer before the handshake completes;
+POLL drives the real three-way handshake with an independent Linux
+socket through QEMU slirp. The host fixture binds before QEMU starts
+and independently checks the exact request, sends a 200-byte
+position-dependent response and observes guest EOF. The guest checks
+every response byte across multiple IPC reads and confirms FIN was
+acknowledged, the peer closed and the handle was revoked. A host EOF
+alone is *not* sufficient: shutting down QEMU after a failed guest
+boot also closes the host socket. `test_m7.py` requires both proofs;
+`test_m7_no_tcp.py` boots without a peer and demands an explicit SKIP,
+not a fabricated TCP success. The artifact-bound stability loop binds
+a fresh host peer and checks guest completion **and** host evidence on
+each of its 100 boots. Host parser tests cover malformed TCP headers,
+wrong pseudo-header checksum, SYN MSS and retry timing.
+
+This also caught a mechanism, not just a flake: netd's old RX/TX
+notification badges were overlapping integers interpreted as bit masks
+by `SYS_WAIT`. A merged RX notification could falsely satisfy a TX
+wait and leave RECV parked with a completed frame. The fix uses
+disjoint bits and a bounded completed-frame FIFO, with compile-time
+badge-disjointness checks (ADR-0035).
+
+### Native network API (M7.7, ADR-0036)
+
+The actual no_std API module is compiled into host tests with an exact
+IPC-call fake that checks operation, packed arguments and inline bytes.
+The guest test also uses that same module on real slirp traffic:
+ARP/ICMP/DNS/TCP plus a second UDP query, including multi-message
+receive and bearer revocation. `test_m7.py` and each 100-boot
+qualification require its real-wire marker alongside the independent
+host TCP peer evidence; a fake transport success cannot satisfy these
+boot gates. Explicit `close`/`release` must be observed by the caller.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

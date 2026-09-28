@@ -33,13 +33,11 @@
 //! VERSION_1 virtio header lives in netd's own page and chains in front
 //! of the CALLER's LENT frame (phys via SYS_CAP_PHYS); the device DMAs
 //! the caller's page directly. RX v1 posts netd-owned buffers, harvests
-//! used entries on the RX badge into a single-frame hold slot (the
-//! FIRST undelivered frame is held; later arrivals are dropped — with
-//! an honest log and an immediate re-post, so the ring never shrinks),
-//! and delivers frames up to MSG_BYTES through the REPLY's inline
-//! message (the fstest-LS pattern — lent caps cannot be mapped, so a
-//! copy into the caller's frame is structurally impossible; full-frame
-//! delivery is the Phase 7 buffer-handoff design).
+//! used entries into a bounded FIFO of three device-owned buffers.
+//! A completed buffer remains out of the device ring until its whole
+//! frame is delivered to the stack in MSG_BYTES-sized reply chunks;
+//! only then is it re-posted. This is copying, not zero-copy receive
+//! (ADR-0032).
 //!
 //! Exit codes (the m6 contract, driver side): 42 clean shutdown,
 //! 70 SYS_DEV_INFO refused / not virtio-net, 71 a self-map refused,
@@ -77,10 +75,14 @@ const FRAME_RX_BASE: usize = 1;
 const RX_BUFS: usize = 3;
 const FRAME_Q1_RING: usize = 4;
 
-/// The RX/TX interrupt badges (distinct bits — the notification merges
-/// pending badges by OR, and netd decodes by bit).
-const IRQ_BADGE_RX: u64 = 0x6E01;
-const IRQ_BADGE_TX: u64 = 0x6E02;
+/// The RX/TX interrupt badges MUST be disjoint single-bit masks: SYS_WAIT
+/// merges badges by OR. The old 0x6e01/0x6e02 values overlapped, so RX
+/// could be mistaken for TX, or a received frame consumed while waiting
+/// for a TX completion (intermittent M7.6 burst hangs).
+const IRQ_BADGE_RX: u64 = 1 << 0;
+const IRQ_BADGE_TX: u64 = 1 << 1;
+const _: () = assert!(IRQ_BADGE_RX & IRQ_BADGE_TX == 0);
+const _: () = assert!((IRQ_BADGE_RX | IRQ_BADGE_TX) & NET_BADGE_DEADLINE == 0);
 
 // ---- the diagnostic exit contract (m6.rs maps every code) --------------------
 
@@ -181,11 +183,14 @@ struct Drv {
     /// notification merges by OR; a TX wait may swallow an RX arrival,
     /// so bits accumulate here and are decoded by bit).
     pending: u64,
-    /// The FIRST undelivered received frame: (RX buffer id, frame
-    /// length with the virtio header stripped). Later arrivals while
-    /// the hold is busy are dropped (logged, counted, buffer re-posted
-    /// — the ring never shrinks).
+    /// The first undelivered frame, plus a FIFO of the other completed
+    /// RX buffers. TCP can deliver ACK, data and FIN in one burst;
+    /// dropping the second completion before the stack can RECV it
+    /// breaks reliable delivery even if the peer did everything right.
     hold: Option<(u16, u32)>,
+    rx_fifo: [Option<(u16, u32)>; RX_BUFS - 1],
+    rx_head: usize,
+    rx_count: usize,
     /// The frame currently being read out in chunks (M7.3): the
     /// receive-ring buffer id and the frame's full length. Its buffer
     /// is NOT re-posted until the last chunk has been taken, so the
@@ -216,10 +221,9 @@ impl Drv {
         }
     }
 
-    /// Drain the RX used ring into the hold slot (non-blocking). The
-    /// hold keeps the FIRST undelivered frame; further arrivals are
-    /// dropped with an honest log and their buffers re-posted at once,
-    /// so the ring keeps its full depth.
+    /// Drain used entries into a FIFO of completed device buffers. No
+    /// copy: each buffer stays out of the device ring until its turn
+    /// has been fully delivered to the stack (ADR-0032).
     ///
     /// # Safety
     /// Method contract as `post_rx`.
@@ -240,17 +244,19 @@ impl Drv {
                     fail(EXIT_COMPLETE, "the RX completion was malformed");
                 }
                 let flen = len.saturating_sub(VNET_HDR_LEN);
-                if self.hold.is_some() {
+                if self.hold.is_none() {
+                    self.hold = Some((id as u16, flen));
+                } else if self.rx_count < self.rx_fifo.len() {
+                    let tail = (self.rx_head + self.rx_count) % self.rx_fifo.len();
+                    self.rx_fifo[tail] = Some((id as u16, flen));
+                    self.rx_count += 1;
+                } else {
+                    // Only possible with more completed RX descriptors
+                    // than allocated buffers; make the refusal visible.
                     self.rx_dropped += 1;
-                    log_line(|o| {
-                        o.str("netd: RX hold busy — dropping a frame of ");
-                        o.u64(u64::from(flen));
-                        o.str(" bytes (v1 holds one undelivered frame)");
-                    });
+                    log("netd: RX FIFO full — discarding completed frame");
                     let p = self.rx_phys[id as usize];
                     self.post_rx(id as u16, p);
-                } else {
-                    self.hold = Some((id as u16, flen));
                 }
             }
         }
@@ -258,7 +264,7 @@ impl Drv {
 
     /// Wait until one of the WANTED badge bits is pending, harvesting
     /// RX arrivals on the way (an RX bit consumed here fills the hold
-    /// slot; unknown bits are ignored forever after). SYS_WAIT takes
+    /// slot/FIFO; unknown bits are ignored forever after). SYS_WAIT takes
     /// the notification's merged pending word, so every bit is
     /// accumulated locally before decoding.
     ///
@@ -266,6 +272,13 @@ impl Drv {
     /// Method contract as `post_rx`.
     unsafe fn wait_bits(&mut self, want: u64) {
         loop {
+            // Completed used entries are authoritative even if QEMU
+            // coalesces their interrupt with a TX completion. Check
+            // once on each blocking wait, never in a spin loop.
+            if self.q0.used_seen != unsafe { self.q0.used_idx() } {
+                // SAFETY: the driver exclusively owns the receive ring.
+                unsafe { self.harvest_rx() };
+            }
             if self.pending & IRQ_BADGE_RX != 0 {
                 self.pending &= !IRQ_BADGE_RX;
                 // SAFETY: method contract.
@@ -276,6 +289,12 @@ impl Drv {
                 // wait from here until the reply must fall through
                 // rather than park again.
                 self.deadline_seen = true;
+            }
+            // harvest_rx consumes the RX badge. Returning on `pending`
+            // alone after that consumption loses a READY frame and
+            // parks until another event (the M7.6 burst race).
+            if want & IRQ_BADGE_RX != 0 && self.hold.is_some() {
+                return;
             }
             if self.pending & want != 0 {
                 self.pending &= !want;
@@ -517,6 +536,9 @@ pub unsafe extern "C" fn _start() -> ! {
             mac,
             pending: 0,
             hold: None,
+            rx_fifo: [None; RX_BUFS - 1],
+            rx_head: 0,
+            rx_count: 0,
             staged: None,
             deadline_seen: false,
             timeouts: 0,
@@ -678,6 +700,11 @@ pub unsafe extern "C" fn _start() -> ! {
                         }
                     }
                     let held = drv.hold.take();
+                    if drv.rx_count > 0 {
+                        drv.hold = drv.rx_fifo[drv.rx_head].take();
+                        drv.rx_head = (drv.rx_head + 1) % drv.rx_fifo.len();
+                        drv.rx_count -= 1;
+                    }
                     if timer_id >= 0 {
                         // Cancelling a timer that already fired is an
                         // error by design (ADR-0029) — ignore it here,
