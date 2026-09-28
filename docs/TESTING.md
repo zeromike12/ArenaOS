@@ -401,6 +401,31 @@ The kernel cross-checks the wire independently: transmit and receive
 relay deliveries must both be non-zero, so the exchange cannot have
 been a lookup table with good manners.
 
+### A proof that cannot fail is not a proof (M7.1b)
+
+The re-attach test took three attempts to become honest, and the two
+failures are more instructive than the success.
+
+Attempt one restarted netd and *then* released the client. It passed
+— and proved only that a capability survives a restart, because the
+stack called into a driver that was already back. Its own counter
+said `0 re-attach(es)`, which is the tell.
+
+Attempt two polled the supervisor inside the drain loop, which is
+what production does. Same result: the first poll ran before the
+client had even woken.
+
+The test now kills netd, releases the client immediately, and waits
+for the KERNEL'S OWN evidence that the stack has met the corpse —
+with netd dead, the only thing left in the system that arms a timer
+is netstackd's backoff, so a rise in `timer::stats().armed_total` is
+unambiguous — and only then lets the supervisor work. The assertion
+that the stack re-attached is read from the service's own accounting,
+not inferred by the harness.
+
+When a test of a failure path passes on the first run, the right
+question is whether the failure actually happened.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

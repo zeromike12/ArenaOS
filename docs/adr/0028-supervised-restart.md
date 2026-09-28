@@ -156,6 +156,31 @@ event they have to handle beyond retrying the one call that failed.
   their own decision rather than being smuggled in as a detail of
   "restart a driver".
 
+## Amendment (M7.1b): calls sent AFTER the server died
+
+This ADR answered "what happens to a caller that was in flight when
+its server died" and, without noticing, left the neighbouring case
+open: a call sent *afterwards*. It queued on an endpoint nobody would
+ever read and blocked forever — the same hang this decision existed to
+remove, one instant later.
+
+It stayed invisible because the suites always destroyed a server while
+somebody was mid-call. The first thing to hit it in earnest was the
+network stack, and unavoidably so: a stack discovers its driver is
+gone **by calling it**.
+
+An endpoint whose serving process is destroyed is now marked
+**orphaned**, and calls to it are refused immediately with
+`STATUS_SERVICE_GONE`. The flag clears when any process takes up the
+serve side again — which a restarted service does by its first
+`recv`, so there is no registration step to forget and no way for the
+flag to outlive the situation it names.
+
+The general lesson is worth more than the fix: "the service is gone"
+has to be answerable at *every* point a client can touch it, not only
+at the instant of death. A typed error that covers one of two paths
+leaves the other path exactly as broken as it was, and looks tested.
+
 ## Future implications
 
 - The obvious next question is D: a ring-3 supervisor. The shape of

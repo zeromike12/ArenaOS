@@ -719,13 +719,25 @@ assertions).
       (nothing must happen when an entry expires); retry covers only
       the idempotent broadcast query, never a datagram send. Gates:
       run_tests 14/14 (402 assertions), fmt + clippy clean.
-- [ ] **7.1b netd under real supervision, and re-attach.** The proof
-      deferred from 7.1 and named rather than implied: netstackd and
-      netd both registered with the supervisor, netd killed
-      mid-exchange, and the stack RE-ESTABLISHING (re-lending
-      buffers, re-arming) rather than retrying — a restarted driver
-      has lost its posted buffers, so continuity cannot be assumed.
-      Phase 7 decision 3 in full.
+- [x] 7.1b **netd under real supervision, and re-attach** — DONE
+      (ADR-0030, plus an amendment to ADR-0028). Decision 3 of the
+      phase, done rather than promised: netd registered with the
+      supervisor, KILLED mid-flight, restarted with its grants
+      replayed, and netstackd re-establishing with the new instance —
+      backing off on a real timer, re-acquiring its device facts, and
+      re-sending only because an ARP request is idempotent. **It also
+      found a hole in ADR-0028**: that decision gave a typed answer to
+      callers in flight when a server died and left the neighbouring
+      case open, so a call sent AFTERWARDS queued on an endpoint
+      nobody would ever read and blocked forever — the same hang, one
+      instant later, and exactly the one a stack hits because a stack
+      discovers its driver is gone BY CALLING IT. Endpoints whose
+      server is destroyed are now ORPHANED and refuse new calls;
+      a restarted service clears that by its first `recv`. Making the
+      test honest took three attempts (twice the driver was already
+      back before the stack noticed, and zero re-attaches were
+      reported); it now waits for the kernel's own evidence that the
+      stack met the corpse before letting the supervisor work.
 
 ### Three decisions taken BEFORE any protocol code
 

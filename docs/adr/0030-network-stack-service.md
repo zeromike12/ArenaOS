@@ -110,14 +110,49 @@ only checked the returned value.
   them to. This is fine today and becomes wrong the moment IPv4
   exists, at which point the receive path needs a demultiplexer —
   which is 7.2's first job, not a retrofit.
-- **The stack is not yet supervised, and netd's restart is not yet
-  survivable by it.** Production wiring of both, plus the re-attach
-  path (a restarted netd has lost its posted buffers, so the stack
-  must re-establish rather than retry), is **7.1b** and is written
-  down here precisely so it cannot be quietly skipped.
+- **The stack itself is not yet supervised.** netd is (7.1b);
+  netstackd is not, and should be once something depends on it.
 - **Inline replies carry one payload word.** Returning a pair means
   packing, which is fine at this scale and will want a proper reply
   message shape before a protocol returns anything structured.
+
+## M7.1b — surviving the driver
+
+Decision 3 of the phase, done rather than promised.
+
+netd is registered with the supervisor, killed mid-flight, and
+restarted with its grant list replayed — including the same endpoint,
+which is why netstackd's capability keeps working. What netstackd
+does on `STATUS_SERVICE_GONE` is the part that matters:
+
+- **It re-establishes, it does not retry.** A restarted netd is a new
+  process that re-ran its own virtio handshake: fresh queues, freshly
+  posted receive buffers, a fresh relay. Nothing it held survived, so
+  the stack re-acquires its device facts (it asks the new instance
+  for the MAC) and treats the success of that call as how it learns
+  the driver is alive again.
+- **It backs off on a real timer.** Spinning on `SYS_CLOCK_NOW` is
+  the polling this phase forbids, and the stack cannot be woken by
+  the supervisor — it has no way to know a spawn happened except by
+  asking.
+- **It re-sends only because ARP is idempotent.** A broadcast query
+  costs a packet to repeat. A datagram send after `SERVICE_GONE` must
+  never be repeated, because the frame may already be on the wire.
+
+This is also where ADR-0028's amendment came from: netstackd's first
+call into the corpse did not fail, it *queued*, because that ADR had
+only covered calls already in flight.
+
+**Making the test honest took three attempts**, and the failures are
+the useful part. Restarting netd before releasing the client proved
+only that a capability survives a restart — the stack called into a
+driver that was already back and reported zero re-attaches. Polling
+the supervisor inside the drain was no better: the first poll ran
+before the client had even woken. The test now waits for the kernel's
+own evidence that the stack has met the corpse — with netd dead, the
+only thing left in the system that arms a timer is netstackd's
+backoff — and only then lets the supervisor work. A proof that cannot
+fail is not a proof.
 
 ## Future implications
 

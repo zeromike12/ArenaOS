@@ -583,6 +583,17 @@ driver, so file data DMAs disk ↔ client page with no copy in any ring.
   client blocked in `SYS_IPC_CALL` cannot observe its own timer
   (ADR-0030, and ADR-0029's erratum).
 
+- **"The service is gone" must be answerable everywhere (M7.1b):**
+  a typed error that covers one of two paths leaves the other exactly
+  as broken as it was, and looks tested. ADR-0028 answered callers who
+  were in flight when a server died; a call sent afterwards still
+  queued on an endpoint nobody would read. Endpoints are now marked
+  orphaned when their server is destroyed and refuse new calls, with
+  the flag cleared by whoever next takes up the serve side. The stack
+  above treats that answer as "re-establish", not "retry" — it
+  re-acquires its device facts and only repeats operations that are
+  idempotent.
+
 ## 9. Security philosophy
 
 - Capabilities are the security model (§2). Rights are attenuable on
