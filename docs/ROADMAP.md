@@ -656,12 +656,112 @@ restart under fault injection, capability re-grant tests.
       the suite calls it). Gates: run_tests 13/13 (362 assertions),
       fmt clean.
 
-## Phase 7 — Networking (outline)
+## Phase 7 — Networking
 
-NIC TX/RX via virtio-net driver server → Ethernet framing → ARP → IPv4 →
+NIC TX/RX via the virtio-net driver server (done, M6.1) → ARP → IPv4 →
 ICMP → UDP → DNS resolver service → TCP (own stack server, async API) →
-userspace net API library. Each protocol a separately testable milestone with
-QEMU netdev (user-mode/slirp + tap tests, packet capture assertions).
+userspace net API library. Each protocol a separately testable milestone
+with QEMU netdev (user-mode/slirp + tap tests, packet capture
+assertions).
+
+### Three decisions taken BEFORE any protocol code
+
+Recorded here rather than discovered later, because each one is
+expensive to reverse once a protocol depends on it. Each gets a full
+ADR at implementation; these are the commitments.
+
+**1. `netd` stays strictly at L2. Protocol state lives elsewhere.**
+netd owns the device and nothing above it: raw Ethernet frames in and
+out, the MAC from config space, virtqueues, interrupts. It does not
+parse an ethertype, hold an ARP entry, or know what an IP address is —
+exactly as ADR-0024 built it and as `nettest` demonstrated by
+hand-building its ARP frame.
+
+Everything above L2 goes in a separate resident service,
+**`netstackd`**: the ARP cache and its aging, IPv4, ICMP, UDP demux,
+DNS, and eventually TCP. Applications talk to netstackd; only
+netstackd talks to netd.
+
+The reason is not tidiness. A driver's job is to survive its device
+and be restartable (M6.5); a protocol stack's job is to hold
+connection state across time. Mixing them means a wedged NIC takes
+every connection with it, and a protocol bug can only be fixed by
+restarting the thing that owns the hardware. Keeping the split means
+netd can be killed and restarted under a live stack — which is
+precisely what decision 3 has to prove.
+
+**2. The timer facility is built FIRST, as 7.0, before ARP.**
+Ring 3 has no timers today. TCP retransmission, ARP aging, DNS
+timeout and retry, connection establishment timeouts, and later
+TIME_WAIT all need real ones, and ADR-0028 already recorded the gap
+from the other side: an IPC client cannot currently time itself out.
+Building protocols first and discovering this later is how a codebase
+ends up with polling loops that never get removed.
+
+The shape, to be ADR'd with the implementation:
+
+- `SYS_CLOCK_NOW` — monotonic microseconds, the clock M2.2 already
+  calibrated, read-only.
+- `SYS_TIMER_ARM(notif_slot, badge, deadline_us)` — a one-shot timer
+  that NOTIFIES an existing notification with a badge bit when the
+  deadline passes. Returns a timer id.
+- `SYS_TIMER_CANCEL(timer_id)`.
+- Timers are owned by the process and swept at `proc::destroy`, the
+  same way relay vectors (M5.2), the console mirror (M6.4), and
+  blocked-thread references (M6.5) already are. That sweep is now a
+  pattern, not a special case.
+
+Delivery by NOTIFICATION is the whole point: every service already
+blocks on exactly one notification with merged badge bits, so "wait
+for a device interrupt OR a client request OR a timeout" needs no new
+blocking primitive and no second thread. **Explicit anti-goal:** no
+polling loops and no busy-waits anywhere in the stack. If a milestone
+in Phase 7 finds itself spinning on a clock read, the timer facility
+is wrong and gets fixed, not worked around.
+
+Granularity is stated honestly rather than implied: the tick is
+100 Hz, so a deadline means "not before", with ~10 ms resolution.
+That is ample for RTO minimums, ARP aging, and DNS retry; nothing in
+Phase 7 may quietly assume finer.
+
+**3. Production supervision comes before the stack depends on netd,
+and retry policy is the stack's — per operation.**
+ADR-0028 built supervised restart but left `supervise::poll` uncalled
+outside the suite. Wiring it into the boot/idle path is part of 7.0,
+so that by the time netstackd exists, a netd that dies is a netd that
+comes back. 7.1 then proves it from the stack's side: kill netd
+mid-exchange and show the stack recovers.
+
+`STATUS_SERVICE_GONE` means the outcome is UNKNOWN, not "did not
+happen", and the stack must act accordingly. Blanket retry is
+forbidden; the policy is per operation:
+
+- **Datagram TX (UDP/IP): never resend on SERVICE_GONE.** The frame
+  may already be on the wire. UDP is unreliable by contract, so "may
+  or may not have been sent" is within what the application signed up
+  for — manufacturing a duplicate is not.
+- **ARP requests: safe to re-send.** A broadcast query is idempotent.
+- **TCP: let the protocol handle it.** Retransmission with sequence
+  numbers is TCP's own job; a SERVICE_GONE during send is exactly the
+  case the RTO covers, so the stack adds no special case and
+  certainly no duplicate.
+- **Receive paths: re-establish, never retry.** A restarted netd has
+  lost its posted RX buffers and queue state, so the stack must
+  RE-ATTACH (re-lend buffers, re-arm) rather than assume continuity.
+  This is an explicit step in the netd protocol, not an implicit
+  recovery.
+
+netstackd itself becomes a supervised service too, once it exists.
+
+### Scope firewall for Phase 7
+
+Phase 7 is not a BSD-sockets compatibility project. The API is
+designed for this OS (capability-addressed, message-based,
+asynchronous) exactly as ADR-0001 requires. A POSIX/sockets
+compatibility layer remains an optional, later, separately-ADR'd
+decision — if a milestone starts shaping the stack around
+`bind`/`listen`/`accept` semantics, that is a scope violation unless
+an ADR has explicitly chosen it first.
 
 ## Phase 8 — Mature userspace (outline)
 

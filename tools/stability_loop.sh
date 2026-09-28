@@ -54,11 +54,25 @@ SERIAL="$REPO_ROOT/build/stability-serial.log"
 QMP_SOCK="$REPO_ROOT/build/qmp-stability.sock"
 VCON_SOCK="$REPO_ROOT/build/vcon-stability.sock"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
-RESULT_LINE='m2: RESULT PASS (21/21)'
-RESULT_LINE_M3='m3: RESULT PASS (13/13)'
-RESULT_LINE_M4='m4: RESULT PASS (9/9)'
-RESULT_LINE_M5='m5: RESULT PASS (6/6)'
-RESULT_LINE_M6='m6: RESULT PASS (6/6)'
+# The suite verdicts are DERIVED, not written down here.
+#
+# This file used to carry a hardcoded line per suite — m2 21/21, m3
+# 13/13, … m6 4/4 — and every milestone that added a test had to
+# remember to come back and edit it. M6.4 and M6.5 added two, nobody
+# edited it, and the v0.10.0 tag shipped a qualification tool that
+# scores 0/100 on its own image: it was still looking for
+# 'm6: RESULT PASS (4/4)'. The check was wrong in the one direction a
+# test must never be wrong — it failed a machine that was fine, and
+# would equally have passed a machine that had silently LOST tests,
+# because 4/4 is a perfectly good line for a suite that used to have
+# six.
+#
+# So: boot 1 establishes the expectation, and boots 2..N must match it
+# exactly. Every 'mN: RESULT ...' line the kernel prints is captured
+# as a set; a suite that changes its verdict, loses tests, or stops
+# reporting at all is a difference. Nothing to keep in step by hand,
+# and the expectation is printed so it is never a mystery.
+EXPECTED="$REPO_ROOT/build/stability-expected.txt"
 # The keystrokes the m6 input_service test waits for, typed on the
 # virtual keyboard once inputd announces DRIVER_OK.
 KEY_MARKER='inputd: virtio-input ready'
@@ -74,6 +88,10 @@ HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 pass=0
 fail=0
 t_start=$(date +%s)
+# Derived FRESH each run: the expectation is "every boot of THIS image
+# agrees", not "this image matches whatever ran here last week". A
+# stale file would reintroduce exactly the staleness this replaced.
+rm -f "$EXPECTED" "$REPO_ROOT/build/stability-receipt.txt"
 # 0.2 s polls per second of boot timeout: the feeder must never outlive
 # QEMU's timeout, or a boot that dies before the prompt wedges the
 # pipeline forever (timeout kills QEMU, not the grep loop).
@@ -147,18 +165,43 @@ for i in $(seq 1 "$N"); do
         why="no serial output"
     elif grep -aq 'PANIC' "$SERIAL"; then
         why="kernel PANIC on serial"
-    elif ! grep -aqF "$RESULT_LINE" "$SERIAL"; then
-        why="missing '$RESULT_LINE'"
-    elif ! grep -aqF "$RESULT_LINE_M3" "$SERIAL"; then
-        why="missing '$RESULT_LINE_M3'"
-    elif ! grep -aqF "$RESULT_LINE_M4" "$SERIAL"; then
-        why="missing '$RESULT_LINE_M4'"
-    elif ! grep -aqF "$RESULT_LINE_M5" "$SERIAL"; then
-        why="missing '$RESULT_LINE_M5'"
-    elif ! grep -aqF "$RESULT_LINE_M6" "$SERIAL"; then
-        why="missing '$RESULT_LINE_M6'"
+    elif grep -aq 'RESULT FAIL' "$SERIAL"; then
+        why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then
         why="missing clean-halt declaration"
+    fi
+
+    # The derived verdict set: every suite's RESULT line, in order.
+    if [[ -z "$why" ]]; then
+        verdicts="$(grep -ao '^m[0-9]*: RESULT [A-Z]* ([0-9]*/[0-9]*' "$SERIAL" \
+                    | sed 's/\r//' | sort -u)"
+        if [[ -z "$verdicts" ]]; then
+            why="no suite reported a RESULT line at all"
+        elif [[ ! -f "$EXPECTED" ]]; then
+            # Boot 1 sets the bar, and says so out loud.
+            printf '%s\n' "$verdicts" > "$EXPECTED"
+            echo "expectation derived from boot $i:"
+            sed 's/^/    /' "$EXPECTED"
+            # Every suite must have passed everything it ran; an
+            # honest SKIP is allowed (an absent fixture), a partial
+            # pass is not.
+            if printf '%s\n' "$verdicts" | grep -q 'RESULT PASS' ; then
+                while read -r line; do
+                    case "$line" in
+                        *"RESULT PASS"*)
+                            got="${line##*(}"
+                            if [[ "${got%%/*}" != "${got##*/}" ]]; then
+                                why="boot $i: '$line' passed only part of its suite"
+                            fi
+                            ;;
+                    esac
+                done <<< "$verdicts"
+            else
+                why="boot $i reported no PASSing suite"
+            fi
+        elif ! printf '%s\n' "$verdicts" | diff -q - "$EXPECTED" >/dev/null; then
+            why="the suite verdicts differ from boot 1's ($(printf '%s' "$verdicts" | tr '\n' ';'))"
+        fi
     fi
 
     if [[ -z "$why" ]]; then
@@ -188,4 +231,20 @@ if (( fail > 0 )); then
     echo "STABILITY: FAIL"
     exit 1
 fi
+# The receipt: WHICH image was qualified, and how thoroughly. A
+# release refuses to publish unless a receipt exists for the exact ESP
+# it just built — "100/100" in release notes should be a checkable
+# fact about that artifact, not a memory of a run against some earlier
+# build (v0.10.0 shipped a stability tool that could not have scored
+# 100/100 on its own image, and nothing noticed).
+# Anchored on the KERNEL image, not the ESP: the ESP is a FAT volume
+# and its bytes change every time it is rebuilt (directory
+# timestamps), so hashing it would make the receipt useless within a
+# second of being written. arena-boot.efi is what actually determines
+# how the machine behaves, and it only changes when the kernel is
+# genuinely relinked.
+printf '%s %s/%s\n' \
+    "$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)" "$pass" "$N" \
+    > "$REPO_ROOT/build/stability-receipt.txt"
+echo "receipt: build/stability-receipt.txt ($(cat "$REPO_ROOT/build/stability-receipt.txt"))"
 echo "STABILITY: PASS"

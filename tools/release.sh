@@ -34,6 +34,36 @@ esac
 echo "== release $TAG: building image =="
 ./tools/build.sh --image
 
+# The stability qualification, checked against THIS artifact.
+#
+# v0.10.0 is why this exists. Its release notes were honest about the
+# suite, but the stability tooling in that very tag could not have
+# scored 100/100 on the image it shipped — it was still looking for a
+# verdict line two milestones out of date, and nothing connected the
+# claim to the artifact. A receipt does: tools/stability_loop.sh
+# records the sha256 of the ESP it qualified, and publishing refuses
+# unless that matches the ESP just built.
+RECEIPT="$REPO_ROOT/build/stability-receipt.txt"
+# The KERNEL image, not the ESP: an ESP is a FAT volume whose bytes
+# change on every rebuild (directory timestamps), so it cannot anchor
+# anything. arena-boot.efi changes only when the kernel is relinked.
+ESP_SHA="$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)"
+STABILITY="(not run)"
+if [[ -f "$RECEIPT" ]]; then
+    read -r R_SHA R_SCORE < "$RECEIPT"
+    if [[ "$R_SHA" == "$ESP_SHA" ]]; then
+        STABILITY="$R_SCORE"
+    fi
+fi
+echo "== release $TAG: stability qualification: $STABILITY (kernel $ESP_SHA) =="
+if [[ "$MODE" == "--publish" && "$STABILITY" == "(not run)" ]]; then
+    echo "error: no stability receipt for the image being published." >&2
+    echo "       run: tools/stability_loop.sh 100" >&2
+    echo "       (the image must not change afterwards — the receipt is" >&2
+    echo "        matched by sha256, which is the whole point)" >&2
+    exit 1
+fi
+
 echo "== release $TAG: gating on the full test suite =="
 # EVERY milestone harness (ADR-0005: old tests are never deleted) —
 # including the M5 suite, the two-boot persistence proof, and the
@@ -145,6 +175,13 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "(ADR-0020). The bundled scratch-template.img is the formatted"
     echo "AFS1 volume — copy it ONCE, then keep reusing your scratch.img:"
     echo "that is where your files live."
+    echo
+    echo "Qualification for THIS image (sha256 ${ESP_SHA:0:16}...):"
+    echo "  * every milestone test script, green (the release gate is the"
+    echo "    real suite — a build that is not green is never staged);"
+    echo "  * boot-stability loop: $STABILITY boots fully green, verdicts"
+    echo "    identical on every boot;"
+    echo "  * the bundle below was extracted and BOOTED before publishing."
 } > "$REL/RELEASE-NOTES.txt"
 
 ls -la "$REL"
