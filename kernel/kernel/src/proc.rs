@@ -185,6 +185,16 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
     // already exited, and useless for a supervisor, whose whole job is
     // to kill drivers that are blocked waiting for work or for a
     // device that will never answer.
+    // M6.5b: tell the supervisor before the process is gone. It only
+    // MARKS the death here — restarting allocates and maps, which this
+    // context must not do (see supervise::note_death).
+    if crate::supervise::is_supervised(pid) {
+        crate::supervise::note_death(pid);
+        crate::log::log_info!(
+            "proc",
+            "destroy pid {pid}: a SUPERVISED service died — the supervisor will restart it"
+        );
+    }
     let (servers, waiters) = crate::ipc::release_blocked_of(pid);
     let killed = crate::sched::kill_threads_of(pid);
     if killed > 0 {

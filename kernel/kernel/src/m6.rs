@@ -47,12 +47,13 @@ enum Outcome {
 }
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Outcome); 5] = [
+    let checks: [(&str, fn() -> Outcome); 6] = [
         ("net_service", test_net_service),
         ("rng_service", test_rng_service),
         ("input_service", test_input_service),
         ("console_service", test_console_service),
         ("service_death", test_service_death),
+        ("service_restart", test_service_restart),
     ];
     let mut passed = 0u32;
     let mut skipped = 0u32;
@@ -861,6 +862,212 @@ fn service_death_inner() -> NetResult {
     Ok(())
 }
 
+/// The badge the restart test's quiet client sends when the RESTARTED
+/// service answers it. Must match `QUIET_BADGE` in faulttest.
+const FAULT_QUIET_BADGE: u64 = 1 << 17;
+
+/// M6.5b (ADR-0028): a service that dies is RESTARTED with the same
+/// capabilities, and the clients' existing capabilities still work.
+///
+/// This is the claim ADR-0022 deferred when it put drivers in ring 3:
+/// isolation only pays off if the service comes back. The proof runs
+/// the whole cycle on real processes — a live service, a kill, a
+/// supervisor restart, and a NEW client reaching the new instance
+/// through the capability it was granted before the crash.
+fn test_service_restart() -> Outcome {
+    match service_restart_inner() {
+        Ok(()) => Outcome::Pass,
+        Err(SkipOrFail::Skip(reason)) => Outcome::Skip(reason),
+        Err(SkipOrFail::Fail(reason)) => Outcome::Fail(reason),
+    }
+}
+
+fn service_restart_inner() -> NetResult {
+    let baseline = frames::free_frames();
+
+    let eid = ipc::create_endpoint().map_err(|_| fail("endpoint table full"))?;
+    let nid_hang = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_void = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_quiet = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+
+    let server_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_READ,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_hang },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_void },
+            rights: cap::RIGHTS_READ,
+        },
+    ];
+    let first_pid = crate::spawn::spawn_init(14, &server_grants, None)
+        .map_err(|_| fail("faultd (image 14) spawn failed"))?;
+    crate::supervise::register("faultd", 14, &server_grants, first_pid)
+        .map_err(|_| fail("the supervisor refused the registration"))?;
+
+    // A client that will be blocked in a call when the service dies —
+    // the same shape as service_death, because that is the case a
+    // restart has to be survivable from.
+    let client_grants = [Cap {
+        obj: CapObj::Endpoint { eid },
+        rights: cap::RIGHTS_WRITE,
+    }];
+    let c_pid =
+        crate::spawn::spawn_init(15, &client_grants, Some((nid_client, CONTEST_EXIT_BADGE)))
+            .map_err(|_| fail("faulttest (image 15) spawn failed"))?;
+    info!(
+        "m6",
+        "service_restart: faultd pid {first_pid} under supervision (endpoint {eid}), faulttest pid {c_pid} — about to kill the service under its client"
+    );
+
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let signal = ipc::wait(nid_hang);
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    signal.map_err(|_| fail("the hang signal never arrived"))?;
+
+    // THE FAULT.
+    proc::destroy(first_pid)?;
+    crate::spawn::forget(first_pid)
+        .map_err(|_| fail("dead server's spawn record forget refused"))?;
+
+    // THE RESTART. `poll` runs at thread context because it spawns.
+    let restarted = crate::supervise::poll();
+    if restarted != 1 {
+        return Err(fail("the supervisor did not restart exactly one service"));
+    }
+    let Some(st) = crate::supervise::status_of("faultd") else {
+        return Err(fail("the supervised service vanished from the table"));
+    };
+    if st.pid == 0 || st.pid == first_pid {
+        return Err(fail("the restarted service has no new pid"));
+    }
+    if st.restarts != 1 || st.abandoned {
+        return Err(fail("the supervisor's restart accounting is wrong"));
+    }
+    let new_pid = st.pid;
+
+    // THE PROOF THAT IT WORKS: a fresh client, granted the SAME
+    // endpoint capability, reaching the NEW instance. Quiet mode (the
+    // notification in slot 1) tells it to ping and leave.
+    let quiet_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_quiet },
+            rights: cap::RIGHTS_WRITE,
+        },
+    ];
+    let q_pid = crate::spawn::spawn_init(15, &quiet_grants, None)
+        .map_err(|_| fail("the post-restart client could not be spawned"))?;
+
+    // Both the original client (woken with STATUS_SERVICE_GONE) and
+    // the new one must finish on their own — but the RESTARTED SERVICE
+    // must not, and that is the point of it. Every earlier test could
+    // drain the machine to a single thread because everything it
+    // spawned was meant to exit; a supervised service is meant to
+    // stay. So this waits for the two clients specifically.
+    if let Err(reason) = drain_pids_interruptible(&[c_pid, q_pid]) {
+        error!(
+            "m6",
+            "service_restart drain failed: old client threads={}, new client threads={}, service threads={}",
+            sched::proc_live_threads(c_pid),
+            sched::proc_live_threads(q_pid),
+            sched::proc_live_threads(new_pid)
+        );
+        return Err(fail(reason));
+    }
+
+    // The restarted service answered the new client — its own word for
+    // it, on a notification only it could have signalled.
+    let quiet = ipc::wait(nid_quiet)
+        .map_err(|_| fail("the restarted service never answered the new client"))?;
+    if quiet & FAULT_QUIET_BADGE == 0 {
+        return Err(fail(
+            "the post-restart acknowledgement carried the wrong badge",
+        ));
+    }
+    let bc =
+        ipc::wait(nid_client).map_err(|_| fail("the old client's exit badge never arrived"))?;
+    if bc != CONTEST_EXIT_BADGE {
+        return Err(fail("the old client's exit badge is not the granted word"));
+    }
+
+    let recs = crate::spawn::records_snapshot();
+    let tid_of = |pid: u64| -> Option<u64> {
+        recs.iter()
+            .flatten()
+            .find(|&&(p, _)| p == pid)
+            .map(|&(_, t)| t)
+    };
+    for (pid, who) in [
+        (c_pid, "the client blocked across the crash"),
+        (q_pid, "the post-restart client"),
+    ] {
+        let Some(tid) = tid_of(pid) else {
+            return Err(fail("a spawned client has no record"));
+        };
+        if syscall::exit_status_of(tid) != Some(FAULT_EXIT_OK) {
+            error!(
+                "m6",
+                "service_restart: {who} (pid {pid}) exited {:?}",
+                syscall::exit_status_of(tid)
+            );
+            return Err(fail("a client did not reach its verified-success exit"));
+        }
+    }
+
+    // Teardown. The restarted service is still alive and parked in
+    // recv — killing it is the same operation the fault used, which is
+    // the point: a supervised service is destroyable at any time.
+    crate::supervise::unregister(new_pid);
+    proc::destroy(new_pid)?;
+    proc::destroy(c_pid)?;
+    proc::destroy(q_pid)?;
+    crate::spawn::forget(new_pid).map_err(|_| fail("restarted server record forget refused"))?;
+    crate::spawn::forget(c_pid).map_err(|_| fail("client record forget refused"))?;
+    crate::spawn::forget(q_pid).map_err(|_| fail("quiet client record forget refused"))?;
+    ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    for nid in [nid_hang, nid_void, nid_quiet, nid_client] {
+        ipc::destroy_notification(nid).map_err(|_| fail("notification teardown refused"))?;
+    }
+
+    // Let the reaper run before counting. A KILLED thread becomes a
+    // zombie holding its 32 KiB kernel stack, and that stack is
+    // reclaimed by `reap` on the next scheduler entry — so the first
+    // version of this check read the frame count while three corpses
+    // were still warm and reported an 8-frame leak that did not
+    // exist. Every earlier test destroyed processes whose threads had
+    // exited and been reaped long before; killing is what makes the
+    // timing visible. `yield_now` reaps even when the ready ring is
+    // empty (`plan_switch` reaps first, then looks for work).
+    for _ in 0..4 {
+        sched::yield_now();
+    }
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m6",
+            "service_restart teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err(fail("service-restart teardown is not frame-exact"));
+    }
+    info!(
+        "m6",
+        "service_restart: faultd died as pid {first_pid} holding a request and came back as pid {new_pid} with its 3 capabilities REPLAYED — the client blocked across the crash was answered STATUS_SERVICE_GONE and exited cleanly, a new client reached the restarted instance through the SAME endpoint capability, the supervisor counted exactly 1 restart, and teardown is frame-exact across the whole cycle (frames {after})"
+    );
+    Ok(())
+}
+
 fn test_console_service() -> Outcome {
     match console_service_inner() {
         Ok(()) => Outcome::Pass,
@@ -1340,6 +1547,39 @@ fn input_service_inner() -> NetResult {
         "input_service: inputtest (pid {c_pid}) read the keystrokes the harness typed on the virtual keyboard back through inputd's (pid {s_pid}) endpoint — evdev keycodes harvested from a device-writable virtqueue on {deliveries} interrupt delivery/deliveries on relay vector {INPUT_RELAY_VEC} (no polling), decoded to ASCII, and verified byte-for-byte; the driver ran in SERVICE mode because the suite withheld the ConsoleInput capability, both children exited {INPUT_EXIT_OK}, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames {after})"
     );
     Ok(())
+}
+
+/// Wait until every pid in `pids` has no live threads left, bounded by
+/// the same HPET wall clock the whole-machine drain uses.
+///
+/// The whole-machine `drain_interruptible` asks "is anything still
+/// running?", which is the right question when every child is
+/// supposed to exit. It is the wrong question once the machine has a
+/// service that is supposed to KEEP running (M6.5b).
+fn drain_pids_interruptible(pids: &[u64]) -> Result<(), &'static str> {
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
+    // SAFETY: ring 0; mapped HPET alias; 32-bit main-counter read.
+    let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+    let mut out = Ok(());
+    loop {
+        if pids.iter().all(|&p| sched::proc_live_threads(p) == 0) {
+            break;
+        }
+        // SAFETY: the same alias and register.
+        let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+        if now.wrapping_sub(t0) >= DRAIN_DEADLINE_TICKS {
+            out = Err("the watched processes are still live after the wall-clock deadline");
+            break;
+        }
+        sched::yield_now();
+    }
+    sched::yield_now();
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    out
 }
 
 /// Run the children while watching `vec` for the first device

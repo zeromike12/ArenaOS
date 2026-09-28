@@ -34,5 +34,6 @@ pub mod proc;
 pub mod relay;
 pub mod sched;
 pub mod spawn;
+pub mod supervise;
 pub mod sync;
 pub mod timekeeping;

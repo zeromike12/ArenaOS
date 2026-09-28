@@ -34,6 +34,21 @@ mod abi;
 use abi::*;
 
 const SLOT_EP: u64 = 0;
+/// The "quiet mode" token (M6.5b): a notification granted in slot 1
+/// means this instance is the one checking a RESTARTED service — ping
+/// and leave, do not ask it to hang. Mode from a capability, not an
+/// argument: the same probe pattern inputd and consoled use, and the
+/// spawn protocol still has no way to pass a parameter.
+const SLOT_QUIET: u64 = 1;
+/// Badge sent in quiet mode to say the restarted service ANSWERED.
+const QUIET_BADGE: u64 = 1 << 17;
+/// Badge used only to discover whether slot 1 holds anything at all.
+/// A zero badge is refused by the kernel whatever the slot contains,
+/// so probing with zero cannot tell "no capability" from "bad
+/// argument" — the first version did exactly that and never entered
+/// quiet mode. Badges are bits (ADR-0028), so the suite simply
+/// ignores this one.
+const PROBE_BADGE: u64 = 1 << 18;
 
 const EXIT_PING_REFUSED: u64 = 60;
 const EXIT_PING_STATUS: u64 = 61;
@@ -79,8 +94,35 @@ pub unsafe extern "C" fn _start() -> ! {
     // SAFETY: this is the whole program — ABI v1 wrappers over this
     // image's own statics and stack. Single-threaded, no aliases.
     unsafe {
-        log("faulttest: client starting — a service is about to die under me");
         let mut msg = [0u8; MSG_BYTES];
+        // The probe: a zero badge is always refused, so this asks the
+        // kernel "do I hold slot 1 at all?" without signalling anything.
+        let quiet = syscall2(SYS_NOTIFY, SLOT_QUIET, PROBE_BADGE) >= 0;
+        if quiet {
+            log("faulttest: quiet mode — checking a service that was RESTARTED under its clients");
+            match call(FAULT_OP_PING, &mut msg) {
+                Ok((status, n)) => {
+                    if status != FAULT_S_OK {
+                        fail(EXIT_PING_STATUS, "the restarted service refused a PING");
+                    }
+                    log_line(|o| {
+                        o.str("faulttest: PASS — the RESTARTED service answered on the SAME endpoint (ping #");
+                        o.u64(n);
+                        o.str("); the capability I was granted before the crash still works");
+                    });
+                    let _ = syscall2(SYS_NOTIFY, SLOT_QUIET, QUIET_BADGE);
+                    syscall1(SYS_THREAD_EXIT, EXIT_OK);
+                }
+                Err(e) => {
+                    log_line(|o| {
+                        o.str("faulttest: the restarted service refused the call: ");
+                        o.i64(e);
+                    });
+                    fail(EXIT_PING_REFUSED, "the restarted service did not answer");
+                }
+            }
+        }
+        log("faulttest: client starting — a service is about to die under me");
 
         // 1. The service is alive and the endpoint works.
         let alive = match call(FAULT_OP_PING, &mut msg) {

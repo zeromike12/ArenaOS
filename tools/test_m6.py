@@ -70,7 +70,7 @@ import mtest  # noqa: E402
 import arena_env  # noqa: E402
 
 EXPECTED_TESTS = ["net_service", "rng_service", "input_service",
-                  "console_service", "service_death"]
+                  "console_service", "service_death", "service_restart"]
 
 # The keystrokes the harness types on the VIRTUAL KEYBOARD (M6.3,
 # ADR-0026), paced by a serial marker like every other harness action:
@@ -194,6 +194,23 @@ def check_with_net_extras(serial: str) -> bool:
           "the client observed the typed death from ring 3 and handled it")
     check("the ENDPOINT outlived its server" in serial,
           "the endpoint survived its server, so a restart can reuse it")
+
+    # ---- M6.5b: the service comes BACK (ADR-0028) --------------------
+    check(re.search(r"^m6:test:service_restart: PASS", serial,
+                    re.MULTILINE) is not None,
+          "the service_restart test PASSED — the whole crash-and-restart "
+          "cycle on real processes")
+    check(re.search(r"faultd: RESTARTED as pid \d+ with its 3 original "
+                    r"capability", serial) is not None,
+          "the supervisor respawned the dead service with its capabilities "
+          "REPLAYED (an Mmio window is a value, so 'the same grants' is "
+          "the identical list, not a reconstruction)")
+    check("the RESTARTED service answered on the SAME endpoint" in serial,
+          "a client reached the new instance through the capability it "
+          "held before the crash — clients never learn the pid")
+    check("a SUPERVISED service died — the supervisor will restart it"
+          in serial,
+          "the death was announced to the supervisor from proc::destroy")
     return ok
 
 
@@ -265,6 +282,10 @@ def boot_without_net() -> bool:
                     re.MULTILINE) is not None,
           "service_death PASSED even with NO fixtures — the fault-injection "
           "proof needs no device, so it holds on the barest machine")
+    check(re.search(r"^m6:test:service_restart: PASS", serial,
+                    re.MULTILINE) is not None,
+          "service_restart PASSED with NO fixtures too — supervision is a "
+          "property of the kernel, not of any device")
     check("arena>" in serial,
           "the shell still reached its prompt on the SERIAL console with "
           "no keyboard attached (the keyboard is additive, never required)")
