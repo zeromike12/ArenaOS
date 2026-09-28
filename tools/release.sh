@@ -83,7 +83,7 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "either device stays green with honest SKIPs);"
     echo "100-boot stability loop green with the full fixture family —"
     echo "every boot ends by typing 'shutdown' into the running shell"
-    echo "(ADR-0011/0020/0022/0023/0024/0025/0026)."
+    echo "(ADR-0011/0020/0022/0023/0024/0025/0026/0027)."
     echo
     echo "This release has a FILESYSTEM: AFS1 (original design, ADR-0023)"
     echo "served entirely from ring 3 — extent-based data, copy-on-write"
@@ -96,6 +96,16 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "proves it on the wire with a real ARP round trip against QEMU's"
     echo "built-in network. The protocol stack (IP/UDP/TCP services) is"
     echo "Phase 7, built on this driver."
+    echo
+    echo "This release has a SECOND CONSOLE (ADR-0027): consoled, the"
+    echo "ring-3 virtio-console driver, attaches a virtio-serial port to"
+    echo "the machine's console in BOTH directions. Run with the"
+    echo "virtio-console lines in RUNNING.md, then from another terminal:"
+    echo "    nc -U /tmp/arena-console.sock"
+    echo "and you are on the console: what ArenaOS prints appears there"
+    echo "too, and what you type there drives the same arena> prompt."
+    echo "Serial remains the kernel's own channel for logs and panics —"
+    echo "this ADDS a channel, it never moves one."
     echo
     echo "This release has a KEYBOARD (ADR-0026): inputd, the ring-3"
     echo "virtio-input driver, decodes real key events and feeds them"
@@ -211,8 +221,15 @@ qemu-system-x86_64 \\
     -device virtio-net-pci,netdev=net0 \\
     -device virtio-rng-pci \\
     -device virtio-keyboard-pci \\
+    -chardev socket,id=vcon0,path=/tmp/arena-console.sock,server=on,wait=off \\
+    -device virtio-serial-pci,max_ports=1 \\
+    -device virtconsole,chardev=vcon0 \\
     -display none -serial mon:stdio -no-reboot
 \`\`\`
+
+While it runs, \`nc -U /tmp/arena-console.sock\` from another terminal
+puts you on the same console through the virtio-console port
+(ADR-0027).
 
 Want to type on a real keyboard instead of the serial port? Swap
 \`-display none\` for \`-display gtk\` (or \`sdl\`/\`cocoa\`): a QEMU
@@ -222,8 +239,8 @@ through the \`inputd\` driver (ADR-0026). Both channels stay live.
 Serial is a console in BOTH directions: the VM runs the milestone
 suite (including the real filesystem tests on scratch.img and the ARP
 link probe over QEMU's built-in network), then the kernel spawns the
-storaged + fsd + netd + rngd + inputd services and the shell, and
-waits at
+storaged + fsd + netd + rngd + inputd + consoled services and the
+shell, and waits at
 the \`arena> \` prompt — type \`help\`, \`ls\`, \`write note.txt hello\`,
 \`cat note.txt\`, \`rm note.txt\`, \`ps\`, \`spawn\`, and \`shutdown\` to
 stop the machine. What you \`write\` is committed to scratch.img and
@@ -303,6 +320,9 @@ EOF
             -device virtio-net-pci,netdev=net0 \
             -device virtio-rng-pci \
             -device virtio-keyboard-pci \
+            -chardev socket,id=vcon0,path=verify-vcon.sock,server=on,wait=on \
+            -device virtio-serial-pci,max_ports=1 \
+            -device virtconsole,chardev=vcon0 \
             -qmp unix:verify-qmp.sock,server=on,wait=off \
             -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
             -no-reboot > verify-serial.log &
@@ -310,12 +330,20 @@ EOF
           python3 "$REPO_ROOT/tools/qmp.py" verify-qmp.sock verify-serial.log \
             'inputd: virtio-input ready' arena 120 >/dev/null 2>&1 &
           typist_pid=$!
+          # M6.4 (ADR-0027): the console port's far end. `wait=on` above
+          # means QEMU does not finish starting until this connects, so
+          # the shipped configuration is verified in its PASS form.
+          python3 "$REPO_ROOT/tools/vcon.py" verify-vcon.sock \
+            'contest: hello from ArenaOS' 'host-says-hello
+' 120 >/dev/null 2>&1 &
+          vcon_pid=$!
           wait "$qemu_pid"
           kill "$typist_pid" 2>/dev/null || true
+          kill "$vcon_pid" 2>/dev/null || true
         )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'm5: RESULT PASS (6/6)' "$verify_dir/verify-serial.log" \
-            && grep -aqF 'm6: RESULT PASS (3/3)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm6: RESULT PASS (4/4)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"

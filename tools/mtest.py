@@ -43,6 +43,7 @@ Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -52,6 +53,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arena_env  # noqa: E402
 import qmp  # noqa: E402
+import vcon as vconsole  # noqa: E402 — `vcon` is a run_qemu parameter
 
 TIMEOUT_S = 120  # TCG is slow; a healthy boot takes <10s
 MEM_MIB = 512
@@ -121,17 +123,39 @@ def _typist(script: KeyScript, serial_log: Path, sock: Path,
             session.close()
 
 
+# A console script item is (marker, nth, text): send `text` on the
+# virtio-console socket once `text`'s marker has appeared `nth` times in
+# what the GUEST has sent back over that same socket. Marker-paced like
+# every other actor in this harness — the console's own stream is the
+# clock, so nothing depends on host timing.
+ConsoleScript = vconsole.ConsoleScript
+
+# The default console script answers the m6 suite's contest client. Its
+# fixture line arrives on the socket; the reply goes back down the same
+# socket and must come out of the guest's receive queue byte-for-byte.
+DEFAULT_CONSOLE: ConsoleScript = [
+    (b"contest: hello from ArenaOS", 1, "host-says-hello\n"),
+]
+
+
 def run_qemu(label: str, esp: Path,
              feed: list[tuple[bytes, int, bytes]] | None = None,
              net: bool = True,
              rng: bool = True,
              kbd: bool = True,
              keys: KeyScript | None = None,
+             vcon: bool = True,
+             console: ConsoleScript | None = None,
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     qmp_sock = bdir / f"qmp-{label}.sock"
+    vcon_sock = bdir / f"vcon-{label}.sock"
+    vcon_capture = bdir / f"vcon-{label}.txt"
+    vcon_capture.write_bytes(b"")
     if keys is None:
         keys = DEFAULT_KEYS if kbd else []
+    if console is None:
+        console = DEFAULT_CONSOLE if vcon else []
     vars_img = bdir / "ovmf-vars.img"
     shutil.copyfile(arena_env.ovmf_vars_template(), vars_img)  # fresh NVRAM every run
     serial_log = bdir / "serial.log"
@@ -166,6 +190,10 @@ def run_qemu(label: str, esp: Path,
         # keystrokes through. kbd=False reproduces an invocation
         # without a keyboard (the honest-SKIP compatibility window).
         + (arena_env.input_args() if kbd else [])
+        # Milestone-6.4 fixture (ADR-0027): the virtio-console port and
+        # its host-side unix socket — the second console channel.
+        # vcon=False reproduces an invocation without it.
+        + (arena_env.console_args(vcon_sock) if vcon else [])
         + arena_env.qmp_args(qmp_sock)
         + [
             "-display", "none",
@@ -210,6 +238,11 @@ def run_qemu(label: str, esp: Path,
             target=_typist, args=(keys, serial_log, qmp_sock, stop,
                                   label),
             daemon=True)
+        actor = threading.Thread(
+            target=vconsole.actor,
+            args=(console, vcon_sock, vcon_capture, stop, label),
+            daemon=True)
+        actor.start()
         typist.start()
         try:
             rc = proc.wait(timeout=TIMEOUT_S)
@@ -250,6 +283,7 @@ def boot(label: str, esp: Path,
     vars_img = bdir / f"ovmf-vars-{label}.img"
     shutil.copyfile(arena_env.ovmf_vars_template(), vars_img)
     qmp_sock = bdir / f"qmp-{label}.sock"
+    vcon_sock = bdir / f"vcon-{label}.sock"
     serial_log = bdir / f"serial-{label}.log"
     if serial_log.exists():
         serial_log.unlink()
@@ -272,6 +306,7 @@ def boot(label: str, esp: Path,
             *arena_env.net_args(),
             *arena_env.rng_args(),
             *arena_env.input_args(),
+            *arena_env.console_args(vcon_sock),
             *arena_env.qmp_args(qmp_sock),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",
@@ -332,6 +367,18 @@ def boot(label: str, esp: Path,
                                   label),
             daemon=True)
         typist.start()
+        # The console actor. NOT optional: the fixture chardev is
+        # `server=on,wait=on`, so QEMU does not finish starting until
+        # somebody is at the far end of the port. A boot() without this
+        # thread hangs before the firmware runs — which is exactly how
+        # the persistence and crash tests failed when the device was
+        # added here and the actor was not.
+        actor = threading.Thread(
+            target=vconsole.actor,
+            args=(DEFAULT_CONSOLE, vcon_sock, bdir / f"vcon-{label}.txt",
+                  stop, label),
+            daemon=True)
+        actor.start()
         try:
             rc: int | None = proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:

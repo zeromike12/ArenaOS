@@ -172,6 +172,13 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             // dead driver's armed vectors must not keep notifying a dead
             // notification — the relay table entries die with the owner.
             let swept = crate::relay::release_by_owner(pid);
+            // M6.4 (ADR-0027): the console output mirror is owned the
+            // same way a relay vector is — a dead channel must not
+            // leave the kernel appending to a ring nobody drains, or
+            // notifying a notification that no longer exists.
+            if crate::console::detach_output_by_owner(pid) {
+                crate::log::log_info!("proc", "destroy pid {pid}: console output mirror detached");
+            }
             if swept > 0 {
                 crate::log::log_info!(
                     "proc",

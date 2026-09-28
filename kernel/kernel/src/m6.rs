@@ -47,10 +47,11 @@ enum Outcome {
 }
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Outcome); 3] = [
+    let checks: [(&str, fn() -> Outcome); 4] = [
         ("net_service", test_net_service),
         ("rng_service", test_rng_service),
         ("input_service", test_input_service),
+        ("console_service", test_console_service),
     ];
     let mut passed = 0u32;
     let mut skipped = 0u32;
@@ -637,15 +638,271 @@ const INPUT_EXIT_NO_KEYS: u64 = 68;
 /// the device's.
 const INPUT_GIVE_UP_BADGE: u64 = 0x7302;
 
-/// How long the suite waits for someone to type before calling the
-/// wait off, in HPET main-counter ticks: ~7 s at QEMU's ~14.4 MHz.
-/// Generous for an automated harness (which types within
-/// milliseconds of inputd's ready marker) and short enough that a
-/// person booting with a keyboard attached and no intention of typing
-/// barely notices. THIS is why the give-up exists: a keyboard driver
-/// cannot distinguish "nobody is typing" from "nobody has typed yet",
-/// so only the supervisor can decide to stop waiting (ADR-0026).
-const KEYSTROKE_WINDOW_TICKS: u32 = 100_000_000;
+/// How long the suite waits for a host-side actor before calling the
+/// driver's wait off, in HPET main-counter ticks: ~1 s (QEMU's HPET
+/// runs at 100 MHz, not the 14.318 MHz of the classic PIT). Generous
+/// for an automated harness — which acts within milliseconds of the
+/// driver's ready marker — and short enough that a person booting with
+/// a keyboard or a console port nobody is using barely notices. THIS
+/// is why the give-up exists: a driver cannot distinguish "nobody is
+/// there" from "nobody is there YET", so only the supervisor can
+/// decide to stop waiting (ADR-0026, extended in ADR-0027).
+const ACTOR_WINDOW_TICKS: u32 = 100_000_000;
+
+/// consoled's two relay vectors, in setup order (receive first). The
+/// suite runs its tests in sequence and each releases its vectors, so
+/// the pair is deterministic — and the RECEIVE one is what the
+/// host-actor window watches: bytes leaving the guest need no listener
+/// (QEMU consumes them either way), bytes arriving do.
+const CONSOLE_RELAY_VEC_RX: u64 = 48;
+const CONSOLE_RELAY_VEC_TX: u64 = 49;
+
+/// contest's verified-success exit, and its honest "nobody was
+/// attached to the port" exit.
+const CONSOLE_EXIT_OK: u64 = 42;
+const CONSOLE_EXIT_NO_DATA: u64 = 68;
+
+/// Exit badges for the console test's two children.
+const CONSOLED_EXIT_BADGE: u64 = 0x00C0_0001;
+const CONTEST_EXIT_BADGE: u64 = 0x00C0_0002;
+
+/// The give-up word on consoled's notification. MUST match
+/// `CONSOLE_BADGE_GIVE_UP` in `userspace/abi.rs`.
+const CONSOLE_GIVE_UP_BADGE: u64 = 0x7402;
+
+fn test_console_service() -> Outcome {
+    match console_service_inner() {
+        Ok(()) => Outcome::Pass,
+        Err(SkipOrFail::Skip(reason)) => Outcome::Skip(reason),
+        Err(SkipOrFail::Fail(reason)) => Outcome::Fail(reason),
+    }
+}
+
+fn console_service_inner() -> NetResult {
+    let baseline = frames::free_frames();
+
+    // Optional fixture, as every M6 fixture is: no virtio-console
+    // function on the bus → an honest SKIP, and the machine stays
+    // fully usable on the serial console.
+    let Some(v) = pci::find_virtio(pci::VIRTIO_TYPE_CONSOLE) else {
+        return Err(SkipOrFail::Skip(
+            "no virtio-console device — attach one with: -device virtio-serial-pci,max_ports=1 -device virtconsole,chardev=<id>",
+        ));
+    };
+    let Some(f) = pci::pci_function(v.pci_index) else {
+        return Err(fail("recorded function vanished from the table"));
+    };
+    let bar = v.common.bar as usize;
+    let bar_phys = f.bar_base[bar];
+    let bar_pages = (f.bar_size[bar] / 4096) as u32;
+    if bar_phys == 0 || bar_pages == 0 || bar_pages > 16 {
+        return Err(fail("the structure BAR is unusable for a window grant"));
+    }
+
+    let eid = ipc::create_endpoint().map_err(|_| fail("endpoint table full"))?;
+    let nid_irq = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_consoled = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+
+    // consoled (registry image 12) gets the three-cap driver shape and
+    // NEITHER console capability: the production instance holds both
+    // (ConsoleInput to feed the line discipline, ConsoleOutput to
+    // mirror what the machine prints), and this one holds neither, so
+    // the same image serves the port over IPC instead. The mode switch
+    // is under test as much as the device is (ADR-0027).
+    let consoled_grants = [
+        Cap {
+            obj: CapObj::Mmio {
+                phys: bar_phys,
+                pages: bar_pages,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_READ,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_irq },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+    ];
+    let s_pid = crate::spawn::spawn_init(
+        12,
+        &consoled_grants,
+        Some((nid_consoled, CONSOLED_EXIT_BADGE)),
+    )
+    .map_err(|_| fail("consoled (image 12) spawn failed"))?;
+    let client_grants = [Cap {
+        obj: CapObj::Endpoint { eid },
+        rights: cap::RIGHTS_WRITE,
+    }];
+    let c_pid =
+        crate::spawn::spawn_init(13, &client_grants, Some((nid_client, CONTEST_EXIT_BADGE)))
+            .map_err(|_| fail("contest (image 13) spawn failed"))?;
+    info!(
+        "m6",
+        "console_service: consoled pid {s_pid} (window bar{} phys {bar_phys:#x} {bar_pages} pages, endpoint {eid} serve side, irq notification {nid_irq}, NO console authority — service mode), contest pid {c_pid} (endpoint {eid} call side) — the port's far end is the harness's socket",
+        bar
+    );
+
+    // The host-actor window, watching the RECEIVE vector: the guest→host
+    // half needs nobody (QEMU takes the bytes whether or not anyone is
+    // listening), the host→guest half needs a listener that answers.
+    if let Err(reason) = wait_for_host_actor(
+        "console_service",
+        nid_irq,
+        CONSOLE_RELAY_VEC_RX,
+        CONSOLE_GIVE_UP_BADGE,
+    ) {
+        return Err(fail(reason));
+    }
+
+    if let Err(reason) = drain_interruptible() {
+        error!(
+            "m6",
+            "console_service drain failed: consoled threads={}, client threads={}, relay deliveries rx/tx={}/{}",
+            sched::proc_live_threads(s_pid),
+            sched::proc_live_threads(c_pid),
+            relay::delivery_count(CONSOLE_RELAY_VEC_RX),
+            relay::delivery_count(CONSOLE_RELAY_VEC_TX),
+        );
+        return Err(fail(reason));
+    }
+
+    let bc = ipc::wait(nid_client).map_err(|_| fail("the client's exit badge never arrived"))?;
+    if bc != CONTEST_EXIT_BADGE {
+        return Err(fail("the client's exit badge is not the granted word"));
+    }
+    let bs = ipc::wait(nid_consoled).map_err(|_| fail("the driver's exit badge never arrived"))?;
+    if bs != CONSOLED_EXIT_BADGE {
+        return Err(fail("the driver's exit badge is not the granted word"));
+    }
+
+    let recs = crate::spawn::records_snapshot();
+    let tid_of = |pid: u64| -> Option<u64> {
+        recs.iter()
+            .flatten()
+            .find(|&&(p, _)| p == pid)
+            .map(|&(_, t)| t)
+    };
+    let (Some(c_tid), Some(s_tid)) = (tid_of(c_pid), tid_of(s_pid)) else {
+        return Err(fail(
+            "a spawned child has no record (spawn registry lost it)",
+        ));
+    };
+    let client_status = syscall::exit_status_of(c_tid);
+    let driver_status = syscall::exit_status_of(s_tid);
+
+    // Nobody was attached to the port's far end: tear down exactly as a
+    // passing run does and report the honest SKIP.
+    if client_status == Some(CONSOLE_EXIT_NO_DATA) {
+        console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled)?;
+        if frames::free_frames() != baseline {
+            return Err(fail("console-service teardown is not frame-exact"));
+        }
+        return Err(SkipOrFail::Skip(
+            "nothing arrived on the port — nobody was attached to its far end (connect to the chardev socket, e.g. nc -U)",
+        ));
+    }
+    if client_status != Some(CONSOLE_EXIT_OK) {
+        return Err(fail(match client_status {
+            Some(60) => "client: a console call was refused (60)",
+            Some(61) => "client: the service refused the port WRITE (61)",
+            Some(63) => "client: the driver reported a READ error status (63)",
+            Some(64) => "client: the service returned an impossible byte count (64)",
+            Some(65) => "client: the bytes read back are NOT what the harness sent (65)",
+            Some(66) => "client: the service under-counted the bytes it sent (66)",
+            Some(67) => "client: the poison shutdown was refused (67)",
+            Some(other) if (80..=89).contains(&other) => {
+                "driver-side failure code surfaced on the client (80..89)"
+            }
+            _ => "the client exited with a code from nowhere in the contract",
+        }));
+    }
+    if driver_status != Some(CONSOLE_EXIT_OK) {
+        return Err(fail(match driver_status {
+            Some(80) => "driver: SYS_DEV_INFO refused or short (80)",
+            Some(81) => "driver: a self-map (device window or ring frame) refused (81)",
+            Some(82) => {
+                "driver: the virtio handshake failed — FEATURES_OK did not stick or VERSION_1 missing (82)"
+            }
+            Some(83) => {
+                "driver: a virtqueue setup failed, or the port buffers did not fit their ring frame (83)"
+            }
+            Some(84) => "driver: SYS_IRQ_RELAY refused (84)",
+            Some(85) => "driver: SYS_IPC_RECV refused (85)",
+            Some(86) => "driver: the notification wait failed (86)",
+            Some(87) => "driver: SYS_CONSOLE_PULL refused in console mode (87)",
+            Some(88) => "driver: SYS_IPC_REPLY refused (88)",
+            Some(89) => {
+                "driver: the console grants were incomplete (89) — the suite's instance should hold NEITHER"
+            }
+            Some(99) => "driver: the panic handler ran (99)",
+            _ => "the driver exited with a code from nowhere in the contract",
+        }));
+    }
+
+    // The interrupt story, counted on the machine side: BOTH directions
+    // must have been interrupt-completed. Lower bounds again — the
+    // device coalesces at its own discretion.
+    let rx = relay::delivery_count(CONSOLE_RELAY_VEC_RX);
+    let tx = relay::delivery_count(CONSOLE_RELAY_VEC_TX);
+    if tx == 0 {
+        return Err(fail(
+            "the transmit vector delivered no interrupts (the bytes cannot have left by interrupt)",
+        ));
+    }
+    if rx == 0 {
+        return Err(fail(
+            "the receive vector delivered no interrupts (the bytes cannot have arrived by interrupt)",
+        ));
+    }
+
+    console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled)?;
+
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m6",
+            "console_service teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err(fail("console-service teardown is not frame-exact"));
+    }
+    info!(
+        "m6",
+        "console_service: contest (pid {c_pid}) drove a port ROUND TRIP through consoled's (pid {s_pid}) endpoint — bytes out the transmit queue that the harness read off the host socket, and the harness's answer back in on the receive queue, verified byte-for-byte; {tx} transmit and {rx} receive interrupt delivery/deliveries on relay vectors {CONSOLE_RELAY_VEC_TX}/{CONSOLE_RELAY_VEC_RX} (no polling), the driver in SERVICE mode because the suite withheld BOTH console capabilities, both children exited {CONSOLE_EXIT_OK}, both exit badges exact, both relays swept by proc::destroy, teardown frame-exact (frames {after})"
+    );
+    Ok(())
+}
+
+/// The console test's teardown, shared by the pass and honest-SKIP
+/// paths: destroying the driver must sweep BOTH its relay vectors.
+fn console_teardown(
+    s_pid: u64,
+    c_pid: u64,
+    eid: u32,
+    nid_irq: u32,
+    nid_client: u32,
+    nid_consoled: u32,
+) -> NetResult {
+    proc::destroy(s_pid)?;
+    if relay::registered(CONSOLE_RELAY_VEC_RX) || relay::registered(CONSOLE_RELAY_VEC_TX) {
+        return Err(fail(
+            "proc::destroy did not sweep both of the dead driver's relay vectors",
+        ));
+    }
+    proc::destroy(c_pid)?;
+    crate::spawn::forget(s_pid).map_err(|_| fail("driver spawn record forget refused"))?;
+    crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
+    ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_irq).map_err(|_| fail("irq notification teardown refused"))?;
+    ipc::destroy_notification(nid_client)
+        .map_err(|_| fail("client notification teardown refused"))?;
+    ipc::destroy_notification(nid_consoled)
+        .map_err(|_| fail("driver notification teardown refused"))?;
+    Ok(())
+}
 
 fn test_input_service() -> Outcome {
     match input_service_inner() {
@@ -731,7 +988,12 @@ fn input_service_inner() -> NetResult {
     // wind themselves up cleanly and the test reports an honest SKIP.
     // A boot with a keyboard attached and nobody at it must stay
     // green — attaching a device must never make a machine unusable.
-    if let Err(reason) = wait_for_keystrokes(nid_irq) {
+    if let Err(reason) = wait_for_host_actor(
+        "input_service",
+        nid_irq,
+        INPUT_RELAY_VEC,
+        INPUT_GIVE_UP_BADGE,
+    ) {
         return Err(fail(reason));
     }
 
@@ -873,23 +1135,32 @@ fn input_service_inner() -> NetResult {
     Ok(())
 }
 
-/// Run the children while watching for the first device interrupt, and
-/// call the wait off if none arrives inside [`KEYSTROKE_WINDOW_TICKS`].
+/// Run the children while watching `vec` for the first device
+/// interrupt, and send `give_up` on their notification if none arrives
+/// inside [`ACTOR_WINDOW_TICKS`]. Shared by the two tests whose
+/// fixtures need a host-side ACTOR — a keyboard nobody types on and a
+/// port nobody is attached to are the same shape of nothing, and
+/// neither driver can tell "never" from "not yet" (ADR-0026/0027).
 /// Returns once either a keystroke landed or the give-up was sent —
 /// the ordinary drain follows in both cases. Caller holds IF as the
 /// suite found it; this enables interrupts exactly like the drain
 /// (device MSIs are only TAKEN while some thread runs with IF=1).
-fn wait_for_keystrokes(nid_irq: u32) -> Result<(), &'static str> {
+fn wait_for_host_actor(
+    test: &str,
+    nid_irq: u32,
+    vec: u64,
+    give_up: u64,
+) -> Result<(), &'static str> {
     let if_before = crate::arch::x86_64::interrupts_enabled();
     crate::arch::x86_64::sti();
     let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
-    let gave_up = keystroke_window(hpet_va);
+    let gave_up = actor_window(hpet_va, vec);
     let notified = if gave_up {
         info!(
             "m6",
-            "input_service: no keystrokes inside the window — calling the driver's wait off (badge {INPUT_GIVE_UP_BADGE:#x}); this boot simply had nobody at the keyboard"
+            "{test}: nothing arrived inside the window — calling the driver's wait off (badge {give_up:#x}); this boot simply had nobody at the other end"
         );
-        ipc::notify(nid_irq, INPUT_GIVE_UP_BADGE).is_ok()
+        ipc::notify(nid_irq, give_up).is_ok()
     } else {
         true
     };
@@ -912,27 +1183,27 @@ fn wait_for_keystrokes(nid_irq: u32) -> Result<(), &'static str> {
 /// and a driver that never arms at all falls through to the ordinary
 /// drain's diagnostics rather than being misreported as "nobody
 /// typed". Caller holds IF=1.
-fn keystroke_window(hpet_va: u64) -> bool {
+fn actor_window(hpet_va: u64, vec: u64) -> bool {
     // SAFETY: ring 0; `hpet_va` is the mapped MMIO alias of the HPET
     // page; 32-bit reads of the main counter's low half.
     let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
     let expired = |t: u32| -> bool {
         // SAFETY: the same alias, the same register.
         let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
-        now.wrapping_sub(t) >= KEYSTROKE_WINDOW_TICKS
+        now.wrapping_sub(t) >= ACTOR_WINDOW_TICKS
     };
-    while !relay::registered(INPUT_RELAY_VEC) {
+    while !relay::registered(vec) {
         if sched::live_threads() <= 1 || expired(t0) {
             return false; // no driver to call off; let the drain speak
         }
         sched::yield_now();
     }
-    let base = relay::delivery_count(INPUT_RELAY_VEC);
+    let base = relay::delivery_count(vec);
     // SAFETY: as above.
     let t1 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
     while sched::live_threads() > 1 {
-        if relay::delivery_count(INPUT_RELAY_VEC) > base {
-            return false; // someone is typing — the drain takes over
+        if relay::delivery_count(vec) > base {
+            return false; // the far end is live — the drain takes over
         }
         if expired(t1) {
             return true;

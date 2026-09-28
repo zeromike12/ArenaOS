@@ -452,9 +452,29 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
+    // --- M6.4: the production console channel (ADR-0027) --------------------
+    // consoled turns a virtio-console port into a SECOND console: host
+    // bytes enter the kernel's line discipline through the same
+    // ConsoleInput gate inputd uses, and the kernel's console output
+    // leaves through a ConsoleOutput-gated mirror. Serial remains the
+    // kernel's own channel for logs and panics — this adds a channel,
+    // it never moves one. ABSENT virtio-console function → the machine
+    // is exactly what it was before.
+    let _console_pid = match spawn_consoled() {
+        Ok(Some(pid)) => Some(pid),
+        Ok(None) => {
+            info!(
+                "kernel",
+                "consoled: no virtio-console function on bus 0 — the console channel service stays offline (attach one with: -device virtio-serial-pci,max_ports=1 -device virtconsole,chardev=<id>)"
+            );
+            None
+        }
+        Err(reason) => crate::halt::halt_machine(reason),
+    };
+
     info!(
         "kernel",
-        "milestones 5–6.3 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port) — spawning the shell"
+        "milestones 5–6.4 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own) — spawning the shell"
     );
 
     // --- M4.6: the hand-off (ADR-0020) -----------------------------------
@@ -726,6 +746,67 @@ fn spawn_inputd() -> Result<Option<u64>, &'static str> {
     info!(
         "kernel",
         "inputd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=ConsoleInput/W) — the keyboard is live; keystrokes feed the shell's line discipline beside the serial port",
+        f.bar_base[bar]
+    );
+    Ok(Some(pid))
+}
+
+/// Spawn the production console channel service (M6.4, ADR-0027).
+///
+/// consoled receives the driver shape every virtio service gets — an
+/// `Mmio` cap over the structure BAR (R|W), an endpoint's serve side
+/// (READ), an interrupt notification (READ|WRITE) — plus BOTH console
+/// singletons: `ConsoleInput` (WRITE) and `ConsoleOutput` (READ).
+///
+/// The pair is the point. One alone would be half a console: input
+/// without output is a keyboard with no screen, output without input
+/// is a log tap. Granting them separately is also what keeps them
+/// honest as SEPARATE authorities — inputd holds the first and never
+/// the second, so a keyboard driver cannot read everything the machine
+/// prints. Exactly one process ever holds both: this one.
+///
+/// Returns `Ok(None)` when bus 0 carries no virtio-console function.
+fn spawn_consoled() -> Result<Option<u64>, &'static str> {
+    let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_CONSOLE) else {
+        return Ok(None);
+    };
+    let f = crate::drivers::pci::pci_function(v.pci_index)
+        .ok_or("consoled: recorded function vanished from the table")?;
+    let bar = v.common.bar as usize;
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 || f.bar_size[bar] < 4096 {
+        return Err("consoled: the virtio structure BAR is unusable");
+    }
+    let eid = crate::ipc::create_endpoint().map_err(|_| "consoled: endpoint table full")?;
+    let nid = crate::ipc::create_notification().map_err(|_| "consoled: notification table full")?;
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Mmio {
+                phys: f.bar_base[bar],
+                pages: (f.bar_size[bar] / 4096) as u32,
+            },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::ConsoleInput,
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::ConsoleOutput,
+            rights: crate::cap::RIGHTS_READ,
+        },
+    ];
+    let pid = crate::spawn::spawn_init(12, &grants, None)?;
+    info!(
+        "kernel",
+        "consoled spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=ConsoleInput/W, 4=ConsoleOutput/R) — the port is a second console; what the machine prints goes there too, and what you type there reaches the shell",
         f.bar_base[bar]
     );
     Ok(Some(pid))

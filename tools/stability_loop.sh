@@ -2,10 +2,11 @@
 # Boot-stability loop (docs/TESTING.md): boot the *prebuilt* ESP image N
 # times with fresh NVRAM each run and require the full green verdict on
 # every single boot — m2 RESULT PASS (21/21), m3 RESULT PASS (13/13), m4
-# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (3/3), the
+# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (4/4), the
 # canonical clean-halt line, no PANIC, QEMU exit 0, under a per-boot
 # timeout. Every fixture rides along (the AFS1 scratch disk, the slirp
-# NIC, the entropy source, and — since M6.3 — the virtio keyboard) —
+# NIC, the entropy source, the virtio keyboard, and — since M6.4 — the
+# virtio-console port) —
 # stability means the SHIPPING configuration. Boots therefore use BOTH
 # input channels: `shutdown` typed on the serial chardev, and the m6
 # input fixture typed on the KEYBOARD through QMP (tools/qmp.py), each
@@ -32,7 +33,7 @@ if [[ ! -f "$ESP" ]]; then
 fi
 
 # Resolve QEMU/OVMF exactly like the test harness does.
-eval "$(cd "$REPO_ROOT" && python3 - <<'EOF'
+eval "$(cd "$REPO_ROOT" && python3 - "$REPO_ROOT/build/vcon-stability.sock" <<'EOF'
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path("tools").resolve()))
@@ -44,22 +45,30 @@ print(f"SCRATCH=({' '.join(repr(x) for x in arena_env.scratch_disk_args())})")
 print(f"NET=({' '.join(repr(x) for x in arena_env.net_args())})")
 print(f"RNG=({' '.join(repr(x) for x in arena_env.rng_args())})")
 print(f"KBD=({' '.join(repr(x) for x in arena_env.input_args())})")
+print(f"VCON=({' '.join(repr(x) for x in arena_env.console_args(Path(sys.argv[1])))})")
 EOF
 )"
 
 VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
 QMP_SOCK="$REPO_ROOT/build/qmp-stability.sock"
+VCON_SOCK="$REPO_ROOT/build/vcon-stability.sock"
 BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
 RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 RESULT_LINE_M4='m4: RESULT PASS (9/9)'
 RESULT_LINE_M5='m5: RESULT PASS (6/6)'
-RESULT_LINE_M6='m6: RESULT PASS (3/3)'
+RESULT_LINE_M6='m6: RESULT PASS (4/4)'
 # The keystrokes the m6 input_service test waits for, typed on the
 # virtual keyboard once inputd announces DRIVER_OK.
 KEY_MARKER='inputd: virtio-input ready'
 KEY_TEXT='arena'
+# The console port's far end: contest sends this line out the port and
+# waits for the answer, so a boot with the device attached needs
+# somebody at the socket (M6.4, ADR-0027).
+VCON_MARKER='contest: hello from ArenaOS'
+VCON_REPLY='host-says-hello
+'
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
 pass=0
@@ -77,7 +86,7 @@ for i in $(seq 1 "$N"); do
     # filename — a disk inherited from the previous boot answers
     # FS_ERR_EXISTS and fails the suite by design).
     ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk()' >/dev/null )
-    rm -f "$SERIAL" "$QMP_SOCK"
+    rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK"
     rc=0
     # The keyboard typist: waits for inputd's ready marker on the
     # serial log, then types the input fixture through QMP. It is
@@ -90,6 +99,10 @@ for i in $(seq 1 "$N"); do
     python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
         "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
     typist_pid=$!
+    # The console actor, reaped with the typist for the same reason.
+    python3 "$REPO_ROOT/tools/vcon.py" "$VCON_SOCK" \
+        "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
+    vcon_pid=$!
     # ADR-0020: a healthy boot no longer halts by itself — it ends at
     # the shell. The feeder subshell types 'shutdown' when the shell's
     # prompt appears (marker-paced, never sleep-based), then holds
@@ -115,6 +128,7 @@ for i in $(seq 1 "$N"); do
         "${NET[@]}" \
         "${RNG[@]}" \
         "${KBD[@]}" \
+        "${VCON[@]}" \
         -qmp unix:"$QMP_SOCK",server=on,wait=off \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
         -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
@@ -122,6 +136,8 @@ for i in $(seq 1 "$N"); do
     # Reap this boot's typist before the next one starts.
     kill "$typist_pid" 2>/dev/null || true
     wait "$typist_pid" 2>/dev/null || true
+    kill "$vcon_pid" 2>/dev/null || true
+    wait "$vcon_pid" 2>/dev/null || true
 
     why=""
     if (( rc != 0 )); then

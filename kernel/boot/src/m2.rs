@@ -254,34 +254,57 @@ fn test_pit_oneshot() -> Result<(), &'static str> {
 /// window) and cross-check it against the value `timekeeping::init()`
 /// computed at boot — two measurements of the same fact must agree.
 fn test_tsc_frequency() -> Result<(), &'static str> {
-    // SAFETY: PIT owned post-init; IF=0; periodic tick restored below.
-    unsafe { pit::set_calibration_mode() };
-    let (counts, tsc) = unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 50) };
-    unsafe { pit::set_periodic_hz(timekeeping::KERNEL_TICK_HZ) };
-
-    if counts == 0 || tsc == 0 {
-        return Err("calibration window measured zero");
-    }
-    let hz = tsc * pit::OSCILLATOR_HZ / u64::from(counts);
     let boot_hz = timekeeping::tsc_hz();
-    let (lo, hi) = if hz <= boot_hz {
-        (hz, boot_hz)
-    } else {
-        (boot_hz, hz)
-    };
-    info!(
-        "m2",
-        "tsc_frequency: re-measured {hz} Hz ({} MHz) vs boot {} MHz over {counts} PIT counts",
-        hz / 1_000_000,
-        boot_hz / 1_000_000
-    );
     if boot_hz == 0 {
         return Err("timekeeping::init() did not produce a calibration");
     }
-    if hi - lo > lo * 5 / 100 {
-        return Err("re-measured TSC frequency disagrees with boot calibration (>5%)");
+    // Up to three windows, passing on the first agreement.
+    //
+    // Not a weakened assertion — the tolerance is still 5%, and a
+    // genuinely wrong calibration disagrees in EVERY window. What the
+    // retry removes is an artifact of the measurement's environment:
+    // under an emulator the TSC advances with HOST wall-clock while the
+    // PIT advances with VIRTUAL time, so if the host deschedules the VM
+    // for a couple of milliseconds inside a 20 ms window, the ratio
+    // reads high by exactly that fraction. Observed live: healthy
+    // windows agree to 0.04% (2599 vs 2600 MHz), and a disturbed one
+    // reads 2853 or 2946 — never something in between. A transient that
+    // large is a stalled host, not a mis-measured clock, and retrying
+    // is how you tell the two apart.
+    const ATTEMPTS: u32 = 3;
+    let mut last = (0u64, 0u64);
+    for attempt in 1..=ATTEMPTS {
+        // SAFETY: PIT owned post-init; IF=0; periodic tick restored below.
+        unsafe { pit::set_calibration_mode() };
+        let (counts, tsc) = unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 50) };
+        unsafe { pit::set_periodic_hz(timekeeping::KERNEL_TICK_HZ) };
+
+        if counts == 0 || tsc == 0 {
+            return Err("calibration window measured zero");
+        }
+        let hz = tsc * pit::OSCILLATOR_HZ / u64::from(counts);
+        let (lo, hi) = if hz <= boot_hz {
+            (hz, boot_hz)
+        } else {
+            (boot_hz, hz)
+        };
+        let off_ppm = (hi - lo) * 1_000_000 / lo;
+        info!(
+            "m2",
+            "tsc_frequency: window {attempt}/{ATTEMPTS} re-measured {hz} Hz ({} MHz) vs boot {} MHz over {counts} PIT counts — {off_ppm} ppm apart",
+            hz / 1_000_000,
+            boot_hz / 1_000_000
+        );
+        if hi - lo <= lo * 5 / 100 {
+            return Ok(());
+        }
+        last = (lo, hi);
     }
-    Ok(())
+    info!(
+        "m2",
+        "tsc_frequency: {ATTEMPTS} windows all disagreed (last {} vs {} Hz)", last.0, last.1
+    );
+    Err("re-measured TSC frequency disagrees with boot calibration (>5%)")
 }
 
 /// The monotonic clock must actually be monotonic, and its microsecond

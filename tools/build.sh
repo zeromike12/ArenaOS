@@ -126,6 +126,23 @@ for INPUTD_ELF in \
     echo "inputd image: ${INPUTD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$INPUTD_ELF") bytes)"
 done
 
+# M6.4 (ADR-0027): the console channel service — ONE crate, TWO images:
+# consoled (spawn-registry image 12, the resident virtio-console
+# driver, the fifth on the shared virtio core and the first with a
+# queue in each direction) and contest (image 13, the m6 suite's port
+# round-trip client). Both embed into the kernel via include_bytes!.
+echo "== building userspace consoled (userspace/consoled, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/consoled" && cargo build --release )
+for CONSOLED_ELF in \
+    "$REPO_ROOT/userspace/consoled/target/x86_64-unknown-none/release/arena-consoled" \
+    "$REPO_ROOT/userspace/consoled/target/x86_64-unknown-none/release/contest"; do
+    if [[ ! -f "$CONSOLED_ELF" ]]; then
+        echo "error: consoled image not produced at $CONSOLED_ELF" >&2
+        exit 1
+    fi
+    echo "consoled image: ${CONSOLED_ELF#"$REPO_ROOT"/} ($(stat -c%s "$CONSOLED_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

@@ -106,6 +106,16 @@ pub enum CapObj {
     /// keystrokes the shell trusts; the kernel's own UART RX ISR feeds
     /// the same discipline as a ring-0 internal, not an invoke.
     ConsoleInput,
+    /// The console-OUTPUT singleton (M6.4, ADR-0027): READ = may
+    /// attach a mirror of the kernel's console output stream
+    /// (`SYS_CONSOLE_ATTACH`) and drain it (`SYS_CONSOLE_PULL`). The
+    /// twin of `ConsoleInput`, and deliberately a SEPARATE object: a
+    /// channel that only injects keystrokes (a keyboard) must not
+    /// thereby gain the power to read everything the machine prints,
+    /// and a log sink must not gain the power to forge input. The
+    /// kernel hands both to exactly one process — the production
+    /// `consoled`, which needs the pair to be a console.
+    ConsoleOutput,
 }
 
 /// One capability: an object reference plus its rights mask.

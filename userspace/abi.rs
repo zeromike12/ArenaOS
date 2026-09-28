@@ -34,6 +34,8 @@ pub const SYS_CAP_DESTROY: u64 = 20;
 pub const SYS_CAP_COPY: u64 = 21;
 pub const SYS_DEV_INFO: u64 = 22;
 pub const SYS_CONSOLE_PUSH: u64 = 23;
+pub const SYS_CONSOLE_ATTACH: u64 = 24;
+pub const SYS_CONSOLE_PULL: u64 = 25;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 
@@ -284,6 +286,50 @@ pub const INPUT_READ_MAX: u64 = 48;
 /// kernel's own bound: a keyboard produces bytes one keystroke at a
 /// time, so this is generous).
 pub const CONSOLE_PUSH_MAX: u64 = 64;
+
+/// Largest run one `SYS_CONSOLE_PULL` returns (the kernel's own bound).
+pub const CONSOLE_PULL_MAX: u64 = 256;
+
+// ---- the console-channel protocol (M6.4, ADR-0027) --------------------------
+//
+// consoled moves BYTES between a virtio-console port and the machine's
+// console. In production it needs no protocol at all — the kernel's
+// line discipline and output mirror are its two endpoints. The
+// protocol exists for the m6 suite's instance, which is denied both
+// console capabilities and therefore serves the port over IPC instead:
+// the same driver, the same queues, an observable boundary.
+//
+// Request words:  w0 = op, w1 = op-specific
+//   WRITE     w1 = byte count (1..=CONSOLE_MSG_MAX) in the INLINE
+//             message; the driver sends them out the port's transmit
+//             queue and replies when the DEVICE has taken them.
+//   READ      w1 = max bytes wanted (1..=CONSOLE_MSG_MAX). Blocks
+//             until the host has sent something; replies with the
+//             count in word 1 and the bytes inline.
+//   SHUTDOWN  the poison request: consoled replies (word 1 = bytes
+//             sent, word 2 = bytes received) and exits.
+// Reply word 0 is CONSOLE_S_*.
+pub const CONSOLE_OP_SHUTDOWN: u64 = 0;
+pub const CONSOLE_OP_WRITE: u64 = 1;
+pub const CONSOLE_OP_READ: u64 = 2;
+
+pub const CONSOLE_S_OK: u64 = 0;
+pub const CONSOLE_S_BAD_OP: u64 = (-1i64) as u64;
+pub const CONSOLE_S_BAD_LEN: u64 = (-2i64) as u64;
+/// A READ was abandoned because nothing was ever sent from the host:
+/// the spawner called the wait off (see [`CONSOLE_BADGE_GIVE_UP`]).
+/// The same honest answer `INPUT_S_NO_KEYS` gives for a keyboard
+/// nobody types on — a port with nobody attached to its far end is
+/// the same shape of nothing.
+pub const CONSOLE_S_NO_DATA: u64 = (-3i64) as u64;
+
+/// Largest payload one console request or reply carries: the inline
+/// message is MSG_BYTES (64) and the count rides in a register.
+pub const CONSOLE_MSG_MAX: u64 = 48;
+
+/// The spawner's give-up word on consoled's notification (ADR-0026's
+/// pattern, second use — see [`INPUT_BADGE_GIVE_UP`]).
+pub const CONSOLE_BADGE_GIVE_UP: u64 = 0x7402;
 
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 

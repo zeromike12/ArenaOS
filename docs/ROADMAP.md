@@ -575,14 +575,42 @@ restart under fault injection, capability re-grant tests.
       exactly — 6.4 must raise it. Gates: run_tests 12/12 (311
       assertions), fmt + clippy clean on the new code, and the
       stability loop 100/100 with the full fixture family.
-- [ ] **6.4 virtio-console: `consoled`.** First task: raise
-      `MAX_IMAGES`/`MAX_SPAWN_RECS` (6.3 filled the registry exactly —
-      ADR-0026, Consequences). A second console channel
-      (virtio-serial port) as a userspace service: the shell's
-      stdout/stdin can live on it, serial stays the kernel's
-      panic/diagnostic path. Decision recorded on whether the desktop
-      phase's terminal multiplexes over consoled or waits for GPU
-      text.
+- [x] 6.4 **virtio-console: `consoled`** — DONE (ADR-0027). The
+      registry bound was raised first (12 → 16), as ADR-0026 required.
+      **The roadmap's plan was decided against, and the ADR says why:**
+      moving the shell's stdout/stdin onto the driver would duplicate
+      the line discipline, break every headless boot, and leave "which
+      console is real?" unanswered. A port is not a console — the
+      kernel keeps ONE console and drivers attach CHANNELS to it.
+      Inbound reuses ADR-0026's `ConsoleInput` gate unchanged (the
+      keyboard's mechanism paying for itself immediately); outbound is
+      the one new kernel mechanism: a `ConsoleOutput`-gated MIRROR of
+      the console's byte stream, drained by `SYS_CONSOLE_ATTACH` (24)
+      and `SYS_CONSOLE_PULL` (25). Two separate capabilities on
+      purpose — a keyboard must not thereby gain the power to read
+      everything the machine prints. Transport: `virtio-serial-pci` +
+      a `virtconsole` port with MULTIPORT declined (QEMU marks a
+      non-multiport port 0 guest-connected at DRIVER_OK, so two queues
+      and no control protocol suffice), buffers posted AFTER DRIVER_OK
+      (QEMU pauses a chardev whose frontend cannot read, and only a
+      post-DRIVER_OK doorbell resumes it). Proofs: `m6:test:console_service`
+      (a real round trip — bytes out the transmit queue that the
+      harness reads off the host socket, and the harness's answer back
+      in on the receive queue, verified byte-for-byte, both directions
+      interrupt-completed, frame-exact teardown) and
+      `tools/test_m6_console.py`, which drives the shell ENTIRELY over
+      the port with the serial input channel dead: banner and prompt
+      arrive on the port, `echo` is echoed and executed, a backspace
+      erases a typo inside the same line discipline, and the machine
+      halts because someone typed `shutdown` there. **Two latent
+      kernel bugs surfaced and were fixed:** the M5.1 relay interrupt
+      stubs clobbered `rcx` before saving it (any code interrupted with
+      a live `rcx` resumed with the vector number in its place — a
+      spawn record index arrived as 54), and boot-time TSC calibration
+      halted the machine whenever a host stall skewed one PIT window
+      (a busy laptop could fail to boot; now up to three rounds, and
+      the same for the m2 cross-check). Gates: run_tests 13/13 (349
+      assertions), fmt + clippy clean, stability 100/100.
 - [ ] **6.5 driver framework hardening: supervised restart.** The
       supervisor story ADR-0022 deferred: fault-injection tests kill
       storaged/netd mid-I/O (`tools/` harness kills, in-guest poison

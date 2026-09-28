@@ -205,6 +205,40 @@ def input_args() -> list[str]:
     return ["-device", "virtio-keyboard-pci"]
 
 
+# ---- the Milestone-6.4 console fixture (ADR-0027) ---------------------------
+#
+# `virtio-serial-pci` + a `virtconsole` port on a unix-socket chardev: a
+# SECOND console channel, independent of the serial port. The socket is the
+# host end — tests connect to it to read what the guest printed and to type
+# into the guest, exactly as a user would with `nc -U`.
+#
+# `wait=on` for the HARNESS, deliberately: QEMU discards everything a
+# console port sends while no client is attached (hw/char/virtio-console.c,
+# `flush_buf` — a console is never throttled, its output just goes to the
+# floor). With `wait=off` the guest could therefore transmit its fixture
+# into a socket nobody had reached yet, and the test would report an honest
+# but useless SKIP about one boot in five. Blocking QEMU's startup until the
+# actor is attached removes the race instead of papering over it with a
+# sleep. Users get `wait=off` in docs/RUNNING.md — their machine must boot
+# whether or not anyone connects, and that configuration is itself tested
+# (the console_service SKIP path).
+#
+# max_ports=1 is deliberate: with only one port QEMU does NOT offer
+# VIRTIO_CONSOLE_F_MULTIPORT, and a non-multiport port 0 is marked
+# guest-connected at DRIVER_OK (hw/char/virtio-serial-bus.c set_status), so
+# both directions work with two queues and no control protocol.
+
+
+def console_args(sock: Path) -> list[str]:
+    """QEMU args attaching the virtio-console port (M6.4 fixture)."""
+    sock.unlink(missing_ok=True)
+    return [
+        "-chardev", f"socket,id=vcon0,path={sock},server=on,wait=on",
+        "-device", "virtio-serial-pci,max_ports=1",
+        "-device", "virtconsole,chardev=vcon0",
+    ]
+
+
 def qmp_args(sock: Path) -> list[str]:
     """QEMU args exposing the QMP control socket the typist uses.
 

@@ -265,6 +265,52 @@ reads the line, so `ps` runs and `psX` never does), and `shutdown` are
 all typed on the virtual keyboard. The machine halts because someone
 typed it.
 
+### The third channel: the virtio-console port (M6.4, ADR-0027)
+
+A boot now has three ways in and two ways out. `arena_env.console_args()`
+attaches `-device virtio-serial-pci,max_ports=1 -device virtconsole` on a
+unix-socket chardev, and `tools/vcon.py` is whoever is sitting at the
+other end of that socket: it records everything the guest sends (that
+capture IS the evidence for guest→host assertions) and sends scripted
+replies when markers appear in that stream. Marker-paced like every
+other actor here — the console's own output is the clock.
+
+The fixture chardev uses **`server=on,wait=on`**: QEMU discards a
+console port's output while nobody is attached, so with `wait=off` the
+guest could transmit its fixture into a socket the harness had not
+reached yet, and the test would report an honest-but-useless SKIP about
+one boot in five. Blocking QEMU's startup until the actor is attached
+removes the race rather than papering over it with a sleep. Users get
+`wait=off` in docs/RUNNING.md — their machine must boot whether or not
+anyone connects, and THAT configuration is tested too (the
+console_service SKIP path).
+
+`m6:test:console_service` spawns consoled (image 12) and contest
+(image 13) with NEITHER console capability, so the driver serves the
+port over IPC and the capability probe that chooses its mode is itself
+under test. contest sends a fixture line out the transmit queue — the
+harness asserts those exact bytes on its socket, where the evidence is
+— and then reads the harness's answer back off the receive queue and
+verifies it byte-for-byte. Both directions must be interrupt-completed;
+teardown must be frame-exact and must sweep BOTH relay vectors.
+
+`tools/test_m6_console.py` is the milestone's real claim: a boot with
+`feed=[]` and `keys=[]` — serial input dead, keyboard untouched — where
+the shell's banner and prompt ARRIVE on the port and `echo`,
+`psX<backspace>`, and `shutdown` are all typed INTO it. The machine
+halts because someone typed it on a virtio-console port.
+
+**A harness that perturbs its subject is a broken instrument.** Two
+lessons, both paid for in flaky runs: an out-of-line call added to
+`serial::putc` (tens of thousands of calls per boot) and an O(n²)
+capture rewrite in the actor each slowed the guest enough to fail the
+m2 suite's TSC calibration — QEMU's TSC follows HOST time while the PIT
+follows virtual time, so host load shows up INSIDE the machine as a
+clock disagreement. The tap's inert path is now three inlined
+instructions and the actor appends to an open file. The kernel's own
+calibration (and the m2 cross-check) additionally retry up to three
+rounds, because a stalled host must not be able to fail a boot.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

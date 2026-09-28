@@ -178,6 +178,24 @@ pub static INPUTD_IMAGE: &[u8] =
 pub static INPUTTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/inputd/target/x86_64-unknown-none/release/inputtest");
 
+/// The console channel service (M6.4, ADR-0027): spawn-registry image
+/// 12, `consoled` — the userspace virtio-console driver. The boot
+/// sequence spawns it with BOTH console capabilities, which is what
+/// turns a byte pipe into a second console: host bytes enter the
+/// kernel's line discipline, kernel console output leaves through the
+/// port. The m6 suite spawns its own instance with NEITHER, which puts
+/// the same image in service mode.
+pub static CONSOLED_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/consoled/target/x86_64-unknown-none/release/arena-consoled");
+
+/// The console-service test client (M6.4): spawn-registry image 13,
+/// `contest` — built from the same crate as `consoled`. It drives a
+/// round trip through the service boundary: bytes out the port that
+/// the harness reads off the host socket, and bytes back from the
+/// harness verified byte-for-byte. Only the m6 suite spawns it.
+pub static CONTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/consoled/target/x86_64-unknown-none/release/contest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

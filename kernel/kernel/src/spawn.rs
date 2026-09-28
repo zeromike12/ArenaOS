@@ -35,14 +35,14 @@ use crate::sync::{SyncCell, without_interrupts};
 /// Image-registry capacity. v1 populates two entries (the embedded
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
-pub const MAX_IMAGES: usize = 12;
+pub const MAX_IMAGES: usize = 16;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
 /// excess is a typed refusal).
 pub const MAX_INHERIT: usize = 4;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten).
-pub const MAX_SPAWN_RECS: usize = 12;
+pub const MAX_SPAWN_RECS: usize = 16;
 
 /// The kernel-side image registry (ADR-0019/0020/0022): image 0 is the
 /// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
@@ -62,9 +62,13 @@ pub const MAX_SPAWN_RECS: usize = 12;
 /// image 9 is `rngtest`, the m6 suite's variance probe. Image 10 is
 /// `inputd`, the userspace virtio-input keyboard driver (M6.3,
 /// ADR-0026), spawned at boot when a keyboard exists; image 11 is
-/// `inputtest`, the m6 suite's decoded-keystroke client. Images 10
-/// and 11 fill `MAX_IMAGES` exactly — 6.4's `consoled` must raise it
-/// (ADR-0026, Consequences).
+/// `inputtest`, the m6 suite's decoded-keystroke client. Image 12 is
+/// `consoled`, the userspace virtio-console driver (M6.4, ADR-0027),
+/// spawned at boot when a virtio-console port exists; image 13 is
+/// `contest`, the m6 suite's port round-trip client. The bound is 16
+/// (raised from 12, which images 10/11 filled exactly — ADR-0026,
+/// Consequences): four spare entries, and the cost is four pointers
+/// in a static table.
 /// A filesystem-backed source slots in here later without changing the
 /// cap shape.
 pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
@@ -81,6 +85,8 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         9 => Some(elf::RNGTEST_IMAGE),
         10 => Some(elf::INPUTD_IMAGE),
         11 => Some(elf::INPUTTEST_IMAGE),
+        12 => Some(elf::CONSOLED_IMAGE),
+        13 => Some(elf::CONTEST_IMAGE),
         _ => None,
     }
 }

@@ -77,6 +77,12 @@ pub const VIRTIO_TYPE_ENTROPY: u16 = 4;
 /// is 0x1040 + 18 = 0x1052 — there is no transitional alias to accept.
 pub const VIRTIO_TYPE_INPUT: u16 = 18;
 
+/// VirtIO device type: console/serial port (M6.4, ADR-0027 —
+/// `consoled` drives `virtio-serial-pci` + a `virtconsole` port).
+/// Transitional ID 0x1003 (the type arrives in the subsystem id, the
+/// generic path below), modern 0x1043.
+pub const VIRTIO_TYPE_CONSOLE: u16 = 3;
+
 /// PCI capability ID: vendor-specific — VirtIO structures live in these.
 const CAP_ID_VENDOR: u8 = 0x09;
 /// PCI capability ID: MSI-X.
@@ -595,6 +601,8 @@ fn log_virtio(v: &VirtioDevice) {
             "entropy"
         } else if v.virtio_type == VIRTIO_TYPE_INPUT {
             "input"
+        } else if v.virtio_type == VIRTIO_TYPE_CONSOLE {
+            "console"
         } else {
             "other"
         },

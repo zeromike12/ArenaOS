@@ -65,7 +65,8 @@ Layout rules:
   4/5), `userspace/netd` (virtio-net, ADR-0024 — images 6/7),
   `userspace/rngd` (virtio-rng, ADR-0025 — images 8/9), and
   `userspace/inputd` (virtio-input keyboard, ADR-0026 — images
-  10/11).
+  10/11), and `userspace/consoled` (virtio-console channel, ADR-0027 —
+  images 12/13).
 - **Shared userspace code is single-file and included by `#[path]`,
   not linked as crates:** `userspace/abi.rs` (the syscall/IPC/wire
   surface every image mirrors — one wire contract, all programs) and,

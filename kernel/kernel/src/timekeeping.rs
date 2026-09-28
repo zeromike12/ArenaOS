@@ -44,6 +44,13 @@ const CAL_WINDOW_COUNTS: u32 = pit::OSCILLATOR_HZ as u32 / 50;
 /// The two windows must agree on TSC frequency within this many percent.
 const CAL_AGREE_PERCENT: u64 = 5;
 
+/// How many two-window rounds `init` may take before giving up. Three
+/// is enough that a single host hiccup cannot fail a boot, and few
+/// enough that a truly unusable TSC still stops the machine promptly
+/// (each round is two ~20 ms windows, so the worst case adds ~80 ms to
+/// boot and only on a machine that was already misbehaving).
+const CAL_ROUNDS: u32 = 3;
+
 /// Plausible TSC bounds (Hz). Anything outside means the measurement — not
 /// the machine — is broken (QEMU TCG presents a fixed-rate TSC; real hosts
 /// are 0.5–6 GHz class). Bounds are deliberately wide.
@@ -59,32 +66,57 @@ static TSC_HZ: AtomicU64 = AtomicU64::new(0);
 /// timer beats a stopped one for every later consumer) when the measured
 /// frequency is implausible or the windows disagree.
 pub fn init() -> Result<(), &'static str> {
-    // Window 1 + window 2, both on the linear mode-2 countdown. IF is 0
-    // here (boot invariant outside the tick tests), so nothing interleaves
-    // with the paired (count, TSC) samples.
+    // Two windows must AGREE — one measurement is a number, two are a
+    // fact. Measured on the linear mode-2 countdown with IF=0 (boot
+    // invariant outside the tick tests), so nothing interleaves with
+    // the paired (count, TSC) samples.
+    //
+    // Up to CAL_ROUNDS attempts, because a disagreement is not always
+    // the machine's fault. On a virtual machine the TSC advances with
+    // the HOST's clock while the PIT advances with the guest's virtual
+    // time, so if the host deschedules the VM for a couple of
+    // milliseconds inside a 20 ms window, that window reads high by
+    // exactly that fraction — observed live at 2860 MHz against a true
+    // 2603. Halting the machine over a busy host would be a boot
+    // failure with no cause inside the machine at all. A genuinely
+    // unstable or unreadable TSC disagrees in EVERY round and still
+    // halts, which is the invariant worth keeping.
+    //
     // SAFETY: we own the PIT from this point (post-M1 suite, single CPU,
     // IF=0); reprogramming channel 0 is the intended effect.
     unsafe { pit::set_calibration_mode() };
-    let (counts1, tsc1) = unsafe { pit::calibrate_tsc_window(CAL_WINDOW_COUNTS) };
-    let (counts2, tsc2) = unsafe { pit::calibrate_tsc_window(CAL_WINDOW_COUNTS) };
+    let mut agreed: Option<(u64, u64)> = None;
+    let mut rounds = 0u32;
+    while rounds < CAL_ROUNDS {
+        rounds += 1;
+        // SAFETY: as above; the PIT stays in calibration mode across
+        // the rounds and is restored to periodic once, below.
+        let (counts1, tsc1) = unsafe { pit::calibrate_tsc_window(CAL_WINDOW_COUNTS) };
+        let (counts2, tsc2) = unsafe { pit::calibrate_tsc_window(CAL_WINDOW_COUNTS) };
+        if counts1 == 0 || counts2 == 0 || tsc1 == 0 || tsc2 == 0 {
+            continue; // nothing advanced; the zero check below decides
+        }
+        let hz1 = tsc1 * pit::OSCILLATOR_HZ / u64::from(counts1);
+        let hz2 = tsc2 * pit::OSCILLATOR_HZ / u64::from(counts2);
+        let (lo, hi) = if hz1 <= hz2 { (hz1, hz2) } else { (hz2, hz1) };
+        info!(
+            "timekeeping",
+            "tsc calibration round {rounds}/{CAL_ROUNDS}: window1 {counts1} counts/{tsc1} tsc = {hz1} Hz, window2 {counts2}/{tsc2} = {hz2} Hz ({} ppm apart)",
+            (hi - lo) * 1_000_000 / lo
+        );
+        if hi - lo <= lo * CAL_AGREE_PERCENT / 100 {
+            agreed = Some((hz1, hz2));
+            break;
+        }
+    }
 
     // Leave the machine ticking whatever the verdict below is.
     // SAFETY: as above.
     unsafe { pit::set_periodic_hz(KERNEL_TICK_HZ) };
 
-    if counts1 == 0 || counts2 == 0 || tsc1 == 0 || tsc2 == 0 {
-        return Err("calibration window measured zero (PIT or TSC not advancing?)");
-    }
-    let hz1 = tsc1 * pit::OSCILLATOR_HZ / u64::from(counts1);
-    let hz2 = tsc2 * pit::OSCILLATOR_HZ / u64::from(counts2);
-    let (lo, hi) = if hz1 <= hz2 { (hz1, hz2) } else { (hz2, hz1) };
-    info!(
-        "timekeeping",
-        "tsc calibration: window1 {counts1} counts/{tsc1} tsc = {hz1} Hz, window2 {counts2}/{tsc2} = {hz2} Hz"
-    );
-    if hi - lo > lo * CAL_AGREE_PERCENT / 100 {
-        return Err("calibration windows disagree beyond tolerance");
-    }
+    let Some((hz1, hz2)) = agreed else {
+        return Err("calibration windows disagree beyond tolerance in every round");
+    };
     let hz = (hz1 + hz2) / 2;
     if !(TSC_HZ_MIN..=TSC_HZ_MAX).contains(&hz) {
         return Err("calibrated TSC frequency outside plausible bounds");

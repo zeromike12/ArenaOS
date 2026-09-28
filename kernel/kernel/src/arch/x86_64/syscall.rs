@@ -131,6 +131,11 @@ pub const SYS_DEV_INFO: u64 = 22;
 // feeds the SAME queue the UART RX ISR does — one line editor, one
 // blocking read contract, two hardware sources.
 pub const SYS_CONSOLE_PUSH: u64 = 23;
+/// SYS_CONSOLE_ATTACH (M6.4, ADR-0027): bind a notification to the
+/// console's output mirror, turning it on.
+pub const SYS_CONSOLE_ATTACH: u64 = 24;
+/// SYS_CONSOLE_PULL (M6.4, ADR-0027): drain mirrored console output.
+pub const SYS_CONSOLE_PULL: u64 = 25;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -608,6 +613,8 @@ extern "C" fn syscall_dispatch(
         SYS_CAP_COPY => sys_cap_copy(a0, a1, a2) as u64,
         SYS_DEV_INFO => sys_dev_info(a0, a1) as u64,
         SYS_CONSOLE_PUSH => sys_console_push(a0, a1, a2) as u64,
+        SYS_CONSOLE_ATTACH => sys_console_attach(a0, a1, a2) as u64,
+        SYS_CONSOLE_PULL => sys_console_pull(a0, a1, a2) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1171,6 +1178,97 @@ fn sys_console_push(a0: u64, a1: u64, a2: u64) -> Status {
         crate::console::feed(b);
     }
     a2 as Status
+}
+
+/// Largest run one `SYS_CONSOLE_PULL` returns. Matches WRITE_MAX: a
+/// driver that pulls console text is about to push it at a device in
+/// buffers of that order, and a bound keeps the copy on the syscall
+/// stack.
+const CONSOLE_PULL_MAX: u64 = 256;
+
+/// SYS_CONSOLE_ATTACH(cap_slot, notif_slot, badge): attach this
+/// process as THE console output channel. `cap_slot` must hold
+/// `ConsoleOutput` with READ; `notif_slot` a notification with WRITE
+/// (the notify side, exactly as `SYS_IRQ_RELAY` takes it); `badge`
+/// must be nonzero (the merged-badge protocol has no empty word).
+///
+/// Returns 0. `STATUS_BUSY` = another channel is already attached.
+/// The attachment is swept when the process is destroyed, so a dead
+/// driver cannot leave the kernel mirroring into a dead notification
+/// (`proc::destroy`, the same place relay vectors are swept).
+fn sys_console_attach(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG; // kernel threads have no cap space
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if !matches!(c.obj, crate::cap::CapObj::ConsoleOutput)
+        || c.rights & crate::cap::RIGHTS_READ == 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    if a2 == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(nid) = notification_of(pid, a1, crate::cap::RIGHTS_WRITE) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::console::attach_output(pid, nid, a2) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// SYS_CONSOLE_PULL(cap_slot, buf, len): copy out up to `len` bytes of
+/// mirrored console output (at most [`CONSOLE_PULL_MAX`]), returning
+/// the count — 0 means the mirror is empty, which also re-arms the
+/// notification.
+///
+/// Non-blocking by construction (see `console::pull_output`). Refused
+/// unless the caller both HOLDS the capability and IS the attached
+/// channel: the cap is the authority, the attachment is the identity.
+fn sys_console_pull(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if !matches!(c.obj, crate::cap::CapObj::ConsoleOutput)
+        || c.rights & crate::cap::RIGHTS_READ == 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    if !crate::console::output_owner_is(pid) {
+        return STATUS_BAD_ARG; // holds the cap, never attached
+    }
+    if a2 == 0 {
+        return 0; // the capability probe, mirroring `SYS_CONSOLE_PUSH`
+    }
+    let n = core::cmp::min(a2, CONSOLE_PULL_MAX) as usize;
+    if !user_range_ok(a1, n as u64) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let mut buf = [0u8; CONSOLE_PULL_MAX as usize];
+    let got = crate::console::pull_output(&mut buf[..n]);
+    if got > 0 {
+        // SAFETY: the span was validated against this thread's
+        // regions; own address space live; STAC brackets the
+        // SMAP-guarded write; IF=0. The source is this stack's scratch.
+        unsafe {
+            super::stac();
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), a1 as *mut u8, got);
+            super::clac();
+        }
+    }
+    got as Status
 }
 
 // ---- driver substrate handlers (M5.1, ADR-0021) ----------------------------

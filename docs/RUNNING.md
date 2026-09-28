@@ -70,8 +70,26 @@ qemu-system-x86_64 \
     -device virtio-net-pci,netdev=net0 \
     -device virtio-rng-pci \
     -device virtio-keyboard-pci \
+    -chardev socket,id=vcon0,path=/tmp/arena-console.sock,server=on,wait=off \
+    -device virtio-serial-pci,max_ports=1 \
+    -device virtconsole,chardev=vcon0 \
     -display none -serial mon:stdio -no-reboot
 ```
+
+**A second console on a socket (new in v0.9.0).** The last three lines
+attach a virtio-console port whose host end is a unix socket. While the
+VM runs, open another terminal and:
+
+```sh
+nc -U /tmp/arena-console.sock
+```
+
+You are now on the machine's console — the same one: what ArenaOS
+prints appears in both places, and what you type in either drives the
+same `arena>` prompt. That is `consoled` (M6.4, ADR-0027): the kernel
+keeps one console and this driver attaches a second channel to it in
+both directions. Leave the lines out and nothing changes; the boot
+suite's console test reports an honest SKIP if nobody connects.
 
 **Want to actually type on a keyboard?** Drop `-display none` and use
 `-display gtk` (or `sdl`/`cocoa`, whatever your QEMU has) with
@@ -92,13 +110,14 @@ sys.path.insert(0, "tools"); import afs1; afs1.mkfs("scratch.img",
 
 The two `-netdev`/`-device virtio-net-pci` lines (new in v0.6.0), the
 `-device virtio-rng-pci` line (new in v0.7.0), and the
-`-device virtio-keyboard-pci` line (new in v0.8.0) are all
-**optional**: they attach QEMU's built-in user-mode network, which the
+`-device virtio-keyboard-pci` line (new in v0.8.0), and the
+virtio-console trio (new in v0.9.0) are all **optional**: they attach QEMU's built-in user-mode network, which the
 `netd` driver (M6.1) proves with a real ARP round trip every boot;
 QEMU's built-in entropy source, which the `rngd` driver (M6.2) proves
-by drawing randomness straight into a client's pages; and a virtual
+by drawing randomness straight into a client's pages; a virtual
 keyboard, which the `inputd` driver (M6.3) turns into live typing at
-the shell prompt. Boot without any of them (e.g. an older saved
+the shell prompt; and a console port, which the `consoled` driver
+(M6.4) turns into a second console you can reach with `nc -U`. Boot without any of them (e.g. an older saved
 command) and the machine stays green — the corresponding test reports
 an honest `SKIP`, the kernel logs the service as offline, and the
 serial console remains a complete way to use the machine. No host setup or privileges are needed either way:
@@ -221,27 +240,35 @@ machine-checkable landmarks, in order:
     an honest **SKIP** — the machine carries on to the shell exactly
     as normal. (Want to see it pass? Type `arena` in the QEMU window
     while the suite is running.) Together these end with
-    `m6: RESULT PASS (3/3)` — or a `RESULT SKIP` line naming whatever
+    `m6: RESULT PASS (4/4)` — or a `RESULT SKIP` line naming whatever
     was missing, which is equally green: booting without the NIC,
-    rng, or keyboard changes nothing else
-12. `storaged spawned: pid …`, `fsd spawned: pid …`, then
+    rng, keyboard, or console port changes nothing else
+13. `m6:test:console_service` — the console-channel proof (ADR-0027):
+    `consoled` plus `contest`, which sends a line out the port and
+    reads the host's answer back in. Like the keyboard, this fixture
+    needs somebody at the other end: connect `nc -U` to the socket
+    before the suite runs and it PASSes; otherwise it SKIPs honestly
+    after about a second and the boot carries on exactly as normal
+14. `storaged spawned: pid …`, `fsd spawned: pid …`, then
     `fsd: mounted AFS1 — commit seq …`, and (with the fixtures)
     `netd spawned: pid …` + `netd: virtio-net ready — DRIVER_OK,
     mac …`, `rngd spawned: pid …` + `rngd: virtio-rng ready —
-    DRIVER_OK …`, and `inputd spawned: pid …` + `inputd: console mode
-    — keystrokes feed the shell's line discipline` — the production
-    services come up on the same devices the suite just proved
-    (ADR-0022/0023/0024/0025/0026)
-13. `milestones 5–6.3 complete … spawning the shell`, then
+    DRIVER_OK …`, `inputd spawned: pid …` + `inputd: console mode
+    — keystrokes feed the shell's line discipline`, and
+    `consoled spawned: pid …` + `consoled: console mode — the port is
+    a second console` — the production services come up on the same
+    devices the suite just proved
+    (ADR-0022/0023/0024/0025/0026/0027)
+15. `milestones 5–6.4 complete … spawning the shell`, then
     `shell spawned: pid …` — the hand-off
-14. `ArenaOS shell v0.8 …` and the `arena> ` prompt — the machine is
+16. `ArenaOS shell v0.9 …` and the `arena> ` prompt — the machine is
     now an interactive system with a real filesystem; type into it
     (see "The shell" above)
-15. After `shutdown`: `shutdown requested by pid … through its Power
+17. After `shutdown`: `shutdown requested by pid … through its Power
     cap` and `halting via UEFI ResetSystem(shutdown)` — the clean-halt
     declaration (the automated harnesses type `shutdown` for you,
     marker-paced)
-16. QEMU exits on its own with status 0
+18. QEMU exits on its own with status 0
 
 If you see `PANIC`, a `FAIL` marker, or QEMU hangs instead, please open
 an issue with the full serial output attached — the log is designed to

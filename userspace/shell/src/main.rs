@@ -443,7 +443,7 @@ fn do_spawn() {
 
 // ---- texts -----------------------------------------------------------------
 
-const BANNER: &str = "ArenaOS shell v0.8 (M4.6 + M5.3/5.4 + M6.3, ADR-0020/0023/0026) — type on the serial port or the keyboard.\r\n";
+const BANNER: &str = "ArenaOS shell v0.9 (M4.6 + M5.3/5.4 + M6.4, ADR-0020/0023/0027) — serial, keyboard, or console port.\r\n";
 const PROMPT: &str = "arena> ";
 /// One debug_write chunk (<= WRITE_MAX = 256): the help text hits the
 /// wire atomically — and Out::push DROPS bytes past WRITE_MAX, so an

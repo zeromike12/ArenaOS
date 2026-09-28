@@ -69,7 +69,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mtest  # noqa: E402
 import arena_env  # noqa: E402
 
-EXPECTED_TESTS = ["net_service", "rng_service", "input_service"]
+EXPECTED_TESTS = ["net_service", "rng_service", "input_service",
+                  "console_service"]
 
 # The keystrokes the harness types on the VIRTUAL KEYBOARD (M6.3,
 # ADR-0026), paced by a serial marker like every other harness action:
@@ -149,6 +150,33 @@ def check_with_net_extras(serial: str) -> bool:
     check("virtio device_id 0x1052 \u2192 type 18 (input), modern" in serial,
           "the kernel's PCI scan classified the keyboard as modern "
           "virtio-input (no transitional alias exists for this class)")
+
+    # ---- M6.4: the console channel (ADR-0027) ------------------------
+    check(re.search(r"^m6:test:console_service: PASS", serial,
+                    re.MULTILINE) is not None,
+          "the console_service test PASSED — a real round trip through "
+          "the port")
+    check("consoled: virtio-console ready" in serial,
+          "consoled completed the virtio 1.0 handshake on both queues")
+    check("consoled: service mode" in serial,
+          "the suite's consoled ran in SERVICE mode (both console "
+          "capabilities withheld — the mode switch is under test)")
+    check("contest: PASS \u2014 the port carried bytes BOTH ways" in serial,
+          "the client verified bytes out AND back, byte-for-byte")
+    check(re.search(r"transmit and \d+ receive interrupt", serial)
+          is not None,
+          "both directions were INTERRUPT-completed (no polling)")
+    check("consoled spawned: pid" in serial and "4=ConsoleOutput/R" in serial,
+          "the production consoled got BOTH console capabilities (input "
+          "to feed the line discipline, output to mirror what the "
+          "machine prints)")
+    check("consoled: console mode" in serial,
+          "the production instance's capability probes put it in console "
+          "mode")
+    check("virtio device_id 0x1003 \u2192 type 3 (console), transitional"
+          in serial,
+          "the kernel's PCI scan resolved the console device through the "
+          "transitional subsystem id")
     return ok
 
 
@@ -170,7 +198,7 @@ def boot_without_net() -> bool:
     try:
         esp = mtest.build(label)
         rc, serial, dt = mtest.run_qemu(label, esp, net=False,
-                                        rng=False, kbd=False)
+                                        rng=False, kbd=False, vcon=False)
     except Exception as e:  # noqa: BLE001 — any harness fault is a FAIL
         print(f"[test-m6-nonet] FAIL: the no-net boot crashed the harness: {e}")
         return False
@@ -207,6 +235,15 @@ def boot_without_net() -> bool:
           "production inputd was NOT spawned without the device")
     check("inputd: starting" not in serial,
           "no inputd instance ran at all without the device")
+    check(re.search(r"^m6:test:console_service: SKIP \(no virtio-console",
+                    serial, re.MULTILINE) is not None,
+          "the console_service test reported an HONEST SKIP too")
+    check("console channel service stays offline" in serial,
+          "the kernel logged the console channel service offline")
+    check("consoled spawned" not in serial,
+          "production consoled was NOT spawned without the device")
+    check("consoled: starting" not in serial,
+          "no consoled instance ran at all without the device")
     check("arena>" in serial,
           "the shell still reached its prompt on the SERIAL console with "
           "no keyboard attached (the keyboard is additive, never required)")
@@ -290,7 +327,7 @@ if __name__ == "__main__":
         if not boot_with_keyboard_but_nobody_typing():
             rc = 1
     print(f"[test-m6] {'=' * 46}")
-    print(f"[test-m6] MILESTONE 6.1+6.2+6.3: {'PASS' if rc == 0 else 'FAIL'} "
-          "(link + entropy + input proofs, and honest SKIPs with no "
+    print(f"[test-m6] MILESTONE 6.1+6.2+6.3+6.4: {'PASS' if rc == 0 else 'FAIL'} "
+          "(link + entropy + input + console proofs, honest SKIPs with no "
           "fixtures)")
     sys.exit(rc)

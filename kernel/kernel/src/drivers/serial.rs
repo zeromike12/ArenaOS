@@ -92,6 +92,12 @@ pub unsafe fn putc(c: u8) {
         }
         outb(COM1_BASE + RBR_THR_DLL, c);
     }
+    // M6.4 (ADR-0027): the console's output mirror. This is the ONE
+    // place every console byte passes — echo, log lines, user
+    // `SYS_DEBUG_WRITE`, and panics alike — so a second console
+    // channel taps it here and nowhere else. Silent no-op until a
+    // `ConsoleOutput` holder attaches.
+    crate::console::mirror_out(c);
 }
 
 /// Enable the receive-data-available interrupt (IER.ERBFI). Called once,

@@ -91,6 +91,25 @@ pub fn set_timer_hook(hook: Option<extern "C" fn()>) {
     TIMER_HOOK.store(hook.map_or(0, |f| f as usize as u64), Ordering::Relaxed);
 }
 
+/// Optional AUXILIARY tick hook (M6.4, ADR-0027): called by the same
+/// vector-32 handler, before the scheduler's hook and independent of
+/// whether preemption is armed.
+///
+/// It exists because the console's output mirror must not wake its
+/// reader from where the bytes are produced: `serial::putc` runs in
+/// every context there is, including inside the scheduler's own log
+/// lines, and calling `ipc::notify` there would re-enter the
+/// scheduler from underneath itself. The tap therefore only appends
+/// and raises a flag, and the wake is delivered from here — an
+/// ordinary interrupt context that is already allowed to wake threads.
+/// `console::init` installs it (the same shape as the RX hook).
+static TICK_AUX_HOOK: AtomicU64 = AtomicU64::new(0);
+
+/// Install (or remove, with `None`) the auxiliary tick hook. IF=0.
+pub fn set_tick_aux_hook(hook: Option<extern "C" fn()>) {
+    TICK_AUX_HOOK.store(hook.map_or(0, |f| f as usize as u64), Ordering::Relaxed);
+}
+
 /// Rust half of `arena_irq_timer_stub` (vector 32 = the reclaimed PIT
 /// tick, `drivers::intc::PIT_VECTOR`; the literal 32 below is kept local
 /// because arch code does not import driver modules).
@@ -110,6 +129,15 @@ extern "C" fn arena_timer_handler() {
         (eoi as *mut u32).write_volatile(0);
     }
     TIMER_IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
+    let aux = TICK_AUX_HOOK.load(Ordering::Relaxed);
+    if aux != 0 {
+        // SAFETY: only set_tick_aux_hook writes this slot, always with
+        // a real `extern "C" fn()` (or 0); the hook upholds the
+        // interrupt-context contract (ADR-0013) exactly as the
+        // scheduler hook below does.
+        let f = unsafe { core::mem::transmute::<u64, extern "C" fn()>(aux) };
+        f();
+    }
     let hook = TIMER_HOOK.load(Ordering::Relaxed);
     if hook != 0 {
         // SAFETY: only set_timer_hook writes this slot, always with a
@@ -338,19 +366,29 @@ global_asm!(
     "iretq",
     // ---- IRQ relay stubs (vectors 48..63, M5.1 / ADR-0021) -----------------
     // 16 slots at a fixed 16-byte stride, same construction contract as the
-    // exception stubs: each body is at most 12 bytes (mov rcx, imm32 = 7,
+    // exception stubs: each body is well under 16 bytes (push imm8 = 2,
     // jmp rel32 = 5 — gas may relax the jmp shorter, never longer), so
     // `.p2align 4` puts stub N exactly at base + 16*N and `relay_stub_addr`
-    // can do the arithmetic. The vector arrives in rcx (Win64 arg 1) to the
-    // common half, which saves every caller-saved register (the relay can
-    // fire into ANY thread, ring 0 or ring 3, mid-anything), EOIs both
-    // controllers, and hands the vector to the relay table (`crate::relay`).
+    // can do the arithmetic.
+    //
+    // The vector travels on the STACK, not in a register, and that is the
+    // whole point (M6.4 bug hunt — ADR-0027). The first version loaded it
+    // with `mov rcx, \vec` before jumping to the common half, which saved
+    // rcx only AFTERWARDS: the interrupted thread's rcx was already
+    // destroyed, and `pop rcx` handed it back the VECTOR NUMBER. An
+    // interrupt may land on any instruction, and rcx is a perfectly legal
+    // place for live data (it is Win64's first argument register), so the
+    // interrupted code resumed with 54 where its value had been. It cost a
+    // day to find because it only bites when a relay fires while some
+    // live value is in rcx — nothing did, until a console channel started
+    // transmitting during process spawn. Push first, read later: exactly
+    // what `exception_common` has always done with its vector.
     ".p2align 4",
     ".globl arena_relay_stubs",
     "arena_relay_stubs:",
     ".macro RELAY_STUB vec",
     ".p2align 4",
-    "mov rcx, \\vec",
+    "push \\vec",
     "jmp arena_relay_common",
     ".endm",
     "RELAY_STUB 48",
@@ -369,12 +407,16 @@ global_asm!(
     "RELAY_STUB 61",
     "RELAY_STUB 62",
     "RELAY_STUB 63",
+    // Stack on entry: [vector][RIP][CS][RFLAGS][RSP][SS] — the same shape
+    // exception_common sees (minus the error code). Save EVERY register
+    // the Rust handler may clobber BEFORE touching any of them, then read
+    // the vector back off the stack as Win64 argument 1.
     ".p2align 4",
     "arena_relay_common:",
     "push rbp",
     "mov rbp, rsp",
-    "push rcx",                 // the vector (stub-loaded rcx) first
     "push rax",
+    "push rcx",
     "push rdx",
     "push rsi",
     "push rdi",
@@ -384,7 +426,7 @@ global_asm!(
     "push r11",
     "and rsp, -16",
     "sub rsp, 32",
-    "mov rcx, [rbp - 8]",       // reload the vector as arg 1
+    "mov rcx, [rbp + 8]",       // the vector the stub pushed, as arg 1
     "call {relay_handler}",
     "lea rsp, [rbp - 72]",
     "pop r11",
@@ -394,9 +436,10 @@ global_asm!(
     "pop rdi",
     "pop rsi",
     "pop rdx",
-    "pop rax",
     "pop rcx",
+    "pop rax",
     "pop rbp",
+    "add rsp, 8",               // drop the pushed vector
     "iretq",
     // ---- common exception path --------------------------------------------
     // Stack here: [vector][error_code][RIP][CS][RFLAGS][RSP][SS]

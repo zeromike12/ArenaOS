@@ -527,6 +527,22 @@ driver, so file data DMAs disk ↔ client page with no copy in any ring.
   switch (a zero-length push is the probe), so the same image serves
   keys over IPC when the suite withholds it. Layout, repeat, LEDs,
   and pointing devices are explicitly out of v1 (ADR-0026).
+- **Console channels (M6.4):** `userspace/consoled` is the fifth
+  driver, and the milestone that settled what a console IS here. A
+  port moves bytes; a console is the line discipline on the way in and
+  everything the machine prints on the way out. Both of those are
+  kernel objects, so the kernel keeps ONE console and drivers attach
+  CHANNELS to it: inbound through the `ConsoleInput` gate the keyboard
+  already uses, outbound through a new `ConsoleOutput`-gated MIRROR of
+  the console's byte stream (`SYS_CONSOLE_ATTACH` / `SYS_CONSOLE_PULL`).
+  The shell was not touched; serial remains the kernel's own for logs
+  and panics; a machine with no console device is exactly what it was.
+  The two capabilities are separate objects so that a keyboard cannot
+  gain the power to read everything the machine prints — only the one
+  process that is meant to BE a console holds both. The mirror's tap
+  never wakes its reader: `serial::putc` runs inside the scheduler's
+  own log lines, so the wake is owed there and paid on the timer tick
+  (ADR-0027).
 
 ## 9. Security philosophy
 
@@ -624,6 +640,7 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Network service (M6.1): `netd` (registry image 6, spawned at boot when the virtio-net fixture is attached) — the ring-3 virtio-net driver, LINK-LAYER ONLY (raw Ethernet frames in/out, no protocols): two split virtqueues (receiveq/transmitq) packed one frame per queue under the CAP_SLOTS budget at modern-virtio alignments, two MSI-X relay badges (bit-disjoint, one notification), VERSION_1+MAC-only feature negotiation, the config-space MAC through DEV_INFO word [6], zero-copy TX (caller's LENT frame chained behind netd's own virtio header), RX buffers posted/harvested interrupt-driven with a first-frame hold slot, RECV delivery through the reply's inline 64-byte message (lent caps cannot be mapped — the full-frame handoff is Phase 7's design); order-independent device discovery (storaged adopted the same probe loop + type assert); `nettest` (image 7) proves the wire: hand-built 42-byte ARP request → slirp reply verified field-by-field, one counted relay delivery per vector; absent fixture → honest SKIP + the network service offline (pre-v0.6.0 invocations stay green) | **M6.1 — implemented, 1/1 in-guest + the no-net SKIP boot (ADR-0024)** |
 | Entropy service (M6.2): `rngd` (registry image 8, spawned at boot when a virtio-rng function exists) — the ring-3 virtio-rng driver on the SHARED virtio core (`userspace/virtio.rs`): one request queue packed into a single owned frame, `RNG_GET` filling the caller's LENT frame by device DMA (zero-copy, the write direction of storaged's read path), MSI-X completion relayed into `SYS_WAIT`, typed refusals that never leak the landed cap; `rngtest` (image 9) proves real variance — two 4 KiB draws, full-length by the device's own count, non-zero, non-constant, mutually different, two counted relay deliveries; absent fixture → honest SKIP + the entropy service offline | **M6.2 — implemented, 2/2 in-guest with all four fixture combinations green (ADR-0025)** |
 | Input service (M6.3): `inputd` (registry image 10, spawned at boot when a virtio-input function exists) — the ring-3 virtio-input keyboard driver on the shared virtio core: one device-writable event queue with 32 posted 8-byte buffers (QEMU drops whole batches against a short ring), evdev events harvested to the used ring's end per interrupt (the device coalesces on `EV_SYN`), a US-ASCII keymap with modifier tracking, and a 64-byte decoded-key ring so asynchronous keystrokes survive between consumers; `SYS_CONSOLE_PUSH` (23) gated on `CapObj::ConsoleInput` feeds the kernel's line discipline so typing drives the shell while serial stays live, with a zero-length push as the capability probe that selects console vs service mode; `inputtest` (image 11) verifies harness-typed keystrokes decoded through the service boundary; absent fixture → honest SKIP + the keyboard service offline | **M6.3 — implemented, 3/3 in-guest + the live-typing boot test (ADR-0026)** |
+| Console channel service (M6.4): `consoled` (registry image 12, spawned at boot when a virtio-console port exists) — the ring-3 virtio-console driver on the shared virtio core: two split virtqueues (receive stocked with 16 buffers posted AFTER DRIVER_OK, because QEMU pauses a chardev whose frontend cannot yet read), MULTIPORT declined so port 0 needs no control protocol, two MSI-X relays merged into ONE notification alongside the kernel's output-mirror wake so the driver has exactly one place to block; `SYS_CONSOLE_ATTACH` (24) + `SYS_CONSOLE_PULL` (25) gated on `CapObj::ConsoleOutput` drain a kernel-side mirror of the console's byte stream, while `SYS_CONSOLE_PUSH` (ADR-0026, unchanged) carries the inbound half — so the port is a full second console in both directions with serial still the kernel's own; `contest` (image 13) proves a round trip the host can see on its socket; absent fixture → honest SKIP + the channel service offline | **M6.4 — implemented, 4/4 in-guest + the shell driven entirely over the port (ADR-0027)** |
 | Truncate/append-overwrite (v1 refuses to clobber), directories, per-file permissions/kernel file caps (security phase), power-loss-grade barriers (`cache=none` + virtio FUA/FLUSH — v1's proven model is process-crash prefixes), full mark-sweep fsck (interrupted generations leak conservatively), the network PROTOCOL stack (Ethernet/ARP/IP/UDP/TCP services — the link layer landed in M6.1), virtio console/input drivers, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.
