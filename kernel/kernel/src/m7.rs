@@ -132,6 +132,9 @@ fn test_arp_service() -> Res {
     let nid_irq = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_stack = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_client = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_backoff = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_sync = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_go = ipc::create_notification().map_err(|_| "notification table full")?;
 
     let netd_grants = [
         Cap {
@@ -152,6 +155,12 @@ fn test_arp_service() -> Res {
     ];
     let netd_pid = crate::spawn::spawn_init(6, &netd_grants, None)
         .map_err(|_| "netd (image 6) spawn failed")?;
+    // M7.1b: the driver runs under real supervision, so killing it is
+    // survivable rather than terminal. The grant list is what gets
+    // replayed — including the SAME endpoint, which is why the stack's
+    // capability keeps working across the restart (ADR-0028).
+    crate::supervise::register("netd", 6, &netd_grants, netd_pid)
+        .map_err(|_| "the supervisor refused netd's registration")?;
 
     // netstackd: the driver's call side, its own serve side, and a
     // frame slot. NO device capability — it cannot touch the NIC even
@@ -165,15 +174,42 @@ fn test_arp_service() -> Res {
             obj: CapObj::Endpoint { eid: ep_stack },
             rights: cap::RIGHTS_READ,
         },
+        // A notification it arms backoff timers on while waiting for a
+        // dead driver to be restarted (M7.1b). Still NO device
+        // capability — the boundary is unchanged. (Padding the list
+        // with empty caps to place this higher does not work: granting
+        // a `CapObj::None` is refused, which is the right answer to a
+        // meaningless grant.)
+        Cap {
+            obj: CapObj::Notification { nid: nid_backoff },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
     ];
     let stack_pid =
         crate::spawn::spawn_init(17, &stack_grants, Some((nid_stack, NETSTACKD_EXIT_BADGE)))
             .map_err(|_| "netstackd (image 17) spawn failed")?;
 
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid: ep_stack },
-        rights: cap::RIGHTS_WRITE,
-    }];
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid: ep_stack },
+            rights: cap::RIGHTS_WRITE,
+        },
+        // The handshake: the client tells us when to kill the driver
+        // and waits for us to say it is back. Deterministic by
+        // agreement rather than by sleep (the faultd pattern, M6.5).
+        //
+        // TWO notifications with one-way rights. Sharing one let the
+        // client's own wait swallow the badge it had just sent — the
+        // same bug, in the same shape, as faultd's first version.
+        Cap {
+            obj: CapObj::Notification { nid: nid_sync },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_go },
+            rights: cap::RIGHTS_READ,
+        },
+    ];
     let client_pid =
         crate::spawn::spawn_init(18, &client_grants, Some((nid_client, ARPTEST_EXIT_BADGE)))
             .map_err(|_| "arptest (image 18) spawn failed")?;
@@ -182,11 +218,60 @@ fn test_arp_service() -> Res {
         "arp_service: netd pid {netd_pid} (L2 only), netstackd pid {stack_pid} (ARP + cache, NO device cap), arptest pid {client_pid} — resolving on the real wire"
     );
 
-    // The client drives everything; the stack and driver follow. It
-    // finishes by poisoning the stack, and the stack's own shutdown
-    // leaves netd running (the driver outlives its client, which is
-    // the point of the split).
-    if let Err(reason) = drain_pid(client_pid) {
+    // ---- the fault, at a moment both sides agreed on ----------------
+    // The client signals when it has finished phase 1; no sleeps, no
+    // guessing which instruction it is on.
+    //
+    // POLLED, not waited on. The boot thread must stay runnable while
+    // its children are blocked on devices: `block_current` treats an
+    // empty ready ring as a deadlock and halts, which is what the
+    // first version of this handshake did. Other tests can call
+    // `ipc::wait` only because they do it after a drain, when the
+    // badge is already pending.
+    if let Err(reason) = await_badge(nid_sync, 1 << 16) {
+        return Err(reason);
+    }
+
+    // Count the timers armed so far. netd arms one per bounded RECV,
+    // and it is about to die; after that the ONLY thing in the system
+    // that arms a timer is netstackd's re-attach backoff. So a rise in
+    // this counter is the kernel's own evidence that the stack met a
+    // dead driver and started coping — observable without asking the
+    // service anything.
+    let timers_before = timer::stats().armed_total;
+    proc::destroy(netd_pid).map_err(|_| "destroying netd failed")?;
+
+    // Release the client IMMEDIATELY, while the driver is still dead.
+    //
+    // The first version restarted netd first and then let the client
+    // go, which proved something real (a client's capability survives
+    // a restart) but not the thing this milestone is about: netstackd
+    // never met a dead driver, so its re-establish path never ran and
+    // it reported zero re-attaches. Now the stack makes its next call
+    // into a corpse, gets STATUS_SERVICE_GONE, and has to cope.
+    ipc::notify(nid_go, 1 << 17).map_err(|_| "the go-ahead could not be sent")?;
+
+    // Do NOT restart it yet. Wait until the stack has actually met the
+    // corpse — proven by it arming a backoff timer — and only then let
+    // the supervisor work.
+    //
+    // Without this the proof was hollow: the supervisor's first poll
+    // ran before the client had even woken, so netstackd called into a
+    // driver that was already back and reported zero re-attaches. The
+    // milestone is about surviving a dead dependency, so the test has
+    // to actually produce one.
+    if let Err(reason) = await_timer_armed(timers_before) {
+        return Err(reason);
+    }
+    info!(
+        "m7",
+        "arp_service: the stack has met the dead driver and is backing off — releasing the supervisor now"
+    );
+
+    // The supervisor's hands, on the boot thread. In production this
+    // is the idle loop (M7.0) running continuously beside live
+    // services.
+    if let Err(reason) = drain_pid_supervised(client_pid) {
         error!(
             "m7",
             "arp_service: client threads={}, stack threads={}, netd threads={}",
@@ -196,6 +281,21 @@ fn test_arp_service() -> Res {
         );
         return Err(reason);
     }
+
+    let Some(st) = crate::supervise::status_of("netd") else {
+        return Err("netd vanished from the supervisor's table");
+    };
+    if st.pid == 0 || st.pid == netd_pid {
+        return Err("the restarted driver has no new pid");
+    }
+    if st.restarts != 1 {
+        return Err("the supervisor's restart accounting is wrong");
+    }
+    let netd_pid2 = st.pid;
+    info!(
+        "m7",
+        "arp_service: netd died as pid {netd_pid} and came back as pid {netd_pid2} with its capabilities replayed — the stack met the corpse, re-established, and carried on"
+    );
 
     let bc = ipc::wait(nid_client).map_err(|_| "the client's exit badge never arrived")?;
     if bc != ARPTEST_EXIT_BADGE {
@@ -221,6 +321,11 @@ fn test_arp_service() -> Res {
             return Err("client: a silent address did not come back unreachable (65)");
         }
         Some(66) => return Err("client: the stack would not report its counters (66)"),
+        Some(67) => {
+            return Err(
+                "client: the stack could not resolve after the driver was RESTARTED under it (67)",
+            );
+        }
         Some(99) => return Err("client: the panic handler ran (99)"),
         _ => return Err("the client exited with a code from nowhere in the contract"),
     }
@@ -235,16 +340,26 @@ fn test_arp_service() -> Res {
         return Err("the ARP exchange did not go through real interrupts");
     }
 
-    // Teardown: the stack poisoned itself, netd is still running.
-    proc::destroy(netd_pid).map_err(|_| "destroying netd failed")?;
+    // Teardown. netd's FIRST incarnation was reaped by the supervisor
+    // when it respawned (ADR-0025's GC debt, closed in ADR-0028), so
+    // only the live one is destroyed here.
+    crate::supervise::unregister(netd_pid2);
+    proc::destroy(netd_pid2).map_err(|_| "destroying the restarted netd failed")?;
     proc::destroy(stack_pid).map_err(|_| "destroying netstackd failed")?;
     proc::destroy(client_pid).map_err(|_| "destroying arptest failed")?;
-    for p in [netd_pid, stack_pid, client_pid] {
+    for p in [netd_pid2, stack_pid, client_pid] {
         crate::spawn::forget(p).map_err(|_| "spawn record forget refused")?;
     }
     ipc::destroy_endpoint(ep_netd).map_err(|_| "endpoint teardown refused")?;
     ipc::destroy_endpoint(ep_stack).map_err(|_| "endpoint teardown refused")?;
-    for n in [nid_irq, nid_stack, nid_client] {
+    for n in [
+        nid_irq,
+        nid_stack,
+        nid_client,
+        nid_backoff,
+        nid_sync,
+        nid_go,
+    ] {
         ipc::destroy_notification(n).map_err(|_| "notification teardown refused")?;
     }
     for _ in 0..4 {
@@ -403,6 +518,92 @@ fn test_timer_facility() -> Res {
         after.cancelled - before.cancelled
     );
     Ok(())
+}
+
+/// Yield until something arms a timer beyond `before`, bounded by the
+/// HPET wall clock. With netd dead, the only such thing is the stack's
+/// re-attach backoff.
+fn await_timer_armed(before: u64) -> Res {
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
+    // SAFETY: ring 0; mapped HPET alias; 32-bit main-counter read.
+    let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+    let mut out = Ok(());
+    while timer::stats().armed_total <= before {
+        // SAFETY: the same alias and register.
+        let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+        if now.wrapping_sub(t0) >= CLIENT_DEADLINE_TICKS {
+            out = Err("the stack never noticed the driver was gone");
+            break;
+        }
+        sched::yield_now();
+    }
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    out
+}
+
+/// Drain like `drain_pid`, but ALSO run the supervisor each pass.
+///
+/// This is the idle thread's job (M7.0) done by the suite: in
+/// production `supervise::poll` runs continuously beside live
+/// services, so a driver that dies is restarted WHILE its clients are
+/// retrying. Sequencing the restart before releasing the client would
+/// test a much easier world.
+fn drain_pid_supervised(pid: u64) -> Res {
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
+    // SAFETY: ring 0; mapped HPET alias; 32-bit main-counter read.
+    let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+    let mut out = Ok(());
+    while sched::proc_live_threads(pid) > 0 {
+        crate::supervise::poll();
+        // SAFETY: the same alias and register.
+        let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+        if now.wrapping_sub(t0) >= CLIENT_DEADLINE_TICKS {
+            out = Err("the client is still live after the wall-clock deadline");
+            break;
+        }
+        sched::yield_now();
+    }
+    sched::yield_now();
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    out
+}
+
+/// Yield until `nid` carries `badge`, bounded by the HPET wall clock.
+///
+/// See `ipc::poll_pending` for why this cannot simply block.
+fn await_badge(nid: u32, badge: u64) -> Res {
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
+    // SAFETY: ring 0; mapped HPET alias; 32-bit main-counter read.
+    let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+    let mut seen = 0u64;
+    let mut out = Ok(());
+    loop {
+        seen |= ipc::poll_pending(nid);
+        if seen & badge != 0 {
+            break;
+        }
+        // SAFETY: the same alias and register.
+        let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+        if now.wrapping_sub(t0) >= CLIENT_DEADLINE_TICKS {
+            out = Err("the expected signal never arrived");
+            break;
+        }
+        sched::yield_now();
+    }
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    out
 }
 
 /// Yield until `pid` has no live threads, bounded by the HPET wall

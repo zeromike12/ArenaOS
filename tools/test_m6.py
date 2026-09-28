@@ -104,12 +104,13 @@ def check_with_net_extras(serial: str) -> bool:
           "the suite's teardown was frame-exact")
     check("netd spawned: pid" in serial,
           "the PRODUCTION netd spawned at boot with the fixture attached")
-    check(serial.count("virtio-net ready") == 3,
-          "netd reached DRIVER_OK three times — the m6 suite's instance, "
-          "the m7 ARP suite's, and the production service. Kept EXACT "
-          "rather than loosened to >=: this assertion is what noticed "
-          "M7.1 adding an instance, and a count that cannot notice is "
-          "not worth writing (the suite's instance + the "
+    check(serial.count("virtio-net ready") == 4,
+          "netd reached DRIVER_OK four times — the m6 suite's instance, "
+          "the m7 ARP suite's, the one the SUPERVISOR restarted after "
+          "M7.1b killed it, and the production service. Kept EXACT "
+          "rather than loosened to >=: this count has now noticed two "
+          "milestones adding instances, which is precisely what a count "
+          "that cannot notice would not have done (the suite's "
           "production service)")
 
     # --- M6.2: the entropy service (ADR-0025) ---

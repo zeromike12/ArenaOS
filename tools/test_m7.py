@@ -152,6 +152,30 @@ def extra_checks(serial: str) -> bool:
           "the stack really did time out on the silent address (its own "
           "accounting, not the test's)")
 
+    # ---- M7.1b: surviving the driver (ADR-0030) ----------------------
+    check("the driver is GONE — waiting for the supervisor" in serial,
+          "the stack MET a dead driver — its call was answered "
+          "STATUS_SERVICE_GONE rather than queued on an endpoint nobody "
+          "would ever read")
+    check("the stack has met the dead driver and is backing off" in serial,
+          "the test produced a genuinely dead dependency before letting "
+          "the supervisor work (the first version restarted netd so fast "
+          "the stack never noticed, and proved nothing)")
+    check(re.search(r"RE-ATTACHED to the restarted driver on attempt \d+",
+                    serial) is not None,
+          "the stack RE-ESTABLISHED with the new instance — it re-acquired "
+          "its device facts rather than assuming anything survived")
+    check(re.search(r"netd died as pid (\d+) and came back as pid (\d+)",
+                    serial) is not None,
+          "the supervisor restarted netd with its capabilities replayed")
+    check("10.0.2.3 resolved to" in serial
+          and "through a driver that was RESTARTED under the stack" in serial,
+          "a resolve that had to reach the WIRE succeeded through the new "
+          "instance (a cache hit would have proven nothing)")
+    m = re.search(r"netstackd: shutdown — .*?(\d+) re-attach\(es\)", serial)
+    check(m is not None and int(m.group(1)) >= 1,
+          "the stack's own accounting records the re-attach")
+
     # Phase 7's standing rule, checked the only way a log can: the
     # machine reached its prompt without a suite hanging on a clock.
     check("arena>" in serial,

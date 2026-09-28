@@ -20,7 +20,14 @@
 //!    timer facility was built before any protocol existed. Before
 //!    M7.0 this call would have parked the stack forever.
 //!
-//! Exit codes: 42 verified, 60..66 typed failures, 99 panic.
+//! 4. **The stack survives its driver being killed.** After phase 1
+//!    this client signals the suite, which destroys netd and lets the
+//!    supervisor restart it, and then wakes the client. The next
+//!    resolve is a deliberate cache MISS, so it must reach the wire
+//!    through an instance that did not exist when the stack started.
+//!    Re-resolving the cached gateway would have proven nothing.
+//!
+//! Exit codes: 42 verified, 60..67 typed failures, 99 panic.
 #![no_std]
 #![no_main]
 
@@ -31,6 +38,29 @@ mod abi;
 use abi::*;
 
 const SLOT_EP: u64 = 0;
+/// The handshake with the suite (M7.1b): this client tells the suite
+/// when it has finished phase 1, then BLOCKS until the suite says go
+/// — so the driver is killed at a moment both sides agree on, rather
+/// than at one the harness guessed with a sleep.
+///
+/// TWO notifications, with rights that make the obvious mistake
+/// impossible. The first version used one for both directions, and
+/// the client's own wait swallowed the badge it had just sent before
+/// the suite could see it — exactly the bug faultd hit in M6.5 and
+/// exactly the fix: this one is WRITE-only, the other READ-only.
+const SLOT_SIGNAL: u64 = 1;
+/// The suite's go-ahead. READ-only: nothing here can forge it.
+const SLOT_GO: u64 = 2;
+/// "Phase 1 is done — kill the driver now."
+const BADGE_PHASE1: u64 = 1 << 16;
+/// "The driver is dead and restarted — carry on."
+const BADGE_GO: u64 = 1 << 17;
+
+/// An address slirp also answers for (its DNS server), used AFTER the
+/// restart so the lookup is a genuine cache MISS and has to reach the
+/// wire through the new driver instance. Re-resolving the gateway
+/// would be served from cache and would prove nothing.
+const SLIRP_DNS_IP: [u8; 4] = [10, 0, 2, 3];
 
 const EXIT_CALL: u64 = 60;
 const EXIT_RESOLVE: u64 = 61;
@@ -39,6 +69,9 @@ const EXIT_CACHE_MISMATCH: u64 = 63;
 const EXIT_CACHE_WIRE: u64 = 64;
 const EXIT_NOT_UNREACHABLE: u64 = 65;
 const EXIT_STATS: u64 = 66;
+/// The stack could not resolve after the driver was restarted under
+/// it — the re-establish path failed.
+const EXIT_AFTER_RESTART: u64 = 67;
 
 /// An address on the slirp network that nothing answers for. slirp
 /// replies for its own gateway and DNS; .77 is simply nobody.
@@ -160,6 +193,58 @@ pub unsafe extern "C" fn _start() -> ! {
         log(
             "arptest: PASS — a silent address came back UNREACHABLE after real deadlines (before M7.0 this call could never have returned)",
         );
+
+        // ---- 4: the driver is killed under us, and the stack copes ----
+        // Tell the suite we are at the agreed point, then wait. The
+        // suite destroys netd, lets the supervisor restart it, and
+        // wakes us.
+        log("arptest: phase 1 complete — signalling the suite to kill the driver");
+        if syscall2(SYS_NOTIFY, SLOT_SIGNAL, BADGE_PHASE1) < 0 {
+            fail(EXIT_CALL, "the phase-1 signal was refused");
+        }
+        loop {
+            let b = syscall1(SYS_WAIT, SLOT_GO);
+            if b < 0 {
+                fail(EXIT_CALL, "waiting for the suite's go-ahead failed");
+            }
+            if b as u64 & BADGE_GO != 0 {
+                break;
+            }
+        }
+        log(
+            "arptest: the driver has been killed and restarted — resolving through the NEW instance",
+        );
+
+        // A cache MISS on purpose: this must reach the wire, which
+        // means it must go through a driver that did not exist when
+        // the stack started.
+        let (status, packed) = call(ARP_OP_RESOLVE, ip_word(SLIRP_DNS_IP));
+        if status != ARP_S_OK {
+            log_line(|o| {
+                o.str("arptest: post-restart RESOLVE status ");
+                o.i64(status as i64);
+            });
+            fail(
+                EXIT_AFTER_RESTART,
+                "the stack could not resolve through the restarted driver",
+            );
+        }
+        if packed == 0 {
+            fail(
+                EXIT_AFTER_RESTART,
+                "the post-restart resolve returned an all-zero MAC",
+            );
+        }
+        log_line(|o| {
+            o.str("arptest: PASS — 10.0.2.3 resolved to ");
+            for i in 0..6u64 {
+                if i > 0 {
+                    o.str(":");
+                }
+                o.hex2(((packed >> (8 * i)) & 0xFF) as u8);
+            }
+            o.str(" through a driver that was RESTARTED under the stack");
+        });
 
         let (status, wire_total, hits_total) = shutdown();
         if status != ARP_S_OK {

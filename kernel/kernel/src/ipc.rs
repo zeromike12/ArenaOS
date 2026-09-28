@@ -113,6 +113,18 @@ const EMPTY_SLOT: CallSlot = CallSlot {
 #[derive(Clone, Copy)]
 struct Endpoint {
     live: bool,
+    /// Nobody is serving this endpoint: the process that held its
+    /// serve side was destroyed (M7.1b).
+    ///
+    /// ADR-0028 gave a typed answer to callers who were IN FLIGHT when
+    /// a server died, and stopped there. A call sent AFTERWARDS simply
+    /// queued on an endpoint nobody would ever read and blocked
+    /// forever — the same hang, one instant later, and the one a
+    /// network stack actually hits: it discovers its driver is gone by
+    /// CALLING it. So an orphaned endpoint refuses new calls with
+    /// `STATUS_SERVICE_GONE` until somebody takes up the serve side
+    /// again, which a restarted service does by its first `recv`.
+    orphaned: bool,
     q: [CallSlot; QUEUE_DEPTH],
     /// Thread parked in `recv` (`NO_TID` = none). v1: one server per
     /// endpoint — a second `recv` gets `STATUS_BUSY` (ADR-0018).
@@ -121,6 +133,7 @@ struct Endpoint {
 
 const EMPTY_EP: Endpoint = Endpoint {
     live: false,
+    orphaned: false,
     q: [EMPTY_SLOT; QUEUE_DEPTH],
     server: NO_TID,
 };
@@ -219,6 +232,7 @@ pub fn create_endpoint() -> Result<u32, &'static str> {
             };
             eps[i] = Endpoint {
                 live: true,
+                orphaned: false,
                 q: [EMPTY_SLOT; QUEUE_DEPTH],
                 server: NO_TID,
             };
@@ -378,6 +392,14 @@ pub fn call(
             let Some(ep) = eps.get_mut(eidx).filter(|e| e.live) else {
                 return Err(STATUS_BAD_ARG);
             };
+            if ep.orphaned {
+                // Nobody is serving this. Answer now rather than
+                // enqueue into silence (M7.1b). Counted directly
+                // rather than through `bump!`, which brings its own
+                // `unsafe` and would nest inside this one.
+                (*STATS.get()).service_gone += 1;
+                return Err(STATUS_SERVICE_GONE);
+            }
             let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Empty) else {
                 return Err(STATUS_BUSY);
             };
@@ -477,6 +499,11 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Stat
             let Some(ep) = eps.get_mut(eid as usize).filter(|e| e.live) else {
                 return Err(STATUS_BAD_ARG);
             };
+            // Somebody is serving this endpoint again (M7.1b). A
+            // restarted service announces itself simply by asking for
+            // work — no re-registration step, and no way for the
+            // orphan flag to outlive the situation it describes.
+            ep.orphaned = false;
             if let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Waiting) {
                 return Ok(Some(qi));
             }
@@ -639,6 +666,9 @@ pub fn fail_calls_for_server(pid: u64) -> usize {
                 if ep.server != NO_TID && sched::proc_id_of(ep.server).unwrap_or(0) == pid {
                     ep.server = NO_TID;
                 }
+                // Whoever held the serve side is dying: until somebody
+                // takes it up again, calls here have nowhere to land.
+                ep.orphaned = true;
                 for slot in ep.q.iter_mut() {
                     if matches!(slot.state, SlotState::Waiting | SlotState::Delivered) {
                         slot.state = SlotState::Failed;
@@ -701,6 +731,39 @@ pub fn release_blocked_of(pid: u64) -> (usize, usize) {
                 }
             }
             (servers, waiters)
+        }
+    })
+}
+
+/// Take the pending badge word WITHOUT blocking (0 = nothing yet).
+///
+/// The suites need this and production does not, for a reason worth
+/// writing down: the boot thread must never park while its children
+/// are waiting on devices. `block_current` treats "nothing runnable"
+/// as a deadlock (ADR-0018) — correctly, because it cannot know an
+/// interrupt is coming — and in production the boot thread becomes
+/// the idle thread precisely so that situation is unreachable. A
+/// suite that blocks on a notification its children have not signalled
+/// yet halts the machine, which is exactly what M7.1b's handshake did
+/// on its first boot.
+///
+/// Every other suite gets away with `wait` because it only calls it
+/// AFTER a drain has confirmed the children are gone, so the badge is
+/// already pending and the wait returns immediately. A handshake with
+/// a LIVE child needs this instead, inside a yield loop.
+pub fn poll_pending(nid: u32) -> u64 {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let ns = &mut *NOTIFS.get();
+            match ns.get_mut(nid as usize).filter(|n| n.live) {
+                Some(n) => {
+                    let b = n.pending;
+                    n.pending = 0;
+                    b
+                }
+                None => 0,
+            }
         }
     })
 }

@@ -5,7 +5,11 @@
 //!   stack is a client of the driver, never the other way round),
 //! - slot 1: `Endpoint` (READ — its own serve side, where clients ask
 //!   it to resolve addresses),
-//! - slot 2: `Untyped` frame slot used for the transmit buffer.
+//! - slot 2: `Notification` (READ|WRITE — backoff timers while a dead
+//!   driver is being restarted; M7.1b),
+//!
+//! and fills slots 3..5 itself with its transmit frame and the lend
+//! copies of it.
 //!
 //! **Where the line is drawn.** netd owns the device: virtqueues,
 //! interrupts, the MAC in config space, and raw Ethernet frames in
@@ -49,7 +53,14 @@ use abi::*;
 
 const SLOT_NETD: u64 = 0;
 const SLOT_EP: u64 = 1;
-const SLOT_TX: u64 = 2;
+/// A notification of its own (M7.1b): what the stack backs off on
+/// while the supervisor brings a dead driver back. Waiting needs
+/// something to wait ON, and spinning on the clock is the polling
+/// Phase 7 forbids. GRANTED, so it sits with the other grants at the
+/// bottom of the space — the slots this program fills itself start
+/// after them.
+const SLOT_NOTIF: u64 = 2;
+const SLOT_TX: u64 = 3;
 /// The MASTER lend copy, taken once before the frame is mapped.
 ///
 /// `SYS_MAP_MEMORY` CONSUMES the cap it maps (ADR-0021: ownership
@@ -59,9 +70,18 @@ const SLOT_TX: u64 = 2;
 /// the map is a copy of nothing. The master is lent, never mapped,
 /// and every send copies from IT — because each send CONSUMES its
 /// copy on the way to the driver.
-const SLOT_TX_MASTER: u64 = 3;
+const SLOT_TX_MASTER: u64 = 4;
 /// The per-send lend copy, consumed by the call that carries it.
-const SLOT_TX_LENT: u64 = 4;
+const SLOT_TX_LENT: u64 = 5;
+
+/// Badge for the re-attach backoff timer.
+const BADGE_BACKOFF: u64 = 1 << 16;
+/// How long to wait between attempts to find the driver alive again.
+/// The supervisor restarts from another thread; this is patience, not
+/// a guess about how long a spawn takes.
+const REATTACH_BACKOFF_US: u64 = 20_000;
+/// How many times to look for the driver before giving up on it.
+const REATTACH_TRIES: u32 = 25;
 
 const EXIT_SETUP: u64 = 80;
 const EXIT_MAC: u64 = 81;
@@ -110,6 +130,8 @@ struct Stack {
     wire_requests: u64,
     replies_seen: u64,
     timeouts: u64,
+    /// Times the driver died under us and was picked back up.
+    reattaches: u64,
 }
 
 impl Stack {
@@ -229,6 +251,7 @@ pub unsafe extern "C" fn _start() -> ! {
             wire_requests: 0,
             replies_seen: 0,
             timeouts: 0,
+            reattaches: 0,
         };
         log_line(|o| {
             o.str("netstackd: ready — ARP over IPv4 for ");
@@ -314,7 +337,9 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                         o.u64(st8.hits);
                         o.str(" cache hit(s), ");
                         o.u64(st8.timeouts);
-                        o.str(" timeout(s)");
+                        o.str(" timeout(s), ");
+                        o.u64(st8.reattaches);
+                        o.str(" re-attach(es)");
                     });
                     reply(
                         ARP_S_OK,
@@ -326,6 +351,63 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                 _ => reply(ARP_S_BAD_OP, 0, 0),
             }
         }
+    }
+}
+
+/// The driver died under us: wait for it to come back, then
+/// RE-ESTABLISH — which is not the same as retrying.
+///
+/// A restarted netd is a new process that has re-run its own virtio
+/// handshake: fresh queues, freshly posted receive buffers, a fresh
+/// MSI-X relay. Nothing it held for us survived, so the stack must
+/// re-acquire its device facts rather than assume continuity. Here
+/// that means one thing — ask the new instance for the MAC — and the
+/// success of that call is also how the stack learns the driver is
+/// alive again.
+///
+/// What this deliberately does NOT do is re-send whatever failed.
+/// `STATUS_SERVICE_GONE` means the outcome is UNKNOWN (ADR-0028), and
+/// for a datagram the frame may already be on the wire. Only the
+/// CALLER decides whether its operation may be repeated; `resolve`
+/// may, because an ARP request is a broadcast query.
+///
+/// The wait is a real timer on a real notification. Spinning on
+/// `SYS_CLOCK_NOW` would be the polling this phase forbids, and the
+/// stack cannot be woken by the supervisor — it has no way to know a
+/// spawn happened except by asking.
+///
+/// # Safety
+/// As `_start`.
+unsafe fn reattach(st8: &mut Stack) -> bool {
+    // SAFETY: function contract.
+    unsafe {
+        log("netstackd: the driver is GONE — waiting for the supervisor, then re-establishing");
+        for attempt in 1..=REATTACH_TRIES {
+            let id = syscall3(
+                SYS_TIMER_ARM,
+                SLOT_NOTIF,
+                BADGE_BACKOFF,
+                REATTACH_BACKOFF_US,
+            );
+            if id >= 0 {
+                syscall1(SYS_WAIT, SLOT_NOTIF);
+            }
+            let (status, packed) = netd_call(NET_OP_MAC, 0, CAP_NONE, 0);
+            if status == NET_S_OK && packed != 0 {
+                for (i, m) in st8.mac.iter_mut().enumerate() {
+                    *m = ((packed >> (8 * i)) & 0xFF) as u8;
+                }
+                st8.reattaches += 1;
+                log_line(|o| {
+                    o.str("netstackd: RE-ATTACHED to the restarted driver on attempt ");
+                    o.u64(attempt as u64);
+                    o.str(" — device facts re-acquired, nothing assumed to have survived");
+                });
+                return true;
+            }
+        }
+        log("netstackd: the driver never came back — reporting the link down rather than guessing");
+        false
     }
 }
 
@@ -365,6 +447,17 @@ unsafe fn resolve(st8: &mut Stack, ip: [u8; 4]) -> Option<[u8; 6]> {
                 fail(EXIT_SETUP, "the transmit cap copy refused");
             }
             let (status, _) = netd_call(NET_OP_SEND, ARP_FRAME_LEN, SLOT_TX_LENT, 0);
+            if status == ARP_S_LINK_DOWN {
+                // The driver died holding this request. Re-establish
+                // and ask again — safe HERE and only here, because an
+                // ARP request is a broadcast query and repeating it
+                // costs nothing but a packet.
+                let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
+                if reattach(st8) {
+                    continue;
+                }
+                return None;
+            }
             if status != NET_S_OK {
                 let _ = syscall1(SYS_CAP_DESTROY, SLOT_TX_LENT);
                 return None;
@@ -384,6 +477,12 @@ unsafe fn resolve(st8: &mut Stack, ip: [u8; 4]) -> Option<[u8; 6]> {
                 if status == NET_S_TIMEOUT {
                     st8.timeouts += 1;
                     break; // retry, or give up after ARP_TRIES
+                }
+                if status == ARP_S_LINK_DOWN {
+                    if reattach(st8) {
+                        break; // re-ask from the top of the retry loop
+                    }
+                    return None;
                 }
                 if status != NET_S_OK {
                     return None;
