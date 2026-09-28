@@ -196,6 +196,18 @@ pub static CONSOLED_IMAGE: &[u8] =
 pub static CONTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/consoled/target/x86_64-unknown-none/release/contest");
 
+/// The fault-injection service (M6.5, ADR-0028): spawn-registry image
+/// 14, `faultd` — the smallest service in the system and the only one
+/// written to be killed. Spawned only by the m6 suite.
+pub static FAULTD_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/faultd/target/x86_64-unknown-none/release/arena-faultd");
+
+/// The client that outlives it (M6.5): spawn-registry image 15,
+/// `faulttest` — proves a destroyed server becomes a typed
+/// `STATUS_SERVICE_GONE` rather than a caller blocked forever.
+pub static FAULTTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/faultd/target/x86_64-unknown-none/release/faulttest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

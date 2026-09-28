@@ -21,6 +21,7 @@ pub const SYS_THREAD_EXIT: u64 = 2;
 pub const SYS_IPC_CALL: u64 = 7;
 pub const SYS_IPC_RECV: u64 = 8;
 pub const SYS_IPC_REPLY: u64 = 9;
+pub const SYS_NOTIFY: u64 = 10;
 pub const SYS_WAIT: u64 = 11;
 pub const SYS_SPAWN: u64 = 12;
 pub const SYS_CONSOLE_READ: u64 = 13;
@@ -340,6 +341,39 @@ pub const CONSOLE_MSG_MAX: u64 = 48;
 /// The spawner's give-up word on consoled's notification (ADR-0026's
 /// pattern, second use — see [`INPUT_BADGE_GIVE_UP`]).
 pub const CONSOLE_BADGE_GIVE_UP: u64 = 1 << 19;
+
+// ---- the fault-injection protocol (M6.5, ADR-0028) --------------------------
+//
+// The smallest service in the system, and the only one whose purpose
+// is to be killed. It exists so that "a driver died while serving a
+// request" is a case the OS has a TESTED answer for, rather than a
+// situation nobody has ever run.
+//
+// Request words: w0 = unused, w1 = op.
+//   PING      reply immediately (proves the service is alive and that
+//             the endpoint works before and — after a restart — again).
+//   HANG      take the request and never reply: park forever on a
+//             notification nobody will ever signal. The suite destroys
+//             the server while this request is in its hands.
+//   SHUTDOWN  reply and exit cleanly.
+// Reply word 0 is FAULT_S_OK.
+pub const FAULT_OP_SHUTDOWN: u64 = 0;
+pub const FAULT_OP_PING: u64 = 1;
+pub const FAULT_OP_HANG: u64 = 2;
+
+pub const FAULT_S_OK: u64 = 0;
+pub const FAULT_S_BAD_OP: u64 = (-1i64) as u64;
+
+/// The badge faultd sends on its notification just before parking in a
+/// HANG, so the suite can inject the fault at a DETERMINISTIC moment
+/// instead of guessing with a sleep.
+pub const FAULT_BADGE_HANGING: u64 = 1 << 16;
+
+/// The kernel's typed answer to a caller whose server was destroyed
+/// (`STATUS_SERVICE_GONE`). Mirrored here because clients must be able
+/// to name it: this is the status a well-written client RETRIES,
+/// rather than the status it dies of.
+pub const STATUS_SERVICE_GONE: i64 = -5;
 
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 

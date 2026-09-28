@@ -160,6 +160,23 @@ pub const STATUS_BAD_ADDRESS: Status = -3;
 /// endpoint, or a second waiter parked on one notification.
 pub const STATUS_BUSY: Status = -4;
 
+/// M6.5 (ADR-0028): the service you called is GONE — its process was
+/// destroyed while your request was queued or in its hands.
+///
+/// This exists so that a dead driver is an ANSWER rather than a hang.
+/// A client blocked in `SYS_IPC_CALL` has no timeout to fall back on
+/// and no way to observe the server's liveness; without this it waits
+/// forever on a reply nobody will ever stage. The endpoint itself
+/// survives (the kernel owns it), so a client that handles this status
+/// may simply call again once the service is back — which is exactly
+/// what a supervised restart makes possible.
+///
+/// It says nothing about whether the request was performed. A client
+/// whose operation is not idempotent must treat it as "unknown", not
+/// as "did not happen" — the ADR is explicit that the kernel cannot
+/// know, and a status that pretended otherwise would be a lie.
+pub const STATUS_SERVICE_GONE: Status = -5;
+
 /// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
 /// so the m4 suite computes its expectation with the very function the
 /// dispatcher returns — the six-register marshalling proof shares no

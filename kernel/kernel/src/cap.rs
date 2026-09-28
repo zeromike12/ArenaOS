@@ -178,6 +178,25 @@ pub fn read(pid: u64, slot: usize) -> Result<Cap, &'static str> {
     })
 }
 
+/// Does `pid` hold the SERVE side of endpoint `eid`? (M6.5, ADR-0028.)
+///
+/// The serve side is `Endpoint` + READ — the same test `SYS_IPC_RECV`
+/// applies. Asking the cap space is how the kernel discovers which
+/// endpoints a dying process owed answers on: no separate registry to
+/// keep in step, and no way for the two to disagree, because the
+/// capability IS the authority to serve.
+pub fn serves_endpoint(pid: u64, eid: u32) -> bool {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| {
+            cs.slots.iter().any(|c| {
+                matches!(c.obj, CapObj::Endpoint { eid: e } if e == eid)
+                    && c.rights & RIGHTS_READ != 0
+            })
+        })
+        .unwrap_or(false)
+    })
+}
+
 /// Occupancy evidence for the suites: `(used, CAP_SLOTS)` of a live
 /// process's space (`None` for an unknown pid).
 pub fn occupancy(pid: u64) -> Option<(u32, u32)> {

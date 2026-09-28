@@ -148,6 +148,51 @@ pub fn pml4_of(pid: u64) -> Option<u64> {
 /// kernel view when the incoming thread's cr3 differs; the bootstrap
 /// thread carries the kernel-view cr3, so any switch back to it does).
 pub fn destroy(pid: u64) -> Result<u64, &'static str> {
+    // M6.5 (ADR-0028): FIRST, answer everyone this process owed a
+    // reply to, with a typed status. A client blocked in
+    // `SYS_IPC_CALL` has no timeout and no way to observe its
+    // server's liveness; without this it waits forever for a reply
+    // nobody will ever stage.
+    //
+    // This runs BEFORE the teardown below, and deliberately outside
+    // it, for two reasons. The endpoints a process served are
+    // discovered from its own capability space, which the teardown is
+    // about to erase — and the teardown holds a `&mut` borrow of the
+    // process table that reading those capabilities would alias. The
+    // first attempt did it inside, after the slot was already cleared,
+    // and silently found nothing: the sweep reported zero failed
+    // calls on a client that was demonstrably blocked.
+    //
+    // A pid that does not exist owes nobody anything, so doing this
+    // before the existence check below costs nothing and keeps the
+    // ordering simple.
+    let failed = crate::ipc::fail_calls_for_server(pid);
+    if failed > 0 {
+        crate::log::log_info!(
+            "proc",
+            "destroy pid {pid}: {failed} in-flight call(s) answered STATUS_SERVICE_GONE"
+        );
+    }
+    // Then drop every kernel reference to this process's threads, and
+    // only then kill them. Order matters and is not stylistic: an
+    // endpoint or notification still holding a dead thread's id would
+    // try to wake a corpse, which halts the machine by design.
+    //
+    // Killing is what makes a process destroyable AT ALL while it is
+    // doing something. Before M6.5 `destroy` tore down the address
+    // space and left any parked thread live forever — fine for the
+    // suites, which only ever destroyed processes whose threads had
+    // already exited, and useless for a supervisor, whose whole job is
+    // to kill drivers that are blocked waiting for work or for a
+    // device that will never answer.
+    let (servers, waiters) = crate::ipc::release_blocked_of(pid);
+    let killed = crate::sched::kill_threads_of(pid);
+    if killed > 0 {
+        crate::log::log_info!(
+            "proc",
+            "destroy pid {pid}: killed {killed} live thread(s) (released {servers} endpoint server slot(s), {waiters} notification waiter(s))"
+        );
+    }
     without_interrupts(|| {
         // SAFETY: IF=0; the root is owned by the table slot found here
         // and freed exactly once (the slot is cleared in the same

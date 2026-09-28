@@ -143,6 +143,22 @@ for CONSOLED_ELF in \
     echo "consoled image: ${CONSOLED_ELF#"$REPO_ROOT"/} ($(stat -c%s "$CONSOLED_ELF") bytes)"
 done
 
+# M6.5 (ADR-0028): the fault-injection pair — faultd (spawn-registry
+# image 14, the service written to be killed mid-request) and
+# faulttest (image 15, the client that must get a typed answer instead
+# of waiting forever).
+echo "== building userspace faultd (userspace/faultd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/faultd" && cargo build --release )
+for FAULTD_ELF in \
+    "$REPO_ROOT/userspace/faultd/target/x86_64-unknown-none/release/arena-faultd" \
+    "$REPO_ROOT/userspace/faultd/target/x86_64-unknown-none/release/faulttest"; do
+    if [[ ! -f "$FAULTD_ELF" ]]; then
+        echo "error: faultd image not produced at $FAULTD_ELF" >&2
+        exit 1
+    fi
+    echo "faultd image: ${FAULTD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$FAULTD_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

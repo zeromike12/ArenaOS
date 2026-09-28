@@ -470,6 +470,54 @@ pub fn wake(tid: u64) -> Result<(), &'static str> {
     })
 }
 
+/// Kill every live thread belonging to `pid` (M6.5, ADR-0028).
+///
+/// The `Blocked` state has carried the note "counts as live until
+/// woken or (later milestones) killed" since M3.1. This is that
+/// milestone: a supervisor cannot restart a driver it cannot kill,
+/// and a driver worth restarting is almost always parked — blocked in
+/// `SYS_IPC_RECV` waiting for work, or in `SYS_WAIT` for an interrupt
+/// that will never come because the device is wedged. Destroying only
+/// the address space left those threads live forever, counted by
+/// every drain and reaped by nothing.
+///
+/// A killed thread becomes a `Zombie` without running another
+/// instruction: it never returns from the syscall it is parked in, so
+/// nothing resumes on its kernel stack and the ordinary reaper
+/// reclaims that stack with the usual canary check. The thread's USER
+/// state is irrelevant — its address space is being torn down by the
+/// caller.
+///
+/// The current thread is never killed here: a process cannot be
+/// destroyed while running on its own address space (`destroy`
+/// refuses that), so the caller is always somebody else.
+///
+/// Returns the number of threads killed. Callers must have released
+/// any kernel-side reference to those thread ids FIRST (endpoint
+/// server slots, notification waiters) — waking a zombie is a halting
+/// offence, and `ipc::release_blocked_of` exists for exactly that.
+pub fn kill_threads_of(pid: u64) -> usize {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let threads = &mut *THREADS.get();
+            let mut killed = 0;
+            for (i, slot) in threads.iter_mut().enumerate() {
+                let Some(t) = slot else { continue };
+                if t.proc_id != pid || t.state == State::Zombie || i == cur {
+                    continue;
+                }
+                // A Ready thread's index stays in the run ring; the
+                // picker skips corpses (see `plan_switch`).
+                t.state = State::Zombie;
+                killed += 1;
+            }
+            killed
+        }
+    })
+}
+
 /// Live (non-zombie) threads belonging to process `pid`. The spawn
 /// protocol's exit-notification hook asks exactly one question with
 /// this: "am I the last thread of my process?" (ADR-0019).
@@ -595,9 +643,21 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
     // SAFETY: single writer under IF=0; all reads/writes complete here.
     unsafe {
         let cpu = &mut (*CPUS.get())[this_cpu()];
-        let next = cpu.ready.pop()?;
         let cur = cpu.current;
         let threads = &mut *THREADS.get();
+        // Skip stale ready-ring entries. Since M6.5 a thread can be
+        // KILLED while Ready (`kill_threads_of`), which zombies it
+        // where it stands and leaves its index in this ring; `reap`
+        // above may also have emptied the slot entirely. Removing an
+        // entry from the middle of a ring is surgery, and the picker
+        // is the natural place to notice instead: a corpse is simply
+        // not a candidate.
+        let next = loop {
+            let cand = cpu.ready.pop()?;
+            if matches!(threads[cand], Some(t) if t.state == State::Ready) {
+                break cand;
+            }
+        };
         if enqueue_current {
             // as_mut(), not expect() — expect() on a Copy place assigns
             // to a discarded temporary (see exit_now).

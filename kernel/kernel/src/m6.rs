@@ -47,11 +47,12 @@ enum Outcome {
 }
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Outcome); 4] = [
+    let checks: [(&str, fn() -> Outcome); 5] = [
         ("net_service", test_net_service),
         ("rng_service", test_rng_service),
         ("input_service", test_input_service),
         ("console_service", test_console_service),
+        ("service_death", test_service_death),
     ];
     let mut passed = 0u32;
     let mut skipped = 0u32;
@@ -669,6 +670,196 @@ const CONTEST_EXIT_BADGE: u64 = 0x00C0_0002;
 /// The give-up word on consoled's notification. MUST match
 /// `CONSOLE_BADGE_GIVE_UP` in `userspace/abi.rs`.
 const CONSOLE_GIVE_UP_BADGE: u64 = 1 << 19;
+
+/// faulttest's verified-success exit.
+const FAULT_EXIT_OK: u64 = 42;
+/// Exit badges for the fault test's two children.
+const FAULTD_EXIT_BADGE: u64 = 0x00F0_0001;
+const FAULTTEST_EXIT_BADGE: u64 = 0x00F0_0002;
+/// The badge faultd sends the instant it is holding an unanswerable
+/// request. MUST match `FAULT_BADGE_HANGING` in `userspace/abi.rs`.
+const FAULT_HANGING_BADGE: u64 = 1 << 16;
+
+/// M6.5 (ADR-0028): a service that dies holding a request must produce
+/// a typed ANSWER for its caller, not a caller blocked forever.
+///
+/// Unlike every other test in this suite, this one needs no device and
+/// no host actor — the fault is injected from inside the kernel, at a
+/// moment the service itself nominates. That makes it the first test
+/// here that is fully deterministic, and it is the reason the
+/// fault-injection pair exists as its own tiny images rather than
+/// being bolted onto a real driver: killing storaged to see what
+/// happens would prove the same thing while risking the filesystem.
+fn test_service_death() -> Outcome {
+    match service_death_inner() {
+        Ok(()) => Outcome::Pass,
+        Err(SkipOrFail::Skip(reason)) => Outcome::Skip(reason),
+        Err(SkipOrFail::Fail(reason)) => Outcome::Fail(reason),
+    }
+}
+
+fn service_death_inner() -> NetResult {
+    let baseline = frames::free_frames();
+    let gone_before = ipc::stats().service_gone;
+
+    let eid = ipc::create_endpoint().map_err(|_| fail("endpoint table full"))?;
+    let nid_hang = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_void = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_server = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+
+    // faultd (image 14): the serve side, plus the notification it uses
+    // to tell us the exact instant it is holding an unanswerable
+    // request. No device caps at all — this service has nothing to
+    // lose but its life.
+    let server_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_READ,
+        },
+        // WRITE only: the service signals us and CANNOT wait on this,
+        // so it cannot swallow its own signal (it did, the first time).
+        Cap {
+            obj: CapObj::Notification { nid: nid_hang },
+            rights: cap::RIGHTS_WRITE,
+        },
+        // READ only: the void it parks on. Nobody ever notifies it,
+        // which is what makes the hang permanent and the fault
+        // deterministic.
+        Cap {
+            obj: CapObj::Notification { nid: nid_void },
+            rights: cap::RIGHTS_READ,
+        },
+    ];
+    let s_pid = crate::spawn::spawn_init(14, &server_grants, Some((nid_server, FAULTD_EXIT_BADGE)))
+        .map_err(|_| fail("faultd (image 14) spawn failed"))?;
+    let client_grants = [Cap {
+        obj: CapObj::Endpoint { eid },
+        rights: cap::RIGHTS_WRITE,
+    }];
+    let c_pid =
+        crate::spawn::spawn_init(15, &client_grants, Some((nid_client, FAULTTEST_EXIT_BADGE)))
+            .map_err(|_| fail("faulttest (image 15) spawn failed"))?;
+    info!(
+        "m6",
+        "service_death: faultd pid {s_pid} (endpoint {eid} serve side, hang signal {nid_hang}), faulttest pid {c_pid} (endpoint {eid} call side) — the client will be blocked in a call when the server dies"
+    );
+
+    // Wait for faultd to tell us it is holding the request. This is
+    // the whole reason for the signal: the fault lands at a state the
+    // service DECLARED, not at a moment we guessed with a sleep.
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let signal = ipc::wait(nid_hang);
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
+    let badge = signal.map_err(|_| fail("the hang signal never arrived"))?;
+    if badge != FAULT_HANGING_BADGE {
+        return Err(fail("the hang signal carried the wrong badge"));
+    }
+
+    // The client must be blocked in its call right now, and the server
+    // must still be alive to be killed.
+    if sched::proc_live_threads(c_pid) != 1 || sched::proc_live_threads(s_pid) != 1 {
+        return Err(fail(
+            "the pair is not in the state the fault requires (a live server, a blocked client)",
+        ));
+    }
+
+    // THE FAULT: destroy the server while it holds the request.
+    proc::destroy(s_pid)?;
+    let gone_after = ipc::stats().service_gone;
+    if gone_after != gone_before + 1 {
+        error!(
+            "m6",
+            "service_death: service_gone {gone_before} → {gone_after}, expected exactly one"
+        );
+        return Err(fail(
+            "destroying the server did not fail exactly one in-flight call",
+        ));
+    }
+
+    // The client must now finish on its own: woken by the kernel with
+    // a typed status, not by a reply that never existed.
+    if let Err(reason) = drain_interruptible() {
+        error!(
+            "m6",
+            "service_death drain failed: client threads={}",
+            sched::proc_live_threads(c_pid)
+        );
+        return Err(fail(reason));
+    }
+
+    let bc = ipc::wait(nid_client).map_err(|_| fail("the client's exit badge never arrived"))?;
+    if bc != FAULTTEST_EXIT_BADGE {
+        return Err(fail("the client's exit badge is not the granted word"));
+    }
+    // The server's exit badge must NOT arrive: it was destroyed, not
+    // exited, and the kernel does not invent a death notice for a
+    // process that never ran an exit path.
+    let recs = crate::spawn::records_snapshot();
+    let Some(c_tid) = recs
+        .iter()
+        .flatten()
+        .find(|&&(p, _)| p == c_pid)
+        .map(|&(_, t)| t)
+    else {
+        return Err(fail("the client has no spawn record"));
+    };
+    match syscall::exit_status_of(c_tid) {
+        Some(FAULT_EXIT_OK) => {}
+        Some(60) => return Err(fail("client: the opening PING call was refused (60)")),
+        Some(61) => return Err(fail("client: the service refused the opening PING (61)")),
+        Some(62) => {
+            return Err(fail(
+                "client: the dead service produced a reply or the wrong status (62)",
+            ));
+        }
+        Some(63) => return Err(fail("client: the ping accounting is wrong (63)")),
+        Some(99) => return Err(fail("client: the panic handler ran (99)")),
+        _ => {
+            return Err(fail(
+                "the client exited with a code from nowhere in the contract",
+            ));
+        }
+    }
+
+    // The ENDPOINT survives its server. That is what makes a restart
+    // possible at all: the clients' capabilities stay valid, so a new
+    // instance can take the serve side and the old callers simply try
+    // again (6.5b builds on exactly this).
+    if !ipc::endpoint_live(eid) {
+        return Err(fail(
+            "the endpoint died with its server — a restart could never reuse it",
+        ));
+    }
+
+    proc::destroy(c_pid)?;
+    crate::spawn::forget(s_pid).map_err(|_| fail("server spawn record forget refused"))?;
+    crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
+    ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_hang).map_err(|_| fail("hang notification teardown refused"))?;
+    ipc::destroy_notification(nid_void).map_err(|_| fail("void notification teardown refused"))?;
+    ipc::destroy_notification(nid_client)
+        .map_err(|_| fail("client notification teardown refused"))?;
+    ipc::destroy_notification(nid_server)
+        .map_err(|_| fail("server notification teardown refused"))?;
+
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m6",
+            "service_death teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err(fail("service-death teardown is not frame-exact"));
+    }
+    info!(
+        "m6",
+        "service_death: faultd (pid {s_pid}) was destroyed while holding faulttest's (pid {c_pid}) request — the kernel answered that call STATUS_SERVICE_GONE instead of leaving the caller blocked forever, the client handled it and exited {FAULT_EXIT_OK}, the ENDPOINT outlived its server (so a restart can reuse it), and teardown is frame-exact (frames {after})"
+    );
+    Ok(())
+}
 
 fn test_console_service() -> Outcome {
     match console_service_inner() {

@@ -30,7 +30,7 @@
 //! slot; a full space drops the cap and counts it — v1 caps describe,
 //! never own, so dropping is safe; ADR-0018).
 
-use crate::arch::x86_64::syscall::{STATUS_BAD_ARG, STATUS_BUSY, Status};
+use crate::arch::x86_64::syscall::{STATUS_BAD_ARG, STATUS_BUSY, STATUS_SERVICE_GONE, Status};
 use crate::cap::{Cap, CapObj};
 use crate::log::log_error as error;
 use crate::sched;
@@ -65,6 +65,10 @@ enum SlotState {
     Delivered,
     /// Reply staged; the caller is being (or has been) woken.
     Replied,
+    /// The server process died holding (or owing) this request. The
+    /// caller is woken and `call` returns `STATUS_SERVICE_GONE`
+    /// instead of a reply (M6.5, ADR-0028).
+    Failed,
 }
 
 #[derive(Clone, Copy)]
@@ -152,6 +156,9 @@ pub struct IpcStats {
     pub cap_drops: u64,
     /// `block_current` calls from IPC paths (call/recv/wait parking).
     pub blocks: u64,
+    /// Calls answered with `STATUS_SERVICE_GONE` because the serving
+    /// process was destroyed under them (M6.5, ADR-0028).
+    pub service_gone: u64,
 }
 
 static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
@@ -163,11 +170,23 @@ static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
     cap_transfers: 0,
     cap_drops: 0,
     blocks: 0,
+    service_gone: 0,
 });
 static ENDPOINTS: SyncCell<[Endpoint; MAX_ENDPOINTS]> = SyncCell::new([EMPTY_EP; MAX_ENDPOINTS]);
 static NOTIFS: SyncCell<[Notif; MAX_NOTIFS]> = SyncCell::new([EMPTY_NOTIF; MAX_NOTIFS]);
 
 /// Snapshot of the IPC counters.
+/// Is endpoint `eid` still a live kernel object? (M6.5, ADR-0028: a
+/// server dying must not take its endpoint with it — the clients'
+/// capabilities name the endpoint, not the process, which is what
+/// lets a restarted service pick the serve side back up.)
+pub fn endpoint_live(eid: u32) -> bool {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe { (*ENDPOINTS.get()).get(eid as usize).is_some_and(|e| e.live) }
+    })
+}
+
 pub fn stats() -> IpcStats {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
@@ -401,8 +420,23 @@ pub fn call(
     sched::block_current();
 
     // Phase 4 — resumed in our own context: take the reply, free the
-    // slot, install the reply cap into our own space.
+    // slot, install the reply cap into our own space. A server that
+    // died holding this request leaves the slot Failed instead, and
+    // the caller gets a typed status rather than a reply (ADR-0028).
     // SAFETY: single writer under IF=0.
+    let failed = without_interrupts(|| unsafe {
+        let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
+        if slot.state == SlotState::Failed {
+            *slot = EMPTY_SLOT;
+            true
+        } else {
+            false
+        }
+    });
+    if failed {
+        bump!(service_gone);
+        return Err(STATUS_SERVICE_GONE);
+    }
     let (reply_words, reply_cap, reply_msg) = without_interrupts(|| unsafe {
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
         if slot.state != SlotState::Replied {
@@ -565,6 +599,110 @@ pub fn notify(nid: u32, badge: u64) -> Result<(), Status> {
         }
     }
     Ok(())
+}
+
+/// Fail every call that `pid` owed an answer to, and wake the callers
+/// (M6.5, ADR-0028). Called from `proc::destroy` before the process
+/// is gone for good.
+///
+/// "Owed an answer" is decided by CAPABILITY, not by bookkeeping: the
+/// endpoints this process serves are exactly the ones it holds an
+/// `Endpoint` cap with READ rights for. Nothing else in the kernel
+/// records that association — and nothing else needs to, because the
+/// cap IS the authority to serve.
+///
+/// Both queue states count. A request already `Delivered` was in the
+/// server's hands, and a request still `Waiting` was addressed to a
+/// service that no longer exists; in neither case is a reply ever
+/// coming. `Replied` slots are left alone — that answer is real and
+/// the caller is entitled to it even though the server has since
+/// died.
+///
+/// Returns how many callers were failed, for the destroy log.
+pub fn fail_calls_for_server(pid: u64) -> usize {
+    // Phase 1 (IF=0): mark the slots and collect the callers to wake.
+    // The wake happens outside the borrow, exactly as `call` does it.
+    let mut wake_list = [NO_TID; QUEUE_DEPTH * MAX_ENDPOINTS];
+    let mut n = 0usize;
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let eps = &mut *ENDPOINTS.get();
+            for (eidx, ep) in eps.iter_mut().enumerate() {
+                if !ep.live {
+                    continue;
+                }
+                if !crate::cap::serves_endpoint(pid, eidx as u32) {
+                    continue;
+                }
+                // The server is dying: it can no longer be parked here.
+                if ep.server != NO_TID && sched::proc_id_of(ep.server).unwrap_or(0) == pid {
+                    ep.server = NO_TID;
+                }
+                for slot in ep.q.iter_mut() {
+                    if matches!(slot.state, SlotState::Waiting | SlotState::Delivered) {
+                        slot.state = SlotState::Failed;
+                        if slot.caller != NO_TID && n < wake_list.len() {
+                            wake_list[n] = slot.caller;
+                            n += 1;
+                        }
+                    }
+                }
+            }
+            (*STATS.get()).service_gone += n as u64;
+        }
+    });
+    // Phase 2: wake them. A caller that cannot be woken is a broken
+    // machine, not a recoverable condition — the same rule `call` and
+    // `notify` already apply.
+    for &tid in &wake_list[..n] {
+        if let Err(e) = sched::wake(tid) {
+            error!(
+                "ipc",
+                "fail_calls_for_server: wake(caller {tid}) failed: {e}"
+            );
+            crate::halt::halt_machine("ipc: a failed caller could not be woken");
+        }
+    }
+    n
+}
+
+/// Drop every kernel-side reference to threads belonging to `pid`
+/// (M6.5, ADR-0028): the endpoint server slots it is parked in and
+/// the notification waiter slots it is parked on.
+///
+/// This MUST run before `sched::kill_threads_of`. Those slots hold
+/// raw thread ids, and both `call` and `notify` treat "I have a
+/// parked thread id and cannot wake it" as a halting offence — which
+/// is the right rule, and exactly why the ids must be gone before the
+/// threads are. A dead driver parked in `SYS_IPC_RECV` would
+/// otherwise be woken by the next client that called its endpoint.
+///
+/// Returns (endpoint server slots cleared, notification waiters cleared).
+pub fn release_blocked_of(pid: u64) -> (usize, usize) {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let mut servers = 0;
+            let mut waiters = 0;
+            for ep in (*ENDPOINTS.get()).iter_mut() {
+                if ep.live
+                    && ep.server != NO_TID
+                    && sched::proc_id_of(ep.server).unwrap_or(0) == pid
+                {
+                    ep.server = NO_TID;
+                    servers += 1;
+                }
+            }
+            for n in (*NOTIFS.get()).iter_mut() {
+                if n.live && n.waiter != NO_TID && sched::proc_id_of(n.waiter).unwrap_or(0) == pid {
+                    n.waiter = NO_TID;
+                    waiters += 1;
+                }
+            }
+            (servers, waiters)
+        }
+    })
 }
 
 /// Blocking: take the pending badge word (clearing it) — parking while

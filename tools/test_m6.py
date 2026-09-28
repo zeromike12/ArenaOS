@@ -70,7 +70,7 @@ import mtest  # noqa: E402
 import arena_env  # noqa: E402
 
 EXPECTED_TESTS = ["net_service", "rng_service", "input_service",
-                  "console_service"]
+                  "console_service", "service_death"]
 
 # The keystrokes the harness types on the VIRTUAL KEYBOARD (M6.3,
 # ADR-0026), paced by a serial marker like every other harness action:
@@ -177,6 +177,23 @@ def check_with_net_extras(serial: str) -> bool:
           in serial,
           "the kernel's PCI scan resolved the console device through the "
           "transitional subsystem id")
+
+    # ---- M6.5: a dead service is an ANSWER (ADR-0028) ----------------
+    check(re.search(r"^m6:test:service_death: PASS", serial,
+                    re.MULTILINE) is not None,
+          "the service_death test PASSED — a server destroyed mid-request "
+          "produces a typed status, not a hung client")
+    check("in-flight call(s) answered STATUS_SERVICE_GONE" in serial,
+          "the kernel failed the in-flight call when the server died")
+    check(re.search(r"destroy pid \d+: killed \d+ live thread", serial)
+          is not None,
+          "destroying a process KILLED its blocked thread (a supervisor "
+          "cannot restart a driver it cannot kill)")
+    check("faulttest: PASS — the HANG call returned STATUS_SERVICE_GONE"
+          in serial,
+          "the client observed the typed death from ring 3 and handled it")
+    check("the ENDPOINT outlived its server" in serial,
+          "the endpoint survived its server, so a restart can reuse it")
     return ok
 
 
@@ -244,6 +261,10 @@ def boot_without_net() -> bool:
           "production consoled was NOT spawned without the device")
     check("consoled: starting" not in serial,
           "no consoled instance ran at all without the device")
+    check(re.search(r"^m6:test:service_death: PASS", serial,
+                    re.MULTILINE) is not None,
+          "service_death PASSED even with NO fixtures — the fault-injection "
+          "proof needs no device, so it holds on the barest machine")
     check("arena>" in serial,
           "the shell still reached its prompt on the SERIAL console with "
           "no keyboard attached (the keyboard is additive, never required)")
