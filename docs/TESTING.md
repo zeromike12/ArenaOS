@@ -378,6 +378,29 @@ kernel sweeps it.
 This suite needs no device fixture and no host actor: it is about the
 kernel's own clock, so it runs and must pass on the barest machine.
 
+### Proving a cache (M7.1, ADR-0030)
+
+`m7:test:arp_service` resolves a real address over the real wire, and
+then does the thing that actually tests a cache: it resolves the SAME
+address again and asserts that the number of ARP requests netstackd
+has PUT ON THE WIRE did not move. A cache that still sends the packet
+would pass any test that merely checked the returned value; the only
+honest evidence is silence on the wire, so that is what is measured.
+
+The third check is the one Phase 7 was reordered for. `arptest` asks
+for an address nothing answers (10.0.2.77) and the call must come
+back `UNREACHABLE` — which above all means it must come back at all.
+Before M7.0, `NET_OP_RECV` blocked until a frame arrived, so this
+test could not have terminated; netd now takes a deadline and arms a
+timer on its own notification, because a client blocked in
+`SYS_IPC_CALL` cannot observe its own (ADR-0029's erratum). The test
+also reads netstackd's own timeout counter, so the timeouts are the
+service's account of itself rather than the harness's inference.
+
+The kernel cross-checks the wire independently: transmit and receive
+relay deliveries must both be non-zero, so the exchange cannot have
+been a lookup table with good manners.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

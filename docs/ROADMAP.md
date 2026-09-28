@@ -696,13 +696,36 @@ assertions).
       now runs in the boot thread's idle loop, so production
       supervision is a fact before the stack depends on netd. Gates:
       run_tests 14/14 (391 assertions), fmt + clippy clean.
-- [ ] **7.1 ARP as a service (`netstackd`).** The first protocol, and
-      the first user of the timer facility (cache aging, request
-      retry). netd stays L2 (decision 1 below); netstackd owns the
-      cache. Proof: resolve the slirp gateway through the service,
-      verify the wire bytes, age an entry out with a real timer, and
-      kill netd mid-exchange to prove the re-establish path (decision
-      3 below) — not a retry, a re-attach.
+- [x] 7.1 **ARP as a service (`netstackd`)** — DONE (ADR-0030). The
+      first protocol, and the decision about where protocol state
+      lives, settled before four more protocols each answer it by
+      accident. `netstackd` (image 17) owns ARP and its cache; netd
+      is unchanged and still has never heard of an ethertype. The
+      split is STRUCTURAL: the stack is granted no device capability,
+      so it could not touch the NIC if it tried. Proven on the real
+      wire — 10.0.2.2 resolved to 52:55:0a:00:02:02 with the kernel
+      witnessing transmit and receive interrupts; a second lookup
+      served from CACHE with the count of requests actually put on
+      the wire unmoved (the only honest proof of a cache); and a
+      silent address reported UNREACHABLE after three real deadlines,
+      which above all TERMINATED. That last part is why 7.0 came
+      first: `NET_OP_RECV` used to block until a frame arrived, so a
+      lost reply would have parked the stack forever, and a client
+      blocked in `SYS_IPC_CALL` cannot observe its own timer
+      (ADR-0029's erratum). The bound is passed DOWN — netd takes a
+      timeout and arms a timer on its own notification — which makes
+      the first production use of the timer facility the thing that
+      makes the first protocol possible. Aging is by CLOCK not timer
+      (nothing must happen when an entry expires); retry covers only
+      the idempotent broadcast query, never a datagram send. Gates:
+      run_tests 14/14 (402 assertions), fmt + clippy clean.
+- [ ] **7.1b netd under real supervision, and re-attach.** The proof
+      deferred from 7.1 and named rather than implied: netstackd and
+      netd both registered with the supervisor, netd killed
+      mid-exchange, and the stack RE-ESTABLISHING (re-lending
+      buffers, re-arming) rather than retrying — a restarted driver
+      has lost its posted buffers, so continuity cannot be assumed.
+      Phase 7 decision 3 in full.
 
 ### Three decisions taken BEFORE any protocol code
 

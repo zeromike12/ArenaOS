@@ -571,6 +571,18 @@ driver, so file data DMAs disk ↔ client page with no copy in any ring.
   mechanism, which is usually the sign that the mechanism is doing
   exactly one thing (ADR-0029).
 
+- **Where the network stack ends (M7.1):** `netstackd` owns protocol
+  state; `netd` owns the device and has never heard of an ethertype.
+  The split is enforced by capability rather than convention — the
+  stack holds no device authority at all — and the reason is
+  operational: a driver must survive its device and be restartable,
+  a stack must hold state across time, and one process cannot do
+  both without losing every connection each time the NIC wedges. The
+  driver's one concession to protocols is a DEADLINE on receive,
+  which is about time rather than packets, and exists because a
+  client blocked in `SYS_IPC_CALL` cannot observe its own timer
+  (ADR-0030, and ADR-0029's erratum).
+
 ## 9. Security philosophy
 
 - Capabilities are the security model (§2). Rights are attenuable on
@@ -670,6 +682,7 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Console channel service (M6.4): `consoled` (registry image 12, spawned at boot when a virtio-console port exists) — the ring-3 virtio-console driver on the shared virtio core: two split virtqueues (receive stocked with 16 buffers posted AFTER DRIVER_OK, because QEMU pauses a chardev whose frontend cannot yet read), MULTIPORT declined so port 0 needs no control protocol, two MSI-X relays merged into ONE notification alongside the kernel's output-mirror wake so the driver has exactly one place to block; `SYS_CONSOLE_ATTACH` (24) + `SYS_CONSOLE_PULL` (25) gated on `CapObj::ConsoleOutput` drain a kernel-side mirror of the console's byte stream, while `SYS_CONSOLE_PUSH` (ADR-0026, unchanged) carries the inbound half — so the port is a full second console in both directions with serial still the kernel's own; `contest` (image 13) proves a round trip the host can see on its socket; absent fixture → honest SKIP + the channel service offline | **M6.4 — implemented, 4/4 in-guest + the shell driven entirely over the port (ADR-0027)** |
 | Supervised restart (M6.5): `STATUS_SERVICE_GONE` (-5) answering every call a destroyed process owed (endpoints served resolved from its own `Endpoint`+READ capabilities, `Delivered` and `Waiting` slots failed, `Replied` left alone), `sched::kill_threads_of` zombieing parked threads after `ipc::release_blocked_of` drops every kernel reference to them, and `kernel/src/supervise.rs` replaying a dead service's grant list into a fresh instance behind the SAME endpoint with a restart bound and honest abandonment; `faultd`/`faulttest` (images 14/15) drive the whole cycle — live, blocked client, kill, restart, a new client reaching the new instance through its old capability — frame-exact, and the spawn-record table flat across it | **M6.5 — implemented, 6/6 in-guest (ADR-0028)** |
 | Timers (M7.0): `SYS_CLOCK_NOW` (monotonic microseconds, no capability — a clock reading is not authority), `SYS_TIMER_ARM(notif_slot, badge, delay_us)` and `SYS_TIMER_CANCEL`, delivering a badge bit on a notification the caller holds WRITE on (the same gate `SYS_IRQ_RELAY` uses, so no new capability kind); relative delays, one-shot, checked on the 100 Hz tick so a deadline means NOT BEFORE with ~10 ms lag; owned by the arming process and swept at `proc::destroy`; `tick.rs` dispatches deferred tick work now that the console mirror and the timer wheel both need it; `timertest` (image 16) measures real deadlines against the clock — never early, within a tick of lag, cancellation honoured, a second cancel refused, two due timers merged into one wake | **M7.0 — implemented, 1/1 in-guest (ADR-0029)** |
+| Network stack service (M7.1): `netstackd` (registry image 17) — ARP over IPv4 and its TTL cache, holding NO device capability, talking to netd as an ordinary client; `NET_OP_RECV` gains a caller-supplied deadline that NETD enforces with an M7.0 timer on its own notification (a blocked caller cannot enforce its own); cache aging by clock rather than timer; retry limited to the idempotent broadcast query; `arptest` (image 18) proves resolution on the wire, a cache hit that moves no packets, and a silent address terminating in UNREACHABLE | **M7.1 — implemented, 2/2 in-guest (ADR-0030)** |
 | Truncate/append-overwrite (v1 refuses to clobber), directories, per-file permissions/kernel file caps (security phase), power-loss-grade barriers (`cache=none` + virtio FUA/FLUSH — v1's proven model is process-crash prefixes), full mark-sweep fsck (interrupted generations leak conservatively), the network PROTOCOL stack (Ethernet/ARP/IP/UDP/TCP services — the link layer landed in M6.1), virtio console/input drivers, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

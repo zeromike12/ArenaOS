@@ -69,7 +69,9 @@ Layout rules:
   images 12/13), and `userspace/faultd` (the fault-injection pair,
   ADR-0028 — images 14/15: a service written to be killed, and the
   client that must survive it), and `userspace/timertest` (the timer
-  facility's proof, ADR-0029 — image 16).
+  facility's proof, ADR-0029 — image 16), and `userspace/netstackd`
+  (the network stack service, ADR-0030 — images 17/18: protocol state
+  kept out of the NIC driver).
 - **Shared userspace code is single-file and included by `#[path]`,
   not linked as crates:** `userspace/abi.rs` (the syscall/IPC/wire
   surface every image mirrors — one wire contract, all programs) and,
