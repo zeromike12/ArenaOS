@@ -209,9 +209,16 @@ def run_qemu(label: str, esp: Path,
     print(f"[{label}] booting QEMU/EDK2:", " ".join(cmd[:3]), "...")
     script = DEFAULT_FEED if feed is None else feed
     t0 = time.monotonic()
-    with open(serial_log, "wb") as logf:
+    # QEMU's stderr is KEPT, not discarded. When the emulator refuses to
+    # start — a bad device argument, a socket already bound, a missing
+    # file — it says so on stderr and exits in a tenth of a second with
+    # an empty serial log, and a harness that throws that away turns a
+    # one-line explanation into a bisect. (Learned while chasing an
+    # rc=1 that QEMU had explained perfectly the whole time.)
+    err_log = arena_env.build_dir() / f"qemu-stderr-{label}.log"
+    with open(serial_log, "wb") as logf, open(err_log, "wb") as errf:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logf,
-                                stderr=subprocess.DEVNULL)
+                                stderr=errf)
         stop = threading.Event()
 
         def feeder() -> None:
@@ -316,9 +323,16 @@ def boot(label: str, esp: Path,
     )
     t0 = time.monotonic()
     killed = False
-    with open(serial_log, "wb") as logf:
+    # QEMU's stderr is KEPT, not discarded. When the emulator refuses to
+    # start — a bad device argument, a socket already bound, a missing
+    # file — it says so on stderr and exits in a tenth of a second with
+    # an empty serial log, and a harness that throws that away turns a
+    # one-line explanation into a bisect. (Learned while chasing an
+    # rc=1 that QEMU had explained perfectly the whole time.)
+    err_log = arena_env.build_dir() / f"qemu-stderr-{label}.log"
+    with open(serial_log, "wb") as logf, open(err_log, "wb") as errf:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logf,
-                                stderr=subprocess.DEVNULL)
+                                stderr=errf)
         stop = threading.Event()
 
         def feeder() -> None:
