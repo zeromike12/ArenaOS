@@ -979,7 +979,13 @@ early, it's a scope violation:
 ## Milestone mechanics
 
 - One milestone = one or more commits, each leaving `tools/run_tests.sh`
-  green.
+  green. **Before committing a completed phase/milestone**, build its
+  final image with `tools/build.sh --image` and run
+  `tools/stability_loop.sh 100` on that image. Require 100/100,
+  zero failures and a receipt whose kernel SHA-256 matches the built
+  artifact. If the image changes, the qualification must be rerun;
+  a past receipt is not evidence for new bits. Releases still require
+  the full suite and artifact-bound qualification as separate gates.
 - New subsystem ⇒ new `m<N>:test:*` markers + new `tools/test_m<N>.py`;
   old test scripts are never deleted.
 - Significant decisions inside a milestone ⇒ ADR before merging the code

@@ -243,6 +243,8 @@ serial marker; nothing is decorative.
 ## Ground rules (enforced, not aspirational)
 
 1. **Always bootable.** Every commit builds and passes all milestone tests.
+   Before a completed phase/milestone is committed, its exact built image
+   must also pass the artifact-bound 100/100 QEMU boot qualification.
 2. **Never fake functionality.** A subsystem is done when a test would fail
    if it were faked (ADR-0005).
 3. **Control scope.** Smallest useful version of everything; the firewall

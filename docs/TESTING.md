@@ -6,6 +6,14 @@ machine effects: bytes that came back out of a UART in loopback mode, register
 values read back after a GDT load, firmware structures parsed from real UEFI
 memory, privilege-level changes, VM exit behavior.
 
+**Phase/milestone commit gate:** run `tools/run_tests.sh`, then build the
+final ESP (`tools/build.sh --image`) and run `tools/stability_loop.sh 100`
+against that exact image **before committing completion**. Require 100/100
+with no failures and compare `build/stability-receipt.txt` to the
+SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
+the receipt. This is now a commit discipline, not only a release gate;
+release staging/publishing retains its own full-suite and receipt check.
+
 ## The testing pyramid
 
 ```
