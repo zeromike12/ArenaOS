@@ -440,6 +440,28 @@ tests and watch it fail before believing it.** Every synthetic frame
 is now valid except for the single thing under test, and the hardened
 self-test reports 6/7 against the injected regression.
 
+### DNS and UDP negative space (M7.5, ADR-0034)
+
+The M7.4 test proved a DNS query went out and a response with its
+transaction id came back; it did NOT parse a name into an address.
+M7.5 now does, and the proof deliberately spans two boundaries: the
+client drains the real 61-byte response with UDP_OP_RECV_CHUNK under
+the same bearer handle (a forged handle and invalid offset fail),
+while DNS_OP_LOOKUP asks the stack itself to parse a fresh answer and
+return an IPv4 A record. CLOSE/rebind then refuses the OLD bearer, so
+revocation remains structural across slot reuse. The network test
+checks these as distinct properties, not one PASS standing in for all.
+
+The wire will not spontaneously provide a bad checksum or malicious
+compression pointer. The guest self-test synthesizes a valid odd-length
+UDP packet, damages ONLY a payload byte, requires the checksum failure
+to be counted, and proves the zero-checksum IPv4 exception; outgoing
+checksum is independently checked. `tools/run_tests.sh` also compiles
+`userspace/netstackd/src/dns.rs` with host `rustc --test` to check a
+compressed answer and malformed responses/queries, including a pointer
+cycle and truncation. Changing the matching logic must break one of
+these gates. A real external reply still proves the happy path.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to

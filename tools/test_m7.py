@@ -255,6 +255,24 @@ def extra_checks(serial: str) -> bool:
           "the stack's own accounting shows a datagram delivered to a "
           "binding and a bad handle refused")
 
+    # ---- M7.5: DNS is a RESOLVER, not just a UDP round trip ----------
+    check("UDP checksum self-test PASSED 4/4" in serial,
+          "outgoing UDP checksum computed and verified; corrupt incoming payload "
+          "counted and refused; the IPv4 zero-checksum exception accepted")
+    chunks = re.search(r"UDP answer drained across IPC messages: (\d+)/ (\d+) bytes", serial)
+    check(chunks is not None and int(chunks.group(1)) == int(chunks.group(2))
+          and int(chunks.group(2)) > 56,
+          "the real DNS answer exceeded one UDP inline message and its tail "
+          "was read through a bearer-authorised continuation")
+    check("closing and rebinding rotated the bearer; the old handle stayed "
+          "revoked" in serial,
+          "CLOSE really revokes authority even when a binding slot is reused")
+    check(re.search(r"DNS resolver returned example\.com A = "
+                    r"(\d+)\.(\d+)\.(\d+)\.(\d+)", serial) is not None,
+          "DNS LOOKUP parsed and validated a real A answer from slirp's resolver")
+    check("a malformed name was refused BEFORE sending" in serial,
+          "bad DNS input was rejected before any network operation")
+
     # Phase 7's standing rule, checked the only way a log can: the
     # machine reached its prompt without a suite hanging on a clock.
     check("arena>" in serial,
@@ -268,7 +286,7 @@ def main() -> int:
         return rc
     serial = (arena_env.build_dir() / "serial-m7.log").read_text()
     ok = extra_checks(serial)
-    print(f"[test-m7] M7.0-7.4 TIMERS + ARP + IPv4/ICMP + UDP: {'PASS' if ok else 'FAIL'}  "
+    print(f"[test-m7] M7.0-7.5 TIMERS + ARP + IPv4/ICMP + UDP + DNS: {'PASS' if ok else 'FAIL'}  "
           f"(serial: build/serial-m7.log)")
     return 0 if ok else 1
 

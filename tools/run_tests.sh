@@ -21,6 +21,18 @@ for pkg in arena-heap arena-sync; do
     fi
 done
 
+# M7.5: the bounded DNS codec is pure Rust, so exercise hostile reply
+# shapes on the host as well as real slirp traffic in the boot gate.
+echo "== host-side DNS parser tests"
+if (cd "$REPO_ROOT" && mkdir -p build && rustc --test --edition 2024 \
+    userspace/netstackd/src/dns.rs -o build/dns-parser-tests && build/dns-parser-tests); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! host-side DNS parser tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"
@@ -36,9 +48,9 @@ done
 
 echo "======================================================================"
 if [[ $failures -eq 0 ]]; then
-    echo "ALL TESTS PASSED ($ran milestone test scripts)"
+    echo "ALL TESTS PASSED ($ran test suites)"
     exit 0
 else
-    echo "$failures of $ran milestone test scripts FAILED"
+    echo "$failures of $ran test suites FAILED"
     exit 1
 fi

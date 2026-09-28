@@ -813,11 +813,25 @@ assertions).
       RECV delivers the first message-worth with the full length
       reported. Gates: run_tests 14/14 (423 assertions), fmt + clippy
       clean.
-- [ ] **7.5 DNS.** Now a parsing exercise rather than a transport one.
-      Needs the rest of a datagram, so the UDP receive path gets the
-      chunked treatment the frame path got in 7.3; and the UDP
-      checksum should be verified, arriving with its synthetic frame
-      in the parser self-test (ADR-0031's template).
+- [x] **7.5 DNS A resolver** — DONE (ADR-0034). DNS_OP_LOOKUP in
+      netstackd sends an A/IN question to slirp's actual resolver and
+      returns an address only after checking source tuple, fresh
+      rngd-drawn transaction id, response flags, matching question and
+      answer owner. A bounded parser refuses bad compression, wrong
+      questions, truncation and errors; host tests exercise negative
+      cases. UDP now stages the whole payload per binding (bounded by
+      FRAME_MAX=512), serves the rest under the SAME bearer handle in
+      chunks, and computes/verifies UDP checksums with the IPv4
+      pseudo-header. An odd-length synthetic control and corruption
+      test keep the checksum honest. CLOSE+rebind now rotates the
+      handle instead of reviving authority in a reused slot — a
+      correctness fix required by ADR-0033, not a new identity model.
+      A real 61-byte DNS answer crosses the inline boundary in the
+      boot proof; the resolver independently parses a live answer and
+      refuses malformed names before sending. No caching, CNAME,
+      DNSSEC, DHCP/configuration, or TCP fallback is claimed. Gates:
+      run_tests 15/15 (two host parser cases + M1–M7 boots),
+      netstackd fmt and clippy clean.
 
 ### Three decisions taken BEFORE any protocol code
 

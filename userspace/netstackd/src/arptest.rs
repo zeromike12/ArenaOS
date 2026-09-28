@@ -89,6 +89,8 @@ const EXIT_FORGED: u64 = 74;
 const EXIT_UDP_SEND: u64 = 75;
 const EXIT_UDP_RECV: u64 = 76;
 const EXIT_DNS_MISMATCH: u64 = 77;
+const EXIT_DNS_CHUNK: u64 = 78;
+const EXIT_DNS_LOOKUP: u64 = 79;
 
 /// The transaction id this client puts in its query and demands back.
 const DNS_TXID: u16 = 0xA7E5;
@@ -500,9 +502,115 @@ pub unsafe extern "C" fn _start() -> ! {
             o.hex(txid as u64);
             o.str(" and the response bit set");
         });
+        // A real DNS answer must cross the UDP service's inline
+        // boundary; drain the rest using the SAME bearer handle.
+        if total <= UDP_INLINE as u64 || total as usize > 470 {
+            fail(
+                EXIT_DNS_CHUNK,
+                "the real DNS answer did not exercise chunked UDP receive",
+            );
+        }
+        let mut probe = [0u8; MSG_BYTES];
+        probe[..2].copy_from_slice(&(UDP_INLINE as u16).to_be_bytes());
+        if call_msg(UDP_OP_RECV_CHUNK, handle ^ 0x1000, &mut probe).0 != UDP_S_BAD_HANDLE {
+            fail(
+                EXIT_FORGED,
+                "a forged handle read the staged UDP continuation",
+            );
+        }
+        probe[..2].copy_from_slice(&0u16.to_be_bytes());
+        if call_msg(UDP_OP_RECV_CHUNK, handle, &mut probe).0 != ARP_S_BAD_OP {
+            fail(
+                EXIT_DNS_CHUNK,
+                "an invalid UDP continuation offset was accepted",
+            );
+        }
+        let mut full = [0u8; 470];
+        full[..UDP_INLINE].copy_from_slice(&rx[8..]);
+        let mut off = UDP_INLINE;
+        while off < total as usize {
+            let mut chunk = [0u8; MSG_BYTES];
+            chunk[..2].copy_from_slice(&(off as u16).to_be_bytes());
+            let (status, n) = call_msg(UDP_OP_RECV_CHUNK, handle, &mut chunk);
+            if status != ARP_S_OK
+                || n == 0
+                || n as usize > MSG_BYTES
+                || off + n as usize > total as usize
+            {
+                fail(
+                    EXIT_DNS_CHUNK,
+                    "UDP continuation was missing or out of bounds",
+                );
+            }
+            full[off..off + n as usize].copy_from_slice(&chunk[..n as usize]);
+            off += n as usize;
+        }
+        // The last answer's RDATA is in the tail of slirp's A reply.
+        // Reassembly must preserve real bytes rather than padding.
+        if full[total as usize - 4..total as usize]
+            .iter()
+            .all(|&b| b == 0)
+        {
+            fail(
+                EXIT_DNS_CHUNK,
+                "the continued DNS answer ended in zero padding",
+            );
+        }
+        log_line(|o| {
+            o.str("arptest: PASS — UDP answer drained across IPC messages: ");
+            o.u64(off as u64);
+            o.str("/ ");
+            o.u64(total);
+            o.str(" bytes, the tail contains answer data");
+        });
         if call(UDP_OP_CLOSE, handle).0 != ARP_S_OK {
             fail(EXIT_BIND, "closing the binding failed");
         }
+
+        // Revocation means an old handle must NOT resurrect when the
+        // table slot or even the same port is bound again.
+        let (status, new_handle) = call(UDP_OP_BIND, 5353);
+        if status != ARP_S_OK || new_handle == 0 || new_handle == handle {
+            fail(EXIT_BIND, "rebind did not issue fresh authority");
+        }
+        if call(UDP_OP_CLOSE, handle).0 != UDP_S_BAD_HANDLE {
+            fail(EXIT_FORGED, "the closed bearer handle revived after rebind");
+        }
+        if call(UDP_OP_CLOSE, new_handle).0 != ARP_S_OK {
+            fail(EXIT_BIND, "closing the new binding failed");
+        }
+        log(
+            "arptest: PASS — closing and rebinding rotated the bearer; the old handle stayed revoked",
+        );
+
+        // Now ask the STACK to resolve, rather than hand-parsing an
+        // opaque datagram as the M7.4 transport probe above did.
+        let mut lookup = [0u8; MSG_BYTES];
+        lookup[..11].copy_from_slice(b"example.com");
+        let (status, addr) = call_msg(DNS_OP_LOOKUP, 11, &mut lookup);
+        if status != ARP_S_OK || addr & 0xffff_ffff == 0 {
+            log_line(|o| {
+                o.str("arptest: DNS LOOKUP status ");
+                o.i64(status as i64);
+            });
+            fail(EXIT_DNS_LOOKUP, "the resolver failed to parse an A answer");
+        }
+        let mut bad_name = [0u8; MSG_BYTES];
+        bad_name[..6].copy_from_slice(b"a..b.c");
+        let (status_bad, _) = call_msg(DNS_OP_LOOKUP, 6, &mut bad_name);
+        if status_bad != DNS_S_BAD_NAME {
+            fail(EXIT_DNS_LOOKUP, "a malformed name was accepted");
+        }
+        log_line(|o| {
+            o.str("arptest: PASS — DNS resolver returned example.com A = ");
+            for i in 0..4 {
+                if i != 0 {
+                    o.str(".");
+                }
+                o.u64((addr >> (8 * i)) & 0xff);
+            }
+            o.str("; a malformed name was refused BEFORE sending");
+        });
 
         let (status, wire_total, hits_total) = shutdown();
         if status != ARP_S_OK {

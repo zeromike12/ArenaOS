@@ -431,12 +431,25 @@ pub const ICMP_OP_RXSTATS: u64 = 4;
 //   RECV    w0 = handle; inline = [timeout_us(8)]. Replies with the
 //           datagram's FULL length in word 1 and
 //           [src ip(4) | src port(2) | len(2) | payload…] inline —
-//           truncated to what one message carries (see UDP_INLINE).
+//           first UDP_INLINE bytes. The rest is staged until drained.
+//   RECV_CHUNK w0 = same bearer handle; inline = offset(2, big endian).
+//           Replies with count in word 1 and up to MSG_BYTES bytes inline.
+//           Offset must start at UDP_INLINE; last chunk releases the stage.
 //   CLOSE   w0 = handle. Releases the binding.
 pub const UDP_OP_BIND: u64 = 5;
 pub const UDP_OP_SEND: u64 = 6;
 pub const UDP_OP_RECV: u64 = 7;
 pub const UDP_OP_CLOSE: u64 = 8;
+pub const UDP_OP_RECV_CHUNK: u64 = 9;
+/// DNS lookup (M7.5): w0 = length of dotted ASCII name in inline
+/// request (1..=32); reply word 1 packs the IPv4 A address low byte
+/// first, as ARP_OP_RESOLVE packs addresses. The stack owns the DNS
+/// transaction, not the caller: no UDP handle is exposed by LOOKUP.
+pub const DNS_OP_LOOKUP: u64 = 10;
+pub const DNS_S_BAD_NAME: u64 = (-8i64) as u64;
+pub const DNS_S_NO_ANSWER: u64 = (-9i64) as u64;
+pub const DNS_S_BAD_REPLY: u64 = (-10i64) as u64;
+pub const DNS_S_BUSY: u64 = (-11i64) as u64;
 
 /// Bytes of datagram payload one request or reply message carries,
 /// after the 8-byte address header above.
