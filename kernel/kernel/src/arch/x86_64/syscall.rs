@@ -1311,7 +1311,11 @@ fn sys_console_pull(a0: u64, a1: u64, a2: u64) -> Status {
 /// will hit first.
 fn sys_clock_now() -> Status {
     let us = crate::timekeeping::now_us();
-    if us > i64::MAX as u64 { i64::MAX } else { us as Status }
+    if us > i64::MAX as u64 {
+        i64::MAX
+    } else {
+        us as Status
+    }
 }
 
 /// SYS_TIMER_ARM(notif slot, badge, delay_us): deliver `badge` on that
