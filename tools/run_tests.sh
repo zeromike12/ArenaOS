@@ -55,6 +55,21 @@ else
     echo "!! host-side networking API tests FAILED"
 fi
 
+# Phase 8.0 groundwork: compile the no_std manifest resolver on the
+# host and reject forged/missing/overbroad requests before any spawn.
+echo "== host-side service manifest policy tests"
+if (cd "$REPO_ROOT" && rustc --test --edition 2024 \
+    userspace/servicemgr/src/lib.rs -o build/service-manifest-tests \
+    && build/service-manifest-tests && rustc --crate-type lib \
+    --edition 2024 -D warnings userspace/servicemgr/src/lib.rs \
+    -o build/libarena-service-manifest.rlib); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! service manifest policy tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

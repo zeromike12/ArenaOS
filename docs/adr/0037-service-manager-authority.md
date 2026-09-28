@@ -1,6 +1,8 @@
 # ADR-0037 — Service-manager authority, bootstrap and manifest v1
 
-*Status: proposed, design gate for Phase 8.0; no implementation or 8.0 qualification yet.*
+*Status: proposed, design gate for Phase 8.0; only the pure manifest
+request validator is implemented. No running manager, cap query/reap or
+8.0 qualification yet.*
 
 ## Context: the existing mechanisms and the missing one
 
@@ -162,3 +164,17 @@ bearers. Preserve every old regression. A completed 8.0 checkpoint
 requires `tools/run_tests.sh`, a freshly built image and
 `tools/stability_loop.sh 100` with matching artifact receipt; this
 proposal and a green M7 receipt are not that checkpoint.
+
+## First implementation slice (not 8.0 completion)
+
+`userspace/servicemgr/src/manifest.rs` now resolves fixed-size, built-in
+requests against a caller-supplied inventory into a bounded grant plan.
+It refuses missing, duplicated, kind-mismatched and overbroad requests,
+invalid slots/policy, cycles and absent/unready external dependencies
+before any child can spawn. Host tests exercise these refusals; the
+full historical suite and artifact-bound 100-boot gate qualify this
+partial, non-bootstrapped slice only. The input inventory MUST be
+filled from an actual caller-cap-only query before integration: a
+manifest resolver by itself neither observes nor mints authority.
+The production manager, Process-cap lifecycle syscall, readiness
+protocol and netstackd restart proof all remain open.

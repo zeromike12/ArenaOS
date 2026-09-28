@@ -14,6 +14,12 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
+Phase 8.0's early manifest resolver has host-only, fail-closed contract
+tests in `userspace/servicemgr/src/manifest.rs`. They cannot prove a
+service was actually granted a cap or restarted; 8.0 requires a separate
+real in-guest cap audit and managed `netstackd` failure/recovery proof
+before its RESULT may be added to the stability loop.
+
 ## The testing pyramid
 
 ```
