@@ -80,10 +80,16 @@ for i in $(seq 1 "$N"); do
     rm -f "$SERIAL" "$QMP_SOCK"
     rc=0
     # The keyboard typist: waits for inputd's ready marker on the
-    # serial log, then types the input fixture through QMP. Bounded by
-    # the boot timeout so a dead boot can never leave it behind.
-    ( python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
-        "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 & )
+    # serial log, then types the input fixture through QMP. It is
+    # REAPED after this boot (below) rather than left to expire: the
+    # serial log is recreated every iteration, so a typist that
+    # outlived its own boot would find the NEXT boot's marker and type
+    # into it — a stray `arena` landing in the same line as the
+    # feeder's `shutdown` would hang a perfectly good kernel. One
+    # typist, one boot.
+    python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
+        "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
+    typist_pid=$!
     # ADR-0020: a healthy boot no longer halts by itself — it ends at
     # the shell. The feeder subshell types 'shutdown' when the shell's
     # prompt appears (marker-paced, never sleep-based), then holds
@@ -112,6 +118,10 @@ for i in $(seq 1 "$N"); do
         -qmp unix:"$QMP_SOCK",server=on,wait=off \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
         -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
+
+    # Reap this boot's typist before the next one starts.
+    kill "$typist_pid" 2>/dev/null || true
+    wait "$typist_pid" 2>/dev/null || true
 
     why=""
     if (( rc != 0 )); then

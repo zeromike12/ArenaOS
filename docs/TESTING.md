@@ -248,6 +248,15 @@ reach the shell prompt, halt cleanly, and report SKIP — never FAIL,
 never a fake PASS. Attaching a device must never make a machine
 unusable.
 
+One rule the stability loop learned the hard way: **one typist, one
+boot.** The loop recreates its serial log every iteration, so a typist
+left over from a finished boot finds the NEXT boot's marker and types
+into it — and a stray `arena` landing in the same line as the feeder's
+`shutdown` hangs a perfectly good kernel. Each boot's typist is now
+reaped before the next begins (the first 100-run with the keyboard
+scored 99/100 with one boot that never reached the kernel at all; the
+reaped rerun was 100/100).
+
 `tools/test_m6_typing.py` is the milestone's real claim, asserted: a
 boot with `feed=[]` — the serial input channel completely dead — where
 `echo Hello-From-The-Keyboard` (capitals prove modifier tracking),

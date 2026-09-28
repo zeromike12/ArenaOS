@@ -83,7 +83,7 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "either device stays green with honest SKIPs);"
     echo "100-boot stability loop green with the full fixture family —"
     echo "every boot ends by typing 'shutdown' into the running shell"
-    echo "(ADR-0011/0020/0022/0023/0024/0025)."
+    echo "(ADR-0011/0020/0022/0023/0024/0025/0026)."
     echo
     echo "This release has a FILESYSTEM: AFS1 (original design, ADR-0023)"
     echo "served entirely from ring 3 — extent-based data, copy-on-write"
@@ -96,6 +96,18 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "proves it on the wire with a real ARP round trip against QEMU's"
     echo "built-in network. The protocol stack (IP/UDP/TCP services) is"
     echo "Phase 7, built on this driver."
+    echo
+    echo "This release has a KEYBOARD (ADR-0026): inputd, the ring-3"
+    echo "virtio-input driver, decodes real key events and feeds them"
+    echo "into the SAME console line discipline the serial port uses —"
+    echo "so if you run QEMU with a display (-display gtk instead of"
+    echo "-display none), you can type at the arena> prompt in the QEMU"
+    echo "window: echo, backspace, and shift all work, and the machine"
+    echo "halts when you type shutdown. Serial stays live at the same"
+    echo "time for logs and panics; a machine with no keyboard behaves"
+    echo "exactly as before. Note the boot suite's input test needs"
+    echo "someone to type: with nobody at the keyboard it reports an"
+    echo "honest SKIP after a moment and the boot continues normally."
     echo
     echo "This release has an ENTROPY SERVICE and a SHARED DRIVER CORE"
     echo "(ADR-0025): rngd (virtio-rng, ring 3) fills a client's own page"
@@ -198,13 +210,20 @@ qemu-system-x86_64 \\
     -netdev user,id=net0 \\
     -device virtio-net-pci,netdev=net0 \\
     -device virtio-rng-pci \\
+    -device virtio-keyboard-pci \\
     -display none -serial mon:stdio -no-reboot
 \`\`\`
 
-Serial is the console in BOTH directions: the VM runs the milestone
+Want to type on a real keyboard instead of the serial port? Swap
+\`-display none\` for \`-display gtk\` (or \`sdl\`/\`cocoa\`): a QEMU
+window opens and your keystrokes drive the same \`arena> \` prompt
+through the \`inputd\` driver (ADR-0026). Both channels stay live.
+
+Serial is a console in BOTH directions: the VM runs the milestone
 suite (including the real filesystem tests on scratch.img and the ARP
 link probe over QEMU's built-in network), then the kernel spawns the
-storaged + fsd + netd services and the shell, and waits at
+storaged + fsd + netd + rngd + inputd services and the shell, and
+waits at
 the \`arena> \` prompt — type \`help\`, \`ls\`, \`write note.txt hello\`,
 \`cat note.txt\`, \`rm note.txt\`, \`ps\`, \`spawn\`, and \`shutdown\` to
 stop the machine. What you \`write\` is committed to scratch.img and
@@ -213,6 +232,12 @@ comes back next boot. Full details: RUNNING.md inside the tarball
 disk), scratch-template.img (formatted AFS1 data disk),
 edk2-x86_64-code.fd + ovmf-vars-template.img (tested EDK2 firmware
 pair), RUNNING.md, sha256sums.txt.
+
+The boot suite's input test needs a typist: with a keyboard attached
+and nobody typing it reports an honest \`SKIP\` after about a second
+and the boot continues normally (that configuration is itself a
+tested one). Type \`arena\` in the QEMU window while the suite runs
+and it PASSes instead.
 EOF
         verify_dir="$(mktemp -d)"
         tar xzf "releases/$TAG/$BUNDLE" -C "$verify_dir"
@@ -242,8 +267,21 @@ EOF
         # the verification asserts m6 RESULT PASS, so the shipped
         # bundle's documented command (which includes the netdev) is
         # exactly what was proven.
-        ( cd "$verify_dir" && cp ovmf-vars-template.img ovmf-vars.img && \
-          cp scratch-template.img scratch.img && \
+        # M6.3 (ADR-0026): the keyboard joins it too, and a keyboard
+        # needs a typist — so the verification boot ALSO runs
+        # tools/qmp.py to type the input fixture, exactly as the
+        # stability loop does. Without it the shipped configuration
+        # would only ever be verified in its SKIP form.
+        # Two host-side actors now drive this boot (the serial feeder
+        # and the keyboard typist), so the subshell does its `cd`
+        # FIRST and runs plain statements afterwards: appending `&` to
+        # a `cd && cp && pipeline` chain backgrounds the WHOLE chain
+        # and leaves everything after it running from the wrong
+        # directory.
+        (
+          cd "$verify_dir" || exit 1
+          cp ovmf-vars-template.img ovmf-vars.img || exit 1
+          cp scratch-template.img scratch.img || exit 1
           {
             n=0
             while ! grep -aq 'arena>' verify-serial.log 2>/dev/null; do
@@ -264,11 +302,20 @@ EOF
             -netdev user,id=net0 \
             -device virtio-net-pci,netdev=net0 \
             -device virtio-rng-pci \
+            -device virtio-keyboard-pci \
+            -qmp unix:verify-qmp.sock,server=on,wait=off \
             -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
-            -no-reboot > verify-serial.log )
+            -no-reboot > verify-serial.log &
+          qemu_pid=$!
+          python3 "$REPO_ROOT/tools/qmp.py" verify-qmp.sock verify-serial.log \
+            'inputd: virtio-input ready' arena 120 >/dev/null 2>&1 &
+          typist_pid=$!
+          wait "$qemu_pid"
+          kill "$typist_pid" 2>/dev/null || true
+        )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'm5: RESULT PASS (6/6)' "$verify_dir/verify-serial.log" \
-            && grep -aqF 'm6: RESULT PASS (2/2)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm6: RESULT PASS (3/3)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"
