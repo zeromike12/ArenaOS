@@ -739,6 +739,34 @@ assertions).
       reported); it now waits for the kernel's own evidence that the
       stack met the corpse before letting the supervisor work.
 
+- [x] 7.2 **IPv4 + ICMP, on a receive demultiplexer** — DONE
+      (ADR-0031). The simplification ADR-0030 named is retired: with
+      one protocol an operation could read the wire itself, with two
+      that is wrong — an echo reply arriving mid-resolve would be
+      discarded and the ping waiting for it would time out for no
+      reason. Recognising a frame is now one job in one place, with
+      counters that must account for every frame (a stack that cannot
+      say what it dropped is not demultiplexing, it is guessing).
+      IPv4 is the smallest honest amount — fixed 20-byte header, no
+      options, no fragmentation, no routing, everything on-link — but
+      what exists is done properly: both checksums computed on send
+      and VERIFIED on receive with failures counted, packets accepted
+      only if addressed to us, and echo replies matched on identifier
+      AND sequence, since one that merely arrived could answer
+      somebody else's ping. Echo requests are deliberately NOT
+      answered: nothing asked ArenaOS to be pingable and an untested
+      reply path is worse than none. Proven first boot: echo reply
+      from 10.0.2.2 in 1281us, timed on the monotonic clock, demux
+      sorting 2 ARP and 1 IPv4 with none dropped. The layering shows
+      in the failures too — an unresolvable address fails UNREACHABLE
+      (no host), a silent resolved host would fail NO_REPLY. Gates:
+      run_tests 14/14 (414 assertions), fmt + clippy clean.
+- [ ] **7.3 UDP.** The demultiplexer grows one arm; the real design
+      question is PORTS — who may bind one is a capability question,
+      not a protocol one, and gets its own ADR. netd's 64-byte inline
+      receive limit becomes the binding constraint here and will need
+      the lent-buffer treatment the send path already has.
+
 ### Three decisions taken BEFORE any protocol code
 
 Recorded here rather than discovered later, because each one is

@@ -901,9 +901,9 @@ unsafe fn build_echo(st8: &Stack, mac: [u8; 6], ip: [u8; 4], id: u16, seq: u16) 
         let base = st8.tx;
         let put = |off: usize, b: u8| *((base + off as u64) as *mut u8) = b;
         // Ethernet
-        for i in 0..6 {
-            put(i, mac[i]);
-            put(6 + i, st8.mac[i]);
+        for (i, (dst, src)) in mac.iter().zip(st8.mac.iter()).enumerate() {
+            put(i, *dst);
+            put(6 + i, *src);
         }
         put(12, (ETHERTYPE_IPV4 >> 8) as u8);
         put(13, (ETHERTYPE_IPV4 & 0xFF) as u8);
