@@ -90,6 +90,8 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         14 => Some(elf::FAULTD_IMAGE),
         15 => Some(elf::FAULTTEST_IMAGE),
         16 => Some(elf::TIMERTEST_IMAGE),
+        17 => Some(elf::NETSTACKD_IMAGE),
+        18 => Some(elf::ARPTEST_IMAGE),
         _ => None,
     }
 }

@@ -60,7 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arena_env  # noqa: E402
 import mtest  # noqa: E402
 
-EXPECTED_TESTS = ["timer_facility"]
+EXPECTED_TESTS = ["timer_facility", "arp_service"]
 
 
 def extra_checks(serial: str) -> bool:
@@ -115,6 +115,43 @@ def extra_checks(serial: str) -> bool:
           "the production supervisor ran quietly — nothing died, so nothing "
           "was restarted")
 
+    # ---- M7.1: the first protocol (ADR-0030) -------------------------
+    check(re.search(r"^m7:test:arp_service: PASS", serial, re.MULTILINE)
+          is not None,
+          "the arp_service test PASSED — a protocol on the real wire")
+    m = re.search(r"netstackd: resolved 10\.0\.2\.2 → "
+                  r"([0-9a-f:]{17}) on attempt (\d+)", serial)
+    check(m is not None,
+          "the stack resolved the gateway by putting a real ARP request on "
+          "the wire")
+    if m:
+        check(m.group(1) != "00:00:00:00:00:00",
+              f"the resolved MAC is a real address ({m.group(1)})")
+    check("cache HIT for 10.0.2.2 — no frame touched the wire" in serial,
+          "the second lookup was served from cache")
+    check(re.search(r"the second lookup was a cache HIT \(\d+ hit\(s\), "
+                    r"wire requests still \d+\)", serial) is not None,
+          "the cache is proven the only honest way — the count of requests "
+          "PUT ON THE WIRE did not move")
+    check("no ARP reply after every retry — reporting unreachable, not "
+          "guessing" in serial,
+          "a silent address was reported UNREACHABLE rather than invented")
+    check("a silent address came back UNREACHABLE after real deadlines"
+          in serial,
+          "and that call TERMINATED — before M7.0 it could not have "
+          "(netd bounds its own wait with a timer, because a client "
+          "blocked in SYS_IPC_CALL cannot observe its own)")
+    check("the driver never parsed a protocol and the stack never touched "
+          "a virtqueue" in serial,
+          "the L2/protocol split held: netd stayed a device driver, "
+          "netstackd stayed a protocol service")
+    m = re.search(r"netstackd: shutdown — (\d+) ARP request\(s\) on the "
+                  r"wire, (\d+) reply/replies, (\d+) cache hit\(s\), "
+                  r"(\d+) timeout\(s\)", serial)
+    check(m is not None and int(m.group(4)) > 0,
+          "the stack really did time out on the silent address (its own "
+          "accounting, not the test's)")
+
     # Phase 7's standing rule, checked the only way a log can: the
     # machine reached its prompt without a suite hanging on a clock.
     check("arena>" in serial,
@@ -128,7 +165,7 @@ def main() -> int:
         return rc
     serial = (arena_env.build_dir() / "serial-m7.log").read_text()
     ok = extra_checks(serial)
-    print(f"[test-m7] M7.0 TIMER FACILITY: {'PASS' if ok else 'FAIL'}  "
+    print(f"[test-m7] M7.0+7.1 TIMERS + ARP: {'PASS' if ok else 'FAIL'}  "
           f"(serial: build/serial-m7.log)")
     return 0 if ok else 1
 

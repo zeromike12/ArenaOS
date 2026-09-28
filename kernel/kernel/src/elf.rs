@@ -214,6 +214,19 @@ pub static FAULTTEST_IMAGE: &[u8] =
 pub static TIMERTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/timertest/target/x86_64-unknown-none/release/timertest");
 
+/// The network stack service (M7.1, ADR-0030): spawn-registry image
+/// 17, `netstackd` — protocol state kept OUT of the NIC driver. ARP
+/// over IPv4 and its cache, built on netd's L2 frame boundary.
+pub static NETSTACKD_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/netstackd/target/x86_64-unknown-none/release/arena-netstackd"
+);
+
+/// The first protocol's proof (M7.1): image 18, `arptest` — resolves
+/// on the real wire, proves the cache keeps the wire quiet, and
+/// proves a silent address comes back unreachable rather than hanging.
+pub static ARPTEST_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/netstackd/target/x86_64-unknown-none/release/arptest");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

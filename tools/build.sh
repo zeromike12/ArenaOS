@@ -169,6 +169,20 @@ if [[ ! -f "$TIMERTEST_ELF" ]]; then
 fi
 echo "timertest image: ${TIMERTEST_ELF#"$REPO_ROOT"/} ($(stat -c%s "$TIMERTEST_ELF") bytes)"
 
+# M7.1 (ADR-0030): the network stack service — netstackd (image 17,
+# protocol state kept out of the driver) and arptest (image 18).
+echo "== building userspace netstackd (userspace/netstackd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/netstackd" && cargo build --release )
+for NS_ELF in \
+    "$REPO_ROOT/userspace/netstackd/target/x86_64-unknown-none/release/arena-netstackd" \
+    "$REPO_ROOT/userspace/netstackd/target/x86_64-unknown-none/release/arptest"; do
+    if [[ ! -f "$NS_ELF" ]]; then
+        echo "error: netstackd image not produced at $NS_ELF" >&2
+        exit 1
+    fi
+    echo "netstackd image: ${NS_ELF#"$REPO_ROOT"/} ($(stat -c%s "$NS_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

@@ -186,6 +186,11 @@ struct Drv {
     /// the hold is busy are dropped (logged, counted, buffer re-posted
     /// — the ring never shrinks).
     hold: Option<(u16, u32)>,
+    /// The caller's RECV deadline has passed (M7.1): sticky for the
+    /// duration of that request so no further wait parks again.
+    deadline_seen: bool,
+    /// RECVs answered NET_S_TIMEOUT — evidence the bound is real.
+    timeouts: u64,
     completions: u64,
     rx_dropped: u64,
 }
@@ -259,6 +264,12 @@ impl Drv {
                 self.pending &= !IRQ_BADGE_RX;
                 // SAFETY: method contract.
                 unsafe { self.harvest_rx() };
+            }
+            if self.pending & NET_BADGE_DEADLINE != 0 {
+                // Sticky: the caller's deadline has passed, and every
+                // wait from here until the reply must fall through
+                // rather than park again.
+                self.deadline_seen = true;
             }
             if self.pending & want != 0 {
                 self.pending &= !want;
@@ -500,6 +511,8 @@ pub unsafe extern "C" fn _start() -> ! {
             mac,
             pending: 0,
             hold: None,
+            deadline_seen: false,
+            timeouts: 0,
             completions: 0,
             rx_dropped: 0,
         };
@@ -627,14 +640,49 @@ pub unsafe extern "C" fn _start() -> ! {
                         reply_err(NET_S_BAD_OP);
                         continue;
                     }
-                    // Block until the hold slot carries a frame: the
-                    // wait consumes RX badges and harvests on the way
-                    // (a TX wait may have swallowed the arrival bit).
-                    while drv.hold.is_none() {
-                        drv.wait_bits(IRQ_BADGE_RX);
+                    // Wait for a frame, but not forever (M7.1,
+                    // ADR-0030). The caller's timeout is enforced HERE
+                    // because netd is the only party that can: a
+                    // client blocked in SYS_IPC_CALL cannot observe
+                    // its own timer (ADR-0029's erratum). netd arms
+                    // one on its own notification and waits for "a
+                    // frame arrived OR the deadline passed".
+                    //
+                    // This is the whole reason the timer facility was
+                    // built before any protocol: without it, one lost
+                    // ARP reply parks the network stack permanently.
+                    let timeout_us = w0;
+                    let mut timer_id: i64 = -1;
+                    if timeout_us > 0 {
+                        timer_id =
+                            syscall3(SYS_TIMER_ARM, SLOT_NOTIF, NET_BADGE_DEADLINE, timeout_us);
+                        if timer_id < 0 {
+                            reply_err(NET_S_NO_BUF); // no timer to bound with
+                            continue;
+                        }
                     }
-                    let Some((id, flen)) = drv.hold.take() else {
-                        fail(EXIT_COMPLETE, "the hold slot emptied itself (internal)");
+                    while drv.hold.is_none() {
+                        if timeout_us == 0 {
+                            break; // poll: whatever is held, right now
+                        }
+                        drv.wait_bits(IRQ_BADGE_RX | NET_BADGE_DEADLINE);
+                        if drv.pending & NET_BADGE_DEADLINE != 0 || drv.deadline_seen {
+                            break;
+                        }
+                    }
+                    let held = drv.hold.take();
+                    if timer_id >= 0 {
+                        // Cancelling a timer that already fired is an
+                        // error by design (ADR-0029) — ignore it here,
+                        // the answer is the same either way.
+                        let _ = syscall1(SYS_TIMER_CANCEL, timer_id as u64);
+                    }
+                    drv.deadline_seen = false;
+                    drv.pending &= !NET_BADGE_DEADLINE;
+                    let Some((id, flen)) = held else {
+                        drv.timeouts += 1;
+                        reply_err(NET_S_TIMEOUT);
+                        continue;
                     };
                     if flen > MSG_BYTES as u32 {
                         // The documented v1 limit: inline delivery caps

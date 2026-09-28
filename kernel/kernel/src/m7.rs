@@ -34,10 +34,17 @@ use crate::frames;
 use crate::ipc;
 use crate::log::{log_error as error, log_info as info, write_marker};
 use crate::proc;
+use crate::relay;
 use crate::sched;
 use crate::{cap, timer};
 
 type Res = Result<(), &'static str>;
+
+/// The ARP test needs the slirp NIC. A machine without one is not a
+/// failing machine (ADR-0024's rule, kept), so the suite reports the
+/// distinction rather than flattening it — the marker says SKIP and
+/// the count says so too.
+const NO_NIC: &str = "SKIP:no virtio-net device — attach it with: -netdev user,id=net0 -device virtio-net-pci,netdev=net0";
 
 /// timertest's verified-success exit.
 const TIMERTEST_EXIT_OK: u64 = 42;
@@ -50,13 +57,23 @@ const TIMERTEST_EXIT_BADGE: u64 = 0x0070_0001;
 const CLIENT_DEADLINE_TICKS: u32 = 500_000_000;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Res); 1] = [("timer_facility", test_timer_facility)];
+    let checks: [(&str, fn() -> Res); 2] = [
+        ("timer_facility", test_timer_facility),
+        ("arp_service", test_arp_service),
+    ];
     let mut passed = 0u32;
+    let mut skipped = 0u32;
     for (name, test) in checks {
         match test() {
             Ok(()) => {
                 passed += 1;
                 write_marker(format_args!("m7:test:{name}: PASS"));
+            }
+            Err(reason) if reason.starts_with("SKIP:") => {
+                skipped += 1;
+                let why = &reason[5..];
+                info!("m7", "test {name} skipped: {why}");
+                write_marker(format_args!("m7:test:{name}: SKIP ({why})"));
             }
             Err(reason) => {
                 error!("m7", "test {name} failed: {reason}");
@@ -65,11 +82,187 @@ pub fn run_suite() -> bool {
         }
     }
     let total = checks.len() as u32;
-    write_marker(format_args!(
-        "m7: RESULT {} ({passed}/{total})",
-        if passed == total { "PASS" } else { "FAIL" }
-    ));
-    passed == total
+    if passed + skipped == total {
+        if skipped > 0 {
+            write_marker(format_args!(
+                "m7: RESULT SKIP ({passed}/{total} passed, {skipped} skipped — nothing to prove them against; see the skip reasons above)"
+            ));
+        } else {
+            write_marker(format_args!("m7: RESULT PASS ({passed}/{total})"));
+        }
+        true
+    } else {
+        write_marker(format_args!("m7: RESULT FAIL ({passed}/{total})"));
+        false
+    }
+}
+
+/// netstackd's and arptest's exit badges.
+const NETSTACKD_EXIT_BADGE: u64 = 0x0071_0001;
+const ARPTEST_EXIT_BADGE: u64 = 0x0071_0002;
+const ARPTEST_EXIT_OK: u64 = 42;
+
+/// M7.1 (ADR-0030): the first protocol, and the boundary it sits on.
+///
+/// The kernel spawns `netd` (the L2 driver, unchanged) and
+/// `netstackd` (image 17, which owns ARP and its cache), wires the
+/// stack to the driver as a CLIENT, and lets `arptest` (image 18) ask
+/// for a real address. What is being tested is as much the SPLIT as
+/// the protocol: netd never learns what an ARP packet is, and the
+/// stack never touches a virtqueue.
+fn test_arp_service() -> Res {
+    let baseline = frames::free_frames();
+
+    let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_NET) else {
+        return Err(NO_NIC);
+    };
+    let Some(f) = crate::drivers::pci::pci_function(v.pci_index) else {
+        return Err("recorded function vanished from the table");
+    };
+    let bar = v.common.bar as usize;
+    let bar_phys = f.bar_base[bar];
+    let bar_pages = (f.bar_size[bar] / 4096) as u32;
+    if bar_phys == 0 || bar_pages == 0 || bar_pages > 16 {
+        return Err("the structure BAR is unusable for a window grant");
+    }
+
+    // Three parties, two endpoints: arptest → netstackd → netd.
+    let ep_netd = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let ep_stack = ipc::create_endpoint().map_err(|_| "endpoint table full")?;
+    let nid_irq = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_stack = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_client = ipc::create_notification().map_err(|_| "notification table full")?;
+
+    let netd_grants = [
+        Cap {
+            obj: CapObj::Mmio {
+                phys: bar_phys,
+                pages: bar_pages,
+            },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: ep_netd },
+            rights: cap::RIGHTS_READ,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_irq },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+        },
+    ];
+    let netd_pid = crate::spawn::spawn_init(6, &netd_grants, None)
+        .map_err(|_| "netd (image 6) spawn failed")?;
+
+    // netstackd: the driver's call side, its own serve side, and a
+    // frame slot. NO device capability — it cannot touch the NIC even
+    // if it wanted to, which is the boundary made structural.
+    let stack_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid: ep_netd },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: ep_stack },
+            rights: cap::RIGHTS_READ,
+        },
+    ];
+    let stack_pid =
+        crate::spawn::spawn_init(17, &stack_grants, Some((nid_stack, NETSTACKD_EXIT_BADGE)))
+            .map_err(|_| "netstackd (image 17) spawn failed")?;
+
+    let client_grants = [Cap {
+        obj: CapObj::Endpoint { eid: ep_stack },
+        rights: cap::RIGHTS_WRITE,
+    }];
+    let client_pid =
+        crate::spawn::spawn_init(18, &client_grants, Some((nid_client, ARPTEST_EXIT_BADGE)))
+            .map_err(|_| "arptest (image 18) spawn failed")?;
+    info!(
+        "m7",
+        "arp_service: netd pid {netd_pid} (L2 only), netstackd pid {stack_pid} (ARP + cache, NO device cap), arptest pid {client_pid} — resolving on the real wire"
+    );
+
+    // The client drives everything; the stack and driver follow. It
+    // finishes by poisoning the stack, and the stack's own shutdown
+    // leaves netd running (the driver outlives its client, which is
+    // the point of the split).
+    if let Err(reason) = drain_pid(client_pid) {
+        error!(
+            "m7",
+            "arp_service: client threads={}, stack threads={}, netd threads={}",
+            sched::proc_live_threads(client_pid),
+            sched::proc_live_threads(stack_pid),
+            sched::proc_live_threads(netd_pid)
+        );
+        return Err(reason);
+    }
+
+    let bc = ipc::wait(nid_client).map_err(|_| "the client's exit badge never arrived")?;
+    if bc != ARPTEST_EXIT_BADGE {
+        return Err("the client's exit badge is not the granted word");
+    }
+    let recs = crate::spawn::records_snapshot();
+    let Some(tid) = recs
+        .iter()
+        .flatten()
+        .find(|&&(p, _)| p == client_pid)
+        .map(|&(_, t)| t)
+    else {
+        return Err("the client has no spawn record");
+    };
+    match syscall::exit_status_of(tid) {
+        Some(ARPTEST_EXIT_OK) => {}
+        Some(60) => return Err("client: a call to the stack was refused (60)"),
+        Some(61) => return Err("client: the gateway did not resolve (61)"),
+        Some(62) => return Err("client: the stack returned an all-zero MAC (62)"),
+        Some(63) => return Err("client: the cache returned a different MAC (63)"),
+        Some(64) => return Err("client: a cached answer still put a request on the wire (64)"),
+        Some(65) => {
+            return Err("client: a silent address did not come back unreachable (65)");
+        }
+        Some(66) => return Err("client: the stack would not report its counters (66)"),
+        Some(99) => return Err("client: the panic handler ran (99)"),
+        _ => return Err("the client exited with a code from nowhere in the contract"),
+    }
+
+    // The machine's own witness: frames really left and really
+    // arrived. Without this the client's story could be a lookup
+    // table with good manners.
+    let tx = relay::delivery_count(49);
+    let rx = relay::delivery_count(48);
+    if tx == 0 || rx == 0 {
+        error!("m7", "arp_service: relay deliveries rx={rx} tx={tx}");
+        return Err("the ARP exchange did not go through real interrupts");
+    }
+
+    // Teardown: the stack poisoned itself, netd is still running.
+    proc::destroy(netd_pid).map_err(|_| "destroying netd failed")?;
+    proc::destroy(stack_pid).map_err(|_| "destroying netstackd failed")?;
+    proc::destroy(client_pid).map_err(|_| "destroying arptest failed")?;
+    for p in [netd_pid, stack_pid, client_pid] {
+        crate::spawn::forget(p).map_err(|_| "spawn record forget refused")?;
+    }
+    ipc::destroy_endpoint(ep_netd).map_err(|_| "endpoint teardown refused")?;
+    ipc::destroy_endpoint(ep_stack).map_err(|_| "endpoint teardown refused")?;
+    for n in [nid_irq, nid_stack, nid_client] {
+        ipc::destroy_notification(n).map_err(|_| "notification teardown refused")?;
+    }
+    for _ in 0..4 {
+        sched::yield_now();
+    }
+    let after = frames::free_frames();
+    if after != baseline {
+        error!(
+            "m7",
+            "arp_service teardown accounting: baseline {baseline}, after {after}"
+        );
+        return Err("arp-service teardown is not frame-exact");
+    }
+    info!(
+        "m7",
+        "arp_service: arptest resolved 10.0.2.2 through netstackd (pid {stack_pid}) over netd (pid {netd_pid}) — a real ARP request on the wire ({tx} transmit and {rx} receive interrupt delivery/deliveries), a second lookup served from CACHE with the wire untouched, and a silent address reported UNREACHABLE after bounded retries instead of parking the stack; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames {after})"
+    );
+    Ok(())
 }
 
 fn test_timer_facility() -> Res {

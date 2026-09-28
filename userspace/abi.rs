@@ -203,6 +203,17 @@ pub const VIRTIO_BLK_S_UNSUPP: u64 = 2;
 
 pub const NET_OP_SHUTDOWN: u64 = 0;
 pub const NET_OP_SEND: u64 = 1;
+/// RECV(w0 = timeout_us): hand back the next received frame inline.
+///
+/// BOUNDED since M7.1 (ADR-0030). It used to block until a frame
+/// arrived, full stop — which is unusable for a protocol: a lost ARP
+/// reply would park the caller forever, and ADR-0029's erratum
+/// records why a timer cannot rescue a thread blocked in an IPC call.
+/// So the deadline is enforced by the SERVER, which is the only party
+/// that can: netd arms a timer on its own notification and waits for
+/// "a frame arrived OR the deadline passed", then answers either way.
+/// A timeout_us of 0 means "poll" — answer immediately with whatever
+/// is already held.
 pub const NET_OP_RECV: u64 = 2;
 pub const NET_OP_MAC: u64 = 3;
 
@@ -210,6 +221,16 @@ pub const NET_S_OK: u64 = 0;
 pub const NET_S_BAD_OP: u64 = (-1i64) as u64;
 pub const NET_S_BAD_LEN: u64 = (-2i64) as u64;
 pub const NET_S_NO_BUF: u64 = (-3i64) as u64;
+/// No frame arrived before the caller's deadline (M7.1). Not an
+/// error: the wire is allowed to be silent, and a protocol that asked
+/// "wait up to 200 ms" needs the answer "nothing came" more than it
+/// needs to be blocked forever. See `NET_OP_RECV`.
+pub const NET_S_TIMEOUT: u64 = (-4i64) as u64;
+
+/// The badge netd arms its own deadline timer with, on its own
+/// interrupt notification. Distinct bit from the two MSI-X relay
+/// badges (badges are BITS — ADR-0028).
+pub const NET_BADGE_DEADLINE: u64 = 1 << 20;
 
 /// Largest Ethernet frame NET_SEND accepts (no jumbos in v1).
 pub const NET_FRAME_MAX: u64 = 1514;
@@ -344,6 +365,44 @@ pub const CONSOLE_MSG_MAX: u64 = 48;
 /// The spawner's give-up word on consoled's notification (ADR-0026's
 /// pattern, second use — see [`INPUT_BADGE_GIVE_UP`]).
 pub const CONSOLE_BADGE_GIVE_UP: u64 = 1 << 19;
+
+// ---- the network stack protocol (M7.1, ADR-0030) ----------------------------
+//
+// `netstackd` owns protocol STATE; `netd` owns the device. The split
+// is deliberate and load-bearing (ROADMAP Phase 7, decision 1): a
+// driver's job is to survive its device and be restartable, a stack's
+// job is to hold state across time, and mixing them means a wedged
+// NIC takes every connection with it.
+//
+// Request words: w0 = op-specific, w1 = op.
+//   RESOLVE   w0 = IPv4 address, big-endian as it appears on the wire.
+//             Replies with the MAC packed little-endian into word 1
+//             (6 bytes, low byte first — the same packing NET_OP_MAC
+//             uses), or a typed failure.
+//   STATS     replies with cache hits in word 1 and the number of ARP
+//             requests actually PUT ON THE WIRE in word 2. The second
+//             number is how a cache is proven: a hit must not move it.
+//   SHUTDOWN  the poison request.
+// Reply word 0 is ARP_S_*.
+pub const ARP_OP_SHUTDOWN: u64 = 0;
+pub const ARP_OP_RESOLVE: u64 = 1;
+pub const ARP_OP_STATS: u64 = 2;
+
+pub const ARP_S_OK: u64 = 0;
+pub const ARP_S_BAD_OP: u64 = (-1i64) as u64;
+/// Nobody answered before the deadline, after every retry. The
+/// address may exist and be silent; this is "no answer", not "no
+/// such host".
+pub const ARP_S_UNREACHABLE: u64 = (-2i64) as u64;
+/// The driver below refused or is gone (see STATUS_SERVICE_GONE).
+pub const ARP_S_LINK_DOWN: u64 = (-3i64) as u64;
+
+/// The slirp network ArenaOS boots into: the guest address QEMU's
+/// DHCP would hand out, and the gateway. Hardcoded until there is a
+/// DHCP client — stated here as a FIXTURE fact rather than pretended
+/// to be configuration.
+pub const SLIRP_GUEST_IP: [u8; 4] = [10, 0, 2, 15];
+pub const SLIRP_GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
 
 // ---- the fault-injection protocol (M6.5, ADR-0028) --------------------------
 //

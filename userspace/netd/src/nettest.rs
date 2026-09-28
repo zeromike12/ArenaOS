@@ -48,6 +48,10 @@ use abi::*;
 
 /// The grant layout (m6.rs net_service): slot 0 = endpoint call side.
 const SLOT_EP: u64 = 0;
+
+/// How long to wait for slirp's ARP reply before giving up. Generous
+/// by four orders of magnitude — the wire answers in microseconds.
+const RECV_TIMEOUT_US: u64 = 2_000_000;
 /// Slot for the owned TX frame cap (consumed by the self-map).
 const SLOT_BUF: u64 = 1;
 /// Slot for the LENT copy that travels with the SEND call.
@@ -244,9 +248,13 @@ pub unsafe extern "C" fn _start() -> ! {
         //    interrupt, never a poll) and lands in the reply's inline
         //    message.
         let mut frame = [0u64; MSG_BYTES / 8];
+        // A DEADLINE, not "forever" (M7.1, ADR-0030). slirp answers an
+        // ARP request in microseconds, so two seconds is enormous
+        // slack; the point is that a lost reply now ends this test
+        // with a typed timeout instead of parking the boot.
         let (st, flen) = request(
             NET_OP_RECV,
-            0,
+            RECV_TIMEOUT_US,
             CAP_NONE,
             frame.as_mut_ptr() as u64,
             EXIT_RECV_CALL,
