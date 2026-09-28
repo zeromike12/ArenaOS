@@ -656,7 +656,7 @@ restart under fault injection, capability re-grant tests.
       the suite calls it). Gates: run_tests 13/13 (362 assertions),
       fmt clean.
 
-## Phase 7 — Networking ✅ (bounded v1)
+## Phase 7 — Networking ✅ (bounded protocol/API v1; stack supervision still open)
 
 NIC TX/RX via the virtio-net driver server (done, M6.1) → ARP → IPv4 →
 ICMP → UDP → DNS resolver service → TCP (own stack server, async API) →
@@ -870,6 +870,17 @@ assertions).
       100/100 boots, matching SHA-256 receipt. Phase 7 bounded v1 is
       complete; this is NOT a POSIX sockets or unrestricted TCP claim.
 
+**Outstanding Phase 7 lifecycle obligation — NOT DONE:** `netstackd`
+currently runs inside M7's test and is destroyed at the end. The
+production kernel boot spawns `netd` and `rngd`, not a supervised,
+resident `netstackd`. The earlier promise that the stack itself will
+be supervised is therefore still open. ADR-0037 assigns the first
+production `netstackd` instance, its lifecycle and its real restart
+proof to 8.0's userspace manager, **not** to both it and the kernel
+supervisor. Phase 7's protocol/API milestone remains qualified; this
+service-lifecycle obligation is an explicit blocker for *8.0
+completion*, not something that became done by changing the heading.
+
 ### Three decisions taken BEFORE any protocol code
 
 Recorded here rather than discovered later, because each one is
@@ -957,7 +968,10 @@ forbidden; the policy is per operation:
   This is an explicit step in the netd protocol, not an implicit
   recovery.
 
-netstackd itself becomes a supervised service too, once it exists.
+`netstackd` supervision remains OPEN: the test instance exists, but no
+production resident stack is registered. ADR-0037 makes a single
+user-space manager own its production lifecycle in 8.0; neither this
+paragraph nor the Phase 7 protocol/API verdict marks that done.
 
 ### Scope firewall for Phase 7
 
@@ -969,11 +983,58 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace (outline)
+## Phase 8 — Mature userspace 🔨 (design only; no 8.x milestone implemented)
 
-Service manager + declarative service manifests → transactional configuration
-store → permission manifests & grant UI (CLI first) → standard libraries →
-package format & signed packages (ADR) → installer/updater.
+Authority model: proposed ADR-0037. The roadmap below is the sequence,
+not permission to implement later steps early. Every completed
+milestone gets its own real negative-space tests, the entire historical
+suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
+is not completed by accepting an ADR.
+
+- [ ] **8.0 service manager + declarative service manifests v1**.
+      Bootstrap one ring-3 manager from a fixed kernel trust root with
+      only explicit Image/Endpoint/Notification/Process authority;
+      kernel alone mints MMIO and keeps driver lifecycle. The manager
+      can delegate only actual caps already held, attenuated by
+      `SYS_SPAWN`; requested manifest grants are checked against the
+      actual inventory and audited against child caps. No typed match,
+      no child. Bounded static service graph, missing-dependency/cycle
+      refusal, explicit readiness before dependents, restart-on-exit
+      with timer backoff and budget, observable OFFLINE state. Add the
+      narrow Process-cap-gated reap path needed to keep restart
+      records/frames flat; refuse kernel-supervised children. The
+      *production* `netstackd` is the first managed service: prove a
+      real kill/restart through the same endpoint, stale bearer refusal
+      and resumed wire service. This is the required closure of the
+      Phase 7 stack-supervision obligation; it is NOT done yet. No
+      dynamic permission UI, generic device-cap request, or competing
+      kernel/user restart owner (ADR-0037). Existing M1–M7 regressions
+      must continue to pass including the no-peer boot.
+- [ ] **8.1 transactional configuration store**. Specify versioned
+      records, ownership/authority, crash model and recovery in an
+      ADR. Implement bounded atomic update/read and multi-boot host
+      verification, including SIGKILL during every commit boundary;
+      corrupt state must fail closed without silently returning a
+      different configuration. Not a permission policy yet.
+- [ ] **8.2 permission manifests + CLI grant workflow**. Separate an
+      application's requested permissions from the actual issued
+      grants, define an explicit trusted approver and revocation
+      behavior in an ADR, and prove denial, attenuation, delegation
+      and restart persistence. No ambient pid/name authority. UI is
+      CLI first; no graphics (Phase 9).
+- [ ] **8.3 standard userspace libraries**. Factor stable no_std
+      syscall, IPC, filesystem and network clients into reusable
+      libraries with ABI compatibility tests and at least two
+      independent consumers. Do not call a module included by only
+      its original test client a general runtime.
+- [ ] **8.4 package format + signed packages**. ADR first for package
+      identity, trust roots, updates/revocation and signature
+      verification. Host tamper and rollback tests plus guest install
+      verification; no dynamic linking merely because packages exist.
+- [ ] **8.5 installer/updater**. Artifact-bound install/upgrade and
+      power-loss recovery tests with an explicit trust chain and
+      rollback rules. No assumption of real-hardware drivers or
+      secure-boot integration without separate proof.
 
 ## Phase 9 — Graphics (outline)
 
