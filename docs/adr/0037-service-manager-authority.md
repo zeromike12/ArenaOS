@@ -1,7 +1,9 @@
 # ADR-0037 — Service-manager authority, bootstrap and manifest v1
 
-*Status: proposed, design gate for Phase 8.0; only the pure manifest
-request validator is implemented. No running manager, cap query/reap or
+*Status: accepted design, Phase 8.0 still incomplete. The bounded
+planner, caller-cap-only describe syscall and Process-cap-gated child
+finish syscall are implemented. The shell exercises two real ring-3
+spawn/reap cycles; no running manager, production stack restart, or
 8.0 qualification yet.*
 
 ## Context: the existing mechanisms and the missing one
@@ -173,8 +175,32 @@ It refuses missing, duplicated, kind-mismatched and overbroad requests,
 invalid slots/policy, cycles and absent/unready external dependencies
 before any child can spawn. Host tests exercise these refusals; the
 full historical suite and artifact-bound 100-boot gate qualify this
-partial, non-bootstrapped slice only. The input inventory MUST be
-filled from an actual caller-cap-only query before integration: a
-manifest resolver by itself neither observes nor mints authority.
-The production manager, Process-cap lifecycle syscall, readiness
-protocol and netstackd restart proof all remain open.
+partial, non-bootstrapped slice only. At this first slice, the input inventory still needed an actual
+caller-cap-only query: a manifest resolver by itself neither observes
+nor mints authority. The next slice added the query and reap ABI; a
+production manager, readiness protocol and netstackd restart proof
+remain open.
+
+## Second implementation slice (not 8.0 completion)
+
+`SYS_CAP_DESCRIBE(slot, out)` describes only a cap in the caller's own
+space as `[kind, object, rights]`; it exposes Image/Endpoint/Notification
+and live Process identities, not raw device/Power/physical authority.
+`userspace/servicemgr/src/inventory.rs` converts named boot slots via
+this syscall to a bounded snapshot and passes it directly to the
+existing manifest resolver. This is still *not* a running manager:
+`SyscallProbe` must be bootstrapped in a service image before it can
+query the real manager grants.
+
+`SYS_PROC_FINISH(slot, mode)` requires an actual held Process cap with
+DESTROY and a live spawn record; mode 0 refuses live threads, mode 1
+explicitly stops and reaps. It excludes the caller and both current and
+pending-dead kernel-supervised driver pids. It retires the process,
+spawn record and caller handle. Existing `SYS_SPAWN` does not return
+the cap slot; the caller must find a *unique* Process descriptor
+matching its returned pid, then invoke using the cap slot. The M4
+shell fixture now proves two ring-3 spawn/badge/reap cycles and rejects
+wrong-kind and stale slots without altering the historical shell
+checks. Host tests cover inventory/plan failures; foreign/driver/self
+attempts, live-child stop, and quantitative flat accounting still
+require separate negative-space integration proofs before 8.0 exits.

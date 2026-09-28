@@ -55,9 +55,9 @@ else
     echo "!! host-side networking API tests FAILED"
 fi
 
-# Phase 8.0 groundwork: compile the no_std manifest resolver on the
-# host and reject forged/missing/overbroad requests before any spawn.
-echo "== host-side service manifest policy tests"
+# Phase 8.0 groundwork: fail-closed no_std manifest + caller-cap
+# inventory adapter. Ring-3 syscall proof runs in the M4 shell fixture.
+echo "== host-side service manifest and inventory policy tests"
 if (cd "$REPO_ROOT" && rustc --test --edition 2024 \
     userspace/servicemgr/src/lib.rs -o build/service-manifest-tests \
     && build/service-manifest-tests && rustc --crate-type lib \

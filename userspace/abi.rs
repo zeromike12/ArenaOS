@@ -40,6 +40,10 @@ pub const SYS_CONSOLE_PULL: u64 = 25;
 pub const SYS_CLOCK_NOW: u64 = 26;
 pub const SYS_TIMER_ARM: u64 = 27;
 pub const SYS_TIMER_CANCEL: u64 = 28;
+/// Inspect an already-held cap into [kind, object, rights] (24 bytes).
+pub const SYS_CAP_DESCRIBE: u64 = 29;
+/// Finish a child by Process-cap slot: 0=reap exited, 1=explicit stop/reap.
+pub const SYS_PROC_FINISH: u64 = 30;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 

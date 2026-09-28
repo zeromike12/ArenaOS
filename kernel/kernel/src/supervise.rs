@@ -174,6 +174,20 @@ pub fn is_supervised(pid: u64) -> bool {
     })
 }
 
+/// Whether this supervisor owns a live OR just-dead instance. The
+/// Process-cap finish syscall must not steal a dead driver's record
+/// before `poll` has reaped it and replayed its grants.
+pub fn owns_pid(pid: u64) -> bool {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*SERVICES.get())
+                .iter()
+                .any(|s| s.live && (s.pid == pid || s.dead_pid == pid))
+        }
+    })
+}
+
 /// Status of the supervised service whose CURRENT pid is `pid`, or
 /// whose name matches — the suites assert on both.
 pub fn status_of(name: &str) -> Option<ServiceStatus> {

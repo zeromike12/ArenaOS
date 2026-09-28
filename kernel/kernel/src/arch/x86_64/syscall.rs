@@ -142,6 +142,10 @@ pub const SYS_CLOCK_NOW: u64 = 26;
 pub const SYS_TIMER_ARM: u64 = 27;
 /// SYS_TIMER_CANCEL (M7.0, ADR-0029).
 pub const SYS_TIMER_CANCEL: u64 = 28;
+// Phase 8.0: inspect only an authority already held in this process,
+// and finish only a Process cap with DESTROY (ADR-0037).
+pub const SYS_CAP_DESCRIBE: u64 = 29;
+pub const SYS_PROC_FINISH: u64 = 30;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -641,6 +645,8 @@ extern "C" fn syscall_dispatch(
         SYS_CLOCK_NOW => sys_clock_now() as u64,
         SYS_TIMER_ARM => sys_timer_arm(a0, a1, a2) as u64,
         SYS_TIMER_CANCEL => sys_timer_cancel(a0) as u64,
+        SYS_CAP_DESCRIBE => sys_cap_describe(a0, a1) as u64,
+        SYS_PROC_FINISH => sys_proc_finish(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1741,6 +1747,88 @@ fn sys_cap_phys(a0: u64) -> Status {
         Ok(phys) => phys as Status,
         Err(_) => STATUS_BAD_ARG,
     }
+}
+
+/// SYS_CAP_DESCRIBE(slot, out): query only a cap the caller possesses.
+/// `out` receives [kind, object id, rights] (three u64s). Object ids
+/// are descriptive, never grant handles. Refuse other cap kinds — in
+/// particular MMIO addresses are neither queryable nor mintable here.
+/// Kind 1 = Image, 2 = Endpoint, 3 = Notification, 4 = Process.
+fn sys_cap_describe(a0: u64, a1: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(a1, 24) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Ok(cap) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let (kind, object) = match cap.obj {
+        crate::cap::CapObj::Image { img_id } => (1u64, u64::from(img_id)),
+        crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
+        crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
+        crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {
+            (4, target)
+        }
+        _ => return STATUS_BAD_ARG,
+    };
+    // SAFETY: caller's live, validated 24-byte user buffer; STAC is
+    // paired with CLAC while the kernel writes all three words.
+    unsafe {
+        super::stac();
+        let out = a1 as *mut u64;
+        core::ptr::write_volatile(out, kind);
+        core::ptr::write_volatile(out.add(1), object);
+        core::ptr::write_volatile(out.add(2), u64::from(cap.rights));
+        super::clac();
+    }
+    STATUS_OK
+}
+
+/// SYS_PROC_FINISH(slot, mode): a Process cap with DESTROY, not a pid.
+/// Mode 0 reaps only an exited child; mode 1 explicitly stops a live
+/// child and then reaps it. Kernel-owned supervised drivers (including
+/// those waiting to restart) and the caller itself are never targets.
+/// The spawn record, child address space and caller handle are all
+/// retired, so repeated restarts cannot exhaust the bounded tables.
+fn sys_proc_finish(a0: u64, a1: u64) -> Status {
+    let Some(owner) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 || a1 > 1 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(owner, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::Process { pid: target } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_DESTROY == 0
+        || target == owner
+        || crate::supervise::owns_pid(target)
+        || crate::proc::pml4_of(target).is_none()
+        || !crate::spawn::has_record(target)
+    {
+        return STATUS_BAD_ARG;
+    }
+    if a1 == 0 && crate::sched::proc_live_threads(target) != 0 {
+        return STATUS_BUSY;
+    }
+    if crate::proc::destroy(target).is_err() {
+        return STATUS_BUSY;
+    }
+    if crate::spawn::forget(target).is_err() {
+        return STATUS_BUSY;
+    }
+    if crate::cap::destroy(owner, a0 as usize).is_err() {
+        return STATUS_BUSY;
+    }
+    STATUS_OK
 }
 
 /// SYS_CAP_DESTROY(slot): discard a cap reference (the ring-3 twin of

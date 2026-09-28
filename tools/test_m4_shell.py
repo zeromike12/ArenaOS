@@ -59,8 +59,9 @@ FEED: list[tuple[bytes, int, bytes]] = [
     (b"arena>", 9, b"rm nosuch.txt\r"),
     (b"arena>", 10, b"ls\r"),
     (b"arena>", 11, b"spawn\r"),
-    (b"arena>", 12, b"bogus\r"),
-    (b"arena>", 13, b"shutdown\r"),
+    (b"arena>", 12, b"spawn\r"),
+    (b"arena>", 13, b"bogus\r"),
+    (b"arena>", 14, b"shutdown\r"),
 ]
 
 LABEL = "test-m4-shell"
@@ -184,6 +185,14 @@ def main() -> int:
           "the spawned payload's message appeared mid-session")
     check("child exited, badge 0x0000000000005aa5" in serial,
           "the child's exit badge arrived at the shell")
+    check(serial.count("caller-cap inventory grounded; Power and bad pointer refused") == 2,
+          "ring-3 queries see held Image/Notification/Endpoint caps and reject Power and bad pointer")
+    check("caller-cap inventory FAILED" not in serial,
+          "caller-cap-only inventory never accepted a hidden or invalid slot")
+    check(serial.count("child reaped by Process cap; forged/stale refused") == 2,
+          "two ring-3 child lifecycles reaped by a live Process cap, with forged and stale slots refused")
+    check("Process-cap lifecycle FAILED" not in serial,
+          "no lifecycle operation silently succeeded or missed its cap")
 
     # unknown command: an answer, never silence.
     check("unknown command: 'bogus'" in serial,

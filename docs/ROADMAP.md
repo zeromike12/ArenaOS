@@ -992,10 +992,12 @@ suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
 is not completed by accepting an ADR.
 
 - [ ] **8.0 service manager + declarative service manifests v1**.
-      IN PROGRESS — a bounded no_std manifest request resolver and its
-      host negative-space tests exist, but it does not observe live
-      capabilities, spawn any child, or close the netstackd supervision
-      obligation. Not an 8.0 completion claim. Bootstrap one ring-3 manager from a fixed kernel trust root with
+      IN PROGRESS — the bounded resolver can consume a caller-cap-only
+      syscall inventory and the Process-cap-gated finish syscall is
+      exercised by two real shell child cycles. No manager is bootstrapped;
+      it does not spawn a managed service or close the netstackd
+      supervision obligation. Not an 8.0 completion claim. Bootstrap one
+      ring-3 manager from a fixed kernel trust root with
       only explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
       can delegate only actual caps already held, attenuated by

@@ -130,8 +130,22 @@ pub fn records_snapshot() -> [Option<(u64, u64)>; MAX_SPAWN_RECS] {
     })
 }
 
+/// A live spawn record is required for the Process-cap-gated finish
+/// operation. A Process cap to another kernel-created process cannot
+/// become a general-purpose process destroy authority.
+pub fn has_record(pid: u64) -> bool {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*RECORDS.get())
+                .iter()
+                .any(|rec| rec.live && rec.child_pid == pid)
+        }
+    })
+}
+
 /// Release a spawn record (teardown-side bookkeeping: v1 has no
-/// automatic GC because it has no user-driven child destroy yet).
+/// automatic GC; a Process-cap finish syscall reaps user children).
 /// Refuses unknown pids — forgetting a child that was never spawned is
 /// a caller bug, not a no-op.
 pub fn forget(child_pid: u64) -> Result<(), &'static str> {

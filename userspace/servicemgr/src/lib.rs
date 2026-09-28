@@ -3,4 +3,5 @@
 //! bootstrapped userspace service queries its actual caps, validates a
 //! manifest, and spawns/reaps a child, these types authorize nothing.
 
+pub mod inventory;
 pub mod manifest;

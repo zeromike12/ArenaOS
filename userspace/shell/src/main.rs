@@ -404,6 +404,40 @@ fn do_rm(o: &mut Out, name: &[u8]) {
 }
 
 fn do_spawn() {
+    // Ring-3 contract probe for the caller-cap-only inventory ABI.
+    // The boot root decides what occupies these slots; ask the kernel,
+    // not the manifest or the process name.
+    let mut image = [0u64; 3];
+    let mut notif = [0u64; 3];
+    let mut endpoint = [0u64; 3];
+    // SAFETY: all three output buffers live on this thread's stack.
+    let image_ok =
+        unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_IMAGE, image.as_mut_ptr() as u64) } == 0;
+    let notif_ok =
+        unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_NOTIF, notif.as_mut_ptr() as u64) } == 0;
+    let ep_ok = unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_FSD, endpoint.as_mut_ptr() as u64) } == 0;
+    let power_denied =
+        unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_POWER, image.as_mut_ptr() as u64) } < 0;
+    let bad_pointer = unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_IMAGE, 0) } < 0;
+    if !(image_ok
+        && image[0] == 1
+        && image[1] == 0
+        && image[2] & RIGHTS_READ != 0
+        && notif_ok
+        && notif[0] == 3
+        && ep_ok
+        && endpoint[0] == 2
+        && power_denied
+        && bad_pointer)
+    {
+        let mut o = Out::new();
+        o.str("  caller-cap inventory FAILED\r\n");
+        o.flush();
+        return;
+    }
+    let mut o = Out::new();
+    o.str("  caller-cap inventory grounded; Power and bad pointer refused\r\n");
+    o.flush();
     let mut o = Out::new();
     // Empty inheritance spec (null pointer, count 0 — the child needs
     // nothing), and the shell's own notification + badge lent for the
@@ -437,6 +471,58 @@ fn do_spawn() {
         o.str(" (expected badge ");
         o.hex(SPAWN_BADGE);
         o.str(")\r\n");
+    }
+    o.flush();
+    if b != SPAWN_BADGE as i64 {
+        return; // never reap a child still running on a guessed deadline
+    }
+    // M8.0 substrate: SYS_SPAWN returns a pid, not the Process-cap
+    // slot. Discover the actual cap by a caller-cap-only kernel query;
+    // possession of Process+DESTROY, not knowing that pid, is authority.
+    let mut found = CAP_NONE;
+    for slot in 0..16u64 {
+        let mut desc = [0u64; 3];
+        // SAFETY: our stack owns the 24-byte output for the full call.
+        let status = unsafe { syscall2(SYS_CAP_DESCRIBE, slot, desc.as_mut_ptr() as u64) };
+        if status == 0 && desc[0] == 4 && desc[1] == r as u64 {
+            if found != CAP_NONE {
+                let mut o = Out::new();
+                o.str("  child cap ambiguous — refusing reap\r\n");
+                o.flush();
+                return;
+            }
+            if desc[2] & RIGHTS_DESTROY == 0 {
+                let mut o = Out::new();
+                o.str("  child cap lacks DESTROY — refusing reap\r\n");
+                o.flush();
+                return;
+            }
+            found = slot;
+        }
+    }
+    if found == CAP_NONE {
+        let mut o = Out::new();
+        o.str("  child Process cap missing — refusing reap\r\n");
+        o.flush();
+        return;
+    }
+    // A named Image cap cannot finish a process, even if the pid is
+    // known. The correct cap reaps exactly once; its now-vacant slot
+    // may be reused by the next spawn without resurrecting authority.
+    let forged = unsafe { syscall2(SYS_PROC_FINISH, SLOT_IMAGE, 0) };
+    let reaped = unsafe { syscall2(SYS_PROC_FINISH, found, 0) };
+    let stale = unsafe { syscall2(SYS_PROC_FINISH, found, 0) };
+    let mut o = Out::new();
+    if forged < 0 && reaped == 0 && stale < 0 {
+        o.str("  child reaped by Process cap; forged/stale refused\r\n");
+    } else {
+        o.str("  Process-cap lifecycle FAILED: ");
+        o.i64(forged);
+        o.str("/");
+        o.i64(reaped);
+        o.str("/");
+        o.i64(stale);
+        o.crlf();
     }
     o.flush();
 }

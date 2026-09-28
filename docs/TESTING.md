@@ -14,9 +14,12 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
-Phase 8.0's early manifest resolver has host-only, fail-closed contract
-tests in `userspace/servicemgr/src/manifest.rs`. They cannot prove a
-service was actually granted a cap or restarted; 8.0 requires a separate
+Phase 8.0's early manifest resolver and caller-cap inventory have host
+fail-closed tests in `userspace/servicemgr/src/{manifest,inventory}.rs`.
+The M4 shell QEMU fixture additionally uses the real describe/finish
+syscalls for two spawn/reap cycles and bad-kind/stale-cap refusals.
+Neither proves a manager was booted or a production service was granted
+caps and restarted; 8.0 requires a separate
 real in-guest cap audit and managed `netstackd` failure/recovery proof
 before its RESULT may be added to the stability loop.
 
