@@ -2,7 +2,7 @@
 # Boot-stability loop (docs/TESTING.md): boot the *prebuilt* ESP image N
 # times with fresh NVRAM each run and require the full green verdict on
 # every single boot — m2 RESULT PASS (21/21), m3 RESULT PASS (13/13), m4
-# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (4/4), the
+# RESULT PASS (9/9), m5 RESULT PASS (6/6), m6 RESULT PASS (6/6), the
 # canonical clean-halt line, no PANIC, QEMU exit 0, under a per-boot
 # timeout. Every fixture rides along (the AFS1 scratch disk, the slirp
 # NIC, the entropy source, the virtio keyboard, and — since M6.4 — the
@@ -58,7 +58,7 @@ RESULT_LINE='m2: RESULT PASS (21/21)'
 RESULT_LINE_M3='m3: RESULT PASS (13/13)'
 RESULT_LINE_M4='m4: RESULT PASS (9/9)'
 RESULT_LINE_M5='m5: RESULT PASS (6/6)'
-RESULT_LINE_M6='m6: RESULT PASS (4/4)'
+RESULT_LINE_M6='m6: RESULT PASS (6/6)'
 # The keystrokes the m6 input_service test waits for, typed on the
 # virtual keyboard once inputd announces DRIVER_OK.
 KEY_MARKER='inputd: virtio-input ready'
