@@ -83,7 +83,7 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "either device stays green with honest SKIPs);"
     echo "100-boot stability loop green with the full fixture family —"
     echo "every boot ends by typing 'shutdown' into the running shell"
-    echo "(ADR-0011/0020/0022/0023/0024/0025/0026/0027)."
+    echo "(ADR-0011/0020/0022/0023/0024/0025/0026/0027/0028)."
     echo
     echo "This release has a FILESYSTEM: AFS1 (original design, ADR-0023)"
     echo "served entirely from ring 3 — extent-based data, copy-on-write"
@@ -96,6 +96,16 @@ GIT_SHA="$(git rev-parse --short HEAD)"
     echo "proves it on the wire with a real ARP round trip against QEMU's"
     echo "built-in network. The protocol stack (IP/UDP/TCP services) is"
     echo "Phase 7, built on this driver."
+    echo
+    echo "This release SURVIVES A DEAD DRIVER (ADR-0028): a service that"
+    echo "dies now ANSWERS everyone it owed a reply to — clients get a"
+    echo "typed STATUS_SERVICE_GONE instead of blocking forever — a"
+    echo "process with parked threads can actually be killed, and the"
+    echo "supervisor respawns the image with its capabilities replayed"
+    echo "behind the SAME endpoint, so clients keep the capability they"
+    echo "already hold and a restart costs them one retry. Watch the boot"
+    echo "for m6:test:service_death and m6:test:service_restart: a real"
+    echo "service is killed mid-request on every boot, on purpose."
     echo
     echo "This release has a SECOND CONSOLE (ADR-0027): consoled, the"
     echo "ring-3 virtio-console driver, attaches a virtio-serial port to"
@@ -343,7 +353,7 @@ EOF
         )
         grep -aqF 'm4: RESULT PASS (9/9)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'm5: RESULT PASS (6/6)' "$verify_dir/verify-serial.log" \
-            && grep -aqF 'm6: RESULT PASS (4/4)' "$verify_dir/verify-serial.log" \
+            && grep -aqF 'm6: RESULT PASS (6/6)' "$verify_dir/verify-serial.log" \
             && grep -aqF 'halting via UEFI ResetSystem(shutdown)' "$verify_dir/verify-serial.log" \
             || { echo "error: bundle verification boot FAILED" >&2; exit 1; }
         rm -rf "$verify_dir"

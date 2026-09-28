@@ -73,6 +73,12 @@ struct Service {
     grant_count: usize,
     /// The currently running instance (0 = none: dead or given up).
     pid: u64,
+    /// The instance that just died, still holding a spawn record.
+    /// Reaped by [`poll`] before the replacement is spawned — the GC
+    /// debt ADR-0025 named: records are a bounded table, and a
+    /// service that restarts would otherwise exhaust it one corpse at
+    /// a time.
+    dead_pid: u64,
     restarts: u32,
     /// Set when `MAX_RESTARTS` is exhausted; the service stays off.
     abandoned: bool,
@@ -85,6 +91,7 @@ const EMPTY: Service = Service {
     grants: [Cap::EMPTY; MAX_INHERIT],
     grant_count: 0,
     pid: 0,
+    dead_pid: 0,
     restarts: 0,
     abandoned: false,
 };
@@ -131,6 +138,7 @@ pub fn register(
                 grants: g,
                 grant_count: grants.len(),
                 pid,
+                dead_pid: 0,
                 restarts: 0,
                 abandoned: false,
             };
@@ -203,6 +211,7 @@ pub fn note_death(pid: u64) {
                 .find(|s| s.live && s.pid == pid)
             {
                 s.pid = 0;
+                s.dead_pid = pid;
             }
         }
     });
@@ -226,12 +235,35 @@ pub fn poll() -> usize {
                     .iter()
                     .enumerate()
                     .find(|(_, s)| s.live && s.pid == 0 && !s.abandoned)
-                    .map(|(i, s)| (i, s.img_id, s.name, s.grants, s.grant_count, s.restarts))
+                    .map(|(i, s)| {
+                        (
+                            i,
+                            s.img_id,
+                            s.name,
+                            s.grants,
+                            s.grant_count,
+                            s.restarts,
+                            s.dead_pid,
+                        )
+                    })
             }
         });
-        let Some((idx, img_id, name, grants, count, restarts)) = pending else {
+        let Some((idx, img_id, name, grants, count, restarts, dead_pid)) = pending else {
             return restarted;
         };
+
+        // Reap the corpse's spawn record first (ADR-0025's debt). The
+        // record table is bounded, and a service that restarts would
+        // otherwise consume one entry per death until spawning became
+        // impossible. A failing `forget` is not fatal: it only means
+        // somebody already reaped it.
+        if dead_pid != 0 {
+            let _ = crate::spawn::forget(dead_pid);
+            without_interrupts(|| {
+                // SAFETY: single writer under IF=0.
+                unsafe { (*SERVICES.get())[idx].dead_pid = 0 };
+            });
+        }
 
         if restarts >= MAX_RESTARTS {
             without_interrupts(|| {

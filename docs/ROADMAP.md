@@ -611,15 +611,50 @@ restart under fault injection, capability re-grant tests.
       (a busy laptop could fail to boot; now up to three rounds, and
       the same for the m2 cross-check). Gates: run_tests 13/13 (349
       assertions), fmt + clippy clean, stability 100/100.
-- [ ] **6.5 driver framework hardening: supervised restart.** The
-      supervisor story ADR-0022 deferred: fault-injection tests kill
-      storaged/netd mid-I/O (`tools/` harness kills, in-guest poison
-      requests), a kernel-side or userspace supervisor restarts the
-      driver, re-grants its caps, and clients receive typed
-      "service restarted" errors — never silent corruption.
-      Capability re-grant tested explicitly (a restarted driver's new
-      Mmio/relay grants work; the dead pid's relays were swept).
-
+- [x] 6.5 **driver framework hardening: supervised restart** — DONE
+      (ADR-0028). ADR-0022 put drivers in ring 3 so a broken one could
+      not take the kernel with it, and deferred the other half:
+      isolation only pays if the SERVICE comes back. Three things had
+      to be built, and the first two were not about supervision at
+      all. (a) **A dead server is an ANSWER**: a client blocked in
+      `SYS_IPC_CALL` has no timeout and no way to see its server's
+      liveness, so `proc::destroy` now fails every call the dying
+      process owed — Delivered or Waiting — with a new typed
+      `STATUS_SERVICE_GONE` (-5) and wakes the caller. Which endpoints
+      it owed answers on is decided by CAPABILITY (`Endpoint` + READ),
+      so there is no registry to fall out of step. The status
+      deliberately does not claim the request did not happen; the
+      kernel cannot know. (b) **A blocked process can be KILLED**:
+      `State::Blocked` has carried the note "until woken or (later
+      milestones) killed" since M3.1, and this is that milestone —
+      `sched::kill_threads_of` zombies parked threads where they
+      stand, the reaper reclaims their stacks with the usual canary
+      check, and `plan_switch` skips stale ready-ring entries.
+      Ordering is load-bearing: every kernel reference to those
+      threads is released FIRST, because waking a corpse halts the
+      machine by design. (c) **The supervisor** (`kernel/src/supervise.rs`):
+      a supervised service is an image plus the exact grant list it
+      was spawned with, and a restart replays that list verbatim — an
+      Mmio window is a physical base and a page count, so "the same
+      grants" is identity, not reconstruction. Clients never learn a
+      pid: their capability names the ENDPOINT, which outlives its
+      server, so the new instance simply picks the serve side back up.
+      Deaths are NOTICED in destroy and ACTED ON in `poll` (restarting
+      allocates and maps; destroy's context must not). `MAX_RESTARTS`
+      bounds it, and giving up leaves the service honestly OFFLINE.
+      Also closes **ADR-0025's spawn-record GC debt** — the supervisor
+      reaps the corpse's record, and the test asserts the record count
+      is flat across a restart cycle. Proof: `userspace/faultd`
+      (images 14/15), the smallest service in the system and the only
+      one written to be murdered, driving the whole cycle on real
+      processes — live service, blocked client, kill, restart with 3
+      caps replayed, the blocked client answered and exiting cleanly,
+      and a NEW client reaching the restarted instance through the
+      capability it held before the crash; frame-exact throughout.
+      NOT claimed: back-off, dependency ordering, state recovery, a
+      ring-3 supervisor, or production wiring (`poll` must be called;
+      the suite calls it). Gates: run_tests 13/13 (362 assertions),
+      fmt clean.
 
 ## Phase 7 — Networking (outline)
 

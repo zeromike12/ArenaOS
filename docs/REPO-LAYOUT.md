@@ -66,7 +66,9 @@ Layout rules:
   `userspace/rngd` (virtio-rng, ADR-0025 — images 8/9), and
   `userspace/inputd` (virtio-input keyboard, ADR-0026 — images
   10/11), and `userspace/consoled` (virtio-console channel, ADR-0027 —
-  images 12/13).
+  images 12/13), and `userspace/faultd` (the fault-injection pair,
+  ADR-0028 — images 14/15: a service written to be killed, and the
+  client that must survive it).
 - **Shared userspace code is single-file and included by `#[path]`,
   not linked as crates:** `userspace/abi.rs` (the syscall/IPC/wire
   surface every image mirrors — one wire contract, all programs) and,

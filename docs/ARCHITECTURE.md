@@ -543,6 +543,21 @@ driver, so file data DMAs disk ↔ client page with no copy in any ring.
   never wakes its reader: `serial::putc` runs inside the scheduler's
   own log lines, so the wake is owed there and paid on the timer tick
   (ADR-0027).
+- **Supervision (M6.5):** isolation is only half a promise — "the
+  kernel survives your driver" is worth little to the program that
+  was USING the driver. Three things make the other half true. A
+  service that dies now produces a typed `STATUS_SERVICE_GONE` for
+  everyone it owed a reply to (found by capability: the endpoints it
+  held `Endpoint`+READ for), instead of leaving them blocked forever
+  with no timeout and no way to see it. A process with parked threads
+  can finally be KILLED, which a supervisor needs because a driver
+  worth restarting is almost always blocked. And `supervise.rs`
+  respawns the image with its grant list replayed, while the ENDPOINT
+  — and therefore every client capability — survives untouched, so a
+  restart is not an event clients have to handle beyond retrying one
+  call. What the kernel does NOT claim: that the failed request did
+  not happen (it cannot know), or that a restarted driver has any of
+  its old state (ADR-0028).
 
 ## 9. Security philosophy
 
@@ -641,6 +656,7 @@ on top of a nonexistent IPC layer is how OS projects die.
 | Entropy service (M6.2): `rngd` (registry image 8, spawned at boot when a virtio-rng function exists) — the ring-3 virtio-rng driver on the SHARED virtio core (`userspace/virtio.rs`): one request queue packed into a single owned frame, `RNG_GET` filling the caller's LENT frame by device DMA (zero-copy, the write direction of storaged's read path), MSI-X completion relayed into `SYS_WAIT`, typed refusals that never leak the landed cap; `rngtest` (image 9) proves real variance — two 4 KiB draws, full-length by the device's own count, non-zero, non-constant, mutually different, two counted relay deliveries; absent fixture → honest SKIP + the entropy service offline | **M6.2 — implemented, 2/2 in-guest with all four fixture combinations green (ADR-0025)** |
 | Input service (M6.3): `inputd` (registry image 10, spawned at boot when a virtio-input function exists) — the ring-3 virtio-input keyboard driver on the shared virtio core: one device-writable event queue with 32 posted 8-byte buffers (QEMU drops whole batches against a short ring), evdev events harvested to the used ring's end per interrupt (the device coalesces on `EV_SYN`), a US-ASCII keymap with modifier tracking, and a 64-byte decoded-key ring so asynchronous keystrokes survive between consumers; `SYS_CONSOLE_PUSH` (23) gated on `CapObj::ConsoleInput` feeds the kernel's line discipline so typing drives the shell while serial stays live, with a zero-length push as the capability probe that selects console vs service mode; `inputtest` (image 11) verifies harness-typed keystrokes decoded through the service boundary; absent fixture → honest SKIP + the keyboard service offline | **M6.3 — implemented, 3/3 in-guest + the live-typing boot test (ADR-0026)** |
 | Console channel service (M6.4): `consoled` (registry image 12, spawned at boot when a virtio-console port exists) — the ring-3 virtio-console driver on the shared virtio core: two split virtqueues (receive stocked with 16 buffers posted AFTER DRIVER_OK, because QEMU pauses a chardev whose frontend cannot yet read), MULTIPORT declined so port 0 needs no control protocol, two MSI-X relays merged into ONE notification alongside the kernel's output-mirror wake so the driver has exactly one place to block; `SYS_CONSOLE_ATTACH` (24) + `SYS_CONSOLE_PULL` (25) gated on `CapObj::ConsoleOutput` drain a kernel-side mirror of the console's byte stream, while `SYS_CONSOLE_PUSH` (ADR-0026, unchanged) carries the inbound half — so the port is a full second console in both directions with serial still the kernel's own; `contest` (image 13) proves a round trip the host can see on its socket; absent fixture → honest SKIP + the channel service offline | **M6.4 — implemented, 4/4 in-guest + the shell driven entirely over the port (ADR-0027)** |
+| Supervised restart (M6.5): `STATUS_SERVICE_GONE` (-5) answering every call a destroyed process owed (endpoints served resolved from its own `Endpoint`+READ capabilities, `Delivered` and `Waiting` slots failed, `Replied` left alone), `sched::kill_threads_of` zombieing parked threads after `ipc::release_blocked_of` drops every kernel reference to them, and `kernel/src/supervise.rs` replaying a dead service's grant list into a fresh instance behind the SAME endpoint with a restart bound and honest abandonment; `faultd`/`faulttest` (images 14/15) drive the whole cycle — live, blocked client, kill, restart, a new client reaching the new instance through its old capability — frame-exact, and the spawn-record table flat across it | **M6.5 — implemented, 6/6 in-guest (ADR-0028)** |
 | Truncate/append-overwrite (v1 refuses to clobber), directories, per-file permissions/kernel file caps (security phase), power-loss-grade barriers (`cache=none` + virtio FUA/FLUSH — v1's proven model is process-crash prefixes), full mark-sweep fsck (interrupted generations leak conservatively), the network PROTOCOL stack (Ethernet/ARP/IP/UDP/TCP services — the link layer landed in M6.1), virtio console/input drivers, graphics, userspace programs beyond the shell and test images, driver restart supervision | not started |
 
 The architecture above is the commitment; the roadmap is the sequence.

@@ -311,6 +311,42 @@ instructions and the actor appends to an open file. The kernel's own
 calibration (and the m2 cross-check) additionally retry up to three
 rounds, because a stalled host must not be able to fail a boot.
 
+### Fault injection: killing a service on purpose (M6.5, ADR-0028)
+
+Every other test in this suite checks what happens when things work.
+Two do not. `m6:test:service_death` and `m6:test:service_restart`
+destroy a live service while a client is blocked in a call to it, and
+assert that the machine says so and recovers.
+
+They need no device and no host actor, which makes them the only
+fully DETERMINISTIC tests in the m6 family — and the reason they use
+their own trivial image pair (`userspace/faultd`) rather than a real
+driver. Killing storaged mid-I/O would prove the same thing while
+risking the filesystem; that experiment belongs with the
+crash-consistency work, not here.
+
+The fault lands at a moment the service NOMINATES rather than one the
+harness guesses: `faultd` takes a request it will never answer,
+signals the suite on a write-only notification, and parks forever on
+a read-only one it can never signal itself. (The first version
+signalled and parked on the SAME notification and swallowed its own
+badge — rights now make that unrepresentable.) Whether the kill
+arrives while it is still runnable or already parked, the client's
+request is `Delivered` either way, which is the only state the proof
+depends on.
+
+What is asserted: the caller is woken with `STATUS_SERVICE_GONE`
+rather than left blocked; the kernel logs exactly one failed
+in-flight call; the parked thread is KILLED, not left live forever;
+the endpoint OUTLIVES its server; the supervisor respawns the image
+with its capabilities replayed under a new pid; a fresh client
+reaches the restarted instance through the capability it was granted
+before the crash; the spawn-record table is flat across the cycle;
+and frames return to baseline. Counting frames here needs one step no
+earlier test needed — a killed thread is a zombie holding its 32 KiB
+kernel stack until the next scheduler entry, so the test yields
+before counting rather than reporting a leak that does not exist.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to
