@@ -789,15 +789,35 @@ assertions).
       that dropped, duplicated or reordered a chunk could not pass,
       where matching identifier and sequence would not have caught it.
       Gates: run_tests 14/14 (418 assertions), fmt + clippy clean.
-- [ ] **7.4 UDP.** Now unblocked, with a working frame path. Note the
-      correction in ADR-0032's appendix: a port must NOT become a
-      kernel capability kind (that would put UDP in the kernel, which
-      ADR-0030 spent a milestone avoiding) — the port namespace is
-      netstackd's, and the unforgeable thing a client holds is its
-      ENDPOINT. And IPC v1 gives a server no caller identity, so
-      per-client port ownership needs per-client endpoints; v1 will
-      enforce bind-once and say plainly that it does not implement
-      ownership it cannot see.
+- [x] 7.4 **UDP, with authority by possession** — DONE (ADR-0033).
+      `BIND` returns a 64-bit handle drawn from rngd and possession of
+      it is the authority to use that port; deliberate passing is
+      delegation. This is the design C proposed in review, and it is
+      better than what I had planned: I had concluded that per-binding
+      authority needed per-client endpoints, which confused AUTHORITY
+      with IDENTITY. A service-issued token is exactly the capability
+      model the rest of this system uses, one layer below the kernel —
+      and the kernel still does not know what a port is. What remains
+      true is only the narrower claim: non-transferable per-process
+      ownership is unavailable on a shared endpoint under IPC v1.
+      Handles are random on purpose (a guessable handle is authority
+      by arithmetic) and without entropy the stack REFUSES to bind
+      rather than issue a predictable one. Bind-once is enforced
+      separately as a namespace rule, and both are tested: a second
+      bind refused, a forged handle refused. Proven against a real
+      server — a DNS query for example.com to slirp's resolver, the
+      61-byte response matched on OUR transaction id and the response
+      bit, so a datagram that merely arrived would not pass. Stated
+      rather than hidden: the UDP checksum is sent as zero (legal) and
+      a nonzero one is not yet verified, the inbox is single-slot, and
+      RECV delivers the first message-worth with the full length
+      reported. Gates: run_tests 14/14 (423 assertions), fmt + clippy
+      clean.
+- [ ] **7.5 DNS.** Now a parsing exercise rather than a transport one.
+      Needs the rest of a datagram, so the UDP receive path gets the
+      chunked treatment the frame path got in 7.3; and the UDP
+      checksum should be verified, arriving with its synthetic frame
+      in the parser self-test (ADR-0031's template).
 
 ### Three decisions taken BEFORE any protocol code
 
