@@ -664,6 +664,46 @@ userspace net API library. Each protocol a separately testable milestone
 with QEMU netdev (user-mode/slirp + tap tests, packet capture
 assertions).
 
+### Milestones
+
+- [x] 7.0 **the timer facility + production supervision** — DONE
+      (ADR-0029). Built first, before any protocol exists to need it,
+      because building protocols first is how a codebase ends up with
+      polling loops nobody removes. `SYS_CLOCK_NOW` (monotonic
+      microseconds — the M2.2 clock the m2 suite re-checks every
+      boot), `SYS_TIMER_ARM(notif_slot, badge, delay_us)` and
+      `SYS_TIMER_CANCEL`. A timer delivers a BADGE BIT on a
+      notification the caller already holds, so "device interrupt OR
+      client request OR timeout" is an ordinary `SYS_WAIT` with one
+      more bit set — no second thread, no new blocking primitive, and
+      no timeout can be missed by a service that was waiting on
+      something else. The capability gate is the notification (WRITE,
+      as `SYS_IRQ_RELAY`), so no new capability kind was needed.
+      Delays are RELATIVE (an absolute deadline races the clock read
+      that produced it), timers are one-shot (a back-off is not a
+      period), and resolution is stated rather than implied: checked
+      on the 100 Hz tick, so a deadline means NOT BEFORE with ~10 ms
+      of lag. Owned and swept at `proc::destroy` — the fourth sweep
+      there, now a rule rather than four special cases. Supporting
+      change: `kernel/src/tick.rs`, a dispatcher for deferred tick
+      work, because the console mirror had taken the single auxiliary
+      hook in M6.4. PROVEN by measurement, not assertion: `timertest`
+      (image 16) armed a 50 ms timer that delivered at 52096us on the
+      first boot — never early, 2096us of lag against a 10000us tick
+      — a cancelled timer stayed silent, a second cancel was REFUSED,
+      two due timers merged into one wake, and a timer abandoned at
+      exit was swept. Also closes ADR-0028's open item: `supervise::poll`
+      now runs in the boot thread's idle loop, so production
+      supervision is a fact before the stack depends on netd. Gates:
+      run_tests 14/14 (391 assertions), fmt + clippy clean.
+- [ ] **7.1 ARP as a service (`netstackd`).** The first protocol, and
+      the first user of the timer facility (cache aging, request
+      retry). netd stays L2 (decision 1 below); netstackd owns the
+      cache. Proof: resolve the slirp gateway through the service,
+      verify the wire bytes, age an entry out with a real timer, and
+      kill netd mid-exchange to prove the re-establish path (decision
+      3 below) — not a retry, a re-attach.
+
 ### Three decisions taken BEFORE any protocol code
 
 Recorded here rather than discovered later, because each one is

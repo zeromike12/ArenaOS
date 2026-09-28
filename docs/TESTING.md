@@ -347,6 +347,37 @@ earlier test needed — a killed thread is a zombie holding its 32 KiB
 kernel stack until the next scheduler entry, so the test yields
 before counting rather than reporting a leak that does not exist.
 
+### Timing, measured rather than asserted (M7.0, ADR-0029)
+
+`m7:test:timer_facility` is the first test whose subject is time
+itself, and it is written as a MEASUREMENT: `timertest` reads
+`SYS_CLOCK_NOW` before and after a real 50 ms timer and reports the
+elapsed microseconds, which `tools/test_m7.py` then parses and checks
+from the host side. A boot prints, for example:
+
+    timertest: PASS — 50000us timer delivered after 52096us
+    (never early, 2096us of lag against a 10000us tick)
+
+The property that matters most is the negative one: a deadline must
+never fire EARLY. A timer that can fire early makes every
+retransmission and aging rule built on it wrong in a way that only
+appears under load, so the test asserts `elapsed >= requested`
+unconditionally, and bounds lateness separately with slack sized for
+a loaded host.
+
+The rest of the facility is checked the same way — a cancelled timer
+must stay silent (or a TCP stack would retransmit segments it had
+already acknowledged), a second cancel of the same timer must be
+REFUSED (a protocol cancelling a retransmission that already went out
+needs to tell the difference), and two due timers on one notification
+must both deliver, since that merge is what lets a Phase 7 service
+wait for "work OR timeout" in a single blocking call. The client then
+leaves a timer armed on purpose and exits, so the suite can prove the
+kernel sweeps it.
+
+This suite needs no device fixture and no host actor: it is about the
+kernel's own clock, so it runs and must pass on the barest machine.
+
 ### Exception-path testing (M2.1+)
 
 Exception tests use *real* faulting instructions (divide-by-zero, writes to
