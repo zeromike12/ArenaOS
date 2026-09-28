@@ -771,11 +771,33 @@ assertions).
       on synthetic frames, which itself had to be hardened after it
       passed against a deliberately reintroduced regression. Gates:
       run_tests 14/14 (415 assertions), fmt + clippy clean.
-- [ ] **7.3 UDP.** The demultiplexer grows one arm; the real design
-      question is PORTS — who may bind one is a capability question,
-      not a protocol one, and gets its own ADR. netd's 64-byte inline
-      receive limit becomes the binding constraint here and will need
-      the lent-buffer treatment the send path already has.
+- [x] 7.3 **frames larger than one IPC message** — DONE (ADR-0032).
+      A REORDERING, stated rather than done quietly: the plan said UDP
+      next, but netd dropped every frame over 64 bytes, so UDP would
+      have been a protocol for tiny datagrams with a test that passed
+      for reasons the real world would not reproduce. The receive path
+      came first. netd now STAGES a frame in the ring where the device
+      put it and serves it by offset, returning the full length with
+      the first chunk and releasing the buffer on the last. Not
+      zero-copy and does not pretend to be — one IPC round trip per 64
+      bytes, right for a DNS answer and wrong for throughput; the
+      caller's-frame-in-the-ring design is named as its own future
+      milestone. Proven by making the EXISTING proof require it: the
+      ICMP echo payload went 8 → 200 bytes, so every boot now puts a
+      242-byte frame on the wire, and the reply is verified
+      byte-for-byte with a POSITION-DEPENDENT pattern — a reassembly
+      that dropped, duplicated or reordered a chunk could not pass,
+      where matching identifier and sequence would not have caught it.
+      Gates: run_tests 14/14 (418 assertions), fmt + clippy clean.
+- [ ] **7.4 UDP.** Now unblocked, with a working frame path. Note the
+      correction in ADR-0032's appendix: a port must NOT become a
+      kernel capability kind (that would put UDP in the kernel, which
+      ADR-0030 spent a milestone avoiding) — the port namespace is
+      netstackd's, and the unforgeable thing a client holds is its
+      ENDPOINT. And IPC v1 gives a server no caller identity, so
+      per-client port ownership needs per-client endpoints; v1 will
+      enforce bind-once and say plainly that it does not implement
+      ownership it cannot see.
 
 ### Three decisions taken BEFORE any protocol code
 
