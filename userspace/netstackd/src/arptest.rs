@@ -462,8 +462,8 @@ pub unsafe extern "C" fn _start() -> ! {
         }
 
         let mut rx = [0u8; MSG_BYTES];
-        for b in 0..8 {
-            rx[b] = ((2_000_000u64 >> (8 * b)) & 0xFF) as u8;
+        for (b, slot) in rx.iter_mut().enumerate().take(8) {
+            *slot = ((2_000_000u64 >> (8 * b)) & 0xFF) as u8;
         }
         let (status, total) = call_msg(UDP_OP_RECV, handle, &mut rx);
         if status != ARP_S_OK {

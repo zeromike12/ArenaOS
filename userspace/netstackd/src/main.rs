@@ -585,8 +585,8 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                         continue;
                     };
                     let mut timeout_us = 0u64;
-                    for b in 0..8 {
-                        timeout_us |= (inbox[b] as u64) << (8 * b);
+                    for (b, byte) in inbox.iter().enumerate().take(8) {
+                        timeout_us |= (*byte as u64) << (8 * b);
                     }
                     // Pump the wire until this binding has something
                     // or the deadline passes. The DEMULTIPLEXER is
