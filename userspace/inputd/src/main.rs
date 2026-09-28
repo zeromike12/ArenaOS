@@ -73,7 +73,7 @@ const SLOT_FRAME_BASE: u64 = 8;
 const FRAMES_TOTAL: usize = 1;
 
 /// The IRQ badge the relay delivers (only the relay notifies this nid).
-const IRQ_BADGE_INPUT: u64 = 0x7301;
+const IRQ_BADGE_INPUT: u64 = 1 << 16;
 
 // ---- the diagnostic exit contract (m6.rs maps every code) --------------------
 
@@ -358,11 +358,15 @@ impl Drv {
         while self.len == 0 {
             // SAFETY: wrapper contract.
             let b = unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) };
-            if b == INPUT_BADGE_GIVE_UP as i64 {
+            // Badges are BITS and arrive merged: test membership, not
+            // equality, or a give-up delivered in the same wake as an
+            // interrupt matches neither (abi.rs, CONSOLE_BADGE_GIVE_UP).
+            let badge = if b < 0 { 0 } else { b as u64 };
+            if badge & INPUT_BADGE_GIVE_UP != 0 {
                 self.give_ups += 1;
                 return Ok(false);
             }
-            if b != IRQ_BADGE_INPUT as i64 {
+            if badge & IRQ_BADGE_INPUT == 0 {
                 log_line(|o| {
                     o.str("inputd: wait returned ");
                     o.i64(b);

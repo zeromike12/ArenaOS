@@ -101,7 +101,8 @@ for i in $(seq 1 "$N"); do
     typist_pid=$!
     # The console actor, reaped with the typist for the same reason.
     python3 "$REPO_ROOT/tools/vcon.py" "$VCON_SOCK" \
-        "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
+        "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" \
+        "$REPO_ROOT/build/vcon-port.txt" >/dev/null 2>"$REPO_ROOT/build/vcon-dbg.txt" &
     vcon_pid=$!
     # ADR-0020: a healthy boot no longer halts by itself — it ends at
     # the shell. The feeder subshell types 'shutdown' when the shell's
@@ -166,6 +167,12 @@ for i in $(seq 1 "$N"); do
         fail=$((fail + 1))
         saved="$REPO_ROOT/build/stability-fail-$i.log"
         cp "$SERIAL" "$saved" 2>/dev/null || true
+        # Keep the console port's own evidence beside the serial log:
+        # what the host actor received, and what it did about it.
+        cp "$REPO_ROOT/build/vcon-port.txt" \
+           "$REPO_ROOT/build/stability-fail-$i-port.txt" 2>/dev/null || true
+        cp "$REPO_ROOT/build/vcon-dbg.txt" \
+           "$REPO_ROOT/build/stability-fail-$i-actor.txt" 2>/dev/null || true
         echo "boot $i: FAIL — $why (serial saved to ${saved#"$REPO_ROOT"/})"
     fi
 

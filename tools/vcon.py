@@ -16,8 +16,9 @@ virtqueue; this sees a socket.
 As a CLI (for the bash stability loop, which runs without the Python
 harness):
 
-    vcon.py <socket> <marker> <reply> [timeout_s]
+    vcon.py <socket> <marker> <reply> [timeout_s] [capture_path]
 """
+import os
 import socket
 import sys
 import threading
@@ -54,8 +55,16 @@ def actor(script: ConsoleScript, sock: Path, capture: Path | None,
     A failure here prints a NOTE and returns: a harness actor must
     never hang the run it is observing.
     """
+    t0 = time.monotonic()
     conn = connect(sock, connect_timeout_s, stop)
     seen = bytearray()
+    # Opt-in tracing (VCON_DEBUG=1): connect/send/exit timing on stderr.
+    # A harness actor that misbehaves must be diagnosable without
+    # changing how it behaves.
+    dbg = os.environ.get("VCON_DEBUG") == "1"
+    if dbg:
+        print(f"[{label}] connect {'ok' if conn else 'FAILED'} "
+              f"after {time.monotonic() - t0:.2f}s", file=sys.stderr)
     # APPENDED to, never rewritten: rewriting the whole accumulated
     # buffer once per chunk is O(n^2) disk traffic, and this port now
     # carries an entire boot log. The harness must never be the reason
@@ -94,24 +103,33 @@ def actor(script: ConsoleScript, sock: Path, capture: Path | None,
                 if seen.count(marker) < nth:
                     break
                 conn.sendall(text.encode())
+                if dbg:
+                    print(f"[{label}] sent {text!r} at "
+                          f"{time.monotonic() - t0:.2f}s "
+                          f"({len(seen)} bytes seen)", file=sys.stderr)
                 pending.pop(0)
     except Exception as e:  # noqa: BLE001 — an actor fault must not hang the run
         print(f"[{label}] NOTE: the console actor failed: {e}")
     finally:
+        if dbg:
+            print(f"[{label}] done at {time.monotonic() - t0:.2f}s, "
+                  f"{len(seen)} bytes seen, {len(pending) if 'pending' in dir() else '?'} "
+                  f"reply/replies unsent", file=sys.stderr)
         if cap_file is not None:
             cap_file.close()
         conn.close()
 
 
 def _main(argv: list[str]) -> int:
-    if not 3 <= len(argv) <= 4:
+    if not 3 <= len(argv) <= 5:
         print(__doc__)
         return 2
     sock, marker, reply = argv[:3]
-    timeout_s = float(argv[3]) if len(argv) == 4 else 60.0
+    timeout_s = float(argv[3]) if len(argv) >= 4 else 60.0
+    capture = Path(argv[4]) if len(argv) == 5 else None
     stop = threading.Event()
     script: ConsoleScript = [(marker.encode(), 1, reply)]
-    actor(script, Path(sock), None, stop, "vcon", timeout_s)
+    actor(script, Path(sock), capture, stop, "vcon", timeout_s)
     return 0
 
 

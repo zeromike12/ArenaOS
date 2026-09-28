@@ -636,7 +636,7 @@ const INPUT_EXIT_NO_KEYS: u64 = 68;
 /// off a pending READ. MUST match `INPUT_BADGE_GIVE_UP` in
 /// `userspace/abi.rs` — the one word of that notification that is not
 /// the device's.
-const INPUT_GIVE_UP_BADGE: u64 = 0x7302;
+const INPUT_GIVE_UP_BADGE: u64 = 1 << 19;
 
 /// How long the suite waits for a host-side actor before calling the
 /// driver's wait off, in HPET main-counter ticks: ~1 s (QEMU's HPET
@@ -668,7 +668,7 @@ const CONTEST_EXIT_BADGE: u64 = 0x00C0_0002;
 
 /// The give-up word on consoled's notification. MUST match
 /// `CONSOLE_BADGE_GIVE_UP` in `userspace/abi.rs`.
-const CONSOLE_GIVE_UP_BADGE: u64 = 0x7402;
+const CONSOLE_GIVE_UP_BADGE: u64 = 1 << 19;
 
 fn test_console_service() -> Outcome {
     match console_service_inner() {
@@ -754,6 +754,20 @@ fn console_service_inner() -> NetResult {
         nid_irq,
         CONSOLE_RELAY_VEC_RX,
         CONSOLE_GIVE_UP_BADGE,
+        // Start the clock when the guest's fixture has actually gone
+        // out (a TRANSMIT completion), not when the driver armed its
+        // relay: the harness cannot answer a question it has not
+        // been asked.
+        Some(CONSOLE_RELAY_VEC_TX),
+        // A LONGER window than the keyboard's, because this exchange
+        // crosses the host twice: the guest asks, the host reads,
+        // answers, and the guest reads back. (The 6-in-100 SKIPs that
+        // first prompted this were NOT a timing problem — they were
+        // consoled's badge words aliasing under `&`, fixed in abi.rs.
+        // The wider budget stays as honest headroom for a two-hop
+        // exchange, and is paid only by a boot where nobody is
+        // attached, which then waits a few seconds before skipping.)
+        ACTOR_WINDOW_TICKS * 4,
     ) {
         return Err(fail(reason));
     }
@@ -993,6 +1007,8 @@ fn input_service_inner() -> NetResult {
         nid_irq,
         INPUT_RELAY_VEC,
         INPUT_GIVE_UP_BADGE,
+        None, // a keyboard needs no prompting; the harness types first
+        ACTOR_WINDOW_TICKS,
     ) {
         return Err(fail(reason));
     }
@@ -1150,11 +1166,13 @@ fn wait_for_host_actor(
     nid_irq: u32,
     vec: u64,
     give_up: u64,
+    after_vec: Option<u64>,
+    window_ticks: u32,
 ) -> Result<(), &'static str> {
     let if_before = crate::arch::x86_64::interrupts_enabled();
     crate::arch::x86_64::sti();
     let hpet_va = paging::mmio_alias_va(intc::HPET_PHYS);
-    let gave_up = actor_window(hpet_va, vec);
+    let gave_up = actor_window(hpet_va, vec, after_vec, window_ticks);
     let notified = if gave_up {
         info!(
             "m6",
@@ -1183,14 +1201,14 @@ fn wait_for_host_actor(
 /// and a driver that never arms at all falls through to the ordinary
 /// drain's diagnostics rather than being misreported as "nobody
 /// typed". Caller holds IF=1.
-fn actor_window(hpet_va: u64, vec: u64) -> bool {
+fn actor_window(hpet_va: u64, vec: u64, after_vec: Option<u64>, window_ticks: u32) -> bool {
     // SAFETY: ring 0; `hpet_va` is the mapped MMIO alias of the HPET
     // page; 32-bit reads of the main counter's low half.
     let t0 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
     let expired = |t: u32| -> bool {
         // SAFETY: the same alias, the same register.
         let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
-        now.wrapping_sub(t) >= ACTOR_WINDOW_TICKS
+        now.wrapping_sub(t) >= window_ticks
     };
     while !relay::registered(vec) {
         if sched::live_threads() <= 1 || expired(t0) {
@@ -1199,6 +1217,34 @@ fn actor_window(hpet_va: u64, vec: u64) -> bool {
         sched::yield_now();
     }
     let base = relay::delivery_count(vec);
+
+    // Phase 1.5, when the host's action is a REPLY rather than an
+    // opening move: do not start counting until the guest's own
+    // message has actually left. The console test asks the harness to
+    // answer something contest sends, so the clock that matters starts
+    // at the TRANSMIT completion — starting it at relay-arming time
+    // measured the guest's own setup instead, and under load that
+    // expired before the question had even been asked (3 boots in 90).
+    // Bounded generously: if the guest never manages to transmit, the
+    // ordinary drain's deadline is the backstop and its diagnostics
+    // are the right ones.
+    if let Some(pre) = after_vec {
+        let pre_base = relay::delivery_count(pre);
+        // SAFETY: as above.
+        let t_pre = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+        while relay::delivery_count(pre) <= pre_base {
+            if sched::live_threads() <= 1 {
+                return false;
+            }
+            // SAFETY: as above.
+            let now = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
+            if now.wrapping_sub(t_pre) >= window_ticks * 4 {
+                break; // let the drain speak; do not blame the host
+            }
+            sched::yield_now();
+        }
+    }
+
     // SAFETY: as above.
     let t1 = unsafe { intc::hpet_read(hpet_va, intc::HPET_MAIN_COUNTER) };
     while sched::live_threads() > 1 {

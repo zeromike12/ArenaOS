@@ -81,12 +81,17 @@ const FRAME_TX: usize = 1;
 /// Badges merged into the ONE notification this driver blocks on
 /// (netd's two-vector pattern, ADR-0024, extended with a wake that is
 /// not an interrupt at all).
-const BADGE_RX: u64 = 0x7401;
-const BADGE_TX: u64 = 0x7411;
+///
+/// DISJOINT BITS, tested with `&` — `ipc::notify` ORs badges together,
+/// so two sources that can arrive in one wake must not share a bit.
+/// See the note on `CONSOLE_BADGE_GIVE_UP` in abi.rs for what numeric
+/// words cost here.
+const BADGE_RX: u64 = 1 << 16;
+const BADGE_TX: u64 = 1 << 17;
 /// The kernel's console output mirror has bytes (M6.4: not a device
 /// interrupt — the kernel notifies this same notification, which is
 /// exactly why the driver has only one thing to block on).
-const BADGE_CON_OUT: u64 = 0x7421;
+const BADGE_CON_OUT: u64 = 1 << 18;
 
 // ---- the diagnostic exit contract (m6.rs maps every code) --------------------
 

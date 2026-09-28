@@ -265,8 +265,18 @@ pub const INPUT_S_BAD_LEN: u64 = (-2i64) as u64;
 /// error — an honest "there is nothing to give you".
 pub const INPUT_S_NO_KEYS: u64 = (-3i64) as u64;
 
+/// A NOTIFICATION BADGE IS A BIT, NOT A NUMBER. `ipc::notify` merges
+/// badges with OR and `SYS_WAIT` returns the union, so every word that
+/// can arrive on the same notification must occupy a DISJOINT bit and
+/// be tested with `&`. Words that merely differ numerically alias:
+/// M6.4 shipped 0x7401/0x7411/0x7402 for a driver's receive, transmit,
+/// and give-up, and `badge & 0x7402` is nonzero for all three — a
+/// transmit completion read as "the supervisor called the wait off",
+/// about six boots in a hundred (whenever the real answer had not
+/// already arrived in the same wake). Single bits, always.
+///
 /// The relay notification carries the device's interrupt badge — and
-/// ONE other word, by contract: whoever spawned inputd (and therefore
+/// ONE other bit, by contract: whoever spawned inputd (and therefore
 /// owns the write side of that notification) may send
 /// `INPUT_BADGE_GIVE_UP` to abandon a pending READ. A keyboard driver
 /// cannot time out by itself — a key that never comes is
@@ -275,7 +285,7 @@ pub const INPUT_S_NO_KEYS: u64 = (-3i64) as u64;
 /// expected to type. The m6 suite uses it so that a boot with a
 /// keyboard attached and nobody at it reports an honest SKIP instead of
 /// hanging (ADR-0026).
-pub const INPUT_BADGE_GIVE_UP: u64 = 0x7302;
+pub const INPUT_BADGE_GIVE_UP: u64 = 1 << 19;
 
 /// Largest READ the service answers in one reply — the inline message
 /// is MSG_BYTES (64) and the count rides in a register, so the whole
@@ -329,7 +339,7 @@ pub const CONSOLE_MSG_MAX: u64 = 48;
 
 /// The spawner's give-up word on consoled's notification (ADR-0026's
 /// pattern, second use — see [`INPUT_BADGE_GIVE_UP`]).
-pub const CONSOLE_BADGE_GIVE_UP: u64 = 0x7402;
+pub const CONSOLE_BADGE_GIVE_UP: u64 = 1 << 19;
 
 // ---- diagnostic exit codes shared by both binaries ---------------------------
 
