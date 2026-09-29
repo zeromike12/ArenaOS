@@ -60,6 +60,14 @@ const SLOT_FSD: u64 = 3; // M5.3: the filesystem service call side
 const SLOT_STACK: u64 = 4; // ADR-0040: privileged admin-only client
 const SLOT_MGR_WAKE: u64 = 5; // shared wake hint; NOT stop authority
 const SLOT_MGR_ADMIN: u64 = 6; // private manager control notification, WRITE only
+// ADR-0044: root-issued diagnostic Process references; never the
+// production child's DESTROY. Slot 7 is still the transient child cap.
+const SLOT_LIFE_CHILD: u64 = 7;
+const SLOT_LIFE_SELF: u64 = 10;
+const SLOT_LIFE_MANAGER: u64 = 11;
+const SLOT_LIFE_NETD: u64 = 12;
+const SLOT_LIFE_RNGD: u64 = 13;
+const SLOT_LIFE_FOREIGN: u64 = 14;
 const STACK_TEST_TIMER: u64 = 1 << 21;
 /// The badge this shell lends its children's exits.
 const SPAWN_BADGE: u64 = 0x5AA5;
@@ -541,6 +549,168 @@ fn stackstop() {
     );
 }
 
+/// Both finish modes must refuse a slot that does not convey lifecycle
+/// authority over a reappable child. This invokes the ACTUAL kernel
+/// syscall, not a host-side imitation of its permission predicate.
+fn finish_refused(slot: u64) -> bool {
+    let r0 = unsafe { syscall2(SYS_PROC_FINISH, slot, 0) };
+    let r1 = unsafe { syscall2(SYS_PROC_FINISH, slot, 1) };
+    if r0 != -2 || r1 != -2 {
+        let mut o = Out::new();
+        o.str("m8: lifetest refusal mismatch slot=");
+        o.u64(slot);
+        o.str(" mode0=");
+        o.i64(r0);
+        o.str(" mode1=");
+        o.i64(r1);
+        o.crlf();
+        o.flush();
+        return false;
+    }
+    true
+}
+
+fn lifetest() {
+    let mut client = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, client.as_mut_ptr() as u64) } != 0 {
+        write_str("m8: lifetest SKIP (no production client cap)\r\n");
+        return;
+    }
+    let mut ids = [0u64; 5];
+    for (i, slot) in [
+        SLOT_LIFE_SELF,
+        SLOT_LIFE_MANAGER,
+        SLOT_LIFE_NETD,
+        SLOT_LIFE_RNGD,
+        SLOT_LIFE_FOREIGN,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut desc = [0u64; 3];
+        if unsafe { syscall2(SYS_CAP_DESCRIBE, *slot, desc.as_mut_ptr() as u64) } != 0
+            || desc[0] != 4
+            || desc[1] == 0
+            || desc[2]
+                != if i == 4 {
+                    RIGHTS_READ
+                } else {
+                    RIGHTS_READ | RIGHTS_DESTROY
+                }
+        {
+            write_str("m8: lifetest FAIL (literal Process reference or rights mismatch)\r\n");
+            return;
+        }
+        ids[i] = desc[1];
+    }
+    if ids.iter().enumerate().any(|(i, id)| ids[..i].contains(id)) {
+        write_str("m8: lifetest FAIL (duplicate protected or foreign target)\r\n");
+        return;
+    }
+    let mut o = Out::new();
+    o.str("m8: lifetest refs shell=");
+    o.u64(ids[0]);
+    o.str(" manager=");
+    o.u64(ids[1]);
+    o.str(" netd=");
+    o.u64(ids[2]);
+    o.str(" rngd=");
+    o.u64(ids[3]);
+    o.str(" foreign=");
+    o.u64(ids[4]);
+    o.crlf();
+    o.flush();
+    let mut msg = [0u8; MSG_BYTES];
+    let (r, st, _) = fs_call(FS_OP_LS, 0, CAP_NONE, &mut msg);
+    if r < 0 || st != FS_OK {
+        write_str("m8: lifetest FAIL (filesystem baseline not settled)\r\n");
+        return;
+    }
+    let gateway = 10 | (2 << 16) | (2 << 24);
+    let (r, st, mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    let (r2, st2, stats) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || mac == 0 || r2 < 0 || st2 != ARP_S_OK || stats >> 32 == 0 {
+        write_str("m8: lifetest FAIL (production child not serving actual wire)\r\n");
+        return;
+    }
+    let Some(baseline) = resource_snapshot() else {
+        write_str("m8: lifetest FAIL (Power-gated resource baseline)\r\n");
+        return;
+    };
+    for slot in [
+        SLOT_LIFE_SELF,
+        SLOT_LIFE_MANAGER,
+        SLOT_LIFE_NETD,
+        SLOT_LIFE_RNGD,
+    ] {
+        if !finish_refused(slot) {
+            write_str("m8: lifetest FAIL (protected target stopped by held DESTROY)\r\n");
+            return;
+        }
+    }
+    write_str("m8: lifetest held DESTROY refused for self/manager/netd/rngd\r\n");
+    if !finish_refused(SLOT_LIFE_FOREIGN)
+        || !finish_refused(SLOT_STACK)
+        || !finish_refused(SLOT_POWER)
+        || !finish_refused(15)
+        || !finish_refused(ids[4])
+        || unsafe {
+            syscall3(
+                SYS_CAP_COPY,
+                SLOT_LIFE_FOREIGN,
+                SLOT_LIFE_CHILD,
+                RIGHTS_READ | RIGHTS_DESTROY,
+            )
+        } != -2
+    {
+        write_str("m8: lifetest FAIL (foreign, forged or amplified lifecycle authority)\r\n");
+        return;
+    }
+    write_str("m8: lifetest foreign READ-only/guessed pid/empty/wrong-kind refused\r\n");
+    // Our ordinary shell child is the positive control. A Process cap
+    // lands in the first free slot (7), never in reserved 10..14.
+    let child = unsafe { syscall5(SYS_SPAWN, SLOT_IMAGE, 0, 0, SLOT_NOTIF, SPAWN_BADGE) };
+    if child <= 0 {
+        write_str("m8: lifetest FAIL (positive-control child spawn refused)\r\n");
+        return;
+    }
+    let badge = unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) };
+    let mut desc = [0u64; 3];
+    if badge != SPAWN_BADGE as i64
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_LIFE_CHILD, desc.as_mut_ptr() as u64) } != 0
+        || desc != [4, child as u64, RIGHTS_READ | RIGHTS_DESTROY]
+        || unsafe { syscall2(SYS_PROC_FINISH, SLOT_LIFE_CHILD, 1) } != STATUS_BUSY
+        || unsafe { syscall2(SYS_PROC_FINISH, SLOT_LIFE_CHILD, 0) } != 0
+        || !finish_refused(SLOT_LIFE_CHILD)
+    {
+        write_str("m8: lifetest FAIL (live-only mode, positive reap or stale slot)\r\n");
+        return;
+    }
+    write_str("m8: lifetest child reaped by held cap; dead mode-1 and stale both refused\r\n");
+    // Resolve a different slirp address after the refusals: the first
+    // gateway resolve cannot make this a cache hit. The same endpoint
+    // must still drive a new request over the actual virtio-net wire.
+    let dns = 10 | (2 << 16) | (3 << 24); // 10.0.2.3
+    let (wire_rc, wire_st, dns_mac) = stack_call(ARP_OP_RESOLVE, dns);
+    let (r, st, after) = stack_call(ARP_OP_STATS, 0);
+    if wire_rc < 0
+        || wire_st != ARP_S_OK
+        || dns_mac == 0
+        || r < 0
+        || st != ARP_S_OK
+        || after >> 32 <= stats >> 32
+        || resource_snapshot() != Some(baseline)
+    {
+        write_str(
+            "m8: lifetest FAIL (foreign production service lost wire or resources drifted)\r\n",
+        );
+        return;
+    }
+    write_str(
+        "m8: lifetest PASS (protected/foreign/forged/stale denied; own child reaped; wire live; resources flat)\r\n",
+    );
+}
+
 fn stackstress() {
     let mut cap = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, cap.as_mut_ptr() as u64) } != 0
@@ -949,7 +1119,8 @@ const PROMPT: &str = "arena> ";
 /// Two bounded debug-write chunks: Out::push drops bytes beyond
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
-const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n  stackstop - opt-in manager-owned forced live stop\r\n  shutdown - halt the machine\r\n";
+const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n";
+const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -1012,6 +1183,7 @@ pub unsafe extern "C" fn _start() -> ! {
                 o.str(HELP);
                 o.flush();
                 write_str(HELP_MORE);
+                write_str(HELP_LAST);
                 continue;
             } else if eq(line, b"ps") {
                 do_ps(&mut o);
@@ -1043,6 +1215,10 @@ pub unsafe extern "C" fn _start() -> ! {
             } else if eq(line, b"stackstop") {
                 o.flush();
                 stackstop();
+                continue;
+            } else if eq(line, b"lifetest") {
+                o.flush();
+                lifetest();
                 continue;
             } else if eq(line, b"spawn") {
                 o.flush();

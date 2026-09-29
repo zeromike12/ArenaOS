@@ -104,6 +104,8 @@ struct SpawnRec {
     live: bool,
     child_pid: u64,
     child_tid: u64,
+    /// Only spawn_from creates user-lifecycle targets. Boot roots belong to the kernel.
+    user_child: bool,
     entry: u64,
     stack_top: u64,
     /// Page-granular (lo, hi) user regions: the image's segments plus
@@ -115,6 +117,7 @@ const EMPTY_REC: SpawnRec = SpawnRec {
     live: false,
     child_pid: 0,
     child_tid: 0,
+    user_child: false,
     entry: 0,
     stack_top: 0,
     regions: [(0, 0); sched::USER_REGIONS_MAX],
@@ -141,6 +144,20 @@ pub fn has_record(pid: u64) -> bool {
             (*RECORDS.get())
                 .iter()
                 .any(|rec| rec.live && rec.child_pid == pid)
+        }
+    })
+}
+
+/// Is this a live child created through SYS_SPAWN, not a kernel boot root?
+/// Authority to finish it still requires a held Process/DESTROY cap;
+/// provenance only protects kernel-owned roots from user lifecycle calls.
+pub fn has_user_child_record(pid: u64) -> bool {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*RECORDS.get())
+                .iter()
+                .any(|rec| rec.live && rec.child_pid == pid && rec.user_child)
         }
     })
 }
@@ -291,7 +308,7 @@ fn prepare(img_id: u32) -> Result<Prepared, Status> {
 /// in SYS_THREAD_EXIT), fill the record's start facts, and start the
 /// child's first thread. Rolls the half-built child back on any
 /// refusal; returns the child's pid.
-fn finish(p: &Prepared, notif: Option<(u32, u64)>) -> Result<u64, Status> {
+fn finish(p: &Prepared, notif: Option<(u32, u64)>, user_child: bool) -> Result<u64, Status> {
     if let Some((nid, badge)) = notif {
         if proc::set_exit_notif(p.pid, nid, badge).is_err() {
             p.rollback();
@@ -302,6 +319,7 @@ fn finish(p: &Prepared, notif: Option<(u32, u64)>) -> Result<u64, Status> {
     without_interrupts(|| unsafe {
         let rec = &mut (*RECORDS.get())[p.idx];
         rec.child_pid = p.pid;
+        rec.user_child = user_child;
         rec.entry = p.entry;
         rec.stack_top = p.stack_top;
         rec.regions = p.regions;
@@ -386,7 +404,7 @@ pub fn spawn_from(
     };
 
     // 6. Notification registration + record + first thread.
-    match finish(&half, notif) {
+    match finish(&half, notif, true) {
         Ok(pid) => Ok(pid),
         Err(status) => {
             // finish rolled the child back; the handle in the PARENT's
@@ -430,7 +448,7 @@ pub fn spawn_init(
             return Err(e);
         }
     }
-    match finish(&half, notif) {
+    match finish(&half, notif, false) {
         Ok(pid) => Ok(pid),
         Err(status) => {
             // finish already rolled the child back.

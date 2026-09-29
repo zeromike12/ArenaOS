@@ -47,13 +47,14 @@ def verify_qualified_image(suite_log: Path) -> tuple[str, bytes]:
         raise ValueError("ESP contains an EFI different from the qualified final EFI")
     log = suite_log.read_text()
     suite = re.search(r"ALL TESTS PASSED \((\d+) test suites\)", log)
-    if not suite or int(suite.group(1)) < 24 or \
+    if not suite or int(suite.group(1)) < 25 or \
             "INITIAL-START SUBSTRATE: PASS" not in log or \
             "PRODUCTION ORDERLY-RESTART SUBSTRATE: PASS" not in log or \
             "REPEATED-ACCOUNTING SUBSTRATE: PASS" not in log or \
             "UNEXPECTED-CRASH SUBSTRATE: PASS" not in log or \
-            "FORCED-LIVE-STOP SUBSTRATE: PASS" not in log:
-        raise ValueError("all 24+ historical suites + production forced live stop proof required")
+            "FORCED-LIVE-STOP SUBSTRATE: PASS" not in log or \
+            "LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: PASS" not in log:
+        raise ValueError("all 25+ historical suites + lifecycle-authority refusal proof required")
     return digest(efi), esp.read_bytes()
 
 
@@ -82,7 +83,7 @@ def main() -> int:
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
-        "Phase 8.0: INCOMPLETE; real #UD and manager-owned forced live stop, flat restarts and budget proven; lifecycle refusals and active dependency probes open\n"
+        "Phase 8.0: INCOMPLETE; crash, forced stop and lifecycle refusals proven; active dependency probes open\n"
     )
     (stage / "sha256sums.txt").write_text("".join(
         f"{digest((stage / path).read_bytes())}  {path}\n" for path in FILES
@@ -120,7 +121,7 @@ def main() -> int:
             os.environ["ARENA_OVMF_CODE"] = str(unpacked / "edk2-x86_64-code.fd")
             os.environ["ARENA_OVMF_VARS"] = str(unpacked / "ovmf-vars-template.img")
             rc, serial, _ = mtest.boot("checkpoint-bundle", unpacked / "arena-esp.img",
-                                       [(b"servicemgr: production netstackd READY pid", 1, b"stackstop\r"),
+                                       [(b"lifecycle read-only foreign Process reference installed pid", 1, b"lifetest\r"),
                                         (b"arena>", 2, b"shutdown\r")], scratch)
         finally:
             for key, old in (("ARENA_OVMF_CODE", old_code), ("ARENA_OVMF_VARS", old_vars)):
@@ -131,15 +132,16 @@ def main() -> int:
         required = ("m7: RESULT PASS (2/2)",
                     "servicemgr: production netstackd READY pid",
                     "four installed child caps audited (netd/W stack/R backoff/RW rngd/W)",
-                    "servicemgr: ignored unauthenticated shared wake hint",
-                    "servicemgr: refused unknown private admin request",
-                    "proc_finish mode1: owner ",
-                    "live_threads=1 held Process/DESTROY",
-                    "servicemgr: forcibly stopped LIVE production child through held Process cap",
-                    "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
+                    "lifecycle protected refs shell=",
+                    "lifecycle read-only foreign Process reference installed pid",
+                    "m8: lifetest held DESTROY refused for self/manager/netd/rngd",
+                    "m8: lifetest foreign READ-only/guessed pid/empty/wrong-kind refused",
+                    "m8: lifetest child reaped by held cap; dead mode-1 and stale both refused",
+                    "m8: lifetest PASS (protected/foreign/forged/stale denied; own child reaped; wire live; resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
         if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
-                or serial.count("servicemgr: production netstackd READY pid") != 2):
+                or serial.count("servicemgr: production netstackd READY pid") != 1
+                or "m8: lifetest FAIL" in serial or "servicemgr: OFFLINE" in serial):
             (ROOT / "build/checkpoint-bundle-failure.log").write_text(serial)
             raise ValueError("extracted bundle did not boot and shut down cleanly")
 

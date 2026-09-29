@@ -433,14 +433,14 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // shared event wake, neither netd nor the stack can signal it.
     let manager_admin_nid = crate::ipc::create_notification()
         .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: admin notification table full"));
-    let net_eid = match spawn_netd(manager_nid) {
-        Ok(Some((_pid, eid))) => Some(eid),
+    let (net_driver_pid, net_eid) = match spawn_netd(manager_nid) {
+        Ok(Some((pid, eid))) => (Some(pid), Some(eid)),
         Ok(None) => {
             info!(
                 "kernel",
                 "netd: no virtio-net function on bus 0 — the network service stays offline (attach it with: -netdev user,id=net0 -device virtio-net-pci,netdev=net0)"
             );
-            None
+            (None, None)
         }
         Err(reason) => crate::halt::halt_machine(reason),
     };
@@ -450,14 +450,14 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // DMA) on its endpoint — the third driver on the shared virtio core.
     // ABSENT virtio-rng function → the entropy service is simply
     // offline, exactly as netd's fixture is optional.
-    let rng_eid = match spawn_rngd(rng_ready_nid) {
-        Ok(Some((_pid, eid))) => Some(eid),
+    let (rng_driver_pid, rng_eid) = match spawn_rngd(rng_ready_nid) {
+        Ok(Some((pid, eid))) => (Some(pid), Some(eid)),
         Ok(None) => {
             info!(
                 "kernel",
                 "rngd: no virtio-rng function on bus 0 — the entropy service stays offline (attach it with: -device virtio-rng-pci)"
             );
-            None
+            (None, None)
         }
         Err(reason) => crate::halt::halt_machine(reason),
     };
@@ -580,12 +580,42 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     } else {
         &shell_grants
     };
-    match crate::spawn::spawn_init(1, shell_caps, None) {
-        Ok(pid) => info!(
-            "kernel",
-            "shell spawned: pid {pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
-        ),
-        Err(reason) => crate::halt::halt_machine(reason),
+    let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
+        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    info!(
+        "kernel",
+        "shell spawned: pid {shell_pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
+    );
+    // ADR-0044: diagnostic Process references only on a full fixture.
+    // All four DESTROY targets are structurally protected by the kernel;
+    // the foreign production child gets READ ONLY *after* the kernel
+    // independently audits its actual Process cap in the manager.
+    // Fixed slots 10..14 do not overlap the shell's spawn/File caps.
+    if let (Some(net), Some(rng), Some(_)) = (net_driver_pid, rng_driver_pid, expected_stack_caps) {
+        use crate::cap::{Cap, CapObj, RIGHTS_DESTROY, RIGHTS_READ};
+        for (slot, target, rights) in [
+            (10, shell_pid, RIGHTS_READ | RIGHTS_DESTROY),
+            (11, manager_pid, RIGHTS_READ | RIGHTS_DESTROY),
+            (12, net, RIGHTS_READ | RIGHTS_DESTROY),
+            (13, rng, RIGHTS_READ | RIGHTS_DESTROY),
+            (14, shell_pid, RIGHTS_READ), // inert reserved placeholder
+        ] {
+            crate::cap::issue(
+                shell_pid,
+                slot,
+                Cap {
+                    obj: CapObj::Process { pid: target },
+                    rights,
+                },
+            )
+            .unwrap_or_else(|_| {
+                crate::halt::halt_machine("m8: protected Process reference issue refused")
+            });
+        }
+        info!(
+            "m8",
+            "lifecycle protected refs shell={shell_pid} manager={manager_pid} netd={net} rngd={rng}; foreign placeholder READ-only"
+        );
     }
 
     // Full shipping fixture occupies all 11 notifications (ADR-0043).
@@ -623,6 +653,34 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
                     info!(
                         "m8",
                         "manager-owned netstackd pid {child}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
+                    );
+                    // READ-only reference; neither boot policy nor a
+                    // manifest grants the shell the child's DESTROY.
+                    let previous = last_audited_child.unwrap_or(shell_pid);
+                    let want = crate::cap::Cap {
+                        obj: crate::cap::CapObj::Process { pid: previous },
+                        rights: crate::cap::RIGHTS_READ,
+                    };
+                    if crate::cap::read(shell_pid, 14).ok() != Some(want) {
+                        crate::halt::halt_machine("m8: foreign reference slot was modified");
+                    }
+                    crate::cap::consume(shell_pid, 14).unwrap_or_else(|_| {
+                        crate::halt::halt_machine("m8: foreign reference retire failed")
+                    });
+                    crate::cap::issue(
+                        shell_pid,
+                        14,
+                        crate::cap::Cap {
+                            obj: crate::cap::CapObj::Process { pid: child },
+                            rights: crate::cap::RIGHTS_READ,
+                        },
+                    )
+                    .unwrap_or_else(|_| {
+                        crate::halt::halt_machine("m8: foreign reference issue failed")
+                    });
+                    info!(
+                        "m8",
+                        "lifecycle read-only foreign Process reference installed pid {child} slot 14"
                     );
                     last_audited_child = Some(child);
                 }

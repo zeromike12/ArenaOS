@@ -1829,9 +1829,10 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
 
 /// SYS_PROC_FINISH(slot, mode): a Process cap with DESTROY, not a pid.
 /// Mode 0 reaps only an exited child; mode 1 explicitly stops a live
-/// child and then reaps it. Kernel-owned supervised drivers (including
-/// those waiting to restart) and the caller itself are never targets.
-/// The spawn record, child address space and caller handle are all
+/// child and then reaps it. Kernel-bootstrapped roots (including the
+/// manager), supervised drivers waiting to restart, and self are never
+/// targets: a live USER-child spawn record is required, but caller parent
+/// identity is not. The spawn record, child address space and handle are all
 /// retired, so repeated restarts cannot exhaust the bounded tables.
 fn sys_proc_finish(a0: u64, a1: u64) -> Status {
     let Some(owner) = crate::sched::current_proc_id() else {
@@ -1850,7 +1851,7 @@ fn sys_proc_finish(a0: u64, a1: u64) -> Status {
         || target == owner
         || crate::supervise::owns_pid(target)
         || crate::proc::pml4_of(target).is_none()
-        || !crate::spawn::has_record(target)
+        || !crate::spawn::has_user_child_record(target)
     {
         return STATUS_BAD_ARG;
     }

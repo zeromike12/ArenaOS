@@ -53,10 +53,21 @@ interactive boots do not auto-kill the stack. `test_m8_stop.py`
 checks a forgery of the shared wake hint, a private admin request,
 the kernel's mode-1 Process-cap operation on a still-live production
 child, an in-flight caller failure, an independently audited restart
-and flat accounting; no-device boots SKIP. Neither the shell nor any
-driver receives a Process handle. Each new commit carries a bundled
+and flat accounting; no-device boots SKIP. The stop request passes no
+Process handle to the shell or driver. Each new commit carries a bundled
 boot image and running instructions under `releases/checkpoints/`
 (ADR-0039), gated by full suite and artifact-bound 100/100 boots.
+`test_m8_lifecycle.py` (ADR-0044) checks actual root-issued Process
+references in the Power-holding shell against independent boot and
+manager-child identities. Both finish modes refuse self, the kernel-owned
+manager/drivers, and a read-only manager-owned child; guessed/empty/
+wrong-kind slots and rights amplification fail. An ordinary user child
+is positively reaped, resource counts stay flat, and the same production
+endpoint serves fresh wire traffic. Both absent-device fixtures SKIP.
+The shell receives narrowly scoped diagnostic references only from the
+trusted boot root on a full fixture; neither a driver nor an ordinary
+client receives them. Phase 8.0 stays incomplete until active dependency
+probes also pass.
 
 ## The testing pyramid
 
