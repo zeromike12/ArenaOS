@@ -35,7 +35,7 @@ use crate::sync::{SyncCell, without_interrupts};
 /// Image-registry capacity. v1 populates two entries (the embedded
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
-pub const MAX_IMAGES: usize = 23;
+pub const MAX_IMAGES: usize = 24;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
 /// excess is a typed refusal).
@@ -96,6 +96,7 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         20 => Some(elf::DEPCHECK_IMAGE),
         21 => Some(elf::CONFIGD_IMAGE),
         22 => Some(elf::CONFIGREAD_IMAGE),
+        23 => Some(elf::CONFIGUP_IMAGE),
         _ => None,
     }
 }

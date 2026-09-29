@@ -70,8 +70,13 @@ def main() -> int:
     efi_sha, esp_bytes = verify_qualified_image(args.suite_log)
     if args.checkpoint.startswith("phase81-"):
         log = args.suite_log.read_text()
-        if "ALL TESTS PASSED (29 test suites)" not in log or "CONFIG-READ-BOUNDARY: PASS" not in log:
-            raise ValueError("8.1 read checkpoint requires all 29 historical suites and its new guest proof")
+        total = 31 if args.checkpoint == "phase81-transactional-core" else 29
+        if f"ALL TESTS PASSED ({total} test suites)" not in log or "CONFIG-READ-BOUNDARY: PASS" not in log:
+            raise ValueError(f"8.1 checkpoint requires all {total} historical suites and the guest read proof")
+        if args.checkpoint == "phase81-transactional-core" and (
+            "AUTHORIZED TRANSACTION/CRASH: PASS" not in log or
+            "EIGHT-SLOT EXHAUSTION: PASS" not in log):
+            raise ValueError("transactional checkpoint requires updater, disk crash and bounded-table proofs")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -90,7 +95,9 @@ def main() -> int:
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1: READ BOUNDARY ONLY; no authorized SET, 8.1 INCOMPLETE\n"
+        + ("Phase 8.1: TRANSACTIONAL CORE; positive SET/crash/table/disk proofs; 8.1 INCOMPLETE pending resource/fault accounting\n"
+           if args.checkpoint == "phase81-transactional-core" else
+           "Phase 8.1: READ BOUNDARY ONLY; no authorized SET, 8.1 INCOMPLETE\n"
            if args.checkpoint.startswith("phase81-") else "")
     )
     (stage / "sha256sums.txt").write_text("".join(
@@ -153,6 +160,9 @@ def main() -> int:
                          "configread: READ UNSET",
                          "configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)",
                          "configread: boot-root reader reaped; no update authority delegated")
+        if args.checkpoint == "phase81-transactional-core":
+            required += ("configup: SKIP (no trusted test intent; no SET)",
+                         "configup: boot-root updater reaped; marker never delegated to shell")
         if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
                 or serial.count("servicemgr: production netstackd READY pid") != 2
                 or serial.count("servicemgr: active netd MAC and rngd entropy probes passed; worker reaped") != 2

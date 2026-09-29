@@ -240,7 +240,13 @@ def run_qemu(label: str, esp: Path,
                 except OSError:
                     data = b""
                 marker, nth, payload = script[sent]
-                if data.count(marker) >= nth:
+                # Some lifecycle tests require BOTH a service-ready
+                # event and the shell prompt. Sending at only READY can
+                # queue the command while the pre-shell config updater
+                # is still draining, splitting its echoed line. A tuple
+                # is a conjunction, not a timed retry or weaker proof.
+                markers = marker if isinstance(marker, tuple) else (marker,)
+                if all(data.count(m) >= nth for m in markers):
                     try:
                         assert proc.stdin is not None
                         proc.stdin.write(payload)
@@ -358,7 +364,11 @@ def boot(label: str, esp: Path,
         def feeder() -> None:
             nonlocal killed
             sent = 0
-            armed_at: int | None = None
+            # A boot-time service may transact before the shell can
+            # accept any feeder command. With no feed, arm from byte 0;
+            # command-driven crash tests still arm only after their last
+            # input, preserving their existing isolation from boot logs.
+            armed_at: int | None = 0 if kill and not feed else None
             marker, nth, delay = kill if kill else (b"", 0, 0.0)
             while not stop.is_set():
                 try:

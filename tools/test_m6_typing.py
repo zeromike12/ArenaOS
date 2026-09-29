@@ -56,18 +56,16 @@ LABEL = "test-m6-typing"
 # Every boot replays the full suite first, and the m6 input_service
 # test waits on real keystrokes — so this boot supplies that fixture
 # too, from the same keyboard, before the shell ever prompts.
-# The first shell line waits for the PRODUCTION fsd's mount (the second
-# "mounted AFS1" of the boot — the m5 suite's instance mounts first)
-# rather than for the prompt: fsd is a separate process and finishes
-# its mount reads CONCURRENTLY with the shell's first prompt, so typing
-# at the prompt interleaves the per-character echo with storaged's log
-# lines. Waiting for the boot's last background work makes the echoed
-# line contiguous and the assertion exact. (Keystrokes typed before the
-# shell is even prompting would still be buffered by the line
-# discipline — this is about a readable log, not correctness.)
+# The first shell line waits for the REAL shell prompt. The old fixture
+# used the production fsd's second mount as a surrogate. After ADR-0046
+# added a separate pre-shell updater, that mount precedes the updater's
+# device-bound drain: typing at mount echoed the first 'e' *before* the
+# shell existed and split the exact serial-echo proof. The command was
+# still executed, but the assertion correctly caught the split. Wait
+# for the boundary we actually need, without weakening byte-exact echo.
 KEY_SCRIPT = [
     (b"inputd: virtio-input ready", 1, "arena"),
-    (b"fsd: mounted AFS1", 2, "echo Hello-From-The-Keyboard\r"),
+    (b"arena>", 1, "echo Hello-From-The-Keyboard\r"),
     (b"arena>", 2, "psX\x08\r"),
     (b"arena>", 3, "shutdown\r"),
 ]

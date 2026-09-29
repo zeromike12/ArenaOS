@@ -170,18 +170,26 @@ pub fn block_req_w1(op: u64, buf_offset: u64) -> u64 {
 }
 
 // ---- Phase 8.1 configuration-service protocol (ADR-0046) --------------------
-// READ is available with only Endpoint/WRITE. SET requires a transferred
-// boot-granted marker verified by the RECEIVER; until the write path is
-// proven it returns CFG_NOT_READY even with authority. No caller id gate.
+// READ needs only Endpoint/WRITE. Every SET and TEST_PLAN must transfer
+// an exact service-issued marker: endpoint access or a filename alone
+// is NEVER update authority. SET msg: u16 payload length (0..32), bytes
+// at [2..], all remaining bytes zero. Return COMMITTED only after fsd's
+// successful CREATE/WRITE/CLOSE and a byte-exact full namespace rescan.
 pub const CFG_OP_READ: u64 = 1;
 pub const CFG_OP_SET: u64 = 2;
+pub const CFG_OP_TEST_PLAN: u64 = 3;
 pub const CFG_OK: u64 = 0; // READ: value in msg[0..2] len, [2..34] data; reply w1=seq
-pub const CFG_UNSET: u64 = 1; // no committed generation
+pub const CFG_UNSET: u64 = 1; // no committed generation or opt-in test request
 pub const CFG_DENIED: u64 = 2; // receiving-service authority refusal
 pub const CFG_CORRUPT: u64 = 3; // visible malformed generation/namespace
 pub const CFG_IO: u64 = 4; // FS unavailable/short read, never fallback
-pub const CFG_NOT_READY: u64 = 5; // explicit read-only checkpoint
+pub const CFG_NOT_READY: u64 = 5; // reserved for compatibility with read-only checkpoint
 pub const CFG_BAD_OP: u64 = 6;
+pub const CFG_COMMITTED: u64 = 7; // exact new generation persisted and rescanned
+pub const CFG_NO_SPACE: u64 = 8; // eight immutable generations exhausted
+pub const CFG_DEGRADED: u64 = 9; // ambiguous FS failure: no more writes this boot
+pub const CFG_BAD_INPUT: u64 = 10;
+pub const CFG_UNCHANGED: u64 = 11; // desired value already committed, no pending generation
 
 // ---- the filesystem-service protocol (ADR-0023) --------------------------------
 //

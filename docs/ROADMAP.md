@@ -1059,19 +1059,24 @@ is not completed by accepting an ADR.
       ordered-write/atomic-sector crash model. The byte-exact `no_std`
       codec and fail-closed generation scanner compile for the bare-metal
       target and match the independent Python reference. A resident
-      `configd` now scans real fsd-visible records; an isolated ordinary
+      `configd` scans real fsd-visible records; an isolated ordinary
       reader proves UNSET, exact host-provisioned VALUE, fail-closed
       malformed/newest-checksum rejection and 20 receiver-side SET
-      refusals. The read-boundary checkpoint is NOT 8.1 completion:
-      there is no authorized updater, guest SET, atomic update or
-      crash-recovery proof yet. AFS1 can hide a newer generation if
-      its commit sector suffers arbitrary corruption; after the explicit
-      scope decision, 8.1 rejects **visible malformed config records**
-      rather than pretending to detect media corruption or rollback
-      outside that model. Implement bounded atomic update/read and
-      multi-boot verification, including SIGKILL at every CREATE/WRITE
-      commit boundary, CLOSE and reply; never silently substitute an
-      older value for a visible corrupt record. No GC or 8.2 UI yet.
+      refusals. The **transactional-core checkpoint** adds a distinct
+      boot-granted updater: actual marker-authorized
+      CREATE/WRITE/CLOSE/rescan, two different guest values, seven
+      SIGKILL/reboot recovery gates on the SAME disk, eight byte-exact
+      immutable generations and typed ninth/full-disk refusals. The
+      trusted raw-FS shell only stages a test-intent file; it never
+      receives update authority. 8.1 stays IN PROGRESS pending numeric
+      per-update resource accounting and fault-return/degraded proof.
+      AFS1 can hide a newer generation if its commit sector suffers
+      arbitrary corruption; after the explicit scope decision, 8.1
+      rejects **visible malformed config records** rather than pretending
+      to detect media corruption or rollback outside that model. The
+      existing guest tests exercise CREATE/WRITE-commit/CLOSE/reply kill
+      boundaries without silently substituting an older visible record.
+      No GC or 8.2 UI yet.
 - [ ] **8.2 permission manifests + CLI grant workflow**. Separate an
       application's requested permissions from the actual issued
       grants, define an explicit trusted approver and revocation

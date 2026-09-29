@@ -412,7 +412,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // ADR-0046: a separate ring-3 config reader owns neither fsd nor
     // the update marker. Only the configd process sees the raw FS cap;
     // the inert marker is a receiver-side anchor, NOT an opcode secret.
-    let (config_eid, _config_marker) = spawn_configd(fs_eid)
+    let (config_eid, config_marker) = spawn_configd(fs_eid)
         .unwrap_or_else(|e| crate::halt::halt_machine(e));
 
     // --- M6.1: the production network service (ADR-0024) --------------------
@@ -610,6 +610,72 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     crate::proc::destroy(reader_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
     crate::spawn::forget(reader_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
     info!("kernel", "configread: boot-root reader reaped; no update authority delegated");
+
+    // A separate updater holds the only transferable update marker.
+    // It first reads a marker-gated test plan from configd and SKIPs
+    // without any FS writes if the trusted shell staged no intent on
+    // a previous boot. The ordinary reader has already exited: neither
+    // it nor the shell is ever granted the marker or raw FS by proxy.
+    let update_grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid: config_eid },
+            rights: crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_COPY,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: config_marker },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
+        },
+    ];
+    let updater_pid = crate::spawn::spawn_init(23, &update_grants, Some((shell_nid, 0xC082)))
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    for (slot, &wanted) in update_grants.iter().enumerate() {
+        if crate::cap::read(updater_pid, slot).ok() != Some(wanted) {
+            crate::halt::halt_machine("configup: boot grant did not match literal policy");
+        }
+    }
+    let up_rec = crate::spawn::records_snapshot();
+    let updater_tid = up_rec.iter().flatten().find(|&&(pid, _)| pid == updater_pid)
+        .map(|&(_, tid)| tid)
+        .unwrap_or_else(|| crate::halt::halt_machine("configup: spawn record missing"));
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    let t0 = crate::timekeeping::now_us();
+    crate::arch::x86_64::sti();
+    loop {
+        // Keep auditing the manager's initial probe across BOTH child
+        // drains; one could exit between the two reader/updater proofs.
+        if let Some(wanted) = expected_stack_caps {
+            if let Some(ManagerChild::Probe(pid, mode)) =
+                audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+                    .unwrap_or_else(|e| crate::halt::halt_machine(e))
+            {
+                if last_audited_probe != Some(pid) {
+                    if mode == 0 {
+                        info!("m8", "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras");
+                    } else {
+                        info!("m8", "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited");
+                    }
+                    last_audited_probe = Some(pid);
+                }
+            }
+        }
+        if let Some(status) = crate::arch::x86_64::syscall::exit_status_of(updater_tid) {
+            if status != 42 {
+                crate::halt::halt_machine("configup: updater rejected plan/update proof");
+            }
+            break;
+        }
+        if crate::timekeeping::now_us().saturating_sub(t0) > 21_000_000 {
+            crate::halt::halt_machine("configup: device-bound updater deadline expired");
+        }
+        crate::sched::yield_now();
+    }
+    if !if_before { crate::arch::x86_64::cli(); }
+    if crate::ipc::try_wait(shell_nid) != Ok(0xC082) {
+        crate::halt::halt_machine("configup: proof client exit badge missing");
+    }
+    crate::proc::destroy(updater_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::spawn::forget(updater_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    info!("kernel", "configup: boot-root updater reaped; marker never delegated to shell");
 
     let shell_grants = [
         crate::cap::Cap {
@@ -1100,7 +1166,7 @@ fn spawn_configd(fs_eid: u32) -> Result<(u32, u32), &'static str> {
             return Err("configd: boot grant did not match literal policy");
         }
     }
-    info!("kernel", "configd spawned: pid {pid}, image21, FS/W + cfg/R + inert marker/R; no updater grant");
+    info!("kernel", "configd spawned: pid {pid}, image21, FS/W + cfg/R + marker/R anchor; updater separately granted");
     Ok((eid, nid))
 }
 

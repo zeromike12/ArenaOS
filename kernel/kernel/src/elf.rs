@@ -239,11 +239,13 @@ pub static DEPCHECK_IMAGE: &[u8] =
     include_bytes!("../../../userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck");
 
 /// ADR-0046 Phase 8.1 read boundary: a real FS-backed config service
-/// and its distinct endpoint-only proof client (no trusted updater yet).
+/// its endpoint-only reader, and separately marker-authorized updater.
 pub static CONFIGD_IMAGE: &[u8] =
     include_bytes!("../../../userspace/configd/target/x86_64-unknown-none/release/arena-configd");
 pub static CONFIGREAD_IMAGE: &[u8] =
     include_bytes!("../../../userspace/configd/target/x86_64-unknown-none/release/configread");
+pub static CONFIGUP_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/configd/target/x86_64-unknown-none/release/configup");
 
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]

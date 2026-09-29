@@ -14,6 +14,21 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
+The Phase 8.1 **transactional-core checkpoint** adds `test_m81_update.py`
+(separate service-issued updater marker; exact guest-committed value;
+seven observed CREATE/WRITE/CLOSE/reply SIGKILL gates, committed platter
+audit BEFORE retry and exact same-disk recovery; visible malformed
+predecessor and full disk return typed refusals) plus
+`test_m81_update_table.py` (eight live guest updates, all prior values
+byte-exact, typed ninth refusal). Host-prepared allocator exhaustion
+marks sectors used in AFS1's committed bitmap; the host audit permits
+this as honest unreachable allocation, not a simulated device error.
+`mtest.boot` now supports a boot-time kill gate with no shell feed; its
+historical command-gated kill semantics remain unchanged. Numeric
+resource accounting after repeated updates and additional fault-return
+paths are still open before 8.1 closure. Full suite is 31 suites; the
+fresh final-image 100/100 and extracted-bundle boot remain mandatory.
+
 The Phase 8.1 **read-boundary checkpoint** is not Phase 8.1 completion.
 `tools/test_m81_read.py` boots the real guest repeatedly, including the
 same platter after the trusted shell writes a malformed reserved name,

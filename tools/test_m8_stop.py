@@ -25,7 +25,11 @@ def check(ok: bool, what: str) -> bool:
 
 def main() -> int:
     esp = mtest.build(LABEL)
-    feed = [(READY.encode(), 1, b"stackstop\r"), (b"arena>", 2, b"shutdown\r")]
+    # READY alone is not a shell-readiness boundary: the pre-shell
+    # configuration updater may still be running. Require both events
+    # before sending the command, keeping the echoed-command assertion.
+    feed = [((READY.encode(), b"arena>"), 1, b"stackstop\r"),
+            (b"arena>", 2, b"shutdown\r")]
     rc, serial, dt = mtest.run_qemu(LABEL, esp, feed=feed)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     print(f"[{LABEL}] full fixture: rc={rc}, {dt:.1f}s")

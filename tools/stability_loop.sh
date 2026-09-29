@@ -241,6 +241,12 @@ for i in $(seq 1 "$N"); do
         why="ordinary config reader did not survive/verify its data-plane proof"
     elif ! grep -aqF 'configread: boot-root reader reaped; no update authority delegated' "$SERIAL"; then
         why="config reader was not reaped before shell startup"
+    elif ! grep -aqF 'configup: SKIP (no trusted test intent; no SET)' "$SERIAL"; then
+        why="fresh ordinary boot incorrectly ran an authorized configuration update"
+    elif ! grep -aqF 'configup: boot-root updater reaped; marker never delegated to shell' "$SERIAL"; then
+        why="config updater or its marker survived shell handoff"
+    elif grep -aqF 'configup: SET COMMITTED' "$SERIAL"; then
+        why="fresh boot unexpectedly consumed an immutable generation"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

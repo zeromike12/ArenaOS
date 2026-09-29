@@ -4,14 +4,51 @@ Every completed milestone ships as a **GitHub release** containing a
 prebuilt, tested boot image plus the exact UEFI firmware pair it was
 verified against. This page explains how to boot it on your own machine.
 
-## Phase 8.1 read-boundary checkpoint (8.1 remains incomplete)
+## Phase 8.1 transactional-core checkpoint (8.1 not yet closed)
+
+This commit's bootable QEMU image adds an actual marker-authorized SET,
+immutable AFS1 generations, exact post-commit rescan, and a separately
+trusted updater. The ordinary reader receives no marker. Both update and
+crash-recovery paths are guest-tested, but 8.1 remains **in progress**
+until numeric resource/fault-path accounting is closed. For this commit:
+
+```sh
+curl -fL -o arenaos-phase81-transactional-core-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-transactional-core/arenaos-phase81-transactional-core-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase81-transactional-core-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-transactional-core/arenaos-phase81-transactional-core-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase81-transactional-core-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase81-transactional-core-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+cp ovmf-vars-template.img ovmf-vars.img
+cp scratch-template.img scratch.img  # FIRST boot only; retain thereafter
+```
+
+Use the QEMU command below. No update runs on an ordinary fresh boot:
+`configup: SKIP` appears before the shell. To exercise the narrowly
+opt-in, **trusted raw-FS test fixture** (not an 8.2 permission UI):
+
+1. At `arena>`, type `write cfg-intent-one x`, then `shutdown`.
+2. Reboot using the **same** `scratch.img` and a fresh vars copy. Before
+   the prompt, the separate updater transfers its marker, writes the
+   complete 512-byte `cfg8-01`, rescans, and reads `guest-v1` back.
+3. For a second distinct value, type `rm cfg-intent-one` followed by
+   `write cfg-intent-two x`, then reboot the same disk; `cfg8-02` is a
+   separate immutable record holding `guest-v2`.
+
+The intent file chooses test input only. It does not authorize SET;
+configd checks the transferred, service-issued marker at the receiving
+boundary. Neither the ordinary reader nor shell holds that marker.
+There is no general configuration or permission-grant CLI yet.
+
+## Historical Phase 8.1 read-boundary checkpoint (8.1 remained incomplete)
 
 The latest checkpoint bundles a bootable resident `configd` and separate
 ordinary reader (ADR-0046). It reads real AFS1 records and refuses SET
 without genuine transferred authority, but **does not perform authorized
 SET, atomic update or crash recovery yet**. The host-provisioned record
-proof is not a guest writer. For this commit, fetch its archive instead
-of the historical Phase 8.0 archive below:
+proof is not a guest writer. For that earlier checkpoint, fetch its archive instead of the Phase 8.0
+archive below:
 
 ```sh
 curl -fL -o arenaos-phase81-read-boundary-qemu-x86_64.tar.gz \

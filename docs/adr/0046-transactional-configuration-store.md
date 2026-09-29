@@ -1,6 +1,6 @@
 # ADR-0046 — Phase 8.1 transactional configuration store: design investigation
 
-*Status: accepted for bounded 8.1 implementation (2026-09-29); not yet implemented or qualified. Phase 8.0 remains complete and 8.1 is in progress. This is not a permission policy (8.2).*
+*Status: accepted for bounded 8.1 implementation (2026-09-29); read boundary qualified; transactional-core implementation and qualification in progress. Phase 8.0 remains complete and 8.1 is not yet closed. This is not a permission policy (8.2).*
 
 ## Existing facts and threat boundary
 
@@ -93,6 +93,93 @@ and a corrupt newest checksum with a valid older value: the guest must
 return CORRUPT rather than silently downgrade. The offline host fixture
 is not a guest SET transaction or a crash-recovery proof. No in-guest
 writer or positive update authority proof exists in this checkpoint.
+
+## Authorized update probe and opt-in boot trigger (next implementation slice)
+
+The production service accepts an arbitrary 0..32-byte SET payload from
+**a separately granted updater** that transfers a fresh COPY of the
+Notification reference on *each* request. The receiver compares the
+object and exact rights to its boot anchor, consumes the landing on every
+path, then performs the full CREATE/WRITE/CLOSE/rescan transaction.
+The source marker remains with the updater and is never copied to the
+ordinary reader or shell. A malformed SET without it is always DENIED;
+a correct marker with malformed bytes is BAD_INPUT, never a write.
+
+To make the positive path opt-in **without filling the shell's already
+occupied cap table or giving it update authority**, the trusted raw-FS
+shell may create exactly one test-intent file, `cfg-intent-one` or
+`cfg-intent-two` (the latter requests a distinct test payload). The
+service exposes a marker-gated `TEST_PLAN` read of those names via its
+existing fsd cap; the updater holds only the config endpoint and marker,
+asks for the plan, then constructs and sends a normal SET payload.
+The intent file is input chosen by an already trusted filesystem writer,
+NOT authority; the service MUST still reject SET when the transferred
+marker is missing, forged or wrong-kind. An absent intent is a verified
+SKIP with no config writes. Both intents present is a typed refusal.
+This staging avoids automatically consuming config generations on every
+ordinary boot and preserves all historical fresh-disk fixtures. It is a
+bounded destructive test interface, not a permission-policy UI (8.2).
+The shell never receives a config cap and cannot cause a SET by sending
+an opcode or guessing an object id.
+
+The boot root allocates no additional endpoint or notification. It adds
+image 23 (24 images in the registry) for the separately privileged
+updater. It launches and reaps that child after the ordinary reader's
+pre-shell proof but before the shell prompt; both use the same boot-root
+exit notification with distinct badges, consumed one at a time. This
+retains the manager's short-lived probe audit throughout both
+interruptible, wall-clock-bounded drains; it also prevents its log from
+splitting console command output. The updater's exit is checked against
+a success/skip protocol, not assumed from a debug line. Production
+services and ordinary boots gain no ambient update authority.
+
+Test driver kills QEMU at observed CREATE, WRITE-commit, CLOSE and
+pre-reply markers, audits the actual committed AFS1 disk **before**
+reboot, then verifies the same disk recovers through fsd/configd and
+an authorized retry without a repair tool. The test-intent file is
+left in place between the kill and recovery boots so the updater can
+retry. A second update exercises immutable old generation plus new
+value; full-table and I/O ambiguity must remain explicit, never a
+silent fallback or invented success.
+
+## Transactional-core implementation/proof scope (partial checkpoint)
+
+The service now uses its single mapped reusable 512-byte buffer and
+LENT copy for a canonical `encode`, CREATE or OPEN the one pending
+empty generation, WRITE once, CLOSE, rescan all fsd-visible reserved
+entries, and compare the exact desired value before `COMMITTED`.
+Identical input with no pending generation is `UNCHANGED`, spending no
+slot. An ambiguous CREATE/OPEN/WRITE/CLOSE/readback error latches
+DEGRADED against further SET until reboot; physical allocation failure
+is a typed `NO_SPACE` with no success claim. Table exhaustion is also
+`NO_SPACE` but returns the bound (8) as a distinct detail. A correct
+marker with oversized input is `BAD_INPUT` and is consumed; a second,
+valid SET transfers a new marker copy. Test-only intent filenames
+select two distinct payloads but convey no update authority.
+
+Guest test `test_m81_update.py` commits two distinct records via the
+service, then SIGKILLs QEMU after CREATE submission, committed-empty
+CREATE, WRITE submission, fsd's WRITE commit record, WRITE reply, CLOSE,
+and just before SET reply; it audits the SAME AFS1 platter before each
+recovery boot and checks old/new bytes after. Visible predecessor
+corruption and conflicting test intents refuse writes; a host-prepared
+allocator-full bitmap produces a real FS `NO_SPACE` without mutating the
+old visible record. `test_m81_update_table.py` checks eight actual
+guest generations and a typed ninth refusal. The ordinary reader never
+gets the marker, the updater never gets fsd or Power, and the boot root
+reaps both before shell input. This is a transactional **core** proof,
+not a claim that numeric resource/fault-path accounting is complete.
+The original crash-model and media-integrity limits above still apply.
+
+The first full regression found two historical console scripts pacing
+commands to **fsd mount** or **manager READY** rather than to the shell's
+real prompt. The added pre-shell updater drain exposed their hidden
+assumption: the keyboard's first character and the stackstop command
+could be echoed before the shell existed, splitting byte-exact serial
+proof. The typing script now waits for `arena>`; the stop script requires
+both READY and `arena>` before sending input. The commands, authority
+checks and exact output assertions remain unchanged. This is a
+readiness-boundary repair, not a timing retry or weakened regression.
 
 ## Required proof before 8.1 closure
 
