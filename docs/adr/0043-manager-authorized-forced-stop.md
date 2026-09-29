@@ -1,6 +1,6 @@
 # ADR-0043 — Explicit, manager-owned forced live stop
 
-*Status: accepted for a partial 8.0 checkpoint. It proves forced live stop, not lifecycle-authority refusal for every forbidden target or active pre-respawn driver probes.*
+*Status: accepted and qualified. This forced-stop checkpoint was partial; ADR-0044–0045 subsequently prove lifecycle-authority refusals and active pre-respawn probes, completing 8.0.*
 
 ## Context
 
@@ -64,9 +64,10 @@ SKIP. Normal boot does not consume the manager's finite restart budget.
 
 Run the full historical suite, a fresh final-EFI-bound 100/100 QEMU
 qualification and an extracted-archive boot before committing the
-source and deployable image together. Do not mark 8.0 complete:
-lifecycle-authority refusals for forged/foreign/self/driver handles and
-active dependency probes remain unproven.
+source and deployable image together. At this checkpoint, 8.0 could
+not yet close: lifecycle-authority refusals for forged/foreign/self/
+driver handles and active dependency probes were unproven. They were
+subsequently proven by ADR-0044/0045 and the full 8.0 qualification.
 
 ## Rejected shortcuts
 

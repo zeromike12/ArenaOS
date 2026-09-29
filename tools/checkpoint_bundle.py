@@ -2,8 +2,8 @@
 """Package a qualified Phase 8 commit with its OWN bootable QEMU build.
 
 Run after tools/run_tests.sh and tools/stability_loop.sh 100, before the
-single source+artifact commit. This is NOT a milestone release; it does
-not turn an incomplete 8.0 into a completed one. Reject an unrelated
+single source+artifact commit. This complete-8.0 checkpoint is not a
+GitHub release; qualification is still bound to its exact EFI. Reject an unrelated
 EFI, an ESP with different bytes, or a partial/stale receipt. Extract
 and boot the actual tarball from a formatted bundled disk before exit.
 """
@@ -47,14 +47,15 @@ def verify_qualified_image(suite_log: Path) -> tuple[str, bytes]:
         raise ValueError("ESP contains an EFI different from the qualified final EFI")
     log = suite_log.read_text()
     suite = re.search(r"ALL TESTS PASSED \((\d+) test suites\)", log)
-    if not suite or int(suite.group(1)) < 25 or \
+    if not suite or int(suite.group(1)) < 26 or \
             "INITIAL-START SUBSTRATE: PASS" not in log or \
             "PRODUCTION ORDERLY-RESTART SUBSTRATE: PASS" not in log or \
             "REPEATED-ACCOUNTING SUBSTRATE: PASS" not in log or \
             "UNEXPECTED-CRASH SUBSTRATE: PASS" not in log or \
             "FORCED-LIVE-STOP SUBSTRATE: PASS" not in log or \
-            "LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: PASS" not in log:
-        raise ValueError("all 25+ historical suites + lifecycle-authority refusal proof required")
+            "LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: PASS" not in log or \
+            "ACTIVE DEPENDENCY PROBES: PASS" not in log:
+        raise ValueError("all 26+ historical suites + all four 8.0 exit areas required")
     return digest(efi), esp.read_bytes()
 
 
@@ -83,7 +84,7 @@ def main() -> int:
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
-        "Phase 8.0: INCOMPLETE; crash, forced stop and lifecycle refusals proven; active dependency probes open\n"
+        "Phase 8.0: COMPLETE; crash recovery, forced live stop, lifecycle refusals and active dependency probes proven\n"
     )
     (stage / "sha256sums.txt").write_text("".join(
         f"{digest((stage / path).read_bytes())}  {path}\n" for path in FILES
@@ -121,7 +122,7 @@ def main() -> int:
             os.environ["ARENA_OVMF_CODE"] = str(unpacked / "edk2-x86_64-code.fd")
             os.environ["ARENA_OVMF_VARS"] = str(unpacked / "ovmf-vars-template.img")
             rc, serial, _ = mtest.boot("checkpoint-bundle", unpacked / "arena-esp.img",
-                                       [(b"lifecycle read-only foreign Process reference installed pid", 1, b"lifetest\r"),
+                                       [(b"servicemgr: production netstackd READY pid", 1, b"stackstop\r"),
                                         (b"arena>", 2, b"shutdown\r")], scratch)
         finally:
             for key, old in (("ARENA_OVMF_CODE", old_code), ("ARENA_OVMF_VARS", old_vars)):
@@ -132,16 +133,17 @@ def main() -> int:
         required = ("m7: RESULT PASS (2/2)",
                     "servicemgr: production netstackd READY pid",
                     "four installed child caps audited (netd/W stack/R backoff/RW rngd/W)",
-                    "lifecycle protected refs shell=",
-                    "lifecycle read-only foreign Process reference installed pid",
-                    "m8: lifetest held DESTROY refused for self/manager/netd/rngd",
-                    "m8: lifetest foreign READ-only/guessed pid/empty/wrong-kind refused",
-                    "m8: lifetest child reaped by held cap; dead mode-1 and stale both refused",
-                    "m8: lifetest PASS (protected/foreign/forged/stale denied; own child reaped; wire live; resources flat)",
+                    "manager-owned dependency probe pid",
+                    "depcheck: netd MAC answered",
+                    "depcheck: rngd device completed 64 varied bytes",
+                    "servicemgr: active netd MAC and rngd entropy probes passed; worker reaped",
+                    "servicemgr: forcibly stopped LIVE production child through held Process cap",
+                    "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
         if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
-                or serial.count("servicemgr: production netstackd READY pid") != 1
-                or "m8: lifetest FAIL" in serial or "servicemgr: OFFLINE" in serial):
+                or serial.count("servicemgr: production netstackd READY pid") != 2
+                or serial.count("servicemgr: active netd MAC and rngd entropy probes passed; worker reaped") != 2
+                or "m8: stackstop FAIL" in serial or "servicemgr: OFFLINE" in serial):
             (ROOT / "build/checkpoint-bundle-failure.log").write_text(serial)
             raise ValueError("extracted bundle did not boot and shut down cleanly")
 

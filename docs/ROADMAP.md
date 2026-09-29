@@ -656,7 +656,7 @@ restart under fault injection, capability re-grant tests.
       the suite calls it). Gates: run_tests 13/13 (362 assertions),
       fmt clean.
 
-## Phase 7 — Networking ✅ (bounded protocol/API v1; stack supervision still open)
+## Phase 7 — Networking ✅ (bounded protocol/API v1; production stack supervision closed in 8.0)
 
 NIC TX/RX via the virtio-net driver server (done, M6.1) → ARP → IPv4 →
 ICMP → UDP → DNS resolver service → TCP (own stack server, async API) →
@@ -870,16 +870,14 @@ assertions).
       100/100 boots, matching SHA-256 receipt. Phase 7 bounded v1 is
       complete; this is NOT a POSIX sockets or unrestricted TCP claim.
 
-**Outstanding Phase 7 lifecycle obligation — NOT DONE:** `netstackd`
-currently runs inside M7's test and is destroyed at the end. The
-production kernel boot spawns `netd` and `rngd`, not a supervised,
-resident `netstackd`. The earlier promise that the stack itself will
-be supervised is therefore still open. ADR-0037 assigns the first
-production `netstackd` instance, its lifecycle and its real restart
-proof to 8.0's userspace manager, **not** to both it and the kernel
-supervisor. Phase 7's protocol/API milestone remains qualified; this
-service-lifecycle obligation is an explicit blocker for *8.0
-completion*, not something that became done by changing the heading.
+**Phase 7 lifecycle obligation — CLOSED in Phase 8.0:** The Phase 7
+protocol/API milestone originally left production `netstackd` supervision
+open. ADR-0037 assigned its lifecycle to one ring-3 service manager,
+not both manager and kernel. ADR-0039–0045 now prove manager-owned initial
+spawn, bounded orderly/crash/forced-stop recovery, exact accounting,
+real held-cap refusals and active external probes before *every* new
+production child. `tools/test_m8_*.py` and final-EFI-bound 100/100 boots
+qualify the closure. Drivers remain exclusively kernel-supervised.
 
 ### Three decisions taken BEFORE any protocol code
 
@@ -983,16 +981,17 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0 in progress; no 8.x milestone completed)
+## Phase 8 — Mature userspace 🔨 (8.0 complete; 8.1 next)
 
-Authority model: accepted ADR-0037/0038/0039/0040/0041/0042/0043/0044. The roadmap below is the sequence,
+Authority model: accepted ADR-0037/0038/0039/0040/0041/0042/0043/0044/0045. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
 milestone gets its own real negative-space tests, the entire historical
 suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
 is not completed by accepting an ADR.
 
-- [ ] **8.0 service manager + declarative service manifests v1**.
-      IN PROGRESS — the bounded resolver consumes a caller-cap-only
+- [x] **8.0 service manager + declarative service manifests v1**.
+      COMPLETE (26 historical suites and fresh final-EFI-bound 100/100
+      QEMU boots; ADR-0037–0045) — the bounded resolver consumes a caller-cap-only
       syscall inventory; two real shell child cycles exercise the
       Process-cap finish ABI. A ring-3 manager now boots with kernel-
       audited literal grants, observes its real caps and waits for
@@ -1019,8 +1018,14 @@ is not completed by accepting an ADR.
       forged/empty/wrong-kind/stale-cap refusal, a positive user-child
       reap, and live post-refusal wire service (ADR-0044). The test
       exposed and fixed the distinction between kernel-bootstrapped
-      roots and user-child spawn records. This is NOT an 8.0 completion
-      claim: active dependency probes still need integration proof.
+      roots and user-child spawn records. Before both initial spawn and
+      every restart, a bounded worker now probes the REAL netd MAC and
+      rngd device entropy protocols, then reaps its held Process cap.
+      Separate opt-in #UD and stalled-driver negative fixtures prove
+      fail-closed OFFLINE before respawn; the driver's genuine #UD also
+      exposed and closed deferred supervised-driver teardown (ADR-0045).
+      These four independently tested areas close 8.0, not a success
+      string on an unattended boot.
       Complete recovery from the fixed kernel trust root with only
       explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
@@ -1035,11 +1040,14 @@ is not completed by accepting an ADR.
       *production* `netstackd` is the first managed service: prove a
       real kill/restart through the same endpoint, stale bearer refusal
       and resumed wire service. This is the required closure of the
-      Phase 7 stack-supervision obligation; it is NOT done yet. No
+      Phase 7 stack-supervision obligation; it is now DONE with the
+      manager-owned production restarts and active probes. No
       dynamic permission UI, generic device-cap request, or competing
       kernel/user restart owner (ADR-0037). Existing M1–M7 regressions
       must continue to pass including the no-peer boot.
-- [ ] **8.1 transactional configuration store**. Specify versioned
+- [ ] **8.1 transactional configuration store**. NEXT — design in
+      progress (proposed ADR-0046); no store implementation or
+      permission-policy claim yet. Specify versioned
       records, ownership/authority, crash model and recovery in an
       ADR. Implement bounded atomic update/read and multi-boot host
       verification, including SIGKILL during every commit boundary;

@@ -1,0 +1,146 @@
+//! One-shot bounded dependency probe. Only the manager holds its Process
+//! cap; a hung call cannot hold the manager hostage (ADR-0045).
+#![no_std]
+#![no_main]
+use core::panic::PanicInfo;
+#[path = "../../abi.rs"]
+mod abi;
+use abi::*;
+
+fn fail(reason: &str) -> ! {
+    let _ = unsafe { syscall2(SYS_DEBUG_WRITE, reason.as_ptr() as u64, reason.len() as u64) };
+    unsafe { syscall1(SYS_THREAD_EXIT, 52) };
+    loop {
+        core::hint::spin_loop()
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn _start() -> ! {
+    // Slots 0/1 are netd/rngd Endpoint/WRITE, slot 2 is the manager's
+    // PRIVATE notification/WRITE. No shutdown or device rights are held.
+    let mut out = [0u64; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            0,
+            0,
+            NET_OP_MAC,
+            CAP_NONE,
+            out.as_mut_ptr() as u64,
+            0,
+        )
+    };
+    if rc != 0 || out[0] != NET_S_OK || out[1] == 0 || out[1] >> 48 != 0 {
+        fail("depcheck: netd MAC probe refused\r\n");
+    }
+    let text = b"depcheck: netd MAC answered\r\n";
+    let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
+    // COPY on netd's ordinary endpoint is an explicit trusted-manager
+    // diagnostic mode, not an ambient pid or a private badge guess.
+    let mut authority = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, 0, authority.as_mut_ptr() as u64) } != 0
+        || authority[0] != 2
+        || authority[2] & RIGHTS_WRITE == 0
+        || authority[2] & !(RIGHTS_WRITE | RIGHTS_COPY) != 0
+    {
+        fail("depcheck: unexpected probe grant\r\n");
+    }
+    if authority[2] & RIGHTS_COPY != 0 {
+        out = [0; 3];
+        let r = unsafe {
+            syscall6(
+                SYS_IPC_CALL,
+                1,
+                0,
+                RNG_OP_FAULT_NEXT_GET,
+                CAP_NONE,
+                out.as_mut_ptr() as u64,
+                0,
+            )
+        };
+        if r != 0 || out[0] != RNG_S_OK {
+            fail("depcheck: rngd fault-arm request refused\r\n");
+        }
+        let text = b"depcheck: private failure fixture armed on rngd\r\n";
+        let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
+    }
+    let mut rng_authority = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, 1, rng_authority.as_mut_ptr() as u64) } != 0
+        || rng_authority[0] != 2
+        || rng_authority[2] & RIGHTS_WRITE == 0
+        || rng_authority[2] & !(RIGHTS_WRITE | RIGHTS_COPY) != 0
+        || rng_authority[2] & RIGHTS_COPY != 0 && authority[2] & RIGHTS_COPY != 0
+    {
+        fail("depcheck: unexpected entropy probe grant\r\n");
+    }
+    if rng_authority[2] & RIGHTS_COPY != 0 {
+        out = [0; 3];
+        let r = unsafe {
+            syscall6(
+                SYS_IPC_CALL,
+                1,
+                0,
+                RNG_OP_STALL_NEXT_GET,
+                CAP_NONE,
+                out.as_mut_ptr() as u64,
+                0,
+            )
+        };
+        if r != 0 || out[0] != RNG_S_OK {
+            fail("depcheck: rngd stall-arm request refused\r\n");
+        }
+        let text = b"depcheck: private stall fixture armed on rngd\r\n";
+        let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
+    }
+    // The LENT copy is made before self-map consumes the owned cap.
+    if unsafe { syscall1(SYS_ALLOC_FRAME, 3) } <= 0
+        || unsafe { syscall3(SYS_CAP_COPY, 3, 4, RIGHTS_ALL) } != 0
+    {
+        fail("depcheck: entropy buffer allocation refused\r\n");
+    }
+    let va = unsafe { syscall2(SYS_MAP_MEMORY, 3, 1) };
+    if va <= 0 {
+        fail("depcheck: entropy frame mapping refused\r\n");
+    }
+    out = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            1,
+            64,
+            RNG_OP_GET,
+            4,
+            out.as_mut_ptr() as u64,
+            0,
+        )
+    };
+    if rc != 0 || out[0] != RNG_S_OK || out[1] != 64 {
+        fail("depcheck: rngd GET probe refused\r\n");
+    }
+    let first = unsafe { core::ptr::read_volatile(va as *const u8) };
+    let mut varied = false;
+    for i in 1..64 {
+        if unsafe { core::ptr::read_volatile((va as u64 + i) as *const u8) } != first {
+            varied = true;
+            break;
+        }
+    }
+    if !varied {
+        fail("depcheck: entropy device returned constant data\r\n");
+    }
+    let text = b"depcheck: rngd device completed 64 varied bytes\r\n";
+    let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
+    if unsafe { syscall2(SYS_NOTIFY, 2, MGR_BADGE_PROBE_OK) } != 0 {
+        fail("depcheck: private success signal refused\r\n");
+    }
+    unsafe { syscall1(SYS_THREAD_EXIT, 42) };
+    loop {
+        core::hint::spin_loop()
+    }
+}
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    fail("depcheck: PANIC\r\n")
+}

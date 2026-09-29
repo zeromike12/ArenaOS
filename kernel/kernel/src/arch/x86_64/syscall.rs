@@ -763,6 +763,15 @@ fn notify_last_thread_exit() {
 pub(crate) fn exit_on_user_fault(vector: u64) -> ! {
     record_exit(crate::sched::current_thread_id(), 0x100 + vector);
     notify_last_thread_exit();
+    // The driver supervisor cannot destroy a process in its own live
+    // CR3 here. Mark the last faulting thread's driver for deferred
+    // idle-thread teardown; poll will release outstanding IPC BEFORE
+    // replaying grants. A non-supervised user child stays manager-owned.
+    if let Some(pid) = crate::sched::current_proc_id() {
+        if crate::sched::proc_live_threads(pid) == 1 && crate::supervise::is_supervised(pid) {
+            crate::supervise::note_death(pid);
+        }
+    }
     crate::sched::terminate()
 }
 

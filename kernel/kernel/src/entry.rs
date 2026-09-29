@@ -640,50 +640,71 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // return. Between wakes it halts the CPU with IF=1 — interrupts
     // must flow now: the UART RX path IS the input device.
     let mut last_audited_child = None;
+    let mut last_audited_probe = None;
     loop {
         // ADR-0039: independently audit the child created by the
         // MANAGER's syscall. The kernel sees its Process handle in the
         // manager's actual cap table, then compares four installed
-        // child caps to the fixed root policy. No m8 completion claim.
+        // child caps to the fixed root policy. The probe worker is audited
+        // separately and never confused with the production stack.
         if let Some(wanted) = expected_stack_caps {
-            if let Some(child) = audit_manager_child(manager_pid, &wanted)
+            match audit_manager_child(manager_pid, &wanted, manager_restart_nid)
                 .unwrap_or_else(|e| crate::halt::halt_machine(e))
             {
-                if last_audited_child != Some(child) {
-                    info!(
-                        "m8",
-                        "manager-owned netstackd pid {child}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
-                    );
-                    // READ-only reference; neither boot policy nor a
-                    // manifest grants the shell the child's DESTROY.
-                    let previous = last_audited_child.unwrap_or(shell_pid);
-                    let want = crate::cap::Cap {
-                        obj: crate::cap::CapObj::Process { pid: previous },
-                        rights: crate::cap::RIGHTS_READ,
-                    };
-                    if crate::cap::read(shell_pid, 14).ok() != Some(want) {
-                        crate::halt::halt_machine("m8: foreign reference slot was modified");
+                Some(ManagerChild::Probe(pid, mode)) => {
+                    if last_audited_probe != Some(pid) {
+                        if mode == 0 {
+                            info!(
+                                "m8",
+                                "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras"
+                            );
+                        } else {
+                            info!(
+                                "m8",
+                                "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited"
+                            );
+                        }
+                        last_audited_probe = Some(pid);
                     }
-                    crate::cap::consume(shell_pid, 14).unwrap_or_else(|_| {
-                        crate::halt::halt_machine("m8: foreign reference retire failed")
-                    });
-                    crate::cap::issue(
-                        shell_pid,
-                        14,
-                        crate::cap::Cap {
-                            obj: crate::cap::CapObj::Process { pid: child },
-                            rights: crate::cap::RIGHTS_READ,
-                        },
-                    )
-                    .unwrap_or_else(|_| {
-                        crate::halt::halt_machine("m8: foreign reference issue failed")
-                    });
-                    info!(
-                        "m8",
-                        "lifecycle read-only foreign Process reference installed pid {child} slot 14"
-                    );
-                    last_audited_child = Some(child);
                 }
+                Some(ManagerChild::Production(child)) => {
+                    if last_audited_child != Some(child) {
+                        info!(
+                            "m8",
+                            "manager-owned netstackd pid {child}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
+                        );
+                        // READ-only reference; neither boot policy nor a
+                        // manifest grants the shell the child's DESTROY.
+                        let previous = last_audited_child.unwrap_or(shell_pid);
+                        let want = crate::cap::Cap {
+                            obj: crate::cap::CapObj::Process { pid: previous },
+                            rights: crate::cap::RIGHTS_READ,
+                        };
+                        if crate::cap::read(shell_pid, 14).ok() != Some(want) {
+                            crate::halt::halt_machine("m8: foreign reference slot was modified");
+                        }
+                        crate::cap::consume(shell_pid, 14).unwrap_or_else(|_| {
+                            crate::halt::halt_machine("m8: foreign reference retire failed")
+                        });
+                        crate::cap::issue(
+                            shell_pid,
+                            14,
+                            crate::cap::Cap {
+                                obj: crate::cap::CapObj::Process { pid: child },
+                                rights: crate::cap::RIGHTS_READ,
+                            },
+                        )
+                        .unwrap_or_else(|_| {
+                            crate::halt::halt_machine("m8: foreign reference issue failed")
+                        });
+                        info!(
+                            "m8",
+                            "lifecycle read-only foreign Process reference installed pid {child} slot 14"
+                        );
+                        last_audited_child = Some(child);
+                    }
+                }
+                None => {}
             }
         }
         // M7.0: the idle thread is also the SUPERVISOR's hands
@@ -766,13 +787,17 @@ fn spawn_servicemgr(
                     obj: CapObj::Notification {
                         nid: manager_restart_nid,
                     },
-                    rights: R | W,
+                    rights: R | W | C, // worker gets WRITE only; stack never sees this object
                 },
                 Cap {
                     obj: CapObj::Notification {
                         nid: manager_admin_nid,
                     },
                     rights: R, // not transferable; only shell can request
+                },
+                Cap {
+                    obj: CapObj::Image { img_id: 20 },
+                    rights: R,
                 },
             ];
             let child = [
@@ -833,10 +858,16 @@ fn spawn_servicemgr(
 /// match the kernel's fixed policy. No guessing a Process-cap slot
 /// from a pid: inspect actual held manager handles first. Child-owned
 /// Untyped frames are allowed; privileged or unexpected grants are not.
+enum ManagerChild {
+    Production(u64),
+    Probe(u64, u8),
+}
+
 fn audit_manager_child(
     manager_pid: u64,
     expected: &[crate::cap::Cap; 4],
-) -> Result<Option<u64>, &'static str> {
+    private_nid: u32,
+) -> Result<Option<ManagerChild>, &'static str> {
     use crate::cap::{CapObj, RIGHTS_DESTROY};
     let mut child = None;
     for slot in 7..crate::cap::CAP_SLOTS {
@@ -854,6 +885,46 @@ fn audit_manager_child(
     if !crate::spawn::has_record(pid) {
         return Err("servicemgr: child Process cap has no live spawn record");
     }
+    let worker = [
+        expected[0], // netd Endpoint/WRITE
+        expected[3], // rngd Endpoint/WRITE
+        crate::cap::Cap {
+            obj: CapObj::Notification { nid: private_nid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    if crate::cap::read(pid, 2).ok() == Some(worker[2]) {
+        if !crate::spawn::has_user_child_record(pid) {
+            return Err("servicemgr: dependency probe has no user-child record");
+        }
+        let Some(first) = crate::cap::read(pid, 0).ok() else {
+            return Err("servicemgr: probe lacks netd grant");
+        };
+        if first.obj != worker[0].obj
+            || ![worker[0].rights, worker[0].rights | crate::cap::RIGHTS_COPY]
+                .contains(&first.rights)
+            || !matches!(crate::cap::read(pid, 1).ok(), Some(c) if c.obj == worker[1].obj
+                && [worker[1].rights, worker[1].rights | crate::cap::RIGHTS_COPY].contains(&c.rights)
+                && !(first.rights & crate::cap::RIGHTS_COPY != 0 && c.rights & crate::cap::RIGHTS_COPY != 0))
+        {
+            return Err("servicemgr: probe grant differs from root policy");
+        }
+        for slot in 3..crate::cap::CAP_SLOTS {
+            if let Ok(c) = crate::cap::read(pid, slot) {
+                if !matches!(c.obj, CapObj::Untyped { .. }) {
+                    return Err("servicemgr: probe received an extra privileged cap");
+                }
+            }
+        }
+        let mode = if first.rights & crate::cap::RIGHTS_COPY != 0 {
+            1
+        } else if crate::cap::read(pid, 1).ok().unwrap().rights & crate::cap::RIGHTS_COPY != 0 {
+            2
+        } else {
+            0
+        };
+        return Ok(Some(ManagerChild::Probe(pid, mode)));
+    }
     for (slot, &want) in expected.iter().enumerate() {
         if crate::cap::read(pid, slot).ok() != Some(want) {
             return Err("servicemgr: actual child cap differs from attenuated policy");
@@ -866,7 +937,7 @@ fn audit_manager_child(
             }
         }
     }
-    Ok(Some(pid))
+    Ok(Some(ManagerChild::Production(pid)))
 }
 
 /// Spawn the production block service (M5.2, ADR-0022): registry image 2

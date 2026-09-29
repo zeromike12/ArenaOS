@@ -61,10 +61,17 @@ pub const MGR_BADGE_STACK_EXIT: u64 = 1 << 3;
 pub const MGR_BADGE_ADMIN_WAKE: u64 = 1 << 5;
 /// Authoritative request lives on a DISTINCT private admin notification.
 pub const MGR_BADGE_ADMIN_STOP: u64 = 1 << 0;
+/// Privileged opt-in proof: crash rngd on its next actual GET.
+pub const MGR_BADGE_ADMIN_DEPFAIL: u64 = 1 << 2;
+pub const MGR_BADGE_ADMIN_DEPSTALL: u64 = 1 << 3;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.
 pub const MGR_BADGE_STACK_BACKOFF: u64 = 1 << 4;
+/// Private worker result, exit and timeout (ADR-0045).
+pub const MGR_BADGE_PROBE_OK: u64 = 1 << 6;
+pub const MGR_BADGE_PROBE_EXIT: u64 = 1 << 7;
+pub const MGR_BADGE_PROBE_DEADLINE: u64 = 1 << 8;
 /// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
 pub const STATUS_BUSY: i64 = -4;
 
@@ -296,6 +303,10 @@ pub const NET_FRAME_MIN: u64 = 14;
 // Reply word 0 is RNG_S_*; word 1 as above.
 pub const RNG_OP_SHUTDOWN: u64 = 0;
 pub const RNG_OP_GET: u64 = 1;
+/// Opt-in ring-3 fault on the NEXT real GET, for manager negative proof.
+pub const RNG_OP_FAULT_NEXT_GET: u64 = 2;
+/// Destructive test VM only: leave next GET blocked without completion.
+pub const RNG_OP_STALL_NEXT_GET: u64 = 3;
 
 pub const RNG_S_OK: u64 = 0;
 pub const RNG_S_BAD_OP: u64 = (-1i64) as u64;

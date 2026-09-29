@@ -429,6 +429,45 @@ fn stackfault() {
 /// ADR-0043: ONLY the manager possesses the child's Process handle.
 /// This command sends a private request and a separate forgeable wake;
 /// the manager must observe a LIVE child and use mode-1 finish itself.
+fn depdeny(stall: bool) {
+    let mut client = [0u64; 3];
+    let mut admin = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, client.as_mut_ptr() as u64) } != 0 {
+        write_str("m8: dependency probe SKIP (no production client cap)\r\n");
+        return;
+    }
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_MGR_ADMIN, admin.as_mut_ptr() as u64) } != 0
+        || client[0] != 2
+        || admin[0] != 3
+        || admin[2] != RIGHTS_WRITE
+        || unsafe { syscall2(SYS_PROC_FINISH, SLOT_MGR_ADMIN, 1) } >= 0
+    {
+        write_str("m8: dependency probe FAIL (private authority mismatch)\r\n");
+        return;
+    }
+    if unsafe {
+        syscall2(
+            SYS_NOTIFY,
+            SLOT_MGR_ADMIN,
+            if stall {
+                MGR_BADGE_ADMIN_DEPSTALL
+            } else {
+                MGR_BADGE_ADMIN_DEPFAIL
+            },
+        )
+    } != 0
+        || unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0
+    {
+        write_str("m8: dependency probe FAIL (private request refused)\r\n");
+        return;
+    }
+    if stall {
+        write_str("m8: depstall private timeout request sent; observing manager\r\n");
+    } else {
+        write_str("m8: depdeny private failure request sent; observing manager\r\n");
+    }
+}
+
 fn stackstop() {
     let mut client = [0u64; 3];
     let mut wake = [0u64; 3];
@@ -1120,7 +1159,7 @@ const PROMPT: &str = "arena> ";
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
 const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n";
-const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  shutdown - halt the machine\r\n";
+const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  depdeny - failed driver probe\r\n  depstall - blocked driver probe\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -1215,6 +1254,14 @@ pub unsafe extern "C" fn _start() -> ! {
             } else if eq(line, b"stackstop") {
                 o.flush();
                 stackstop();
+                continue;
+            } else if eq(line, b"depdeny") {
+                o.flush();
+                depdeny(false);
+                continue;
+            } else if eq(line, b"depstall") {
+                o.flush();
+                depdeny(true);
                 continue;
             } else if eq(line, b"lifetest") {
                 o.flush();

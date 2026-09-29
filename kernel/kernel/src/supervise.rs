@@ -266,6 +266,22 @@ pub fn poll() -> usize {
             return restarted;
         };
 
+        // A CPL3 fault of a supervised driver's last thread marked the
+        // process dead without freeing its LIVE CR3 inside the IDT.
+        // Here, in plain idle-thread context, release its endpoint
+        // callers and address space before reusing the service grants.
+        if dead_pid != 0 && crate::proc::pml4_of(dead_pid).is_some() {
+            if let Err(e) = crate::proc::destroy(dead_pid) {
+                error!("supervise", "{name}: faulted driver teardown refused: {e}");
+                without_interrupts(|| unsafe { (*SERVICES.get())[idx].abandoned = true });
+                continue;
+            }
+            info!(
+                "supervise",
+                "{name}: faulted driver pid {dead_pid} reaped before restart"
+            );
+        }
+
         // Reap the corpse's spawn record first (ADR-0025's debt). The
         // record table is bounded, and a service that restarts would
         // otherwise consume one entry per death until spawning became

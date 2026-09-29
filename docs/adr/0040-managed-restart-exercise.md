@@ -1,6 +1,6 @@
 # ADR-0040 — Bounded manager restart and a privileged, real-wire exercise
 
-*Status: accepted for the next **partial** 8.0 checkpoint. Full 8.0 and the Phase 7 production-supervision closure remain open pending repeated fault/negative-space/accounting proofs.*
+*Status: accepted. This was the first restart checkpoint; ADR-0041–0045 subsequently qualified repeated restarts, negative space, active probes and Phase 7 supervision closure.*
 
 ## Context
 

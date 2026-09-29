@@ -1,6 +1,6 @@
 # ADR-0044 — Exercise lifecycle refusal with real held caps, not pid names
 
-*Status: accepted for the Phase 8.0 lifecycle-authority refusal checkpoint. Active pre-respawn dependency probes remain the last open 8.0 area.*
+*Status: accepted and qualified. The previously open active-dependency-probe area is closed by ADR-0045 and the full Phase 8.0 qualification.*
 
 ## Context
 
@@ -83,5 +83,5 @@ violate manager ownership. The kernel is forbidden to do so.
 
 Each commit carries its own QEMU bundle after the complete historical
 suite, fresh artifact-bound 100/100 qualification and extracted-archive
-boot. Do not close 8.0 or the Phase 7 supervision obligation until the
-remaining active dependency probes are integrated and qualified.
+boot. The Phase 7 supervision obligation and Phase 8.0 are closed only after
+ADR-0045's active probes and full, artifact-bound qualification pass.

@@ -25,6 +25,7 @@ const SLOT_RNGD: u8 = 5;
 const SLOT_RNG_READY: u8 = 6;
 const SLOT_RESTART: u8 = 7; // private timer object, NOT shared with any driver
 const SLOT_ADMIN: u8 = 8; // READ-only private shell-to-manager request
+const SLOT_PROBE_IMAGE: u8 = 9; // Image20/READ, full fixture only
 const READY_DEADLINE_US: u64 = 2_000_000;
 
 const IMAGE: Key = Key(0);
@@ -141,7 +142,17 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
     let rng_ready = probe.describe(SLOT_RNG_READY).map_err(|_| ())?;
     let restart = probe.describe(SLOT_RESTART).map_err(|_| ())?;
     let admin = probe.describe(SLOT_ADMIN).map_err(|_| ())?;
-    if admin.kind != inventory::NOTIFICATION_KIND || admin.rights != manifest::READ as u64 {
+    let image = probe.describe(SLOT_PROBE_IMAGE).map_err(|_| ())?;
+    if image.kind != inventory::IMAGE_KIND
+        || image.object != 20
+        || image.rights != manifest::READ as u64
+    {
+        return Err(());
+    }
+    if admin.kind != inventory::NOTIFICATION_KIND
+        || admin.rights != manifest::READ as u64
+        || restart.rights & manifest::COPY as u64 == 0
+    {
         return Err(());
     }
     for event in [notify, rng_ready, restart] {
@@ -280,10 +291,96 @@ fn report_child(pid: u64) {
     let _ = unsafe { syscall2(SYS_DEBUG_WRITE, buf.as_ptr() as u64, n as u64) };
 }
 
-fn planned_step() -> Result<Step, ()> {
+/// A separate user process can block in real driver IPC while the manager
+/// still observes a deadline. Success AND exit must precede the timer.
+fn probe_dependencies(fixture: u8) -> Result<(), ()> {
+    let spec = [
+        (
+            SLOT_NETD as u64,
+            RIGHTS_WRITE | if fixture == 1 { RIGHTS_COPY } else { 0 },
+        ),
+        (
+            SLOT_RNGD as u64,
+            RIGHTS_WRITE | if fixture == 2 { RIGHTS_COPY } else { 0 },
+        ),
+        (SLOT_RESTART as u64, RIGHTS_WRITE),
+    ];
+    let child = unsafe {
+        syscall5(
+            SYS_SPAWN,
+            SLOT_PROBE_IMAGE as u64,
+            spec.as_ptr() as u64,
+            3,
+            SLOT_RESTART as u64,
+            MGR_BADGE_PROBE_EXIT,
+        )
+    };
+    if child <= 0 {
+        return Err(());
+    }
+    let handle = inventory::child_handle(child as u64, &SyscallProbe).map_err(|_| ())?;
+    let timer = unsafe {
+        syscall3(
+            SYS_TIMER_ARM,
+            SLOT_RESTART as u64,
+            MGR_BADGE_PROBE_DEADLINE,
+            READY_DEADLINE_US,
+        )
+    };
+    if timer < 0 {
+        if inventory::finish(handle, true).is_err() {
+            let _ = inventory::finish(handle, false);
+        }
+        return Err(());
+    }
+    let mut seen = 0u64;
+    loop {
+        let b = unsafe { syscall1(SYS_WAIT, SLOT_RESTART as u64) };
+        if b <= 0 {
+            break;
+        }
+        seen |= b as u64;
+        if seen & MGR_BADGE_PROBE_DEADLINE != 0 {
+            break;
+        }
+        if seen & MGR_BADGE_PROBE_EXIT != 0 {
+            break;
+        }
+        if seen & !(MGR_BADGE_PROBE_OK | MGR_BADGE_PROBE_EXIT) != 0 {
+            break;
+        }
+    }
+    let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
+    // If a timeout raced with an exit, timeout wins. A failed worker
+    // cannot forge success: only image20 receives private WRITE.
+    if seen & MGR_BADGE_PROBE_DEADLINE == 0
+        && seen & (MGR_BADGE_PROBE_OK | MGR_BADGE_PROBE_EXIT)
+            == (MGR_BADGE_PROBE_OK | MGR_BADGE_PROBE_EXIT)
+        && inventory::finish(handle, false).is_ok()
+    {
+        log("servicemgr: active netd MAC and rngd entropy probes passed; worker reaped\r\n");
+        return Ok(());
+    }
+    // Terminate even a worker stuck in a driver call. Never launch a
+    // new production child after a failed or unbounded dependency.
+    if inventory::finish(handle, true).is_err() && inventory::finish(handle, false).is_err() {
+        log("servicemgr: OFFLINE — dependency probe worker teardown REFUSED\r\n");
+        return Err(());
+    }
+    if seen & MGR_BADGE_PROBE_DEADLINE != 0 {
+        log("servicemgr: dependency probe DEADLINE; blocked worker stopped, no child launched\r\n");
+    } else {
+        log("servicemgr: dependency probe FAILED; worker reaped, no child launched\r\n");
+    }
+    Err(())
+}
+
+fn planned_step(fixture: u8) -> Result<Step, ()> {
+    // Probe the actual driver service/device protocols BEFORE making a
+    // ready dependency assertion, both on boot and on every restart.
+    probe_dependencies(fixture)?;
     // Inspect our REAL caps again on each restart. The static manifest
-    // never mints replacement authority; each fresh child's setup must
-    // independently verify live netd/rngd before it reports READY.
+    // never mints replacement authority.
     let external = [
         External { id: 1, ready: true },
         External { id: 2, ready: true },
@@ -334,6 +431,7 @@ fn child_still_live(pid: u64) -> Result<bool, ()> {
 }
 
 fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
+    let mut next_probe_fixture = 0u8;
     let mut policy = match Restart::new(pid, step.restart_limit, step.backoff_us) {
         Ok(p) => p,
         Err(_) => {
@@ -357,9 +455,22 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
                 log("servicemgr: OFFLINE — private admin channel refused\r\n");
                 park();
             }
-            if request as u64 == MGR_BADGE_ADMIN_STOP {
+            if request as u64 == MGR_BADGE_ADMIN_STOP
+                || request as u64 == MGR_BADGE_ADMIN_DEPFAIL
+                || request as u64 == MGR_BADGE_ADMIN_DEPSTALL
+            {
+                let fixture = if request as u64 == MGR_BADGE_ADMIN_DEPFAIL {
+                    1
+                } else if request as u64 == MGR_BADGE_ADMIN_DEPSTALL {
+                    2
+                } else {
+                    0
+                };
                 match child_still_live(pid) {
-                    Ok(true) => force_live = true,
+                    Ok(true) => {
+                        force_live = true;
+                        next_probe_fixture = fixture;
+                    }
                     Ok(false) => {
                         // Natural exit won the race. Mode 0 only;
                         // never call a dead reap a forced live stop.
@@ -435,7 +546,7 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
             log("servicemgr: OFFLINE — restart backoff deadline/refusal\r\n");
             park();
         }
-        let next = match planned_step() {
+        let next = match planned_step(next_probe_fixture) {
             Ok(s) if s.service_id == step.service_id => s,
             _ => {
                 log("servicemgr: OFFLINE — restart authority/dependency plan refused\r\n");
@@ -476,7 +587,7 @@ pub extern "C" fn _start() -> ! {
         log("servicemgr: OFFLINE — device readiness deadline/refusal; no child spawned\r\n");
         park();
     }
-    let step = match planned_step() {
+    let step = match planned_step(0) {
         Ok(step) => step,
         Err(()) => {
             log("servicemgr: OFFLINE — live cap/policy mismatch; no child spawned\r\n");

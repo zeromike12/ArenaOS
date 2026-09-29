@@ -36,9 +36,9 @@ exit, Process-cap reap, timer backoff, second cap-audited child on the
 same endpoint, SERVICE_GONE while dead, refused old bearer and a new
 ARP request on the wire. An absent dependency grants no shell client
 cap. The 100-boot gate exercises this command on the final image, not
-just idle boot. These tests do NOT close 8.0: adversarial lifecycle
-negative-space and pre-respawn driver probes are still required
-before a completed milestone RESULT. `test_m8_stress.py`
+just idle boot. The subsequent negative-space and active probe suites
+close 8.0 as a suite-level qualification, not a fabricated `m8: RESULT`
+line on an unattended boot. `test_m8_stress.py`
 checks the full restart budget on *production* children and reads a
 Power-gated atomic kernel snapshot after each recovery: free frames,
 spawn records and process slots must all match the live baseline
@@ -66,8 +66,18 @@ is positively reaped, resource counts stay flat, and the same production
 endpoint serves fresh wire traffic. Both absent-device fixtures SKIP.
 The shell receives narrowly scoped diagnostic references only from the
 trusted boot root on a full fixture; neither a driver nor an ordinary
-client receives them. Phase 8.0 stays incomplete until active dependency
-probes also pass.
+client receives them. `test_m8_dependencies.py` (ADR-0045) proves two
+independently cap-audited active workers before the first stack spawn
+and after its forced live stop: netd MAC, real rngd 64-byte device DMA,
+private success and exit, Process-cap reap, then production readiness
+and new wire. Two destructive negative fixtures distinguish a real
+rngd #UD (driver IPC failure, deferred kernel-owned process teardown,
+supervised driver restart but NO new stack) from an indefinitely blocked
+rngd GET (manager timer deadline and authorized worker stop, NO new
+stack). Both absent-device fixtures SKIP without worker authority. All
+26 suites and 100/100 final-image boots qualify the four-area 8.0 exit;
+normal boot does not inject failures or claim the destructive fixtures
+ran on its own.
 
 ## The testing pyramid
 

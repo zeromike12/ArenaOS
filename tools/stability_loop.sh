@@ -193,15 +193,19 @@ for i in $(seq 1 "$N"); do
         why="native UDP library did not deliver/revoke its real-wire datagram"
     elif ! grep -aq 'TCP FIN was acknowledged, the peer closed, and the bearer was revoked' "$SERIAL"; then
         why="guest did not complete TCP FIN/close/revocation"
-    # Phase 8.0 partial checkpoint: the shipping fixture must run
-    # the ring-3 manager, observe live caps, receive both driver
-    # badges, then start, reap and restart its child. NOT full 8.0.
-    elif ! grep -aqF 'audited 9 literal caps; no device/Power/Process grants' "$SERIAL"; then
+    # Shipping fixture: real manager caps, two bounded active driver
+    # probes, then two production children and a real-wire restart.
+    # Destructive fault/stall negatives live in the historical host suite.
+    elif ! grep -aqF 'audited 10 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
     elif ! grep -aqF 'servicemgr: full fixture notification budget 11/11; twelfth refused' "$SERIAL"; then
         why="manager readiness-channel notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
+    elif [[ $(grep -acF 'servicemgr: active netd MAC and rngd entropy probes passed; worker reaped' "$SERIAL" || true) -ne 2 ]]; then
+        why="two actual pre-spawn driver probes/reaps were not observed"
+    elif [[ $(grep -acF 'depcheck: rngd device completed 64 varied bytes' "$SERIAL" || true) -ne 2 ]]; then
+        why="the entropy device did not complete both active dependency probes"
     elif ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL"; then
         why="manager did not bring its production child to readiness"
     elif ! grep -aqF 'four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras' "$SERIAL"; then

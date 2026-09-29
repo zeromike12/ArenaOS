@@ -1,6 +1,6 @@
 # ADR-0041 — Repeatable production restart accounting and finite-budget proof
 
-*Status: accepted for a partial Phase 8.0 checkpoint. This does not close Phase 8.0 or the Phase 7 production-stack supervision obligation.*
+*Status: accepted. Historical accounting checkpoint; ADR-0042–0045 close the remaining 8.0 and Phase 7 stack-supervision obligations.*
 
 ## Context
 

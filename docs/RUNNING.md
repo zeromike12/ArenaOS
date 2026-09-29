@@ -6,19 +6,19 @@ verified against. This page explains how to boot it on your own machine.
 
 ## Phase 8 checkpoint: boot the exact per-commit build
 
-Phase 8.0 is **not finished**. Every new Phase 8 checkpoint commit
+Phase 8.0 is **complete**; 8.1 is next. Every Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
-`releases/checkpoints/` (ADR-0039). For the **current lifecycle-authority refusal**
+`releases/checkpoints/` (ADR-0039). For the **completed 8.0 service-manager**
 checkpoint on this branch, download the archive directly from the
 commit's repository tree (or clone and use its local path):
 
 ```sh
-curl -fL -o arenaos-phase8-lifecycle-refusals-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-lifecycle-refusals/arenaos-phase8-lifecycle-refusals-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase8-lifecycle-refusals-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-lifecycle-refusals/arenaos-phase8-lifecycle-refusals-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase8-lifecycle-refusals-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase8-lifecycle-refusals-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-manager-complete-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-manager-complete/arenaos-phase8-manager-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-manager-complete-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-manager-complete/arenaos-phase8-manager-complete-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-manager-complete-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-manager-complete-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
 cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
@@ -66,7 +66,8 @@ accounting. Do not use this against a service whose state you need.
 shared manager-event wake leaves the first child alive. Only a second,
 private admin request lets the manager use its held Process/DESTROY cap
 to force-stop that live child. The stop request never delegates the
-manager's Process cap to the shell. An in-flight call is failed, the same client endpoint survives, a fresh
+manager's Process cap to the shell. An in-flight call is failed; the
+same client endpoint survives; a fresh
 child rejects the old bearer and sends new ARP, and kernel resource
 counts return to baseline. This spends one restart attempt.
 `lifetest` is a separate **opt-in** lifecycle-authority proof
@@ -79,7 +80,17 @@ rights amplification. A normal shell child is reaped by its real held
 Process cap; the production child then serves new ARP wire traffic and
 resource counts stay flat. No ordinary client or driver receives these
 references. Without the network or entropy device, `lifetest` SKIPs.
-Active dependency probes remain open: Phase 8.0 is incomplete.
+The manager also probes netd's real MAC and rngd's real device-entropy
+GET **before each** stack spawn, with its own timer and a Process-cap-
+reaped worker. `depdeny` is a separate destructive diagnostic: after
+stopping the live stack it faults rngd on the next probe GET and the
+manager refuses to launch another child even though the kernel
+supervisor repairs rngd. `depstall` deliberately wedges rngd's next
+GET; the manager's own deadline stops its blocked worker and leaves the
+stack OFFLINE. Use these only in a disposable VM, then reboot. Missing
+devices SKIP rather than granting partial authority. Phase 8.0 passed
+all 26 historical suites and an exact-image 100/100 QEMU qualification;
+8.1 transactional configuration storage is next.
 Earlier per-commit bundles remain available at
 [`3669743`](https://github.com/zeromike12/ArenaOS/commit/3669743ecabbda26110541b7eea4ebee4b722a7f),
 [`30885a8`](https://github.com/zeromike12/ArenaOS/commit/30885a8e1e2e62867aecf80e816abdd7e478791e),

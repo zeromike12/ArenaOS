@@ -1,6 +1,6 @@
 # ADR-0039 — Manager-owned initial stack startup and checkpoint builds
 
-*Status: Accepted. Phase 8.0 remains incomplete until production restart proof.*
+*Status: accepted. Historical initial-spawn checkpoint; restart and the remaining 8.0 obligations are now qualified by ADR-0040–0045.*
 
 ## Context
 

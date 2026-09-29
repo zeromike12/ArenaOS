@@ -1,6 +1,6 @@
 # ADR-0042 — Ring-3 fault isolation for managed production crash recovery
 
-*Status: accepted design for a partial Phase 8.0 crash checkpoint. It does not close 8.0 until forced live stop, lifecycle-authority refusals and active dependency probes are proved.*
+*Status: accepted and qualified. This crash checkpoint was partial; ADR-0043–0045 subsequently prove forced live stop, lifecycle refusals and active dependency probes, completing 8.0.*
 
 ## Context and decision
 

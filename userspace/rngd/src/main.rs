@@ -302,6 +302,8 @@ pub unsafe extern "C" fn _start() -> ! {
         // has no slot 3, so its refused optional notify is harmless.
         let _ = syscall2(SYS_NOTIFY, SLOT_MANAGER_READY, MGR_BADGE_RNGD_READY);
         let mut drv = Drv { q, completions: 0 };
+        let mut fault_next_get = false;
+        let mut stall_next_get = false;
 
         // 4. The service loop: recv → zero-copy fill → interrupt →
         //    reply. One request in flight at a time (synchronous IPC).
@@ -343,7 +345,39 @@ pub unsafe extern "C" fn _start() -> ! {
                     // SAFETY: thread_exit diverges; 42 is the clean-exit code.
                     syscall1(SYS_THREAD_EXIT, EXIT_OK);
                 }
+                RNG_OP_FAULT_NEXT_GET => {
+                    if landed != CAP_NONE {
+                        let _ = syscall1(SYS_CAP_DESTROY, landed);
+                        reply_err(RNG_S_BAD_OP);
+                        continue;
+                    }
+                    fault_next_get = true;
+                    reply_ok(0);
+                    log("rngd: opt-in next real GET will fault in ring 3");
+                }
+                RNG_OP_STALL_NEXT_GET => {
+                    if landed != CAP_NONE {
+                        let _ = syscall1(SYS_CAP_DESTROY, landed);
+                        reply_err(RNG_S_BAD_OP);
+                        continue;
+                    }
+                    stall_next_get = true;
+                    reply_ok(0);
+                    log("rngd: opt-in next real GET will stall without device completion");
+                }
                 RNG_OP_GET => {
+                    if stall_next_get {
+                        log(
+                            "rngd: intentionally withholding GET completion in destructive test VM",
+                        );
+                        loop {
+                            let _ = syscall1(SYS_WAIT, SLOT_NOTIF);
+                        }
+                    }
+                    if fault_next_get {
+                        log("rngd: injecting genuine #UD with probe GET in flight");
+                        core::arch::asm!("ud2", options(noreturn));
+                    }
                     if landed == CAP_NONE {
                         reply_err(RNG_S_NO_BUF);
                         continue;

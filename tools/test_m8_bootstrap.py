@@ -46,8 +46,8 @@ def main() -> int:
     ok &= check(rc == 0 and "PANIC" not in serial and "m7: RESULT PASS (2/2)" in serial,
                 "full fixture booted with all historical M7 tests green")
     manager = re.search(r"servicemgr spawned: pid (\d+), image19; stack endpoint Some\((\d+)\); audited (\d+) literal caps; no device/Power/Process grants", serial)
-    ok &= check(manager is not None and manager.group(3) == "9" if manager else False,
-                "kernel installed and audited exactly nine bounded manager grants")
+    ok &= check(manager is not None and manager.group(3) == "10" if manager else False,
+                "kernel installed and audited exactly ten bounded manager grants")
     netd = re.search(r"netd spawned: pid \d+ .*?1=Endpoint(\d+)/R.*?3=Notif(\d+)/W", serial)
     rngd = re.search(r"rngd spawned: pid \d+ .*?1=Endpoint(\d+)/R.*?3=Notif(\d+)/W", serial)
     observed = re.search(r"servicemgr: live caps image17 netd=(\d+) stack=(\d+) rngd=(\d+)", serial)

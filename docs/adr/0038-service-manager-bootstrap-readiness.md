@@ -1,6 +1,6 @@
 # ADR-0038 — Service-manager bootstrap grants and driver-readiness channel
 
-*Status: Accepted (Phase 8.0 bootstrap/inventory checkpoint, not a completed manager).*
+*Status: accepted. Historical bootstrap-only checkpoint; the complete manager and its active probes qualified in 8.0 (ADR-0039–0045).*
 
 ## Context
 

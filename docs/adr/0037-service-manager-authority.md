@@ -1,10 +1,9 @@
 # ADR-0037 — Service-manager authority, bootstrap and manifest v1
 
-*Status: accepted design, Phase 8.0 still incomplete. The bounded
-planner, caller-cap-only describe syscall and Process-cap-gated child
-finish syscall are implemented. The shell exercises two real ring-3
-spawn/reap cycles; no running manager, production stack restart, or
-8.0 qualification yet.*
+*Status: accepted and implemented. Phase 8.0 qualified with all four
+exit areas by ADR-0042–0045 (26 historical suites, fresh artifact-bound
+100/100 QEMU boots). This ADR's context below records the original
+pre-implementation gaps; it is not a description of the completed tree.*
 
 ## Context: the existing mechanisms and the missing one
 

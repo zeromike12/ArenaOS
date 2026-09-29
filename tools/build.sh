@@ -195,6 +195,12 @@ if [[ ! -f "$MGR_ELF" ]]; then
 fi
 echo "servicemgr image: ${MGR_ELF#"$REPO_ROOT"/} ($(stat -c%s "$MGR_ELF") bytes)"
 
+echo "== building userspace depcheck (userspace/depcheck, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/depcheck" && cargo build --release )
+DEPCHECK_ELF="$REPO_ROOT/userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck"
+test -f "$DEPCHECK_ELF"
+echo "depcheck image: ${DEPCHECK_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DEPCHECK_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

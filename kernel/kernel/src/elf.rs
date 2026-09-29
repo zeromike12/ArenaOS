@@ -234,6 +234,10 @@ pub static SERVICEMGR_IMAGE: &[u8] = include_bytes!(
     "../../../userspace/servicemgr/target/x86_64-unknown-none/release/arena-servicemgr"
 );
 
+/// ADR-0045: short-lived pre-spawn dependency probe, image 20.
+pub static DEPCHECK_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {
