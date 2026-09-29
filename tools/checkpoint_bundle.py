@@ -47,9 +47,10 @@ def verify_qualified_image(suite_log: Path) -> tuple[str, bytes]:
         raise ValueError("ESP contains an EFI different from the qualified final EFI")
     log = suite_log.read_text()
     suite = re.search(r"ALL TESTS PASSED \((\d+) test suites\)", log)
-    if not suite or int(suite.group(1)) < 20 or \
-            "INITIAL-START SUBSTRATE: PASS" not in log:
-        raise ValueError("all 20+ historical suites + manager-child test log required")
+    if not suite or int(suite.group(1)) < 21 or \
+            "INITIAL-START SUBSTRATE: PASS" not in log or \
+            "PRODUCTION ORDERLY-RESTART SUBSTRATE: PASS" not in log:
+        raise ValueError("all 21+ historical suites + actual production restart proof required")
     return digest(efi), esp.read_bytes()
 
 
@@ -78,7 +79,7 @@ def main() -> int:
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
-        "Phase 8.0: INCOMPLETE; production stack restart unproven\n"
+        "Phase 8.0: INCOMPLETE; one orderly restart proven, crash and lifecycle/accounting gates open\n"
     )
     (stage / "sha256sums.txt").write_text("".join(
         f"{digest((stage / path).read_bytes())}  {path}\n" for path in FILES
@@ -116,8 +117,8 @@ def main() -> int:
             os.environ["ARENA_OVMF_CODE"] = str(unpacked / "edk2-x86_64-code.fd")
             os.environ["ARENA_OVMF_VARS"] = str(unpacked / "ovmf-vars-template.img")
             rc, serial, _ = mtest.boot("checkpoint-bundle", unpacked / "arena-esp.img",
-                                       [(b"servicemgr: production netstackd READY pid", 1, b""),
-                                        *mtest.DEFAULT_FEED], scratch)
+                                       [(b"servicemgr: production netstackd READY pid", 1, b"stacktest\r"),
+                                        (b"arena>", 2, b"shutdown\r")], scratch)
         finally:
             for key, old in (("ARENA_OVMF_CODE", old_code), ("ARENA_OVMF_VARS", old_vars)):
                 if old is None:
@@ -127,8 +128,12 @@ def main() -> int:
         required = ("m7: RESULT PASS (2/2)",
                     "servicemgr: production netstackd READY pid",
                     "four installed child caps audited (netd/W stack/R backoff/RW rngd/W)",
+                    "m8: stacktest Process-cap stop refused to endpoint-only client",
+                    "m8: stacktest observed SERVICE_GONE during child absence",
+                    "m8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)",
                     "halting via UEFI ResetSystem(shutdown)")
-        if rc != 0 or "PANIC" in serial or any(item not in serial for item in required):
+        if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
+                or serial.count("servicemgr: production netstackd READY pid") != 2):
             (ROOT / "build/checkpoint-bundle-failure.log").write_text(serial)
             raise ValueError("extracted bundle did not boot and shut down cleanly")
 

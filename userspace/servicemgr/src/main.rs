@@ -1,6 +1,6 @@
 //! Phase 8.0 ring-3 managed initial spawn (ADR-0037/0039).
-//! This program starts and reaps the production stack but DOES NOT yet
-//! prove restart or close Phase 7's production supervision obligation.
+//! This program restarts the production stack with a bounded policy,
+//! but Phase 8.0's adversarial lifecycle/accounting proofs remain open.
 //! No manifest request becomes authority merely because this program
 //! boots: the kernel installed literal caps, queried by SyscallProbe.
 #![no_std]
@@ -9,6 +9,7 @@
 use arena_servicemgr::inventory::{self, NamedSlot, Probe, SyscallProbe};
 use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request, Service, Step};
 use arena_servicemgr::readiness::Gate;
+use arena_servicemgr::restart::{Refusal as RestartRefusal, Restart};
 use core::panic::PanicInfo;
 
 #[path = "../../abi.rs"]
@@ -22,6 +23,7 @@ const SLOT_STACK: u8 = 3;
 const SLOT_BACKOFF: u8 = 4;
 const SLOT_RNGD: u8 = 5;
 const SLOT_RNG_READY: u8 = 6;
+const SLOT_RESTART: u8 = 7; // private timer object, NOT shared with any driver
 const READY_DEADLINE_US: u64 = 2_000_000;
 
 const IMAGE: Key = Key(0);
@@ -136,7 +138,8 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
     let probe = SyscallProbe;
     let notify = probe.describe(SLOT_EVENTS).map_err(|_| ())?;
     let rng_ready = probe.describe(SLOT_RNG_READY).map_err(|_| ())?;
-    for event in [notify, rng_ready] {
+    let restart = probe.describe(SLOT_RESTART).map_err(|_| ())?;
+    for event in [notify, rng_ready, restart] {
         if event.kind != inventory::NOTIFICATION_KIND
             || event.rights & (manifest::READ | manifest::WRITE) as u64
                 != (manifest::READ | manifest::WRITE) as u64
@@ -146,7 +149,10 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
     }
     // Distinct objects, not just disjoint badge labels. A WRITE
     // capability to one must not be able to signal the other.
-    if notify.object == rng_ready.object {
+    if notify.object == rng_ready.object
+        || notify.object == restart.object
+        || rng_ready.object == restart.object
+    {
         return Err(());
     }
     let inventory = inventory::collect(&SLOTS, &probe).map_err(|_| ())?;
@@ -158,6 +164,7 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
         || held[2].kind != Kind::Endpoint
         || held[3].kind != Kind::Notification
         || held[4].kind != Kind::Endpoint
+        || held[3].object == restart.object
     {
         return Err(());
     }
@@ -165,9 +172,9 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
 }
 
 fn wait_one(slot: u8, badge: u64) -> Result<(), ()> {
-    // Bound EACH driver separately. Since WRITE authority is on two
-    // distinct notification objects, neither can forge the other's
-    // ready event by sending its badge bit on a shared channel.
+    // Bound each event on its specific notification object. Driver
+    // readiness and the private restart timer have distinct WRITE
+    // holders; badge bits alone do not establish origin.
     let timer = unsafe {
         syscall3(
             SYS_TIMER_ARM,
@@ -264,33 +271,143 @@ fn report_child(pid: u64) {
     let _ = unsafe { syscall2(SYS_DEBUG_WRITE, buf.as_ptr() as u64, n as u64) };
 }
 
-fn monitor(pid: u64, handle: u8) -> ! {
+fn planned_step() -> Result<Step, ()> {
+    // Inspect our REAL caps again on each restart. The static manifest
+    // never mints replacement authority; each fresh child's setup must
+    // independently verify live netd/rngd before it reports READY.
+    let external = [
+        External { id: 1, ready: true },
+        External { id: 2, ready: true },
+    ];
+    let plan = inventory::plan(&SLOTS, &SyscallProbe, &[SERVICE], &external).map_err(|_| ())?;
+    if plan.count != 1 {
+        return Err(());
+    }
+    plan.steps[0].ok_or(())
+}
+
+fn backoff(delay: u64) -> Result<(), ()> {
+    // The manager owns this timer: neither an unsolicited driver badge
+    // nor a guessed pid grants permission to skip the backoff.
+    let timer = unsafe {
+        syscall3(
+            SYS_TIMER_ARM,
+            SLOT_RESTART as u64,
+            MGR_BADGE_STACK_BACKOFF,
+            delay,
+        )
+    };
+    if timer < 0 {
+        return Err(());
+    }
+    let result = wait_one(SLOT_RESTART, MGR_BADGE_STACK_BACKOFF);
+    if result.is_err() {
+        let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
+    }
+    result
+}
+
+/// A diagnostic snapshot distinguishes a forged early exit hint from
+/// a BUSY teardown failure. It never grants lifecycle authority: only
+/// the held Process cap may authorize SYS_PROC_FINISH.
+fn child_still_live(pid: u64) -> Result<bool, ()> {
+    let mut entries = [0u64; 64];
+    let n = unsafe { syscall2(SYS_PROC_LIST, entries.as_mut_ptr() as u64, 32) };
+    if !(0..=32).contains(&n) {
+        return Err(());
+    }
+    for i in 0..n as usize {
+        if entries[2 * i] == pid {
+            return Ok(entries[2 * i + 1] != 0);
+        }
+    }
+    Err(())
+}
+
+fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
+    let mut policy = match Restart::new(pid, step.restart_limit, step.backoff_us) {
+        Ok(p) => p,
+        Err(_) => {
+            log("servicemgr: OFFLINE — invalid restart policy\r\n");
+            park();
+        }
+    };
     loop {
         let badge = unsafe { syscall1(SYS_WAIT, SLOT_EVENTS as u64) };
         if badge < 0 {
             log("servicemgr: OFFLINE — event wait refused\r\n");
             park();
         }
-        if badge as u64 & MGR_BADGE_STACK_EXIT != 0 {
-            // The badge is a hint, NEVER authority. The held Process
-            // cap with DESTROY authorizes the one-time reap.
-            if inventory::child_handle(pid, &SyscallProbe) != Ok(handle)
-                || inventory::finish(handle, false).is_err()
-            {
-                log("servicemgr: OFFLINE — Process-cap reap REFUSED\r\n");
-            } else {
-                log("servicemgr: OFFLINE — child reaped; restart proof still OPEN\r\n");
-            }
+        if badge as u64 & MGR_BADGE_STACK_EXIT == 0 {
+            continue;
+        }
+        // A badge is a hint, NEVER authority. Drivers sharing this
+        // notification can assert the bit; mode 0 MUST reject a live
+        // child even when the caller really holds the Process cap.
+        if inventory::child_handle(pid, &SyscallProbe) != Ok(handle) {
+            log("servicemgr: OFFLINE — unique child Process cap missing\r\n");
             park();
         }
-        // Driver restart badges may arrive here; this slice does not
-        // claim a live dependency health protocol or respawn yet.
+        match inventory::finish(handle, false) {
+            Err(STATUS_BUSY) => {
+                if child_still_live(pid) == Ok(true) {
+                    log("servicemgr: ignored exit hint: held child is still live\r\n");
+                    continue;
+                }
+                log("servicemgr: OFFLINE — child dead but Process-cap finish BUSY\r\n");
+                park();
+            }
+            Err(_) => {
+                log("servicemgr: OFFLINE — Process-cap reap REFUSED\r\n");
+                park();
+            }
+            Ok(()) => {}
+        }
+        let delay = match policy.exited(pid) {
+            Ok(delay) => delay,
+            Err(RestartRefusal::BudgetExhausted) => {
+                log("servicemgr: OFFLINE — bounded restart budget exhausted\r\n");
+                park();
+            }
+            Err(_) => {
+                log("servicemgr: OFFLINE — child lifecycle mismatch\r\n");
+                park();
+            }
+        };
+        log("servicemgr: production child reaped through Process cap; bounded backoff\r\n");
+        if backoff(delay).is_err() {
+            log("servicemgr: OFFLINE — restart backoff deadline/refusal\r\n");
+            park();
+        }
+        let next = match planned_step() {
+            Ok(s) if s.service_id == step.service_id => s,
+            _ => {
+                log("servicemgr: OFFLINE — restart authority/dependency plan refused\r\n");
+                park();
+            }
+        };
+        match launch(next) {
+            Ok((new_pid, new_handle)) => {
+                if policy.ready(new_pid).is_err() {
+                    log("servicemgr: OFFLINE — restart state mismatch\r\n");
+                    park();
+                }
+                pid = new_pid;
+                handle = new_handle;
+                log("servicemgr: restarted production netstackd on original endpoint\r\n");
+                report_child(pid);
+            }
+            Err(()) => {
+                log("servicemgr: OFFLINE — replacement spawn/readiness refused\r\n");
+                park();
+            }
+        }
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    log("servicemgr: ring-3 boot (Phase 8.0 initial-stack substrate)\r\n");
+    log("servicemgr: ring-3 boot (Phase 8.0 bounded-restart substrate)\r\n");
     let ids = match boot_inventory() {
         Ok(ids) => ids,
         Err(()) => {
@@ -303,27 +420,22 @@ pub extern "C" fn _start() -> ! {
         log("servicemgr: OFFLINE — device readiness deadline/refusal; no child spawned\r\n");
         park();
     }
-    let external = [
-        External { id: 1, ready: true },
-        External { id: 2, ready: true },
-    ];
-    let plan = match inventory::plan(&SLOTS, &SyscallProbe, &[SERVICE], &external) {
-        Ok(plan) => plan,
-        Err(_) => {
+    let step = match planned_step() {
+        Ok(step) => step,
+        Err(()) => {
             log("servicemgr: OFFLINE — live cap/policy mismatch; no child spawned\r\n");
             park();
         }
     };
-    if plan.count != 1 || plan.steps[0].unwrap().count != 4 {
+    if step.service_id != 17 || step.count != 4 {
         log("servicemgr: OFFLINE — unexpected plan shape; no child spawned\r\n");
         park();
     }
     log("servicemgr: policy validated from live caps and ready drivers\r\n");
-    let step = plan.steps[0].unwrap();
     match launch(step) {
         Ok((pid, handle)) => {
             report_child(pid);
-            monitor(pid, handle);
+            monitor(pid, handle, step);
         }
         Err(()) => {
             log("servicemgr: OFFLINE — spawn or stack readiness refused\r\n");

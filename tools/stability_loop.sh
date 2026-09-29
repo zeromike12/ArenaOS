@@ -131,16 +131,21 @@ for i in $(seq 1 "$N"); do
         "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" \
         "$REPO_ROOT/build/vcon-port.txt" >/dev/null 2>"$REPO_ROOT/build/vcon-dbg.txt" &
     vcon_pid=$!
-    # ADR-0020: a healthy boot no longer halts by itself — it ends at
-    # the shell. The feeder subshell types 'shutdown' when the shell's
-    # BOTH prompt and manager child-ready must appear before shutdown.
-    # Prompt alone races the child's startup (observed in the full
-    # suite); this is a readiness test, not scheduler timing. A stuck
-    # child leaves the feeder waiting until QEMU's timeout fails boot.
+    # ADR-0040: qualify the *real* manager restart, not merely idle
+    # boot. Wait for both prompt and first manager ready, explicitly
+    # type the privileged stacktest, then wait for its end-to-end
+    # success AND second shell prompt before shutdown. A failure or
+    # hang times out — it cannot be retried into an apparent pass.
     {
         n=0
         while ! grep -aq 'arena>' "$SERIAL" 2>/dev/null || \
               ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL" 2>/dev/null; do
+            sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
+        done
+        printf 'stacktest\r'
+        n=0
+        while ! grep -aqF 'm8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)' "$SERIAL" 2>/dev/null || \
+              (( $(grep -ac 'arena>' "$SERIAL" 2>/dev/null || true) < 2 )); do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
         printf 'shutdown\r'
@@ -190,10 +195,10 @@ for i in $(seq 1 "$N"); do
         why="guest did not complete TCP FIN/close/revocation"
     # Phase 8.0 partial checkpoint: the shipping fixture must run
     # the ring-3 manager, observe live caps, receive both driver
-    # badges, and start/audit its one child. NOT a restart proof.
-    elif ! grep -aqF 'audited 7 literal caps; no device/Power/Process grants' "$SERIAL"; then
+    # badges, then start, reap and restart its child. NOT full 8.0.
+    elif ! grep -aqF 'audited 8 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 9/9; tenth refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 10/10; eleventh refused' "$SERIAL"; then
         why="manager readiness-channel notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
@@ -201,6 +206,18 @@ for i in $(seq 1 "$N"); do
         why="manager did not bring its production child to readiness"
     elif ! grep -aqF 'four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras' "$SERIAL"; then
         why="manager-owned child kernel cap audit missing"
+    elif [[ $(grep -acF 'servicemgr: production netstackd READY pid' "$SERIAL" || true) -ne 2 ]]; then
+        why="manager did not start exactly two child incarnations"
+    elif [[ $(grep -acF 'four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras' "$SERIAL" || true) -ne 2 ]]; then
+        why="both manager children were not independently audited"
+    elif ! grep -aqF 'servicemgr: production child reaped through Process cap; bounded backoff' "$SERIAL"; then
+        why="production child was not reaped/backed off by manager"
+    elif ! grep -aqF 'm8: stacktest Process-cap stop refused to endpoint-only client' "$SERIAL"; then
+        why="the client endpoint did not prove it lacks Process-stop authority"
+    elif ! grep -aqF 'm8: stacktest observed SERVICE_GONE during child absence' "$SERIAL"; then
+        why="old endpoint did not report SERVICE_GONE in the dead interval"
+    elif ! grep -aqF 'm8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)' "$SERIAL"; then
+        why="post-restart stale bearer and fresh wire proof missing"
     elif grep -aq 'servicemgr: OFFLINE' "$SERIAL"; then
         why="manager went OFFLINE although both fixture drivers were attached"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then

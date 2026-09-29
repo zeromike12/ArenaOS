@@ -983,9 +983,9 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (design only; no 8.x milestone implemented)
+## Phase 8 — Mature userspace 🔨 (8.0 in progress; no 8.x milestone completed)
 
-Authority model: proposed ADR-0037. The roadmap below is the sequence,
+Authority model: accepted ADR-0037/0038/0039/0040. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
 milestone gets its own real negative-space tests, the entire historical
 suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
@@ -999,9 +999,15 @@ is not completed by accepting an ADR.
       device-originated readiness badges (ADR-0038). It now requests
       one production `netstackd` through `SYS_SPAWN`, checks its ready
       badge and Process handle, and the kernel audits all four child's
-      installed grants (ADR-0039). It does NOT yet prove failure/restart
-      or close the netstackd supervision obligation. Not an 8.0
-      completion claim. Complete restart from the fixed kernel trust root with
+      installed grants (ADR-0039). It now uses its held Process cap to
+      reap an orderly exiting production child, waits for bounded timer
+      backoff, revalidates live grants, and starts a replacement behind
+      the SAME endpoint. A privileged shell client proves an old bearer
+      fails and new ARP work reaches the real wire (ADR-0040). This is
+      NOT an 8.0 completion claim: unexpected in-flight crash, forced
+      stop, forged/foreign/driver Process-cap refusals, repeated flat
+      accounting, dependency probes and budget exhaustion still need
+      integration proof. Complete recovery from the fixed kernel trust root with
       only explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
       can delegate only actual caps already held, attenuated by

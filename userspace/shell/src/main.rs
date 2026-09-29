@@ -12,8 +12,9 @@
 //! - slot 1: `Image{0}` (READ) — the M4.3 test payload, for `spawn`,
 //! - slot 2: `Notification` (READ|WRITE) — its children's exit-badge
 //!   channel,
-//! - slot 3: `Endpoint` (WRITE) — the call side of fsd's filesystem
-//!   service (M5.3): `ls`, `cat`, and `write` run through it.
+//! - slot 3: `Endpoint` (WRITE) — filesystem service (M5.3).
+//! - slot 4: `Endpoint` (WRITE) — privileged production stack client
+//!   only when BOTH drivers exist (ADR-0040). No app gets this cap.
 //!
 //! The shell is a plain program: no libc, no allocator — fixed buffers,
 //! byte-wise command matching, the shared userspace ABI surface
@@ -56,6 +57,8 @@ const SLOT_POWER: u64 = 0;
 const SLOT_IMAGE: u64 = 1; // registry image 0 = the M4.3 test payload
 const SLOT_NOTIF: u64 = 2;
 const SLOT_FSD: u64 = 3; // M5.3: the filesystem service call side
+const SLOT_STACK: u64 = 4; // ADR-0040: privileged admin-only client
+const STACK_TEST_TIMER: u64 = 1 << 21;
 /// The badge this shell lends its children's exits.
 const SPAWN_BADGE: u64 = 0x5AA5;
 
@@ -188,6 +191,128 @@ fn msg_zero(msg: &mut [u8; MSG_BYTES]) {
     for b in msg.iter_mut() {
         *b = 0;
     }
+}
+
+/// The shell is already the Power-holding administrator. This opt-in
+/// integration proof holds its own stack client cap across a real
+/// service restart. A TCP/UDP handle is authority by possession, not
+/// by pid; the SAME caller's old bearer must be revoked in the fresh
+/// server, while the kernel endpoint cap stays valid.
+fn stack_call(op: u64, arg: u64) -> (i64, u64, u64) {
+    let mut reply = [0u64; 3];
+    let status = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            SLOT_STACK,
+            arg,
+            op,
+            CAP_NONE,
+            reply.as_mut_ptr() as u64,
+            0,
+        )
+    };
+    (status, reply[0], reply[1])
+}
+fn stack_pause(us: u64) -> bool {
+    let timer = unsafe { syscall3(SYS_TIMER_ARM, SLOT_NOTIF, STACK_TEST_TIMER, us) };
+    if timer < 0 {
+        return false;
+    }
+    loop {
+        let b = unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) };
+        if b < 0 {
+            return false;
+        }
+        if b as u64 & STACK_TEST_TIMER != 0 {
+            return true;
+        }
+    }
+}
+fn stacktest() {
+    let mut cap = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, cap.as_mut_ptr() as u64) } != 0
+        || cap[0] != 2
+        || cap[2] & RIGHTS_WRITE == 0
+    {
+        write_str("m8: stacktest SKIP (no production client cap)\r\n");
+        return;
+    }
+    // The endpoint lets us CALL the service, not reap it. `Power` is
+    // not a Process cap either; service lifecycle stays manager-owned.
+    if unsafe { syscall2(SYS_PROC_FINISH, SLOT_STACK, 1) } >= 0
+        || unsafe { syscall2(SYS_PROC_FINISH, SLOT_POWER, 1) } >= 0
+    {
+        write_str("m8: stacktest FAIL (client cap could stop a process)\r\n");
+        return;
+    }
+    write_str("m8: stacktest Process-cap stop refused to endpoint-only client\r\n");
+    let gateway = 10 | (2 << 16) | (2 << 24); // 10.0.2.2, low byte first
+    let (r, st, mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    if r < 0 || st != ARP_S_OK || mac == 0 {
+        write_str("m8: stacktest FAIL (first real-wire ARP resolve)\r\n");
+        return;
+    }
+    let (r, st, prior) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || prior >> 32 == 0 {
+        write_str("m8: stacktest FAIL (first instance has no wire evidence)\r\n");
+        return;
+    }
+    let (r, st, bearer) = stack_call(UDP_OP_BIND, 5355);
+    if r < 0 || st != ARP_S_OK || bearer == 0 {
+        write_str("m8: stacktest FAIL (no rngd-backed UDP bearer)\r\n");
+        return;
+    }
+    write_str(
+        "m8: stacktest held old endpoint and issued rngd-backed bearer after real ARP wire work\r\n",
+    );
+    let (r, st, _) = stack_call(ARP_OP_SHUTDOWN, 0);
+    if r < 0 || st != ARP_S_OK {
+        write_str("m8: stacktest FAIL (orderly production child exit)\r\n");
+        return;
+    }
+    write_str("m8: stacktest requested production child exit (manager must reap and restart)\r\n");
+    let start = unsafe { syscall0(SYS_CLOCK_NOW) };
+    if start < 0 {
+        write_str("m8: stacktest FAIL (no monotonic clock)\r\n");
+        return;
+    }
+    let mut gone = false;
+    loop {
+        let (r, st, _) = stack_call(UDP_OP_CLOSE, bearer);
+        if r == 0 && st == UDP_S_BAD_HANDLE {
+            break;
+        }
+        if r != STATUS_SERVICE_GONE {
+            write_str("m8: stacktest FAIL (stale bearer was accepted or unexpected transport)\r\n");
+            return;
+        }
+        gone = true;
+        let now = unsafe { syscall0(SYS_CLOCK_NOW) };
+        if now < 0 || now as u64 - start as u64 > 3_000_000 || !stack_pause(25_000) {
+            write_str("m8: stacktest FAIL (no bounded replacement)\r\n");
+            return;
+        }
+    }
+    if gone {
+        write_str("m8: stacktest observed SERVICE_GONE during child absence\r\n");
+    }
+    let (r, st, fresh) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || fresh >> 32 != 0 {
+        write_str("m8: stacktest FAIL (replacement was not fresh)\r\n");
+        return;
+    }
+    let (r, st, fresh_mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    let (r2, st2, after) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || mac != fresh_mac || r2 < 0 || st2 != ARP_S_OK || after >> 32 == 0
+    {
+        write_str(
+            "m8: stacktest FAIL (replacement did not perform real post-restart wire work)\r\n",
+        );
+        return;
+    }
+    write_str(
+        "m8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)\r\n",
+    );
 }
 
 // ---- the builtins ----------------------------------------------------------
@@ -531,10 +656,11 @@ fn do_spawn() {
 
 const BANNER: &str = "ArenaOS shell v0.10 (M4.6 + M5.3/5.4 + M6.5, ADR-0020/0023/0028) — serial, keyboard, or console port.\r\n";
 const PROMPT: &str = "arena> ";
-/// One debug_write chunk (<= WRITE_MAX = 256): the help text hits the
-/// wire atomically — and Out::push DROPS bytes past WRITE_MAX, so an
-/// over-long HELP would silently lose its tail. Budget: 251 bytes.
-const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n  shutdown - halt the machine\r\n";
+/// Two bounded debug-write chunks: Out::push drops bytes beyond
+/// WRITE_MAX, so never append to the old near-full help buffer.
+const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
+const HELP_MORE: &str =
+    "  stacktest - privileged stack restart proof\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -595,6 +721,9 @@ pub unsafe extern "C" fn _start() -> ! {
             let mut o = Out::new();
             if eq(line, b"help") {
                 o.str(HELP);
+                o.flush();
+                write_str(HELP_MORE);
+                continue;
             } else if eq(line, b"ps") {
                 do_ps(&mut o);
             } else if eq(line, b"echo") {
@@ -610,6 +739,10 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_write(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"rm ") {
                 do_rm(&mut o, rest);
+            } else if eq(line, b"stacktest") {
+                o.flush();
+                stacktest();
+                continue;
             } else if eq(line, b"spawn") {
                 o.flush();
                 do_spawn(); // does its own output (the child talks mid-flight)

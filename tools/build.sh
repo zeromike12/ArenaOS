@@ -185,7 +185,7 @@ done
 
 # Phase 8.0 bootstrap substrate: a real ring-3 manager image (19).
 # It validates caller-held caps and driver readiness and starts the
-# initial production stack; restart remains an open milestone gate.
+# production stack; one orderly restart is tested, but 8.0 remains open.
 echo "== building userspace servicemgr (userspace/servicemgr, x86_64-unknown-none) =="
 ( cd "$REPO_ROOT/userspace/servicemgr" && cargo build --release )
 MGR_ELF="$REPO_ROOT/userspace/servicemgr/target/x86_64-unknown-none/release/arena-servicemgr"

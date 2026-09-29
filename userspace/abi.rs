@@ -54,6 +54,10 @@ pub const MGR_BADGE_DEADLINE: u64 = 1 << 2;
 pub const MGR_BADGE_STACK_EXIT: u64 = 1 << 3;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
+/// Manager's own bounded backoff timer on the event channel.
+pub const MGR_BADGE_STACK_BACKOFF: u64 = 1 << 4;
+/// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
+pub const STATUS_BUSY: i64 = -4;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 

@@ -22,14 +22,24 @@ syscalls for two spawn/reap cycles and bad-kind/stale-cap refusals.
 `test_m8_bootstrap.py` now verifies a real manager boot and its live
 caller-cap query against the kernel's installed-cap audit. Separate
 full-network and no-network fixtures check genuine post-DRIVER_OK
-readiness and fail-closed OFFLINE with no partial authority. The
-100-boot gate requires that same bootstrap on the full fixture. These
+readiness and fail-closed OFFLINE with no partial authority. ADR-0040
+adds a manager-private restart timer notification (full fixture 10/10,
+eleventh refused): unlike the driver-ready event and stack backoff
+objects, neither driver nor child can forge its timeout. The 100-boot
+gate requires that same bootstrap on the full fixture. These
 checks now include one actual manager-owned production `netstackd`
 spawn, an explicit ready badge and an independent kernel audit of all
-four installed child caps. They do NOT prove recovery: 8.0 still
-requires lifecycle negative-space/accounting tests and a production
-`netstackd` restart, stale-bearer and resumed-wire proof before it can
-report a completed milestone RESULT. Each new commit carries a bundled
+four installed child caps. `test_m8_restart.py` then types the Power-
+holding shell's explicit `stacktest` command: genuine ARP wire traffic,
+an rngd-backed UDP bearer held across production netstackd's orderly
+exit, Process-cap reap, timer backoff, second cap-audited child on the
+same endpoint, SERVICE_GONE while dead, refused old bearer and a new
+ARP request on the wire. An absent dependency grants no shell client
+cap. The 100-boot gate exercises this command on the final image, not
+just idle boot. These tests do NOT close 8.0: adversarial lifecycle
+negative-space, crash recovery, repeated flat frame/record accounting
+and pre-respawn driver probes are still required before a completed
+milestone RESULT. Each new commit carries a bundled
 boot image and running instructions under `releases/checkpoints/`
 (ADR-0039), gated by full suite and artifact-bound 100/100 boots.
 

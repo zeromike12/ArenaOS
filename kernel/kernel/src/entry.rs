@@ -424,6 +424,11 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // signal each ready event is possession of a distinct WRITE cap.
     let rng_ready_nid = crate::ipc::create_notification()
         .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: rng readiness table full"));
+    // ADR-0040: no driver or child may forge a restart-backoff timer.
+    // Badge bits are data, not authority: give this private object
+    // WRITE only to the manager, separately from netd/rngd readiness.
+    let manager_restart_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: restart timer table full"));
     let net_eid = match spawn_netd(manager_nid) {
         Ok(Some((_pid, eid))) => Some(eid),
         Ok(None) => {
@@ -494,10 +499,16 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     // The manager is a separate ring-3 process, never a second owner
     // of kernel-minted driver grants. It starts the production stack
-    // after live-cap and driver-readiness checks; restart is unproven.
-    let (manager_pid, expected_stack_caps) =
-        spawn_servicemgr(manager_nid, rng_ready_nid, net_eid, rng_eid)
-            .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // after live-cap and driver-readiness checks. One orderly restart
+    // can be tested; full lifecycle/failure proof remains open.
+    let (manager_pid, expected_stack_caps) = spawn_servicemgr(
+        manager_nid,
+        rng_ready_nid,
+        manager_restart_nid,
+        net_eid,
+        rng_eid,
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
 
     info!(
         "kernel",
@@ -537,7 +548,24 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             rights: crate::cap::RIGHTS_WRITE,
         },
     ];
-    match crate::spawn::spawn_init(1, &shell_grants, None) {
+    // ADR-0040: the Power-holding administrator alone can exercise a
+    // production client's call endpoint. No Process cap/driver/MMIO;
+    // missing dependencies grant NO partial stack access.
+    let mut shell_full = [crate::cap::Cap::EMPTY; 5];
+    shell_full[..4].copy_from_slice(&shell_grants);
+    let shell_caps: &[crate::cap::Cap] = if let Some(caps) = expected_stack_caps {
+        let crate::cap::CapObj::Endpoint { eid } = caps[1].obj else {
+            crate::halt::halt_machine("manager: stack grant was not an endpoint");
+        };
+        shell_full[4] = crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_WRITE,
+        };
+        &shell_full
+    } else {
+        &shell_grants
+    };
+    match crate::spawn::spawn_init(1, shell_caps, None) {
         Ok(pid) => info!(
             "kernel",
             "shell spawned: pid {pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
@@ -545,18 +573,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     }
 
-    // Full shipping fixture occupies all 9 notifications (ADR-0038).
-    // The tenth must be a typed refusal, never a silent over-allocation;
+    // Full shipping fixture occupies all 10 notifications (ADR-0040).
+    // The eleventh must be a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse a tenth object",
+                "servicemgr: notification bound failed to refuse an eleventh object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 9/9; tenth refused"
+            "servicemgr: full fixture notification budget 10/10; eleventh refused"
         );
     }
 
@@ -566,18 +594,22 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // input, and gives every wake (console RX, tick) somewhere to
     // return. Between wakes it halts the CPU with IF=1 — interrupts
     // must flow now: the UART RX path IS the input device.
-    let mut stack_audited = false;
+    let mut last_audited_child = None;
     loop {
         // ADR-0039: independently audit the child created by the
         // MANAGER's syscall. The kernel sees its Process handle in the
         // manager's actual cap table, then compares four installed
         // child caps to the fixed root policy. No m8 completion claim.
-        if !stack_audited {
-            if let Some(wanted) = expected_stack_caps {
-                if audit_manager_child(manager_pid, &wanted)
-                    .unwrap_or_else(|e| crate::halt::halt_machine(e))
-                {
-                    stack_audited = true;
+        if let Some(wanted) = expected_stack_caps {
+            if let Some(child) = audit_manager_child(manager_pid, &wanted)
+                .unwrap_or_else(|e| crate::halt::halt_machine(e))
+            {
+                if last_audited_child != Some(child) {
+                    info!(
+                        "m8",
+                        "manager-owned netstackd pid {child}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
+                    );
+                    last_audited_child = Some(child);
                 }
             }
         }
@@ -612,6 +644,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 fn spawn_servicemgr(
     manager_nid: u32,
     rng_ready_nid: u32,
+    manager_restart_nid: u32,
     net: Option<u32>,
     rng: Option<u32>,
 ) -> Result<(u64, Option<[crate::cap::Cap; 4]>), &'static str> {
@@ -653,6 +686,12 @@ fn spawn_servicemgr(
                 },
                 Cap {
                     obj: CapObj::Notification { nid: rng_ready_nid },
+                    rights: R | W,
+                },
+                Cap {
+                    obj: CapObj::Notification {
+                        nid: manager_restart_nid,
+                    },
                     rights: R | W,
                 },
             ];
@@ -717,7 +756,7 @@ fn spawn_servicemgr(
 fn audit_manager_child(
     manager_pid: u64,
     expected: &[crate::cap::Cap; 4],
-) -> Result<bool, &'static str> {
+) -> Result<Option<u64>, &'static str> {
     use crate::cap::{CapObj, RIGHTS_DESTROY};
     let mut child = None;
     for slot in 7..crate::cap::CAP_SLOTS {
@@ -730,7 +769,7 @@ fn audit_manager_child(
         }
     }
     let Some(pid) = child else {
-        return Ok(false);
+        return Ok(None);
     };
     if !crate::spawn::has_record(pid) {
         return Err("servicemgr: child Process cap has no live spawn record");
@@ -747,11 +786,7 @@ fn audit_manager_child(
             }
         }
     }
-    info!(
-        "m8",
-        "manager-owned netstackd pid {pid}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
-    );
-    Ok(true)
+    Ok(Some(pid))
 }
 
 /// Spawn the production block service (M5.2, ADR-0022): registry image 2

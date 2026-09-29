@@ -8,17 +8,17 @@ verified against. This page explains how to boot it on your own machine.
 
 Phase 8.0 is **not finished**. Every new Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
-`releases/checkpoints/` (ADR-0039). For the manager-owned initial-stack
+`releases/checkpoints/` (ADR-0039). For the **current bounded-restart**
 checkpoint on this branch, download the archive directly from the
 commit's repository tree (or clone and use its local path):
 
 ```sh
-curl -fL -o arenaos-phase8-initial-stack-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-initial-stack/arenaos-phase8-initial-stack-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase8-initial-stack-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-initial-stack/arenaos-phase8-initial-stack-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase8-initial-stack-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase8-initial-stack-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-managed-restart-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-managed-restart/arenaos-phase8-managed-restart-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-managed-restart-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-managed-restart/arenaos-phase8-managed-restart-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-managed-restart-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-managed-restart-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
 cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
@@ -45,10 +45,18 @@ qemu-system-x86_64 -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
 
 Look for `servicemgr: production netstackd READY pid ...` and the
 kernel's four-cap child audit, then the `arena> ` prompt. Type
+`stacktest` for the **opt-in**, privileged orderly restart proof: the
+same shell-held client endpoint survives the child's exit/reap/backoff,
+its old rngd-backed UDP bearer is rejected, and its new instance
+resolves 10.0.2.2 over real ARP. This spends one of the manager's three
+restart attempts; normal boots do not intentionally restart it. Type
 `help`, `ps`, or `shutdown` to exit cleanly (`Ctrl-A X` quits QEMU).
-This image starts the stack but **has no qualified restart proof**;
-production stack supervision and Phase 8.0 remain open. The archive
-includes this document, a formatted AFS1 scratch template and the
+Unexpected-crash, repeated accounting and lifecycle refusal tests are
+still open: Phase 8.0 and full production supervision remain incomplete.
+The preceding initial-start image remains downloadable from commit
+[`f1bbafb`](https://github.com/zeromike12/ArenaOS/commit/f1bbafbe117d9a814df5a684fd45716286490487).
+
+The archive includes this document, a formatted AFS1 scratch template and the
 exact EDK2 firmware pair used by qualification. Build-from-source
 interactive alternative: `tools/dev-env/bootstrap.sh && tools/run.sh`.
 
