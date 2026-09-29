@@ -63,7 +63,7 @@ def main() -> int:
     ok &= check(rc == 0 and "m8: stacktest SKIP (no production client cap)" in absent
                 and "servicemgr: OFFLINE" in absent and SUCCESS not in absent,
                 "no device means no shell stack authority and an honest SKIP")
-    print(f"[{LABEL}] PRODUCTION ORDERLY-RESTART SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] PRODUCTION ORDERLY-RESTART SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1
 
 

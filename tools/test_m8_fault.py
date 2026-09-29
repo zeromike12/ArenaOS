@@ -60,7 +60,7 @@ def main() -> int:
     ok &= check(rc == 0 and "m8: stackfault SKIP (no production client cap)" in missing
                 and "servicemgr: OFFLINE" in missing and "[arena user fault]" not in missing,
                 "absent dependencies grant no fault-injection authority")
-    print(f"[{LABEL}] UNEXPECTED-CRASH SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] UNEXPECTED-CRASH SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1
 
 

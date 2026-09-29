@@ -4,7 +4,7 @@
 The Power-holding admin issues a private request, NEVER a Process cap.
 A forged shared wake is refused independently; a true mode-1 kernel
 finish observes a live child and fails an in-flight call, then the
-bounded manager replaces it on the same endpoint. 8.0 remains open.
+bounded manager replaces it on the same endpoint. This test alone does not close 8.0.
 """
 import re
 import sys
@@ -74,7 +74,7 @@ def main() -> int:
     ok &= check(rc == 0 and "m8: stackstop SKIP (no production client cap)" in missing
                 and "servicemgr: OFFLINE" in missing and "proc_finish mode1:" not in missing,
                 "missing dependencies grant neither admin stop nor client authority")
-    print(f"[{LABEL}] FORCED-LIVE-STOP SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] FORCED-LIVE-STOP SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1
 
 

@@ -4,6 +4,11 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Match build.sh: host-side suites also need the repository's Rust toolchain.
+if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/tools/dev-env/env.sh"
+fi
 failures=0
 ran=0
 

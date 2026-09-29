@@ -92,7 +92,7 @@ def main() -> int:
                     and "m8: lifetest PASS" not in missing
                     and "PANIC" not in missing,
                     f"{tag}: honest SKIP with no diagnostic grants or manager-owned child")
-    print(f"[{LABEL}] LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1
 
 

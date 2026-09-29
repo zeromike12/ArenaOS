@@ -65,7 +65,7 @@ def main() -> int:
     ok &= check(rc == 0 and "m8: stackstress SKIP (no production client cap)" in absent
                 and "servicemgr: OFFLINE" in absent and PASS not in absent,
                 "missing dependencies grant no client authority; explicit SKIP")
-    print(f"[{LABEL}] REPEATED-ACCOUNTING SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] REPEATED-ACCOUNTING SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1
 
 

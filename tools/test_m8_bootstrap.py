@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 8.0 INCOMPLETE: prove manager bootstrap/initial child, not restart.
+"""Phase 8.0: prove manager bootstrap/initial child, not restart.
 
 An actual ring-3 process queries its own caps; real boot drivers signal
 readiness after DRIVER_OK. Device-missing boots must not mint partial
@@ -79,7 +79,7 @@ def main() -> int:
         ok &= check(OFFLINE in serial and VALIDATED not in serial,
                     f"{tag}: manager reports OFFLINE instead of asserting fake readiness")
 
-    print(f"[{LABEL}] INITIAL-START SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] INITIAL-START SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1
 
 
