@@ -55,8 +55,9 @@ else
     echo "!! host-side networking API tests FAILED"
 fi
 
-# Phase 8.0 groundwork: fail-closed no_std manifest + caller-cap
-# inventory adapter. Ring-3 syscall proof runs in the M4 shell fixture.
+# Phase 8.0 groundwork: fail-closed no_std manifest, caller-cap
+# inventory and readiness badge gate. Ring-3 syscall proof runs in
+# the M4 shell fixture; real manager boot in test_m8_bootstrap.py.
 echo "== host-side service manifest and inventory policy tests"
 if (cd "$REPO_ROOT" && rustc --test --edition 2024 \
     userspace/servicemgr/src/lib.rs -o build/service-manifest-tests \

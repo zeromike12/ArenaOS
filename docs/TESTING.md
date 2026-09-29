@@ -14,14 +14,20 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
-Phase 8.0's early manifest resolver and caller-cap inventory have host
-fail-closed tests in `userspace/servicemgr/src/{manifest,inventory}.rs`.
+Phase 8.0's early manifest resolver, caller-cap inventory and readiness
+badge gate have host fail-closed tests in
+`userspace/servicemgr/src/{manifest,inventory,readiness}.rs` (ADR-0037/0038).
 The M4 shell QEMU fixture additionally uses the real describe/finish
 syscalls for two spawn/reap cycles and bad-kind/stale-cap refusals.
-Neither proves a manager was booted or a production service was granted
-caps and restarted; 8.0 requires a separate
-real in-guest cap audit and managed `netstackd` failure/recovery proof
-before its RESULT may be added to the stability loop.
+`test_m8_bootstrap.py` now verifies a real manager boot and its live
+caller-cap query against the kernel's installed-cap audit. Separate
+full-network and no-network fixtures check genuine post-DRIVER_OK
+readiness and fail-closed OFFLINE with no partial authority. The
+100-boot gate requires that same bootstrap on the full fixture. These
+checks do NOT prove a manager spawned a service: 8.0 still requires
+an actual child-cap audit, lifecycle negative-space tests, and a
+production `netstackd` restart/wire recovery proof before it can
+report a completed milestone RESULT.
 
 ## The testing pyramid
 

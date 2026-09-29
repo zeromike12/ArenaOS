@@ -8,6 +8,9 @@
 //! - slot 1: `Endpoint` (READ — the serve side of the entropy
 //!   service),
 //! - slot 2: `Notification` (READ|WRITE — the interrupt relay target).
+//! - optional production-only slot 3: a distinct Notification/WRITE
+//!   for its own DRIVER_OK signal to the manager (ADR-0038). A test
+//!   instance lacks it and ignores the refused optional notify.
 //!
 //! Everything else is this program's own work, all from ring 3 on top
 //! of the SHARED virtio core (`userspace/virtio.rs` — the third-driver
@@ -47,6 +50,8 @@ use virtio::*;
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
 const SLOT_NOTIF: u64 = 2;
+/// Optional production-only boot readiness channel (ADR-0037).
+const SLOT_MANAGER_READY: u64 = 3;
 
 /// Owned frame slots: ONE frame — the request queue's three ring areas
 /// packed by the shared core's `ring_offsets` (the device's 8-entry
@@ -293,6 +298,9 @@ pub unsafe extern "C" fn _start() -> ! {
             o.i64(vec);
         });
 
+        // Announce only after the queue is DRIVER_OK; the test instance
+        // has no slot 3, so its refused optional notify is harmless.
+        let _ = syscall2(SYS_NOTIFY, SLOT_MANAGER_READY, MGR_BADGE_RNGD_READY);
         let mut drv = Drv { q, completions: 0 };
 
         // 4. The service loop: recv → zero-copy fill → interrupt →

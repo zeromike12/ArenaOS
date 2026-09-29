@@ -183,6 +183,18 @@ for NS_ELF in \
     echo "netstackd image: ${NS_ELF#"$REPO_ROOT"/} ($(stat -c%s "$NS_ELF") bytes)"
 done
 
+# Phase 8.0 bootstrap substrate: a real ring-3 manager image (19).
+# It validates caller-held caps and driver readiness; it does not
+# supervise the production stack yet.
+echo "== building userspace servicemgr (userspace/servicemgr, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/servicemgr" && cargo build --release )
+MGR_ELF="$REPO_ROOT/userspace/servicemgr/target/x86_64-unknown-none/release/arena-servicemgr"
+if [[ ! -f "$MGR_ELF" ]]; then
+    echo "error: servicemgr image not produced at $MGR_ELF" >&2
+    exit 1
+fi
+echo "servicemgr image: ${MGR_ELF#"$REPO_ROOT"/} ($(stat -c%s "$MGR_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

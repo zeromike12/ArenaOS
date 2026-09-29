@@ -187,6 +187,17 @@ for i in $(seq 1 "$N"); do
         why="native UDP library did not deliver/revoke its real-wire datagram"
     elif ! grep -aq 'TCP FIN was acknowledged, the peer closed, and the bearer was revoked' "$SERIAL"; then
         why="guest did not complete TCP FIN/close/revocation"
+    # Phase 8.0 bootstrap checkpoint: the shipping fixture must run
+    # the actual ring-3 manager, observe its own real caps and receive
+    # BOTH driver readiness badges. This is not a supervision proof.
+    elif ! grep -aqF 'audited 7 literal caps; no device/Power/Process grants' "$SERIAL"; then
+        why="manager bootstrap cap audit absent on full fixture"
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 9/9; tenth refused' "$SERIAL"; then
+        why="manager readiness-channel notification bound was not tested"
+    elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers; spawn/restart NOT YET CONNECTED' "$SERIAL"; then
+        why="ring-3 manager did not validate live inventory and driver readiness"
+    elif grep -aq 'servicemgr: OFFLINE' "$SERIAL"; then
+        why="manager went OFFLINE although both fixture drivers were attached"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

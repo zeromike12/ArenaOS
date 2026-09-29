@@ -38,7 +38,10 @@ use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
 pub const MAX_ENDPOINTS: usize = 8;
-pub const MAX_NOTIFS: usize = 8;
+// ADR-0038: nine disjoint production notifications (including separate
+// netd and rngd readiness authority); a shared badge word is forgeable
+// by either WRITE holder, so do not squeeze both drivers onto one nid.
+pub const MAX_NOTIFS: usize = 9;
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
 const QUEUE_DEPTH: usize = 4;

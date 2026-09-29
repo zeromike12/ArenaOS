@@ -45,6 +45,12 @@ pub const SYS_CAP_DESCRIBE: u64 = 29;
 /// Finish a child by Process-cap slot: 0=reap exited, 1=explicit stop/reap.
 pub const SYS_PROC_FINISH: u64 = 30;
 
+// ADR-0037: trusted boot driver-readiness signals on the manager's
+// notification (different object from each driver's interrupt notif).
+pub const MGR_BADGE_NETD_READY: u64 = 1 << 0;
+pub const MGR_BADGE_RNGD_READY: u64 = 1 << 1;
+pub const MGR_BADGE_DEADLINE: u64 = 1 << 2;
+
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 
 pub const CAP_NONE: u64 = u64::MAX;

@@ -992,12 +992,14 @@ suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
 is not completed by accepting an ADR.
 
 - [ ] **8.0 service manager + declarative service manifests v1**.
-      IN PROGRESS — the bounded resolver can consume a caller-cap-only
-      syscall inventory and the Process-cap-gated finish syscall is
-      exercised by two real shell child cycles. No manager is bootstrapped;
-      it does not spawn a managed service or close the netstackd
-      supervision obligation. Not an 8.0 completion claim. Bootstrap one
-      ring-3 manager from a fixed kernel trust root with
+      IN PROGRESS — the bounded resolver consumes a caller-cap-only
+      syscall inventory; two real shell child cycles exercise the
+      Process-cap finish ABI. A ring-3 manager now boots with kernel-
+      audited literal grants, observes its real caps and waits for
+      device-originated readiness badges (ADR-0038). It does NOT yet spawn or
+      restart a managed service or close the netstackd supervision
+      obligation. Not an 8.0 completion claim. Fully connect one
+      ring-3 manager to spawn/restart from the fixed kernel trust root with
       only explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
       can delegate only actual caps already held, attenuated by

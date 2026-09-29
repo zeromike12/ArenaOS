@@ -53,7 +53,8 @@ Rules:
 | [0034](0034-dns-resolver-and-udp-continuations.md) | DNS A lookup, UDP continuations, checksums and bearer revocation | Accepted |
 | [0035](0035-tcp-active-open.md) | Bounded TCP active open and disjoint netd RX/TX badges | Accepted |
 | [0036](0036-native-networking-api.md) | Native userspace API with explicit bearer delegation and real-wire proof | Accepted |
-| [0037](0037-service-manager-authority.md) | Phase 8.0 service manager authority, manifests, lifecycle ownership and bootstrap | Proposed |
+| [0037](0037-service-manager-authority.md) | Phase 8.0 service manager authority, manifests, lifecycle ownership and bootstrap | Accepted |
+| [0038](0038-service-manager-bootstrap-readiness.md) | Fixed manager boot grants, device-originated readiness badges, and fail-closed inventory bootstrap (8.0 partial) | Accepted |
 
 ## Template
 

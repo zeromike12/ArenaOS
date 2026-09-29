@@ -1,7 +1,7 @@
 //! `netd` — the ArenaOS network service (M6.1, ADR-0024). Spawn-registry
 //! image 6, spawned at boot when the virtio-net fixture is attached (and
-//! short-lived inside the m6 suite's net_service test). The grant layout
-//! mirrors storaged's exactly:
+//! short-lived inside the m6 suite's net_service test). Its first
+//! three grants mirror storaged's:
 //!
 //! - slot 0: `Mmio` over the BAR carrying the virtio structures (R|W —
 //!   the handshake writes registers),
@@ -9,6 +9,9 @@
 //! - slot 2: `Notification` (R|W — the target of BOTH MSI-X relay
 //!   badges: RX arrivals and TX completions; badges are distinct BITS
 //!   because the notification merges pending words by OR).
+//! - optional production-only slot 3: Notification/WRITE to signal
+//!   DRIVER_OK readiness to the ring-3 manager (ADR-0038). Test
+//!   instances lack this cap; a refused optional notify is harmless.
 //!
 //! netd is the virtio-net driver, LINK-LAYER ONLY: raw Ethernet frames
 //! in, raw Ethernet frames out — no protocols (Phase 7's business). It
@@ -64,6 +67,9 @@ use virtio::*;
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
 const SLOT_NOTIF: u64 = 2;
+/// Optional production-only boot readiness channel (ADR-0037).
+/// The M6/M7 fixture drivers have no slot 3, and keep their old behavior.
+const SLOT_MANAGER_READY: u64 = 3;
 
 /// Owned frame slots (SYS_ALLOC_FRAME lands the cap, SYS_MAP_MEMORY
 /// consumes it). Five frames: 0 = q0 rings, 1..3 = RX buffers,
@@ -520,6 +526,10 @@ pub unsafe extern "C" fn _start() -> ! {
             o.i64(qvecs[1]);
         });
 
+        // Once DRIVER_OK and our MAC/queues are validated, tell the
+        // boot manager; this is not a claim made by a kernel log line.
+        // A standalone test driver lacks this optional boot grant.
+        let _ = syscall2(SYS_NOTIFY, SLOT_MANAGER_READY, MGR_BADGE_NETD_READY);
         let mut drv = Drv {
             q0,
             q1,

@@ -414,7 +414,17 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // on its endpoint — Phase 7's stack will be its first production
     // client. ABSENT virtio-net function → the network service is simply
     // offline: pre-v0.6.0 QEMU invocations boot green without it.
-    let _net_eid = match spawn_netd() {
+    // ADR-0037: a private manager notification exists before either
+    // driver starts, so their DRIVER_OK badges cannot be lost even if
+    // they run before the manager's first instruction.
+    let manager_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: notification table full"));
+    // A DIFFERENT notification: netd must not be able to assert that
+    // rngd is ready merely by writing rngd's badge bit. Authority to
+    // signal each ready event is possession of a distinct WRITE cap.
+    let rng_ready_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: rng readiness table full"));
+    let net_eid = match spawn_netd(manager_nid) {
         Ok(Some((_pid, eid))) => Some(eid),
         Ok(None) => {
             info!(
@@ -431,7 +441,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // DMA) on its endpoint — the third driver on the shared virtio core.
     // ABSENT virtio-rng function → the entropy service is simply
     // offline, exactly as netd's fixture is optional.
-    let _rng_eid = match spawn_rngd() {
+    let rng_eid = match spawn_rngd(rng_ready_nid) {
         Ok(Some((_pid, eid))) => Some(eid),
         Ok(None) => {
             info!(
@@ -482,6 +492,12 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
+    // The manager is a separate ring-3 process, never a second owner
+    // of kernel-minted driver grants. No service is spawned by it in
+    // this bootstrap/readiness checkpoint (8.0 remains incomplete).
+    spawn_servicemgr(manager_nid, rng_ready_nid, net_eid, rng_eid)
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+
     info!(
         "kernel",
         "milestones 5–6.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own + supervised restart: a destroyed service answers its callers with a typed status and comes back with its capabilities replayed) — spawning the shell"
@@ -528,6 +544,21 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     }
 
+    // Full shipping fixture occupies all 9 notifications (ADR-0038).
+    // The tenth must be a typed refusal, never a silent over-allocation;
+    // optional-device boots do not claim to fill that table.
+    if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
+        if crate::ipc::create_notification().is_ok() {
+            crate::halt::halt_machine(
+                "servicemgr: notification bound failed to refuse a tenth object",
+            );
+        }
+        info!(
+            "kernel",
+            "servicemgr: full fixture notification budget 9/9; tenth refused"
+        );
+    }
+
     // The bootstrap thread becomes the idle thread: it stays runnable
     // forever, which keeps block_current's no-runnable-thread deadlock
     // halt (ADR-0018) unreachable while the shell parks on console
@@ -556,6 +587,94 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         // and the interrupt gate masks IF again for the handler.
         unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
     }
+}
+
+/// The fixed kernel trust root for the Phase 8.0 manager. On a machine
+/// without BOTH drivers, give it only its image and event channel; it
+/// must report OFFLINE and must never receive partial/phantom grants.
+/// On a full fixture, all 4 netstackd grants are COPY-able *manager*
+/// caps. The manager still may only attenuate them through SYS_SPAWN.
+fn spawn_servicemgr(
+    manager_nid: u32,
+    rng_ready_nid: u32,
+    net: Option<u32>,
+    rng: Option<u32>,
+) -> Result<(), &'static str> {
+    use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let root = [
+        Cap {
+            obj: CapObj::Image { img_id: 17 },
+            rights: R,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: manager_nid },
+            rights: R | W,
+        },
+    ];
+    let (grants, stack) = match (net, rng) {
+        (Some(net_eid), Some(rng_eid)) => {
+            let stack_eid = crate::ipc::create_endpoint()
+                .map_err(|_| "servicemgr: stack endpoint table full")?;
+            let backoff_nid = crate::ipc::create_notification()
+                .map_err(|_| "servicemgr: backoff notification table full")?;
+            let all = [
+                root[0],
+                root[1],
+                Cap {
+                    obj: CapObj::Endpoint { eid: net_eid },
+                    rights: W | C,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: stack_eid },
+                    rights: R | C,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: backoff_nid },
+                    rights: R | W | C,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: rng_eid },
+                    rights: W | C,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: rng_ready_nid },
+                    rights: R | W,
+                },
+            ];
+            (Some(all), Some(stack_eid))
+        }
+        _ => (None, None),
+    };
+    let pid = if let Some(all) = grants {
+        crate::spawn::spawn_init(19, &all, None)?
+    } else {
+        crate::spawn::spawn_init(19, &root, None)?
+    };
+    // Post-install audit: no extra authority and no rights widened by
+    // bootstrap. A manifest cannot authorize something not present in
+    // this actual process cap table.
+    let expected: &[Cap] = if let Some(ref all) = grants {
+        all
+    } else {
+        &root
+    };
+    for (slot, &wanted) in expected.iter().enumerate() {
+        if crate::cap::read(pid, slot).ok() != Some(wanted) {
+            return Err("servicemgr: actual boot cap did not match literal grant");
+        }
+    }
+    for slot in expected.len()..crate::cap::CAP_SLOTS {
+        if crate::cap::read(pid, slot).is_ok() {
+            return Err("servicemgr: unexpected boot cap (authority leak)");
+        }
+    }
+    info!(
+        "kernel",
+        "servicemgr spawned: pid {pid}, image19; stack endpoint {:?}; audited {} literal caps; no device/Power/Process grants",
+        stack,
+        expected.len()
+    );
+    Ok(())
 }
 
 /// Spawn the production block service (M5.2, ADR-0022): registry image 2
@@ -629,14 +748,14 @@ fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32), &'static str> {
 }
 
 /// Spawn the production network service (M6.1, ADR-0024): registry
-/// image 6 with the SAME grant shape as storaged — an `Mmio` cap over
-/// the virtio-net structure BAR (R|W: the handshake writes), its own
-/// endpoint's serve side (READ), and an interrupt notification
-/// (READ|WRITE, the target of BOTH MSI-X relay badges). Returns
+/// image 6 with storaged's three-cap driver shape — an `Mmio` cap over
+/// the virtio-net structure BAR (R|W), its endpoint serve side (READ),
+/// and interrupt notification (READ|WRITE, both MSI-X relays) — plus a
+/// fourth, WRITE-only manager-readiness notification (ADR-0038). Returns
 /// `Ok(None)` when bus 0 carries no virtio-net function: the network
 /// service is optional until Phase 7 (an honest SKIP, never a fake
 /// init — the caller logs the absence).
-fn spawn_netd() -> Result<Option<(u64, u32)>, &'static str> {
+fn spawn_netd(manager_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
     let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_NET) else {
         return Ok(None);
     };
@@ -664,25 +783,34 @@ fn spawn_netd() -> Result<Option<(u64, u32)>, &'static str> {
             obj: crate::cap::CapObj::Notification { nid },
             rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
         },
+        // Production only: a WRITE-only readiness signal to the
+        // manager after this driver reaches DRIVER_OK. The kernel
+        // supervisor replays it if the driver is restarted.
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: manager_nid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
     ];
     let pid = crate::spawn::spawn_init(6, &grants, None)?;
+    crate::supervise::register("netd", 6, &grants, pid)
+        .map_err(|_| "netd: production supervisor registration refused")?;
     info!(
         "kernel",
-        "netd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the link-layer network service is live; Phase 7's stack will be its first production client",
+        "netd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=Notif{manager_nid}/W) — kernel-owned link-layer driver; signals manager when DRIVER_OK",
         f.bar_base[bar]
     );
     Ok(Some((pid, eid)))
 }
 
 /// Spawn the production entropy service (M6.2, ADR-0025): registry
-/// image 8 with the SAME grant shape as storaged and netd — an `Mmio`
-/// cap over the virtio-rng structure BAR (R|W: the handshake writes),
-/// its own endpoint's serve side (READ), and an interrupt notification
-/// (READ|WRITE, the MSI-X relay badge's target). Returns `Ok(None)`
+/// image 8 with the same first three driver grants: Mmio/RW, serve
+/// Endpoint/READ and IRQ Notification/RW. The fourth, WRITE-only cap
+/// names a *different* manager-readiness notification (ADR-0038).
+/// Returns `Ok(None)`
 /// when bus 0 carries no virtio-rng function: the entropy service is
 /// optional (an honest offline note, never a fake init — the caller
 /// logs the absence).
-fn spawn_rngd() -> Result<Option<(u64, u32)>, &'static str> {
+fn spawn_rngd(rng_ready_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
     let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_ENTROPY) else {
         return Ok(None);
     };
@@ -710,11 +838,20 @@ fn spawn_rngd() -> Result<Option<(u64, u32)>, &'static str> {
             obj: crate::cap::CapObj::Notification { nid },
             rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
         },
+        // Production only: a WRITE-only readiness signal to the
+        // manager after this driver reaches DRIVER_OK. The kernel
+        // supervisor replays it if the driver is restarted.
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: rng_ready_nid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
     ];
     let pid = crate::spawn::spawn_init(8, &grants, None)?;
+    crate::supervise::register("rngd", 8, &grants, pid)
+        .map_err(|_| "rngd: production supervisor registration refused")?;
     info!(
         "kernel",
-        "rngd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the entropy service is live; RNG_GET fills a caller-LENT frame by device DMA",
+        "rngd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=Notif{rng_ready_nid}/W) — kernel-owned entropy driver; signals manager when DRIVER_OK",
         f.bar_base[bar]
     );
     Ok(Some((pid, eid)))
