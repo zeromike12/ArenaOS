@@ -981,7 +981,7 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0 complete; 8.1 next)
+## Phase 8 — Mature userspace 🔨 (8.0 complete; 8.1 in progress)
 
 Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
@@ -1053,14 +1053,18 @@ is not completed by accepting an ADR.
       dynamic permission UI, generic device-cap request, or competing
       kernel/user restart owner (ADR-0037). Existing M1–M7 regressions
       must continue to pass including the no-peer boot.
-- [ ] **8.1 transactional configuration store**. NEXT — design in
-      progress (proposed ADR-0046); no store implementation or
-      permission-policy claim yet. Specify versioned
-      records, ownership/authority, crash model and recovery in an
-      ADR. Implement bounded atomic update/read and multi-boot host
-      verification, including SIGKILL during every commit boundary;
-      corrupt state must fail closed without silently returning a
-      different configuration. Not a permission policy yet.
+- [ ] **8.1 transactional configuration store**. IN PROGRESS — accepted
+      ADR-0046 selects a bounded single-key, immutable-generation design,
+      explicit receiving-service update marker and the existing AFS1
+      ordered-write/atomic-sector crash model. No guest store or
+      permission-policy claim yet. AFS1 can hide a newer generation if
+      its commit sector suffers arbitrary corruption; after the explicit
+      scope decision, 8.1 rejects **visible malformed config records**
+      rather than pretending to detect media corruption or rollback
+      outside that model. Implement bounded atomic update/read and
+      multi-boot verification, including SIGKILL at every CREATE/WRITE
+      commit boundary, CLOSE and reply; never silently substitute an
+      older value for a visible corrupt record. No GC or 8.2 UI yet.
 - [ ] **8.2 permission manifests + CLI grant workflow**. Separate an
       application's requested permissions from the actual issued
       grants, define an explicit trusted approver and revocation

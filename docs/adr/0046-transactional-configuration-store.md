@@ -1,68 +1,43 @@
-# ADR-0046 — 8.1 transactional configuration store: design investigation
+# ADR-0046 — Phase 8.1 transactional configuration store: design investigation
 
-*Status: proposed; Phase 8.1 opened after the qualified 8.0 manager checkpoint. No storage implementation or permission policy is approved by this draft.*
+*Status: accepted for bounded 8.1 implementation (2026-09-29); not yet implemented or qualified. Phase 8.0 remains complete and 8.1 is in progress. This is not a permission policy (8.2).*
 
-## Problem and existing contracts
+## Existing facts and threat boundary
 
-8.1 needs versioned, bounded update/read and multi-boot verification with
-QEMU SIGKILL at every commit boundary. A corrupt state must fail closed,
-not silently return an older or different configuration. This is a
-configuration store, **not** 8.2's permission-grant UI. No service may
-turn a file's symbolic name or an application's pid into authority.
+AFS1 (ADR-0023; `userspace/fsd/src/main.rs`, `tools/afs1.py`) has 32 flat-namespace objects, names shorter than 32 bytes, a single-threaded FS endpoint, and `CREATE`, `OPEN`, `READ`, `WRITE`, `CLOSE`, `LS`, `UNLINK`. It copies metadata into new sectors and flips a 512-byte ping-pong commit sector. **Existing file data is overwritten in place.** Therefore updating a configuration by overwriting a file is NOT atomic. `CREATE` commits an empty file separately from the subsequent `WRITE`; `CLOSE` is not a commit; there is no rename/truncate syscall. A failed `CREATE` may even have committed an empty object before it discovers the 8-slot open-file table is full. `WRITE` of a new one-sector file writes data first, then metadata, then the commit record. Failures must be reconciled by scanning the disk state, not assuming an error reply means nothing changed.
 
-AFS1 (ADR-0023) has an atomic metadata commit-record flip under the
-*process-crash / ordered submitted writes / atomic 512-byte sector*
-model, but its `WRITE` path overwrites **existing data sectors in place**.
-Therefore overwriting an existing config file, even behind AFS1's CoW
-metadata, is NOT an atomic config update. There is no rename syscall.
-`CREATE` commits an empty file before a later `WRITE` commits its data;
-`UNLINK` is its own transaction. A crash may leave the empty new file.
-Power loss with volatile write caches is outside AFS1's existing
-contract; do not claim it without FLUSH/FUA and new qualification.
+The existing crash model (M5.4) is SIGKILL of QEMU under ordered, submitted writes and atomic 512-byte sectors. Host volatile-cache power loss, malicious writes via a raw FS capability, and arbitrary block-device rollback are **not** covered. The current Power-holding shell has a raw FS `Endpoint/WRITE` cap for historical `ls`/`cat`/`write`; it cannot be treated as an untrusted config reader or used as evidence that the config namespace is protected from every process. No ordinary config reader will get that raw cap. A future permission system must separately protect the namespace from processes with filesystem write authority.
 
-## Candidate boundary to validate before implementation
+## Decision: bounded single-key v1
 
-A single built-in config service, started with a fixed, kernel-audited
-filesystem `Endpoint/WRITE` capability, owns the records. A client
-needs a separately granted config-service endpoint capability to read;
-updates require a **different** trusted WRITE authority. The service
-must not infer write rights from a pid, filename or a manifest. It
-serializes requests and has no path for ordinary clients to reach the
-FS write endpoint. Exactly which kernel bootstrap grant and two
-public endpoint objects fit existing bounds must be audited before
-accepting this design; no new mint syscall is assumed.
+One built-in `configd` process serializes requests. The kernel boot root grants it the production fsd `Endpoint/WRITE`, a dedicated config `Endpoint/READ`, and a READ-only reference to an otherwise inert, newly minted Notification object. Read clients receive only the config endpoint's WRITE side. A separately named trusted **test updater** receives the same endpoint plus a READ|COPY|DESTROY reference to the Notification. The receiving service checks the *transferred* reference against its own boot-granted object and exact allowed rights, then discards it on all paths (ADR-0047). An endpoint, opcode, pid, file name or guessed object number is never update authority. No new kernel cap type, name-based grant, generic device request, or 8.2 approval UI is proposed. The updater and read client must be separate processes in the negative proof; the existing Power/raw-FS shell is a trusted bootstrap actor, not the unprivileged reader.
 
-Consider immutable, uniquely named generation files. Each has a
-versioned, fixed-size record (magic, format, monotonic sequence,
-length, payload, checksum, reserved zeros) in one <=512-byte payload
-written by one `FS_OP_WRITE` into a newly created *empty* file. The
-committed AFS1 metadata flip either leaves the file empty (not a
-committed config), or exposes its full checked bytes. Recovery scans
-the bounded namespace, refuses any malformed nonempty generation,
-selects the unique highest valid sequence, and rejects duplicates,
-gaps, impossible length/version, unexpected name or sequence overflow.
-An empty generation after a crash is only a pending transaction, never
-a returned value. Reclaim of old generations via `UNLINK` must preserve
-at least one durable prior generation and be crash-tested separately;
-the 32-object AFS1 table and competing user files make this a real
-capacity/GC design question, not a reason to silently overwrite data.
+The production footprint is auditable before any code: the kernel registry currently has `MAX_IMAGES=21` with images 0..20 in use; one new service and one or two isolated test clients would require raising that limit with literal image mappings and an audit. `MAX_ENDPOINTS=8`: the full production fixture uses block, FS, net, rng, input, console and stack (7), so ONE config endpoint fits if there are no extra endpoints hidden in the final fixture. `MAX_NOTIFS=13` is filled by existing production objects; the inert authority marker needs a documented one-object increase. Every process has 16 cap slots. The fully equipped shell already reserves slots 0..6, transient child slot 7, file-window slots 8..9, protected-target proof slots 10..14 and diagnostic marker slot 15: do NOT silently add config grants to it or reuse a transient slot. A dedicated updater/read client avoids this conflict. Recheck the boot and the no-device fixture, grant counts and resource snapshots when introducing real processes.
 
-## Decisions still required before code
+For a deliberately bounded *single key*, reserve names `cfg8-01` through `cfg8-08`. Never overwrite a nonempty file. Version 1 has a fixed **512-byte** file: 8-byte magic `ARCFG8V1`, format u32=1 at offset 8, zero u32 at 12, sequence u64 at 16, payload length u16 (0..32) at 24, zeros at 26..31, 32 payload bytes at 32..63 (unused bytes zero), zeros at 64..503, then FNV-1a-64 over bytes 0..503 at 504. All integers are little-endian. Names and embedded sequences must agree, be contiguous from 1, and never wrap. Request/reply data fits the existing 64-byte inline IPC message; the receiver's *own* mapped, reusable buffer frame stages exactly one 512-byte FS write/read. A client never needs a map of a lent cap. Read returns explicit `UNSET`, `VALUE(seq,len,bytes)`, or `CORRUPT`; update returns `COMMITTED`, `NO_SPACE` or a typed failure. Empty payload is distinguishable from an empty pending file by its full 512-byte on-disk record.
 
-1. Specify the trusted config updater's cap grant and whether a new
-   bounded service/image fits the kernel registry, endpoint and cap
-   tables without granting FS write access to untrusted readers.
-2. Nail down the exact permitted recovery shapes at CREATE, WRITE,
-   CLOSE and UNLINK boundaries, including full-table/IO errors and
-   the distinction between an aborted empty file and corrupted bytes.
-3. Fix the maximum record size, generation count, sequence/name format,
-   GC ordering and behavior on capacity exhaustion; no wraparound or
-   fallback to an older value on corruption.
-4. Run multi-boot host SIGKILL at **each** observable commit boundary,
-   check returned bytes and the actual AFS1 platter, and boot the same
-   final EFI under the full historical suite and fresh 100/100 gate.
+A successful read scans **all 32 directory entries**, rejects any malformed name in the reserved `cfg8-` prefix, duplicates, gaps, invalid sizes/checksums/versions/reserved bytes, or more than one empty generation. All nonempty generations are read and validated, not merely the highest candidate; a 0-byte file is only a pending `max_valid+1` generation. If no valid record exists and no pending file, return `UNSET`; an empty first generation also leaves the value unset. On an update, resume the one pending empty next generation or CREATE it, WRITE the complete new record once at offset 0, CLOSE, rescan and verify the *exact* requested value before acknowledging it. A failed write or reply is not evidence of non-commit: the next read/reboot scans again. On the eighth committed generation, all subsequent updates return `NO_SPACE` with the eighth record intact. There is deliberately NO GC or UNLINK in v1; the table limit and disk fullness are reported, never papered over by deleting the prior good value. The old record is never mutated, including on an aborted update.
 
-No implementation begins until these choices are made in an accepted
-ADR. This investigation deliberately does not invent transactional
-rename, overwrite atomicity, crash-safe disk flushes, or a permissions
-UI that AFS1 and the current authority model do not provide.
+Under the stated AFS1 crash model the observable states around one update would be:
+
+| SIGKILL point | Recovery candidate |
+| --- | --- |
+| Before CREATE's commit record | Prior complete generation (or UNSET) |
+| After CREATE's commit, before WRITE's commit | Prior complete generation plus one empty pending file |
+| During new data/extent/metadata writes, before WRITE's commit | Same pending empty file; unreachable new blocks may leak |
+| After WRITE's commit, before/after CLOSE/reply | Fully validated new generation |
+
+Do **not** conflate a pending 0-byte file with corruption or a returned configuration, and do not turn a nonempty malformed record into a silent fallback. A full table/disk, lost FS service or unrecognized on-disk format must be explicit, not a success with a different value. This contract covers fail-closed *visible record* corruption under AFS1's ordered-write/atomic-sector crash model, not the separate commit-selection problem below. Any ambiguous FS I/O or unexpected return leaves configd DEGRADED until reboot; it must not continue writes with potentially inconsistent in-memory fsd state.
+
+## Integrity limit and rejected alternative: invisible newest generation
+
+`fsd` and `tools/afs1.py` select the highest **valid** AFS1 commit record. An invalid newer commit slot is ignored and the older valid slot wins. If a committed newer config's AFS1 commit sector is subsequently corrupted, fsd can mount the older metadata and **hide the newer generation completely**. A config service scanning only fsd cannot distinguish that disk from one where the newer commit was never submitted; a checksum on the now-invisible config file does not help. Thus an unqualified claim that *all* corrupt states fail closed instead of returning an older configuration would be false. The host probe `tools/probe_config_commit_fallback.py` demonstrates the actual commit-selection behavior without changing the kernel or trusting a timing retry.
+
+**Scope decision:** 8.1 adopts the existing AFS1 crash model and requires visible record corruption to fail closed. Arbitrary corruption of an AFS1 commit sector, malicious raw-FS writes and device rollback are explicitly outside this guarantee. Detecting a lost committed generation would require a separate trusted monotonic anchor or a stronger storage protocol; replicating checksums inside files hidden by fsd cannot help. This is an accepted limitation, not a claimed proof of general media integrity. Do not silently broaden it in test names or release notes. If general corruption detection becomes a requirement, accept a new storage ADR and qualify its implementation separately. The existing v1 `FS_OP_CREATE` post-commit handle failure and lack of per-file ownership are exercised within the chosen crash/authority model.
+
+## Required proof before 8.1 closure
+
+1. Audit actual image, endpoint, notification, slot and process bounds and grant provenance with both device-present and absent fixtures before allocating boot grants. Keep raw FS writers explicitly trusted; never give the config reader a raw FS endpoint.
+2. Unit-test the exact record parser, reserved namespace scan, empty/contiguous/gap/duplicate/unknown-version/corrupt cases, sequence exhaustion and full-table refusal. Prove ordinary endpoint without marker and wrong/forged markers cannot update at the receiver; only the genuine separately granted updater can.
+3. Multi-boot QEMU test with the SAME scratch disk: exact old/new bytes and on-disk `afs1.audit()` after SIGKILL at every CREATE, WRITE commit-record, CLOSE and reply boundary. Test failure return paths, full table/disk and bounded memory/capability accounting; do not treat a reboot after a transient failure as a fix for a flake.
+4. Keep all historical tests. At any **completed checkpoint**, run the full historical suite and a fresh final-image-bound 100/100 QEMU qualification, package and boot its own deployable archive and verify its receipt. Until then 8.1 stays incomplete and the already-qualified 8.0 archive is the bootable build.

@@ -76,6 +76,18 @@ else
     echo "!! service manifest policy tests FAILED"
 fi
 
+# ADR-0046 design gate (host only): exact bounded record semantics and
+# the known AFS1 fallback limit. This does NOT certify a guest configd.
+echo "== host-side Phase 8.1 config record and AFS1 integrity-limit probes"
+if (cd "$REPO_ROOT" && python3 tools/test_config_record.py && \
+    python3 tools/probe_config_commit_fallback.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! host-side configuration record tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

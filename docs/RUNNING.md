@@ -4,6 +4,15 @@ Every completed milestone ships as a **GitHub release** containing a
 prebuilt, tested boot image plus the exact UEFI firmware pair it was
 verified against. This page explains how to boot it on your own machine.
 
+## Phase 8.1 in progress: qualified boot image remains 8.0
+
+ADR-0046 and its host-only record/recovery tests begin 8.1 without
+changing the guest EFI. No 8.1 service is deployed or claimed complete;
+this commit retains the **same qualified Phase 8.0 archive** below as its
+bootable build. The first completed 8.1 checkpoint will need its own
+fresh full-suite and final-image-bound 100/100 boot qualification and
+archive; do not treat a host-only test as that checkpoint.
+
 ## Phase 8 checkpoint: boot the exact per-commit build
 
 Phase 8.0 is **complete after the ADR-0047 receiving-service authority

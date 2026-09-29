@@ -683,3 +683,14 @@ figures are `conventional=`/`reclaimable=`.
 - **KVM acceleration** when the host allows it; test semantics unchanged.
 - **Packet capture assertions** (Phase 7): QEMU slirp/tap + tcpdump-grade
   checks that bytes actually went on the wire.
+
+### Phase 8.1 design gate (NOT a guest milestone)
+
+`python3 tools/test_config_record.py` tests ADR-0046's exact 512-byte
+record encoding, namespace scans, pending empty files, bounded sequence
+and visible corruption refusal. `python3 tools/probe_config_commit_fallback.py`
+exposes the older-commit fallback under *arbitrary* AFS1 commit-sector
+corruption; that media-corruption model is explicitly outside the accepted
+8.1 ordered-write/atomic-sector crash contract. Both are also host-side
+suites in `tools/run_tests.sh`. Neither proves `configd` exists yet; 8.1
+remains incomplete and the 8.0 archive remains the deployable image.
