@@ -76,10 +76,16 @@ else
     echo "!! service manifest policy tests FAILED"
 fi
 
-# ADR-0046 design gate (host only): exact bounded record semantics and
-# the known AFS1 fallback limit. This does NOT certify a guest configd.
+# ADR-0046 foundation: test the exact no_std codec/scanner against
+# independent Python reference vectors, compile it for the bare-metal
+# target and retain the AFS1 fallback-limit probe. No guest configd yet.
 echo "== host-side Phase 8.1 config record and AFS1 integrity-limit probes"
-if (cd "$REPO_ROOT" && python3 tools/test_config_record.py && \
+if (cd "$REPO_ROOT" && rustc --test --edition 2024 -D warnings \
+    userspace/config.rs -o build/config-record-tests && build/config-record-tests && \
+    rustc --crate-type lib --edition 2024 -D warnings \
+    --target x86_64-unknown-none --emit=metadata \
+    tools/config_no_std.rs -o build/config-no-std.rmeta && \
+    python3 tools/test_config_record.py && \
     python3 tools/probe_config_commit_fallback.py); then
     ran=$((ran+1))
 else

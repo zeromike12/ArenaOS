@@ -1056,8 +1056,10 @@ is not completed by accepting an ADR.
 - [ ] **8.1 transactional configuration store**. IN PROGRESS — accepted
       ADR-0046 selects a bounded single-key, immutable-generation design,
       explicit receiving-service update marker and the existing AFS1
-      ordered-write/atomic-sector crash model. No guest store or
-      permission-policy claim yet. AFS1 can hide a newer generation if
+      ordered-write/atomic-sector crash model. The byte-exact `no_std`
+      codec and fail-closed generation scanner compile for the bare-metal
+      target and match the independent Python reference; no resident guest
+      store, IPC authorization or permission-policy claim yet. AFS1 can hide a newer generation if
       its commit sector suffers arbitrary corruption; after the explicit
       scope decision, 8.1 rejects **visible malformed config records**
       rather than pretending to detect media corruption or rollback

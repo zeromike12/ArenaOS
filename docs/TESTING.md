@@ -686,11 +686,20 @@ figures are `conventional=`/`reclaimable=`.
 
 ### Phase 8.1 design gate (NOT a guest milestone)
 
-`python3 tools/test_config_record.py` tests ADR-0046's exact 512-byte
-record encoding, namespace scans, pending empty files, bounded sequence
-and visible corruption refusal. `python3 tools/probe_config_commit_fallback.py`
-exposes the older-commit fallback under *arbitrary* AFS1 commit-sector
-corruption; that media-corruption model is explicitly outside the accepted
-8.1 ordered-write/atomic-sector crash contract. Both are also host-side
-suites in `tools/run_tests.sh`. Neither proves `configd` exists yet; 8.1
-remains incomplete and the 8.0 archive remains the deployable image.
+The same `userspace/config.rs` module intended for configd is tested via
+`rustc --test --edition 2024 -D warnings userspace/config.rs` and compiled
+as a `no_std` bare-metal library through `tools/config_no_std.rs`. Its
+byte vectors match the independent `python3 tools/test_config_record.py`
+reference: 512-byte records, reserved namespace, pending empty files,
+sequence exhaustion and visible corruption refusal. The scanner remains
+poisoned if a caller ignores an ingestion error. The separate
+`python3 tools/probe_config_commit_fallback.py` exposes the older-commit
+fallback under *arbitrary* AFS1 commit-sector corruption; that model is
+explicitly outside the accepted ordered-write/atomic-sector contract.
+All four checks form one host-side suite in `tools/run_tests.sh`. This
+proves neither filesystem IPC nor receiving-service authority: `configd`
+does not exist yet; 8.1 remains incomplete and the 8.0 archive is still
+the deployable image. A cold source-identical rebuild produced an EFI with
+12 different bytes: the PE COFF timestamps and linked RSDS/PDB identifier.
+Do not transfer a 100/100 receipt between those hashes; the archive's
+own EFI and matching receipt remain the qualified 8.0 build.
