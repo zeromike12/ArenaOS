@@ -146,6 +146,8 @@ pub const SYS_TIMER_CANCEL: u64 = 28;
 // and finish only a Process cap with DESTROY (ADR-0037).
 pub const SYS_CAP_DESCRIBE: u64 = 29;
 pub const SYS_PROC_FINISH: u64 = 30;
+/// ADR-0041: read-only kernel accounting, held Power/WRITE only.
+pub const SYS_RESOURCE_SNAPSHOT: u64 = 31;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -647,6 +649,7 @@ extern "C" fn syscall_dispatch(
         SYS_TIMER_CANCEL => sys_timer_cancel(a0) as u64,
         SYS_CAP_DESCRIBE => sys_cap_describe(a0, a1) as u64,
         SYS_PROC_FINISH => sys_proc_finish(a0, a1) as u64,
+        SYS_RESOURCE_SNAPSHOT => sys_resource_snapshot(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1827,6 +1830,46 @@ fn sys_proc_finish(a0: u64, a1: u64) -> Status {
     }
     if crate::cap::destroy(owner, a0 as usize).is_err() {
         return STATUS_BUSY;
+    }
+    STATUS_OK
+}
+
+/// SYS_RESOURCE_SNAPSHOT(power slot, output pointer): three scalar
+/// counts [free frames, live spawn records, occupied process slots].
+/// An observation is NOT lifecycle authority. Wrong-kind caps fail
+/// before touching output; Power/WRITE is the existing admin gate.
+fn sys_resource_snapshot(a0: u64, a1: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, a0 as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if !matches!(c.obj, crate::cap::CapObj::Power) || c.rights & crate::cap::RIGHTS_WRITE == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(a1, 24) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let counts = crate::sync::without_interrupts(|| {
+        [
+            crate::frames::free_frames(),
+            crate::spawn::records_snapshot().iter().flatten().count() as u64,
+            crate::proc::live_count() as u64,
+        ]
+    });
+    // SAFETY: output is the caller's validated, live 24-byte user span;
+    // the SMAP window is paired in this synchronous syscall.
+    unsafe {
+        super::stac();
+        let out = a1 as *mut u64;
+        for (i, &value) in counts.iter().enumerate() {
+            core::ptr::write_volatile(out.add(i), value);
+        }
+        super::clac();
     }
     STATUS_OK
 }

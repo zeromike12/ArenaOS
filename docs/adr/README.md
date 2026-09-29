@@ -57,6 +57,7 @@ Rules:
 | [0038](0038-service-manager-bootstrap-readiness.md) | Fixed manager boot grants, device-originated readiness badges, and fail-closed inventory bootstrap (8.0 partial) | Accepted |
 | [0039](0039-managed-stack-startup.md) | Manager-owned initial stack startup, bounded ready signal, child cap audit and qualified per-commit QEMU bundle | Accepted |
 | [0040](0040-managed-restart-exercise.md) | Bounded Process-cap reap/restart, privileged opt-in real-wire restart and its remaining negative-space gates | Accepted |
+| [0041](0041-repeatable-manager-accounting.md) | Power-gated kernel resource snapshot, three exact-accounting production restarts and exhausted budget | Accepted |
 
 ## Template
 

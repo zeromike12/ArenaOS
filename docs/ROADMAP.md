@@ -1003,11 +1003,13 @@ is not completed by accepting an ADR.
       reap an orderly exiting production child, waits for bounded timer
       backoff, revalidates live grants, and starts a replacement behind
       the SAME endpoint. A privileged shell client proves an old bearer
-      fails and new ARP work reaches the real wire (ADR-0040). This is
-      NOT an 8.0 completion claim: unexpected in-flight crash, forced
-      stop, forged/foreign/driver Process-cap refusals, repeated flat
-      accounting, dependency probes and budget exhaustion still need
-      integration proof. Complete recovery from the fixed kernel trust root with
+      fails and new ARP work reaches the real wire (ADR-0040). An opt-in
+      administrator test now measures exact free frames, spawn records
+      and process slots after EACH of three production restarts, then
+      proves the fourth exit exhausts the bounded budget (ADR-0041).
+      This is NOT an 8.0 completion claim: unexpected in-flight crash,
+      forced stop, forged/foreign/self/driver Process-cap refusals and
+      active dependency probes still need integration proof. Complete recovery from the fixed kernel trust root with
       only explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
       can delegate only actual caps already held, attenuated by

@@ -8,17 +8,17 @@ verified against. This page explains how to boot it on your own machine.
 
 Phase 8.0 is **not finished**. Every new Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
-`releases/checkpoints/` (ADR-0039). For the **current bounded-restart**
+`releases/checkpoints/` (ADR-0039). For the **current repeated-accounting**
 checkpoint on this branch, download the archive directly from the
 commit's repository tree (or clone and use its local path):
 
 ```sh
-curl -fL -o arenaos-phase8-managed-restart-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-managed-restart/arenaos-phase8-managed-restart-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase8-managed-restart-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-managed-restart/arenaos-phase8-managed-restart-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase8-managed-restart-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase8-managed-restart-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-repeat-accounting/arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-repeat-accounting/arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
 cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
@@ -51,9 +51,15 @@ its old rngd-backed UDP bearer is rejected, and its new instance
 resolves 10.0.2.2 over real ARP. This spends one of the manager's three
 restart attempts; normal boots do not intentionally restart it. Type
 `help`, `ps`, or `shutdown` to exit cleanly (`Ctrl-A X` quits QEMU).
-Unexpected-crash, repeated accounting and lifecycle refusal tests are
-still open: Phase 8.0 and full production supervision remain incomplete.
-The preceding initial-start image remains downloadable from commit
+For a **destructive test VM**, `stackstress` instead repeats the real
+wire/bearer restart three times with byte-exact free-frame, spawn-record
+and process-slot snapshots, then proves the fourth exit exhausts the
+three-restart budget and leaves the service OFFLINE. Reboot to restore
+it; this is never run automatically on an ordinary boot.
+Unexpected in-flight crashes, forced live stop, lifecycle refusals and
+pre-respawn driver probes remain open: Phase 8.0 is incomplete.
+Earlier per-commit bundles remain available at
+[`7e79547`](https://github.com/zeromike12/ArenaOS/commit/7e79547c649f07da67ecc54cc35a996109fd6658) and
 [`f1bbafb`](https://github.com/zeromike12/ArenaOS/commit/f1bbafbe117d9a814df5a684fd45716286490487).
 
 The archive includes this document, a formatted AFS1 scratch template and the

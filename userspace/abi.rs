@@ -44,6 +44,9 @@ pub const SYS_TIMER_CANCEL: u64 = 28;
 pub const SYS_CAP_DESCRIBE: u64 = 29;
 /// Finish a child by Process-cap slot: 0=reap exited, 1=explicit stop/reap.
 pub const SYS_PROC_FINISH: u64 = 30;
+/// Read-only [free frames, live spawn records, live process slots];
+/// gated by a held Power/WRITE cap (ADR-0041).
+pub const SYS_RESOURCE_SNAPSHOT: u64 = 31;
 
 // ADR-0037: trusted boot driver-readiness signals on the manager's
 // notification (different object from each driver's interrupt notif).

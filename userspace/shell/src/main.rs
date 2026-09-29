@@ -228,14 +228,14 @@ fn stack_pause(us: u64) -> bool {
         }
     }
 }
-fn stacktest() {
+fn stacktest() -> bool {
     let mut cap = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, cap.as_mut_ptr() as u64) } != 0
         || cap[0] != 2
         || cap[2] & RIGHTS_WRITE == 0
     {
         write_str("m8: stacktest SKIP (no production client cap)\r\n");
-        return;
+        return false;
     }
     // The endpoint lets us CALL the service, not reap it. `Power` is
     // not a Process cap either; service lifecycle stays manager-owned.
@@ -243,24 +243,24 @@ fn stacktest() {
         || unsafe { syscall2(SYS_PROC_FINISH, SLOT_POWER, 1) } >= 0
     {
         write_str("m8: stacktest FAIL (client cap could stop a process)\r\n");
-        return;
+        return false;
     }
     write_str("m8: stacktest Process-cap stop refused to endpoint-only client\r\n");
     let gateway = 10 | (2 << 16) | (2 << 24); // 10.0.2.2, low byte first
     let (r, st, mac) = stack_call(ARP_OP_RESOLVE, gateway);
     if r < 0 || st != ARP_S_OK || mac == 0 {
         write_str("m8: stacktest FAIL (first real-wire ARP resolve)\r\n");
-        return;
+        return false;
     }
     let (r, st, prior) = stack_call(ARP_OP_STATS, 0);
     if r < 0 || st != ARP_S_OK || prior >> 32 == 0 {
         write_str("m8: stacktest FAIL (first instance has no wire evidence)\r\n");
-        return;
+        return false;
     }
     let (r, st, bearer) = stack_call(UDP_OP_BIND, 5355);
     if r < 0 || st != ARP_S_OK || bearer == 0 {
         write_str("m8: stacktest FAIL (no rngd-backed UDP bearer)\r\n");
-        return;
+        return false;
     }
     write_str(
         "m8: stacktest held old endpoint and issued rngd-backed bearer after real ARP wire work\r\n",
@@ -268,13 +268,13 @@ fn stacktest() {
     let (r, st, _) = stack_call(ARP_OP_SHUTDOWN, 0);
     if r < 0 || st != ARP_S_OK {
         write_str("m8: stacktest FAIL (orderly production child exit)\r\n");
-        return;
+        return false;
     }
     write_str("m8: stacktest requested production child exit (manager must reap and restart)\r\n");
     let start = unsafe { syscall0(SYS_CLOCK_NOW) };
     if start < 0 {
         write_str("m8: stacktest FAIL (no monotonic clock)\r\n");
-        return;
+        return false;
     }
     let mut gone = false;
     loop {
@@ -284,13 +284,13 @@ fn stacktest() {
         }
         if r != STATUS_SERVICE_GONE {
             write_str("m8: stacktest FAIL (stale bearer was accepted or unexpected transport)\r\n");
-            return;
+            return false;
         }
         gone = true;
         let now = unsafe { syscall0(SYS_CLOCK_NOW) };
         if now < 0 || now as u64 - start as u64 > 3_000_000 || !stack_pause(25_000) {
             write_str("m8: stacktest FAIL (no bounded replacement)\r\n");
-            return;
+            return false;
         }
     }
     if gone {
@@ -299,7 +299,7 @@ fn stacktest() {
     let (r, st, fresh) = stack_call(ARP_OP_STATS, 0);
     if r < 0 || st != ARP_S_OK || fresh >> 32 != 0 {
         write_str("m8: stacktest FAIL (replacement was not fresh)\r\n");
-        return;
+        return false;
     }
     let (r, st, fresh_mac) = stack_call(ARP_OP_RESOLVE, gateway);
     let (r2, st2, after) = stack_call(ARP_OP_STATS, 0);
@@ -308,11 +308,97 @@ fn stacktest() {
         write_str(
             "m8: stacktest FAIL (replacement did not perform real post-restart wire work)\r\n",
         );
-        return;
+        return false;
     }
     write_str(
         "m8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)\r\n",
     );
+    true
+}
+/// A Power-gated observation; an Endpoint is not a diagnostic grant.
+fn resource_snapshot() -> Option<[u64; 3]> {
+    let mut out = [u64::MAX; 3];
+    for slot in [SLOT_STACK, 15] {
+        // wrong kind and unheld slot
+        if unsafe { syscall2(SYS_RESOURCE_SNAPSHOT, slot, out.as_mut_ptr() as u64) } >= 0
+            || out != [u64::MAX; 3]
+        {
+            return None;
+        }
+    }
+    let bad_pointer = unsafe { syscall2(SYS_RESOURCE_SNAPSHOT, SLOT_POWER, 0) };
+    if bad_pointer != -3 {
+        return None;
+    } // STATUS_BAD_ADDRESS
+    let ok = unsafe { syscall2(SYS_RESOURCE_SNAPSHOT, SLOT_POWER, out.as_mut_ptr() as u64) };
+    if ok != 0 {
+        return None;
+    }
+    Some(out)
+}
+
+fn stackstress() {
+    let mut cap = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, cap.as_mut_ptr() as u64) } != 0
+        || cap[0] != 2
+        || cap[2] & RIGHTS_WRITE == 0
+    {
+        write_str("m8: stackstress SKIP (no production client cap)\r\n");
+        return;
+    }
+    // fsd only serves after mount: a synchronous call ensures its
+    // asynchronous startup allocations are over before measurement.
+    let mut msg = [0u8; MSG_BYTES];
+    let (r, st, _) = fs_call(FS_OP_LS, 0, CAP_NONE, &mut msg);
+    if r < 0 || st != FS_OK {
+        write_str("m8: stackstress FAIL (filesystem baseline not settled)\r\n");
+        return;
+    }
+    let Some(baseline) = resource_snapshot() else {
+        write_str("m8: stackstress FAIL (Power-gated snapshot or refusals)\r\n");
+        return;
+    };
+    let mut o = Out::new();
+    o.str("m8: stackstress baseline frames=");
+    o.u64(baseline[0]);
+    o.str(" records=");
+    o.u64(baseline[1]);
+    o.str(" processes=");
+    o.u64(baseline[2]);
+    o.crlf();
+    o.flush();
+    for cycle in 1..=3u64 {
+        if !stacktest() {
+            write_str("m8: stackstress FAIL (production restart cycle failed)\r\n");
+            return;
+        }
+        let Some(now) = resource_snapshot() else {
+            write_str("m8: stackstress FAIL (diagnostic refused after restart)\r\n");
+            return;
+        };
+        let mut o = Out::new();
+        o.str("m8: stackstress cycle ");
+        o.u64(cycle);
+        o.str(" frames=");
+        o.u64(now[0]);
+        o.str(" records=");
+        o.u64(now[1]);
+        o.str(" processes=");
+        o.u64(now[2]);
+        o.crlf();
+        o.flush();
+        if now != baseline {
+            write_str("m8: stackstress FAIL (resource totals not flat)\r\n");
+            return;
+        }
+    }
+    write_str("m8: stackstress PASS (3 real-wire restarts, exact frames/records/processes)\r\n");
+    let (r, st, _) = stack_call(ARP_OP_SHUTDOWN, 0);
+    if r < 0 || st != ARP_S_OK {
+        write_str("m8: stackstress FAIL (fourth orderly exit refused)\r\n");
+        return;
+    }
+    write_str("m8: stackstress requested fourth exit; budget must leave service OFFLINE\r\n");
 }
 
 // ---- the builtins ----------------------------------------------------------
@@ -659,8 +745,7 @@ const PROMPT: &str = "arena> ";
 /// Two bounded debug-write chunks: Out::push drops bytes beyond
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
-const HELP_MORE: &str =
-    "  stacktest - privileged stack restart proof\r\n  shutdown - halt the machine\r\n";
+const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -741,7 +826,11 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_rm(&mut o, rest);
             } else if eq(line, b"stacktest") {
                 o.flush();
-                stacktest();
+                let _ = stacktest();
+                continue;
+            } else if eq(line, b"stackstress") {
+                o.flush();
+                stackstress();
                 continue;
             } else if eq(line, b"spawn") {
                 o.flush();

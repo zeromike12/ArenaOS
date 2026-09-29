@@ -131,8 +131,8 @@ for i in $(seq 1 "$N"); do
         "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" \
         "$REPO_ROOT/build/vcon-port.txt" >/dev/null 2>"$REPO_ROOT/build/vcon-dbg.txt" &
     vcon_pid=$!
-    # ADR-0040: qualify the *real* manager restart, not merely idle
-    # boot. Wait for both prompt and first manager ready, explicitly
+    # ADR-0040/0041: qualify one real manager restart on EACH boot;
+    # the dedicated stress QEMU fixture proves all three and budget. Wait for both prompt and first manager ready, explicitly
     # type the privileged stacktest, then wait for its end-to-end
     # success AND second shell prompt before shutdown. A failure or
     # hang times out — it cannot be retried into an apparent pass.
