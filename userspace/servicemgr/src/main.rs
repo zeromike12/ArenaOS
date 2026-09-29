@@ -1,12 +1,13 @@
-//! Phase 8.0 ring-3 bootstrap/inventory/readiness checkpoint (ADR-0037).
-//! This program does NOT yet spawn netstackd or supervise a child.
+//! Phase 8.0 ring-3 managed initial spawn (ADR-0037/0039).
+//! This program starts and reaps the production stack but DOES NOT yet
+//! prove restart or close Phase 7's production supervision obligation.
 //! No manifest request becomes authority merely because this program
 //! boots: the kernel installed literal caps, queried by SyscallProbe.
 #![no_std]
 #![no_main]
 
 use arena_servicemgr::inventory::{self, NamedSlot, Probe, SyscallProbe};
-use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request, Service};
+use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request, Service, Step};
 use arena_servicemgr::readiness::Gate;
 use core::panic::PanicInfo;
 
@@ -195,9 +196,101 @@ fn wait_ready() -> Result<(), ()> {
     wait_one(SLOT_RNG_READY, MGR_BADGE_RNGD_READY)
 }
 
+/// Cross the real SYS_SPAWN boundary only with a fully validated plan.
+/// A positive pid is an observation; the new Process cap is the only
+/// lifecycle authority. The stack must signal ready on the SAME
+/// notification it later uses for backoff, before we report service up.
+fn launch(step: Step) -> Result<(u64, u8), ()> {
+    if step.count != 4 {
+        return Err(());
+    }
+    let mut spec = [(0u64, 0u64); 4];
+    for (i, item) in spec.iter_mut().enumerate() {
+        let grant = step.grants[i].ok_or(())?;
+        if grant.child_slot != i as u8 {
+            return Err(());
+        }
+        *item = (grant.source_slot as u64, grant.rights as u64);
+    }
+    let pid = unsafe {
+        syscall5(
+            SYS_SPAWN,
+            step.image_slot as u64,
+            spec.as_ptr() as u64,
+            step.count as u64,
+            SLOT_EVENTS as u64,
+            MGR_BADGE_STACK_EXIT,
+        )
+    };
+    if pid <= 0 {
+        return Err(());
+    }
+    let handle = inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?;
+    if wait_one(SLOT_BACKOFF, MGR_BADGE_STACK_READY).is_err() {
+        // Bounded startup: a child that never reaches serve must not
+        // remain a live, unowned server on the shared endpoint.
+        if inventory::finish(handle, true).is_err() {
+            log("servicemgr: FAILED to stop a startup-refused child\r\n");
+        }
+        return Err(());
+    }
+    Ok((pid as u64, handle))
+}
+
+fn report_child(pid: u64) {
+    const PREFIX: &[u8] = b"servicemgr: production netstackd READY pid ";
+    let mut buf = [0u8; 80];
+    let mut n = PREFIX.len();
+    buf[..n].copy_from_slice(PREFIX);
+    let mut digits = [0u8; 20];
+    let mut v = pid;
+    let mut len = 0;
+    loop {
+        digits[len] = b'0' + (v % 10) as u8;
+        len += 1;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    while len != 0 {
+        len -= 1;
+        buf[n] = digits[len];
+        n += 1;
+    }
+    buf[n..n + 2].copy_from_slice(b"\r\n");
+    n += 2;
+    // SAFETY: own live stack buffer for this synchronous syscall.
+    let _ = unsafe { syscall2(SYS_DEBUG_WRITE, buf.as_ptr() as u64, n as u64) };
+}
+
+fn monitor(pid: u64, handle: u8) -> ! {
+    loop {
+        let badge = unsafe { syscall1(SYS_WAIT, SLOT_EVENTS as u64) };
+        if badge < 0 {
+            log("servicemgr: OFFLINE — event wait refused\r\n");
+            park();
+        }
+        if badge as u64 & MGR_BADGE_STACK_EXIT != 0 {
+            // The badge is a hint, NEVER authority. The held Process
+            // cap with DESTROY authorizes the one-time reap.
+            if inventory::child_handle(pid, &SyscallProbe) != Ok(handle)
+                || inventory::finish(handle, false).is_err()
+            {
+                log("servicemgr: OFFLINE — Process-cap reap REFUSED\r\n");
+            } else {
+                log("servicemgr: OFFLINE — child reaped; restart proof still OPEN\r\n");
+            }
+            park();
+        }
+        // Driver restart badges may arrive here; this slice does not
+        // claim a live dependency health protocol or respawn yet.
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    log("servicemgr: ring-3 boot (Phase 8.0 substrate)\r\n");
+    log("servicemgr: ring-3 boot (Phase 8.0 initial-stack substrate)\r\n");
     let ids = match boot_inventory() {
         Ok(ids) => ids,
         Err(()) => {
@@ -225,10 +318,18 @@ pub extern "C" fn _start() -> ! {
         log("servicemgr: OFFLINE — unexpected plan shape; no child spawned\r\n");
         park();
     }
-    log(
-        "servicemgr: policy validated from live caps and ready drivers; spawn/restart NOT YET CONNECTED\r\n",
-    );
-    park();
+    log("servicemgr: policy validated from live caps and ready drivers\r\n");
+    let step = plan.steps[0].unwrap();
+    match launch(step) {
+        Ok((pid, handle)) => {
+            report_child(pid);
+            monitor(pid, handle);
+        }
+        Err(()) => {
+            log("servicemgr: OFFLINE — spawn or stack readiness refused\r\n");
+            park();
+        }
+    }
 }
 
 fn park() -> ! {

@@ -228,7 +228,8 @@ pub static ARPTEST_IMAGE: &[u8] =
     include_bytes!("../../../userspace/netstackd/target/x86_64-unknown-none/release/arptest");
 
 /// Ring-3 service manager (ADR-0037), image 19. The bootstrap slice
-/// validates actual boot caps/readiness but DOES NOT yet spawn a service.
+/// validates live caps/readiness and spawns the initial production
+/// stack. Restart/failure recovery still needs separate proof.
 pub static SERVICEMGR_IMAGE: &[u8] = include_bytes!(
     "../../../userspace/servicemgr/target/x86_64-unknown-none/release/arena-servicemgr"
 );

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
     # shellcheck disable=SC1091
     source "$REPO_ROOT/tools/dev-env/env.sh"
@@ -22,6 +23,7 @@ print(f"OVMF_CODE={arena_env.ovmf_code()}")
 print(f"OVMF_VARS={arena_env.ovmf_vars_template()}")
 print(f"SCRATCH=({' '.join(repr(x) for x in arena_env.scratch_disk_args())})")
 print(f"NET=({' '.join(repr(x) for x in arena_env.net_args())})")
+print(f"RNG=({' '.join(repr(x) for x in arena_env.rng_args())})")
 EOF
 )"
 
@@ -35,4 +37,5 @@ exec "${QEMU[@]}" \
     -drive format=raw,file="$REPO_ROOT/build/arena-esp.img" \
     "${SCRATCH[@]}" \
     "${NET[@]}" \
+    "${RNG[@]}" \
     -display none -serial mon:stdio -no-reboot

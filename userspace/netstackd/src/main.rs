@@ -524,6 +524,14 @@ pub unsafe extern "C" fn _start() -> ! {
             o.str(" entries, TTL 30s; netd stays L2");
         });
 
+        // ADR-0039: signal startup on the SAME notification used for
+        // later backoff, avoiding an unrequested fifth child grant.
+        // In M7's standalone fixture nobody waits on this bit; the
+        // driver's own backoff waits accept a merged badge and retry.
+        let ready = syscall2(SYS_NOTIFY, SLOT_NOTIF, MGR_BADGE_STACK_READY);
+        if ready != 0 {
+            fail(EXIT_SETUP, "stack readiness notification refused");
+        }
         serve(&mut st8);
     }
 }

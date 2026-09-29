@@ -133,13 +133,14 @@ for i in $(seq 1 "$N"); do
     vcon_pid=$!
     # ADR-0020: a healthy boot no longer halts by itself — it ends at
     # the shell. The feeder subshell types 'shutdown' when the shell's
-    # prompt appears (marker-paced, never sleep-based), then holds
-    # stdin open until the clean-halt declaration lands. A dead boot
-    # (panic/hang before the prompt) leaves the feeder spinning until
-    # the timeout kills the pipeline — the failure verdict is unchanged.
+    # BOTH prompt and manager child-ready must appear before shutdown.
+    # Prompt alone races the child's startup (observed in the full
+    # suite); this is a readiness test, not scheduler timing. A stuck
+    # child leaves the feeder waiting until QEMU's timeout fails boot.
     {
         n=0
-        while ! grep -aq 'arena>' "$SERIAL" 2>/dev/null; do
+        while ! grep -aq 'arena>' "$SERIAL" 2>/dev/null || \
+              ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL" 2>/dev/null; do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
         printf 'shutdown\r'
@@ -187,15 +188,19 @@ for i in $(seq 1 "$N"); do
         why="native UDP library did not deliver/revoke its real-wire datagram"
     elif ! grep -aq 'TCP FIN was acknowledged, the peer closed, and the bearer was revoked' "$SERIAL"; then
         why="guest did not complete TCP FIN/close/revocation"
-    # Phase 8.0 bootstrap checkpoint: the shipping fixture must run
-    # the actual ring-3 manager, observe its own real caps and receive
-    # BOTH driver readiness badges. This is not a supervision proof.
+    # Phase 8.0 partial checkpoint: the shipping fixture must run
+    # the ring-3 manager, observe live caps, receive both driver
+    # badges, and start/audit its one child. NOT a restart proof.
     elif ! grep -aqF 'audited 7 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
     elif ! grep -aqF 'servicemgr: full fixture notification budget 9/9; tenth refused' "$SERIAL"; then
         why="manager readiness-channel notification bound was not tested"
-    elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers; spawn/restart NOT YET CONNECTED' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
+    elif ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL"; then
+        why="manager did not bring its production child to readiness"
+    elif ! grep -aqF 'four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras' "$SERIAL"; then
+        why="manager-owned child kernel cap audit missing"
     elif grep -aq 'servicemgr: OFFLINE' "$SERIAL"; then
         why="manager went OFFLINE although both fixture drivers were attached"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then

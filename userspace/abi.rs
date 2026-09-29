@@ -50,6 +50,10 @@ pub const SYS_PROC_FINISH: u64 = 30;
 pub const MGR_BADGE_NETD_READY: u64 = 1 << 0;
 pub const MGR_BADGE_RNGD_READY: u64 = 1 << 1;
 pub const MGR_BADGE_DEADLINE: u64 = 1 << 2;
+/// Manager-owned child exit on the event notification (ADR-0039).
+pub const MGR_BADGE_STACK_EXIT: u64 = 1 << 3;
+/// Stack startup acknowledgement on its existing backoff notification.
+pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
 

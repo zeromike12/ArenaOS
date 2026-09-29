@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 8.0 INCOMPLETE: prove manager bootstrap/inventory/readiness, not restart.
+"""Phase 8.0 INCOMPLETE: prove manager bootstrap/initial child, not restart.
 
 An actual ring-3 process queries its own caps; real boot drivers signal
 readiness after DRIVER_OK. Device-missing boots must not mint partial
 service authority or claim a manager-owned service started. No m8 RESULT
-is emitted until real spawn/restart/negative-space proofs are complete.
+is emitted until real restart and negative-space proofs are complete.
 """
 import re
 import sys
@@ -15,7 +15,7 @@ import arena_env  # noqa: E402
 import mtest  # noqa: E402
 
 LABEL = "m8-bootstrap"
-VALIDATED = "servicemgr: policy validated from live caps and ready drivers; spawn/restart NOT YET CONNECTED"
+VALIDATED = "servicemgr: policy validated from live caps and ready drivers"
 OFFLINE = "servicemgr: OFFLINE — missing or invalid boot grants; no child spawned"
 
 
@@ -26,7 +26,12 @@ def check(ok: bool, msg: str) -> bool:
 
 def boot(esp: Path, tag: str, *, net: bool, rng: bool) -> tuple[int, str]:
     arena_env.make_scratch_disk()
-    rc, serial, dt = mtest.run_qemu(f"{LABEL}-{tag}", esp,
+    # The shell can reach its prompt before the new child completes
+    # setup. Wait for BOTH independent observations before shutdown;
+    # otherwise a fast feeder tests scheduling luck, not readiness.
+    feed = ([(b"servicemgr: production netstackd READY pid", 1, b""),
+             *mtest.DEFAULT_FEED] if net and rng else mtest.DEFAULT_FEED)
+    rc, serial, dt = mtest.run_qemu(f"{LABEL}-{tag}", esp, feed=feed,
                                   net=net, rng=rng, kbd=net and rng,
                                   vcon=net and rng, tcp_peer=False)
     (arena_env.build_dir() / f"serial-{LABEL}-{tag}.log").write_text(serial)
@@ -57,8 +62,13 @@ def main() -> int:
     ok &= check("servicemgr: PANIC" not in serial and "m8: RESULT PASS" not in serial,
                 "no panic and no dishonest 8.0 completion marker")
     after = serial.split("servicemgr spawned: pid", 1)[-1]
-    ok &= check("netstackd: ready" not in after,
-                "bootstrap does not silently start an unsupervised production stack")
+    ready = re.search(r"servicemgr: production netstackd READY pid (\d+)", after)
+    audited = re.search(r"manager-owned netstackd pid (\d+): four installed child caps audited \(netd/W stack/R backoff/RW rngd/W\), no privileged extras", after)
+    ok &= check(bool(ready and audited and ready.group(1) == audited.group(1)
+                     and after.count("servicemgr: production netstackd READY pid") == 1),
+                "one manager-owned PRODUCTION child booted, reported ready and passed independent kernel cap audit")
+    ok &= check("restart proof still OPEN" not in after,
+                "the initial child stayed resident during this test boot")
 
     for tag, net, rng in (("none", False, False), ("rng-only", False, True)):
         rc, serial = boot(esp, tag, net=net, rng=rng)
@@ -69,7 +79,7 @@ def main() -> int:
         ok &= check(OFFLINE in serial and VALIDATED not in serial,
                     f"{tag}: manager reports OFFLINE instead of asserting fake readiness")
 
-    print(f"[{LABEL}] BOOTSTRAP SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
+    print(f"[{LABEL}] INITIAL-START SUBSTRATE: {'PASS' if ok else 'FAIL'} (Phase 8.0 NOT complete)")
     return 0 if ok else 1
 
 

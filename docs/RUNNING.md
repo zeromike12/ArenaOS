@@ -4,6 +4,54 @@ Every completed milestone ships as a **GitHub release** containing a
 prebuilt, tested boot image plus the exact UEFI firmware pair it was
 verified against. This page explains how to boot it on your own machine.
 
+## Phase 8 checkpoint: boot the exact per-commit build
+
+Phase 8.0 is **not finished**. Every new Phase 8 checkpoint commit
+includes a qualified, self-contained QEMU archive under
+`releases/checkpoints/` (ADR-0039). For the manager-owned initial-stack
+checkpoint on this branch, download the archive directly from the
+commit's repository tree (or clone and use its local path):
+
+```sh
+curl -fL -o arenaos-phase8-initial-stack-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-initial-stack/arenaos-phase8-initial-stack-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-initial-stack-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-initial-stack/arenaos-phase8-initial-stack-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-initial-stack-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-initial-stack-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
+cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
+```
+
+From the extracted directory, start QEMU (8.0+). This configuration
+attaches the **network and entropy devices** needed by the production
+stack. It deliberately omits a virtual keyboard/console-port actor, so
+those optional boot tests honestly SKIP; type at the bidirectional
+serial console. The absent host TCP fixture also reports an honest
+SKIP, never a fake TCP pass:
+
+```sh
+qemu-system-x86_64 -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
+  -drive if=pflash,format=raw,readonly=on,file=edk2-x86_64-code.fd \
+  -drive if=pflash,format=raw,file=ovmf-vars.img \
+  -drive format=raw,file=arena-esp.img \
+  -drive file=scratch.img,format=raw,if=none,id=scr0 \
+  -device virtio-blk-pci,drive=scr0 \
+  -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+  -device virtio-rng-pci \
+  -display none -serial mon:stdio -no-reboot
+```
+
+Look for `servicemgr: production netstackd READY pid ...` and the
+kernel's four-cap child audit, then the `arena> ` prompt. Type
+`help`, `ps`, or `shutdown` to exit cleanly (`Ctrl-A X` quits QEMU).
+This image starts the stack but **has no qualified restart proof**;
+production stack supervision and Phase 8.0 remain open. The archive
+includes this document, a formatted AFS1 scratch template and the
+exact EDK2 firmware pair used by qualification. Build-from-source
+interactive alternative: `tools/dev-env/bootstrap.sh && tools/run.sh`.
+
 ## What you need
 
 * Any x86-64 host (Linux, macOS, Windows/WSL) with

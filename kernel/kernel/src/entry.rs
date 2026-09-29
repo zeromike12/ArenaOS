@@ -493,10 +493,11 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     };
 
     // The manager is a separate ring-3 process, never a second owner
-    // of kernel-minted driver grants. No service is spawned by it in
-    // this bootstrap/readiness checkpoint (8.0 remains incomplete).
-    spawn_servicemgr(manager_nid, rng_ready_nid, net_eid, rng_eid)
-        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // of kernel-minted driver grants. It starts the production stack
+    // after live-cap and driver-readiness checks; restart is unproven.
+    let (manager_pid, expected_stack_caps) =
+        spawn_servicemgr(manager_nid, rng_ready_nid, net_eid, rng_eid)
+            .unwrap_or_else(|e| crate::halt::halt_machine(e));
 
     info!(
         "kernel",
@@ -565,7 +566,21 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // input, and gives every wake (console RX, tick) somewhere to
     // return. Between wakes it halts the CPU with IF=1 — interrupts
     // must flow now: the UART RX path IS the input device.
+    let mut stack_audited = false;
     loop {
+        // ADR-0039: independently audit the child created by the
+        // MANAGER's syscall. The kernel sees its Process handle in the
+        // manager's actual cap table, then compares four installed
+        // child caps to the fixed root policy. No m8 completion claim.
+        if !stack_audited {
+            if let Some(wanted) = expected_stack_caps {
+                if audit_manager_child(manager_pid, &wanted)
+                    .unwrap_or_else(|e| crate::halt::halt_machine(e))
+                {
+                    stack_audited = true;
+                }
+            }
+        }
         // M7.0: the idle thread is also the SUPERVISOR's hands
         // (ADR-0028 built restart but left `poll` uncalled outside the
         // suite, which made production supervision a promise rather
@@ -599,7 +614,7 @@ fn spawn_servicemgr(
     rng_ready_nid: u32,
     net: Option<u32>,
     rng: Option<u32>,
-) -> Result<(), &'static str> {
+) -> Result<(u64, Option<[crate::cap::Cap; 4]>), &'static str> {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let root = [
         Cap {
@@ -641,7 +656,25 @@ fn spawn_servicemgr(
                     rights: R | W,
                 },
             ];
-            (Some(all), Some(stack_eid))
+            let child = [
+                Cap {
+                    obj: CapObj::Endpoint { eid: net_eid },
+                    rights: W,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: stack_eid },
+                    rights: R,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: backoff_nid },
+                    rights: R | W,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: rng_eid },
+                    rights: W,
+                },
+            ];
+            (Some(all), Some((stack_eid, child)))
         }
         _ => (None, None),
     };
@@ -671,10 +704,54 @@ fn spawn_servicemgr(
     info!(
         "kernel",
         "servicemgr spawned: pid {pid}, image19; stack endpoint {:?}; audited {} literal caps; no device/Power/Process grants",
-        stack,
+        stack.map(|(eid, _)| eid),
         expected.len()
     );
-    Ok(())
+    Ok((pid, stack.map(|(_, child)| child)))
+}
+
+/// True after the manager has spawned one child and all four caps
+/// match the kernel's fixed policy. No guessing a Process-cap slot
+/// from a pid: inspect actual held manager handles first. Child-owned
+/// Untyped frames are allowed; privileged or unexpected grants are not.
+fn audit_manager_child(
+    manager_pid: u64,
+    expected: &[crate::cap::Cap; 4],
+) -> Result<bool, &'static str> {
+    use crate::cap::{CapObj, RIGHTS_DESTROY};
+    let mut child = None;
+    for slot in 7..crate::cap::CAP_SLOTS {
+        if let Ok(c) = crate::cap::read(manager_pid, slot) {
+            if let CapObj::Process { pid } = c.obj {
+                if c.rights & RIGHTS_DESTROY == 0 || child.replace(pid).is_some() {
+                    return Err("servicemgr: child Process cap ambiguous or lacks DESTROY");
+                }
+            }
+        }
+    }
+    let Some(pid) = child else {
+        return Ok(false);
+    };
+    if !crate::spawn::has_record(pid) {
+        return Err("servicemgr: child Process cap has no live spawn record");
+    }
+    for (slot, &want) in expected.iter().enumerate() {
+        if crate::cap::read(pid, slot).ok() != Some(want) {
+            return Err("servicemgr: actual child cap differs from attenuated policy");
+        }
+    }
+    for slot in 4..crate::cap::CAP_SLOTS {
+        if let Ok(c) = crate::cap::read(pid, slot) {
+            if !matches!(c.obj, CapObj::Untyped { .. }) {
+                return Err("servicemgr: child received an extra privileged cap");
+            }
+        }
+    }
+    info!(
+        "m8",
+        "manager-owned netstackd pid {pid}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
+    );
+    Ok(true)
 }
 
 /// Spawn the production block service (M5.2, ADR-0022): registry image 2

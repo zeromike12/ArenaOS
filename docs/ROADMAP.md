@@ -996,10 +996,12 @@ is not completed by accepting an ADR.
       syscall inventory; two real shell child cycles exercise the
       Process-cap finish ABI. A ring-3 manager now boots with kernel-
       audited literal grants, observes its real caps and waits for
-      device-originated readiness badges (ADR-0038). It does NOT yet spawn or
-      restart a managed service or close the netstackd supervision
-      obligation. Not an 8.0 completion claim. Fully connect one
-      ring-3 manager to spawn/restart from the fixed kernel trust root with
+      device-originated readiness badges (ADR-0038). It now requests
+      one production `netstackd` through `SYS_SPAWN`, checks its ready
+      badge and Process handle, and the kernel audits all four child's
+      installed grants (ADR-0039). It does NOT yet prove failure/restart
+      or close the netstackd supervision obligation. Not an 8.0
+      completion claim. Complete restart from the fixed kernel trust root with
       only explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
       can delegate only actual caps already held, attenuated by

@@ -24,10 +24,14 @@ caller-cap query against the kernel's installed-cap audit. Separate
 full-network and no-network fixtures check genuine post-DRIVER_OK
 readiness and fail-closed OFFLINE with no partial authority. The
 100-boot gate requires that same bootstrap on the full fixture. These
-checks do NOT prove a manager spawned a service: 8.0 still requires
-an actual child-cap audit, lifecycle negative-space tests, and a
-production `netstackd` restart/wire recovery proof before it can
-report a completed milestone RESULT.
+checks now include one actual manager-owned production `netstackd`
+spawn, an explicit ready badge and an independent kernel audit of all
+four installed child caps. They do NOT prove recovery: 8.0 still
+requires lifecycle negative-space/accounting tests and a production
+`netstackd` restart, stale-bearer and resumed-wire proof before it can
+report a completed milestone RESULT. Each new commit carries a bundled
+boot image and running instructions under `releases/checkpoints/`
+(ADR-0039), gated by full suite and artifact-bound 100/100 boots.
 
 ## The testing pyramid
 
