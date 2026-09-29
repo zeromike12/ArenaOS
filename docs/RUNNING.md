@@ -4,14 +4,32 @@ Every completed milestone ships as a **GitHub release** containing a
 prebuilt, tested boot image plus the exact UEFI firmware pair it was
 verified against. This page explains how to boot it on your own machine.
 
-## Phase 8.1 in progress: qualified boot image remains 8.0
+## Phase 8.1 read-boundary checkpoint (8.1 remains incomplete)
 
-ADR-0046, the `no_std` record/recovery module and its host-only tests
-begin 8.1 without changing the guest EFI. No 8.1 service is deployed or claimed complete;
-this commit retains the **same qualified Phase 8.0 archive** below as its
-bootable build. The first completed 8.1 checkpoint will need its own
-fresh full-suite and final-image-bound 100/100 boot qualification and
-archive; do not treat a host-only test as that checkpoint.
+The latest checkpoint bundles a bootable resident `configd` and separate
+ordinary reader (ADR-0046). It reads real AFS1 records and refuses SET
+without genuine transferred authority, but **does not perform authorized
+SET, atomic update or crash recovery yet**. The host-provisioned record
+proof is not a guest writer. For this commit, fetch its archive instead
+of the historical Phase 8.0 archive below:
+
+```sh
+curl -fL -o arenaos-phase81-read-boundary-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-read-boundary/arenaos-phase81-read-boundary-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase81-read-boundary-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-read-boundary/arenaos-phase81-read-boundary-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase81-read-boundary-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase81-read-boundary-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+cp ovmf-vars-template.img ovmf-vars.img
+cp scratch-template.img scratch.img  # only on first boot; retain thereafter
+```
+
+Then use the QEMU command below (with both virtio-net and virtio-rng).
+A fresh scratch disk prints `configread: READ UNSET` and
+`configread: ORDINARY READ BOUNDARY PASS`, before the shell prompt.
+The ordinary reader is reaped before shell startup. Existing shell commands
+remain available; there is deliberately no configuration write command.
 
 ## Phase 8 checkpoint: boot the exact per-commit build
 
@@ -111,7 +129,7 @@ supervisor repairs rngd. `depstall` deliberately wedges rngd's next
 GET; the manager's own deadline stops its blocked worker and leaves the
 stack OFFLINE. Use these only in a disposable VM, then reboot. Missing
 devices SKIP rather than granting partial authority. Phase 8.0 passed
-all 27 historical suites and an exact-image 100/100 QEMU qualification;
+the full historical suite and an exact-image 100/100 QEMU qualification;
 8.1 transactional configuration storage is next.
 Earlier per-commit bundles remain available at
 [`3669743`](https://github.com/zeromike12/ArenaOS/commit/3669743ecabbda26110541b7eea4ebee4b722a7f),

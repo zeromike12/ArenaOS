@@ -14,6 +14,21 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
+The Phase 8.1 **read-boundary checkpoint** is not Phase 8.1 completion.
+`tools/test_m81_read.py` boots the real guest repeatedly, including the
+same platter after the trusted shell writes a malformed reserved name,
+a separate offline host-provisioned valid 512-byte record (the guest
+reads the exact payload), a corrupted newest checksum after an older
+valid record (no fallback), and an optional-device-absent boot. Its
+ordinary reader lacks fsd and update-marker rights and checks 20
+receiver-side missing/wrong-kind refusals before repeating READ; host
+`afs1.audit` checks each disk. Offline host provisioning is NOT a guest
+transaction. Authorized SET, crash points, full-table and trusted-updater
+proofs are still outstanding. `tools/stability_loop.sh 100` checks the
+ordinary reader boundary on every final-image boot as well as the 8.0
+stack path. The complete historical suite and fresh 100/100 must precede
+any checkpoint bundle or commit.
+
 Phase 8.0's early manifest resolver, caller-cap inventory and readiness
 badge gate have host fail-closed tests in
 `userspace/servicemgr/src/{manifest,inventory,readiness}.rs` (ADR-0037/0038).

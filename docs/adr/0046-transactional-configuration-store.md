@@ -35,9 +35,68 @@ Do **not** conflate a pending 0-byte file with corruption or a returned configur
 
 **Scope decision:** 8.1 adopts the existing AFS1 crash model and requires visible record corruption to fail closed. Arbitrary corruption of an AFS1 commit sector, malicious raw-FS writes and device rollback are explicitly outside this guarantee. Detecting a lost committed generation would require a separate trusted monotonic anchor or a stronger storage protocol; replicating checksums inside files hidden by fsd cannot help. This is an accepted limitation, not a claimed proof of general media integrity. Do not silently broaden it in test names or release notes. If general corruption detection becomes a requirement, accept a new storage ADR and qualify its implementation separately. The existing v1 `FS_OP_CREATE` post-commit handle failure and lack of per-file ownership are exercised within the chosen crash/authority model.
 
+## Read-boundary boot integration (partial 8.1 checkpoint)
+
+This checkpoint implements only FS-backed reads and receiver-side SET
+refusal; it does **not** create a trusted updater, grant anyone the marker
+update right, or write any config generation. The boot root allocates one
+endpoint and one inert notification; `configd` receives the literal grants
+`fsd Endpoint/WRITE` (slot 0), `config Endpoint/READ` (slot 1) and
+`marker Notification/READ` (slot 2). Its data-only client (image 22)
+receives `config Endpoint/WRITE|COPY`, no fsd endpoint or notification.
+The server checks transferred markers against its own slot-2 object;
+missing and wrong-kind references are refused, consumed and destroyed at
+the receiving boundary. Even a correctly marked SET returns `NOT_READY`
+at this stage. The separately privileged updater/positive case and the
+write transaction remain REQUIRED before 8.1 can close. The ordinary
+reader uses a copyable endpoint as intentional data-authority delegation,
+not as update authority.
+
+The live budget is 23 images (0..22, up from 21), 8 endpoints (the one
+remaining full-fixture endpoint is config), and 14 notifications (up from
+13, the sole added object is the update marker). The full-fixture boot
+checks that allocating a fifteenth notification fails; without optional
+devices the table is intentionally not full. Existing shell slots remain
+untouched; the boot-root reader is destroyed, its exit notice consumed and
+spawn record forgotten before shell start. Neither it nor the shell is
+given an update marker. One resident configd process remains; no second
+filesystem owner is introduced.
+
+The reader's pre-shell proof needs fsd's real interrupt-driven block
+completion. Blocking the boot thread on its exit notification left all
+threads blocked with an empty scheduler ready ring and prevented the
+pending device interrupt from finishing: **do not block the boot thread
+here**. Instead, keep it runnable, enable interrupts, yield while
+watching the reader's exact exit status, and enforce an HPET-derived
+21-second wall-clock deadline; restore its prior interrupt state, then
+consume the matching exit badge with nonblocking `try_wait` and reap the
+reader. This is a deadline, not a yield-count retry or a missing-badge
+success path. Start the manager before the reader drain, as in the historical
+boot: it may finish its initial device probe before shell input begins,
+so its logs cannot split a typed line or a file streamed to the console.
+The first full regression exposed this real interleaving when the manager
+was moved AFTER the reader: filesystem marker bytes and keyboard echo
+were split by manager startup output. The reader drain must instead
+poll `audit_manager_child` while runnable and record any short-lived
+initial probe's exact installed caps immediately. Waiting to audit only
+in the later idle loop misses that worker if it has exited by then.
+The idle loop subsequently audits the production child and installs
+the shell's READ-only foreign Process reference. This preserves both
+the first-probe audit and the historical quiet shell handoff without
+weakening either regression test. Manager readiness badges persist.
+`test_m8_dependencies.py` checks both workers and
+the full historical suite preserves this ordering.
+
+Host-prepared fixture disks exercise UNSET, a valid committed 512-byte
+`cfg8-01` value through real fsd/storaged DMA, malformed reserved names,
+and a corrupt newest checksum with a valid older value: the guest must
+return CORRUPT rather than silently downgrade. The offline host fixture
+is not a guest SET transaction or a crash-recovery proof. No in-guest
+writer or positive update authority proof exists in this checkpoint.
+
 ## Required proof before 8.1 closure
 
 1. Audit actual image, endpoint, notification, slot and process bounds and grant provenance with both device-present and absent fixtures before allocating boot grants. Keep raw FS writers explicitly trusted; never give the config reader a raw FS endpoint.
 2. Unit-test the exact record parser, reserved namespace scan, empty/contiguous/gap/duplicate/unknown-version/corrupt cases, sequence exhaustion and full-table refusal. Prove ordinary endpoint without marker and wrong/forged markers cannot update at the receiver; only the genuine separately granted updater can.
 3. Multi-boot QEMU test with the SAME scratch disk: exact old/new bytes and on-disk `afs1.audit()` after SIGKILL at every CREATE, WRITE commit-record, CLOSE and reply boundary. Test failure return paths, full table/disk and bounded memory/capability accounting; do not treat a reboot after a transient failure as a fix for a flake.
-4. Keep all historical tests. At any **completed checkpoint**, run the full historical suite and a fresh final-image-bound 100/100 QEMU qualification, package and boot its own deployable archive and verify its receipt. Until then 8.1 stays incomplete and the already-qualified 8.0 archive is the bootable build.
+4. Keep all historical tests. At any **completed checkpoint**, run the full historical suite and a fresh final-image-bound 100/100 QEMU qualification, package and boot its own deployable archive and verify its receipt. A separately qualified partial read-boundary checkpoint does not close 8.1; no unqualified guest image is a deployable checkpoint.

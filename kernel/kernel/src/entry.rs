@@ -409,6 +409,12 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
+    // ADR-0046: a separate ring-3 config reader owns neither fsd nor
+    // the update marker. Only the configd process sees the raw FS cap;
+    // the inert marker is a receiver-side anchor, NOT an opcode secret.
+    let (config_eid, _config_marker) = spawn_configd(fs_eid)
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+
     // --- M6.1: the production network service (ADR-0024) --------------------
     // netd parks serving raw Ethernet frames (NET_SEND/NET_RECV/NET_MAC)
     // on its endpoint — Phase 7's stack will be its first production
@@ -508,22 +514,6 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
-    // The manager is a separate ring-3 process, never a second owner
-    // of kernel-minted driver grants. It starts the production stack
-    // after live-cap and driver-readiness checks. One orderly restart
-    // can be tested; full lifecycle/failure proof remains open.
-    let (manager_pid, expected_stack_caps) = spawn_servicemgr(
-        manager_nid,
-        rng_ready_nid,
-        manager_restart_nid,
-        manager_admin_nid,
-        net_eid,
-        rng_eid,
-        rng_diag_nid,
-        stack_diag_nid,
-    )
-    .unwrap_or_else(|e| crate::halt::halt_machine(e));
-
     info!(
         "kernel",
         "milestones 5–6.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own + supervised restart: a destroyed service answers its callers with a typed status and comes back with its capabilities replayed) — spawning the shell"
@@ -544,6 +534,83 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Ok(nid) => nid,
         Err(_) => crate::halt::halt_machine("shell: notification table full"),
     };
+    // The manager is a separate ring-3 process, never a second owner
+    // of kernel-minted driver grants. It starts the production stack
+    // after live-cap and driver-readiness checks. One orderly restart
+    // can be tested; full lifecycle/failure proof remains open.
+    let (manager_pid, expected_stack_caps) = spawn_servicemgr(
+        manager_nid,
+        rng_ready_nid,
+        manager_restart_nid,
+        manager_admin_nid,
+        net_eid,
+        rng_eid,
+        rng_diag_nid,
+        stack_diag_nid,
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+
+    // The proof client has the ordinary endpoint only, never the raw
+    // filesystem endpoint or a marker. Wait for its exact success exit,
+    // then reclaim the boot-root test process before creating the shell.
+    let read_grants = [crate::cap::Cap {
+        obj: crate::cap::CapObj::Endpoint { eid: config_eid },
+        rights: crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_COPY,
+    }];
+    let reader_pid = crate::spawn::spawn_init(22, &read_grants, Some((shell_nid, 0xC081)))
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let rec = crate::spawn::records_snapshot();
+    let reader_tid = rec.iter().flatten().find(|&&(pid, _)| pid == reader_pid)
+        .map(|&(_, tid)| tid)
+        .unwrap_or_else(|| crate::halt::halt_machine("configread: spawn record missing"));
+    // Before the boot thread becomes idle it must NOT block on a
+    // notification: if the fsd/virtio completion is pending, all other
+    // threads can be blocked and sched::block_current halts on an empty
+    // ready ring. Stay runnable AND IF=1 for the device MSI, like M5's
+    // HPET-bounded device-service drain (not a yield-count retry).
+    let if_before = crate::arch::x86_64::interrupts_enabled();
+    let t0 = crate::timekeeping::now_us();
+    let mut last_audited_probe = None;
+    crate::arch::x86_64::sti();
+    loop {
+        // The manager is already running. Its first short-lived worker
+        // may exit before the idle loop; audit its REAL installed caps
+        // now, not merely after the reader returns. The production
+        // child's shell reference is still installed by the idle loop.
+        if let Some(wanted) = expected_stack_caps {
+            if let Some(ManagerChild::Probe(pid, mode)) =
+                audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+                    .unwrap_or_else(|e| crate::halt::halt_machine(e))
+            {
+                if last_audited_probe != Some(pid) {
+                    if mode == 0 {
+                        info!("m8", "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras");
+                    } else {
+                        info!("m8", "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited");
+                    }
+                    last_audited_probe = Some(pid);
+                }
+            }
+        }
+        if let Some(status) = crate::arch::x86_64::syscall::exit_status_of(reader_tid) {
+            if status != 42 {
+                crate::halt::halt_machine("configread: ordinary client refused read/authority proof");
+            }
+            break;
+        }
+        if crate::timekeeping::now_us().saturating_sub(t0) > 21_000_000 {
+            crate::halt::halt_machine("configread: device-bound reader deadline expired");
+        }
+        crate::sched::yield_now();
+    }
+    if !if_before { crate::arch::x86_64::cli(); }
+    if crate::ipc::try_wait(shell_nid) != Ok(0xC081) {
+        crate::halt::halt_machine("configread: proof client exit badge missing");
+    }
+    crate::proc::destroy(reader_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::spawn::forget(reader_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    info!("kernel", "configread: boot-root reader reaped; no update authority delegated");
+
     let shell_grants = [
         crate::cap::Cap {
             obj: crate::cap::CapObj::Power,
@@ -634,18 +701,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
-    // Full shipping fixture occupies all 13 notifications (ADR-0047).
-    // The fourteenth must be a typed refusal, never silent over-allocation;
+    // Full shipping fixture occupies all 14 notifications (ADR-0046).
+    // The fifteenth must be a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse a fourteenth object",
+                "servicemgr: notification bound failed to refuse a fifteenth object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 13/13; fourteenth refused"
+            "servicemgr: full fixture notification budget 14/14; fifteenth refused"
         );
     }
 
@@ -656,7 +723,6 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // return. Between wakes it halts the CPU with IF=1 — interrupts
     // must flow now: the UART RX path IS the input device.
     let mut last_audited_child = None;
-    let mut last_audited_probe = None;
     loop {
         // ADR-0039: independently audit the child created by the
         // MANAGER's syscall. The kernel sees its Process handle in the
@@ -1016,6 +1082,26 @@ fn spawn_storaged() -> Result<(u64, u32), &'static str> {
         f.bar_base[bar]
     );
     Ok((pid, eid))
+}
+
+/// Spawn the 8.1 resident config reader with no delegated updater.
+fn spawn_configd(fs_eid: u32) -> Result<(u32, u32), &'static str> {
+    use crate::cap::{Cap, CapObj, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let eid = crate::ipc::create_endpoint().map_err(|_| "configd: endpoint table full")?;
+    let nid = crate::ipc::create_notification().map_err(|_| "configd: marker table full")?;
+    let grants = [
+        Cap { obj: CapObj::Endpoint { eid: fs_eid }, rights: W },
+        Cap { obj: CapObj::Endpoint { eid }, rights: R },
+        Cap { obj: CapObj::Notification { nid }, rights: R },
+    ];
+    let pid = crate::spawn::spawn_init(21, &grants, None)?;
+    for (slot, &wanted) in grants.iter().enumerate() {
+        if crate::cap::read(pid, slot).ok() != Some(wanted) {
+            return Err("configd: boot grant did not match literal policy");
+        }
+    }
+    info!("kernel", "configd spawned: pid {pid}, image21, FS/W + cfg/R + inert marker/R; no updater grant");
+    Ok((eid, nid))
 }
 
 /// Spawn the production filesystem service (M5.3, ADR-0023): registry

@@ -68,6 +68,10 @@ def main() -> int:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", args.checkpoint):
         parser.error("checkpoint name must contain lowercase letters/digits/hyphens")
     efi_sha, esp_bytes = verify_qualified_image(args.suite_log)
+    if args.checkpoint.startswith("phase81-"):
+        log = args.suite_log.read_text()
+        if "ALL TESTS PASSED (29 test suites)" not in log or "CONFIG-READ-BOUNDARY: PASS" not in log:
+            raise ValueError("8.1 read checkpoint requires all 29 historical suites and its new guest proof")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -86,6 +90,8 @@ def main() -> int:
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
+        + ("Phase 8.1: READ BOUNDARY ONLY; no authorized SET, 8.1 INCOMPLETE\n"
+           if args.checkpoint.startswith("phase81-") else "")
     )
     (stage / "sha256sums.txt").write_text("".join(
         f"{digest((stage / path).read_bytes())}  {path}\n" for path in FILES
@@ -142,6 +148,11 @@ def main() -> int:
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",
                     "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
+        if args.checkpoint.startswith("phase81-"):
+            required += ("configread: SET absent/wrong-kind refused x20 by receiver",
+                         "configread: READ UNSET",
+                         "configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)",
+                         "configread: boot-root reader reaped; no update authority delegated")
         if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
                 or serial.count("servicemgr: production netstackd READY pid") != 2
                 or serial.count("servicemgr: active netd MAC and rngd entropy probes passed; worker reaped") != 2

@@ -38,10 +38,10 @@ use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
 pub const MAX_ENDPOINTS: usize = 8;
-// ADR-0038/0040/0043/0047: thirteen disjoint production notifications,
-// including driver readiness, private manager control, and two inert
-// service-side diagnostic markers. A shared badge word is forgeable.
-pub const MAX_NOTIFS: usize = 13;
+// ADR-0038/0040/0043/0047/0046: fourteen disjoint production
+// notifications. The config update proof is inert and distinct from
+// readiness, private manager control and diagnostic markers.
+pub const MAX_NOTIFS: usize = 14;
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
 const QUEUE_DEPTH: usize = 4;

@@ -198,8 +198,8 @@ for i in $(seq 1 "$N"); do
     # Destructive fault/stall negatives live in the historical host suite.
     elif ! grep -aqF 'audited 12 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 13/13; fourteenth refused' "$SERIAL"; then
-        why="manager readiness-channel notification bound was not tested"
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 14/14; fifteenth refused' "$SERIAL"; then
+        why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
     elif [[ $(grep -acF 'servicemgr: active netd MAC and rngd entropy probes passed; worker reaped' "$SERIAL" || true) -ne 2 ]]; then
@@ -228,6 +228,19 @@ for i in $(seq 1 "$N"); do
         why="post-restart stale bearer and fresh wire proof missing"
     elif grep -aq 'servicemgr: OFFLINE' "$SERIAL"; then
         why="manager went OFFLINE although both fixture drivers were attached"
+    # ADR-0046 partial 8.1 boundary: the data endpoint alone cannot
+    # mutate; 20 missing/wrong-kind calls were rejected at the receiver
+    # and the guest still scanned the real FS twice without a write.
+    elif ! grep -aqF 'configd spawned: pid' "$SERIAL"; then
+        why="resident configd did not receive its literal boot grants"
+    elif ! grep -aqF 'configread: SET absent/wrong-kind refused x20 by receiver' "$SERIAL"; then
+        why="ordinary config endpoint bypassed service-side mutation refusal"
+    elif ! grep -aqF 'configread: READ UNSET' "$SERIAL"; then
+        why="config reader did not scan the fresh real AFS1 volume"
+    elif ! grep -aqF 'configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)' "$SERIAL"; then
+        why="ordinary config reader did not survive/verify its data-plane proof"
+    elif ! grep -aqF 'configread: boot-root reader reaped; no update authority delegated' "$SERIAL"; then
+        why="config reader was not reaped before shell startup"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

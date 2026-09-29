@@ -88,7 +88,9 @@ pub const RIGHTS_ALL: u64 = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DE
 /// A numeric nid/slot or the caller's endpoint rights are never proof.
 /// Consume even an invalid landed cap; normal data-buffer paths never call this.
 pub fn take_diagnostic(landed: u64, held_slot: u64) -> bool {
-    if landed == CAP_NONE { return false; }
+    if landed == CAP_NONE {
+        return false;
+    }
     let mut held = [0u64; 3];
     let mut sent = [0u64; 3];
     let ok = unsafe {
@@ -96,17 +98,22 @@ pub fn take_diagnostic(landed: u64, held_slot: u64) -> bool {
         // production drivers reserve slot 3 for readiness/console and
         // use slot 4 (or 5). Only a READ-only Notification can anchor.
         let primary = syscall2(SYS_CAP_DESCRIBE, held_slot, held.as_mut_ptr() as u64) == 0
-            && held[0] == 3 && held[2] == RIGHTS_READ;
+            && held[0] == 3
+            && held[2] == RIGHTS_READ;
         if !primary && held_slot >= 4 {
             held = [0; 3];
             let _ = syscall2(SYS_CAP_DESCRIBE, 3, held.as_mut_ptr() as u64);
         }
         syscall2(SYS_CAP_DESCRIBE, landed, sent.as_mut_ptr() as u64) == 0
-            && held[0] == 3 && held[2] == RIGHTS_READ
-            && sent[0] == 3 && sent[1] == held[1]
+            && held[0] == 3
+            && held[2] == RIGHTS_READ
+            && sent[0] == 3
+            && sent[1] == held[1]
             && sent[2] == RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
     };
-    if unsafe { syscall1(SYS_CAP_DESTROY, landed) } != 0 { return false; }
+    if unsafe { syscall1(SYS_CAP_DESTROY, landed) } != 0 {
+        return false;
+    }
     ok
 }
 
@@ -114,8 +121,11 @@ pub fn take_diagnostic(landed: u64, held_slot: u64) -> bool {
 /// authority; the caller can then test the same live endpoint again.
 pub fn diagnostic_refused(ep: u64, arg: u64, op: u64, cap: u64, error: u64) -> bool {
     let mut reply = [0u64; 3];
-    unsafe { syscall6(SYS_IPC_CALL, ep, arg, op, cap, reply.as_mut_ptr() as u64, 0) == 0
-        && reply[0] == error && reply[2] == CAP_NONE }
+    unsafe {
+        syscall6(SYS_IPC_CALL, ep, arg, op, cap, reply.as_mut_ptr() as u64, 0) == 0
+            && reply[0] == error
+            && reply[2] == CAP_NONE
+    }
 }
 
 // ---- IPC v1.1 inline messages (M5.3, ADR-0023) -------------------------------
@@ -158,6 +168,20 @@ pub const BLOCK_FRAME_BYTES: u64 = 4096;
 pub fn block_req_w1(op: u64, buf_offset: u64) -> u64 {
     op | (buf_offset << 8)
 }
+
+// ---- Phase 8.1 configuration-service protocol (ADR-0046) --------------------
+// READ is available with only Endpoint/WRITE. SET requires a transferred
+// boot-granted marker verified by the RECEIVER; until the write path is
+// proven it returns CFG_NOT_READY even with authority. No caller id gate.
+pub const CFG_OP_READ: u64 = 1;
+pub const CFG_OP_SET: u64 = 2;
+pub const CFG_OK: u64 = 0; // READ: value in msg[0..2] len, [2..34] data; reply w1=seq
+pub const CFG_UNSET: u64 = 1; // no committed generation
+pub const CFG_DENIED: u64 = 2; // receiving-service authority refusal
+pub const CFG_CORRUPT: u64 = 3; // visible malformed generation/namespace
+pub const CFG_IO: u64 = 4; // FS unavailable/short read, never fallback
+pub const CFG_NOT_READY: u64 = 5; // explicit read-only checkpoint
+pub const CFG_BAD_OP: u64 = 6;
 
 // ---- the filesystem-service protocol (ADR-0023) --------------------------------
 //

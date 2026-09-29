@@ -1058,8 +1058,13 @@ is not completed by accepting an ADR.
       explicit receiving-service update marker and the existing AFS1
       ordered-write/atomic-sector crash model. The byte-exact `no_std`
       codec and fail-closed generation scanner compile for the bare-metal
-      target and match the independent Python reference; no resident guest
-      store, IPC authorization or permission-policy claim yet. AFS1 can hide a newer generation if
+      target and match the independent Python reference. A resident
+      `configd` now scans real fsd-visible records; an isolated ordinary
+      reader proves UNSET, exact host-provisioned VALUE, fail-closed
+      malformed/newest-checksum rejection and 20 receiver-side SET
+      refusals. The read-boundary checkpoint is NOT 8.1 completion:
+      there is no authorized updater, guest SET, atomic update or
+      crash-recovery proof yet. AFS1 can hide a newer generation if
       its commit sector suffers arbitrary corruption; after the explicit
       scope decision, 8.1 rejects **visible malformed config records**
       rather than pretending to detect media corruption or rollback

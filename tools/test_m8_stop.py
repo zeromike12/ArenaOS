@@ -57,8 +57,12 @@ def main() -> int:
     ok &= check(all(p >= 0 for p in positions) and positions == sorted(positions),
                 "forged hint refused; private authority, live teardown, IPC failure and bounded restart in order")
     after = serial.split("servicemgr: forcibly stopped LIVE production child", 1)[-1]
-    production = serial.split("\nstackstop\n", 1)[-1]
-    ok &= check(after.count("netstackd: resolved 10.0.2.2") == 1
+    # The shell echoes "arena> stackstop", not a bare "stackstop" line.
+    # Require the real command anchor before excluding earlier M7 suite
+    # shutdowns; the old split silently searched the whole boot instead.
+    command = "arena> stackstop\n"
+    production = serial.split(command, 1)[1] if command in serial else ""
+    ok &= check(command in serial and after.count("netstackd: resolved 10.0.2.2") == 1
                 and "netstackd: shutdown" not in production and "[arena user fault]" not in production
                 and SUCCESS in after,
                 "not orderly exit or CPU crash: forced stop, stale bearer rejected, fresh real wire and flat accounting")

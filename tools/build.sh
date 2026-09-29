@@ -194,6 +194,19 @@ if [[ ! -f "$MGR_ELF" ]]; then
 fi
 echo "servicemgr image: ${MGR_ELF#"$REPO_ROOT"/} ($(stat -c%s "$MGR_ELF") bytes)"
 
+# Phase 8.1: resident read-only configd and isolated endpoint-only reader.
+echo "== building userspace configd (userspace/configd, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/configd" && cargo build --release )
+for CFG_ELF in \
+    "$REPO_ROOT/userspace/configd/target/x86_64-unknown-none/release/arena-configd" \
+    "$REPO_ROOT/userspace/configd/target/x86_64-unknown-none/release/configread"; do
+    if [[ ! -f "$CFG_ELF" ]]; then
+        echo "error: config image not produced at $CFG_ELF" >&2
+        exit 1
+    fi
+    echo "config image: ${CFG_ELF#"$REPO_ROOT"/} ($(stat -c%s "$CFG_ELF") bytes)"
+done
+
 echo "== building userspace depcheck (userspace/depcheck, x86_64-unknown-none) =="
 ( cd "$REPO_ROOT/userspace/depcheck" && cargo build --release )
 DEPCHECK_ELF="$REPO_ROOT/userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck"
