@@ -8,17 +8,17 @@ verified against. This page explains how to boot it on your own machine.
 
 Phase 8.0 is **not finished**. Every new Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
-`releases/checkpoints/` (ADR-0039). For the **current unexpected-crash recovery**
+`releases/checkpoints/` (ADR-0039). For the **current manager-owned forced-stop**
 checkpoint on this branch, download the archive directly from the
 commit's repository tree (or clone and use its local path):
 
 ```sh
-curl -fL -o arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-user-fault-recovery/arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-user-fault-recovery/arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-forced-live-stop-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-forced-live-stop/arenaos-phase8-forced-live-stop-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-forced-live-stop-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-forced-live-stop/arenaos-phase8-forced-live-stop-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-forced-live-stop-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-forced-live-stop-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
 cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
@@ -62,9 +62,17 @@ Power-holding shell observes `STATUS_SERVICE_GONE`, then proves a fresh
 instance accepts the original endpoint but rejects the old bearer,
 sends new ARP onto the wire, and returns to exact frame/record/process
 accounting. Do not use this against a service whose state you need.
-Forced live stop, lifecycle-authority refusals, and active dependency
-probes remain open: Phase 8.0 is incomplete.
+`stackstop` is the separate **opt-in** live-stop proof. A forged
+shared manager-event wake leaves the first child alive. Only a second,
+private admin request lets the manager use its held Process/DESTROY cap
+to force-stop that live child. The shell never holds a Process cap. An
+in-flight call is failed, the same client endpoint survives, a fresh
+child rejects the old bearer and sends new ARP, and kernel resource
+counts return to baseline. This spends one restart attempt.
+Lifecycle-authority refusals for forged/foreign/self/driver handles
+and active dependency probes remain open: Phase 8.0 is incomplete.
 Earlier per-commit bundles remain available at
+[`3669743`](https://github.com/zeromike12/ArenaOS/commit/3669743ecabbda26110541b7eea4ebee4b722a7f),
 [`30885a8`](https://github.com/zeromike12/ArenaOS/commit/30885a8e1e2e62867aecf80e816abdd7e478791e),
 [`7e79547`](https://github.com/zeromike12/ArenaOS/commit/7e79547c649f07da67ecc54cc35a996109fd6658) and
 [`f1bbafb`](https://github.com/zeromike12/ArenaOS/commit/f1bbafbe117d9a814df5a684fd45716286490487).

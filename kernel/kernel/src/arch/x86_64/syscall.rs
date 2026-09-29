@@ -148,6 +148,8 @@ pub const SYS_CAP_DESCRIBE: u64 = 29;
 pub const SYS_PROC_FINISH: u64 = 30;
 /// ADR-0041: read-only kernel accounting, held Power/WRITE only.
 pub const SYS_RESOURCE_SNAPSHOT: u64 = 31;
+/// Nonblocking take of a held Notification/READ's pending badge.
+pub const SYS_TRY_WAIT: u64 = 32;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -650,6 +652,7 @@ extern "C" fn syscall_dispatch(
         SYS_CAP_DESCRIBE => sys_cap_describe(a0, a1) as u64,
         SYS_PROC_FINISH => sys_proc_finish(a0, a1) as u64,
         SYS_RESOURCE_SNAPSHOT => sys_resource_snapshot(a0, a1) as u64,
+        SYS_TRY_WAIT => sys_try_wait(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1007,6 +1010,21 @@ fn sys_wait(a0: u64) -> Status {
     };
     match crate::ipc::wait(nid) {
         Ok(badge) => badge as Status, // positive payload: the merged badge word
+        Err(e) => e,
+    }
+}
+
+/// SYS_TRY_WAIT(notification READ slot): return pending merged badge
+/// and clear it, or zero if absent; NEVER park or register a waiter.
+fn sys_try_wait(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(nid) = notification_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::ipc::try_wait(nid) {
+        Ok(badge) => badge as Status,
         Err(e) => e,
     }
 }
@@ -1836,8 +1854,15 @@ fn sys_proc_finish(a0: u64, a1: u64) -> Status {
     {
         return STATUS_BAD_ARG;
     }
-    if a1 == 0 && crate::sched::proc_live_threads(target) != 0 {
-        return STATUS_BUSY;
+    let live_threads = crate::sched::proc_live_threads(target);
+    if (a1 == 0 && live_threads != 0) || (a1 == 1 && live_threads == 0) {
+        return STATUS_BUSY; // mode 1 is a genuine LIVE stop, not a dead reap
+    }
+    if a1 == 1 {
+        info!(
+            "syscall",
+            "proc_finish mode1: owner {owner} target {target} live_threads={live_threads} held Process/DESTROY"
+        );
     }
     if crate::proc::destroy(target).is_err() {
         return STATUS_BUSY;

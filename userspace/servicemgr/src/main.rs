@@ -24,6 +24,7 @@ const SLOT_BACKOFF: u8 = 4;
 const SLOT_RNGD: u8 = 5;
 const SLOT_RNG_READY: u8 = 6;
 const SLOT_RESTART: u8 = 7; // private timer object, NOT shared with any driver
+const SLOT_ADMIN: u8 = 8; // READ-only private shell-to-manager request
 const READY_DEADLINE_US: u64 = 2_000_000;
 
 const IMAGE: Key = Key(0);
@@ -139,6 +140,10 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
     let notify = probe.describe(SLOT_EVENTS).map_err(|_| ())?;
     let rng_ready = probe.describe(SLOT_RNG_READY).map_err(|_| ())?;
     let restart = probe.describe(SLOT_RESTART).map_err(|_| ())?;
+    let admin = probe.describe(SLOT_ADMIN).map_err(|_| ())?;
+    if admin.kind != inventory::NOTIFICATION_KIND || admin.rights != manifest::READ as u64 {
+        return Err(());
+    }
     for event in [notify, rng_ready, restart] {
         if event.kind != inventory::NOTIFICATION_KIND
             || event.rights & (manifest::READ | manifest::WRITE) as u64
@@ -152,6 +157,9 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
     if notify.object == rng_ready.object
         || notify.object == restart.object
         || rng_ready.object == restart.object
+        || admin.object == notify.object
+        || admin.object == rng_ready.object
+        || admin.object == restart.object
     {
         return Err(());
     }
@@ -165,6 +173,7 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
         || held[3].kind != Kind::Notification
         || held[4].kind != Kind::Endpoint
         || held[3].object == restart.object
+        || held[3].object == admin.object
     {
         return Err(());
     }
@@ -236,8 +245,8 @@ fn launch(step: Step) -> Result<(u64, u8), ()> {
     if wait_one(SLOT_BACKOFF, MGR_BADGE_STACK_READY).is_err() {
         // Bounded startup: a child that never reaches serve must not
         // remain a live, unowned server on the shared endpoint.
-        if inventory::finish(handle, true).is_err() {
-            log("servicemgr: FAILED to stop a startup-refused child\r\n");
+        if inventory::finish(handle, true).is_err() && inventory::finish(handle, false).is_err() {
+            log("servicemgr: FAILED to finish a startup-refused child\r\n");
         }
         return Err(());
     }
@@ -338,7 +347,36 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
             log("servicemgr: OFFLINE — event wait refused\r\n");
             park();
         }
-        if badge as u64 & MGR_BADGE_STACK_EXIT == 0 {
+        // Shared events can be forged by netd. STOP authority is the
+        // separate private notification (shell/W, manager/R), taken
+        // nonblocking so a forged wake cannot stall the monitor.
+        let mut force_live = false;
+        if badge as u64 & MGR_BADGE_ADMIN_WAKE != 0 {
+            let request = unsafe { syscall1(SYS_TRY_WAIT, SLOT_ADMIN as u64) };
+            if request < 0 {
+                log("servicemgr: OFFLINE — private admin channel refused\r\n");
+                park();
+            }
+            if request as u64 == MGR_BADGE_ADMIN_STOP {
+                match child_still_live(pid) {
+                    Ok(true) => force_live = true,
+                    Ok(false) => {
+                        // Natural exit won the race. Mode 0 only;
+                        // never call a dead reap a forced live stop.
+                        log("servicemgr: admin request raced natural child exit\r\n");
+                    }
+                    Err(()) => {
+                        log("servicemgr: OFFLINE — no observable held child for admin stop\r\n");
+                        park();
+                    }
+                }
+            } else if request != 0 {
+                log("servicemgr: refused unknown private admin request\r\n");
+            } else {
+                log("servicemgr: ignored unauthenticated shared wake hint\r\n");
+            }
+        }
+        if !force_live && badge as u64 & MGR_BADGE_STACK_EXIT == 0 {
             continue;
         }
         // A badge is a hint, NEVER authority. Drivers sharing this
@@ -348,8 +386,20 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
             log("servicemgr: OFFLINE — unique child Process cap missing\r\n");
             park();
         }
-        match inventory::finish(handle, false) {
+        let mut finished = inventory::finish(handle, force_live);
+        if force_live && finished == Err(STATUS_BUSY) && child_still_live(pid) == Ok(false) {
+            // Single CPU but the child may exit between the user's
+            // diagnostic and the mode-1 syscall. Kernel mode 1 refuses
+            // dead children; fall back to the authorized mode-0 reap.
+            force_live = false;
+            finished = inventory::finish(handle, false);
+        }
+        match finished {
             Err(STATUS_BUSY) => {
+                if force_live {
+                    log("servicemgr: OFFLINE — forced live stop BUSY\r\n");
+                    park();
+                }
                 if child_still_live(pid) == Ok(true) {
                     log("servicemgr: ignored exit hint: held child is still live\r\n");
                     continue;
@@ -361,7 +411,13 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step) -> ! {
                 log("servicemgr: OFFLINE — Process-cap reap REFUSED\r\n");
                 park();
             }
-            Ok(()) => {}
+            Ok(()) => {
+                if force_live {
+                    log(
+                        "servicemgr: forcibly stopped LIVE production child through held Process cap\r\n",
+                    );
+                }
+            }
         }
         let delay = match policy.exited(pid) {
             Ok(delay) => delay,

@@ -985,7 +985,7 @@ an ADR has explicitly chosen it first.
 
 ## Phase 8 — Mature userspace 🔨 (8.0 in progress; no 8.x milestone completed)
 
-Authority model: accepted ADR-0037/0038/0039/0040/0041/0042. The roadmap below is the sequence,
+Authority model: accepted ADR-0037/0038/0039/0040/0041/0042/0043. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
 milestone gets its own real negative-space tests, the entire historical
 suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
@@ -1010,11 +1010,15 @@ is not completed by accepting an ADR.
       An opt-in test now causes a genuine production-child #UD during an
       unanswered IPC; the kernel isolates the ring-3 fault, the manager
       reaps and restarts, and the client gets typed SERVICE_GONE before
-      resumed real-wire service (ADR-0042). This is NOT an 8.0 completion
-      claim: forced live stop, forged/foreign/self/driver Process-cap
-      refusals and active dependency probes still need integration proof.
-      Complete recovery from the fixed kernel trust root with
-      only explicit Image/Endpoint/Notification/Process authority;
+      resumed real-wire service (ADR-0042). The Power-holding admin can
+      now request a private manager control event: a forged shared wake
+      alone cannot stop the child, but the manager's held Process cap
+      force-stops a *live* production child and restores wire service
+      (ADR-0043). This is NOT an 8.0 completion claim:
+      forged/foreign/self/driver Process-cap refusals and active
+      dependency probes still need integration proof.
+      Complete recovery from the fixed kernel trust root with only
+      explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager
       can delegate only actual caps already held, attenuated by
       `SYS_SPAWN`; requested manifest grants are checked against the

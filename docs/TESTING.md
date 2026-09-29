@@ -23,8 +23,8 @@ syscalls for two spawn/reap cycles and bad-kind/stale-cap refusals.
 caller-cap query against the kernel's installed-cap audit. Separate
 full-network and no-network fixtures check genuine post-DRIVER_OK
 readiness and fail-closed OFFLINE with no partial authority. ADR-0040
-adds a manager-private restart timer notification (full fixture 10/10,
-eleventh refused): unlike the driver-ready event and stack backoff
+adds a manager-private restart timer notification (full fixture 11/11 after the separate admin stop channel,
+twelfth refused): unlike the driver-ready event and stack backoff
 objects, neither driver nor child can forge its timeout. The 100-boot
 gate requires that same bootstrap on the full fixture. These
 checks now include one actual manager-owned production `netstackd`
@@ -37,8 +37,8 @@ same endpoint, SERVICE_GONE while dead, refused old bearer and a new
 ARP request on the wire. An absent dependency grants no shell client
 cap. The 100-boot gate exercises this command on the final image, not
 just idle boot. These tests do NOT close 8.0: adversarial lifecycle
-negative-space, forced live stop and pre-respawn driver probes are
-still required before a completed milestone RESULT. `test_m8_stress.py`
+negative-space and pre-respawn driver probes are still required
+before a completed milestone RESULT. `test_m8_stress.py`
 checks the full restart budget on *production* children and reads a
 Power-gated atomic kernel snapshot after each recovery: free frames,
 spawn records and process slots must all match the live baseline
@@ -48,8 +48,14 @@ production stack while its caller awaits IPC. It checks the kernel's
 in-flight SERVICE_GONE sweep, manager Process-cap reap, new wire work
 through the same endpoint, bearer revocation and exact accounting;
 an absent dependency yields SKIP. The qualified bundle is extracted and
-boots this opt-in crash fixture; ordinary interactive boots do not
-auto-kill the stack. Each new commit carries a bundled boot image and running instructions under `releases/checkpoints/`
+boots the opt-in fixture for the current checkpoint; ordinary
+interactive boots do not auto-kill the stack. `test_m8_stop.py`
+checks a forgery of the shared wake hint, a private admin request,
+the kernel's mode-1 Process-cap operation on a still-live production
+child, an in-flight caller failure, an independently audited restart
+and flat accounting; no-device boots SKIP. Neither the shell nor any
+driver receives a Process handle. Each new commit carries a bundled
+boot image and running instructions under `releases/checkpoints/`
 (ADR-0039), gated by full suite and artifact-bound 100/100 boots.
 
 ## The testing pyramid

@@ -59,6 +59,7 @@ Rules:
 | [0040](0040-managed-restart-exercise.md) | Bounded Process-cap reap/restart, privileged opt-in real-wire restart and its remaining negative-space gates | Accepted |
 | [0041](0041-repeatable-manager-accounting.md) | Power-gated kernel resource snapshot, three exact-accounting production restarts and exhausted budget | Accepted |
 | [0042](0042-user-fault-managed-crash.md) | Isolate unexpected ring-3 #UD, fail in-flight production IPC and recover through manager-owned Process-cap reap | Accepted (partial 8.0) |
+| [0043](0043-manager-authorized-forced-stop.md) | Separate private admin request from forgeable event wake; only the manager's Process cap can force-stop a live production child | Accepted (partial 8.0) |
 
 ## Template
 

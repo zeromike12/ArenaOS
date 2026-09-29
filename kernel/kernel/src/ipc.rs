@@ -38,10 +38,10 @@ use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
 pub const MAX_ENDPOINTS: usize = 8;
-// ADR-0038: nine disjoint production notifications (including separate
-// netd and rngd readiness authority); a shared badge word is forgeable
-// by either WRITE holder, so do not squeeze both drivers onto one nid.
-pub const MAX_NOTIFS: usize = 10;
+// ADR-0038/0040/0043: eleven disjoint production notifications,
+// including independently writable driver readiness, manager-private
+// backoff and admin stop channels. A shared badge word is forgeable.
+pub const MAX_NOTIFS: usize = 11;
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
 const QUEUE_DEPTH: usize = 4;
@@ -767,6 +767,27 @@ pub fn poll_pending(nid: u32) -> u64 {
                 }
                 None => 0,
             }
+        }
+    })
+}
+
+/// ADR-0043: nonblocking, READ-cap-gated at the syscall layer. Take
+/// only an already pending badge; never install/steal a waiter. An
+/// unauthenticated wake on a different notification must not block the
+/// manager while it checks its private administrative request.
+pub fn try_wait(nid: u32) -> Result<u64, Status> {
+    without_interrupts(|| {
+        // SAFETY: one writer under IF=0; no borrow survives this call.
+        unsafe {
+            let Some(n) = (*NOTIFS.get()).get_mut(nid as usize).filter(|n| n.live) else {
+                return Err(STATUS_BAD_ARG);
+            };
+            if n.waiter != NO_TID {
+                return Err(STATUS_BUSY);
+            }
+            let badge = n.pending;
+            n.pending = 0;
+            Ok(badge)
         }
     })
 }

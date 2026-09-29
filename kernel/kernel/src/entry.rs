@@ -429,6 +429,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // WRITE only to the manager, separately from netd/rngd readiness.
     let manager_restart_nid = crate::ipc::create_notification()
         .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: restart timer table full"));
+    // ADR-0043: private administrative STOP authority. Unlike the
+    // shared event wake, neither netd nor the stack can signal it.
+    let manager_admin_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: admin notification table full"));
     let net_eid = match spawn_netd(manager_nid) {
         Ok(Some((_pid, eid))) => Some(eid),
         Ok(None) => {
@@ -505,6 +509,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         manager_nid,
         rng_ready_nid,
         manager_restart_nid,
+        manager_admin_nid,
         net_eid,
         rng_eid,
     )
@@ -551,7 +556,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // ADR-0040: the Power-holding administrator alone can exercise a
     // production client's call endpoint. No Process cap/driver/MMIO;
     // missing dependencies grant NO partial stack access.
-    let mut shell_full = [crate::cap::Cap::EMPTY; 5];
+    let mut shell_full = [crate::cap::Cap::EMPTY; 7];
     shell_full[..4].copy_from_slice(&shell_grants);
     let shell_caps: &[crate::cap::Cap] = if let Some(caps) = expected_stack_caps {
         let crate::cap::CapObj::Endpoint { eid } = caps[1].obj else {
@@ -560,6 +565,16 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         shell_full[4] = crate::cap::Cap {
             obj: crate::cap::CapObj::Endpoint { eid },
             rights: crate::cap::RIGHTS_WRITE,
+        };
+        shell_full[5] = crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: manager_nid },
+            rights: crate::cap::RIGHTS_WRITE, // wake hint only
+        };
+        shell_full[6] = crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification {
+                nid: manager_admin_nid,
+            },
+            rights: crate::cap::RIGHTS_WRITE, // private STOP request
         };
         &shell_full
     } else {
@@ -573,18 +588,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     }
 
-    // Full shipping fixture occupies all 10 notifications (ADR-0040).
-    // The eleventh must be a typed refusal, never silent over-allocation;
+    // Full shipping fixture occupies all 11 notifications (ADR-0043).
+    // The twelfth must be a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse an eleventh object",
+                "servicemgr: notification bound failed to refuse a twelfth object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 10/10; eleventh refused"
+            "servicemgr: full fixture notification budget 11/11; twelfth refused"
         );
     }
 
@@ -645,6 +660,7 @@ fn spawn_servicemgr(
     manager_nid: u32,
     rng_ready_nid: u32,
     manager_restart_nid: u32,
+    manager_admin_nid: u32,
     net: Option<u32>,
     rng: Option<u32>,
 ) -> Result<(u64, Option<[crate::cap::Cap; 4]>), &'static str> {
@@ -693,6 +709,12 @@ fn spawn_servicemgr(
                         nid: manager_restart_nid,
                     },
                     rights: R | W,
+                },
+                Cap {
+                    obj: CapObj::Notification {
+                        nid: manager_admin_nid,
+                    },
+                    rights: R, // not transferable; only shell can request
                 },
             ];
             let child = [

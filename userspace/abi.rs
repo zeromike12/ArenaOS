@@ -47,6 +47,8 @@ pub const SYS_PROC_FINISH: u64 = 30;
 /// Read-only [free frames, live spawn records, live process slots];
 /// gated by a held Power/WRITE cap (ADR-0041).
 pub const SYS_RESOURCE_SNAPSHOT: u64 = 31;
+/// ADR-0043: nonblocking take of a held Notification/READ; 0=empty.
+pub const SYS_TRY_WAIT: u64 = 32;
 
 // ADR-0037: trusted boot driver-readiness signals on the manager's
 // notification (different object from each driver's interrupt notif).
@@ -55,6 +57,10 @@ pub const MGR_BADGE_RNGD_READY: u64 = 1 << 1;
 pub const MGR_BADGE_DEADLINE: u64 = 1 << 2;
 /// Manager-owned child exit on the event notification (ADR-0039).
 pub const MGR_BADGE_STACK_EXIT: u64 = 1 << 3;
+/// Wake hint is forgeable on shared manager events; NOT authority.
+pub const MGR_BADGE_ADMIN_WAKE: u64 = 1 << 5;
+/// Authoritative request lives on a DISTINCT private admin notification.
+pub const MGR_BADGE_ADMIN_STOP: u64 = 1 << 0;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.

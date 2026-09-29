@@ -196,9 +196,9 @@ for i in $(seq 1 "$N"); do
     # Phase 8.0 partial checkpoint: the shipping fixture must run
     # the ring-3 manager, observe live caps, receive both driver
     # badges, then start, reap and restart its child. NOT full 8.0.
-    elif ! grep -aqF 'audited 8 literal caps; no device/Power/Process grants' "$SERIAL"; then
+    elif ! grep -aqF 'audited 9 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 10/10; eleventh refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 11/11; twelfth refused' "$SERIAL"; then
         why="manager readiness-channel notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"

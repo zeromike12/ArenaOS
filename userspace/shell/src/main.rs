@@ -58,6 +58,8 @@ const SLOT_IMAGE: u64 = 1; // registry image 0 = the M4.3 test payload
 const SLOT_NOTIF: u64 = 2;
 const SLOT_FSD: u64 = 3; // M5.3: the filesystem service call side
 const SLOT_STACK: u64 = 4; // ADR-0040: privileged admin-only client
+const SLOT_MGR_WAKE: u64 = 5; // shared wake hint; NOT stop authority
+const SLOT_MGR_ADMIN: u64 = 6; // private manager control notification, WRITE only
 const STACK_TEST_TIMER: u64 = 1 << 21;
 /// The badge this shell lends its children's exits.
 const SPAWN_BADGE: u64 = 0x5AA5;
@@ -413,6 +415,129 @@ fn stackfault() {
     }
     write_str(
         "m8: stackfault PASS (real #UD, in-flight call failed, same endpoint fresh wire, resources flat)\r\n",
+    );
+}
+
+/// ADR-0043: ONLY the manager possesses the child's Process handle.
+/// This command sends a private request and a separate forgeable wake;
+/// the manager must observe a LIVE child and use mode-1 finish itself.
+fn stackstop() {
+    let mut client = [0u64; 3];
+    let mut wake = [0u64; 3];
+    let mut admin = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, client.as_mut_ptr() as u64) } != 0 {
+        write_str("m8: stackstop SKIP (no production client cap)\r\n");
+        return;
+    }
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_MGR_WAKE, wake.as_mut_ptr() as u64) } != 0
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_MGR_ADMIN, admin.as_mut_ptr() as u64) } != 0
+        || client[0] != 2
+        || wake[0] != 3
+        || admin[0] != 3
+        || client[2] & RIGHTS_WRITE == 0
+        || wake[2] != RIGHTS_WRITE
+        || admin[2] != RIGHTS_WRITE
+        || wake[1] == admin[1]
+        || unsafe { syscall2(SYS_PROC_FINISH, SLOT_MGR_ADMIN, 1) } >= 0
+        || unsafe { syscall2(SYS_PROC_FINISH, SLOT_MGR_WAKE, 1) } >= 0
+        || unsafe { syscall1(SYS_TRY_WAIT, SLOT_MGR_ADMIN) } >= 0
+    {
+        write_str("m8: stackstop FAIL (private control authority mismatch)\r\n");
+        return;
+    }
+    let mut msg = [0u8; MSG_BYTES];
+    let (r, st, _) = fs_call(FS_OP_LS, 0, CAP_NONE, &mut msg);
+    if r < 0 || st != FS_OK {
+        write_str("m8: stackstop FAIL (filesystem baseline not settled)\r\n");
+        return;
+    }
+    let Some(baseline) = resource_snapshot() else {
+        write_str("m8: stackstop FAIL (resource baseline refused)\r\n");
+        return;
+    };
+    let gateway = 10 | (2 << 16) | (2 << 24);
+    let (r, st, mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    if r < 0 || st != ARP_S_OK || mac == 0 {
+        write_str("m8: stackstop FAIL (no initial ARP wire)\r\n");
+        return;
+    }
+    let (r, st, bearer) = stack_call(UDP_OP_BIND, 5355);
+    if r < 0 || st != ARP_S_OK || bearer == 0 {
+        write_str("m8: stackstop FAIL (no original rngd-backed bearer)\r\n");
+        return;
+    }
+    // A netd WRITE holder could forge this wake bit. Prove the hint
+    // alone cannot kill the live child before issuing private STOP.
+    if unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0
+        || !stack_pause(75_000)
+    {
+        write_str("m8: stackstop FAIL (untrusted wake injection)\r\n");
+        return;
+    }
+    let (r, st, prior) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || prior >> 32 == 0 {
+        write_str("m8: stackstop FAIL (forgeable wake stopped the child)\r\n");
+        return;
+    }
+    write_str("m8: stackstop forged shared wake alone did NOT stop live child\r\n");
+    // A malformed private request is not the exact STOP authorization.
+    if unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_ADMIN, MGR_BADGE_ADMIN_STOP << 1) } != 0
+        || unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0
+        || !stack_pause(75_000)
+    {
+        write_str("m8: stackstop FAIL (malformed control test refused)\r\n");
+        return;
+    }
+    let (r, st, prior) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || prior >> 32 == 0 {
+        write_str("m8: stackstop FAIL (malformed control stopped the child)\r\n");
+        return;
+    }
+    write_str("m8: stackstop malformed private request did NOT stop live child\r\n");
+    if unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_ADMIN, MGR_BADGE_ADMIN_STOP) } != 0
+        || unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0
+    {
+        write_str("m8: stackstop FAIL (private administrative request refused)\r\n");
+        return;
+    }
+    write_str("m8: stackstop sent private STOP then shared wake, no Process cap delegated\r\n");
+    let start = unsafe { syscall0(SYS_CLOCK_NOW) };
+    if start < 0 {
+        write_str("m8: stackstop FAIL (no clock)\r\n");
+        return;
+    }
+    loop {
+        let (r, st, _) = stack_call(UDP_OP_CLOSE, bearer);
+        if r == 0 && st == UDP_S_BAD_HANDLE {
+            break;
+        }
+        if r != STATUS_SERVICE_GONE {
+            write_str("m8: stackstop FAIL (old bearer accepted or wrong transport)\r\n");
+            return;
+        }
+        let now = unsafe { syscall0(SYS_CLOCK_NOW) };
+        if now < 0 || now as u64 - start as u64 > 3_000_000 || !stack_pause(25_000) {
+            write_str("m8: stackstop FAIL (no bounded replacement)\r\n");
+            return;
+        }
+    }
+    let (r, st, fresh) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || fresh >> 32 != 0 {
+        write_str("m8: stackstop FAIL (replacement not fresh)\r\n");
+        return;
+    }
+    let (r, st, new_mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    let (r2, st2, after) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || new_mac != mac || r2 < 0 || st2 != ARP_S_OK || after >> 32 == 0 {
+        write_str("m8: stackstop FAIL (replacement did not perform new real-wire ARP)\r\n");
+        return;
+    }
+    if resource_snapshot() != Some(baseline) {
+        write_str("m8: stackstop FAIL (resource totals drifted)\r\n");
+        return;
+    }
+    write_str(
+        "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)\r\n",
     );
 }
 
@@ -824,7 +949,7 @@ const PROMPT: &str = "arena> ";
 /// Two bounded debug-write chunks: Out::push drops bytes beyond
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
-const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n  shutdown - halt the machine\r\n";
+const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n  stackstop - opt-in manager-owned forced live stop\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -914,6 +1039,10 @@ pub unsafe extern "C" fn _start() -> ! {
             } else if eq(line, b"stackfault") {
                 o.flush();
                 stackfault();
+                continue;
+            } else if eq(line, b"stackstop") {
+                o.flush();
+                stackstop();
                 continue;
             } else if eq(line, b"spawn") {
                 o.flush();
