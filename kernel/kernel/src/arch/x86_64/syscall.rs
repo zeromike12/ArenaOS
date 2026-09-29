@@ -714,6 +714,28 @@ fn sys_thread_exit(status: u64) -> ! {
     }
     let id = crate::sched::current_thread_id();
     record_exit(id, status);
+    notify_last_thread_exit();
+    // This syscall diverges: the stub's exit-side `swapgs` never runs.
+    // Restore the canonical user-side GS state HERE (GS.base = 0,
+    // KERNEL_GS_BASE = scratch) before the scheduler takes over —
+    // otherwise the machine stays on the kernel side of the swap and the
+    // NEXT syscall's entry `swapgs` lands backwards, writing through
+    // GS.base = 0 (observed live during bring-up: #PF at LSTAR+3 →
+    // SMAP-blocked exception push onto the user stack → #DF → triple
+    // fault). Every other syscall returns through the stub and swaps
+    // back there.
+    // SAFETY: swapgs exchanges GS.base ↔ MSR_KERNEL_GS_BASE; we are
+    // inside the stub's swapped window (IF=0), single CPU.
+    unsafe {
+        core::arch::asm!("swapgs", options(nostack, preserves_flags));
+    }
+    crate::sched::terminate()
+}
+
+/// Shared last-thread hook for both voluntary exit and an unarmed CPL3
+/// exception (ADR-0042). The exception entered via IDT, not the syscall
+/// swapgs window, so its caller must NOT swap GS again.
+fn notify_last_thread_exit() {
     // Spawn-protocol hook (ADR-0019): if this is the LAST live thread of
     // a process with a registered exit notification, badge it now — the
     // supervisor's `wait` consumes the badge through the ADR-0018
@@ -729,20 +751,15 @@ fn sys_thread_exit(status: u64) -> ! {
             }
         }
     }
-    // This syscall diverges: the stub's exit-side `swapgs` never runs.
-    // Restore the canonical user-side GS state HERE (GS.base = 0,
-    // KERNEL_GS_BASE = scratch) before the scheduler takes over —
-    // otherwise the machine stays on the kernel side of the swap and the
-    // NEXT syscall's entry `swapgs` lands backwards, writing through
-    // GS.base = 0 (observed live during bring-up: #PF at LSTAR+3 →
-    // SMAP-blocked exception push onto the user stack → #DF → triple
-    // fault). Every other syscall returns through the stub and swaps
-    // back there.
-    // SAFETY: swapgs exchanges GS.base ↔ MSR_KERNEL_GS_BASE; we are
-    // inside the stub's swapped window (IF=0), single CPU.
-    unsafe {
-        core::arch::asm!("swapgs", options(nostack, preserves_flags));
-    }
+}
+
+/// A genuine ring-3 CPU fault kills ONLY the faulting process thread.
+/// The parent receives its ordinary child-exit notification; its held
+/// Process cap must still authorize teardown, including failing a
+/// client IPC already delivered to this server. Called IF=0 from IDT.
+pub(crate) fn exit_on_user_fault(vector: u64) -> ! {
+    record_exit(crate::sched::current_thread_id(), 0x100 + vector);
+    notify_last_thread_exit();
     crate::sched::terminate()
 }
 

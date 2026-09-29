@@ -564,6 +564,10 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
             }
             match op {
+                ARP_OP_FAULT => {
+                    log_line(|o| o.str("netstackd: injecting real #UD before in-flight reply"));
+                    core::arch::asm!("ud2", options(noreturn));
+                }
                 ARP_OP_RESOLVE => {
                     let ip = [
                         (arg & 0xFF) as u8,

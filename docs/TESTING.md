@@ -37,15 +37,19 @@ same endpoint, SERVICE_GONE while dead, refused old bearer and a new
 ARP request on the wire. An absent dependency grants no shell client
 cap. The 100-boot gate exercises this command on the final image, not
 just idle boot. These tests do NOT close 8.0: adversarial lifecycle
-negative-space, crash recovery and pre-respawn driver probes are still
-required before a completed milestone RESULT. `test_m8_stress.py`
+negative-space, forced live stop and pre-respawn driver probes are
+still required before a completed milestone RESULT. `test_m8_stress.py`
 checks the full restart budget on *production* children and reads a
 Power-gated atomic kernel snapshot after each recovery: free frames,
 spawn records and process slots must all match the live baseline
 exactly. Its fourth exit must leave OFFLINE without a fifth child.
-The qualified bundle is extracted and boots this destructive opt-in
-exercise; ordinary interactive boots do not auto-kill the stack. Each new commit carries a bundled
-boot image and running instructions under `releases/checkpoints/`
+`test_m8_fault.py` separately triggers an actual CPL3 #UD inside the
+production stack while its caller awaits IPC. It checks the kernel's
+in-flight SERVICE_GONE sweep, manager Process-cap reap, new wire work
+through the same endpoint, bearer revocation and exact accounting;
+an absent dependency yields SKIP. The qualified bundle is extracted and
+boots this opt-in crash fixture; ordinary interactive boots do not
+auto-kill the stack. Each new commit carries a bundled boot image and running instructions under `releases/checkpoints/`
 (ADR-0039), gated by full suite and artifact-bound 100/100 boots.
 
 ## The testing pyramid

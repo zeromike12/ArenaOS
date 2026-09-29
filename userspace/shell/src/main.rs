@@ -337,6 +337,85 @@ fn resource_snapshot() -> Option<[u64; 3]> {
     Some(out)
 }
 
+/// ADR-0042: unlike stacktest's orderly shutdown, this is a genuine
+/// user-mode #UD with the caller blocked on an unanswered IPC.
+fn stackfault() {
+    let mut cap = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, cap.as_mut_ptr() as u64) } != 0
+        || cap[0] != 2
+        || cap[2] & RIGHTS_WRITE == 0
+    {
+        write_str("m8: stackfault SKIP (no production client cap)\r\n");
+        return;
+    }
+    let mut msg = [0u8; MSG_BYTES];
+    let (r, st, _) = fs_call(FS_OP_LS, 0, CAP_NONE, &mut msg);
+    if r < 0 || st != FS_OK {
+        write_str("m8: stackfault FAIL (filesystem baseline not settled)\r\n");
+        return;
+    }
+    let Some(baseline) = resource_snapshot() else {
+        write_str("m8: stackfault FAIL (resource snapshot refused)\r\n");
+        return;
+    };
+    let gateway = 10 | (2 << 16) | (2 << 24);
+    let (r, st, mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    if r < 0 || st != ARP_S_OK || mac == 0 {
+        write_str("m8: stackfault FAIL (no initial real wire)\r\n");
+        return;
+    }
+    let (r, st, bearer) = stack_call(UDP_OP_BIND, 5355);
+    if r < 0 || st != ARP_S_OK || bearer == 0 {
+        write_str("m8: stackfault FAIL (no original entropy-backed bearer)\r\n");
+        return;
+    }
+    write_str("m8: stackfault issued real-wire request and held bearer before fault\r\n");
+    let (r, _, _) = stack_call(ARP_OP_FAULT, 0);
+    if r != STATUS_SERVICE_GONE {
+        write_str("m8: stackfault FAIL (in-flight call did not receive SERVICE_GONE)\r\n");
+        return;
+    }
+    write_str("m8: stackfault in-flight call answered SERVICE_GONE on actual #UD\r\n");
+    let start = unsafe { syscall0(SYS_CLOCK_NOW) };
+    if start < 0 {
+        write_str("m8: stackfault FAIL (no clock)\r\n");
+        return;
+    }
+    loop {
+        let (r, st, _) = stack_call(UDP_OP_CLOSE, bearer);
+        if r == 0 && st == UDP_S_BAD_HANDLE {
+            break;
+        }
+        if r != STATUS_SERVICE_GONE {
+            write_str("m8: stackfault FAIL (stale bearer accepted or wrong transport)\r\n");
+            return;
+        }
+        let now = unsafe { syscall0(SYS_CLOCK_NOW) };
+        if now < 0 || now as u64 - start as u64 > 3_000_000 || !stack_pause(25_000) {
+            write_str("m8: stackfault FAIL (no bounded recovery)\r\n");
+            return;
+        }
+    }
+    let (r, st, fresh) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || fresh >> 32 != 0 {
+        write_str("m8: stackfault FAIL (new instance not fresh)\r\n");
+        return;
+    }
+    let (r, st, new_mac) = stack_call(ARP_OP_RESOLVE, gateway);
+    let (r2, st2, after) = stack_call(ARP_OP_STATS, 0);
+    if r < 0 || st != ARP_S_OK || new_mac != mac || r2 < 0 || st2 != ARP_S_OK || after >> 32 == 0 {
+        write_str("m8: stackfault FAIL (no fresh post-fault real-wire work)\r\n");
+        return;
+    }
+    if resource_snapshot() != Some(baseline) {
+        write_str("m8: stackfault FAIL (frames/records/processes not flat)\r\n");
+        return;
+    }
+    write_str(
+        "m8: stackfault PASS (real #UD, in-flight call failed, same endpoint fresh wire, resources flat)\r\n",
+    );
+}
+
 fn stackstress() {
     let mut cap = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, cap.as_mut_ptr() as u64) } != 0
@@ -745,7 +824,7 @@ const PROMPT: &str = "arena> ";
 /// Two bounded debug-write chunks: Out::push drops bytes beyond
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
-const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  shutdown - halt the machine\r\n";
+const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -831,6 +910,10 @@ pub unsafe extern "C" fn _start() -> ! {
             } else if eq(line, b"stackstress") {
                 o.flush();
                 stackstress();
+                continue;
+            } else if eq(line, b"stackfault") {
+                o.flush();
+                stackfault();
                 continue;
             } else if eq(line, b"spawn") {
                 o.flush();

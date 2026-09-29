@@ -421,6 +421,9 @@ pub const CONSOLE_BADGE_GIVE_UP: u64 = 1 << 19;
 pub const ARP_OP_SHUTDOWN: u64 = 0;
 pub const ARP_OP_RESOLVE: u64 = 1;
 pub const ARP_OP_STATS: u64 = 2;
+/// Privileged opt-in test: accepted in-flight call deliberately #UD faults
+/// the server before reply; only the Power-holding shell has this endpoint.
+pub const ARP_OP_FAULT: u64 = 0x8F;
 /// PING (M7.2): w0 = IPv4 address. Resolves the address if needed,
 /// sends an ICMP echo request, and replies with the round-trip time
 /// in MICROSECONDS in word 1 — measured with `SYS_CLOCK_NOW`, so it

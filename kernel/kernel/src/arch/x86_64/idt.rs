@@ -536,6 +536,19 @@ extern "C" fn arena_exception_handler(
         let f = &*frame;
         (f.rip, f.cs, f.rflags, f.rsp, f.ss)
     };
+    // ADR-0042: a real CPL3 exception is a PROCESS failure, not a
+    // kernel failure. IDT entry does not swap GS; the last-thread exit
+    // hook notifies the manager, which reaps through its Process cap.
+    // Fatal CPU vectors and all CPL0 faults remain kernel-fatal.
+    if cs & 3 == 3 && !matches!(vector, 2 | 8 | 18) {
+        if let Some(pid) = crate::sched::current_proc_id() {
+            crate::log::write_marker(format_args!(
+                "[arena user fault] pid={pid} vector={vector:#04x} ({}) rip={rip:#x} cr2={cr2:#x}",
+                vector_name(vector)
+            ));
+            super::syscall::exit_on_user_fault(vector);
+        }
+    }
     crate::log::write_marker(format_args!(
         "[arena PANIC fault] vector={vector:#04x} ({}) error_code={error_code:#x} rip={rip:#x} cs={cs:#x} rflags={rflags:#x} rsp={rsp:#x} ss={ss:#x} cr2={cr2:#x}",
         vector_name(vector),

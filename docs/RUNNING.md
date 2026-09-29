@@ -8,17 +8,17 @@ verified against. This page explains how to boot it on your own machine.
 
 Phase 8.0 is **not finished**. Every new Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
-`releases/checkpoints/` (ADR-0039). For the **current repeated-accounting**
+`releases/checkpoints/` (ADR-0039). For the **current unexpected-crash recovery**
 checkpoint on this branch, download the archive directly from the
 commit's repository tree (or clone and use its local path):
 
 ```sh
-curl -fL -o arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-repeat-accounting/arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-repeat-accounting/arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase8-repeat-accounting-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-user-fault-recovery/arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-user-fault-recovery/arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-user-fault-recovery-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
 cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
@@ -56,9 +56,16 @@ wire/bearer restart three times with byte-exact free-frame, spawn-record
 and process-slot snapshots, then proves the fourth exit exhausts the
 three-restart budget and leaves the service OFFLINE. Reboot to restore
 it; this is never run automatically on an ordinary boot.
-Unexpected in-flight crashes, forced live stop, lifecycle refusals and
-pre-respawn driver probes remain open: Phase 8.0 is incomplete.
+`stackfault` is a separate **opt-in** crash test: a real ring-3 #UD
+occurs in the production stack with an IPC call still unanswered. The
+Power-holding shell observes `STATUS_SERVICE_GONE`, then proves a fresh
+instance accepts the original endpoint but rejects the old bearer,
+sends new ARP onto the wire, and returns to exact frame/record/process
+accounting. Do not use this against a service whose state you need.
+Forced live stop, lifecycle-authority refusals, and active dependency
+probes remain open: Phase 8.0 is incomplete.
 Earlier per-commit bundles remain available at
+[`30885a8`](https://github.com/zeromike12/ArenaOS/commit/30885a8e1e2e62867aecf80e816abdd7e478791e),
 [`7e79547`](https://github.com/zeromike12/ArenaOS/commit/7e79547c649f07da67ecc54cc35a996109fd6658) and
 [`f1bbafb`](https://github.com/zeromike12/ArenaOS/commit/f1bbafbe117d9a814df5a684fd45716286490487).
 
