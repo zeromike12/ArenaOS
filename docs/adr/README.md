@@ -62,6 +62,7 @@ Rules:
 | [0043](0043-manager-authorized-forced-stop.md) | Separate private admin request from forgeable event wake; only the manager's Process cap can force-stop a live production child | Accepted (partial 8.0) |
 | [0044](0044-process-cap-lifecycle-refusals.md) | Real held Process references, protected/foreign refusal, kernel-owned bootstrap provenance, successful user-child reap | Accepted |
 | [0045](0045-active-dependency-probes.md) | Bounded active netd MAC/rngd device-entropy probes before each managed spawn, fault/stall fail-closed fixtures and deferred driver-fault teardown; completes 8.0 | Accepted |
+| [0047](0047-service-diagnostic-authority.md) | Receiver-verified boot-granted marker for destructive IPC; legacy poison refusals, managed #UD/stall proof and IPC-landed reference cleanup | Accepted |
 | [0046](0046-transactional-configuration-store.md) | 8.1 design investigation: immutable config generations, crash boundaries and scoped authority; unresolved capacity/GC and grants before code | Proposed |
 
 ## Template

@@ -59,6 +59,7 @@ const SLOT_NOTIF: u64 = 2;
 const SLOT_FSD: u64 = 3; // M5.3: the filesystem service call side
 const SLOT_STACK: u64 = 4; // ADR-0040: privileged admin-only client
 const SLOT_MGR_WAKE: u64 = 5; // shared wake hint; NOT stop authority
+const SLOT_STACK_DIAG: u64 = 15; // boot-granted R|COPY, not an ordinary client cap
 const SLOT_MGR_ADMIN: u64 = 6; // private manager control notification, WRITE only
 // ADR-0044: root-issued diagnostic Process references; never the
 // production child's DESTROY. Slot 7 is still the transient child cap.
@@ -209,6 +210,10 @@ fn msg_zero(msg: &mut [u8; MSG_BYTES]) {
 /// by pid; the SAME caller's old bearer must be revoked in the fresh
 /// server, while the kernel endpoint cap stays valid.
 fn stack_call(op: u64, arg: u64) -> (i64, u64, u64) {
+    stack_call_cap(op, arg, CAP_NONE)
+}
+
+fn stack_call_cap(op: u64, arg: u64, cap: u64) -> (i64, u64, u64) {
     let mut reply = [0u64; 3];
     let status = unsafe {
         syscall6(
@@ -216,7 +221,7 @@ fn stack_call(op: u64, arg: u64) -> (i64, u64, u64) {
             SLOT_STACK,
             arg,
             op,
-            CAP_NONE,
+            cap,
             reply.as_mut_ptr() as u64,
             0,
         )
@@ -275,7 +280,15 @@ fn stacktest() -> bool {
     write_str(
         "m8: stacktest held old endpoint and issued rngd-backed bearer after real ARP wire work\r\n",
     );
-    let (r, st, _) = stack_call(ARP_OP_SHUTDOWN, 0);
+    for cap in [CAP_NONE, SLOT_NOTIF] {
+        let (r, st, _) = stack_call_cap(ARP_OP_SHUTDOWN, 0, cap);
+        if r != 0 || st != ARP_S_BAD_OP {
+            write_str("m8: stacktest FAIL (unauthorized shutdown accepted)\r\n");
+            return false;
+        }
+    }
+    write_str("m8: stacktest service refused missing/wrong shutdown marker\r\n");
+    let (r, st, _) = stack_call_cap(ARP_OP_SHUTDOWN, 0, SLOT_STACK_DIAG);
     if r < 0 || st != ARP_S_OK {
         write_str("m8: stacktest FAIL (orderly production child exit)\r\n");
         return false;
@@ -380,7 +393,20 @@ fn stackfault() {
         return;
     }
     write_str("m8: stackfault issued real-wire request and held bearer before fault\r\n");
-    let (r, _, _) = stack_call(ARP_OP_FAULT, 0);
+    for cap in [CAP_NONE, SLOT_NOTIF] {
+        let (r, st, _) = stack_call_cap(ARP_OP_FAULT, 0, cap);
+        if r != 0 || st != ARP_S_BAD_OP {
+            write_str("m8: stackfault FAIL (unauthorized #UD accepted)\r\n");
+            return;
+        }
+    }
+    let (r, st, _) = stack_call(ARP_OP_STATS, 0);
+    if r != 0 || st != ARP_S_OK {
+        write_str("m8: stackfault FAIL (service lost after refused fault)\r\n");
+        return;
+    }
+    write_str("m8: stackfault service refused missing/wrong diagnostic marker, still live\r\n");
+    let (r, _, _) = stack_call_cap(ARP_OP_FAULT, 0, SLOT_STACK_DIAG);
     if r != STATUS_SERVICE_GONE {
         write_str("m8: stackfault FAIL (in-flight call did not receive SERVICE_GONE)\r\n");
         return;
@@ -691,7 +717,7 @@ fn lifetest() {
     if !finish_refused(SLOT_LIFE_FOREIGN)
         || !finish_refused(SLOT_STACK)
         || !finish_refused(SLOT_POWER)
-        || !finish_refused(15)
+        || !finish_refused(7)
         || !finish_refused(ids[4])
         || unsafe {
             syscall3(
@@ -806,7 +832,7 @@ fn stackstress() {
         }
     }
     write_str("m8: stackstress PASS (3 real-wire restarts, exact frames/records/processes)\r\n");
-    let (r, st, _) = stack_call(ARP_OP_SHUTDOWN, 0);
+    let (r, st, _) = stack_call_cap(ARP_OP_SHUTDOWN, 0, SLOT_STACK_DIAG);
     if r < 0 || st != ARP_S_OK {
         write_str("m8: stackstress FAIL (fourth orderly exit refused)\r\n");
         return;

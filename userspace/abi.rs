@@ -84,6 +84,40 @@ pub const RIGHTS_COPY: u64 = 1 << 2;
 pub const RIGHTS_DESTROY: u64 = 1 << 3;
 pub const RIGHTS_ALL: u64 = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
 
+/// ADR-0047: server-side check of an IPC-transferred diagnostic reference.
+/// A numeric nid/slot or the caller's endpoint rights are never proof.
+/// Consume even an invalid landed cap; normal data-buffer paths never call this.
+pub fn take_diagnostic(landed: u64, held_slot: u64) -> bool {
+    if landed == CAP_NONE { return false; }
+    let mut held = [0u64; 3];
+    let mut sent = [0u64; 3];
+    let ok = unsafe {
+        // Legacy M6 fixture grants its private marker at slot 3;
+        // production drivers reserve slot 3 for readiness/console and
+        // use slot 4 (or 5). Only a READ-only Notification can anchor.
+        let primary = syscall2(SYS_CAP_DESCRIBE, held_slot, held.as_mut_ptr() as u64) == 0
+            && held[0] == 3 && held[2] == RIGHTS_READ;
+        if !primary && held_slot >= 4 {
+            held = [0; 3];
+            let _ = syscall2(SYS_CAP_DESCRIBE, 3, held.as_mut_ptr() as u64);
+        }
+        syscall2(SYS_CAP_DESCRIBE, landed, sent.as_mut_ptr() as u64) == 0
+            && held[0] == 3 && held[2] == RIGHTS_READ
+            && sent[0] == 3 && sent[1] == held[1]
+            && sent[2] == RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
+    };
+    if unsafe { syscall1(SYS_CAP_DESTROY, landed) } != 0 { return false; }
+    ok
+}
+
+/// Destructive operation must answer a typed refusal with no transferred
+/// authority; the caller can then test the same live endpoint again.
+pub fn diagnostic_refused(ep: u64, arg: u64, op: u64, cap: u64, error: u64) -> bool {
+    let mut reply = [0u64; 3];
+    unsafe { syscall6(SYS_IPC_CALL, ep, arg, op, cap, reply.as_mut_ptr() as u64, 0) == 0
+        && reply[0] == error && reply[2] == CAP_NONE }
+}
+
 // ---- IPC v1.1 inline messages (M5.3, ADR-0023) -------------------------------
 //
 // CALL/RECV/REPLY take an OPTIONAL trailing pointer to a 64-byte

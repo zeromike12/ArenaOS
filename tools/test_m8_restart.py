@@ -34,7 +34,7 @@ def main() -> int:
     ok &= check(rc == 0 and "PANIC" not in serial and "m7: RESULT PASS (2/2)" in serial,
                 "old M1–M7 regressions green and clean QEMU halt")
     pids = re.findall(r"servicemgr: production netstackd READY pid (\d+)", serial)
-    audited = re.findall(r"manager-owned netstackd pid (\d+): four installed child caps audited", serial)
+    audited = re.findall(r"manager-owned netstackd pid (\d+): five inherited child caps audited", serial)
     ok &= check(len(pids) == 2 and pids[0] != pids[1] and audited == pids,
                 "exactly one production restart, each child independently cap-audited")
     markers = ["m8: stacktest Process-cap stop refused to endpoint-only client",

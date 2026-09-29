@@ -30,7 +30,7 @@ def main() -> int:
     print(f"[{LABEL}] production crash fixture: rc={rc}, {dt:.1f}s")
     ok = True
     pids = re.findall(rf"{READY} (\d+)", serial)
-    audits = re.findall(r"manager-owned netstackd pid (\d+): four installed child caps audited", serial)
+    audits = re.findall(r"manager-owned netstackd pid (\d+): five inherited child caps audited", serial)
     ok &= check(rc == 0 and "PANIC" not in serial and "m7: RESULT PASS (2/2)" in serial,
                 "historical suite green; no whole-kernel panic on ring-3 fault")
     ok &= check(len(pids) == len(set(pids)) == 2 and audits == pids,

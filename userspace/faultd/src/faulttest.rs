@@ -75,7 +75,7 @@ unsafe fn call(op: u64, msg: &mut [u8; MSG_BYTES]) -> Result<(u64, u64), i64> {
             SLOT_EP,
             0,
             op,
-            CAP_NONE,
+            if op == FAULT_OP_HANG { SLOT_QUIET } else { CAP_NONE },
             reply.as_mut_ptr() as u64,
             msg.as_mut_ptr() as u64,
         )
@@ -148,6 +148,10 @@ pub unsafe extern "C" fn _start() -> ! {
 
         // 2. The call the service will never answer. The suite kills
         //    it while this is in flight; the kernel must answer for it.
+        if !diagnostic_refused(SLOT_EP, 0, FAULT_OP_HANG, CAP_NONE, FAULT_S_BAD_OP) {
+            fail(EXIT_NOT_GONE, "ordinary endpoint authorized hang");
+        }
+        log("faulttest: service refused hang without diagnostic marker");
         match call(FAULT_OP_HANG, &mut msg) {
             Ok((status, _)) => {
                 log_line(|o| {

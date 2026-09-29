@@ -139,6 +139,7 @@ impl Cap {
 #[derive(Clone, Copy)]
 pub struct CapSpace {
     slots: [Cap; CAP_SLOTS],
+    ipc_landed: [bool; CAP_SLOTS], // ADR-0047: receiver may discard a hostile transferred reference
 }
 
 impl CapSpace {
@@ -146,6 +147,7 @@ impl CapSpace {
     pub const fn new() -> Self {
         CapSpace {
             slots: [Cap::EMPTY; CAP_SLOTS],
+            ipc_landed: [false; CAP_SLOTS],
         }
     }
 
@@ -218,9 +220,24 @@ pub fn grant(pid: u64, cap: Cap) -> Result<usize, &'static str> {
                 return Err("capability space full (CAP_SLOTS)");
             };
             cs.slots[slot] = cap;
+            cs.ipc_landed[slot] = false;
             Ok(slot)
         })
         .ok_or("grant: no such process")?
+    })
+}
+
+/// IPC transfer metadata: mark ONLY the recipient's slot. Grant and
+/// marking are sequential IF=0 phases with no scheduling boundary.
+pub fn mark_ipc_landed(pid: u64, slot: usize) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        proc::with_caps_mut(pid, |cs| {
+            if slot >= CAP_SLOTS || matches!(cs.slots[slot].obj, CapObj::None) {
+                return Err("IPC landing missing from recipient cap space");
+            }
+            cs.ipc_landed[slot] = true;
+            Ok(())
+        }).ok_or("IPC recipient process missing")?
     })
 }
 
@@ -324,7 +341,10 @@ pub fn consume(pid: u64, slot: usize) -> Result<(), &'static str> {
 
 /// Remove the cap from its slot — the *reference*, not the object
 /// (ADR-0015: object lifetime belongs to the owning subsystem; caps may
-/// dangle and invokes re-validate). Requires the `DESTROY` right.
+/// dangle and invokes re-validate). Ordinarily requires DESTROY. A
+/// recipient may also DISCARD an IPC-landed reference without it: the
+/// kernel proved that slot was transferred in, not minted or inherited;
+/// its owned Untyped frame cannot arrive through IPC (ADR-0047).
 ///
 /// Kind-aware since ADR-0021: destroying an [`CapObj::Untyped`] cap
 /// returns its frame to the allocator — exactly once, because mapping
@@ -334,7 +354,9 @@ pub fn consume(pid: u64, slot: usize) -> Result<(), &'static str> {
 pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
     without_interrupts(|| {
         let cap = read(pid, slot)?;
-        if cap.rights & RIGHTS_DESTROY == 0 {
+        let landed = proc::with_caps(pid, |cs| cs.ipc_landed.get(slot).copied().unwrap_or(false))
+            .ok_or("cap destroy: process missing")?;
+        if cap.rights & RIGHTS_DESTROY == 0 && !landed {
             return Err("cap destroy: cap lacks the DESTROY right");
         }
         // Owned frame: return it. A LENT Untyped cap (a copy or an
@@ -521,6 +543,7 @@ fn install(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
                 return Err("cap slot out of bounds");
             };
             *entry = cap;
+            cs.ipc_landed[slot] = false;
             Ok(())
         })
         .ok_or("cap: no such process")?

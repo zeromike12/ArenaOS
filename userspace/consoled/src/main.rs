@@ -64,6 +64,7 @@ use virtio::*;
 
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 5; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
 /// The console-input authority — PRODUCTION ONLY.
 const SLOT_CON_IN: u64 = 3;
@@ -695,12 +696,16 @@ unsafe fn service_loop(drv: &mut Drv) -> ! {
                 fail(EXIT_RECV, "the serve-side receive failed");
             }
             let (n_or_want, op, landed) = (w[0], w[1], w[2]);
-            if landed != CAP_NONE {
+            if landed != CAP_NONE && op != CONSOLE_OP_SHUTDOWN {
                 // This service lends nothing and takes nothing.
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
             }
             match op {
                 CONSOLE_OP_SHUTDOWN => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply(CONSOLE_S_BAD_OP, 0);
+                        continue;
+                    }
                     log_line(|o| {
                         o.str("consoled: poison shutdown — ");
                         o.u64(drv.bytes_out);

@@ -136,6 +136,15 @@ def check_with_net_extras(serial: str) -> bool:
           f"({m.group(1)} vs {m.group(2)})" if m else
           "the logged draw fingerprints are present and differ")
 
+    for proof in ("blktest: missing diagnostic authority refused by storaged",
+                  "netdtest: missing diagnostic authority refused by service",
+                  "rngdtest: missing diagnostic authority refused by service",
+                  "fstest: fsd and storaged rejected missing/wrong-object poison markers",
+                  "inputtest: service refused poison without diagnostic marker",
+                  "contest: service refused poison without diagnostic marker",
+                  "faulttest: service refused hang without diagnostic marker"):
+        check(proof in serial, f"service-side diagnostic refusal: {proof}")
+
     # --- M6.3: the input service (ADR-0026) ---
     check("inputtest: PASS — the injected keystrokes arrived decoded "
           "and in order: \"arena\"" in serial,
@@ -205,7 +214,7 @@ def check_with_net_extras(serial: str) -> bool:
                     re.MULTILINE) is not None,
           "the service_restart test PASSED — the whole crash-and-restart "
           "cycle on real processes")
-    check(re.search(r"faultd: RESTARTED as pid \d+ with its 3 original "
+    check(re.search(r"faultd: RESTARTED as pid \d+ with its 4 original "
                     r"capability", serial) is not None,
           "the supervisor respawned the dead service with its capabilities "
           "REPLAYED (an Mmio window is a value, so 'the same grants' is "

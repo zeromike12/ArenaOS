@@ -38,9 +38,9 @@ use abi::*;
 /// The grant layout (m5.rs block_service): slot 0 = endpoint call side.
 const SLOT_EP: u64 = 0;
 /// Slot for the owned buffer cap (consumed by the self-map).
-const SLOT_BUF: u64 = 1;
+const SLOT_BUF: u64 = 8;
 /// Slot for the LENT copy that travels with the calls.
-const SLOT_BUF_LENT: u64 = 2;
+const SLOT_BUF_LENT: u64 = 9;
 
 const EXIT_SETUP: u64 = 43;
 const EXIT_WRITE_CALL: u64 = 44;
@@ -234,7 +234,11 @@ pub unsafe extern "C" fn _start() -> ! {
 
         // 7. Poison: the driver replies, then exits cleanly by its own
         //    hand (a service is never destroyed with parked threads).
-        request(OP_SHUTDOWN, u64::MAX, CAP_NONE, EXIT_POISON, EXIT_POISON);
+        if !diagnostic_refused(SLOT_EP, u64::MAX, block_req_w1(OP_SHUTDOWN, 0), CAP_NONE, VIRTIO_BLK_S_UNSUPP) {
+            fail(EXIT_POISON, "ordinary block endpoint authorized poison");
+        }
+        log_line(|o| o.str("blktest: missing diagnostic authority refused by storaged"));
+        request(OP_SHUTDOWN, u64::MAX, 1, EXIT_POISON, EXIT_POISON);
         log_line(|o| {
             o.str("blktest: PASS — the cycle completed and the service shut down cleanly")
         });

@@ -66,6 +66,7 @@ use virtio::*;
 
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 4; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
 /// Optional production-only boot readiness channel (ADR-0037).
 /// The M6/M7 fixture drivers have no slot 3, and keep their old behavior.
@@ -580,12 +581,13 @@ pub unsafe extern "C" fn _start() -> ! {
             let (w0, op, landed) = (msg[0], msg[1], msg[2]);
             match op {
                 NET_OP_SHUTDOWN => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply_err(NET_S_BAD_OP);
+                        continue;
+                    }
                     // The poison request: reply FIRST (the caller
                     // blocks), then exit — a process is never destroyed
                     // with parked threads.
-                    if landed != CAP_NONE {
-                        let _ = syscall1(SYS_CAP_DESTROY, landed);
-                    }
                     log_line(|o| {
                         o.str("netd: shutdown requested after ");
                         o.u64(drv.completions);

@@ -832,6 +832,10 @@ unsafe fn stats() -> (u64, u64, u64) {
 /// # Safety
 /// As `call`.
 unsafe fn shutdown() -> (u64, u64, u64) {
+    if !diagnostic_refused(SLOT_EP, 0, ARP_OP_SHUTDOWN, CAP_NONE, ARP_S_BAD_OP) {
+        fail(EXIT_CALL, "ordinary endpoint authorized stack shutdown");
+    }
+    log("arptest: stack refused shutdown without diagnostic marker");
     let mut reply = [0u64; 3];
     // SAFETY: wrapper contract.
     let r = unsafe {
@@ -840,7 +844,7 @@ unsafe fn shutdown() -> (u64, u64, u64) {
             SLOT_EP,
             0,
             ARP_OP_SHUTDOWN,
-            CAP_NONE,
+            3,
             reply.as_mut_ptr() as u64,
             0,
         )

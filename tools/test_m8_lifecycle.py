@@ -45,7 +45,7 @@ def main() -> int:
     manager = one(r"servicemgr spawned: pid (\d+), image19", serial)
     netd = one(r"netd spawned: pid (\d+)", serial)
     rngd = one(r"rngd spawned: pid (\d+)", serial)
-    child = one(r"manager-owned netstackd pid (\d+): four installed child caps audited", serial)
+    child = one(r"manager-owned netstackd pid (\d+): five inherited child caps audited", serial)
     foreign = one(r"lifecycle read-only foreign Process reference installed pid (\d+) slot 14", serial)
     ready = one(r"servicemgr: production netstackd READY pid (\d+)", serial)
     expected = (shell, manager, netd, rngd, child)

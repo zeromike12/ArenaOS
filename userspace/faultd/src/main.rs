@@ -45,6 +45,7 @@ mod abi;
 use abi::*;
 
 const SLOT_EP: u64 = 0;
+const SLOT_DIAG: u64 = 3; // short-lived test service only
 /// The hang signal to the suite — granted WRITE-ONLY, and that is the
 /// point: the first version signalled and then parked on the SAME
 /// notification, so it consumed its own badge before the suite could
@@ -85,7 +86,7 @@ pub unsafe extern "C" fn _start() -> ! {
                 fail(EXIT_RECV, "the serve-side receive failed");
             }
             let (op, landed) = (w[1], w[2]);
-            if landed != CAP_NONE {
+            if landed != CAP_NONE && op != FAULT_OP_HANG && op != FAULT_OP_SHUTDOWN {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
             }
             match op {
@@ -94,6 +95,10 @@ pub unsafe extern "C" fn _start() -> ! {
                     reply(FAULT_S_OK, pings);
                 }
                 FAULT_OP_HANG => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply(FAULT_S_BAD_OP, 0);
+                        continue;
+                    }
                     // The request is now DELIVERED and will never be
                     // answered. Tell the suite that the moment has
                     // arrived, then park forever.
@@ -116,6 +121,10 @@ pub unsafe extern "C" fn _start() -> ! {
                     }
                 }
                 FAULT_OP_SHUTDOWN => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply(FAULT_S_BAD_OP, 0);
+                        continue;
+                    }
                     log_line(|o| {
                         o.str("faultd: clean shutdown after ");
                         o.u64(pings);

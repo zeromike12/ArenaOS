@@ -15,10 +15,31 @@ fn fail(reason: &str) -> ! {
     }
 }
 
+/// A forged attenuated Notification/READ|COPY lacks DESTROY. Repeated
+/// refusal must not strand references in the driver's bounded cap space.
+fn challenge_wrong_marker(op: u64) {
+    if unsafe { syscall3(SYS_CAP_COPY, 3, 7, RIGHTS_READ | RIGHTS_COPY) } != 0 {
+        fail("depcheck: wrong-marker attenuation refused\r\n");
+    }
+    if unsafe { syscall1(SYS_CAP_DESTROY, 7) } >= 0 {
+        fail("depcheck: ordinary copy incorrectly gained DESTROY\r\n");
+    }
+    for _ in 0..20 {
+        if !diagnostic_refused(1, 0, op, 7, RNG_S_BAD_OP) {
+            fail("depcheck: wrong-marker repeat refused or leaked server slots\r\n");
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     // Slots 0/1 are netd/rngd Endpoint/WRITE, slot 2 is the manager's
     // PRIVATE notification/WRITE. No shutdown or device rights are held.
+    if !diagnostic_refused(0, 0, NET_OP_SHUTDOWN, CAP_NONE, NET_S_BAD_OP)
+        || !diagnostic_refused(1, 0, RNG_OP_SHUTDOWN, CAP_NONE, RNG_S_BAD_OP)
+    { fail("depcheck: production driver poison opcode accepted without marker\r\n"); }
+    let text = b"depcheck: production driver poison opcodes refused without marker\r\n";
+    let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
     let mut out = [0u64; 3];
     let rc = unsafe {
         syscall6(
@@ -47,6 +68,15 @@ pub extern "C" fn _start() -> ! {
         fail("depcheck: unexpected probe grant\r\n");
     }
     if authority[2] & RIGHTS_COPY != 0 {
+        // Same real rngd endpoint, deliberately omit the boot-granted
+        // marker, then transfer the *different* stack marker. Neither
+        // numeric opcode nor a syntactically valid Notification is authority.
+        if !diagnostic_refused(1, 0, RNG_OP_FAULT_NEXT_GET, CAP_NONE, RNG_S_BAD_OP)
+            || !diagnostic_refused(1, 0, RNG_OP_FAULT_NEXT_GET, 3, RNG_S_BAD_OP)
+        { fail("depcheck: rngd accepted ungranted fault authority\r\n"); }
+        challenge_wrong_marker(RNG_OP_FAULT_NEXT_GET);
+        let text = b"depcheck: rngd refused absent and wrong-object fault marker\r\n";
+        let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
         out = [0; 3];
         let r = unsafe {
             syscall6(
@@ -54,7 +84,7 @@ pub extern "C" fn _start() -> ! {
                 1,
                 0,
                 RNG_OP_FAULT_NEXT_GET,
-                CAP_NONE,
+                4,
                 out.as_mut_ptr() as u64,
                 0,
             )
@@ -75,6 +105,12 @@ pub extern "C" fn _start() -> ! {
         fail("depcheck: unexpected entropy probe grant\r\n");
     }
     if rng_authority[2] & RIGHTS_COPY != 0 {
+        if !diagnostic_refused(1, 0, RNG_OP_STALL_NEXT_GET, CAP_NONE, RNG_S_BAD_OP)
+            || !diagnostic_refused(1, 0, RNG_OP_STALL_NEXT_GET, 3, RNG_S_BAD_OP)
+        { fail("depcheck: rngd accepted ungranted stall authority\r\n"); }
+        challenge_wrong_marker(RNG_OP_STALL_NEXT_GET);
+        let text = b"depcheck: rngd refused absent and wrong-object stall marker\r\n";
+        let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
         out = [0; 3];
         let r = unsafe {
             syscall6(
@@ -82,7 +118,7 @@ pub extern "C" fn _start() -> ! {
                 1,
                 0,
                 RNG_OP_STALL_NEXT_GET,
-                CAP_NONE,
+                4,
                 out.as_mut_ptr() as u64,
                 0,
             )
@@ -94,12 +130,12 @@ pub extern "C" fn _start() -> ! {
         let _ = unsafe { syscall2(SYS_DEBUG_WRITE, text.as_ptr() as u64, text.len() as u64) };
     }
     // The LENT copy is made before self-map consumes the owned cap.
-    if unsafe { syscall1(SYS_ALLOC_FRAME, 3) } <= 0
-        || unsafe { syscall3(SYS_CAP_COPY, 3, 4, RIGHTS_ALL) } != 0
+    if unsafe { syscall1(SYS_ALLOC_FRAME, 5) } <= 0
+        || unsafe { syscall3(SYS_CAP_COPY, 5, 6, RIGHTS_ALL) } != 0
     {
         fail("depcheck: entropy buffer allocation refused\r\n");
     }
-    let va = unsafe { syscall2(SYS_MAP_MEMORY, 3, 1) };
+    let va = unsafe { syscall2(SYS_MAP_MEMORY, 5, 1) };
     if va <= 0 {
         fail("depcheck: entropy frame mapping refused\r\n");
     }
@@ -110,7 +146,7 @@ pub extern "C" fn _start() -> ! {
             1,
             64,
             RNG_OP_GET,
-            4,
+            6,
             out.as_mut_ptr() as u64,
             0,
         )

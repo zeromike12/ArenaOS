@@ -49,6 +49,7 @@ use virtio::*;
 
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 4; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
 /// Optional production-only boot readiness channel (ADR-0037).
 const SLOT_MANAGER_READY: u64 = 3;
@@ -320,12 +321,13 @@ pub unsafe extern "C" fn _start() -> ! {
             let (w0, op, landed) = (msg[0], msg[1], msg[2]);
             match op {
                 RNG_OP_SHUTDOWN => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply_err(RNG_S_BAD_OP);
+                        continue;
+                    }
                     // The poison request: reply FIRST (the caller
                     // blocks), then exit — a process is never
                     // destroyed with parked threads.
-                    if landed != CAP_NONE {
-                        let _ = syscall1(SYS_CAP_DESTROY, landed);
-                    }
                     log_line(|o| {
                         o.str("rngd: shutdown requested after ");
                         o.u64(drv.completions);
@@ -346,8 +348,7 @@ pub unsafe extern "C" fn _start() -> ! {
                     syscall1(SYS_THREAD_EXIT, EXIT_OK);
                 }
                 RNG_OP_FAULT_NEXT_GET => {
-                    if landed != CAP_NONE {
-                        let _ = syscall1(SYS_CAP_DESTROY, landed);
+                    if !take_diagnostic(landed, SLOT_DIAG) {
                         reply_err(RNG_S_BAD_OP);
                         continue;
                     }
@@ -356,8 +357,7 @@ pub unsafe extern "C" fn _start() -> ! {
                     log("rngd: opt-in next real GET will fault in ring 3");
                 }
                 RNG_OP_STALL_NEXT_GET => {
-                    if landed != CAP_NONE {
-                        let _ = syscall1(SYS_CAP_DESTROY, landed);
+                    if !take_diagnostic(landed, SLOT_DIAG) {
                         reply_err(RNG_S_BAD_OP);
                         continue;
                     }

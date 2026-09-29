@@ -53,9 +53,9 @@ const SLOT_EP: u64 = 0;
 /// by four orders of magnitude — the wire answers in microseconds.
 const RECV_TIMEOUT_US: u64 = 2_000_000;
 /// Slot for the owned TX frame cap (consumed by the self-map).
-const SLOT_BUF: u64 = 1;
+const SLOT_BUF: u64 = 8;
 /// Slot for the LENT copy that travels with the SEND call.
-const SLOT_BUF_LENT: u64 = 2;
+const SLOT_BUF_LENT: u64 = 9;
 
 const EXIT_SETUP: u64 = 43;
 const EXIT_MAC_CALL: u64 = 44;
@@ -317,7 +317,11 @@ pub unsafe extern "C" fn _start() -> ! {
 
         // 7. Poison: the driver replies, then exits cleanly by its own
         //    hand (a service is never destroyed with parked threads).
-        let (st, completions) = request(NET_OP_SHUTDOWN, 0, CAP_NONE, 0, EXIT_POISON);
+        if !diagnostic_refused(SLOT_EP, 0, NET_OP_SHUTDOWN, CAP_NONE, NET_S_BAD_OP) {
+            fail(EXIT_POISON, "ordinary endpoint authorized poison");
+        }
+        log_line(|o| o.str("netdtest: missing diagnostic authority refused by service"));
+        let (st, completions) = request(NET_OP_SHUTDOWN, 0, 1, 0, EXIT_POISON);
         if st != NET_S_OK {
             fail(EXIT_POISON, "the shutdown reply carried an error status");
         }

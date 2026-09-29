@@ -65,6 +65,7 @@ use abi::*;
 
 const SLOT_BLK: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 2; // ADR-0047 boot-granted proof
 /// Scratch slots for the one owned metadata frame — the self-map
 /// CONSUMES the original; the LENT copy travels with every storaged
 /// call. Client buffer caps land in the first free slot (2) and are
@@ -1256,10 +1257,13 @@ pub unsafe extern "C" fn _start() -> ! {
             }
             let (op, w1, landed) = (ibuf[0], ibuf[1], ibuf[2]);
             omsg = [0u8; MSG_BYTES];
-            let (rw0, rw1) = serve(&mut fs, op, w1, landed, &imsg, &mut omsg);
+            let authorized = op != FS_OP_SHUTDOWN || take_diagnostic(landed, SLOT_DIAG);
+            let (rw0, rw1) = if authorized {
+                serve(&mut fs, op, w1, landed, &imsg, &mut omsg)
+            } else { (FS_ERR_BAD_OP, 0) };
             // The forwarded client cap is done with: discard fsd's
             // reference (frees nothing — the client keeps its window).
-            if landed != CAP_NONE {
+            if landed != CAP_NONE && op != FS_OP_SHUTDOWN {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
             }
             let rr = syscall5(

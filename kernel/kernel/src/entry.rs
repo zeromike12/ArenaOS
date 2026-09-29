@@ -433,6 +433,13 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // shared event wake, neither netd nor the stack can signal it.
     let manager_admin_nid = crate::ipc::create_notification()
         .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: admin notification table full"));
+    // ADR-0047: proof objects, NEVER badge channels. The same object
+    // is held read-only by each receiving service and explicitly
+    // delegated by the trusted root to its diagnostic actor.
+    let rng_diag_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("rngd: diagnostic marker table full"));
+    let stack_diag_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("netstackd: diagnostic marker table full"));
     let (net_driver_pid, net_eid) = match spawn_netd(manager_nid) {
         Ok(Some((pid, eid))) => (Some(pid), Some(eid)),
         Ok(None) => {
@@ -450,7 +457,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // DMA) on its endpoint — the third driver on the shared virtio core.
     // ABSENT virtio-rng function → the entropy service is simply
     // offline, exactly as netd's fixture is optional.
-    let (rng_driver_pid, rng_eid) = match spawn_rngd(rng_ready_nid) {
+    let (rng_driver_pid, rng_eid) = match spawn_rngd(rng_ready_nid, rng_diag_nid) {
         Ok(Some((pid, eid))) => (Some(pid), Some(eid)),
         Ok(None) => {
             info!(
@@ -512,6 +519,8 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         manager_admin_nid,
         net_eid,
         rng_eid,
+        rng_diag_nid,
+        stack_diag_nid,
     )
     .unwrap_or_else(|e| crate::halt::halt_machine(e));
 
@@ -546,7 +555,8 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         },
         crate::cap::Cap {
             obj: crate::cap::CapObj::Notification { nid: shell_nid },
-            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE
+                | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
         },
         crate::cap::Cap {
             obj: crate::cap::CapObj::Endpoint { eid: fs_eid },
@@ -582,6 +592,12 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     };
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    if expected_stack_caps.is_some() {
+        crate::cap::issue(shell_pid, 15, crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: stack_diag_nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
+        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: diagnostic marker issue refused"));
+    }
     info!(
         "kernel",
         "shell spawned: pid {shell_pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
@@ -618,18 +634,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
-    // Full shipping fixture occupies all 11 notifications (ADR-0043).
-    // The twelfth must be a typed refusal, never silent over-allocation;
+    // Full shipping fixture occupies all 13 notifications (ADR-0047).
+    // The fourteenth must be a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse a twelfth object",
+                "servicemgr: notification bound failed to refuse a fourteenth object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 11/11; twelfth refused"
+            "servicemgr: full fixture notification budget 13/13; fourteenth refused"
         );
     }
 
@@ -644,7 +660,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     loop {
         // ADR-0039: independently audit the child created by the
         // MANAGER's syscall. The kernel sees its Process handle in the
-        // manager's actual cap table, then compares four installed
+        // manager's actual cap table, then compares five installed
         // child caps to the fixed root policy. The probe worker is audited
         // separately and never confused with the production stack.
         if let Some(wanted) = expected_stack_caps {
@@ -671,7 +687,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
                     if last_audited_child != Some(child) {
                         info!(
                             "m8",
-                            "manager-owned netstackd pid {child}: four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras"
+                            "manager-owned netstackd pid {child}: five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded"
                         );
                         // READ-only reference; neither boot policy nor a
                         // manifest grants the shell the child's DESTROY.
@@ -742,7 +758,9 @@ fn spawn_servicemgr(
     manager_admin_nid: u32,
     net: Option<u32>,
     rng: Option<u32>,
-) -> Result<(u64, Option<[crate::cap::Cap; 4]>), &'static str> {
+    rng_diag_nid: u32,
+    stack_diag_nid: u32,
+) -> Result<(u64, Option<[crate::cap::Cap; 5]>), &'static str> {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let root = [
         Cap {
@@ -799,6 +817,14 @@ fn spawn_servicemgr(
                     obj: CapObj::Image { img_id: 20 },
                     rights: R,
                 },
+                Cap {
+                    obj: CapObj::Notification { nid: rng_diag_nid },
+                    rights: R | C | crate::cap::RIGHTS_DESTROY, // transferable, disposable proof
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: stack_diag_nid },
+                    rights: R | C | crate::cap::RIGHTS_DESTROY, // stack receives READ only
+                },
             ];
             let child = [
                 Cap {
@@ -816,6 +842,10 @@ fn spawn_servicemgr(
                 Cap {
                     obj: CapObj::Endpoint { eid: rng_eid },
                     rights: W,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: stack_diag_nid },
+                    rights: R,
                 },
             ];
             (Some(all), Some((stack_eid, child)))
@@ -865,7 +895,7 @@ enum ManagerChild {
 
 fn audit_manager_child(
     manager_pid: u64,
-    expected: &[crate::cap::Cap; 4],
+    expected: &[crate::cap::Cap; 5],
     private_nid: u32,
 ) -> Result<Option<ManagerChild>, &'static str> {
     use crate::cap::{CapObj, RIGHTS_DESTROY};
@@ -909,13 +939,20 @@ fn audit_manager_child(
         {
             return Err("servicemgr: probe grant differs from root policy");
         }
-        for slot in 3..crate::cap::CAP_SLOTS {
-            if let Ok(c) = crate::cap::read(pid, slot) {
-                if !matches!(c.obj, CapObj::Untyped { .. }) {
-                    return Err("servicemgr: probe received an extra privileged cap");
-                }
-            }
+        let diagnostic = first.rights & crate::cap::RIGHTS_COPY != 0
+            || crate::cap::read(pid, 1).ok().unwrap().rights & crate::cap::RIGHTS_COPY != 0;
+        if diagnostic {
+            let wrong = crate::cap::read(pid, 3).map_err(|_| "probe missing wrong-marker fixture")?;
+            let correct = crate::cap::read(pid, 4).map_err(|_| "probe missing rngd marker")?;
+            let root = crate::cap::read(manager_pid, 10).map_err(|_| "manager lost rngd marker")?;
+            if wrong.obj != expected[4].obj || wrong.rights != crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY
+                || correct != root
+                || correct.obj == wrong.obj
+            { return Err("probe diagnostic authority shape differs from root policy"); }
         }
+        // Later slots are allocated/copied by the live worker itself;
+        // inherited authority is bounded by SYS_SPAWN, not by a
+        // snapshot taken during the worker's own negative-space calls.
         let mode = if first.rights & crate::cap::RIGHTS_COPY != 0 {
             1
         } else if crate::cap::read(pid, 1).ok().unwrap().rights & crate::cap::RIGHTS_COPY != 0 {
@@ -930,13 +967,10 @@ fn audit_manager_child(
             return Err("servicemgr: actual child cap differs from attenuated policy");
         }
     }
-    for slot in 4..crate::cap::CAP_SLOTS {
-        if let Ok(c) = crate::cap::read(pid, slot) {
-            if !matches!(c.obj, CapObj::Untyped { .. }) {
-                return Err("servicemgr: child received an extra privileged cap");
-            }
-        }
-    }
+    // SYS_SPAWN accepts at most five inherited references. Later slots
+    // may contain caller-controlled IPC landings (including malformed
+    // references); treating them as bootstrap grants lets an ordinary
+    // client halt the entire kernel by sending a cap during an audit.
     Ok(Some(ManagerChild::Production(pid)))
 }
 
@@ -1073,7 +1107,7 @@ fn spawn_netd(manager_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
 /// when bus 0 carries no virtio-rng function: the entropy service is
 /// optional (an honest offline note, never a fake init — the caller
 /// logs the absence).
-fn spawn_rngd(rng_ready_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
+fn spawn_rngd(rng_ready_nid: u32, rng_diag_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
     let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_ENTROPY) else {
         return Ok(None);
     };
@@ -1107,6 +1141,10 @@ fn spawn_rngd(rng_ready_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
         crate::cap::Cap {
             obj: crate::cap::CapObj::Notification { nid: rng_ready_nid },
             rights: crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: rng_diag_nid },
+            rights: crate::cap::RIGHTS_READ,
         },
     ];
     let pid = crate::spawn::spawn_init(8, &grants, None)?;

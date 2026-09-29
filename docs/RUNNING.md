@@ -6,19 +6,21 @@ verified against. This page explains how to boot it on your own machine.
 
 ## Phase 8 checkpoint: boot the exact per-commit build
 
-Phase 8.0 is **complete**; 8.1 is next. Every Phase 8 checkpoint commit
+Phase 8.0 is **complete after the ADR-0047 receiving-service authority
+closure**; 8.1 is next. Earlier 8.0 checkpoint images are historical,
+not substitutes for this corrected build. Every Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
 `releases/checkpoints/` (ADR-0039). For the **completed 8.0 service-manager**
 checkpoint on this branch, download the archive directly from the
 commit's repository tree (or clone and use its local path):
 
 ```sh
-curl -fL -o arenaos-phase8-manager-complete-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-manager-complete/arenaos-phase8-manager-complete-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase8-manager-complete-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-manager-complete/arenaos-phase8-manager-complete-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase8-manager-complete-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase8-manager-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-service-authority-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-service-authority/arenaos-phase8-service-authority-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase8-service-authority-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase8-service-authority/arenaos-phase8-service-authority-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase8-service-authority-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase8-service-authority-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
 cp scratch-template.img scratch.img       # FIRST boot only; keep it thereafter
@@ -44,7 +46,7 @@ qemu-system-x86_64 -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
 ```
 
 Look for `servicemgr: production netstackd READY pid ...` and the
-kernel's four-cap child audit, then the `arena> ` prompt. Type
+kernel's five-cap inherited child audit, then the `arena> ` prompt. Type
 `stacktest` for the **opt-in**, privileged orderly restart proof: the
 same shell-held client endpoint survives the child's exit/reap/backoff,
 its old rngd-backed UDP bearer is rejected, and its new instance
@@ -80,6 +82,17 @@ rights amplification. A normal shell child is reaped by its real held
 Process cap; the production child then serves new ARP wire traffic and
 resource counts stay flat. No ordinary client or driver receives these
 references. Without the network or entropy device, `lifetest` SKIPs.
+Destructive IPC opcodes are not enabled merely by possession of an
+ordinary service endpoint. The receiver verifies a transferred,
+boot-granted Notification reference; the shell carries a separate
+explicit marker for `stacktest`, `stackstress` and `stackfault`.
+These commands first verify missing/wrong-marker refusal in the
+service. Normal clients cannot mint or infer that capability from a
+numeric opcode. The manager alone delegates the rngd proof to its
+opt-in worker; production storaged, fsd, netd, inputd and consoled
+have no poison marker. ADR-0047 documents the legacy test-service
+shutdown fixtures and malformed-cap cleanup.
+
 The manager also probes netd's real MAC and rngd's real device-entropy
 GET **before each** stack spawn, with its own timer and a Process-cap-
 reaped worker. `depdeny` is a separate destructive diagnostic: after
@@ -89,7 +102,7 @@ supervisor repairs rngd. `depstall` deliberately wedges rngd's next
 GET; the manager's own deadline stops its blocked worker and leaves the
 stack OFFLINE. Use these only in a disposable VM, then reboot. Missing
 devices SKIP rather than granting partial authority. Phase 8.0 passed
-all 26 historical suites and an exact-image 100/100 QEMU qualification;
+all 27 historical suites and an exact-image 100/100 QEMU qualification;
 8.1 transactional configuration storage is next.
 Earlier per-commit bundles remain available at
 [`3669743`](https://github.com/zeromike12/ArenaOS/commit/3669743ecabbda26110541b7eea4ebee4b722a7f),

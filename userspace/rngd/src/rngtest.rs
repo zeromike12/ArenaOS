@@ -37,13 +37,13 @@ use abi::*;
 const SLOT_EP: u64 = 0;
 /// Owned draw-frame slots (the self-map consumes each) and the LENT
 /// copies that travel with the GET calls.
-const SLOT_BUF_A: u64 = 1;
-const SLOT_BUF_B: u64 = 2;
+const SLOT_BUF_A: u64 = 8;
+const SLOT_BUF_B: u64 = 9;
 /// The LENT copies that travel with the GET calls — one per frame,
 /// COPIED BEFORE the self-map consumes the original (ADR-0022's
 /// lend-keep pattern: map consumes, so the copy must exist first).
-const SLOT_LENT_A: u64 = 3;
-const SLOT_LENT_B: u64 = 4;
+const SLOT_LENT_A: u64 = 10;
+const SLOT_LENT_B: u64 = 11;
 
 const EXIT_SETUP: u64 = 52;
 const EXIT_GET_CALL: u64 = 53;
@@ -275,7 +275,11 @@ pub unsafe extern "C" fn _start() -> ! {
         //    exits by its own hand. Two draws → two interrupt-served
         //    completions; anything else means a completion was faked
         //    or lost.
-        let (st, completions) = request(RNG_OP_SHUTDOWN, 0, CAP_NONE, EXIT_POISON);
+        if !diagnostic_refused(SLOT_EP, 0, RNG_OP_SHUTDOWN, CAP_NONE, RNG_S_BAD_OP) {
+            fail(EXIT_POISON, "ordinary endpoint authorized poison");
+        }
+        log_line(|o| o.str("rngdtest: missing diagnostic authority refused by service"));
+        let (st, completions) = request(RNG_OP_SHUTDOWN, 0, 1, EXIT_POISON);
         if st != RNG_S_OK {
             fail(EXIT_POISON, "the shutdown reply carried an error status");
         }

@@ -111,7 +111,7 @@ fn request(op: u64, w0: u64, msg_out: u64) -> (u64, u64) {
             SLOT_EP,
             w0,
             op,
-            CAP_NONE,
+            if op == INPUT_OP_SHUTDOWN { 1 } else { CAP_NONE },
             reply.as_mut_ptr() as u64,
             msg_out,
         )
@@ -168,6 +168,10 @@ pub unsafe extern "C" fn _start() -> ! {
                 // boot with a keyboard attached and no typist must not
                 // hang, and must not pretend to have proved anything.
                 log("inputtest: nobody typed during this boot — the wait was called off");
+                if !diagnostic_refused(SLOT_EP, 0, INPUT_OP_SHUTDOWN, CAP_NONE, INPUT_S_BAD_OP) {
+                    fail(EXIT_POISON, "ordinary endpoint authorized poison");
+                }
+                log("inputtest: service refused poison without diagnostic marker");
                 let (st, _) = request(INPUT_OP_SHUTDOWN, 0, 0);
                 if st != INPUT_S_OK {
                     fail(EXIT_POISON, "the poison shutdown was refused");
@@ -234,6 +238,10 @@ pub unsafe extern "C" fn _start() -> ! {
         // keys (the device coalesces events per SYN_REPORT, so the
         // exact count is QEMU's batching policy, not our behavior —
         // the suite asserts what is genuinely ours).
+        if !diagnostic_refused(SLOT_EP, 0, INPUT_OP_SHUTDOWN, CAP_NONE, INPUT_S_BAD_OP) {
+            fail(EXIT_POISON, "ordinary endpoint authorized poison");
+        }
+        log("inputtest: service refused poison without diagnostic marker");
         let (status, batches) = request(INPUT_OP_SHUTDOWN, 0, 0);
         if status != INPUT_S_OK || batches == 0 {
             log_line(|o| {

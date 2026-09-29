@@ -39,6 +39,7 @@ use virtio::*;
 
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 3; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
 /// Scratch slots for the four owned ring frames — self-map CONSUMES the
 /// cap, so these go empty again; a landed caller-buffer cap takes the
@@ -368,6 +369,10 @@ pub unsafe extern "C" fn _start() -> ! {
             // with a typed status (ADR-0022/0023 security seam).
             let (op, buf_off) = (w1 & 0xFF, w1 >> 8);
             if op == OP_SHUTDOWN {
+                if !take_diagnostic(landed, SLOT_DIAG) {
+                    let _ = syscall5(SYS_IPC_REPLY, SLOT_EP, VIRTIO_BLK_S_UNSUPP, 0, CAP_NONE, 0);
+                    continue;
+                }
                 // The poison request: reply FIRST (the caller blocks),
                 // then exit — a process is never destroyed with parked
                 // threads, so the service always dies by its own hand.

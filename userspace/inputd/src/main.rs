@@ -58,6 +58,7 @@ use virtio::*;
 
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 4; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
 /// The console-input authority — present ONLY in the production
 /// instance. Its absence is what puts this image in service mode.
@@ -580,13 +581,17 @@ unsafe fn service_loop(drv: &mut Drv) -> ! {
                 fail(EXIT_RECV, "SYS_IPC_RECV refused");
             }
             let (want, op, landed) = (msg[0], msg[1], msg[2]);
-            if landed != CAP_NONE {
+            if landed != CAP_NONE && op != INPUT_OP_SHUTDOWN {
                 // This service lends nothing and takes nothing: a cap
                 // that rode in is discarded, never silently kept.
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
             }
             match op {
                 INPUT_OP_SHUTDOWN => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply_err(INPUT_S_BAD_OP);
+                        continue;
+                    }
                     log_line(|o| {
                         o.str("inputd: shutdown requested after ");
                         o.u64(drv.batches);

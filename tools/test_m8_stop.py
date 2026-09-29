@@ -31,7 +31,7 @@ def main() -> int:
     print(f"[{LABEL}] full fixture: rc={rc}, {dt:.1f}s")
     ok = True
     pids = re.findall(rf"{READY} (\d+)", serial)
-    audited = re.findall(r"manager-owned netstackd pid (\d+): four installed child caps audited", serial)
+    audited = re.findall(r"manager-owned netstackd pid (\d+): five inherited child caps audited", serial)
     manager = re.search(r"servicemgr spawned: pid (\d+), image19", serial)
     mode1 = re.findall(r"proc_finish mode1: owner (\d+) target (\d+) live_threads=(\d+) held Process/DESTROY", serial)
     ok &= check(rc == 0 and "PANIC" not in serial and "m7: RESULT PASS (2/2)" in serial,

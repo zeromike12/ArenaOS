@@ -73,7 +73,7 @@ unsafe fn request(op: u64, w0: u64, msg: &mut [u8; MSG_BYTES]) -> (u64, u64) {
             SLOT_EP,
             w0,
             op,
-            CAP_NONE,
+            if op == CONSOLE_OP_SHUTDOWN { 1 } else { CAP_NONE },
             reply.as_mut_ptr() as u64,
             msg.as_mut_ptr() as u64,
         )
@@ -135,6 +135,10 @@ pub unsafe extern "C" fn _start() -> ! {
                 // so it exits cleanly, then report the honest outcome:
                 // nothing was proved, and nothing is claimed.
                 log("contest: nothing arrived on the port — nobody was attached to its far end");
+                if !diagnostic_refused(SLOT_EP, 0, CONSOLE_OP_SHUTDOWN, CAP_NONE, CONSOLE_S_BAD_OP) {
+                    fail(EXIT_POISON, "ordinary endpoint authorized poison");
+                }
+                log("contest: service refused poison without diagnostic marker");
                 let (st, _) = request(CONSOLE_OP_SHUTDOWN, 0, &mut msg);
                 if st != CONSOLE_S_OK {
                     fail(EXIT_POISON, "the poison shutdown was refused");
@@ -174,6 +178,10 @@ pub unsafe extern "C" fn _start() -> ! {
         });
 
         // 3. Poison the service and check its accounting.
+        if !diagnostic_refused(SLOT_EP, 0, CONSOLE_OP_SHUTDOWN, CAP_NONE, CONSOLE_S_BAD_OP) {
+            fail(EXIT_POISON, "ordinary endpoint authorized poison");
+        }
+        log("contest: service refused poison without diagnostic marker");
         let (status, out_total) = request(CONSOLE_OP_SHUTDOWN, 0, &mut msg);
         if status != CONSOLE_S_OK {
             fail(EXIT_POISON, "the poison shutdown was refused");

@@ -75,9 +75,21 @@ rngd #UD (driver IPC failure, deferred kernel-owned process teardown,
 supervised driver restart but NO new stack) from an indefinitely blocked
 rngd GET (manager timer deadline and authorized worker stop, NO new
 stack). Both absent-device fixtures SKIP without worker authority. All
-26 suites and 100/100 final-image boots qualify the four-area 8.0 exit;
+27 suites and 100/100 final-image boots qualify the four-area 8.0 exit
+and ADR-0047's service-side diagnostic-authority repair;
 normal boot does not inject failures or claim the destructive fixtures
-ran on its own.
+ran on its own. `test_m8_diagnostic.py` exercises distinct receiving-
+service refusals on the ordinary endpoint (missing and wrong marker),
+then the real boot-granted authority for orderly exit, genuine #UD,
+rngd #UD and a stalled GET in separate disposable VMs. The test worker
+also tries 20 attenuated wrong markers with no DESTROY right before
+using the legitimate proof: these must be discarded as IPC-landed
+references so one untrusted caller cannot exhaust the driver's 16 cap
+slots. M5–M7 legacy poison/hang test clients now prove missing and
+wrong-object refusal before the authorized, clean test-only exit.
+Production workers test netd/rngd SHUTDOWN refusals before both active
+protocol probes; input and console service fixtures retain their own
+no-marker refusal and successful diagnostic shutdown proofs.
 
 ## The testing pyramid
 

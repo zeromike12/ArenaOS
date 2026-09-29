@@ -47,15 +47,16 @@ def verify_qualified_image(suite_log: Path) -> tuple[str, bytes]:
         raise ValueError("ESP contains an EFI different from the qualified final EFI")
     log = suite_log.read_text()
     suite = re.search(r"ALL TESTS PASSED \((\d+) test suites\)", log)
-    if not suite or int(suite.group(1)) < 26 or \
+    if not suite or int(suite.group(1)) < 27 or \
             "INITIAL-START SUBSTRATE: PASS" not in log or \
             "PRODUCTION ORDERLY-RESTART SUBSTRATE: PASS" not in log or \
             "REPEATED-ACCOUNTING SUBSTRATE: PASS" not in log or \
             "UNEXPECTED-CRASH SUBSTRATE: PASS" not in log or \
             "FORCED-LIVE-STOP SUBSTRATE: PASS" not in log or \
             "LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: PASS" not in log or \
-            "ACTIVE DEPENDENCY PROBES: PASS" not in log:
-        raise ValueError("all 26+ historical suites + all four 8.0 exit areas required")
+            "ACTIVE DEPENDENCY PROBES: PASS" not in log or \
+            "SERVICE-SIDE DIAGNOSTIC AUTHORITY: PASS" not in log:
+        raise ValueError("all 27+ historical suites + service-side diagnostic authority required")
     return digest(efi), esp.read_bytes()
 
 
@@ -84,7 +85,7 @@ def main() -> int:
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
-        "Phase 8.0: COMPLETE; crash recovery, forced live stop, lifecycle refusals and active dependency probes proven\n"
+        "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
     )
     (stage / "sha256sums.txt").write_text("".join(
         f"{digest((stage / path).read_bytes())}  {path}\n" for path in FILES
@@ -132,9 +133,10 @@ def main() -> int:
                     os.environ[key] = old
         required = ("m7: RESULT PASS (2/2)",
                     "servicemgr: production netstackd READY pid",
-                    "four installed child caps audited (netd/W stack/R backoff/RW rngd/W)",
+                    "five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R)",
                     "manager-owned dependency probe pid",
                     "depcheck: netd MAC answered",
+                    "depcheck: production driver poison opcodes refused without marker",
                     "depcheck: rngd device completed 64 varied bytes",
                     "servicemgr: active netd MAC and rngd entropy probes passed; worker reaped",
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",

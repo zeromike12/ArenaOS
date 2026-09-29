@@ -211,6 +211,7 @@ fn net_service_inner() -> NetResult {
     let nid_irq = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_netd = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_diag = ipc::create_notification().map_err(|_| fail("diagnostic marker table full"))?;
 
     // netd (registry image 6): slot 0 = the device window (Mmio,
     // READ|WRITE), slot 1 = the serve side of the endpoint, slot 2 =
@@ -234,6 +235,7 @@ fn net_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(6, &netd_grants, Some((nid_netd, NETD_EXIT_BADGE)))
         .map_err(|_| fail("netd (image 6) spawn failed"))?;
@@ -241,7 +243,9 @@ fn net_service_inner() -> NetResult {
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid = crate::spawn::spawn_init(7, &client_grants, Some((nid_client, NETTEST_EXIT_BADGE)))
         .map_err(|_| fail("nettest (image 7) spawn failed"))?;
     info!(
@@ -369,6 +373,7 @@ fn net_service_inner() -> NetResult {
     crate::spawn::forget(s_pid).map_err(|_| fail("driver spawn record forget refused"))?;
     crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
     ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_diag).map_err(|_| fail("diagnostic marker teardown refused"))?;
     ipc::destroy_notification(nid_irq).map_err(|_| fail("irq notification teardown refused"))?;
     ipc::destroy_notification(nid_client)
         .map_err(|_| fail("client notification teardown refused"))?;
@@ -442,6 +447,7 @@ fn rng_service_inner() -> NetResult {
     let nid_irq = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_rngd = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_diag = ipc::create_notification().map_err(|_| fail("diagnostic marker table full"))?;
 
     // rngd (registry image 8): the same grant shape as storaged and
     // netd — slot 0 = the device window (Mmio, READ|WRITE), slot 1 =
@@ -464,6 +470,7 @@ fn rng_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(8, &rngd_grants, Some((nid_rngd, RNGD_EXIT_BADGE)))
         .map_err(|_| fail("rngd (image 8) spawn failed"))?;
@@ -471,7 +478,9 @@ fn rng_service_inner() -> NetResult {
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid = crate::spawn::spawn_init(9, &client_grants, Some((nid_client, RNGTEST_EXIT_BADGE)))
         .map_err(|_| fail("rngtest (image 9) spawn failed"))?;
     info!(
@@ -595,6 +604,7 @@ fn rng_service_inner() -> NetResult {
     crate::spawn::forget(s_pid).map_err(|_| fail("driver spawn record forget refused"))?;
     crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
     ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_diag).map_err(|_| fail("diagnostic marker teardown refused"))?;
     ipc::destroy_notification(nid_irq).map_err(|_| fail("irq notification teardown refused"))?;
     ipc::destroy_notification(nid_client)
         .map_err(|_| fail("client notification teardown refused"))?;
@@ -708,6 +718,7 @@ fn service_death_inner() -> NetResult {
     let nid_void = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_server = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_diag = ipc::create_notification().map_err(|_| fail("faultd marker table full"))?;
 
     // faultd (image 14): the serve side, plus the notification it uses
     // to tell us the exact instant it is holding an unanswerable
@@ -731,13 +742,16 @@ fn service_death_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_void },
             rights: cap::RIGHTS_READ,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(14, &server_grants, Some((nid_server, FAULTD_EXIT_BADGE)))
         .map_err(|_| fail("faultd (image 14) spawn failed"))?;
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid =
         crate::spawn::spawn_init(15, &client_grants, Some((nid_client, FAULTTEST_EXIT_BADGE)))
             .map_err(|_| fail("faulttest (image 15) spawn failed"))?;
@@ -840,6 +854,7 @@ fn service_death_inner() -> NetResult {
     crate::spawn::forget(s_pid).map_err(|_| fail("server spawn record forget refused"))?;
     crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
     ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_diag).map_err(|_| fail("faultd marker teardown refused"))?;
     ipc::destroy_notification(nid_hang).map_err(|_| fail("hang notification teardown refused"))?;
     ipc::destroy_notification(nid_void).map_err(|_| fail("void notification teardown refused"))?;
     ipc::destroy_notification(nid_client)
@@ -890,6 +905,7 @@ fn service_restart_inner() -> NetResult {
     let nid_void = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_quiet = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_diag = ipc::create_notification().map_err(|_| fail("faultd marker table full"))?;
 
     let server_grants = [
         Cap {
@@ -904,6 +920,7 @@ fn service_restart_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_void },
             rights: cap::RIGHTS_READ,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let first_pid = crate::spawn::spawn_init(14, &server_grants, None)
         .map_err(|_| fail("faultd (image 14) spawn failed"))?;
@@ -916,7 +933,9 @@ fn service_restart_inner() -> NetResult {
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid =
         crate::spawn::spawn_init(15, &client_grants, Some((nid_client, CONTEST_EXIT_BADGE)))
             .map_err(|_| fail("faulttest (image 15) spawn failed"))?;
@@ -1037,7 +1056,7 @@ fn service_restart_inner() -> NetResult {
     crate::spawn::forget(c_pid).map_err(|_| fail("client record forget refused"))?;
     crate::spawn::forget(q_pid).map_err(|_| fail("quiet client record forget refused"))?;
     ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
-    for nid in [nid_hang, nid_void, nid_quiet, nid_client] {
+    for nid in [nid_hang, nid_void, nid_quiet, nid_client, nid_diag] {
         ipc::destroy_notification(nid).map_err(|_| fail("notification teardown refused"))?;
     }
 
@@ -1063,7 +1082,7 @@ fn service_restart_inner() -> NetResult {
     }
     info!(
         "m6",
-        "service_restart: faultd died as pid {first_pid} holding a request and came back as pid {new_pid} with its 3 capabilities REPLAYED — the client blocked across the crash was answered STATUS_SERVICE_GONE and exited cleanly, a new client reached the restarted instance through the SAME endpoint capability, the supervisor counted exactly 1 restart, and teardown is frame-exact across the whole cycle (frames {after})"
+        "service_restart: faultd died as pid {first_pid} holding a request and came back as pid {new_pid} with its 4 capabilities REPLAYED — the client blocked across the crash was answered STATUS_SERVICE_GONE and exited cleanly, a new client reached the restarted instance through the SAME endpoint capability, the supervisor counted exactly 1 restart, and teardown is frame-exact across the whole cycle (frames {after})"
     );
     Ok(())
 }
@@ -1101,6 +1120,7 @@ fn console_service_inner() -> NetResult {
     let nid_irq = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_consoled = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_diag = ipc::create_notification().map_err(|_| fail("diagnostic marker table full"))?;
 
     // consoled (registry image 12) gets the three-cap driver shape and
     // NEITHER console capability: the production instance holds both
@@ -1124,6 +1144,7 @@ fn console_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(
         12,
@@ -1134,7 +1155,9 @@ fn console_service_inner() -> NetResult {
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid =
         crate::spawn::spawn_init(13, &client_grants, Some((nid_client, CONTEST_EXIT_BADGE)))
             .map_err(|_| fail("contest (image 13) spawn failed"))?;
@@ -1209,7 +1232,7 @@ fn console_service_inner() -> NetResult {
     // Nobody was attached to the port's far end: tear down exactly as a
     // passing run does and report the honest SKIP.
     if client_status == Some(CONSOLE_EXIT_NO_DATA) {
-        console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled)?;
+        console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled, nid_diag)?;
         if frames::free_frames() != baseline {
             return Err(fail("console-service teardown is not frame-exact"));
         }
@@ -1271,7 +1294,7 @@ fn console_service_inner() -> NetResult {
         ));
     }
 
-    console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled)?;
+    console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled, nid_diag)?;
 
     let after = frames::free_frames();
     if after != baseline {
@@ -1297,6 +1320,7 @@ fn console_teardown(
     nid_irq: u32,
     nid_client: u32,
     nid_consoled: u32,
+    nid_diag: u32,
 ) -> NetResult {
     proc::destroy(s_pid)?;
     if relay::registered(CONSOLE_RELAY_VEC_RX) || relay::registered(CONSOLE_RELAY_VEC_TX) {
@@ -1308,6 +1332,7 @@ fn console_teardown(
     crate::spawn::forget(s_pid).map_err(|_| fail("driver spawn record forget refused"))?;
     crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
     ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_diag).map_err(|_| fail("diagnostic marker teardown refused"))?;
     ipc::destroy_notification(nid_irq).map_err(|_| fail("irq notification teardown refused"))?;
     ipc::destroy_notification(nid_client)
         .map_err(|_| fail("client notification teardown refused"))?;
@@ -1352,6 +1377,7 @@ fn input_service_inner() -> NetResult {
     let nid_irq = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_client = ipc::create_notification().map_err(|_| fail("notification table full"))?;
     let nid_inputd = ipc::create_notification().map_err(|_| fail("notification table full"))?;
+    let nid_diag = ipc::create_notification().map_err(|_| fail("diagnostic marker table full"))?;
 
     // inputd (registry image 10) gets the THREE-cap driver shape and
     // deliberately NOT the ConsoleInput cap the production instance
@@ -1374,6 +1400,7 @@ fn input_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(10, &inputd_grants, Some((nid_inputd, INPUTD_EXIT_BADGE)))
         .map_err(|_| fail("inputd (image 10) spawn failed"))?;
@@ -1381,7 +1408,9 @@ fn input_service_inner() -> NetResult {
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid =
         crate::spawn::spawn_init(11, &client_grants, Some((nid_client, INPUTTEST_EXIT_BADGE)))
             .map_err(|_| fail("inputtest (image 11) spawn failed"))?;
@@ -1458,7 +1487,7 @@ fn input_service_inner() -> NetResult {
     // teardown is part of what this test proves either way) and report
     // the honest SKIP.
     if client_status == Some(INPUT_EXIT_NO_KEYS) {
-        input_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_inputd)?;
+        input_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_inputd, nid_diag)?;
         if frames::free_frames() != baseline {
             return Err(fail("input-service teardown is not frame-exact"));
         }
@@ -1532,7 +1561,7 @@ fn input_service_inner() -> NetResult {
     // then both address spaces come back frame-exact — the driver's ONE
     // ring frame (rings AND event buffers in the same page), every page
     // table, and nothing else.
-    input_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_inputd)?;
+    input_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_inputd, nid_diag)?;
 
     let after = frames::free_frames();
     if after != baseline {
@@ -1700,6 +1729,7 @@ fn input_teardown(
     nid_irq: u32,
     nid_client: u32,
     nid_inputd: u32,
+    nid_diag: u32,
 ) -> NetResult {
     proc::destroy(s_pid)?;
     if relay::registered(INPUT_RELAY_VEC) {
@@ -1711,6 +1741,7 @@ fn input_teardown(
     crate::spawn::forget(s_pid).map_err(|_| fail("driver spawn record forget refused"))?;
     crate::spawn::forget(c_pid).map_err(|_| fail("client spawn record forget refused"))?;
     ipc::destroy_endpoint(eid).map_err(|_| fail("endpoint teardown refused"))?;
+    ipc::destroy_notification(nid_diag).map_err(|_| fail("diagnostic marker teardown refused"))?;
     ipc::destroy_notification(nid_irq).map_err(|_| fail("irq notification teardown refused"))?;
     ipc::destroy_notification(nid_client)
         .map_err(|_| fail("client notification teardown refused"))?;

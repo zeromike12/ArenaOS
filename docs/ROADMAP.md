@@ -983,14 +983,14 @@ an ADR has explicitly chosen it first.
 
 ## Phase 8 — Mature userspace 🔨 (8.0 complete; 8.1 next)
 
-Authority model: accepted ADR-0037/0038/0039/0040/0041/0042/0043/0044/0045. The roadmap below is the sequence,
+Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
 milestone gets its own real negative-space tests, the entire historical
 suite and a fresh, artifact-bound 100/100 boot qualification. Phase 8
 is not completed by accepting an ADR.
 
 - [x] **8.0 service manager + declarative service manifests v1**.
-      COMPLETE (26 historical suites and fresh final-EFI-bound 100/100
+      COMPLETE (27 historical suites and fresh final-EFI-bound 100/100
       QEMU boots; ADR-0037–0045) — the bounded resolver consumes a caller-cap-only
       syscall inventory; two real shell child cycles exercise the
       Process-cap finish ABI. A ring-3 manager now boots with kernel-
@@ -1024,8 +1024,16 @@ is not completed by accepting an ADR.
       Separate opt-in #UD and stalled-driver negative fixtures prove
       fail-closed OFFLINE before respawn; the driver's genuine #UD also
       exposed and closed deferred supervised-driver teardown (ADR-0045).
-      These four independently tested areas close 8.0, not a success
-      string on an unattended boot.
+      These four independently tested areas close the original exit
+      gates, not a success string on an unattended boot. ADR-0047 then
+      fixed the receiver-side authority gap discovered during 8.0
+      review: fault, stall and all poison/shutdown operations require
+      a transferred boot-granted diagnostic reference checked by the
+      *receiving service*, never just the client's data endpoint.
+      Missing and wrong markers are refused in real IPC before the
+      existing #UD/stall proofs; the historical driver/FS/console
+      shutdown fixtures retain their positive and negative proofs.
+      The final checkpoint was freshly requalified after this fix.
       Complete recovery from the fixed kernel trust root with only
       explicit Image/Endpoint/Notification/Process authority;
       kernel alone mints MMIO and keeps driver lifecycle. The manager

@@ -196,9 +196,9 @@ for i in $(seq 1 "$N"); do
     # Shipping fixture: real manager caps, two bounded active driver
     # probes, then two production children and a real-wire restart.
     # Destructive fault/stall negatives live in the historical host suite.
-    elif ! grep -aqF 'audited 10 literal caps; no device/Power/Process grants' "$SERIAL"; then
+    elif ! grep -aqF 'audited 12 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 11/11; twelfth refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 13/13; fourteenth refused' "$SERIAL"; then
         why="manager readiness-channel notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
@@ -206,18 +206,22 @@ for i in $(seq 1 "$N"); do
         why="two actual pre-spawn driver probes/reaps were not observed"
     elif [[ $(grep -acF 'depcheck: rngd device completed 64 varied bytes' "$SERIAL" || true) -ne 2 ]]; then
         why="the entropy device did not complete both active dependency probes"
+    elif [[ $(grep -acF 'depcheck: production driver poison opcodes refused without marker' "$SERIAL" || true) -ne 2 ]]; then
+        why="ordinary worker endpoints did not reject driver poison on both probe rounds"
     elif ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL"; then
         why="manager did not bring its production child to readiness"
-    elif ! grep -aqF 'four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras' "$SERIAL"; then
+    elif ! grep -aqF 'five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded' "$SERIAL"; then
         why="manager-owned child kernel cap audit missing"
     elif [[ $(grep -acF 'servicemgr: production netstackd READY pid' "$SERIAL" || true) -ne 2 ]]; then
         why="manager did not start exactly two child incarnations"
-    elif [[ $(grep -acF 'four installed child caps audited (netd/W stack/R backoff/RW rngd/W), no privileged extras' "$SERIAL" || true) -ne 2 ]]; then
+    elif [[ $(grep -acF 'five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded' "$SERIAL" || true) -ne 2 ]]; then
         why="both manager children were not independently audited"
     elif ! grep -aqF 'servicemgr: production child reaped through Process cap; bounded backoff' "$SERIAL"; then
         why="production child was not reaped/backed off by manager"
     elif ! grep -aqF 'm8: stacktest Process-cap stop refused to endpoint-only client' "$SERIAL"; then
         why="the client endpoint did not prove it lacks Process-stop authority"
+    elif ! grep -aqF 'm8: stacktest service refused missing/wrong shutdown marker' "$SERIAL"; then
+        why="service-side orderly-stop authority refusals absent"
     elif ! grep -aqF 'm8: stacktest observed SERVICE_GONE during child absence' "$SERIAL"; then
         why="old endpoint did not report SERVICE_GONE in the dead interval"
     elif ! grep -aqF 'm8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)' "$SERIAL"; then

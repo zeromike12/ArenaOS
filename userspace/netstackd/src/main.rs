@@ -70,6 +70,7 @@ mod tcp;
 
 const SLOT_NETD: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_DIAG: u64 = 4; // ADR-0047 boot-granted proof
 /// A notification of its own (M7.1b): what the stack backs off on
 /// while the supervisor brings a dead driver back. Waiting needs
 /// something to wait ON, and spinning on the clock is the polling
@@ -81,7 +82,7 @@ const SLOT_NOTIF: u64 = 2;
 /// handle pool from rngd at startup: a handle is authority by
 /// possession, so a guessable one would be authority by arithmetic.
 const SLOT_RNG: u64 = 3;
-const SLOT_TX: u64 = 4;
+const SLOT_TX: u64 = 8;
 /// The MASTER lend copy, taken once before the frame is mapped.
 ///
 /// `SYS_MAP_MEMORY` CONSUMES the cap it maps (ADR-0021: ownership
@@ -91,9 +92,9 @@ const SLOT_TX: u64 = 4;
 /// the map is a copy of nothing. The master is lent, never mapped,
 /// and every send copies from IT — because each send CONSUMES its
 /// copy on the way to the driver.
-const SLOT_TX_MASTER: u64 = 5;
+const SLOT_TX_MASTER: u64 = 9;
 /// The per-send lend copy, consumed by the call that carries it.
-const SLOT_TX_LENT: u64 = 6;
+const SLOT_TX_LENT: u64 = 10;
 
 /// Badge for the re-attach backoff timer.
 const BADGE_BACKOFF: u64 = 1 << 16;
@@ -525,7 +526,8 @@ pub unsafe extern "C" fn _start() -> ! {
         });
 
         // ADR-0039: signal startup on the SAME notification used for
-        // later backoff, avoiding an unrequested fifth child grant.
+        // later backoff; ADR-0047's separate fifth inherited cap is a
+        // read-only diagnostic marker, never a readiness channel.
         // In M7's standalone fixture nobody waits on this bit; the
         // driver's own backoff waits accept a merged badge and retry.
         let ready = syscall2(SYS_NOTIFY, SLOT_NOTIF, MGR_BADGE_STACK_READY);
@@ -560,11 +562,15 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                 fail(EXIT_RECV, "the serve-side receive failed");
             }
             let (arg, op, landed) = (w[0], w[1], w[2]);
-            if landed != CAP_NONE {
+            if landed != CAP_NONE && op != ARP_OP_SHUTDOWN && op != ARP_OP_FAULT {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
             }
             match op {
                 ARP_OP_FAULT => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply(ARP_S_BAD_OP, 0, 0);
+                        continue;
+                    }
                     log_line(|o| o.str("netstackd: injecting real #UD before in-flight reply"));
                     core::arch::asm!("ud2", options(noreturn));
                 }
@@ -895,6 +901,10 @@ unsafe fn serve(st8: &mut Stack) -> ! {
                     0,
                 ),
                 ARP_OP_SHUTDOWN => {
+                    if !take_diagnostic(landed, SLOT_DIAG) {
+                        reply(ARP_S_BAD_OP, 0, 0);
+                        continue;
+                    }
                     log_line(|o| {
                         o.str("netstackd: shutdown — ");
                         o.u64(st8.wire_requests);

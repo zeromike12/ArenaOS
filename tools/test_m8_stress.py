@@ -41,7 +41,7 @@ def main() -> int:
                 and all(tuple(values) == baseline[0] for _, *values in cycles) and PASS in serial,
                 "actual kernel free frames/spawn records/process slots flat after EACH of three restarts")
     pids = re.findall(rf"{READY} (\d+)", serial)
-    audited = re.findall(r"manager-owned netstackd pid (\d+): four installed child caps audited", serial)
+    audited = re.findall(r"manager-owned netstackd pid (\d+): five inherited child caps audited", serial)
     ok &= check(len(pids) == len(set(pids)) == 4 and audited == pids,
                 "four distinct production child instances, every installed cap audited")
     ok &= check(serial.count("servicemgr: production child reaped through Process cap") == 3

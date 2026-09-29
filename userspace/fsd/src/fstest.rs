@@ -299,7 +299,12 @@ unsafe fn shutdown_services(msg: &mut [u8; MSG_BYTES], expected_ops: u64) {
     // SAFETY: `msg` is this thread's own buffer; `reply` its own
     // stack; the caps are the granted slots.
     unsafe {
-        let (st, disk_ops) = fs_call(SLOT_FS, FS_OP_SHUTDOWN, 0, CAP_NONE, msg, EXIT_FSD_SHUTDOWN);
+        if !diagnostic_refused(SLOT_FS, FS_OP_SHUTDOWN, 0, CAP_NONE, FS_ERR_BAD_OP)
+            || !diagnostic_refused(SLOT_FS, FS_OP_SHUTDOWN, 0, 3, FS_ERR_BAD_OP)
+            || !diagnostic_refused(SLOT_BLK, u64::MAX, block_req_w1(OP_SHUTDOWN, 0), 2, VIRTIO_BLK_S_UNSUPP)
+        { fail(EXIT_FSD_SHUTDOWN, "ordinary or wrong diagnostic marker authorized poison"); }
+        log_line(|o| o.str("fstest: fsd and storaged rejected missing/wrong-object poison markers"));
+        let (st, disk_ops) = fs_call(SLOT_FS, FS_OP_SHUTDOWN, 0, 2, msg, EXIT_FSD_SHUTDOWN);
         if st != FS_OK || disk_ops != expected_ops {
             log_line(|o| {
                 o.str("fstest: SHUTDOWN status ");
@@ -320,7 +325,7 @@ unsafe fn shutdown_services(msg: &mut [u8; MSG_BYTES], expected_ops: u64) {
             SLOT_BLK,
             u64::MAX,
             block_req_w1(OP_SHUTDOWN, 0),
-            CAP_NONE,
+            3,
             reply.as_mut_ptr() as u64,
             0,
         );

@@ -10,7 +10,7 @@
 //! Phase 8.0 implementation substrate only: no service is spawned here.
 
 pub const MAX_SERVICES: usize = 4;
-pub const MAX_GRANTS: usize = 4; // matches spawn::MAX_INHERIT
+pub const MAX_GRANTS: usize = 5; // matches spawn::MAX_INHERIT
 pub const MAX_DEPS: usize = 4;
 pub const MAX_CAPS: usize = 16;
 pub const MAX_RESTARTS: u8 = 3;

@@ -1,6 +1,6 @@
-//! Phase 8.0 ring-3 managed initial spawn (ADR-0037/0039).
-//! This program restarts the production stack with a bounded policy,
-//! but Phase 8.0's adversarial lifecycle/accounting proofs remain open.
+//! Phase 8.0 ring-3 service manager (ADR-0037–0047).
+//! This program restarts the production stack with a bounded policy;
+//! destructive operations need receiving-service diagnostic authority.
 //! No manifest request becomes authority merely because this program
 //! boots: the kernel installed literal caps, queried by SyscallProbe.
 #![no_std]
@@ -26,6 +26,8 @@ const SLOT_RNG_READY: u8 = 6;
 const SLOT_RESTART: u8 = 7; // private timer object, NOT shared with any driver
 const SLOT_ADMIN: u8 = 8; // READ-only private shell-to-manager request
 const SLOT_PROBE_IMAGE: u8 = 9; // Image20/READ, full fixture only
+const SLOT_RNG_DIAG: u8 = 10; // diagnostic marker, never a data-plane cap
+const SLOT_STACK_DIAG: u8 = 11; // inherited READ-only by production stack
 const READY_DEADLINE_US: u64 = 2_000_000;
 
 const IMAGE: Key = Key(0);
@@ -33,7 +35,8 @@ const NETD: Key = Key(1);
 const STACK: Key = Key(2);
 const BACKOFF: Key = Key(3);
 const RNGD: Key = Key(4);
-const SLOTS: [NamedSlot; 5] = [
+const STACK_DIAG: Key = Key(5);
+const SLOTS: [NamedSlot; 6] = [
     NamedSlot {
         key: IMAGE,
         slot: SLOT_IMAGE,
@@ -54,8 +57,12 @@ const SLOTS: [NamedSlot; 5] = [
         key: RNGD,
         slot: SLOT_RNGD,
     },
+    NamedSlot {
+        key: STACK_DIAG,
+        slot: SLOT_STACK_DIAG,
+    },
 ];
-const GRANTS: [Request; 4] = [
+const GRANTS: [Request; 5] = [
     Request {
         key: NETD,
         kind: Kind::Endpoint,
@@ -79,6 +86,12 @@ const GRANTS: [Request; 4] = [
         kind: Kind::Endpoint,
         rights: manifest::WRITE,
         child_slot: 3,
+    },
+    Request {
+        key: STACK_DIAG,
+        kind: Kind::Notification,
+        rights: manifest::READ,
+        child_slot: 4,
     },
 ];
 const DEPS: [Dependency; 2] = [Dependency::External(1), Dependency::External(2)];
@@ -143,6 +156,16 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
     let restart = probe.describe(SLOT_RESTART).map_err(|_| ())?;
     let admin = probe.describe(SLOT_ADMIN).map_err(|_| ())?;
     let image = probe.describe(SLOT_PROBE_IMAGE).map_err(|_| ())?;
+    let rng_diag = probe.describe(SLOT_RNG_DIAG).map_err(|_| ())?;
+    let stack_diag = probe.describe(SLOT_STACK_DIAG).map_err(|_| ())?;
+    if rng_diag.kind != inventory::NOTIFICATION_KIND
+        || stack_diag.kind != inventory::NOTIFICATION_KIND
+        || rng_diag.rights != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
+        || stack_diag.rights != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
+        || rng_diag.object == stack_diag.object
+        || rng_diag.object == restart.object || stack_diag.object == restart.object
+        || rng_diag.object == admin.object || stack_diag.object == admin.object
+    { return Err(()); }
     if image.kind != inventory::IMAGE_KIND
         || image.object != 20
         || image.rights != manifest::READ as u64
@@ -183,6 +206,8 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
         || held[2].kind != Kind::Endpoint
         || held[3].kind != Kind::Notification
         || held[4].kind != Kind::Endpoint
+        || held[5].kind != Kind::Notification
+        || held[5].object != stack_diag.object
         || held[3].object == restart.object
         || held[3].object == admin.object
     {
@@ -228,10 +253,10 @@ fn wait_ready() -> Result<(), ()> {
 /// lifecycle authority. The stack must signal ready on the SAME
 /// notification it later uses for backoff, before we report service up.
 fn launch(step: Step) -> Result<(u64, u8), ()> {
-    if step.count != 4 {
+    if step.count != 5 {
         return Err(());
     }
-    let mut spec = [(0u64, 0u64); 4];
+    let mut spec = [(0u64, 0u64); 5];
     for (i, item) in spec.iter_mut().enumerate() {
         let grant = step.grants[i].ok_or(())?;
         if grant.child_slot != i as u8 {
@@ -304,13 +329,15 @@ fn probe_dependencies(fixture: u8) -> Result<(), ()> {
             RIGHTS_WRITE | if fixture == 2 { RIGHTS_COPY } else { 0 },
         ),
         (SLOT_RESTART as u64, RIGHTS_WRITE),
+        (SLOT_STACK_DIAG as u64, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY), // wrong-object negative
+        (SLOT_RNG_DIAG as u64, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY), // real proof
     ];
     let child = unsafe {
         syscall5(
             SYS_SPAWN,
             SLOT_PROBE_IMAGE as u64,
             spec.as_ptr() as u64,
-            3,
+            if fixture == 0 { 3 } else { 5 },
             SLOT_RESTART as u64,
             MGR_BADGE_PROBE_EXIT,
         )
@@ -594,7 +621,7 @@ pub extern "C" fn _start() -> ! {
             park();
         }
     };
-    if step.service_id != 17 || step.count != 4 {
+    if step.service_id != 17 || step.count != 5 {
         log("servicemgr: OFFLINE — unexpected plan shape; no child spawned\r\n");
         park();
     }

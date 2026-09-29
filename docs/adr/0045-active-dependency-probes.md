@@ -1,6 +1,8 @@
 # ADR-0045 — Bounded active dependency probes before every managed stack spawn
 
-*Status: accepted and qualified. The four Phase 8.0 exit areas are proven by the complete historical QEMU suite and final-EFI-bound 100/100 boot qualification.*
+*Status: accepted. The original four Phase 8.0 exit areas were qualified;
+ADR-0047 subsequently closes the service-side diagnostic authorization
+gap discovered during review. Use the later, freshly qualified checkpoint.*
 
 ## Context
 

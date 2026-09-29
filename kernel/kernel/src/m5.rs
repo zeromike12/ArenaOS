@@ -957,6 +957,7 @@ fn test_block_service() -> Result<(), &'static str> {
     let nid_irq = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_client = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_storaged = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_diag = ipc::create_notification().map_err(|_| "diagnostic marker table full")?;
 
     // storaged (registry image 2): slot 0 = the device window (Mmio,
     // READ|WRITE — the handshake writes registers), slot 1 = the serve
@@ -979,6 +980,7 @@ fn test_block_service() -> Result<(), &'static str> {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(
         2,
@@ -990,7 +992,9 @@ fn test_block_service() -> Result<(), &'static str> {
     let client_grants = [Cap {
         obj: CapObj::Endpoint { eid },
         rights: cap::RIGHTS_WRITE,
-    }];
+    },
+        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    ];
     let c_pid = crate::spawn::spawn_init(3, &client_grants, Some((nid_client, CLIENT_EXIT_BADGE)))
         .map_err(|_| "blktest (image 3) spawn failed")?;
     info!(
@@ -1102,6 +1106,7 @@ fn test_block_service() -> Result<(), &'static str> {
     crate::spawn::forget(s_pid).map_err(|_| "driver spawn record forget refused")?;
     crate::spawn::forget(c_pid).map_err(|_| "client spawn record forget refused")?;
     ipc::destroy_endpoint(eid).map_err(|_| "endpoint teardown refused")?;
+    ipc::destroy_notification(nid_diag).map_err(|_| "diagnostic marker teardown refused")?;
     ipc::destroy_notification(nid_irq).map_err(|_| "irq notification teardown refused")?;
     ipc::destroy_notification(nid_client).map_err(|_| "client notification teardown refused")?;
     ipc::destroy_notification(nid_storaged).map_err(|_| "driver notification teardown refused")?;
@@ -1188,6 +1193,8 @@ fn test_fs_service() -> Result<(), &'static str> {
     let nid_fstest = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_fsd = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_storaged = ipc::create_notification().map_err(|_| "notification table full")?;
+    let nid_fs_diag = ipc::create_notification().map_err(|_| "diagnostic marker table full")?;
+    let nid_blk_diag = ipc::create_notification().map_err(|_| "block diagnostic marker table full")?;
 
     // storaged (registry image 2), exactly as block_service grants it:
     // the device window, the block endpoint's serve side, the irq
@@ -1208,6 +1215,7 @@ fn test_fs_service() -> Result<(), &'static str> {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_blk_diag }, rights: cap::RIGHTS_READ },
     ];
     let s_pid = crate::spawn::spawn_init(
         2,
@@ -1230,6 +1238,7 @@ fn test_fs_service() -> Result<(), &'static str> {
             obj: CapObj::Endpoint { eid: eid_fs },
             rights: cap::RIGHTS_READ,
         },
+        Cap { obj: CapObj::Notification { nid: nid_fs_diag }, rights: cap::RIGHTS_READ },
     ];
     let f_pid = crate::spawn::spawn_init(4, &fsd_grants, Some((nid_fsd, FSD_EXIT_BADGE)))
         .map_err(|_| "fsd (image 4) spawn failed")?;
@@ -1245,6 +1254,8 @@ fn test_fs_service() -> Result<(), &'static str> {
             obj: CapObj::Endpoint { eid: eid_blk },
             rights: cap::RIGHTS_WRITE,
         },
+        Cap { obj: CapObj::Notification { nid: nid_fs_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+        Cap { obj: CapObj::Notification { nid: nid_blk_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
     ];
     let c_pid = crate::spawn::spawn_init(5, &fstest_grants, Some((nid_fstest, FSTEST_EXIT_BADGE)))
         .map_err(|_| "fstest (image 5) spawn failed")?;
@@ -1394,6 +1405,8 @@ fn test_fs_service() -> Result<(), &'static str> {
     crate::spawn::forget(c_pid).map_err(|_| "fstest spawn record forget refused")?;
     ipc::destroy_endpoint(eid_blk).map_err(|_| "block endpoint teardown refused")?;
     ipc::destroy_endpoint(eid_fs).map_err(|_| "fs endpoint teardown refused")?;
+    ipc::destroy_notification(nid_fs_diag).map_err(|_| "diagnostic marker teardown refused")?;
+    ipc::destroy_notification(nid_blk_diag).map_err(|_| "block marker teardown refused")?;
     ipc::destroy_notification(nid_irq).map_err(|_| "irq notification teardown refused")?;
     ipc::destroy_notification(nid_fstest).map_err(|_| "fstest notification teardown refused")?;
     ipc::destroy_notification(nid_fsd).map_err(|_| "fsd notification teardown refused")?;

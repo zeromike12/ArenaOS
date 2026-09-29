@@ -38,10 +38,10 @@ use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
 pub const MAX_ENDPOINTS: usize = 8;
-// ADR-0038/0040/0043: eleven disjoint production notifications,
-// including independently writable driver readiness, manager-private
-// backoff and admin stop channels. A shared badge word is forgeable.
-pub const MAX_NOTIFS: usize = 11;
+// ADR-0038/0040/0043/0047: thirteen disjoint production notifications,
+// including driver readiness, private manager control, and two inert
+// service-side diagnostic markers. A shared badge word is forgeable.
+pub const MAX_NOTIFS: usize = 13;
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
 const QUEUE_DEPTH: usize = 4;
@@ -323,6 +323,8 @@ fn install_cap(pid: u64, cap: Cap) -> u64 {
     };
     match crate::cap::grant(pid, cap) {
         Ok(slot) => {
+            crate::cap::mark_ipc_landed(pid, slot)
+                .unwrap_or_else(|_| crate::halt::halt_machine("IPC recipient cap provenance lost"));
             bump!(cap_transfers);
             slot as u64
         }

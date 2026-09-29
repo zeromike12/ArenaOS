@@ -39,7 +39,7 @@ pub const MAX_IMAGES: usize = 21;
 /// Most handles one spawn may inherit (the spec arrives in registers +
 /// a small user buffer; four is plenty for a supervisor demo and every
 /// excess is a typed refusal).
-pub const MAX_INHERIT: usize = 4;
+pub const MAX_INHERIT: usize = 5;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten).
 pub const MAX_SPAWN_RECS: usize = 20;
