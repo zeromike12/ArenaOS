@@ -14,7 +14,8 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
-The Phase 8.1 **transactional-core checkpoint** adds `test_m81_update.py`
+The Phase 8.1 **completed checkpoint** retains the transactional-core tests:
+`test_m81_update.py`
 (separate service-issued updater marker; exact guest-committed value;
 seven observed CREATE/WRITE/CLOSE/reply SIGKILL gates, committed platter
 audit BEFORE retry and exact same-disk recovery; visible malformed
@@ -23,11 +24,17 @@ predecessor and full disk return typed refusals) plus
 byte-exact, typed ninth refusal). Host-prepared allocator exhaustion
 marks sectors used in AFS1's committed bitmap; the host audit permits
 this as honest unreachable allocation, not a simulated device error.
-`mtest.boot` now supports a boot-time kill gate with no shell feed; its
-historical command-gated kill semantics remain unchanged. Numeric
-resource accounting after repeated updates and additional fault-return
-paths are still open before 8.1 closure. Full suite is 31 suites; the
-fresh final-image 100/100 and extracted-bundle boot remain mandatory.
+`mtest.boot` supports a boot-time kill gate with no shell feed; its
+historical command-gated kill semantics remain unchanged. Each boot's
+Power-gated `stackstress` snapshot checks exact boot-relative free-frame
+consumption, live spawn records and occupied process slots across skip,
+commit, no-op, all eight generations and the ninth refusal; subtracting
+each boot's post-EBS free-frame baseline accounts for genuine OVMF map
+variation rather than tolerating a guest leak. A second marked SET after
+real disk allocation failure must return DEGRADED on the same boot;
+preflight table exhaustion stays NO_SPACE and exact old-value READ
+survives. Full suite is 31 suites; the fresh final-image 100/100 and
+extracted-bundle boot are mandatory and complete for 8.1.
 
 The Phase 8.1 **read-boundary checkpoint** is not Phase 8.1 completion.
 `tools/test_m81_read.py` boots the real guest repeatedly, including the

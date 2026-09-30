@@ -80,6 +80,17 @@ pub extern "C" fn _start() -> ! {
         (CFG_OK, 2) => b"guest-v2",
         _ => fail("configup: invalid plan status\r\n"),
     };
+    // Compare the exact *service-visible* old reply across a failed
+    // transaction. This avoids assuming a specific prior disk sequence
+    // while still detecting a silent fallback or a pending empty value.
+    let mut previous = [0u8; MSG_BYTES];
+    let (rc, previous_reply) = request(CFG_OP_READ, CAP_NONE, &mut previous);
+    if rc != 0
+        || previous_reply[2] != CAP_NONE
+        || !matches!(previous_reply[0], CFG_OK | CFG_UNSET | CFG_CORRUPT)
+    {
+        fail("configup: initial READ IPC failed\r\n");
+    }
     msg = [0; MSG_BYTES];
     msg[..2].copy_from_slice(&(wanted.len() as u16).to_le_bytes());
     msg[2..2 + wanted.len()].copy_from_slice(wanted);
@@ -118,10 +129,35 @@ pub extern "C" fn _start() -> ! {
             log("configup: SET UNCHANGED (same committed bytes; no new generation)\r\n")
         }
         CFG_NO_SPACE => {
+            msg = [0; MSG_BYTES]; // the previous IPC call overwrote the input
+            msg[..2].copy_from_slice(&(wanted.len() as u16).to_le_bytes());
+            msg[2..2 + wanted.len()].copy_from_slice(wanted);
+            let (rc, again) = request(CFG_OP_SET, 1, &mut msg);
+            if rc != 0 || again[2] != CAP_NONE {
+                fail("configup: NO_SPACE follow-up IPC refused\r\n");
+            }
             if done[1] == 8 {
+                if again[0] != CFG_NO_SPACE || again[1] != 8 {
+                    fail("configup: bounded table preflight incorrectly degraded\r\n");
+                }
                 log("configup: SET NO_SPACE (eight immutable generations)\r\n");
+                log("configup: table preflight stayed bounded, not degraded\r\n");
             } else if done[1] == 0 {
+                if again[0] != CFG_DEGRADED || again[1] != 0 {
+                    fail("configup: FS_NO_SPACE did not latch DEGRADED\r\n");
+                }
+                let mut old = [0u8; MSG_BYTES];
+                let (rc, read) = request(CFG_OP_READ, CAP_NONE, &mut old);
+                if rc != 0
+                    || read[2] != CAP_NONE
+                    || !matches!(read[0], CFG_OK | CFG_UNSET)
+                    || read != previous_reply
+                    || old != previous
+                {
+                    fail("configup: prior exact value lost after disk-full refusal\r\n");
+                }
                 log("configup: SET NO_SPACE (disk allocation refused)\r\n");
+                log("configup: DEGRADED latch + exact old READ after FS_NO_SPACE\r\n");
             } else {
                 fail("configup: invalid NO_SPACE detail\r\n");
             }

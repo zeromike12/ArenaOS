@@ -1053,7 +1053,7 @@ is not completed by accepting an ADR.
       dynamic permission UI, generic device-cap request, or competing
       kernel/user restart owner (ADR-0037). Existing M1–M7 regressions
       must continue to pass including the no-peer boot.
-- [ ] **8.1 transactional configuration store**. IN PROGRESS — accepted
+- [x] **8.1 transactional configuration store**. COMPLETE — accepted
       ADR-0046 selects a bounded single-key, immutable-generation design,
       explicit receiving-service update marker and the existing AFS1
       ordered-write/atomic-sector crash model. The byte-exact `no_std`
@@ -1068,8 +1068,12 @@ is not completed by accepting an ADR.
       SIGKILL/reboot recovery gates on the SAME disk, eight byte-exact
       immutable generations and typed ninth/full-disk refusals. The
       trusted raw-FS shell only stages a test-intent file; it never
-      receives update authority. 8.1 stays IN PROGRESS pending numeric
-      per-update resource accounting and fault-return/degraded proof.
+      receives update authority. Closure measures exact post-EBS-relative
+      free-frame consumption / spawn records / process slots `(254,10,10)`
+      across no-update, commit, no-op, all eight generations and the ninth
+      refusal. Same-boot disk-full forces a second real marked SET to return
+      `DEGRADED`, with an exact old-value READ; safe full-table preflight
+      remains `NO_SPACE` and does not degrade.
       AFS1 can hide a newer generation if its commit sector suffers
       arbitrary corruption; after the explicit scope decision, 8.1
       rejects **visible malformed config records** rather than pretending

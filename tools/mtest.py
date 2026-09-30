@@ -377,7 +377,8 @@ def boot(label: str, esp: Path,
                     data = b""
                 while sent < len(feed):
                     m, n, payload = feed[sent]
-                    if data.count(m) < n:
+                    markers = m if isinstance(m, tuple) else (m,)
+                    if not all(data.count(part) >= n for part in markers):
                         break
                     try:
                         assert proc.stdin is not None

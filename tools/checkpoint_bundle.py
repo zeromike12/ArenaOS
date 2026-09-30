@@ -70,13 +70,27 @@ def main() -> int:
     efi_sha, esp_bytes = verify_qualified_image(args.suite_log)
     if args.checkpoint.startswith("phase81-"):
         log = args.suite_log.read_text()
-        total = 31 if args.checkpoint == "phase81-transactional-core" else 29
+        total = 31 if args.checkpoint in ("phase81-transactional-core", "phase81-complete") else 29
         if f"ALL TESTS PASSED ({total} test suites)" not in log or "CONFIG-READ-BOUNDARY: PASS" not in log:
             raise ValueError(f"8.1 checkpoint requires all {total} historical suites and the guest read proof")
-        if args.checkpoint == "phase81-transactional-core" and (
+        if args.checkpoint in ("phase81-transactional-core", "phase81-complete") and (
             "AUTHORIZED TRANSACTION/CRASH: PASS" not in log or
             "EIGHT-SLOT EXHAUSTION: PASS" not in log):
             raise ValueError("transactional checkpoint requires updater, disk crash and bounded-table proofs")
+        if args.checkpoint == "phase81-complete":
+            metric = r"\(\d+, \d+, \d+\)"
+            baseline = re.search(
+                rf"Power-gated boot-relative frame/record/process consumption exact across skip/commit/no-op: \[({metric}), ({metric}), ({metric})\]",
+                log)
+            generations = re.findall(
+                rf"\[m81-table\] generation ([1-8]): PASS .*boot-relative counters=({metric})",
+                log)
+            if (baseline is None or len(set(baseline.groups())) != 1 or
+                [int(n) for n, _ in generations] != list(range(1, 9)) or
+                any(counts != baseline[1] for _, counts in generations) or
+                "FS allocator refused WRITE; second marked SET DEGRADED, old READ/record intact" not in log or
+                "PASS: table preflight stayed bounded, not degraded" not in log):
+                raise ValueError("8.1 closure requires exact numeric bounds and same-boot failure barrier")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -95,7 +109,9 @@ def main() -> int:
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1: TRANSACTIONAL CORE; positive SET/crash/table/disk proofs; 8.1 INCOMPLETE pending resource/fault accounting\n"
+        + ("Phase 8.1: COMPLETE; AFS1 ordered-write/atomic-sector model; visible config-record integrity; exact boot-relative resources, bounded table/disk refusal and DEGRADED barrier proven\n"
+           if args.checkpoint == "phase81-complete" else
+           "Phase 8.1: TRANSACTIONAL CORE; positive SET/crash/table/disk proofs; 8.1 INCOMPLETE pending resource/fault accounting\n"
            if args.checkpoint == "phase81-transactional-core" else
            "Phase 8.1: READ BOUNDARY ONLY; no authorized SET, 8.1 INCOMPLETE\n"
            if args.checkpoint.startswith("phase81-") else "")
@@ -136,7 +152,8 @@ def main() -> int:
             os.environ["ARENA_OVMF_CODE"] = str(unpacked / "edk2-x86_64-code.fd")
             os.environ["ARENA_OVMF_VARS"] = str(unpacked / "ovmf-vars-template.img")
             rc, serial, _ = mtest.boot("checkpoint-bundle", unpacked / "arena-esp.img",
-                                       [(b"servicemgr: production netstackd READY pid", 1, b"stackstop\r"),
+                                       [((b"servicemgr: production netstackd READY pid", b"arena>"),
+                                         1, b"stackstop\r"),
                                         (b"arena>", 2, b"shutdown\r")], scratch)
         finally:
             for key, old in (("ARENA_OVMF_CODE", old_code), ("ARENA_OVMF_VARS", old_vars)):
@@ -160,7 +177,7 @@ def main() -> int:
                          "configread: READ UNSET",
                          "configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)",
                          "configread: boot-root reader reaped; no update authority delegated")
-        if args.checkpoint == "phase81-transactional-core":
+        if args.checkpoint in ("phase81-transactional-core", "phase81-complete"):
             required += ("configup: SKIP (no trusted test intent; no SET)",
                          "configup: boot-root updater reaped; marker never delegated to shell")
         if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)

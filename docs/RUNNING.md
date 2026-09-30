@@ -1,24 +1,28 @@
 # Running ArenaOS in your own QEMU
 
-Every completed milestone ships as a **GitHub release** containing a
-prebuilt, tested boot image plus the exact UEFI firmware pair it was
-verified against. This page explains how to boot it on your own machine.
+Every completed milestone checkpoint ships a deployable, qualified QEMU
+archive with its exact verified UEFI firmware pair. Tagged GitHub releases
+are separate publication events. This page explains how to boot locally.
 
-## Phase 8.1 transactional-core checkpoint (8.1 not yet closed)
+## Phase 8.1 complete: exact per-commit QEMU build
 
-This commit's bootable QEMU image adds an actual marker-authorized SET,
-immutable AFS1 generations, exact post-commit rescan, and a separately
-trusted updater. The ordinary reader receives no marker. Both update and
-crash-recovery paths are guest-tested, but 8.1 remains **in progress**
-until numeric resource/fault-path accounting is closed. For this commit:
+This bootable image includes the marker-authorized immutable update,
+exact post-commit rescan, crash recovery, bounded resource accounting
+through all eight generations and a same-boot DEGRADED barrier after
+real disk-full refusal. Phase 8.1 is **complete within the AFS1
+ordered-write/atomic-sector crash model**: visible malformed config
+records are rejected. Arbitrary commit-sector corruption and disk
+rollback are not covered. The ordinary reader has no update marker.
+Full historical suite: 31/31; fresh final-EFI-bound boots: 100/100.
+Download this checkpoint:
 
 ```sh
-curl -fL -o arenaos-phase81-transactional-core-qemu-x86_64.tar.gz \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-transactional-core/arenaos-phase81-transactional-core-qemu-x86_64.tar.gz
-curl -fL -o arenaos-phase81-transactional-core-qemu-x86_64.tar.gz.sha256 \
-  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-transactional-core/arenaos-phase81-transactional-core-qemu-x86_64.tar.gz.sha256
-sha256sum -c arenaos-phase81-transactional-core-qemu-x86_64.tar.gz.sha256
-tar xzf arenaos-phase81-transactional-core-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase81-complete-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-complete/arenaos-phase81-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase81-complete-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase81-complete/arenaos-phase81-complete-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase81-complete-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase81-complete-qemu-x86_64.tar.gz
 sha256sum -c sha256sums.txt
 cp ovmf-vars-template.img ovmf-vars.img
 cp scratch-template.img scratch.img  # FIRST boot only; retain thereafter
@@ -41,9 +45,17 @@ configd checks the transferred, service-issued marker at the receiving
 boundary. Neither the ordinary reader nor shell holds that marker.
 There is no general configuration or permission-grant CLI yet.
 
+## Historical Phase 8.1 transactional-core checkpoint (8.1 remained incomplete)
+
+The earlier partial archive remains available at
+`releases/checkpoints/phase81-transactional-core/`. It proved SET, crash
+recovery and table/disk refusal but did **not** yet prove numeric resource
+accounting or the second same-boot DEGRADED refusal. Use its own archive
+and checksum, not this completed checkpoint's receipt.
+
 ## Historical Phase 8.1 read-boundary checkpoint (8.1 remained incomplete)
 
-The latest checkpoint bundles a bootable resident `configd` and separate
+That earlier checkpoint bundles a bootable resident `configd` and separate
 ordinary reader (ADR-0046). It reads real AFS1 records and refuses SET
 without genuine transferred authority, but **does not perform authorized
 SET, atomic update or crash recovery yet**. The host-provisioned record
@@ -70,8 +82,8 @@ remain available; there is deliberately no configuration write command.
 
 ## Phase 8 checkpoint: boot the exact per-commit build
 
-Phase 8.0 is **complete after the ADR-0047 receiving-service authority
-closure**; 8.1 is next. Earlier 8.0 checkpoint images are historical,
+Phase 8.0 was **complete after the ADR-0047 receiving-service authority
+closure**; 8.1 is now also complete in the bounded ADR-0046 scope. Earlier 8.0 checkpoint images are historical,
 not substitutes for this corrected build. Every Phase 8 checkpoint commit
 includes a qualified, self-contained QEMU archive under
 `releases/checkpoints/` (ADR-0039). For the **completed 8.0 service-manager**

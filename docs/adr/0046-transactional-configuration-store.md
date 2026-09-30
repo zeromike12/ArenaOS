@@ -1,6 +1,6 @@
-# ADR-0046 — Phase 8.1 transactional configuration store: design investigation
+# ADR-0046 — Phase 8.1 transactional configuration store
 
-*Status: accepted for bounded 8.1 implementation (2026-09-29); read boundary qualified; transactional-core implementation and qualification in progress. Phase 8.0 remains complete and 8.1 is not yet closed. This is not a permission policy (8.2).*
+*Status: accepted and implemented within bounded scope (2026-09-29). Phase 8.1 complete: full 31-suite regression, final-EFI-bound 100/100 QEMU boot qualification, deployable archive and extracted-archive boot. Not a permission policy (8.2).*
 
 ## Existing facts and threat boundary
 
@@ -181,7 +181,75 @@ both READY and `arena>` before sending input. The commands, authority
 checks and exact output assertions remain unchanged. This is a
 readiness-boundary repair, not a timing retry or weakened regression.
 
-## Required proof before 8.1 closure
+## Final 8.1 accounting and failure-return proof plan
+
+Do not grant Power or a raw-FS endpoint to the trusted updater just to
+measure its own resource usage. Use the existing Power-gated shell
+`stackstress` snapshot: its first log line contains kernel counts of
+free frames, live spawn records and occupied process slots. Compare
+snapshots from a boot with no config transaction and a subsequent boot
+on the SAME disk after a committed update, **before** the shell maps any
+file-buffer frame. Also compare after a repeated no-op update and each
+of eight bounded generations. UEFI may deliver a different initial RAM
+map: its post-EBS *free-frame baseline* is logged each boot. Compare
+`post-EBS free - Power snapshot free` exactly, plus exact records and
+processes, rather than comparing absolute free-frame counts across
+machines with different initial pools. The existing manager stress proof
+keeps counts flat inside each boot; there is no tolerated drift in the
+boot-relative comparison. `configd` holds one reusable frame and the
+boot root reaps both proof clients, so a difference would expose a real
+leak or startup race to investigate, not a reason to relax the test.
+
+On an offline prepared allocator-full disk, the first marker-authorized
+SET may CREATE a pending empty generation but cannot WRITE it. After
+configd returns `NO_SPACE`, a second genuine SET on that SAME boot must
+return `DEGRADED` without another fsd mutation; a subsequent ordinary
+READ must validate the committed namespace (and, on the known-value
+fixture, return the prior value rather than the pending empty file). The
+host independently verifies those exact old bytes on disk. On the full eight-record table (no FS mutation attempted),
+a second SET may return bounded `NO_SPACE` again but must not enter
+DEGRADED. This distinguishes ambiguous transaction state from safe
+preflight exhaustion and exercises the promised receiver-side failure
+barrier. Disk audit and post-reboot retry retain the crash-model bounds.
+
+## 8.1 closure: observed proof and limits
+
+The qualified full regression reported **31/31 suites** and the final EFI
+(`21f9df0b7444acb52b7e9cb908cec4945c0461b59ee9420655af63a18a9335c8`)
+passed **100/100** ordinary QEMU boots with its matching receipt. Same-disk
+skip → real SET → repeated no-op produced exact Power-gated boot-relative
+frame/spawn-record/process counts `(254, 10, 10)` on all three boots.
+Eight subsequent guest-committed generations and the ninth preflight
+refusal independently returned `(254, 10, 10)` on each of their nine
+boots; `stackstress` also verified *within* each boot that three real
+manager restart cycles returned all three counters exactly. In the
+first table-test attempt, OVMF delivered 117025 initial free frames on
+one boot versus 117010 on the next: comparing absolute free-frame
+counts falsely reported +15. The divergence was already present at
+post-EBS, before any config process ran. The corrected assertion
+subtracts each boot's actual post-EBS free pool; it still permits **zero**
+resource-consumption drift, and the process/record counts remain absolute.
+
+An offline allocator-full fixture forces fsd's actual WRITE to refuse
+allocation after creating a pending generation. The updater sends a
+second marker-bearing SET on the same boot; configd returns `DEGRADED`
+and refuses further mutations while an ordinary READ validates the
+committed namespace. The host checks the old generation's exact bytes,
+that the new generation is at most empty, and `afs1.audit()` clean. On
+the eight-generation table, a second marker-bearing preflight SET still
+returns `NO_SPACE`, **not** `DEGRADED`, because no uncertain FS mutation
+was attempted. These are distinct failure paths, not a fabricated
+status reply or a reboot used to clear the first error.
+
+The earlier seven real QEMU SIGKILL boundaries, same-disk reconciliation,
+visible-record corruption refusal and no-marker/wrong-kind receiver
+denials remain in the 31-suite run. The trusted shell still has raw FS
+power; it cannot be used as an untrusted adversary for namespace
+integrity. Arbitrary corruption of AFS1 commit sectors, volatile-cache
+power loss and disk rollback remain outside the selected 8.1 crash
+model; no global media-integrity or 8.2 grant UI is claimed.
+
+## Closure criteria (verified)
 
 1. Audit actual image, endpoint, notification, slot and process bounds and grant provenance with both device-present and absent fixtures before allocating boot grants. Keep raw FS writers explicitly trusted; never give the config reader a raw FS endpoint.
 2. Unit-test the exact record parser, reserved namespace scan, empty/contiguous/gap/duplicate/unknown-version/corrupt cases, sequence exhaustion and full-table refusal. Prove ordinary endpoint without marker and wrong/forged markers cannot update at the receiver; only the genuine separately granted updater can.
