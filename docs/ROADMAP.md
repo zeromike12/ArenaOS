@@ -981,7 +981,7 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0 complete; 8.1 in progress)
+## Phase 8 — Mature userspace 🔨 (8.0 and 8.1 complete; 8.2 design investigation)
 
 Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
@@ -1081,12 +1081,16 @@ is not completed by accepting an ADR.
       existing guest tests exercise CREATE/WRITE-commit/CLOSE/reply kill
       boundaries without silently substituting an older visible record.
       No GC or 8.2 UI yet.
-- [ ] **8.2 permission manifests + CLI grant workflow**. Separate an
-      application's requested permissions from the actual issued
-      grants, define an explicit trusted approver and revocation
-      behavior in an ADR, and prove denial, attenuation, delegation
-      and restart persistence. No ambient pid/name authority. UI is
-      CLI first; no graphics (Phase 9).
+- [ ] **8.2 permission manifests + CLI grant workflow**. Design
+      investigation started in proposed ADR-0048: the trusted shell is
+      the explicit CLI approver, requests are not grants, and revocable
+      operations require receiver-mediated possession checks rather
+      than deleting one copy of a kernel cap. No 8.2 grant or CLI is
+      implemented yet. Audit boot resource bounds and the separate
+      transactional policy namespace before accepting architecture-
+      dependent code. Prove denial, attenuation, delegation, live
+      revocation and restart persistence; no ambient pid/name authority,
+      graphics, package-signature or unauthenticated filesystem policy.
 - [ ] **8.3 standard userspace libraries**. Factor stable no_std
       syscall, IPC, filesystem and network clients into reusable
       libraries with ABI compatibility tests and at least two

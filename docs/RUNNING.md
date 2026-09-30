@@ -4,6 +4,18 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
+## Phase 8.2 proposed-ADR review commit (no 8.2 code yet)
+
+The proposed ADR-0048 review commit includes its own deployable archive at
+`releases/checkpoints/phase82-adr-proposal/`. It is **byte-for-byte the
+same archive** as the completed, qualified 8.1 image below; only the
+outer filename differs. Thus it boots the same 8.1 system, and the
+original 31-suite/100-boot/extracted-archive qualification applies to
+those *unchanged bytes*. This is not a new 8.2 milestone, a fresh 8.2
+qualification, or evidence that a permission UI exists. Read the
+checkpoint's README for checksum and extraction instructions, then use
+the QEMU command below.
+
 ## Phase 8.1 complete: exact per-commit QEMU build
 
 This bootable image includes the marker-authorized immutable update,

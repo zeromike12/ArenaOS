@@ -48,14 +48,16 @@ after the boot-time test suites pass, the kernel spawns the shell and
 the machine waits for you at the `arena> ` prompt — type `help`, and
 `shutdown` when you are done.
 
-For the **in-progress Phase 8** branch, every new code commit includes its
-own bootable, 100/100-qualified archive under `releases/checkpoints/`.
-See the exact download, checksum, extraction and QEMU commands in
-**[docs/RUNNING.md](docs/RUNNING.md#phase-81-transactional-core-checkpoint-81-not-yet-closed)**.
-These are per-commit bootable checkpoints, **not** GitHub release assets;
-the current one qualifies the 8.1 transactional core, not 8.1 closure.
+For the **in-progress Phase 8** branch, completed code checkpoints include
+their own bootable, 100/100-qualified archives under `releases/checkpoints/`.
+See the download, checksum, extraction and QEMU commands in
+**[docs/RUNNING.md](docs/RUNNING.md#phase-82-proposed-adr-review-commit-no-82-code-yet)**.
+These per-commit archives are **not** tagged GitHub release assets.
+The proposed-ADR review snapshot reuses the identical qualified 8.1
+boot bytes; Phase 8.2 is a design investigation, not an implemented
+permission/grant UI.
 
-## What just booted (current: Phase 8.1 transactional core, NOT 8.1 closure; Phase 8.0 complete — bounded manager-owned stack lifecycle, active driver probes and service-side diagnostic authority; Phase 7 bounded network v1 and production supervision complete)
+## What just booted (current: bounded Phase 8.1 complete; Phase 8.2 design investigation; Phase 8.0 manager and Phase 7 network lifecycle complete)
 
 QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It brings
 up serial, GDT/IDT/TSS, the 16550 UART, and the real UEFI memory map;
