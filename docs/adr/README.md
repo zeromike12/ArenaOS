@@ -69,7 +69,7 @@ Rules:
 | [0050](0050-dead-ipc-caller-lifecycle.md) | General IPC caller sweep and broker-first deadline; four-state staged-cap/typed-refusal M4 proof plus caller-first real guest regression; qualified partial integration | Accepted (8.2 subsequently complete) |
 | [0051](0051-filesystem-absence-proof.md) | Distinct receiver-verified fsd shutdown marker and kernel-root exited-service reap to orphan the real FS endpoint; typed absence and restoration | Accepted (8.2 complete) |
 | [0052](0052-standard-userspace-client-libraries.md) | Linked no_std syscall/IPC/AFS1/network clients; independent guest consumers; corrected IPC-landed reply-cap disposal, real mutation-tested 40×2 guest proof; 43/43 + fresh corrected-EFI 100/100 + extracted boot | Accepted (8.3 reclosed) |
-| [0053](0053-signed-package-trust-and-staging.md) | Proposed 8.4 signed-package trust root, canonical format, receiver-side verified staging and honest non-anti-rollback revocation; architecture code gated on trust/format review | Proposed (8.4 NOT implemented) |
+| [0053](0053-signed-package-trust-and-staging.md) | Review-ready 8.4 design: test-only Ed25519 root, exact signed bytes/domains, cumulative bounded revocation, receiver-side staged authority, fixed resource budget and same-disk crash refusal; vendor/audit/vector gates unresolved | Proposed (awaiting user/C review; 8.4 NOT implemented) |
 
 ## Template
 

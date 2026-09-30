@@ -1123,13 +1123,15 @@ is not completed by accepting an ADR.
       success words remain caller-validated, not library-certified.
       Fresh corrective historical suite 43/43 and final-image-bound
       100/100; `phase83-corrected` archive supersedes original 8.3.
-- [ ] **8.4 package format + signed packages**. ADR-0053 is **Proposed
-      for material security/trust-model and persistent-format review**;
-      there is no 8.4 signature code, install authority or qualification
-      yet. ADR first for package identity, trust roots, updates/revocation
-      and signature verification. Host tamper and rollback tests plus
-      guest install verification; no dynamic linking merely because
-      packages exist.
+- [ ] **8.4 package format + signed packages**. ADR-0053 is **Proposed,
+      design complete for user/C review**; no 8.4 implementation until their
+      approval, and the exact vendored-source audit and independent wire
+      vectors remain gates before ADR acceptance/dependent code. There is
+      no 8.4 signature code, install authority or qualification yet. Define
+      package identity, public test root, cumulative revocation and canonical
+      signature domains; test tamper and bounded same-disk crash recovery
+      and guest **receiver-side verified staging only**. Installation,
+      activation and dynamic linking remain out of scope until 8.5.
 - [ ] **8.5 installer/updater**. Artifact-bound install/upgrade and
       power-loss recovery tests with an explicit trust chain and
       rollback rules. No assumption of real-hardware drivers or

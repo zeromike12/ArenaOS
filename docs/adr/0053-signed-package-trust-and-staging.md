@@ -1,153 +1,305 @@
-# ADR-0053 — Phase 8.4 signed package trust and staging (proposal)
+# ADR-0053 — Phase 8.4 signed packages and verified staging
 
-Status: **Proposed, design direction reviewed** (2026-09-30). The Ed25519/test-root/staging boundaries are approved in principle; dependency audit, exact pinned source hashes and frozen package/policy bytes remain acceptance gates. No 8.4 implementation or completion claim.
-Milestone: 8.4 package format + signed packages; 8.5 installer/updater is separate.
+Status: **Proposed — design complete for review, not accepted or implemented**
+(2026-09-30). The Ed25519/test-root/staging direction was reviewed with the user; the user
+and C will review this complete design before implementation. Exact vendored-source
+hashes, complete dependency audit and independent wire vectors are explicit
+**pre-acceptance / pre-implementation gates**, not facts already established. Phase 8.3
+remains the last completed milestone.
 
-## Problem and boundary
+## Scope and threat model
 
-A filename, the creator of an AFS1 file, and possession of an fsd endpoint
-are not evidence that executable bytes are authorized. Phase 8.4 requires
-package identity, trust roots, update/revocation rules, signature verification,
-host tamper and rollback tests, and a guest installation-verification boundary.
-The kernel currently spawns only its explicitly embedded images via Image
-caps. We must neither pretend an on-disk binary can already be executed nor
-smuggle an install primitive into the kernel. AFS1 guarantees ordered writes
-and atomic sectors for its own commit model, not anti-rollback or adversarial
-commit-sector protection. A running guest has no trusted wall clock, TPM or
-remote transparency log. ADR-0004 prohibits third-party crates in OS images.
+A file name, AFS1 ownership and a shell assertion are not signature or install authority.
+Phase 8.4 defines package identity, a canonical signed format, bounded signer policy,
+revocation/version semantics, and a **receiving userspace service** that verifies and
+stages bytes. Phase 8.5 owns installation/activation, filesystem-backed execution,
+Image-cap acquisition, upgrade transactions and rollback recovery. Phase 8.4 NEVER loads
+or registers an on-disk executable, dynamically links code, gives a package an Image cap,
+or changes a syscall/IPC primitive. The shell is the pre-existing trusted Power/raw-FS
+administrator; an ordinary client holds only the staging endpoint. Neither a caller's
+pid/name nor a filename authorizes a stage.
 
-## Proposed decision — review gates before architecture-dependent code
+The cryptographic test root below is **public, test-only and deliberately known**; tests
+prove parser, signature and receiver enforcement but do not establish production key
+secrecy, Secure Boot or distribution integrity. No private production key enters the OS,
+repository, guest disk or deployable artifact. An attacker with the *test* seed can sign
+test packages; that is explicitly not a production security claim. Malicious userspace
+without the admin marker or signing key, malformed inputs and same-disk crashes are
+tested. A holder of the trusted shell's raw fsd cap or the root signing key is outside
+this 8.4 threat model. AFS1 has ordered writes and atomic-sector commits, **not**
+adversarial disk rollback/tamper or arbitrary commit-sector corruption protection; an
+offline disk replacement can reinstate old policy/stages. No RTC/TPM/remote monotonic
+anchor is invented.
 
-1. **Algorithm and key custody.** Offline host tooling signs pure Ed25519
-   (RFC 8032, not Ed25519ph). The guest holds only a fixed **test-only**
-   32-byte root public key and its SHA-256 key ID in a privileged verifier
-   image. No private key belongs in any OS image, guest disk or deployable
-   checkpoint; a deterministic host-only fixture key must never be reused
-   as a production signing root. Guest verification uses one pinned,
-   vendored, vetted pure-Rust no_std implementation, tentatively
-   `ed25519-dalek` 2.2.0 with `default-features = false`, invoking
-   `VerifyingKey::verify_strict` so weak keys and noncanonical signatures
-   refuse. This is a **narrow exception to ADR-0004**, not a blanket
-   invitation to ship dependencies. The complete transitive *runtime*
-   closure, enabled features, licenses, checksums, upstream revisions,
-   unsafe/build-script/proc-macro inventory and source vendoring must be
-   frozen and reviewed before this ADR is Accepted or code depends on it.
-   Do not claim an audit without evidence for the exact version/config.
-   Prohibit runtime network access, code generation and guest signing,
-   key generation, RNG, PEM/PKCS#8, batch, serde, default or unnecessary
-   features. Offline signing may use separate trusted host tooling;
-   production release-key custody is a later security decision. Proposed
-   non-secret **test** root is RFC 8032 test vector 1 public key
-   `d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`;
-   its raw-public-key SHA-256 key ID is
-   `21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`.
-   The widely published RFC test seed is host-test-only material; these
-   known bytes afford *zero* production signing security.
-2. **Canonical package v1 (frozen candidate bytes).** A file is exactly
-   `manifest[128] || payload[payload_len] || signature[64]`; there is no
-   trailing data. Little-endian integers, no native struct layout:
+## Cryptography, custody and bounded ADR-0004 exception
 
-   | Bytes | Field | Canonical rule |
-   |---|---|---|
-   | 0..4 | magic | ASCII `APKG` |
-   | 4..6 | format version, u16 | exactly 1 |
-   | 6..8 | manifest length, u16 | exactly 128 |
-   | 8..10 | target architecture, u16 | exactly 1 = x86_64-unknown-none |
-   | 10..12 | flags, u16 | exactly 0 |
-   | 12..44 | package ID, 32 bytes | 1..31 lowercase ASCII `[a-z0-9.-]`, first byte alphanumeric; first NUL and all trailing bytes zero |
-   | 44..52 | package version, u64 | >=1 |
-   | 52..56 | payload length, u32 | 1..4096, exact file length 192 + payload length |
-   | 56..88 | payload SHA-256 | exact hash of payload bytes |
-   | 88..120 | signer key ID | SHA-256 of raw 32-byte Ed25519 public key |
-   | 120..128 | reserved | all zero |
+Use pure RFC 8032 Ed25519 (not Ed25519ph): `ed25519-dalek` **2.2.0**, candidate
+`default-features = false`, guest **verification only** through
+`VerifyingKey::verify_strict`, rejecting weak/noncanonical keys and signatures. Hash
+payloads/key IDs with SHA-256 (`sha2` candidate **0.10.9**, defaults off). Signing is
+offline host tooling; no guest RNG, key generation, private-key parsing, signing, batch,
+PEM/PKCS#8, serde, alloc or std feature unless an exact audited dependency proves one
+unavoidable. In particular, never enable `legacy_compatibility` or `hazmat`. A scoped
+exception to ADR-0004 permits **only** the approved pinned/vendored verifier closure,
+after review; it is not a general permission to add crates. No claim of an audit of any
+version/configuration that has not actually been audited.
 
-   Pure Ed25519 signs/verifies **exactly** `b"ArenaOS.pkg.v1\x00" ||
-   manifest[0..128] || payload[0..payload_len]`, with no prehash mode.
-   The signature is the last 64 bytes and is not itself signed. Check all
-   lengths with checked arithmetic, reject noncanonical bytes, bad IDs,
-   unknown algorithms/architectures and truncated/extra bytes *before*
-   signature verification. Identical package IDs are compared using the
-   full 32-byte canonical field, never an AFS1 filename or a truncated
-   digest. Exact host/guest vectors and external OpenSSL cross-checks are
-   required before implementation acceptance.
+The first guest root is the RFC 8032 test vector 1 **public** 32 bytes
+`d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`; its key ID is SHA-256
+of those exact raw bytes,
+`21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`. The corresponding
+widely published seed is usable only in host fixture generation, never in the image/ESP,
+guest disk or archive, and is not a production secret. No root rotation by a package:
+replacing/revoking the root requires a separately trusted OS image and a future
+production-key ceremony (generation, offline custody, release procedures and compromise
+response are NOT 8.4 claims).
 
-   A separate root-signed **policy v1** is exactly 320 bytes: bytes 0..4
-   `APOL`, 4..6 u16 version=1, 6..8 u16 header length=256, 8..16 u64
-   generation>=1, 16..48 the same canonical namespace ID, 48..80 raw
-   subordinate Ed25519 public key, 80..112 its SHA-256 key ID,
-   112..120 u64 minimum accepted package version>=1, 120..152 optional
-   revoked package digest (all-zero means none), 152 u8 state (1=ALLOW,
-   2=REVOKE subordinate), 153..256 all zero; 256..320 is a 64-byte
-   **root** Ed25519 signature over `b"ArenaOS.policy.v1\x00" ||
-   policy[0..256]`. Exactly one active subordinate key per namespace,
-   no arbitrary key lists or unsigned policy fallback. REVOKE invalidates
-   every package from that key even if a bearer or old file was copied.
-   A root-direct package is permitted for the positive test-root case;
-   root rotation/revocation requires a new trusted OS image. An offline
-   replacement of the entire policy/disk can defeat local generation
-   checks: no anti-rollback claim.
-3. **Authority and guest proof.** A bounded receiver-side staging verifier,
-   not the shell's opinion or caller identity, checks bytes and trust policy
-   before returning an accepted-install *eligibility* decision. It holds an
-   explicit AFS1 endpoint and a private manager-issued approval marker;
-   callers have only its request endpoint. A forged, missing, wrong-kind or
-   insufficient-rights marker must fail at the receiver. Guest fixture
-   injects a host-signed package onto an actual AFS1 disk and checks accept;
-   altered payload, manifest, signature, root, wrong architecture and
-   truncated/oversize packages refuse. The same service must refuse all
-   attempts to stage an unverified package. Phase 8.4 does NOT grant an
-   on-disk executable an Image cap, dynamically link it, activate it at boot
-   or implement the 8.5 installer/update transaction.
-4. **Update and revocation semantics.** A root-signed bounded policy record
-   may authorize subordinate signing keys for a specific package namespace,
-   with monotonically increasing *locally observed* policy generation and
-   explicit key/package revocations. An accepted version/digest is a
-   separate staging decision from an installed/active version. If a newer
-   policy or installed version is visible on the same platter, an older
-   package/policy refuses; a signed `REVOKE` denies all matching versions
-   and surviving copies. With no new root-signed policy, fail closed for
-   unknown keys, not open to arbitrary developer keys. Because AFS1 can be
-   rolled back offline, **neither revocation nor version monotonicity is
-   anti-rollback** across hostile disk replacement; removing this caveat
-   would require a separately approved monotonic anchor/trust model. Root
-   compromise or rotation requires a new trusted OS image: packages cannot
-   certify their own new root. Host tamper/rollback tests must distinguish
-   visible same-disk stale data refusal from excluded full-disk rollback.
-5. **Evidence and release discipline.** Prove canonical codec/crypto vectors
-   and negative space on the host and in a no_std build; run real guest
-   verification, an absent/forged-authority proof, prior AFS1 crash and
-   mediated-permission regressions, then all historical suites and a fresh
-   image-bound 100/100 before calling any 8.4 checkpoint complete. Each
-   commit remains bootable and keeps a qualified deployable image. The
-   already published corrected 8.3 artifact remains the bootable build for
-   this ADR-only design checkpoint; it is not an 8.4 implementation.
+**Dependency acceptance gate:** obtain the exact versioned sources of **every**
+target/runtime and host-build dependency, vendor them in the repo, pin a resolved lockfile
+and enabled target features, and record per-source SHA-256, upstream revision, license and
+relationship to crates.io archive checksums. Inspect all unsafe blocks, build scripts,
+proc macros and feature unification, including target-specific backends; forbid network
+access and runtime code generation. Demonstrate an offline/reproducible
+`x86_64-unknown-none` build using only the vendored sources. Validate RFC 8032 vectors,
+independent OpenSSL-compatible signature results and malformed/noncanonical key/signature
+cases; fuzz the format before accepting this ADR. Until that gate passes, no OS-image
+signature implementation or acceptance claim. The candidate resolution and **unresolved**
+supply-chain evidence are recorded below.
 
-## Dependency reconnaissance (NOT the completed audit)
+## Frozen candidate package v1 bytes
 
-`ed25519-dalek` 2.2.0's published API documents `no_std` with default
-features disabled and `verify_strict` for weak-key rejection; the upstream
-monorepo tag `ed25519-2.2.0` resolves to Git commit
-`8016d6d9b9cdbaa681f24147e0b9377cc8cef934` at
-https://github.com/dalek-cryptography/curve25519-dalek . Its source tree
-contains `ed25519-dalek` 2.2.0 (BSD-3-Clause), `curve25519-dalek` 4.2.0
-(BSD-3-Clause) and `curve25519-dalek-derive` 0.1.1 (MIT OR Apache-2.0).
-The dalek dependency is not a single crate: its runtime dependencies
-include the `ed25519`, `sha2`, `subtle`, `digest`, `cfg-if` and target-specific
-`cpufeatures` crates; curve25519's x86_64 backend also pulls in a **proc
-macro** (`curve25519-dalek-derive`) and its build script uses
-`rustc_version`. The proc macro's `syn`, `quote`, `proc-macro2` closure
-must be reviewed even though it is built for the host, not loaded at guest
-runtime. This list is preliminary, **not** a complete pinned dependency
-graph, feature audit or source-vendoring claim. An audit-only bare-metal
-Cargo probe using `ed25519-dalek = { version = "=2.2.0",
-default-features = false }` and `sha2 = { version = "=0.10.9",
-default-features = false }` initially failed TLS access to the crates.io
-sparse index. A follow-up with the GitHub-hosted crates.io **git index**
-resolved a candidate 23-registry-crate lockfile; downloading the corresponding
-`.crate` sources from the static CDN still fails TLS. This is a *registry
-checksum*, **not** a SHA-256 of examined/vendored source; lock resolution
-alone does not constitute an audit and includes potentially conditional
-packages. Candidate from the audit-only bare-metal Cargo probe:
+One file is **exactly** `manifest[128] || payload[n] || signature[64]`, `1 <= n <= 4096`,
+total length `192+n` (193..4288 bytes). Integers are little-endian; no Rust/native struct
+layout, optional fields, trailing bytes or implicit NUL parsing. Parse lengths with
+checked arithmetic before reading/allocating or verifying. The canonical package ID field
+is 32 bytes: 1..31 bytes lowercase ASCII `[a-z0-9.-]`, first byte `[a-z0-9]`, then one NUL
+followed by zeros. It is not a filesystem path and has no identity authority.
+
+| Byte interval | Field | Mandatory validation |
+|---|---|---|
+| 0..4 | magic | `APKG` |
+| 4..6 | u16 format | `1` |
+| 6..8 | u16 header bytes | `128` |
+| 8..10 | u16 target | `1` = `x86_64-unknown-none` only |
+| 10..12 | u16 flags | zero |
+| 12..44 | package ID | canonical 32-byte form above |
+| 44..52 | u64 package version | >=1 |
+| 52..56 | u32 payload length | 1..4096; file size exactly `192+n` |
+| 56..88 | SHA-256 payload digest | hash of all `n` exact payload bytes |
+| 88..120 | SHA-256 signer key ID | hash of the exact 32-byte raw Ed25519 public key |
+| 120..128 | reserved | all zero |
+| 128..128+n | payload | opaque bytes; NEVER activated by 8.4 |
+| 128+n..192+n | Ed25519 signature | exactly 64 bytes, strict canonical verification |
+
+Ed25519 signs/verifies the exact **raw message** `b"ArenaOS.pkg.v1\x00" (15 bytes) ||
+manifest[0..128] || payload[0..n]`. This is pure Ed25519 over that concatenation, **not**
+a prehash/signature over a hex digest, and the signature itself is excluded. Verify the
+signed payload digest as an independent corruption check and compare key IDs to the chosen
+trust root or a root-signed, currently authorized subordinate key. An unknown key ID,
+wrong root, wrong arch, different payload/signature/manifest bytes, malformed padding or
+extra data is a refusal. Two signed files with identical ID+version but different
+full-package SHA-256 are a conflict, not an update.
+
+## Frozen candidate policy v1 bytes and revocation
+
+A policy is **exactly 512 bytes** (`header[448] || root_signature[64]`). All integers LE.
+Only the fixed root may sign it. One namespace has at most four immutable policy
+generations; a policy authorizes **one** subordinate public key for that exact package ID
+at a time. The key does not authorize a different ID even if deliberately transferred.
+There is no unsigned fallback or automatic trust-on-first-use.
+
+| Byte interval | Field | Mandatory validation |
+|---|---|---|
+| 0..4 | magic | `APOL` |
+| 4..6 | u16 format | `1` |
+| 6..8 | u16 signed header bytes | `448` |
+| 8..16 | u64 generation | 1..4, contiguous across visible records |
+| 16..48 | namespace ID | same canonical 32-byte package ID |
+| 48..80 | subordinate raw Ed25519 public key | strictly parseable, not root key |
+| 80..112 | subordinate key ID | SHA-256 of 48..80, byte-exact |
+| 112..120 | u64 minimum package version | >=1, never decreases vs predecessor |
+| 120 | state u8 | 1=ALLOW this subordinate; 2=REVOKE subordinate signing for this namespace |
+| 121 | revocation count u8 | 0..8 |
+| 122..128 | reserved | all zero |
+| 128..384 | eight SHA-256 full-package-file digest slots | first `count` nonzero, unique, strictly ascending; remaining slots zero |
+| 384..448 | reserved | all zero |
+| 448..512 | root Ed25519 signature | strict, over exact header and domain |
+
+The root signs `b"ArenaOS.policy.v1\x00" (18 bytes) || policy[0..448]`. Policy signatures
+are never signed by the delegated key. A revoked digest is SHA-256 of the **entire**
+package file including its 64-byte signature, not the payload digest at manifest 56..88.
+Each new policy preserves the previous record's revoked-digest set as a subset and cannot
+decrease minimum version; a previously REVOKEd or replaced subordinate key may **never**
+become active again in this visible sequence. A newer ALLOW may replace a revoked key with
+a *new* key. A REVOKE state denies every subordinate-signed package of that namespace; the
+cumulative digest list also denies matching root-direct packages. A root-direct package is
+allowed without policy for the positive test-root case, but if any policy is visible for
+that namespace, the root-direct package must still satisfy minimum version and cumulative
+digest revocation. No certificate chain, time-based expiry or remote policy is claimed.
+
+Visible policy files are named `p8-` + the first **20 lowercase hex digits** of
+SHA-256(full canonical package ID field) + `-01`..`-04` (26 bytes, below AFS1's 32-byte
+name limit). A package input file is `i8-` + those digits, and a policy intent is `a8-` +
+those digits (each 23 bytes). Immutable accepted stage files use `s8-` + those digits +
+`-01`..`-02` (26 bytes). Each file's *internal signed ID* is checked in full: a truncated
+filename-hash collision is a **typed collision refusal**, not an alias or a second
+identity. Namespace prefixes are disjoint from existing `cfg8-*` and `perm8-*` records. At
+boot and before each decision, use bounded `FS_OP_LS` to inspect **every** visible `p8-*`
+and `s8-*` name, rejecting unrecognized suffixes, multiple namespaces, gaps,
+duplicate/misnamed records, truncated-ID hash collisions and malformed file contents. With
+no visible accepted files the first marked operation selects the sole namespace;
+thereafter a different ID refuses. Enforce the one-namespace budget even if the file was
+written by another raw-FS holder. Reverify every policy chain member under the root. Check
+each stage predecessor's exact bytes and signature against a historically valid signer
+from that chain (or the root), and its strictly increasing version; a prior stage later
+revoked is structurally valid but **ineligible**. Only the latest stage under the
+**current** policy can yield ELIGIBLE. A malformed, missing or out-of-order visible
+predecessor is an error; never fall back to an older ALLOW or stage. Fifth policy / third
+staged package and clean pre-CREATE object/sector refusals return typed NO_SPACE without
+eviction; late write/commit space exhaustion is ambiguous and returns DEGRADED instead. With at most 4 policy, 2 stage and 2 input objects for the **single test
+namespace** in 8.4, at most 8 new AFS1 files are budgeted; prove the object-count
+preflight alongside existing 8.1/8.2 records, rely on fsd for actual disk-sector refusal
+(there is no public free-sector query), and never raise their bounds or overwrite them.
+General multi-package storage/GC belongs to 8.5.
+
+## Receiver-side staging and lifecycle authority
+
+One manager-owned `packaged` verifier image (proposed image ID **26** after existing
+0..25) serves **one** package endpoint in **one** receive loop. No new syscall, IPC
+select, thread, kernel Package cap or disk-image loader. It holds the test root's *public
+bytes* in its own image and obtains no private key. It reads candidate package bytes from
+the `i8-*` input on the actual fsd/AFS1 device; input may be host-seeded for the 8.4 guest
+fixture or written by the already trusted shell. It never trusts the input filename as
+identity. The ordinary caller owns only Endpoint/WRITE; it cannot read fsd or stage by
+knowing a name. Only the trusted Power/raw-FS shell holds the separate stage-approval
+marker. The existing 8.2 permission marker is **not** reused: doing so would silently
+broaden authority held by its independent copies.
+
+The 64-byte IPC request has `words[0]` opcode (`0=PING`, `1=QUERY`, `2=POLICY`,
+`3=STAGE`), `words[1]=0`, and `msg[0..32]` the canonical ID (all zeros only for PING),
+`msg[32..64]=0`. Refuse unknown opcodes, nonzero padding and unexpected sent caps even for
+read-only requests. Replies NEVER transfer a cap: `words[0]` is `0=OK` (PING/POLICY),
+`1=ELIGIBLE`, `2=UNSET`, `3=INELIGIBLE`, or two's-complement `-1=BAD_FORMAT`, `-2=DENY`,
+`-3=NO_SPACE`, `-4=DEGRADED`, `-5=CORRUPT`, `-6=COLLISION`, `-7=OFFLINE`; syscall
+transport error is separate. Reply `words[1]` is zero except PING magic `0x504b4731`,
+POLICY committed generation or ELIGIBLE version. All reply bytes are zero except ELIGIBLE
+`msg[0..32]` = full-package SHA-256. Probe validation requires all PING words, zero reply
+bytes and **no** returned cap.
+
+A **new** root-issued Notification is the disjoint marker. The receiver keeps its
+reference at READ, while a trusted admin holds READ|COPY|DESTROY and transfers an *exact*
+reference with each mutating call. The receiver verifies kind, object identity and exact
+rights against its held reference with `SYS_CAP_DESCRIBE`, then destroys **every**
+IPC-landed cap (even wrong-kind/forged) under the existing landed-cap provenance rule. It
+checks the signature/policy on each accepted staging operation, not only on boot. `QUERY`
+requires Endpoint/WRITE and verifies the latest visible staged bytes/policy afresh but
+changes nothing; it cannot approve staging. `STAGE` and `POLICY` require a transferred
+marker as well as Endpoint/WRITE. `POLICY` reads the root-signed `a8-*` intent for the
+requested ID, checks the full signed chain including exact next generation/cumulative
+revocation, writes the next immutable policy file, closes, rescans all visible
+predecessors and acknowledges only the byte-exact newly validated generation. `STAGE`
+first validates the requested `i8-*` input under the latest policy and current version
+bound, creates the next immutable `s8-*` file, writes **all** exact bytes in bounded fsd
+chunks, closes, rereads and revalidates it and policy, then returns `ELIGIBLE` with
+package version + full SHA-256 as a **userspace decision**, not Image or execution
+authority. The stage scan must reject incomplete/malformed newest files, not silently
+return a former stage. Repeating the identical verified package is an idempotent no-op;
+equal version with different digest or lower version refuses. Later policy REVOKE makes
+any previous staged copy ineligible on the next verification. Use <=3584-byte fsd
+READ/WRITE chunks (`FS_XFER_MAX`), checked offsets, and one handle at a time (AFS1 has
+only eight open handles). `POLICY`/`STAGE` IO ambiguity **after CREATE or WRITE begins**,
+including a late NO_SPACE, latches DEGRADED until a same-disk restart/rescan, never
+acknowledges uncertain bytes; a proven pre-CREATE capacity refusal is typed NO_SPACE
+instead. A newly visible partial highest generation is CORRUPT after reboot, never an old
+success. A crash mid-write can leave incomplete visible bytes: fail closed after reboot.
+8.4 does **not** promise old stage availability during interrupted replacement; 8.5 owns
+activation/upgrade atomicity. Staged files and reply words are never independent
+authentication proof for a future installer, which must verify again at its receiver.
+
+The four states are deliberately distinct: **signature-valid** means bytes verify under a
+known key; **stage-eligible** additionally satisfies current namespace policy, minimum
+version, revocation and monotonic stage checks; **installed** and **active** are both
+unreachable in 8.4. ELIGIBLE is not an installed/active status and confers no authority to
+execute.
+
+**Exact proposed grants and fixed bounds:** `packaged` inherits slot 0 fsd Endpoint/WRITE,
+slot 1 package Endpoint/READ, slot 2 marker Notification/READ — **three** grants, no
+Power/Process/Image, no broker/app authority. The manager already holds fsd
+Endpoint/WRITE|COPY at source slot 14; root additionally grants image26/READ at manager
+slot 17, package Endpoint/READ|WRITE|COPY at 18, marker Notification/READ|COPY at 19. The
+shell receives package Endpoint/WRITE|COPY at slot 20 and marker
+Notification/READ|COPY|DESTROY at 21; app/permission broker receive neither. Slots 0..19
+of the existing shell and 0..16 of the manager retain their meanings. The manager's
+existing private result/exit/deadline notification receives disjoint package-readiness
+OK/EXIT/DEADLINE bits (proposed bits 15, 16, 17, distinct from 8.2 bits 12..14); a bounded
+probe worker receives only package Endpoint/WRITE and attenuated WRITE to that existing
+notification (two grants), sends PING, validates the exact reply, and exits. Manager
+requires success **plus actual exit before deadline**, failure/deadline wins; it reaps
+through its held Process cap and has bounded restart/backoff and OFFLINE on absent fsd or
+malformed visible policy. `spawn::MAX_INHERIT=5`, manager `MAX_GRANTS=5`, 32 cap slots and
+manager `MAX_CAPS=32` stay fixed. The package service is a third managed service within
+`MAX_SERVICES=4`; no fabricated readiness or raw FS cap in an ordinary client.
+
+The full 8.3 boot has exactly **9/9 endpoints and 16/16 Notifications**. This new endpoint
+and distinct marker therefore require a **bounded internal** increase to
+`MAX_ENDPOINTS=10` and `MAX_NOTIFS=17`, never a hidden reuse of permission authority or an
+unlimited allocation. `Endpoint` is 976 B, `Notif` 24 B on x86_64 by the current layout
+(measure again in the implementation): +1000 B static IPC tables plus 4 more wake-list
+thread IDs (+32 B stack), before alignment/frame effects. The image registry needs one
+additional literal mapping for ID26 (its historical `MAX_IMAGES=24` comment is already
+stale relative to current 0..25 mappings; correct the bound to 27 if enforced). Re-prove
+exact 10/10, 17/17 full-table refusal, missing-device SKIP, exact free
+frames/records/processes and historical failure semantics; do not merely rewrite an old
+assertion. If measured limits differ, revisit this ADR before granting authority. These
+are capacity changes, **not** new kernel primitives or rights.
+
+## Test matrix, qualification and acceptance gates
+
+* **Pure bytes/crypto:** independent Python/host Rust reference for package/policy
+  offsets, little-endian, signed domains and key IDs; RFC 8032 vectors 1+, OpenSSL/dalek
+  cross-verification, key substitution, weak/noncanonical signatures, overflow, unknown
+  target, flags, reserved bytes, wrong lengths/trailing data, ID collisions and fuzz
+  corpus. Confirm no guest signing feature or network/build-time code generation in the
+  vendored closure; record exact versions/hashes/licenses/revisions and audit
+  unsafe/build/proc macros. Bare-metal no_std compile and no default features. *
+  **Structural authority:** in a real QEMU guest, no marker, wrong object/kind/rights,
+  guessed slot, endpoint-only and copied app endpoint cannot stage or change policy; valid
+  root-signed input with genuine transferred marker is accepted **only** at the receiving
+  service. Ensure every landed marker is disposed and 32-slot occupancy stays flat,
+  including rejection and restart. Verified output is a digest/version decision, not an
+  Image cap. Deliberately break signature or receiver marker check once: focused test MUST
+  go red before trusting its green verdict. * **Persistence/negative space:** actual AFS1
+  host-seeded package and policy, durable stage and same-platter reboot/rescan;
+  subordinate ALLOW, test root-direct acceptance, unknown signer, wrong embedded root,
+  altered/truncated manifest/payload/signature, wrong namespace/key, revoked subordinate,
+  revoked package digest, version downgrade, identical idempotent retry, equal-version
+  conflicting digest, policy-chain gap/corruption, fourth policy/second stage successes
+  followed by fifth/third typed NO_SPACE, disk allocation exhaustion, service
+  crash/restart and SIGKILL across CREATE/WRITE/CLOSE/reply boundaries. Every ambiguous
+  prefix is audited against the documented AFS1 crash model and fails closed; never claim
+  hostile full-disk anti-rollback. Old 8.1 configuration and 8.2 permission disk
+  namespaces and exact guest counts must stay green. * **Closure:** preserve all
+  historical suites, run the full suite on the final source, rebuild the final EFI,
+  perform **fresh artifact-bound 100/100 QEMU boots**, verify receipt against EFI inside
+  ESP, package exact firmware/AFS1 disk/QEMU instructions, checksum and boot the extracted
+  archive. A review-only ADR commit reuses the published corrected Phase 8.3 image without
+  claiming an 8.4 checkpoint; do not ship a partial implementation as a completed phase.
+
+## Dependency reconnaissance — NOT a source audit
+
+Candidate: `ed25519-dalek = { version = "=2.2.0", default-features = false }` and `sha2 =
+{ version = "=0.10.9", default-features = false }` targeting `x86_64-unknown-none`. The
+upstream dalek monorepo tag `ed25519-2.2.0` at
+https://github.com/dalek-cryptography/curve25519-dalek resolves to Git commit
+`8016d6d9b9cdbaa681f24147e0b9377cc8cef934` and contains `ed25519-dalek` 2.2.0
+(BSD-3-Clause) and `curve25519-dalek-derive` 0.1.1 (MIT OR Apache-2.0), but its colocated
+`curve25519-dalek` is **4.2.0 while the registry lock resolved 4.1.3**. Never treat that
+tag as proof of 4.1.3's published source. The resolved candidate lock contains 23 registry
+packages (some target/backend conditional); derive is a host proc macro depending on
+`syn`, `quote`, `proc-macro2`, and curve's build script depends on `rustc_version`. This
+is **not** a complete feature/unsafe/license/vendor audit. Its source archive registry
+SHA-256 values are listed below for provenance only; these are not hashes of downloaded
+and reviewed vendored source:
 
 | Registry package | Pinned candidate | Registry archive SHA-256 (not vendored source hash) |
 |---|---:|---|
@@ -175,53 +327,19 @@ packages. Candidate from the audit-only bare-metal Cargo probe:
 | `unicode-ident` | `1.0.26` | `d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954` |
 | `version_check` | `0.9.5` | `0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a` |
 
-`curve25519-dalek` resolved **4.1.3**, not the 4.2.0 version co-located
-at the inspected upstream tag: identical-looking monorepo tags are not
-proof that the published crate source/feature graph is the same. Obtain
-and compare the exact versioned source before vendoring. `fiat-crypto`
-and `libc` are in the registry lock but may be backend/target-conditional;
-only a complete target-feature graph and actual bare-metal build can
-establish which packages compile into the guest or run in the host build.
-No guest signature verifier was built or shipped. All versions, enabled
-features, licenses, upstream revisions, unsafe and build/proc-macro
-inventory, **vendored-source hashes** and actual RFC/cross-implementation
-vectors remain mandatory before acceptance; until then the corrected 8.3
-EFI and archive remain the deployable build for this design-only step.
 
-## Alternatives and trade-offs
+The crates.io sparse index and static crate-source CDN produced TLS failures in this sandbox. A GitHub-hosted crates.io **git index** supplied version resolution and candidate archive checksums, not actual source; do not replace missing exact crates with an arbitrary GitHub HEAD or claim those checksums validate a different git tree. The implementation must source the exact versions through a verifiable route, compare source/release provenance, record vendored tree hashes/licenses/commits, resolve feature unification for *the OS image* and run a real offline build and audit before acceptance. No 8.4 signature code has been built, accepted, qualified or shipped.
 
-- **In-house RSA-3072 or Ed25519 arithmetic:** avoids a dependency but
-  creates a large unaudited cryptographic TCB and new parser/malleability
-  risks. Rejected in favor of a *narrow, pinned, vendored* Ed25519-verifier
-  exception to ADR-0004, subject to the exact dependency gate below.
-- **Rely on UEFI Secure Boot, host OpenSSL alone or shell `sha256sum`:** none
-  makes the guest's package receiver verify a signed artifact, and none
-  provides package-level revocation. Host signing is tooling, not guest
-  authority.
-- **Verify in the kernel or add a `Package` cap:** broadens the frozen
-  syscall/authority ABI for a format whose policy belongs in userspace;
-  reject unless a later failure proves a genuine kernel enforcement need.
-- **Claim tamper/rollback resistance from AFS1 persistence:** false. Its
-  legal crash model and same-platter generation checks do not detect a
-  copied old platter. Never turn a host disk-rollback test into a claim of
-  full-disk anti-rollback.
+## Rejected alternatives and future rules
 
-## Required review before implementation
-
-The material direction has been reviewed: allow **only** a pinned/vendored
-vetted Ed25519 verifier and its audited runtime dependency closure as a
-scoped ADR-0004 exception; use a clearly non-production public root for
-guest tests; keep verified staging distinct from 8.5 activation. This is
-NOT a claim that the exact dependency has been audited. Before ADR
-acceptance, enumerate every runtime crate/feature, pin and vendor exact
-sources, record SHA-256/license/upstream revision, inspect unsafe uses and
-build scripts/proc macros, and forbid network/runtime code generation.
-Cross-check RFC 8032 vectors and independently implemented signatures;
-fuzz malformed keys/signatures/packages and run actual QEMU negative-space
-proofs. Freeze and independently test the precise canonical package/policy
-bytes and signature domain above. Production root creation, custody,
-rotation, compromise response and release signing ceremony require a
-separate pre-production security decision; a public RFC test-vector seed
-used by host fixtures is not a secret or a production key and must NEVER
-be put in the guest binary/disk. Until these audits and vectors are done,
-this ADR remains Proposed and no architecture-dependent 8.4 code may ship.
+* Handwritten RSA/Ed25519 arithmetic creates an unaudited cryptographic TCB; a narrowly
+  pinned verifier closure is preferred **subject to the explicit audit gate**. A blanket
+  third-party OS dependency exception is not accepted. * Host-only signature check,
+  unsigned SHA-256, caller identity, AFS1 filename or a signed success message from an
+  untrusted client cannot replace receiver verification and a held admin marker. * Kernel
+  Package caps, new syscall, on-disk ELF activation, dynamic linking and production
+  root/secure boot ceremony are not justified by 8.4; 8.5 or a separate approved decision
+  must take responsibility if actually required. * Complete-platter rollback, arbitrary
+  commit-sector corruption, hostile raw-FS writer, root-key compromise and signed package
+  distribution security are **not** implied by 8.4's test-root and AFS1 crash-model
+  proofs.
