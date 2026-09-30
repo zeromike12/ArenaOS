@@ -1,0 +1,16 @@
+# ADR-0053 PRE-ACCEPTANCE AUDIT PROBE ONLY. Not linked into any ArenaOS image.
+[package]
+name = "arena-phase84-crypto-audit"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+[workspace]
+[dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false }
+sha2 = { version = "=0.10.9", default-features = false }
+[lib]
+path = "src/lib.rs"
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"

@@ -1,0 +1,11 @@
+# Offline, repo-vendored audit probe. Serial cfg is a diagnostic workaround for
+# Rust 1.97.0 LLVM SIGILL in optimized default SIMD backend on this sandbox;
+# it is NOT yet an approved guest-crypto backend decision (ADR-0053 review gate).
+[source.crates-io]
+replace-with = "arena-phase84-vendor"
+[source.arena-phase84-vendor]
+directory = "../../vendor/phase84"
+[build]
+rustflags = ['--cfg', 'curve25519_dalek_backend="serial"']
+[net]
+offline = true

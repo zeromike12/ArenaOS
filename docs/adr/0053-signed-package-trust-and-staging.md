@@ -298,7 +298,9 @@ are capacity changes, **not** new kernel primitives or rights.
   archive. A review-only ADR commit reuses the published corrected Phase 8.3 image without
   claiming an 8.4 checkpoint; do not ship a partial implementation as a completed phase.
 
-## Dependency reconnaissance — NOT a source audit
+## Dependency reconnaissance — historical pre-acquisition snapshot
+
+**Update 2026-09-30:** the 23 exact archives were subsequently supplied by the user and independently verified, extracted and committed under `vendor/phase84`; the earlier CDN/cache-blocker statements in this section describe the situation *before* that acquisition. Current gate status and the unresolved unsafe/fuzz review are tracked in [0053-gate-evidence.md](0053-gate-evidence.md) and [0053-source-audit.md](0053-source-audit.md). ADR remains Proposed; only an audit-only no_std verifier probe has compiled, not guest signature code or a checkpoint.
 
 Candidate: `ed25519-dalek = { version = "=2.2.0", default-features = false }` and `sha2 =
 { version = "=0.10.9", default-features = false }` targeting `x86_64-unknown-none`. The
