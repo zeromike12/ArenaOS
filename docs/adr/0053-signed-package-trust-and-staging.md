@@ -141,14 +141,52 @@ runtime. This list is preliminary, **not** a complete pinned dependency
 graph, feature audit or source-vendoring claim. An audit-only bare-metal
 Cargo probe using `ed25519-dalek = { version = "=2.2.0",
 default-features = false }` and `sha2 = { version = "=0.10.9",
-default-features = false }` was blocked by TLS errors to the crates.io
-index/static CDN in this sandbox; no binary or signature code was
-substituted or shipped. Fetch the *exact* versioned crate sources via a
-verifiable channel (or map complete upstream revisions), vendor each
-package and its licenses, record source SHA-256s and the resolved lockfile,
-then audit the complete enabled closure **before** accepting this ADR or
-using a dependency in an OS image. The older, qualified 8.3 EFI and archive
-remain unchanged while this design is reviewed.
+default-features = false }` initially failed TLS access to the crates.io
+sparse index. A follow-up with the GitHub-hosted crates.io **git index**
+resolved a candidate 23-registry-crate lockfile; downloading the corresponding
+`.crate` sources from the static CDN still fails TLS. This is a *registry
+checksum*, **not** a SHA-256 of examined/vendored source; lock resolution
+alone does not constitute an audit and includes potentially conditional
+packages. Candidate from the audit-only bare-metal Cargo probe:
+
+| Registry package | Pinned candidate | Registry archive SHA-256 (not vendored source hash) |
+|---|---:|---|
+| `block-buffer` | `0.10.4` | `3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71` |
+| `cfg-if` | `1.0.5` | `4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600` |
+| `cpufeatures` | `0.2.17` | `59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280` |
+| `crypto-common` | `0.1.7` | `78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a` |
+| `curve25519-dalek` | `4.1.3` | `97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be` |
+| `curve25519-dalek-derive` | `0.1.1` | `f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3` |
+| `digest` | `0.10.7` | `9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292` |
+| `ed25519` | `2.2.3` | `115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53` |
+| `ed25519-dalek` | `2.2.0` | `70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9` |
+| `fiat-crypto` | `0.2.9` | `28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d` |
+| `generic-array` | `0.14.7` | `85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a` |
+| `libc` | `0.2.189` | `3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2` |
+| `proc-macro2` | `1.0.107` | `985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9` |
+| `quote` | `1.0.47` | `1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001` |
+| `rustc_version` | `0.4.1` | `cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92` |
+| `semver` | `1.0.28` | `8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd` |
+| `sha2` | `0.10.9` | `a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283` |
+| `signature` | `2.2.0` | `77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de` |
+| `subtle` | `2.6.1` | `13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292` |
+| `syn` | `2.0.119` | `872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297` |
+| `typenum` | `1.20.1` | `b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20` |
+| `unicode-ident` | `1.0.26` | `d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954` |
+| `version_check` | `0.9.5` | `0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a` |
+
+`curve25519-dalek` resolved **4.1.3**, not the 4.2.0 version co-located
+at the inspected upstream tag: identical-looking monorepo tags are not
+proof that the published crate source/feature graph is the same. Obtain
+and compare the exact versioned source before vendoring. `fiat-crypto`
+and `libc` are in the registry lock but may be backend/target-conditional;
+only a complete target-feature graph and actual bare-metal build can
+establish which packages compile into the guest or run in the host build.
+No guest signature verifier was built or shipped. All versions, enabled
+features, licenses, upstream revisions, unsafe and build/proc-macro
+inventory, **vendored-source hashes** and actual RFC/cross-implementation
+vectors remain mandatory before acceptance; until then the corrected 8.3
+EFI and archive remain the deployable build for this design-only step.
 
 ## Alternatives and trade-offs
 
