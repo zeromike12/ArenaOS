@@ -43,8 +43,7 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
-#[path = "../../net.rs"]
-mod net;
+use arena_lib::net; // separately linked no_std client, shared with shell (ADR-0052)
 
 const SLOT_EP: u64 = 0;
 /// The handshake with the suite (M7.1b): this client tells the suite
@@ -591,6 +590,12 @@ pub unsafe extern "C" fn _start() -> ! {
         let old_handle = socket.handle();
         let mut query = [0u8; UDP_INLINE];
         let qlen = build_dns_query(&mut query);
+        // The preceding raw-IPC DNS proof used this same source port,
+        // destination and TXID. A second identical wire tuple can be
+        // coalesced by the external DNS proxy; use a distinct transaction
+        // to prove the native client actually received its OWN reply.
+        let api_txid = DNS_TXID.wrapping_add(1);
+        query[..2].copy_from_slice(&api_txid.to_be_bytes());
         let peer = net::Address {
             ip: SLIRP_DNS_IP,
             port: 53,
@@ -601,10 +606,22 @@ pub unsafe extern "C" fn _start() -> ! {
         let mut answer = [0u8; net::UDP_PAYLOAD_MAX];
         let datagram = socket
             .recv(2_000_000, &mut answer)
-            .unwrap_or_else(|_| fail(EXIT_DNS_CHUNK, "API UDP continuation failed"));
+            .unwrap_or_else(|err| {
+                log_line(|o| {
+                    o.str("arptest: native receive failed: ");
+                    match err {
+                        net::Error::Transport(code) => { o.str("kernel transport "); o.i64(code); }
+                        net::Error::Status(code) => { o.str("service status "); o.u64(code); }
+                        net::Error::Protocol => o.str("invalid response wire"),
+                        net::Error::TooLong => o.str("oversize response"),
+                        net::Error::Closed => o.str("closed binding"),
+                    }
+                });
+                fail(EXIT_DNS_CHUNK, "API UDP continuation failed")
+            });
         if datagram.from != peer
             || datagram.len <= UDP_INLINE
-            || u16::from_be_bytes([answer[0], answer[1]]) != DNS_TXID
+            || u16::from_be_bytes([answer[0], answer[1]]) != api_txid
             || answer[2] & 0x80 == 0
             || answer[datagram.len - 4..datagram.len]
                 .iter()

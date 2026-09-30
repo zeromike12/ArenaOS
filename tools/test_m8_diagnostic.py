@@ -38,7 +38,10 @@ def main() -> int:
             "servicemgr: dependency probe DEADLINE; blocked worker stopped, no child launched"]),
     ):
         rc, serial, dt = mtest.run_qemu(f"{LABEL}-{name}", esp,
-            feed=[(READY, 1, command),
+            # The concurrently spawned permission app is not part of the
+            # restart resource baseline: wait for its actual Process-cap reap.
+            feed=[((READY, b"arena>", b"permission app reaped through held Process cap"),
+                   1, command),
                   ("servicemgr: OFFLINE — restart authority/dependency plan refused".encode()
                    if name.startswith("rng-") else b"arena>",
                    1 if name.startswith("rng-") else 2, b"shutdown\r")], tcp_peer=False)

@@ -66,20 +66,20 @@ def main() -> int:
     esp = mtest.build(LABEL)
     disk = arena_env.make_scratch_disk()
     ok = True
-    rc, initial = boot("stage-one", esp, disk, [(b"arena>", 1, b"stackstress\r"),
+    rc, initial = boot("stage-one", esp, disk, [((b"arena>", b"permission app reaped through held Process cap"), 1, b"stackstress\r"),
                                                (b"arena>", 2, b"write cfg-intent-one x\r"),
                                                (b"arena>", 3, b"shutdown\r")])
     ok &= check(rc == 0 and "configup: SKIP" in initial
                 and "m8: stackstress PASS" in initial
                 and "wrote 1 bytes to 'cfg-intent-one'" in initial and not afs1.audit(disk),
                 "trusted intent staged without automatic write or updater authority in shell")
-    rc, first = boot("commit-one", esp, disk, [(b"arena>", 1, b"stackstress\r"),
+    rc, first = boot("commit-one", esp, disk, [((b"arena>", b"permission app reaped through held Process cap"), 1, b"stackstress\r"),
                                                (b"arena>", 2, b"shutdown\r")])
     ok &= check(rc == 0 and PASS in first and "configup: SET COMMITTED" in first
                 and "m8: stackstress PASS" in first and get(disk, 1) == ONE
                 and not afs1.audit(disk),
                 "separate marker-holding updater committed exact seq1 to real disk")
-    rc, repeat = boot("repeat-one", esp, disk, [(b"arena>", 1, b"stackstress\r"),
+    rc, repeat = boot("repeat-one", esp, disk, [((b"arena>", b"permission app reaped through held Process cap"), 1, b"stackstress\r"),
                                                (b"arena>", 2, b"shutdown\r")])
     ok &= check(rc == 0 and PASS in repeat and "configup: SET UNCHANGED" in repeat
                 and "m8: stackstress PASS" in repeat and get(disk, 1) == ONE

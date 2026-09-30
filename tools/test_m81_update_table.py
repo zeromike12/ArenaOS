@@ -16,7 +16,7 @@ def main() -> int:
     disk = arena_env.make_scratch_disk()
     ok = True
     rc, serial, dt = mtest.boot(LABEL + "-intent", esp,
-                                [(b"arena>", 1, b"stackstress\r"),
+                                [((b"arena>", b"permission app reaped through held Process cap"), 1, b"stackstress\r"),
                                  (b"arena>", 2, b"write cfg-intent-one x\r"),
                                  (b"arena>", 3, b"shutdown\r")], disk)
     print(f"[{LABEL}] staged: rc={rc}, {dt:.1f}s")
@@ -28,7 +28,7 @@ def main() -> int:
         current = b"one" if i % 2 else b"two"
         next_ = b"two" if i % 2 else b"one"
         marker = b"guest-v1" if i % 2 else b"guest-v2"
-        script = [(b"arena>", 1, b"stackstress\r"),
+        script = [((b"arena>", b"permission app reaped through held Process cap"), 1, b"stackstress\r"),
                   (b"arena>", 2, b"rm cfg-intent-" + current + b"\r"),
                   (b"arena>", 3, b"write cfg-intent-" + next_ + b" x\r"),
                   (b"arena>", 4, b"shutdown\r")]
@@ -47,7 +47,7 @@ def main() -> int:
         if not ok:
             return 1
     rc, serial, dt = mtest.boot(LABEL + "-full", esp,
-                                [(b"arena>", 1, b"stackstress\r"),
+                                [((b"arena>", b"permission app reaped through held Process cap"), 1, b"stackstress\r"),
                                  (b"arena>", 2, b"shutdown\r")], disk)
     (arena_env.build_dir() / f"serial-{LABEL}-full.log").write_text(serial)
     # get() intentionally names only canonical generations 1..8. Do not

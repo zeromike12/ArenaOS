@@ -47,6 +47,7 @@ mod permission;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+use arena_lib::net;
 
 // ---- shell-local constants (the grants mirror entry.rs) ----------------------
 
@@ -209,6 +210,36 @@ fn fs_error(o: &mut Out, what: &str, r: i64, st: u64) {
 fn msg_zero(msg: &mut [u8; MSG_BYTES]) {
     for b in msg.iter_mut() {
         *b = 0;
+    }
+}
+
+/// ADR-0052: a SECOND actual network client uses the separately linked
+/// no_std library (the other is arptest). The existing stack cap is the
+/// only authority; this command neither mints a bearer nor gets a new
+/// grant. An absent stack is an honest SKIP rather than a fake response.
+fn netlib() {
+    // An Image/READ is not an Endpoint/WRITE even if it has a valid slot.
+    // Refusal is from the kernel's actual kind/rights check, not from a
+    // userspace name filter or a guessed process identity.
+    if !matches!(net::Client::new(SLOT_IMAGE).resolve([10, 0, 2, 2]),
+                 Err(net::Error::Transport(_))) {
+        write_str("m83: netlib FAIL (wrong-kind Image accepted as endpoint)\r\n");
+        return;
+    }
+    write_str("m83: netlib wrong-kind Image endpoint refused by kernel\r\n");
+    let mut desc = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, desc.as_mut_ptr() as u64) } != 0 {
+        write_str("m83: netlib SKIP (no stack endpoint)\r\n");
+        return;
+    }
+    if desc[0] != 2 || desc[2] & RIGHTS_WRITE == 0 {
+        write_str("m83: netlib FAIL (stack cap kind/rights)\r\n");
+        return;
+    }
+    match net::Client::new(SLOT_STACK).resolve([10, 0, 2, 2]) {
+        Ok(mac) if mac != [0; 6] =>
+            write_str("m83: netlib PASS (linked client, live gateway ARP)\r\n"),
+        _ => write_str("m83: netlib FAIL (real ARP or IPC refused)\r\n"),
     }
 }
 
@@ -1192,8 +1223,8 @@ const PROMPT: &str = "arena> ";
 /// Two bounded debug-write chunks: Out::push drops bytes beyond
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
-const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n";
-const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  depdeny - failed driver probe\r\n  depstall - blocked driver probe\r\n  perm request|allow|deny|revoke|acquire|read - VOLATILE mediated access\r\n  shutdown - halt the machine\r\n";
+const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n  netlib - linked native client, live gateway ARP\r\n";
+const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  depdeny - failed driver probe\r\n  depstall - blocked driver probe\r\n  perm request|allow|deny|revoke|acquire|read - durable mediated access\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -1275,6 +1306,10 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_rm(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"perm ") {
                 permission::dispatch(&mut o, rest);
+            } else if eq(line, b"netlib") {
+                o.flush();
+                netlib();
+                continue;
             } else if eq(line, b"stacktest") {
                 o.flush();
                 let _ = stacktest();

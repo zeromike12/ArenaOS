@@ -28,3 +28,6 @@ path = "src/main.rs"
 [[bin]]
 name = "fstest"
 path = "src/fstest.rs"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }

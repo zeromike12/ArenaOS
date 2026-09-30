@@ -14,3 +14,6 @@ description = "ArenaOS minimal shell (M4.6, ADR-0020) — the first input-driven
 panic = "abort"
 codegen-units = 1
 opt-level = "s"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }

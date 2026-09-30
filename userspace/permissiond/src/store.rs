@@ -2,22 +2,39 @@
 //! A positive admin acknowledgement is AFTER exact committed rescan.
 //! No claim about malicious FS writers, commit-sector corruption or rollback.
 use super::*;
+use arena_lib::fs as client_fs;
 #[path = "../../permission.rs"]
 mod record;
 
 pub(super) fn fs(op: u64, w1: u64, cap: u64, msg: &mut [u8; MSG_BYTES]) -> Result<[u64; 3], u64> {
-    let mut reply = [0u64; 3];
-    let rc = unsafe { syscall6(SYS_IPC_CALL, FS, op, w1, cap,
-        reply.as_mut_ptr() as u64, msg.as_mut_ptr() as u64) };
-    if rc < 0 || reply[2] != CAP_NONE { return Err(PERM_IO); }
-    if reply[0] != FS_OK {
-        return Err(match reply[0] {
+    // The persisted-policy path uses the shared TYPED client: exactly
+    // the same endpoint cap and LENT frame as before, with validation
+    // before the syscall and no extra transaction or hidden retry.
+    let client = client_fs::Client::new(FS);
+    let result = match op {
+        FS_OP_LS => client.list(w1, msg),
+        FS_OP_OPEN | FS_OP_CREATE => {
+            let len = msg.iter().position(|&b| b == 0).unwrap_or(MSG_BYTES);
+            if op == FS_OP_OPEN { client.open(&msg[..len]) }
+            else { client.create(&msg[..len]) }
+        }
+        FS_OP_READ | FS_OP_WRITE => {
+            let len = u64::from_le_bytes(msg[..8].try_into().unwrap());
+            let (fh, offset) = (w1 & 0xff, w1 >> 8);
+            if op == FS_OP_READ { client.read(fh, offset, cap, len) }
+            else { client.write(fh, offset, cap, len) }
+        }
+        FS_OP_CLOSE => client.close(w1),
+        _ => return Err(PERM_IO),
+    }.map_err(|_| PERM_IO)?;
+    if result.status != FS_OK {
+        return Err(match result.status {
             FS_ERR_CORRUPT => PERM_CORRUPT,
             FS_ERR_NO_SPACE | FS_ERR_TABLE_FULL => PERM_NO_SPACE,
             _ => PERM_IO,
         });
     }
-    Ok(reply)
+    Ok([result.status, result.value, CAP_NONE])
 }
 
 /// Scan the WHOLE fsd namespace, including unrecognized perm8-* names.

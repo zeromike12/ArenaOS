@@ -25,10 +25,10 @@ def check(ok: bool, what: str) -> bool:
 
 def main() -> int:
     esp = mtest.build(LABEL)
-    # READY alone is not a shell-readiness boundary: the pre-shell
-    # configuration updater may still be running. Require both events
-    # before sending the command, keeping the echoed-command assertion.
-    feed = [((READY.encode(), b"arena>"), 1, b"stackstop\r"),
+    # READY and the prompt do not imply the concurrent permission app has
+    # exited. Its manager-owned Process-cap reap is the resource baseline.
+    feed = [((READY.encode(), b"arena>", b"permission app reaped through held Process cap"),
+             1, b"stackstop\r"),
             (b"arena>", 2, b"shutdown\r")]
     rc, serial, dt = mtest.run_qemu(LABEL, esp, feed=feed)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
@@ -61,12 +61,12 @@ def main() -> int:
     ok &= check(all(p >= 0 for p in positions) and positions == sorted(positions),
                 "forged hint refused; private authority, live teardown, IPC failure and bounded restart in order")
     after = serial.split("servicemgr: forcibly stopped LIVE production child", 1)[-1]
-    # The shell echoes "arena> stackstop", not a bare "stackstop" line.
-    # Require the real command anchor before excluding earlier M7 suite
-    # shutdowns; the old split silently searched the whole boot instead.
-    command = "arena> stackstop\n"
-    production = serial.split(command, 1)[1] if command in serial else ""
-    ok &= check(command in serial and after.count("netstackd: resolved 10.0.2.2") == 1
+    # The shell echoes the standalone typed command. Another process may
+    # log between its prompt and that echo: never require adjacent bytes.
+    # Anchor after the echo to exclude earlier M7 shutdowns.
+    command = re.search(r"(?m)^(?:arena> )?stackstop\r?$", serial)
+    production = serial[command.end():] if command else ""
+    ok &= check(command is not None and after.count("netstackd: resolved 10.0.2.2") == 1
                 and "netstackd: shutdown" not in production and "[arena user fault]" not in production
                 and SUCCESS in after,
                 "not orderly exit or CPU crash: forced stop, stale bearer rejected, fresh real wire and flat accounting")

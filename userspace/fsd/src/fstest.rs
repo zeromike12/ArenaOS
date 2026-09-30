@@ -56,6 +56,7 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+use arena_lib::fs;
 
 /// The grant layout (m5.rs fs_service): slot 0 = fsd call side,
 /// slot 1 = storaged call side (the final poison only).
@@ -118,33 +119,24 @@ fn fs_call(
     msg: &mut [u8; MSG_BYTES],
     fail_code: u64,
 ) -> (u64, u64) {
-    let mut reply = [0u64; 3];
-    // SAFETY: wrapper contract; `reply`/`msg` are on this thread's own
-    // (registered) stack; the endpoint cap is a granted slot.
-    let r = unsafe {
-        syscall6(
-            SYS_IPC_CALL,
-            slot,
-            op,
-            w1,
-            cap,
-            reply.as_mut_ptr() as u64,
-            msg.as_mut_ptr() as u64,
-        )
-    };
-    if r < 0 {
-        log_line(|o| {
-            o.str("fstest: call(op ");
-            o.u64(op);
-            o.str(") transport refused: ");
-            o.i64(r);
-        });
-        fail(fail_code, "the service call was refused");
+    // This independent FS consumer links the SAME checked library as
+    // permissiond. The raw escape hatch preserves the historical exact
+    // operation count and the receiver-gated SHUTDOWN fixture.
+    match fs::Client::new(slot).request(op, w1, cap, msg) {
+        Ok(reply) => (reply.status, reply.value),
+        Err(fs::Error::Ipc(arena_lib::ipc::Error::Transport(r))) => {
+            log_line(|o| {
+                o.str("fstest: call(op ");
+                o.u64(op);
+                o.str(") transport refused: ");
+                o.i64(r);
+            });
+            fail(fail_code, "the service call was refused");
+        }
+        Err(fs::Error::Ipc(arena_lib::ipc::Error::ReturnedCap)) =>
+            fail(fail_code, "fsd sent a cap back (the protocol never does)"),
+        Err(fs::Error::Input) => fail(fail_code, "fs client input refused"),
     }
-    if reply[2] != CAP_NONE {
-        fail(fail_code, "fsd sent a cap back (the protocol never does)");
-    }
-    (reply[0], reply[1])
 }
 
 /// Put `name` into the inline message, NUL-padded.

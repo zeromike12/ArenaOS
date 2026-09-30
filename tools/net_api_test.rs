@@ -3,6 +3,12 @@
 #[path = "../userspace/abi.rs"]
 mod abi;
 #[allow(dead_code)]
+#[path = "../userspace/arena-lib/src/sys.rs"]
+mod sys;
+#[allow(dead_code)]
+#[path = "../userspace/arena-lib/src/ipc.rs"]
+mod ipc;
+#[allow(dead_code)]
 #[path = "../userspace/net.rs"]
 mod net;
 use abi::*;

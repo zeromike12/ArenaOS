@@ -14,6 +14,28 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
+**Phase 8.3 linked-library completion gate (ADR-0052):**
+`userspace/arena-lib` is a separately compiled no_std rlib, not a module
+included only by its original test client. `tools/run_tests.sh` host-builds
+and tests its syscall/IPC and filesystem contracts, then compiles it for
+`x86_64-unknown-none`; the retained native network API fake-transport
+suite checks bounded UDP/TCP/DNS wire bytes and bearer lifecycle.
+`test_m83_libraries.py` boots two independent linked real FS consumers
+(`fstest` and the permission broker) against fsd's actual AFS1 device and
+two independent linked network clients (`arptest` and shell `netlib`)
+against real slirp ARP; the shell also checks wrong-kind Image refusal and
+an absent-stack boot honestly SKIPs. The unchanged fstest 34 disk-operation
+contract, durable ALLOW/REVOKE, prior FS crash tests, client cap audits
+and real-wire regression tests remain mandatory. An exact-resource
+lifecycle fixture must wait for the concurrent permission app's **real
+manager-owned Process-cap reap** before taking its baseline: the first
+full 8.3 attempt exposed a legitimate live-app baseline (12 processes)
+versus settled 11, not a leak; the tests now use an event conjunction,
+never a loosened resource count. An unrelated pre-kernel 87-byte OVMF
+startup stall also timed out; the harness preserves serial/QMP diagnostics,
+and no successful QEMU exit or retry is counted as proof of that failed
+boot. Final suite/receipt/archive digests live in ADR-0052.
+
 The **Phase 8.2 completion gate** retains all old suites and adds
 `test_m82_permission.py` (single receiver, request/approval/bearer
 separation, ordering and exact-file mediated read),

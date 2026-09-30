@@ -42,7 +42,9 @@ def main():
     esp = mtest.build(LABEL)
     disk = arena_env.make_scratch_disk()
     rc, s = boot(esp, disk, 'restart-both', [
-        (b'arena>', 1, b'perm snapshot\r'),
+        # A concurrent permission app is still live at the first prompt;
+        # snapshot only after the manager has reaped its real Process cap.
+        ((b'arena>', b'permission app reaped through held Process cap'), 1, b'perm snapshot\r'),
         (b'arena>', 2, b'perm allow\r'),
         (b'arena>', 3, b'perm acquire\r'),
         (b'arena>', 4, b'perm retain\r'),

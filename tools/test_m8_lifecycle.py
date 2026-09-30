@@ -33,7 +33,8 @@ def main() -> int:
     # This is later than the shell's first prompt and the independent
     # manager-child cap audit. A feeder keyed to "m8: ..." would never
     # fire: kernel log lines are prefixed "[arena INFO  m8] ...".
-    feed = [(FOREIGN.encode(), 1, b"lifetest\r"),
+    feed = [((FOREIGN.encode(), b"arena>", b"permission app reaped through held Process cap"),
+             1, b"lifetest\r"),
             (b"arena>", 2, b"shutdown\r")]
     rc, serial, dt = mtest.run_qemu(LABEL, esp, feed=feed)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)

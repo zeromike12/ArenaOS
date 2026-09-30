@@ -981,7 +981,7 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0, 8.1 and 8.2 complete; 8.3+ not started)
+## Phase 8 — Mature userspace 🔨 (8.0–8.3 complete; 8.4+ not started)
 
 Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
@@ -1098,11 +1098,22 @@ is not completed by accepting an ADR.
       graphics, signatures, or package authority. The previous fixed-slot
       and volatile checkpoints remain available as historical binaries;
       this completed checkpoint is qualified separately.
-- [ ] **8.3 standard userspace libraries**. Factor stable no_std
-      syscall, IPC, filesystem and network clients into reusable
-      libraries with ABI compatibility tests and at least two
-      independent consumers. Do not call a module included by only
-      its original test client a general runtime.
+- [x] **8.3 standard userspace libraries** (ADR-0052). A separately
+      compiled no_std `arena-lib` crate links the existing frozen ABI,
+      checked syscall/IPC transport (typed service status versus kernel
+      transport, unexpected returned-cap refusal), bounded AFS1 file
+      client with explicit Endpoint/LENT caps, and the existing native
+      ARP/ICMP/UDP/DNS/TCP client with receiver-issued bearer semantics.
+      `fstest` and production `permissiond` are independent linked FS
+      consumers; `arptest` and the shell are independent linked native
+      network consumers, all crossing the same `ipc`/`sys` boundary.
+      Host fake transports test byte-exact wire and negative space;
+      QEMU proves genuine AFS1 DMA/durable approval and real-wire ARP,
+      plus no-stack SKIP and wrong-kind refusal. No new kernel primitive,
+      cap grant, ambient name/identity authority, dynamic runtime or
+      POSIX socket compatibility. Prior M5 disk-operation counts and M8
+      resource/restart invariants stay exact; final 42-suite and fresh
+      artifact-bound 100/100 qualification are recorded in ADR-0052.
 - [ ] **8.4 package format + signed packages**. ADR first for package
       identity, trust roots, updates/revocation and signature
       verification. Host tamper and rollback tests plus guest install

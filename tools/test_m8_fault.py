@@ -24,7 +24,11 @@ def check(ok: bool, what: str) -> bool:
 
 def main() -> int:
     esp = mtest.build(LABEL)
-    feed = [(READY.encode(), 1, b"stackfault\r"), (b"arena>", 2, b"shutdown\r")]
+    # A real permission app is concurrently finishing its startup proof.
+    # Do not take a resource baseline while its Process/frame still exists;
+    # require its manager-owned reap AND stack readiness before the command.
+    feed = [((READY.encode(), b"permission app reaped through held Process cap", b"arena>"),
+             1, b"stackfault\r"), (b"arena>", 2, b"shutdown\r")]
     rc, serial, dt = mtest.run_qemu(LABEL, esp, feed=feed)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     print(f"[{LABEL}] production crash fixture: rc={rc}, {dt:.1f}s")

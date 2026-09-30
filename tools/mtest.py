@@ -180,7 +180,7 @@ def timeout_diagnostics(label: str, serial_log: Path, vcon_capture: Path,
         session = qmp.Qmp(str(qmp_sock), connect_timeout_s=2)
         info.append(f"QMP status={session.command('query-status')}")
         for _ in range(2):
-            info.append(f"CPU={session.command('human-monitor-command', command_line='info registers')}")
+            info.append(f"CPU={session.command('human-monitor-command', **{'command-line': 'info registers'})}")
             time.sleep(0.05)
         session.close()
     except Exception as exc:  # diagnostics must not override the timeout

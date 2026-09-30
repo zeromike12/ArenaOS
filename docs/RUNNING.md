@@ -4,7 +4,45 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 8.2 completed permission workflow
+## Phase 8.3 completed linked userspace client libraries
+
+This independently qualified checkpoint preserves the completed durable
+8.2 permission workflow and all earlier milestone regressions. It ships
+`arena-lib`, a separately compiled **no_std** syscall/checked-IPC,
+filesystem and native-network client library. `fstest` and the resident
+permission broker are separate FS consumers; `arptest` and the shell are
+separate network consumers. No new kernel authority, ambient endpoint,
+identity check or POSIX emulation is provided. `netlib` at `arena>` is an
+**opt-in** linked-client proof: it refuses a wrong-kind Image cap, then
+uses the shell's existing production stack endpoint to resolve the live
+slirp gateway over ARP; with no stack cap it honestly SKIPs. Ordinary
+`perm` ALLOW/ACQUIRE/REVOKE remains backed by immutable AFS1 policy and
+receiver-issued bearer bytes. Phase 8.4 packages/signatures are not built.
+
+Download and verify the deployable per-commit QEMU archive:
+
+```sh
+curl -fL -o arenaos-phase83-complete-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase83-complete/arenaos-phase83-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase83-complete-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase83-complete/arenaos-phase83-complete-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase83-complete-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase83-complete-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+test "$(sha256sum arena-boot.efi | cut -d' ' -f1) 100/100" = "$(cat stability-receipt.txt)"
+cp ovmf-vars-template.img ovmf-vars.img
+cp scratch-template.img scratch.img   # only FIRST boot; keep for durable policy
+```
+
+Use the [QEMU command in the common checkpoint instructions below](#phase-8-checkpoint-boot-the-exact-per-commit-build),
+then type `netlib` at the prompt (requires the attached NIC/entropy fixture
+shown there), `perm show`, or `shutdown`. The archive contains the precise
+EDK2 pair and an AFS1-formatted disk template; its EFI and receipt are
+included separately for a direct artifact-bound hash check. The full
+historical suite, 100/100 receipt and boot of the extracted archive are
+recorded in ADR-0052.
+
+## Historical Phase 8.2 completed permission workflow
 
 This independently qualified checkpoint includes persistent ALLOW, DENY and
 REVOKE decisions in immutable `perm8-*` AFS1 records; a manager-owned broker

@@ -34,7 +34,8 @@ def boot(esp: Path, tag: str, feed, **opts):
 def main() -> int:
     esp = mtest.build(LABEL)
     ok = True
-    rc, s, dt = boot(esp, "restart", [(READY.encode(), 1, b"stackstop\r"),
+    rc, s, dt = boot(esp, "restart", [((READY.encode(), b"arena>", b"permission app reaped through held Process cap"),
+                                       1, b"stackstop\r"),
                                       (b"arena>", 2, b"shutdown\r")])
     pids = re.findall(rf"{READY} (\d+)", s)
     workers = re.findall(AUDIT, s)

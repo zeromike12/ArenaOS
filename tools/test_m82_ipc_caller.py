@@ -22,7 +22,8 @@ def check(cond: bool, msg: str) -> bool:
 
 def run(esp: Path, mode: str, completion: bytes) -> tuple[int | None, str]:
     arena_env.make_scratch_disk()
-    feed = [((b'permissiond READY', b'arena>'), 1, b'perm snapshot\r'),
+    feed = [((b'permissiond READY', b'arena>',
+               b'permission app reaped through held Process cap'), 1, b'perm snapshot\r'),
             (b'arena>', 2, b'perm ' + mode.encode() + b'\r'),
             (completion, 1, b'perm snapshot\r'),
             (b'arena>', 4, b'perm acquire\r'),

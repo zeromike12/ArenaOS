@@ -19,3 +19,6 @@ path = "src/main.rs"
 [[bin]]
 name = "permapp"
 path = "src/permapp.rs"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }

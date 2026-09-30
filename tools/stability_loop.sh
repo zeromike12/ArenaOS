@@ -260,6 +260,8 @@ for i in $(seq 1 "$N"); do
         why="real broker grants differed from exact four-cap inventory"
     elif ! grep -aqF 'permapp: audited ONLY mediator WRITE|COPY, 31 other cap slots empty' "$SERIAL"; then
         why="client app was not independently audited as endpoint-only"
+    elif ! grep -aqF 'servicemgr: permission app reaped through held Process cap' "$SERIAL"; then
+        why="independent app still live or its manager Process cap not reaped"
     elif ! grep -aqF 'servicemgr: permission PING result + exit before deadline; worker reaped' "$SERIAL"; then
         why="permission readiness lacked a result-and-exit witness"
     elif grep -aqF 'servicemgr: permission PING failed/deadline; no READY' "$SERIAL"; then

@@ -60,6 +60,21 @@ else
     echo "!! host-side networking API tests FAILED"
 fi
 
+# ADR-0052: the independently linked userspace rlib is tested on the
+# host AND compiled for the actual bare-metal guest target. The guest
+# fixture exercises two separate FS and two separate network consumers.
+echo "== host and no_std target Phase 8.3 userspace client libraries"
+if (cd "$REPO_ROOT" && cargo test --manifest-path userspace/arena-lib/Cargo.toml \
+    --lib --target x86_64-unknown-linux-gnu && \
+    cargo build --manifest-path userspace/arena-lib/Cargo.toml \
+    --release --target x86_64-unknown-none); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! linked no_std client libraries FAILED"
+fi
+
 # Phase 8.0 groundwork: fail-closed no_std manifest, caller-cap
 # inventory and readiness badge gate. Ring-3 syscall proof runs in
 # the M4 shell fixture; real manager boot in test_m8_bootstrap.py.

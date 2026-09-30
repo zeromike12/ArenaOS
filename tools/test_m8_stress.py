@@ -26,7 +26,11 @@ def check(ok: bool, what: str) -> bool:
 
 def main() -> int:
     esp = mtest.build(LABEL)
-    feed = [(READY.encode(), 1, b"stackstress\r"),
+    # The broker's independently spawned app may still be live when the
+    # shell prompt and production stack READY appear. Require its actual
+    # reap before taking exact Process/frame baselines (never relax them).
+    feed = [((READY.encode(), b"permission app reaped through held Process cap", b"arena>"),
+             1, b"stackstress\r"),
             (OFFLINE.encode(), 1, b"shutdown\r")]
     rc, serial, dt = mtest.run_qemu(LABEL, esp, feed=feed)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)

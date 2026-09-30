@@ -9,6 +9,7 @@
 //! ICMP work; TCP OPEN sends SYN then POLL drives progress; UDP RECV waits
 //! for the caller's deadline. No POSIX sockets, DHCP or passive TCP.
 use crate::abi::*;
+use crate::ipc::Transport as _;
 
 pub const UDP_PAYLOAD_MAX: usize = 512 - 14 - 20 - 8;
 
@@ -74,24 +75,12 @@ pub trait Transport {
 pub struct Syscall;
 impl Transport for Syscall {
     fn call(&self, ep: u64, op: u64, arg: u64, msg: &mut [u8; MSG_BYTES]) -> Result<(u64, u64)> {
-        let mut reply = [0u64; 3];
-        // SAFETY: both arrays live for the entire synchronous IPC call.
-        let r = unsafe {
-            syscall6(
-                SYS_IPC_CALL,
-                ep,
-                arg,
-                op,
-                CAP_NONE,
-                reply.as_mut_ptr() as u64,
-                msg.as_mut_ptr() as u64,
-            )
-        };
-        if r < 0 {
-            Err(Error::Transport(r))
-        } else {
-            Ok((reply[0], reply[1]))
-        }
+        let reply = crate::ipc::Syscall.exchange(ep, arg, op, CAP_NONE, msg)
+            .map_err(|e| match e {
+                crate::ipc::Error::Transport(r) => Error::Transport(r),
+                crate::ipc::Error::ReturnedCap => Error::Protocol,
+            })?;
+        Ok((reply.status, reply.value))
     }
 }
 

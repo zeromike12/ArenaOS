@@ -19,3 +19,6 @@ path = "src/main.rs"
 [[bin]]
 name = "arptest"
 path = "src/arptest.rs"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }

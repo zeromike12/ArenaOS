@@ -18,7 +18,8 @@ def main() -> int:
     esp = mtest.build(LABEL)
     disk = arena_env.make_scratch_disk()
     rc, serial, elapsed = mtest.boot(LABEL, esp,
-        [(b"arena>", 1, b"stackstress\r"),
+        [((b"arena>", b"permission app reaped through held Process cap"),
+          1, b"stackstress\r"),
          (b"arena>", 2, b"shutdown\r")], disk)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     counters = resource_use(serial)
