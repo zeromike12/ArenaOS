@@ -94,6 +94,17 @@ else
     echo "!! host-side configuration record tests FAILED"
 fi
 
+# ADR-0048: source-derived static bounds on both host and bare-metal
+# x86_64; the separate guest suite checks live capacity and resources.
+echo "== host and no_std target cap/IPC layout audit"
+if (cd "$REPO_ROOT" && python3 tools/probe_capspace_layout.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! Phase 8.2 cap/IPC layout audit FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

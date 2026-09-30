@@ -1461,8 +1461,14 @@ fn test_capability_spaces() -> Result<(), &'static str> {
     if cap::read(pa, cap::CAP_SLOTS).is_ok() {
         return Err("out-of-bounds slot accepted");
     }
-    if cap::read(pa, 15).is_ok() {
-        return Err("empty slot read as a cap");
+    if cap::read(pa, cap::CAP_SLOTS - 1).is_ok() {
+        return Err("empty final slot read as a cap");
+    }
+    if cap::copy(pa, s_mem, pb, cap::CAP_SLOTS, cap::RIGHTS_READ).is_ok()
+        || cap::move_cap(pa, s_mem, pb, cap::CAP_SLOTS, cap::RIGHTS_READ).is_ok()
+        || cap::read(pa, s_mem)? != mem_cap
+    {
+        return Err("out-of-range copy/move mutated a source or destination");
     }
     // Attenuating copy A -> B: WRITE dropped, object preserved.
     cap::copy(pa, s_mem, pb, 0, cap::RIGHTS_READ | cap::RIGHTS_COPY)?;
@@ -1518,27 +1524,36 @@ fn test_capability_spaces() -> Result<(), &'static str> {
     if cap::occupancy(pb) != Some((2, cap::CAP_SLOTS as u32)) {
         return Err("B occupancy wrong (expected slot 0 + slot 3)");
     }
-    // Capacity: fill A, next grant refused (fillers carry DESTROY so
-    // the dangling phase below can open a slot again).
+    // Capacity: fill A, next grant refused. Exercise the *new* last
+    // slot and its exact out-of-range neighbor, not a historical 15.
+    // Fillers carry DESTROY so the dangling phase can open a slot.
+    let filler = cap::Cap {
+        obj: cap::CapObj::Process { pid: pa },
+        rights: cap::RIGHTS_DESTROY,
+    };
     while cap::occupancy(pa).map(|(u, _)| u).unwrap_or(0) < cap::CAP_SLOTS as u32 {
-        cap::grant(
-            pa,
-            cap::Cap {
-                obj: cap::CapObj::Process { pid: pa },
-                rights: cap::RIGHTS_DESTROY,
-            },
-        )?;
+        cap::grant(pa, filler)?;
     }
-    if cap::grant(
-        pa,
-        cap::Cap {
-            obj: cap::CapObj::Process { pid: pa },
-            rights: 0,
-        },
-    )
-    .is_ok()
+    let last = cap::CAP_SLOTS - 1;
+    if cap::read(pa, last)? != filler
+        || cap::grant(pa, cap::Cap { rights: 0, ..filler }).is_ok()
+        || cap::copy(pa, s_mem, pa, last, cap::RIGHTS_READ).is_ok()
+        || cap::move_cap(pa, s_mem, pa, last, cap::RIGHTS_READ).is_ok()
+        || cap::read(pa, s_mem)? != mem_cap
     {
-        return Err("grant into a full space was not refused");
+        return Err("full space/last slot did not refuse without mutating source");
+    }
+    cap::destroy(pa, last)?;
+    cap::copy(pa, s_mem, pa, last, cap::RIGHTS_READ | cap::RIGHTS_COPY)?;
+    if cap::read(pa, last)?.rights != cap::RIGHTS_READ | cap::RIGHTS_COPY {
+        return Err("copy into new last slot lost attenuation");
+    }
+    cap::move_cap(pa, last, pb, 4, cap::RIGHTS_READ)?;
+    if cap::read(pa, last).is_ok() || cap::read(pb, 4)?.rights != cap::RIGHTS_READ {
+        return Err("move from new last slot failed to clear or attenuate");
+    }
+    if cap::grant(pa, filler)? != last {
+        return Err("refill did not return the new last slot");
     }
     // Dangling: destroy the target process; a live cap to it fails its
     // invoke cleanly while the reference itself remains readable

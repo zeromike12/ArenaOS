@@ -14,6 +14,19 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
+The Phase 8.2 **cap-space foundation** adds `test_m82_capspace.py`: a
+real QEMU boot checks the new fixed 32-slot M3 last-slot/overfull
+capacity proof, exactly bounded Power snapshots after three production
+restart cycles and clean shutdown. `tools/probe_capspace_layout.py`
+compiles extracted production structs for both host and bare-metal
+target; it measures static table sizes, NOT live frame use. Historical
+8.1 skip/commit/no-op/eight-generation tests remain in the full suite.
+No app approval or service-mediated grant is claimed by this slice.
+The full suite has 33 suites. This *partial code checkpoint* passed
+33/33 and a fresh final-EFI-bound 100/100; its extracted archive also
+passed checksums and a real QEMU boot. Later 8.2 code checkpoints must
+repeat those gates on their own final images.
+
 The Phase 8.1 **completed checkpoint** retains the transactional-core tests:
 `test_m81_update.py`
 (separate service-issued updater marker; exact guest-committed value;

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""ADR-0048: measure real Cap/CapSpace/Process declarations at 16/18/32 slots.
+"""ADR-0048: source-extracted host/bare-metal cap and IPC table layout.
 
-Host x86_64 Rust layout estimate only; guest frame accounting and full-table
-proofs are separate implementation gates. No kernel or guest file is edited.
+Static size is not a live frame/leak proof. No kernel/guest source is edited.
 """
 from pathlib import Path
+import re
+import struct
 import subprocess
 import tempfile
 
@@ -57,6 +58,95 @@ fn main() {
         src.write_text(source)
         subprocess.run(["rustc", "--edition=2024", str(src), "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
+
+        # Compile the same *actual source definitions* against the guest's
+        # no_std target. A constant array in LLVM IR exposes the target
+        # layout without executing bare-metal code or altering the OS.
+        sizes = """#[used]
+#[unsafe(no_mangle)]
+pub static ARENA_CAP_LAYOUT: [usize; 14] = [
+ size_of::<CapObj>(), size_of::<Cap>(),
+ size_of::<CapSpace<16>>(),size_of::<Process<16>>(),size_of::<Option<Process<16>>>(),32*size_of::<Option<Process<16>>>(),
+ size_of::<CapSpace<18>>(),size_of::<Process<18>>(),size_of::<Option<Process<18>>>(),32*size_of::<Option<Process<18>>>(),
+ size_of::<CapSpace<32>>(),size_of::<Process<32>>(),size_of::<Option<Process<32>>>(),32*size_of::<Option<Process<32>>>(),
+];
+"""
+        target = Path(work) / "target.rs"
+        ir = Path(work) / "target.ll"
+        target.write_text("#![no_std]\n#![allow(dead_code)]\nuse core::mem::size_of;\n"
+                          + "\n".join((obj, item, space, process)) + sizes)
+        subprocess.run(["rustc", "--crate-type=lib", "--edition=2024", "-O",
+                        "--target=x86_64-unknown-none", "--emit=llvm-ir",
+                        str(target), "-o", str(ir)], check=True)
+        match = re.search(r'@ARENA_CAP_LAYOUT = constant \[112 x i8\] c"([^"]+)"',
+                          ir.read_text())
+        if match is None:
+            raise ValueError("guest layout constant missing from LLVM IR")
+        encoded = match[1]
+        data = bytearray()
+        i = 0
+        while i < len(encoded):
+            if encoded[i] == "\\":
+                data.append(int(encoded[i + 1:i + 3], 16))
+                i += 3
+            else:
+                data.append(ord(encoded[i]))
+                i += 1
+        actual = struct.unpack("<14Q", data)
+        expected = (16, 24, 400, 448, 448, 14336, 456, 504, 504,
+                    16128, 800, 848, 848, 27136)
+        if actual != expected:
+            raise ValueError(f"on-target layout changed: {actual!r} != {expected!r}")
+        print("x86_64-unknown-none target cap layout: identical to host, all 14 fields PASS")
+
+        ipc = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
+        ipc_decls = [declaration(ipc, start) for start in (
+            "#[derive(Clone, Copy, PartialEq, Eq)]\nenum SlotState",
+            "#[derive(Clone, Copy)]\nstruct CallSlot",
+            "#[derive(Clone, Copy)]\nstruct Endpoint",
+            "#[derive(Clone, Copy)]\nstruct Notif",
+        )]
+        depth = re.search(r"const QUEUE_DEPTH: usize = (\d+);", ipc)
+        width = re.search(r"const MSG_BYTES: usize = (\d+);", ipc)
+        if depth is None or width is None:
+            raise ValueError("IPC queue/message bounds missing from source")
+        ipc_source = ("#![no_std]\n#![allow(dead_code)]\n"
+                      f"const QUEUE_DEPTH: usize = {depth[1]};\n"
+                      f"const MSG_BYTES: usize = {width[1]};\n"
+                      "use core::mem::size_of;\n"
+                      + "\n".join((obj, item, *ipc_decls)) + """
+#[used]
+#[unsafe(no_mangle)]
+pub static ARENA_IPC_LAYOUT: [usize; 5] = [
+ size_of::<CallSlot>(),size_of::<Endpoint>(),size_of::<Notif>(),
+ 8*size_of::<Endpoint>(),9*size_of::<Endpoint>()
+];
+""")
+        ipc_target = Path(work) / "ipc.rs"
+        ipc_ir = Path(work) / "ipc.ll"
+        ipc_target.write_text(ipc_source)
+        subprocess.run(["rustc", "--crate-type=lib", "--edition=2024", "-O",
+                        "--target=x86_64-unknown-none", "--emit=llvm-ir",
+                        str(ipc_target), "-o", str(ipc_ir)], check=True)
+        match = re.search(r'@ARENA_IPC_LAYOUT = constant \[40 x i8\] c"([^"]+)"',
+                          ipc_ir.read_text())
+        if match is None:
+            raise ValueError("guest IPC layout constant missing from LLVM IR")
+        encoded = match[1]
+        data = bytearray()
+        i = 0
+        while i < len(encoded):
+            if encoded[i] == "\\":
+                data.append(int(encoded[i + 1:i + 3], 16))
+                i += 3
+            else:
+                data.append(ord(encoded[i]))
+                i += 1
+        ipc_sizes = struct.unpack("<5Q", data)
+        if ipc_sizes != (240, 976, 24, 7808, 8784):
+            raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
+        print("x86_64-unknown-none IPC: CallSlot=240 Endpoint=976 Notif=24; "
+              "8->9 endpoints +976 B, 14->15 notifications +24 B PASS")
 
 
 if __name__ == "__main__":

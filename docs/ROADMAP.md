@@ -981,7 +981,7 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0 and 8.1 complete; 8.2 design investigation)
+## Phase 8 — Mature userspace 🔨 (8.0 and 8.1 complete; 8.2 accepted design, runtime incomplete)
 
 Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
@@ -1081,19 +1081,21 @@ is not completed by accepting an ADR.
       existing guest tests exercise CREATE/WRITE-commit/CLOSE/reply kill
       boundaries without silently substituting an older visible record.
       No GC or 8.2 UI yet.
-- [ ] **8.2 permission manifests + CLI grant workflow**. Design
-      investigation started in proposed ADR-0048: the trusted shell is
-      the explicit CLI approver, requests are not grants, and revocable
-      operations require receiver-mediated possession checks rather
-      than deleting one copy of a kernel cap. The reviewed proposal now
-      compares fixed 18/32-slot costs and favors 32, specifies a
-      persistent app-specific endpoint for re-ACQUIRE after broker
-      restart, and selects 128-bit rngd-backed grants. No 8.2 grant or
-      CLI is implemented yet. Audit boot resource bounds and the
-      separate transactional policy namespace before accepting
-      architecture-dependent code. Prove denial, attenuation, delegation, live
-      revocation and restart persistence; no ambient pid/name authority,
-      graphics, package-signature or unauthenticated filesystem policy.
+- [ ] **8.2 permission manifests + CLI grant workflow**. Accepted
+      ADR-0048 resolves a single mediator endpoint, receiver-checked
+      trusted-shell marker, manager-owned broker/app with exactly
+      four/one inherited grants, fixed 32-slot cap table, separate
+      transactional `perm8-*` namespace and 128-bit service-issued
+      tokens. Requests are not approvals or issued authority; bearer
+      copies fail after receiver-side revocation. The pre-code static/
+      target resource, policy-namespace and ordering audits are recorded.
+      The first foundation checkpoint raises kernel `CAP_SLOTS` to 32,
+      retaining last-slot attenuation, full-table refusal, frame-exact
+      teardown and all historical suites; it does NOT implement a
+      permission grant or CLI. Prove denial,
+      attenuation, delegation, live revocation and restart persistence;
+      no ambient pid/name authority, graphics, package-signature or
+      unauthenticated filesystem policy.
 - [ ] **8.3 standard userspace libraries**. Factor stable no_std
       syscall, IPC, filesystem and network clients into reusable
       libraries with ABI compatibility tests and at least two

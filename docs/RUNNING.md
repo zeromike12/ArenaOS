@@ -4,7 +4,31 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 8.2 revised proposed-ADR review (no 8.2 runtime yet)
+## Phase 8.2 cap-space foundation checkpoint (8.2 incomplete)
+
+This commit's QEMU archive has the **new fixed 32-slot kernel cap
+space**, with guest-tested last-slot COPY/MOVE, full-table refusal,
+out-of-range refusal and frame-exact teardown. It is still Phase 8.1's
+transactional store at runtime: **no permission service, CLI approval or
+revocable grant exists yet**. ADR-0048 is accepted as a bounded design;
+8.2 remains in progress. Download this commit's qualified image:
+
+```sh
+curl -fL -o arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase82-capspace-foundation/arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase82-capspace-foundation/arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+cp ovmf-vars-template.img ovmf-vars.img
+cp scratch-template.img scratch.img  # only on first boot; retain thereafter
+```
+
+Then use the QEMU command below. The prior ADR-only review archives
+remain historical and run the **unchanged 8.1 binary**.
+
+## Historical Phase 8.2 revised proposed-ADR review (no 8.2 runtime yet)
 
 The revised, still-Proposed ADR-0048 commit carries its own deployable
 archive at `releases/checkpoints/phase82-adr-reacquisition-review/`.

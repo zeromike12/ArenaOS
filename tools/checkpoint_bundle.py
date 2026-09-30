@@ -91,6 +91,16 @@ def main() -> int:
                 "FS allocator refused WRITE; second marked SET DEGRADED, old READ/record intact" not in log or
                 "PASS: table preflight stayed bounded, not degraded" not in log):
                 raise ValueError("8.1 closure requires exact numeric bounds and same-boot failure barrier")
+    if args.checkpoint == "phase82-capspace-foundation":
+        log = args.suite_log.read_text()
+        required = ("ALL TESTS PASSED (33 test suites)",
+                    "CAPSPACE32: PASS (guest last-slot copy/move/full-refusal",
+                    "x86_64-unknown-none target cap layout: identical to host, all 14 fields PASS",
+                    "x86_64-unknown-none IPC: CallSlot=240 Endpoint=976 Notif=24",
+                    "AUTHORIZED TRANSACTION/CRASH: PASS",
+                    "EIGHT-SLOT EXHAUSTION: PASS")
+        if any(item not in log for item in required):
+            raise ValueError("8.2 capspace checkpoint requires all historical and exact resource/capacity proofs")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -109,7 +119,9 @@ def main() -> int:
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1: COMPLETE; AFS1 ordered-write/atomic-sector model; visible config-record integrity; exact boot-relative resources, bounded table/disk refusal and DEGRADED barrier proven\n"
+        + ("Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: CAP-SPACE FOUNDATION ONLY: 32 fixed slots with full-table refusal and accounting; no permissiond/CLI/approval/grant; 8.2 INCOMPLETE\n"
+           if args.checkpoint == "phase82-capspace-foundation" else
+           "Phase 8.1: COMPLETE; AFS1 ordered-write/atomic-sector model; visible config-record integrity; exact boot-relative resources, bounded table/disk refusal and DEGRADED barrier proven\n"
            if args.checkpoint == "phase81-complete" else
            "Phase 8.1: TRANSACTIONAL CORE; positive SET/crash/table/disk proofs; 8.1 INCOMPLETE pending resource/fault accounting\n"
            if args.checkpoint == "phase81-transactional-core" else
@@ -172,14 +184,17 @@ def main() -> int:
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",
                     "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
-        if args.checkpoint.startswith("phase81-"):
+        if args.checkpoint.startswith("phase81-") or args.checkpoint == "phase82-capspace-foundation":
             required += ("configread: SET absent/wrong-kind refused x20 by receiver",
                          "configread: READ UNSET",
                          "configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)",
                          "configread: boot-root reader reaped; no update authority delegated")
-        if args.checkpoint in ("phase81-transactional-core", "phase81-complete"):
+        if args.checkpoint in ("phase81-transactional-core", "phase81-complete", "phase82-capspace-foundation"):
             required += ("configup: SKIP (no trusted test intent; no SET)",
                          "configup: boot-root updater reaped; marker never delegated to shell")
+        if args.checkpoint == "phase82-capspace-foundation":
+            required += ("capability_spaces: 32 slots/space",
+                         "m3:test:capability_spaces: PASS")
         if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
                 or serial.count("servicemgr: production netstackd READY pid") != 2
                 or serial.count("servicemgr: active netd MAC and rngd entropy probes passed; worker reaped") != 2

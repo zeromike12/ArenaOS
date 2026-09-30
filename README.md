@@ -51,12 +51,12 @@ the machine waits for you at the `arena> ` prompt — type `help`, and
 For the **in-progress Phase 8** branch, completed code checkpoints include
 their own bootable, 100/100-qualified archives under `releases/checkpoints/`.
 See the download, checksum, extraction and QEMU commands in
-**[docs/RUNNING.md](docs/RUNNING.md#phase-82-revised-proposed-adr-review-no-82-runtime-yet)**.
+**[docs/RUNNING.md](docs/RUNNING.md#phase-82-cap-space-foundation-checkpoint-82-incomplete)**.
 These per-commit archives are **not** tagged GitHub release assets.
-The revised proposed-ADR review image reuses the identical qualified 8.1
-boot bytes; Phase 8.2 still has no implemented permission/grant UI.
+The current boot changes only the bounded kernel cap-space capacity;
+Phase 8.2 still has no permission service, CLI or grant workflow.
 
-## What just booted (current: bounded Phase 8.1 complete; Phase 8.2 design investigation; Phase 8.0 manager and Phase 7 network lifecycle complete)
+## What just booted (current: bounded Phase 8.1 complete; Phase 8.2 cap-space foundation, no grants yet; Phase 8.0 manager and Phase 7 network lifecycle complete)
 
 QEMU/OVMF loads `EFI/BOOT/BOOTX64.EFI` (our Rust boot stage). It brings
 up serial, GDT/IDT/TSS, the 16550 UART, and the real UEFI memory map;

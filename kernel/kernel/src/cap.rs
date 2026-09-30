@@ -28,10 +28,11 @@ use crate::frames;
 use crate::proc;
 use crate::sync::without_interrupts;
 
-/// Slots per capability space. Fixed capacity, no growth — the M3
-/// discipline (threads, processes) applied again; revisited when
-/// userspace cspaces need more (ADR-0015, Future implications).
-pub const CAP_SLOTS: usize = 16;
+/// Fixed per-process capacity (ADR-0015, revised by ADR-0048): 32 is
+/// bounded mature-userspace headroom, not authority. Source COPY and
+/// destination occupancy/rights are still checked on every delegation;
+/// a full table refuses rather than growing or replacing a cap.
+pub const CAP_SLOTS: usize = 32;
 
 /// Inspect what the cap references (and, for process caps, obtain the
 /// target's PML4 root through [`process_root`]).
