@@ -91,16 +91,21 @@ def main() -> int:
                 "FS allocator refused WRITE; second marked SET DEGRADED, old READ/record intact" not in log or
                 "PASS: table preflight stayed bounded, not degraded" not in log):
                 raise ValueError("8.1 closure requires exact numeric bounds and same-boot failure barrier")
-    if args.checkpoint == "phase82-capspace-foundation":
+    if args.checkpoint in ("phase82-capspace-foundation", "phase82-volatile-permission"):
         log = args.suite_log.read_text()
-        required = ("ALL TESTS PASSED (33 test suites)",
+        required = ("ALL TESTS PASSED (33 test suites)" if args.checkpoint == "phase82-capspace-foundation"
+                    else "ALL TESTS PASSED (35 test suites)",
                     "CAPSPACE32: PASS (guest last-slot copy/move/full-refusal",
                     "x86_64-unknown-none target cap layout: identical to host, all 14 fields PASS",
                     "x86_64-unknown-none IPC: CallSlot=240 Endpoint=976 Notif=24",
                     "AUTHORIZED TRANSACTION/CRASH: PASS",
                     "EIGHT-SLOT EXHAUSTION: PASS")
+        if args.checkpoint == "phase82-volatile-permission":
+            required += ("VOLATILE INTEGRATION: PASS", "ADR-0050: PASS (3 guest fault boundaries)",
+                         "worker died IN SYS_IPC_CALL before server death",
+                         "broker-first timeout returned typed SERVICE_GONE")
         if any(item not in log for item in required):
-            raise ValueError("8.2 capspace checkpoint requires all historical and exact resource/capacity proofs")
+            raise ValueError("8.2 checkpoint requires its complete historical and focused guest proofs")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -119,7 +124,9 @@ def main() -> int:
         "Historical suite: all passed (see commit gate)\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: CAP-SPACE FOUNDATION ONLY: 32 fixed slots with full-table refusal and accounting; no permissiond/CLI/approval/grant; 8.2 INCOMPLETE\n"
+        + ("Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: VOLATILE INTEGRATION ONLY: default-DENY mediator, marker-authorized in-memory ALLOW/DENY/REVOKE, 128-bit service bearer and mediated arena.txt READ; IPC dead-caller teardown corrected. No persisted decision or reboot/restart/crash-model permission guarantee; 8.2 INCOMPLETE\n"
+           if args.checkpoint == "phase82-volatile-permission" else
+           "Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: CAP-SPACE FOUNDATION ONLY: 32 fixed slots with full-table refusal and accounting; no permissiond/CLI/approval/grant; 8.2 INCOMPLETE\n"
            if args.checkpoint == "phase82-capspace-foundation" else
            "Phase 8.1: COMPLETE; AFS1 ordered-write/atomic-sector model; visible config-record integrity; exact boot-relative resources, bounded table/disk refusal and DEGRADED barrier proven\n"
            if args.checkpoint == "phase81-complete" else
@@ -184,18 +191,24 @@ def main() -> int:
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",
                     "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
-        if args.checkpoint.startswith("phase81-") or args.checkpoint == "phase82-capspace-foundation":
+        if args.checkpoint.startswith("phase81-") or args.checkpoint.startswith("phase82-"):
             required += ("configread: SET absent/wrong-kind refused x20 by receiver",
                          "configread: READ UNSET",
                          "configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)",
                          "configread: boot-root reader reaped; no update authority delegated")
-        if args.checkpoint in ("phase81-transactional-core", "phase81-complete", "phase82-capspace-foundation"):
+        if args.checkpoint in ("phase81-transactional-core", "phase81-complete", "phase82-capspace-foundation", "phase82-volatile-permission"):
             required += ("configup: SKIP (no trusted test intent; no SET)",
                          "configup: boot-root updater reaped; marker never delegated to shell")
-        if args.checkpoint == "phase82-capspace-foundation":
+        if args.checkpoint.startswith("phase82-"):
             required += ("capability_spaces: 32 slots/space",
                          "m3:test:capability_spaces: PASS")
-        if (rc != 0 or "PANIC" in serial or any(item not in serial for item in required)
+        if args.checkpoint == "phase82-volatile-permission":
+            required += ("permissiond READY (volatile policy; default DENY)",
+                         "servicemgr: permission PING result + exit before deadline; worker reaped",
+                         "ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact")
+        if (rc != 0 or "PANIC" in serial or "halting machine:" in serial
+                or "[arena ERROR halt]" in serial or "[arena ERROR ipc]" in serial
+                or any(item not in serial for item in required)
                 or serial.count("servicemgr: production netstackd READY pid") != 2
                 or serial.count("servicemgr: active netd MAC and rngd entropy probes passed; worker reaped") != 2
                 or "m8: stackstop FAIL" in serial or "servicemgr: OFFLINE" in serial):

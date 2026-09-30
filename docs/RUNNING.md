@@ -4,14 +4,54 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 8.2 cap-space foundation checkpoint (8.2 incomplete)
+## Phase 8.2 volatile permission integration checkpoint (8.2 incomplete)
 
-This commit's QEMU archive has the **new fixed 32-slot kernel cap
+This checkpoint's qualified archive contains the default-DENY `permissiond`
+mediator, marker-authorized **in-memory** ALLOW/DENY/REVOKE, rngd-issued
+128-bit revocable read bearers, the mediated `arena.txt` app, the bounded
+PING readiness witness, and the general dead-IPC-caller teardown fix.
+The old 8.0/8.1 functionality remains. **No approval persists after broker
+restart or reboot; do not use this as a durable permission store.** The
+8.2 persistent-record, crash, restart and ordering completion gates remain
+open. A fresh 35/35 historical suite, final-EFI-bound 100/100 QEMU boots
+and an extracted-archive boot qualify **this partial checkpoint**, not
+8.2 completion. Download and verify the image for this commit:
+
+```sh
+curl -fL -o arenaos-phase82-volatile-permission-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase82-volatile-permission/arenaos-phase82-volatile-permission-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase82-volatile-permission-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase82-volatile-permission/arenaos-phase82-volatile-permission-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase82-volatile-permission-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase82-volatile-permission-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+cp ovmf-vars-template.img ovmf-vars.img
+cp scratch-template.img scratch.img  # only first boot; retain for reboot checks
+```
+
+Use the QEMU command below. At `arena>` try `perm request` (description,
+not authority), `perm acquire` (denied by default), `perm allow-noauth`
+and `perm allow-wrong` (receiver refuses missing/wrong approval marker),
+then `perm allow` (trusted-shell marker transfers to broker). `perm
+acquire` receives a fresh bearer; `perm read` mediates 32 bytes of
+`arena.txt`; `perm retain` / `perm read-retained` exercise an independent
+bearer copy. `perm delegate` transfers only the mediator endpoint to a
+new app. `perm revoke` invalidates **all** earlier bearers at the broker;
+`perm read-retained` then fails even though the copied bytes survive.
+These opt-in commands require a disposable QEMU disk; this checkpoint's
+ALLOW is not written to that disk. The privileged shell still has its
+pre-existing raw FS authority for historical tests; the **app** receives
+only the mediator endpoint, never fsd authority.
+
+## Historical Phase 8.2 cap-space foundation checkpoint (8.2 incomplete)
+
+The earlier archive has the **new fixed 32-slot kernel cap
 space**, with guest-tested last-slot COPY/MOVE, full-table refusal,
-out-of-range refusal and frame-exact teardown. It is still Phase 8.1's
-transactional store at runtime: **no permission service, CLI approval or
-revocable grant exists yet**. ADR-0048 is accepted as a bounded design;
-8.2 remains in progress. Download this commit's qualified image:
+out-of-range refusal and frame-exact teardown. **That earlier binary**
+is still Phase 8.1's transactional store at runtime: no permission
+service, CLI approval or revocable grant exists in that earlier image.
+ADR-0048 was accepted as a bounded design; 8.2 remains in progress.
+Download that checkpoint's own qualified image:
 
 ```sh
 curl -fL -o arenaos-phase82-capspace-foundation-qemu-x86_64.tar.gz \

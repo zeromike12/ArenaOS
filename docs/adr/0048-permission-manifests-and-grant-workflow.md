@@ -1,6 +1,6 @@
 # ADR-0048 — Phase 8.2 permission requests, approval and revocable grants
 
-*Status: Accepted for bounded Phase 8.2 implementation (2026-09-30).
+*Status: Superseded by ADR-0049 (2026-09-30), **only for the readiness worker's success witness**. All other bounded Phase 8.2 decisions and gates remain in force. Originally accepted 2026-09-30.
 The proposal was published for review at `8c041ae` and `add2d30` before
 acceptance. This revision resolves the single-endpoint/spawn-grant
 integration conflicts and records the pre-code static/target, authority,
@@ -456,3 +456,47 @@ and checksum/extracted-archive QEMU boot verification. Deployable image:
 `releases/checkpoints/phase82-capspace-foundation/`. There is still no
 8.2 grant/revocation or persistence proof; later code requires a new
 image, full suite, fresh receipt and the remaining completion gates.
+
+## Volatile integration checkpoint (8.2 still incomplete)
+
+A second, separately qualified image now exercises the first **in-memory**
+permission path. Manager manifest validation grants `permissiond` fsd/W,
+rngd/W, mediator/R and receiver-verified approval-marker/R; the client
+app inherits only mediator/W|COPY. The reused image20 PING worker inherits
+mediator/W and WRITE on the existing private manager result Notification;
+its own cap-describe guard refuses a third grant. Manager requires exact
+reply body, success badge, exit badge, no deadline and a successful
+Process-cap reap before READY. Negative PING replies and stalled calls
+never mark READY. The single mediator receiver refuses no-marker and
+wrong-object admin requests; typed `PERM_VOLATILE` makes it explicit
+that an authorized ALLOW/DENY/REVOKE changes *memory only*. On ALLOW it
+uses rngd to issue unique 128-bit byte bearers and reads only `arena.txt`
+through its own fsd cap; independently copied bearer bytes remain usable
+until receiver-side revocation. A separately spawned endpoint-only app
+verifies the real 512-byte file. Normal broker timeout is broker-first;
+ADR-0050 separately closes the general dead-caller teardown invariant.
+
+Present-device resource snapshots stabilize at exactly `(275,11,11)`
+boot-relative frames/spawn records/processes in the capspace fixture,
+versus foundation `(254,10,10)`: the **one** additional resident broker
+accounts for records/processes (11/11 is *not* a relaxed limit), while
+frames also reflect the larger linked integration EFI and resident
+service's mapped/ELF pages. Each targeted failed-PING teardown checks
+exact free-frame/record/process equality before and after broker/worker
+reaping. The fixture still refuses full cap tables and tests three
+restart cycles of the original netstackd. No conclusion about a
+persisted permission decision follows from these numbers.
+
+Full historical suite: **35/35** (`build/phase82-volatile-full-suite.log`),
+including the three-mode ADR-0050 guest regression and same-disk reboot
+which correctly returns to DENY. The final EFI SHA-256 is
+`98331c626c4febed721682fdddc6ee9c3df5a7aa48067cc9690b8e64620bbc15`;
+a fresh **100/100** qualification on that EFI, its matching receipt, and
+an extracted-archive QEMU boot passed. The deployable archive is
+`releases/checkpoints/phase82-volatile-permission/`. The file's
+remaining implementation gates are **open**: durable policy format and
+same-disk reboot/restart recovery, AFS1 write-boundary crash tests,
+malformed/NO_SPACE/DEGRADED cases, old-token refusal across actual broker
+restart, pre/post-REVOKE serialization proofs, and permission-specific
+absent-device/full-table negative-space fixtures. Neither ADR acceptance
+nor this partial checkpoint closes 8.2.

@@ -184,6 +184,8 @@ for i in $(seq 1 "$N"); do
         why="no serial output"
     elif grep -aq 'PANIC' "$SERIAL"; then
         why="kernel PANIC on serial"
+    elif grep -aqE '\[arena ERROR (halt|ipc)\]|halting machine:' "$SERIAL"; then
+        why="kernel halt/IPC error on serial (ResetSystem exit 0 is NOT success)"
     elif ! grep -aq 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' \
         "$REPO_ROOT/build/tcp-stability.log"; then
         why="TCP host peer did not verify request/200-byte response/FIN"
@@ -196,9 +198,9 @@ for i in $(seq 1 "$N"); do
     # Shipping fixture: real manager caps, two bounded active driver
     # probes, then two production children and a real-wire restart.
     # Destructive fault/stall negatives live in the historical host suite.
-    elif ! grep -aqF 'audited 12 literal caps; no device/Power/Process grants' "$SERIAL"; then
+    elif ! grep -aqF 'audited 17 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 14/14; fifteenth refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 15/15; sixteenth refused' "$SERIAL"; then
         why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
@@ -247,6 +249,15 @@ for i in $(seq 1 "$N"); do
         why="config updater or its marker survived shell handoff"
     elif grep -aqF 'configup: SET COMMITTED' "$SERIAL"; then
         why="fresh boot unexpectedly consumed an immutable generation"
+    # 8.2 volatile integration: ordinary boot must not invent an ALLOW,
+    # and manager readiness requires both the worker's authenticated PING
+    # result and its observed exit (a false success must fail qualification).
+    elif ! grep -aqF 'permissiond READY (volatile policy; default DENY)' "$SERIAL"; then
+        why="permission mediator absent or default-DENY boot not observed"
+    elif ! grep -aqF 'servicemgr: permission PING result + exit before deadline; worker reaped' "$SERIAL"; then
+        why="permission readiness lacked a result-and-exit witness"
+    elif grep -aqF 'servicemgr: permission PING failed/deadline; no READY' "$SERIAL"; then
+        why="permission readiness failed during ordinary qualification"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

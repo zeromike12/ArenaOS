@@ -31,8 +31,42 @@ fn challenge_wrong_marker(op: u64) {
     }
 }
 
+/// ADR-0049: strictly typed second mode of the already registered
+/// image20. The worker cannot manufacture this result channel: its
+/// manager spawns it with exactly mediator/W and private result/W.
+fn permission_ping_mode() -> ! {
+    let mut ep = [0u64; 3];
+    let mut result = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, 0, ep.as_mut_ptr() as u64) } != 0
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, 1, result.as_mut_ptr() as u64) } != 0
+        || ep[0] != 2 || ep[2] != RIGHTS_WRITE
+        || result[0] != 3 || result[2] != RIGHTS_WRITE
+    { fail("depcheck: permission mode grant shape refused\r\n"); }
+    let mut unexpected = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, 2, unexpected.as_mut_ptr() as u64) } == 0 {
+        fail("depcheck: permission mode unexpected third grant\r\n");
+    }
+    let mut msg = [0u8; MSG_BYTES];
+    let mut out = [0u64; 3];
+    let rc = unsafe { syscall6(SYS_IPC_CALL, 0, PERM_OP_PING, 0, CAP_NONE,
+        out.as_mut_ptr() as u64, msg.as_mut_ptr() as u64) };
+    if rc != 0 || out != [PERM_OK, PERM_PING_VERSION, CAP_NONE]
+        || msg[..4] != PERM_PING_MAGIC || msg[4..].iter().any(|b| *b != 0)
+    { fail("depcheck: permission PING incomplete or refused\r\n"); }
+    if unsafe { syscall2(SYS_NOTIFY, 1, MGR_BADGE_PERM_PROBE_OK) } != 0 {
+        fail("depcheck: permission result signal refused\r\n");
+    }
+    unsafe { syscall1(SYS_THREAD_EXIT, 42) };
+    loop { core::hint::spin_loop() }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
+    let mut second = [0u64; 3];
+    // Original driver mode always has rngd Endpoint in slot 1. A
+    // Notification in slot 1 is exclusively the mediator probe mode.
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, 1, second.as_mut_ptr() as u64) } == 0
+        && second[0] == 3 { permission_ping_mode(); }
     // Slots 0/1 are netd/rngd Endpoint/WRITE, slot 2 is the manager's
     // PRIVATE notification/WRITE. No shutdown or device rights are held.
     if !diagnostic_refused(0, 0, NET_OP_SHUTDOWN, CAP_NONE, NET_S_BAD_OP)

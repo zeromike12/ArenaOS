@@ -64,6 +64,8 @@ pub const MGR_BADGE_ADMIN_STOP: u64 = 1 << 0;
 /// Privileged opt-in proof: crash rngd on its next actual GET.
 pub const MGR_BADGE_ADMIN_DEPFAIL: u64 = 1 << 2;
 pub const MGR_BADGE_ADMIN_DEPSTALL: u64 = 1 << 3;
+pub const MGR_BADGE_ADMIN_PERM_PROBE: u64 = 1 << 4; // private manager request, test only
+pub const MGR_BADGE_ADMIN_PERM_CALLER_FIRST: u64 = 1 << 6; // ADR-0050 regression mode
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.
@@ -72,6 +74,11 @@ pub const MGR_BADGE_STACK_BACKOFF: u64 = 1 << 4;
 pub const MGR_BADGE_PROBE_OK: u64 = 1 << 6;
 pub const MGR_BADGE_PROBE_EXIT: u64 = 1 << 7;
 pub const MGR_BADGE_PROBE_DEADLINE: u64 = 1 << 8;
+/// ADR-0049: dedicated result/exit/deadline bits on existing private
+/// manager restart notification; driver probe uses disjoint bits 6..8.
+pub const MGR_BADGE_PERM_PROBE_OK: u64 = 1 << 12;
+pub const MGR_BADGE_PERM_PROBE_EXIT: u64 = 1 << 13;
+pub const MGR_BADGE_PERM_PROBE_DEADLINE: u64 = 1 << 14;
 /// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
 pub const STATUS_BUSY: i64 = -4;
 
@@ -168,6 +175,36 @@ pub const BLOCK_FRAME_BYTES: u64 = 4096;
 pub fn block_req_w1(op: u64, buf_offset: u64) -> u64 {
     op | (buf_offset << 8)
 }
+
+// ---- Phase 8.2 mediated, VOLATILE grant exercise (ADR-0048) ------------------
+// This first integration path deliberately makes NO persistence claim.
+// A request, an approval, and a 128-bit service-issued grant differ.
+// Single endpoint: admin calls transfer the boot-issued marker; ACQUIRE
+// needs possession of the endpoint, READ also needs a current bearer.
+// ACQUIRE: msg OUT [0..16] random token. READ: msg IN [0..16] token,
+// w1 = offset (0..511, multiples of 32); OUT [0..32] file data, w1=len.
+pub const PERM_OP_PING: u64 = 1;
+// Full PING reply: (PERM_OK, PERM_PING_VERSION, CAP_NONE), 64-byte
+// message with only its first four bytes set to PERM_PING_MAGIC.
+pub const PERM_PING_VERSION: u64 = 0x0001_0008;
+pub const PERM_PING_MAGIC: [u8; 4] = *b"PRM8";
+pub const PERM_OP_ACQUIRE: u64 = 2;
+pub const PERM_OP_READ: u64 = 3;
+pub const PERM_OP_ALLOW: u64 = 4;
+pub const PERM_OP_DENY: u64 = 5;
+pub const PERM_OP_REVOKE: u64 = 6;
+// Destructive proof fixtures, same receiving-service marker gate as
+// admin policy changes; never exposed to the app.
+pub const PERM_OP_TEST_BAD_PING: u64 = 7;
+pub const PERM_OP_TEST_STALL_PING: u64 = 8;
+pub const PERM_OK: u64 = 0;
+pub const PERM_DENIED: u64 = 1;
+pub const PERM_BAD_TOKEN: u64 = 2;
+pub const PERM_BAD_INPUT: u64 = 3;
+pub const PERM_IO: u64 = 4;
+pub const PERM_ENTROPY: u64 = 5;
+pub const PERM_VOLATILE: u64 = 6; // admin success; lost at reboot/restart
+pub const PERM_NO_SPACE: u64 = 7; // bounded live bearer table full; no eviction
 
 // ---- Phase 8.1 configuration-service protocol (ADR-0046) --------------------
 // READ needs only Endpoint/WRITE. Every SET and TEST_PLAN must transfer

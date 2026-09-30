@@ -37,11 +37,15 @@ use crate::sched;
 use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
-pub const MAX_ENDPOINTS: usize = 8;
+pub const MAX_ENDPOINTS: usize = 9; // ADR-0048: single mediator endpoint
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 14;
+pub const MAX_NOTIFS: usize = 15; // ADR-0048: distinct approval marker, no new probe notif
+#[path = "ipc_adr50_test.rs"]
+mod adr50_test;
+/// In-guest internal-only M4 fixture; no userspace syscall or authority.
+pub(crate) use adr50_test::{stage as stage_abandoned_caller_fixture, verify as verify_abandoned_caller_fixture};
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
 const QUEUE_DEPTH: usize = 4;
@@ -703,8 +707,8 @@ pub fn fail_calls_for_server(pid: u64) -> usize {
 }
 
 /// Drop every kernel-side reference to threads belonging to `pid`
-/// (M6.5, ADR-0028): the endpoint server slots it is parked in and
-/// the notification waiter slots it is parked on.
+/// (ADR-0028/0050): parked endpoint servers, notification waiters,
+/// AND in-flight endpoint callers in all nonempty queue states.
 ///
 /// This MUST run before `sched::kill_threads_of`. Those slots hold
 /// raw thread ids, and both `call` and `notify` treat "I have a
@@ -713,29 +717,44 @@ pub fn fail_calls_for_server(pid: u64) -> usize {
 /// threads are. A dead driver parked in `SYS_IPC_RECV` would
 /// otherwise be woken by the next client that called its endpoint.
 ///
-/// Returns (endpoint server slots cleared, notification waiters cleared).
-pub fn release_blocked_of(pid: u64) -> (usize, usize) {
+/// Returns (parked servers, notification waiters, abandoned call slots).
+/// Clearing a call slot discards only STAGED value copies: the sender's
+/// original cap remains in its own space until proc teardown; an already
+/// installed LENT cap belongs to the receiving server, not this slot.
+/// Replied reply caps are staged copies not yet installed in the dead
+/// caller's space. Never orphan the endpoint here: its server is alive.
+pub fn release_blocked_of(pid: u64) -> (usize, usize, usize) {
     without_interrupts(|| {
         // SAFETY: single writer under IF=0.
         unsafe {
             let mut servers = 0;
             let mut waiters = 0;
+            let mut calls = 0;
             for ep in (*ENDPOINTS.get()).iter_mut() {
-                if ep.live
-                    && ep.server != NO_TID
-                    && sched::proc_id_of(ep.server).unwrap_or(0) == pid
-                {
+                if !ep.live { continue; }
+                if ep.server != NO_TID && sched::proc_id_of(ep.server) == Some(pid) {
                     ep.server = NO_TID;
                     servers += 1;
                 }
+                // An endpoint slot can outlive the caller in Waiting,
+                // Delivered, Replied or Failed. Reclaim ALL four before
+                // sched::kill_threads_of makes caller TIDs unwakeable.
+                // The real server (if any) is not stopped or orphaned;
+                // its later SYS_IPC_REPLY receives STATUS_BAD_ARG.
+                for slot in ep.q.iter_mut() {
+                    if slot.state != SlotState::Empty && sched::proc_id_of(slot.caller) == Some(pid) {
+                        *slot = EMPTY_SLOT;
+                        calls += 1;
+                    }
+                }
             }
             for n in (*NOTIFS.get()).iter_mut() {
-                if n.live && n.waiter != NO_TID && sched::proc_id_of(n.waiter).unwrap_or(0) == pid {
+                if n.live && n.waiter != NO_TID && sched::proc_id_of(n.waiter) == Some(pid) {
                     n.waiter = NO_TID;
                     waiters += 1;
                 }
             }
-            (servers, waiters)
+            (servers, waiters, calls)
         }
     })
 }

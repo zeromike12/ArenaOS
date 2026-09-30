@@ -60,6 +60,29 @@ TIMEOUT_S = 120  # TCG is slow; a healthy boot takes <10s
 MEM_MIB = 512
 
 
+def semantic_exit_rc(rc: int | None, serial: str, label: str) -> int | None:
+    """QEMU ResetSystem is also used by halt_machine: rc=0 is NOT PASS.
+
+    Successful boots in this repository all complete M3/M4's historical
+    markers and the shell's explicit shutdown. Individual suites still
+    require their own operation-specific PASS/SKIP markers and disk/wire
+    proofs. Never turn a SIGKILL crash fixture's rc=None into success.
+    """
+    if rc != 0:
+        return rc
+    fatal = ('[arena ERROR halt]', '[arena ERROR ipc]', 'halting machine:',
+             'PANIC', 'RESULT FAIL')
+    required = ('m3: RESULT PASS (13/13)', 'm4: RESULT PASS (9/9)',
+                'halting via UEFI ResetSystem(shutdown)')
+    hit = next((x for x in fatal if x in serial), None)
+    missing = next((x for x in required if x not in serial), None)
+    if hit or missing:
+        print(f'[{label}] GUEST FAILURE despite QEMU rc=0: '
+              f'{"fatal " + hit if hit else "missing " + missing}')
+        return 97  # harness verdict, not a fabricated QEMU process status
+    return rc
+
+
 def build(label: str) -> Path:
     print(f"[{label}] building kernel image + ESP ...")
     subprocess.run(
@@ -282,7 +305,7 @@ def run_qemu(label: str, esp: Path,
     if peer_thread is not None: peer_thread.join(timeout=2)
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
-    return rc, serial, dt
+    return semantic_exit_rc(rc, serial, label), serial, dt
 
 
 def boot(label: str, esp: Path,
@@ -441,7 +464,7 @@ def boot(label: str, esp: Path,
         rc = None
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
-    return rc, serial, dt
+    return semantic_exit_rc(rc, serial, label), serial, dt
 
 
 def evaluate(label: str, milestone: str, expected_tests: list[str],

@@ -208,6 +208,15 @@ for CFG_ELF in \
     echo "config image: ${CFG_ELF#"$REPO_ROOT"/} ($(stat -c%s "$CFG_ELF") bytes)"
 done
 
+echo "== building userspace permissiond (userspace/permissiond, x86_64-unknown-none) =="
+( cd "$REPO_ROOT/userspace/permissiond" && cargo build --release )
+for PERM_ELF in \
+    "$REPO_ROOT/userspace/permissiond/target/x86_64-unknown-none/release/arena-permissiond" \
+    "$REPO_ROOT/userspace/permissiond/target/x86_64-unknown-none/release/permapp"; do
+    test -f "$PERM_ELF"
+    echo "permission image: ${PERM_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PERM_ELF") bytes)"
+done
+
 echo "== building userspace depcheck (userspace/depcheck, x86_64-unknown-none) =="
 ( cd "$REPO_ROOT/userspace/depcheck" && cargo build --release )
 DEPCHECK_ELF="$REPO_ROOT/userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck"

@@ -247,6 +247,14 @@ pub static CONFIGREAD_IMAGE: &[u8] =
 pub static CONFIGUP_IMAGE: &[u8] =
     include_bytes!("../../../userspace/configd/target/x86_64-unknown-none/release/configup");
 
+/// ADR-0048/0049: mediated permission receiver and one-cap application.
+/// The bounded PING worker reuses the audited image20 dependency probe.
+pub static PERMISSIOND_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/permissiond/target/x86_64-unknown-none/release/arena-permissiond"
+);
+pub static PERMAPP_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/permissiond/target/x86_64-unknown-none/release/permapp");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

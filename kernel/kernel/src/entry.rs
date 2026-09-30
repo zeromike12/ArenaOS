@@ -538,7 +538,8 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // of kernel-minted driver grants. It starts the production stack
     // after live-cap and driver-readiness checks. One orderly restart
     // can be tested; full lifecycle/failure proof remains open.
-    let (manager_pid, expected_stack_caps) = spawn_servicemgr(
+    let (manager_pid, expected_stack_caps, permission_root) = spawn_servicemgr(
+        fs_eid,
         manager_nid,
         rng_ready_nid,
         manager_restart_nid,
@@ -731,6 +732,22 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
         }).unwrap_or_else(|_| crate::halt::halt_machine("shell: diagnostic marker issue refused"));
     }
+    if let Some((eid, nid)) = permission_root {
+        use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W,
+            RIGHTS_DESTROY as D};
+        crate::cap::issue(shell_pid, 16, Cap {
+            obj: CapObj::Endpoint { eid }, rights: W | C,
+        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: mediator issue refused"));
+        crate::cap::issue(shell_pid, 17, Cap {
+            obj: CapObj::Notification { nid }, rights: R | C | D,
+        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: approval marker issue refused"));
+        // Trusted shell can deliberately transfer its held mediator
+        // client cap to an independent proof child of the same app image.
+        // That child inherits ONLY the transferred endpoint, not this Image.
+        crate::cap::issue(shell_pid, 18, Cap {
+            obj: CapObj::Image { img_id: 25 }, rights: R,
+        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: delegate fixture image refused"));
+    }
     info!(
         "kernel",
         "shell spawned: pid {shell_pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
@@ -767,18 +784,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
-    // Full shipping fixture occupies all 14 notifications (ADR-0046).
-    // The fifteenth must be a typed refusal, never silent over-allocation;
+    // ADR-0048 adds one exact approval marker: 15 notifications at capacity.
+    // The sixteenth must be a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse a fifteenth object",
+                "servicemgr: notification bound failed to refuse a sixteenth object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 14/14; fifteenth refused"
+            "servicemgr: full fixture notification budget 15/15; sixteenth refused"
         );
     }
 
@@ -884,6 +901,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 /// On a full fixture, all 4 netstackd grants are COPY-able *manager*
 /// caps. The manager still may only attenuate them through SYS_SPAWN.
 fn spawn_servicemgr(
+    fs_eid: u32,
     manager_nid: u32,
     rng_ready_nid: u32,
     manager_restart_nid: u32,
@@ -892,7 +910,7 @@ fn spawn_servicemgr(
     rng: Option<u32>,
     rng_diag_nid: u32,
     stack_diag_nid: u32,
-) -> Result<(u64, Option<[crate::cap::Cap; 5]>), &'static str> {
+) -> Result<(u64, Option<[crate::cap::Cap; 5]>, Option<(u32, u32)>), &'static str> {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let root = [
         Cap {
@@ -904,12 +922,16 @@ fn spawn_servicemgr(
             rights: R | W,
         },
     ];
-    let (grants, stack) = match (net, rng) {
+    let (grants, stack, permission) = match (net, rng) {
         (Some(net_eid), Some(rng_eid)) => {
             let stack_eid = crate::ipc::create_endpoint()
                 .map_err(|_| "servicemgr: stack endpoint table full")?;
             let backoff_nid = crate::ipc::create_notification()
                 .map_err(|_| "servicemgr: backoff notification table full")?;
+            let permission_eid = crate::ipc::create_endpoint()
+                .map_err(|_| "permissiond: endpoint table full")?;
+            let approval_nid = crate::ipc::create_notification()
+                .map_err(|_| "permissiond: approval marker table full")?;
             let all = [
                 root[0],
                 root[1],
@@ -957,6 +979,12 @@ fn spawn_servicemgr(
                     obj: CapObj::Notification { nid: stack_diag_nid },
                     rights: R | C | crate::cap::RIGHTS_DESTROY, // stack receives READ only
                 },
+                // ADR-0048 exact five manager-held permission sources.
+                Cap { obj: CapObj::Image { img_id: 24 }, rights: R },
+                Cap { obj: CapObj::Image { img_id: 25 }, rights: R },
+                Cap { obj: CapObj::Endpoint { eid: fs_eid }, rights: W | C },
+                Cap { obj: CapObj::Endpoint { eid: permission_eid }, rights: R | W | C },
+                Cap { obj: CapObj::Notification { nid: approval_nid }, rights: R | C },
             ];
             let child = [
                 Cap {
@@ -980,9 +1008,9 @@ fn spawn_servicemgr(
                     rights: R,
                 },
             ];
-            (Some(all), Some((stack_eid, child)))
+            (Some(all), Some((stack_eid, child)), Some((permission_eid, approval_nid)))
         }
-        _ => (None, None),
+        _ => (None, None, None),
     };
     let pid = if let Some(all) = grants {
         crate::spawn::spawn_init(19, &all, None)?
@@ -1013,7 +1041,7 @@ fn spawn_servicemgr(
         stack.map(|(eid, _)| eid),
         expected.len()
     );
-    Ok((pid, stack.map(|(_, child)| child)))
+    Ok((pid, stack.map(|(_, child)| child), permission))
 }
 
 /// True after the manager has spawned one child and all four caps
@@ -1035,8 +1063,16 @@ fn audit_manager_child(
     for slot in 7..crate::cap::CAP_SLOTS {
         if let Ok(c) = crate::cap::read(manager_pid, slot) {
             if let CapObj::Process { pid } = c.obj {
-                if c.rights & RIGHTS_DESTROY == 0 || child.replace(pid).is_some() {
-                    return Err("servicemgr: child Process cap ambiguous or lacks DESTROY");
+                if c.rights & RIGHTS_DESTROY == 0 {
+                    return Err("servicemgr: child Process cap lacks DESTROY");
+                }
+                // This historical audit selects only the netd-sourced
+                // stack or its worker. The manager now also owns a
+                // separate broker and app; audit those independently.
+                if crate::cap::read(pid, 0).ok().is_some_and(|first| first.obj == expected[0].obj)
+                    && child.replace(pid).is_some()
+                {
+                    return Err("servicemgr: stack child Process cap ambiguous");
                 }
             }
         }

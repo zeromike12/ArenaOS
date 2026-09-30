@@ -42,6 +42,7 @@
 #![no_main]
 
 use core::panic::PanicInfo;
+mod permission;
 
 #[path = "../../abi.rs"]
 mod abi;
@@ -61,6 +62,9 @@ const SLOT_STACK: u64 = 4; // ADR-0040: privileged admin-only client
 const SLOT_MGR_WAKE: u64 = 5; // shared wake hint; NOT stop authority
 const SLOT_STACK_DIAG: u64 = 15; // boot-granted R|COPY, not an ordinary client cap
 const SLOT_MGR_ADMIN: u64 = 6; // private manager control notification, WRITE only
+const SLOT_MEDIATOR: u64 = 16; // ADR-0048: endpoint/W|COPY, full fixture
+const SLOT_APPROVAL: u64 = 17; // receiver-verified separate approval marker
+const SLOT_PERM_IMAGE: u64 = 18; // trusted test-only delegate fixture, Image25/READ
 // ADR-0044: root-issued diagnostic Process references; never the
 // production child's DESTROY. Slot 7 is still the transient child cap.
 const SLOT_LIFE_CHILD: u64 = 7;
@@ -87,6 +91,10 @@ static mut LINE: [u8; LINE_LEN] = [0; LINE_LEN];
 static mut PROCS: [u64; 64] = [0; 64];
 /// The lazily allocated file window: its VA (0 = not yet allocated).
 static mut FILE_VA: u64 = 0;
+/// Local copy of service-issued bytes; revocation is at the receiver,
+/// never by deleting this array or a kernel cap slot.
+static mut PERM_TOKEN: [u8; 16] = [0; 16];
+static mut PERM_RETAINED: [u8; 16] = [0; 16];
 
 // ---- byte-wise line helpers (no std, no alloc, no surprises) ---------------
 
@@ -1185,7 +1193,7 @@ const PROMPT: &str = "arena> ";
 /// WRITE_MAX, so never append to the old near-full help buffer.
 const HELP: &str = "commands:\r\n  help - this text\r\n  ps - live processes\r\n  echo TEXT - print TEXT\r\n  ls - list the AFS1 files\r\n  cat NAME - print a file\r\n  write NAME TXT - create a file\r\n  rm NAME - delete a file\r\n  spawn - run image 0\r\n";
 const HELP_MORE: &str = "  stacktest - privileged stack restart proof\r\n  stackstress - destructive restart budget and accounting test\r\n  stackfault - opt-in in-flight #UD crash recovery\r\n";
-const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  depdeny - failed driver probe\r\n  depstall - blocked driver probe\r\n  shutdown - halt the machine\r\n";
+const HELP_LAST: &str = "  stackstop - opt-in manager-owned forced live stop\r\n  lifetest - opt-in Process-cap refusal audit\r\n  depdeny - failed driver probe\r\n  depstall - blocked driver probe\r\n  perm request|allow|deny|revoke|acquire|read - VOLATILE mediated access\r\n  shutdown - halt the machine\r\n";
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -1265,6 +1273,8 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_write(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"rm ") {
                 do_rm(&mut o, rest);
+            } else if let Some(rest) = strip_prefix(line, b"perm ") {
+                permission::dispatch(&mut o, rest);
             } else if eq(line, b"stacktest") {
                 o.flush();
                 let _ = stacktest();

@@ -14,7 +14,26 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
-The Phase 8.2 **cap-space foundation** adds `test_m82_capspace.py`: a
+The Phase 8.2 **volatile integration checkpoint** adds
+`test_m82_permission.py` (receiver-side missing/wrong/genuine marker,
+separate request vs approval vs issued 128-bit bearer, real mediated
+`arena.txt` read, independent bearer copy and endpoint delegation,
+receiver-side revoke and same-disk reboot default DENY) and
+`test_m82_ipc_caller.py` (wrong/bounded-stall and deliberately killed
+blocked `SYS_IPC_CALL` caller, exact resources, original endpoint reuse,
+no false READY). M4's in-guest four-state abandoned-call fixture also
+checks staged-cap disposal, typed late-reply refusal and frame cleanup.
+The shared QEMU harness refuses rc=0 kernel halts and missing historical
+PASS markers; the focused test checks both negative cases with synthetic
+serial input. The fresh **35/35** historical suite, final-EFI-bound
+**100/100** boots and independently booted, checksum-verified extracted
+archive passed for EFI SHA-256
+`98331c626c4febed721682fdddc6ee9c3df5a7aa48067cc9690b8e64620bbc15`.
+This is **not** 8.2 completion: policy decisions are volatile. Persistent
+record/restart/crash-model and serialization gates require a new image,
+fresh historical suite and a new 100/100 receipt.
+
+The earlier Phase 8.2 **cap-space foundation** adds `test_m82_capspace.py`: a
 real QEMU boot checks the new fixed 32-slot M3 last-slot/overfull
 capacity proof, exactly bounded Power snapshots after three production
 restart cycles and clean shutdown. `tools/probe_capspace_layout.py`

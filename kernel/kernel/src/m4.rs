@@ -1585,6 +1585,29 @@ fn test_ipc_echo() -> Result<(), &'static str> {
         IPC_BADGE,
         after
     );
+    test_abandoned_caller_states()?;
+    Ok(())
+}
+
+/// ADR-0050 internal kernel invariant probe. The separate full-device
+/// fixture kills an actual user worker in SYS_IPC_CALL; this bounded
+/// proof injects all FOUR queue states with a REAL live process thread
+/// id, then destroys that process and verifies typed late-reply refusal,
+/// staged-copy discard, server liveness and exact endpoint/frame reuse.
+fn test_abandoned_caller_states() -> Result<(), &'static str> {
+    let baseline = frames::free_frames();
+    let pid = proc::create("ipcDeadCall")?;
+    let tid = sched::spawn_in_proc("ipcDeadCaller", |_| {
+        loop { sched::yield_now(); }
+    }, 0, pid)?;
+    let eid = ipc::stage_abandoned_caller_fixture(tid)?;
+    proc::destroy(pid)?;
+    ipc::verify_abandoned_caller_fixture(eid)?;
+    m4_drain(16)?;
+    if frames::free_frames() != baseline {
+        return Err("dead-caller four-state sweep leaked process/thread frames");
+    }
+    info!("m4", "ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact");
     Ok(())
 }
 

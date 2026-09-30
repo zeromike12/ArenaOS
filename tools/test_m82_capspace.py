@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""ADR-0048 fixed cap-table foundation; no 8.2 permission broker claimed."""
+"""ADR-0048 fixed cap-table foundation plus integrated volatile broker.
+
+The broker is one real live manager child at this snapshot; its
+short-lived app and readiness worker must both have been reaped.
+"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -21,7 +25,10 @@ def main() -> int:
     passed = (rc == 0 and "m3:test:capability_spaces: PASS" in serial
               and "capability_spaces: 32 slots/space" in serial
               and "m8: stackstress PASS" in serial and counters is not None
-              and counters[1:] == (10, 10)
+              and counters[1:] == (11, 11)
+              and "servicemgr: permission PING result + exit before deadline; worker reaped" in serial
+              and "servicemgr: permission app reaped through held Process cap" in serial
+              and "servicemgr: permissiond READY" in serial
               and "configup: SKIP" in serial and "PANIC" not in serial
               and "halting via UEFI ResetSystem(shutdown)" in serial)
     print(f"[{LABEL}] rc={rc} {elapsed:.1f}s; post-EBS-relative "

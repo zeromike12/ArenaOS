@@ -203,12 +203,12 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
     if timers > 0 {
         crate::log::log_info!("proc", "destroy pid {pid}: swept {timers} armed timer(s)");
     }
-    let (servers, waiters) = crate::ipc::release_blocked_of(pid);
+    let (servers, waiters, calls) = crate::ipc::release_blocked_of(pid);
     let killed = crate::sched::kill_threads_of(pid);
-    if killed > 0 {
+    if killed > 0 || calls > 0 {
         crate::log::log_info!(
             "proc",
-            "destroy pid {pid}: killed {killed} live thread(s) (released {servers} endpoint server slot(s), {waiters} notification waiter(s))"
+            "destroy pid {pid}: killed {killed} live thread(s) (released {servers} endpoint server slot(s), {waiters} notification waiter(s), {calls} abandoned caller slot(s))"
         );
     }
     without_interrupts(|| {

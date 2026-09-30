@@ -64,7 +64,9 @@ Rules:
 | [0045](0045-active-dependency-probes.md) | Bounded active netd MAC/rngd device-entropy probes before each managed spawn, fault/stall fail-closed fixtures and deferred driver-fault teardown; completes 8.0 | Accepted |
 | [0047](0047-service-diagnostic-authority.md) | Receiver-verified boot-granted marker for destructive IPC; legacy poison refusals, managed #UD/stall proof and IPC-landed reference cleanup | Accepted |
 | [0046](0046-transactional-configuration-store.md) | 8.1 bounded single-key immutable generations, receiving-service update marker, crash boundaries, numeric resources and DEGRADED barrier; explicitly scoped corruption guarantee; no GC | Accepted (8.1 complete) |
-| [0048](0048-permission-manifests-and-grant-workflow.md) | 8.2 accepted bounded design: one receiver endpoint, marker-checked admin changes, 128-bit revocable service grants, fixed 32-slot cap table, exact four/one spawn grants, separate `perm8-*` persistence; runtime proofs still open | Accepted (8.2 incomplete) |
+| [0048](0048-permission-manifests-and-grant-workflow.md) | 8.2 bounded design: one receiver endpoint, marker-checked admin changes, 128-bit revocable service grants, fixed 32-slot cap table, exact four/one spawn grants, separate `perm8-*` persistence; volatile path qualified; persistent/crash/restart/ordering proofs remain open | Superseded by ADR-0049 for worker witness only (8.2 incomplete) |
+| [0049](0049-bounded-permission-readiness-witness.md) | Two-grant bounded PING worker: mediator client and existing private manager-result notification; success + exit without deadline before READY; volatile guest proof | Accepted (8.2 incomplete) |
+| [0050](0050-dead-ipc-caller-lifecycle.md) | General IPC caller sweep and broker-first deadline; four-state staged-cap/typed-refusal M4 proof plus caller-first real guest regression; qualified partial integration | Accepted (8.2 incomplete) |
 
 ## Template
 

@@ -1092,8 +1092,13 @@ is not completed by accepting an ADR.
       The first foundation checkpoint raises kernel `CAP_SLOTS` to 32,
       retaining last-slot attenuation, full-table refusal, frame-exact
       teardown and all historical suites; it does NOT implement a
-      permission grant or CLI. Prove denial,
-      attenuation, delegation, live revocation and restart persistence;
+      permission grant or CLI. A separate qualified **volatile** integration
+      checkpoint now proves live denial, marker-checked in-memory approval,
+      128-bit bearer delegation and receiver-side revoke, mediator-only app,
+      bounded readiness and general dead IPC caller teardown. It does NOT
+      persist decisions; same-disk reboot resets to DENY. Finish durable
+      ALLOW/DENY/REVOKE with AFS1 crash-model boundaries, broker-restart
+      stale-bearer and ordering proofs and absent-device negative space;
       no ambient pid/name authority, graphics, package-signature or
       unauthenticated filesystem policy.
 - [ ] **8.3 standard userspace libraries**. Factor stable no_std
