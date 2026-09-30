@@ -14,7 +14,26 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
-**Phase 8.3 linked-library completion gate (ADR-0052):**
+**Phase 8.3 linked-library completion gate (ADR-0052, reopened for reply-cap disposal):**
+`test_m83_returned_cap.py` exercises the *production* linked `Syscall`
+client in two real ring-3 faulttest instances. The isolated faultd
+server deliberately returns an inert notification cap on 40 calls per
+client. The client requires typed `ReturnedCap`, an undescribable
+would-be landing slot, exact 2/32 cap occupancy after **each** reply,
+more calls than the fixed table can hold, and a normal no-cap PING after
+the storm; the original M6 death/restart proof must still pass. The
+new regression was run on a deliberately removed cleanup and failed
+on a still-describable slot and kernel halt; it passed after restoring
+the cleanup. A failed `SYS_CAP_DESTROY` is reported as a transport
+failure, never as contained authority. The FS helpers bound outgoing
+requests only; successful server handles, byte counts and cursors are
+caller-validated, not certified by the library. The original 8.3
+42-suite/100-boot receipt remains a prior image, not proof for the
+corrected binary. The corrective suite passed **43/43**, a fresh rebuilt
+EFI received **100/100**, and the extracted corrected archive booted
+with both 40-reply proofs, real-wire `netlib`, clean disk audit, and
+Power-cap shutdown; exact hashes are in ADR-0052.
+
 `userspace/arena-lib` is a separately compiled no_std rlib, not a module
 included only by its original test client. `tools/run_tests.sh` host-builds
 and tests its syscall/IPC and filesystem contracts, then compiles it for

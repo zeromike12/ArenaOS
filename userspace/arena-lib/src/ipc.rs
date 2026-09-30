@@ -1,5 +1,6 @@
 //! Synchronous 64-byte IPC v1.1 client with checked three-word replies.
-//! Returned caps are never silently discarded by a generic client.
+//! Unexpected reply caps are explicitly discarded at the syscall-backed
+//! boundary before reporting refusal; a pure fake transport parses only.
 use crate::{abi::{CAP_NONE, MSG_BYTES}, sys};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,8 +29,15 @@ pub struct Syscall;
 impl Transport for Syscall {
     fn exchange(&self, endpoint: u64, w0: u64, w1: u64, attached: u64,
                 msg: &mut [u8; MSG_BYTES]) -> Result<Reply, Error> {
-        interpret(sys::ipc_call(endpoint, w0, w1, attached, msg)
-                  .map_err(Error::Transport)?)
+        let words = sys::ipc_call(endpoint, w0, w1, attached, msg)
+            .map_err(Error::Transport)?;
+        if words[2] != CAP_NONE {
+            // SYS_IPC_CALL installed this reference *before* returning
+            // its slot. Merely rejecting the third word leaks authority
+            // and eventually fills the caller's fixed cap table.
+            sys::discard_landed_cap(words[2]).map_err(Error::Transport)?;
+        }
+        interpret(words)
     }
 }
 

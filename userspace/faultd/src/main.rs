@@ -55,6 +55,9 @@ const SLOT_SIGNAL: u64 = 1;
 /// The void this service parks on: a notification nobody will ever
 /// signal. Granted READ-only.
 const SLOT_VOID: u64 = 2;
+/// Private test-only opcode: deliberately return an unrequested, inert
+/// READ-only notification cap to a linked generic IPC client (ADR-0052).
+const OP_UNEXPECTED_CAP: u64 = 3;
 
 const EXIT_RECV: u64 = 85;
 const EXIT_REPLY: u64 = 88;
@@ -93,6 +96,14 @@ pub unsafe extern "C" fn _start() -> ! {
                 FAULT_OP_PING => {
                     pings += 1;
                     reply(FAULT_S_OK, pings);
+                }
+                OP_UNEXPECTED_CAP => {
+                    // Only the isolated M6 fault fixture grants COPY on
+                    // SLOT_VOID. The caller requested no reply cap; the
+                    // generic library must discard this landed reference.
+                    let r = syscall5(SYS_IPC_REPLY, SLOT_EP, FAULT_S_OK, 0,
+                                     SLOT_VOID, 0);
+                    if r < 0 { fail(EXIT_REPLY, "test reply cap refused"); }
                 }
                 FAULT_OP_HANG => {
                     if !take_diagnostic(landed, SLOT_DIAG) {

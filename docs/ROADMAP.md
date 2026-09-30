@@ -1112,8 +1112,17 @@ is not completed by accepting an ADR.
       plus no-stack SKIP and wrong-kind refusal. No new kernel primitive,
       cap grant, ambient name/identity authority, dynamic runtime or
       POSIX socket compatibility. Prior M5 disk-operation counts and M8
-      resource/restart invariants stay exact; final 42-suite and fresh
+      resource/restart invariants stay exact; the original 42-suite and
       artifact-bound 100/100 qualification are recorded in ADR-0052.
+      The corrective 8.3 checkpoint fixes syscall-backed unexpected
+      IPC reply-cap disposal (not just parser refusal): the controlled
+      M6 service returns an inert cap 40 times to each of two linked
+      clients; every landed slot is destroyed, baseline 2/32 occupancy
+      remains exact, normal no-cap replies work, and a deliberate
+      cleanup-removal mutation fails the guest regression. FS helper
+      success words remain caller-validated, not library-certified.
+      Fresh corrective historical suite 43/43 and final-image-bound
+      100/100; `phase83-corrected` archive supersedes original 8.3.
 - [ ] **8.4 package format + signed packages**. ADR first for package
       identity, trust roots, updates/revocation and signature
       verification. Host tamper and rollback tests plus guest install

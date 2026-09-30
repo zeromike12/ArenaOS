@@ -68,7 +68,7 @@ Rules:
 | [0049](0049-bounded-permission-readiness-witness.md) | Two-grant bounded PING worker: mediator client and existing private manager-result notification; success + exit without deadline before READY | Accepted (8.2 complete) |
 | [0050](0050-dead-ipc-caller-lifecycle.md) | General IPC caller sweep and broker-first deadline; four-state staged-cap/typed-refusal M4 proof plus caller-first real guest regression; qualified partial integration | Accepted (8.2 subsequently complete) |
 | [0051](0051-filesystem-absence-proof.md) | Distinct receiver-verified fsd shutdown marker and kernel-root exited-service reap to orphan the real FS endpoint; typed absence and restoration | Accepted (8.2 complete) |
-| [0052](0052-standard-userspace-client-libraries.md) | Separately linked no_std syscall/IPC/AFS1/native-network clients, checked returned-cap semantics, two independent guest consumers each; 42/42 + fresh final-EFI 100/100 + extracted boot | Accepted (8.3 qualified complete) |
+| [0052](0052-standard-userspace-client-libraries.md) | Linked no_std syscall/IPC/AFS1/network clients; independent guest consumers; corrected IPC-landed reply-cap disposal, real mutation-tested 40×2 guest proof; 43/43 + fresh corrected-EFI 100/100 + extracted boot | Accepted (8.3 reclosed) |
 
 ## Template
 

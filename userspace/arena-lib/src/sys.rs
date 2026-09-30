@@ -1,5 +1,5 @@
 //! Thin, raw syscall boundary. IPC's wire checks live in `ipc`, not here.
-use crate::abi::{syscall6, SYS_IPC_CALL, MSG_BYTES};
+use crate::abi::{syscall1, syscall6, SYS_CAP_DESTROY, SYS_IPC_CALL, MSG_BYTES};
 
 /// Exactly the existing six-argument ABI. Slot possession, not this
 /// wrapper, authorizes the kernel call. No retry (non-idempotent ops).
@@ -13,4 +13,13 @@ pub fn ipc_call(
                  reply.as_mut_ptr() as u64, msg.as_mut_ptr() as u64)
     };
     if rc < 0 { Err(rc) } else { Ok(reply) }
+}
+
+/// Discard a reply cap that IPC *already landed* in this process. The
+/// kernel's IPC provenance permits discarding even an attenuated cap
+/// without DESTROY rights; do not turn a failed discard into a claim
+/// that the unexpected authority was contained.
+pub fn discard_landed_cap(slot: u64) -> Result<(), i64> {
+    let rc = unsafe { syscall1(SYS_CAP_DESTROY, slot) };
+    if rc != 0 { Err(rc) } else { Ok(()) }
 }

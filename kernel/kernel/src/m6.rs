@@ -735,12 +735,13 @@ fn service_death_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_hang },
             rights: cap::RIGHTS_WRITE,
         },
-        // READ only: the void it parks on. Nobody ever notifies it,
-        // which is what makes the hang permanent and the fault
-        // deterministic.
+        // The void it parks on. COPY is needed only for the M8.3
+        // controlled reply-cap regression: a copied READ reference is
+        // inert (nobody signals this notification). The server retains
+        // READ, so the original hang/death boundary stays deterministic.
         Cap {
             obj: CapObj::Notification { nid: nid_void },
-            rights: cap::RIGHTS_READ,
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY,
         },
         Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];
@@ -832,6 +833,7 @@ fn service_death_inner() -> NetResult {
             ));
         }
         Some(63) => return Err(fail("client: the ping accounting is wrong (63)")),
+        Some(70) => return Err(fail("client: linked IPC reply-cap disposal failed (70)")),
         Some(99) => return Err(fail("client: the panic handler ran (99)")),
         _ => {
             return Err(fail(
@@ -918,7 +920,7 @@ fn service_restart_inner() -> NetResult {
         },
         Cap {
             obj: CapObj::Notification { nid: nid_void },
-            rights: cap::RIGHTS_READ,
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY,
         },
         Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
     ];

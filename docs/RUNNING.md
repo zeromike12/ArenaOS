@@ -4,10 +4,48 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 8.3 completed linked userspace client libraries
+## Phase 8.3 corrected linked-client checkpoint
 
-This independently qualified checkpoint preserves the completed durable
-8.2 permission workflow and all earlier milestone regressions. It ships
+This is the **current qualified 8.3 build**. It retains two independent
+filesystem and network consumers and the complete durable 8.2 permission
+workflow. The syscall-backed `arena-lib` client now **destroys an
+unexpected IPC-landed reply cap before returning `ReturnedCap`**; the
+isolated real faultd/faulttest service pair proves 40 malicious replies
+per client cannot strand a describable cap or exhaust the 32-slot table.
+The full historical suite passed **43/43**, and this precise EFI passed
+a fresh receipt-bound **100/100** boot qualification. This is not a
+new kernel primitive or signed package release; FS helper success values
+are still caller-validated (requests and returned-cap disposal are library
+checked). The original 8.3 checkpoint below is historical and does **not**
+have the landed-cap disposal guarantee.
+
+Download the per-commit deployable archive, then boot it using the
+[common QEMU command below](#phase-8-checkpoint-boot-the-exact-per-commit-build):
+
+```sh
+curl -fL -o arenaos-phase83-corrected-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase83-corrected/arenaos-phase83-corrected-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase83-corrected-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase83-corrected/arenaos-phase83-corrected-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase83-corrected-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase83-corrected-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+test "$(sha256sum arena-boot.efi | cut -d' ' -f1) 100/100" = "$(cat stability-receipt.txt)"
+cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
+cp scratch-template.img scratch.img       # FIRST boot only; keep for persistence
+```
+
+Ordinary boots exercise the disposal boundary twice in the embedded
+M6 service fixtures (`m83: returncap PASS ...`); type `netlib` at the
+shell for a separate opt-in real-wire linked-client proof, then
+`shutdown`. See ADR-0052 for qualification and mutation-test evidence.
+
+## Historical original Phase 8.3 linked userspace client libraries
+
+This **historical, superseded** checkpoint preserves the completed durable
+8.2 permission workflow and all earlier milestone regressions. Its generic
+IPC client rejects unexpected reply caps but does NOT discard the already
+landed capability; use the corrected archive above for that guarantee. It ships
 `arena-lib`, a separately compiled **no_std** syscall/checked-IPC,
 filesystem and native-network client library. `fstest` and the resident
 permission broker are separate FS consumers; `arptest` and the shell are

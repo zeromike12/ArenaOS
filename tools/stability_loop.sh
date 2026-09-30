@@ -191,6 +191,8 @@ for i in $(seq 1 "$N"); do
         why="TCP host peer did not verify request/200-byte response/FIN"
     elif grep -aq 'TCP SKIP' "$SERIAL"; then
         why="TCP was skipped although this is a fixture-equipped qualification"
+    elif [[ $(grep -acF 'm83: returncap PASS (40 real reply caps rejected and discarded; slot 2 empty, occupancy 2/32 exact; ordinary no-cap PING unchanged)' "$SERIAL" || true) -ne 2 ]]; then
+        why="linked IPC client did not discard forty landed caps in BOTH real M6 server/client fixtures"
     elif ! grep -aq 'native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer' "$SERIAL"; then
         why="native UDP library did not deliver/revoke its real-wire datagram"
     elif ! grep -aq 'TCP FIN was acknowledged, the peer closed, and the bearer was revoked' "$SERIAL"; then

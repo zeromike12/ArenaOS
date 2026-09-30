@@ -11,7 +11,7 @@
 Add one separately compiled `no_std` rlib (`userspace/arena-lib`) with the following narrowly bounded modules. Use Cargo path dependencies from independent existing standalone userspace crates; do not create another image, kernel ABI, IPC primitive, allocator, threading facility, POSIX/socket facade or ambient cap registry.
 
 * `abi` reuses the existing frozen `userspace/abi.rs` declarations unchanged; it does not own or mint a cap. `sys` exposes only typed wrappers around existing syscall numbers; `ipc` implements a synchronous, caller-owned 64-byte message/three-word reply exchange, requires a *passed* endpoint slot, and rejects unexpected returned caps with a typed protocol error. A returned cap cannot silently become authority merely because a generic client ignored it. Transport errors and service statuses remain distinct; no wrapper converts SERVICE_GONE into success or retries a potentially non-idempotent operation.
-* `fs` owns the FS wire packing and a bounded client using `ipc`. Typed name/length, LS cursor, OPEN/CREATE, READ/WRITE with an explicitly supplied LENT cap, CLOSE and UNLINK helpers check message/length/returned-cap contracts. Low-level `request` remains available for the existing receiver-gated fsd shutdown diagnostic and exact historical syscall-order fixture. A client **does not own a file by name**: it holds an explicit endpoint slot and an opaque fsd handle, and cannot read data without the caller's separately held LENT buffer cap. The library never copies an fsd endpoint into an app and never raises rights.
+* `fs` owns the FS wire packing and a bounded client using `ipc`. Typed name/length, LS cursor, OPEN/CREATE, READ/WRITE with an explicitly supplied LENT cap, CLOSE and UNLINK helpers check outgoing message/request bounds and reject unexpected returned caps; successful reply values remain raw and caller-validated as clarified below. Low-level `request` remains available for the existing receiver-gated fsd shutdown diagnostic and exact historical syscall-order fixture. A client **does not own a file by name**: it holds an explicit endpoint slot and an opaque fsd handle, and cannot read data without the caller's separately held LENT buffer cap. The library never copies an fsd endpoint into an app and never raises rights.
 * `net` is the existing M7.7 `userspace/net.rs` module compiled in the rlib, with its production syscall path using the checked `ipc` boundary. It keeps explicit bearer possession, `adopt_*` delegation and CLOSE; no pid/identity test or UDP-specific kernel cap. The existing host-injected `Transport` contract remains supported.
 
 **Two genuinely independent guest consumers per layer:** the historical `fstest` and the resident `permissiond` call the linked `fs` client (the latter uses typed operations on the durable-policy path); `arptest` and the shell call the linked `net` client (the shell's opt-in library command performs a real live-guest slirp ARP lookup on its already-held stack endpoint). The `fs` and `net` clients both traverse the same checked `ipc`/`sys` rlib path, so their independent guest usages also exercise those layers. Keep all existing historical wire tests and exact service operation counts: refactoring the client must not mutate protocol requests or introduce extra operations. The trusted shell keeps its existing Power/raw-FS privileges; the app and broker still inherit exactly the ADR-0048 one/four grants. A library object is not a grant.
@@ -67,6 +67,67 @@ captured actual guest RIP/HLT at a shell awaiting an incorrectly spelled
 test marker). The pre-kernel stall did **not** recur in the final suite or
 100/100; its cause is not established and no flake is counted as a pass.
 The old Phase 8.2 checkpoint at `9350a48` remains unchanged.
+
+## Reopened correctness correction: reply-cap disposal (2026-09-30)
+
+`SYS_IPC_CALL` installs a reply cap before returning its landing slot. The
+original pure `interpret()` correctly flagged an unexpected third word, but
+the production `Syscall` transport did **not** remove the already-landed
+reference. Rejection alone is not structural authority containment. The
+production boundary must discard a non-`CAP_NONE` reply slot via existing
+`SYS_CAP_DESTROY` (IPC-landed provenance permits discard even without
+DESTROY rights), and report `ReturnedCap` **only after successful cleanup**.
+A failed cleanup is a distinct transport failure; it must not masquerade
+as successful containment. Pure fake transports still validate the wire;
+only the real syscall boundary owns and can dispose of actual landed refs.
+
+Use the existing M6 faultd/faulttest test-only server/client pair: an
+explicit private opcode returns a copyable inert notification from a
+controlled server. The linked `arena-lib` guest client must observe
+`ReturnedCap`, verify the would-be landing slot is undescribable and all
+32 slots have the exact baseline occupancy across more than 32 malicious
+replies, then receive an ordinary no-cap PING unchanged before the
+original service-death proof. No new kernel primitive, no new live
+production service, and no ambient acquisition path.
+
+The FS typed helpers validate **request** names, lengths, handle/offset
+packing, LENT-cap presence, unexpected cap transfer, and syscall transport.
+They intentionally return raw fsd `Reply { status, value }`; they do NOT
+validate the success word's handle, read/write count, LS cursor, or the
+inline LS record. The caller must check those according to its operation
+(e.g. read count <= requested length, valid handle/cursor). Do not
+advertise such validation until the library implements it, and do not
+confuse request bounds with server reply trust.
+
+**Falsification and requalification:** before the fix, the real guest
+regression failed because slot 2 was still describable, then the M6
+fixture explicitly failed (exit 70, semantic kernel halt). After the
+syscall-backed cleanup, the guest passed twice per boot: 40 hostile
+replies per client, exact 2/32 cap occupancy, an undescribable slot 2
+after **every** reply, and an ordinary no-cap PING unchanged. Cleanup
+was then deliberately removed from the production path for a negative
+control: the same guest test again failed on its *first* still-describable
+slot, with no false PASS. After restoration it passed again. No new
+syscall or kernel capability kind was introduced; the only server-grant
+change is COPY on the inert test-only notification held by `faultd`.
+The **corrected** historical suite `build/phase83-reclosed-full-suite.log`
+passed **43/43** and a rebuilt final EFI passed an independent
+**100/100** artifact-bound boot run (zero failures). Final EFI SHA-256:
+`02f85015160c921004f91ee20f696be38a402ced9d8b7432b6b3ef6dc77ba73a`;
+receipt exactly that digest followed by `100/100`.
+The original 8.3 image/digest listed above remains historical and
+must **not** be advertised as satisfying unexpected-cap disposal.
+Corrected deployable archive:
+`releases/checkpoints/phase83-corrected/arenaos-phase83-corrected-qemu-x86_64.tar.gz`,
+SHA-256 `12baf9491f6e77acc1bbcfc3cded5d1bd1b3dc3de2bfb912f351affb4ea4d1f9`.
+Every extracted member checksum, the identical EFI in the ESP and receipt,
+bundled firmware, and formatted AFS1 disk were verified. A fresh boot
+using **only the extracted ESP and bundled firmware/disk** passed two
+real 40-reply cap-disposal proofs, the optional `netlib` real-wire
+client, historical kernel verdicts, clean disk audit, and Power-cap
+shutdown. QEMU download/extraction/boot instructions in `docs/RUNNING.md`.
+This corrected archive is the current deployable per-commit checkpoint,
+not a tagged GitHub release.
 
 ## Rejected alternatives
 

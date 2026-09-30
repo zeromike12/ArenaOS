@@ -32,6 +32,22 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+use arena_lib::ipc::{self, Transport as _};
+
+/// Test-only request handled by the isolated faultd fixture, never a
+/// production service or public kernel ABI operation.
+const OP_UNEXPECTED_CAP: u64 = 3;
+const CAP_SLOTS: u64 = 32;
+const CAP_TRIALS: u64 = 40; // more than the entire fixed cap table
+const EXIT_CAP_LEAK: u64 = 70;
+
+fn describable(slot: u64) -> bool {
+    let mut desc = [0u64; 3];
+    unsafe { syscall2(SYS_CAP_DESCRIBE, slot, desc.as_mut_ptr() as u64) == 0 }
+}
+fn occupied() -> u64 {
+    (0..CAP_SLOTS).filter(|&slot| describable(slot)).count() as u64
+}
 
 const SLOT_EP: u64 = 0;
 /// The "quiet mode" token (M6.5b): a notification granted in slot 1
@@ -85,6 +101,49 @@ unsafe fn call(op: u64, msg: &mut [u8; MSG_BYTES]) -> Result<(u64, u64), i64> {
     } else {
         Ok((reply[0], reply[1]))
     }
+}
+
+/// A hostile *real* server installs a reply cap before SYS_IPC_CALL
+/// returns. Verify the linked production boundary removes it, not merely
+/// that a pure host parser rejects the third word. Keep the service-death
+/// experiment running on failure so the kernel never waits forever for a
+/// HANG request that this client abandoned.
+fn verify_returned_cap(alive: u64, msg: &mut [u8; MSG_BYTES]) -> bool {
+    let baseline = occupied();
+    let landing = (0..CAP_SLOTS).find(|&slot| !describable(slot));
+    if baseline != 2 || landing != Some(2) {
+        log("m83: returncap FAIL (unexpected baseline cap inventory)");
+        return false;
+    }
+    let client = ipc::Syscall;
+    for _ in 0..CAP_TRIALS {
+        let answer = client.exchange(SLOT_EP, 0, OP_UNEXPECTED_CAP, CAP_NONE, msg);
+        if answer != Err(ipc::Error::ReturnedCap) {
+            log("m83: returncap FAIL (no typed protocol error)");
+            return false;
+        }
+        if describable(2) {
+            log("m83: returncap FAIL (IPC-landed slot still describable)");
+            return false;
+        }
+        if occupied() != baseline {
+            log("m83: returncap FAIL (cap occupancy not back at baseline)");
+            return false;
+        }
+    }
+    // Same linked production transport, ordinary reply without a cap:
+    // service status and word are unchanged even after 40 refusals.
+    if client.exchange(SLOT_EP, 0, FAULT_OP_PING, CAP_NONE, msg)
+        != Ok(ipc::Reply { status: FAULT_S_OK, value: alive + 1 }) {
+        log("m83: returncap FAIL (normal no-cap PING changed)");
+        return false;
+    }
+    log_line(|o| {
+        o.str("m83: returncap PASS (40 real reply caps rejected and discarded; slot 2 empty, occupancy ");
+        o.u64(baseline);
+        o.str("/32 exact; ordinary no-cap PING unchanged)");
+    });
+    true
 }
 
 /// # Safety
@@ -146,7 +205,13 @@ pub unsafe extern "C" fn _start() -> ! {
             o.str(") — the service is live; now asking it to hang");
         });
 
-        // 2. The call the service will never answer. The suite kills
+        // 2. Before the deliberate crash, challenge the *linked* generic
+        //    IPC boundary against a controlled server returning authority
+        //    we did not ask for. A failure is recorded but still proceeds
+        //    to HANG, allowing the kernel to finish this fixture.
+        let cap_ok = verify_returned_cap(alive, &mut msg);
+
+        // 3. The call the service will never answer. The suite kills
         //    it while this is in flight; the kernel must answer for it.
         if !diagnostic_refused(SLOT_EP, 0, FAULT_OP_HANG, CAP_NONE, FAULT_S_BAD_OP) {
             fail(EXIT_NOT_GONE, "ordinary endpoint authorized hang");
@@ -184,6 +249,9 @@ pub unsafe extern "C" fn _start() -> ! {
 
         if alive == 0 {
             fail(EXIT_ORDER, "the ping count makes no sense");
+        }
+        if !cap_ok {
+            fail(EXIT_CAP_LEAK, "linked IPC unexpected-cap cleanup failed");
         }
         log("faulttest: a client that outlived its service, and knows it");
         syscall1(SYS_THREAD_EXIT, EXIT_OK);
