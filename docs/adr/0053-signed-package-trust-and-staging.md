@@ -1,11 +1,11 @@
 # ADR-0053 — Phase 8.4 signed packages and verified staging
 
-Status: **Proposed — design complete for review, not accepted or implemented**
-(2026-09-30). The Ed25519/test-root/staging direction was reviewed with the user; the user
-and C will review this complete design before implementation. Exact vendored-source
-hashes, complete dependency audit and independent wire vectors are explicit
-**pre-acceptance / pre-implementation gates**, not facts already established. Phase 8.3
-remains the last completed milestone.
+Status: **Proposed — design approved by user and C, not yet accepted or implemented**
+(2026-09-30). The user approved proceeding with Phase 8.4, subject to the already-defined
+exact-source vendoring, dependency audit, offline target build and independent verifier
+vectors. These are **pre-acceptance / pre-dependent-implementation gates**, not facts
+already established; see [the evidence ledger](0053-gate-evidence.md). Phase 8.3 remains
+the last completed milestone.
 
 ## Scope and threat model
 
