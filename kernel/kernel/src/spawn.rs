@@ -411,7 +411,22 @@ pub fn spawn_from(
 
     // 6. Notification registration + record + first thread.
     match finish(&half, notif, true) {
-        Ok(pid) => Ok(pid),
+        Ok(pid) => {
+            // ADR-0050 restart handoff: a live new server can accept
+            // queued calls on its inherited endpoint even before its
+            // first RECV. Never do this before the rollback boundary,
+            // or for a WRITE-only client inheritance.
+            for slot in 0..inherit.len() {
+                if let Ok(c) = cap::read(pid, slot) {
+                    if let CapObj::Endpoint { eid } = c.obj {
+                        if c.rights & cap::RIGHTS_READ != 0 {
+                            crate::ipc::reopen_after_server_spawn(eid);
+                        }
+                    }
+                }
+            }
+            Ok(pid)
+        },
         Err(status) => {
             // finish rolled the child back; the handle in the PARENT's
             // space still needs undoing (it carries DESTROY exactly for

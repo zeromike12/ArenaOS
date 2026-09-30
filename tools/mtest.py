@@ -162,6 +162,34 @@ DEFAULT_CONSOLE: ConsoleScript = [
 ]
 
 
+def timeout_diagnostics(label: str, serial_log: Path, vcon_capture: Path,
+                        qmp_sock: Path) -> None:
+    """Preserve an actual hung boot and locate its CPU before SIGKILL.
+
+    In particular, an OVMF-only boot must not be misreported as a guest
+    deadlock. No verdict is changed and there is no automatic retry.
+    """
+    snapshot = arena_env.build_dir() / f"serial-{label}-timeout.log"
+    if serial_log.exists():
+        shutil.copyfile(serial_log, snapshot)
+    serial = snapshot.read_bytes() if snapshot.exists() else b""
+    vcon_bytes = vcon_capture.stat().st_size if vcon_capture.exists() else -1
+    info = [f"serial={len(serial)} bytes; virtconsole={vcon_bytes} bytes",
+            f"serial tail={serial[-1200:]!r}"]
+    try:
+        session = qmp.Qmp(str(qmp_sock), connect_timeout_s=2)
+        info.append(f"QMP status={session.command('query-status')}")
+        for _ in range(2):
+            info.append(f"CPU={session.command('human-monitor-command', command_line='info registers')}")
+            time.sleep(0.05)
+        session.close()
+    except Exception as exc:  # diagnostics must not override the timeout
+        info.append(f"QMP diagnosis unavailable: {exc!r}")
+    report = arena_env.build_dir() / f"timeout-{label}.txt"
+    report.write_text("\n".join(info) + "\n")
+    print(f"[{label}] timed out; preserved serial and QMP CPU evidence in {report}")
+
+
 def run_qemu(label: str, esp: Path,
              feed: list[tuple[bytes, int, bytes]] | None = None,
              net: bool = True,
@@ -171,6 +199,7 @@ def run_qemu(label: str, esp: Path,
              vcon: bool = True,
              console: ConsoleScript | None = None,
              tcp_peer: bool = True,
+             disk: bool = True,
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     qmp_sock = bdir / f"qmp-{label}.sock"
@@ -200,7 +229,7 @@ def run_qemu(label: str, esp: Path,
         ]
         # Milestone-5 fixture (ADR-0021): fresh scratch disk attached as
         # virtio-blk-pci — the kernel's bus-0 scan must find it.
-        + arena_env.scratch_disk_args()
+        + (arena_env.scratch_disk_args() if disk else [])
         # Milestone-6 fixture (ADR-0024): the slirp NIC for netd's link
         # proof — nettest's ARP request goes to 10.0.2.2 and comes back.
         # net=False reproduces a pre-v0.6.0 invocation (the honest-SKIP
@@ -294,6 +323,7 @@ def run_qemu(label: str, esp: Path,
         try:
             rc = proc.wait(timeout=TIMEOUT_S)
         except subprocess.TimeoutExpired:
+            timeout_diagnostics(label, serial_log, vcon_capture, qmp_sock)
             proc.kill()
             proc.wait()
             stop.set()
@@ -450,6 +480,7 @@ def boot(label: str, esp: Path,
         try:
             rc: int | None = proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
+            timeout_diagnostics(label, serial_log, bdir / f"vcon-{label}.txt", qmp_sock)
             proc.kill()
             proc.wait()
             rc = None

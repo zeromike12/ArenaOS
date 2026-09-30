@@ -4,7 +4,55 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 8.2 volatile permission integration checkpoint (8.2 incomplete)
+## Phase 8.2 completed permission workflow
+
+This independently qualified checkpoint includes persistent ALLOW, DENY and
+REVOKE decisions in immutable `perm8-*` AFS1 records; a manager-owned broker
+validates them again on restart and refuses old bearer bytes. The ordinary
+app receives only mediator access, **not** the shell's raw FS authority.
+Only a receiver-verified trusted-shell approval marker can commit an admin
+decision; holding or transferring the mediator endpoint permits ACQUIRE
+under an already-approved ALLOW, not a new approval. The rngd-backed
+128-bit bearer grants the read of `arena.txt`; REVOKE invalidates all
+copies at the receiver. This is normal-reboot and documented AFS1
+ordered-write/atomic-sector crash-model persistence, **not** anti-rollback
+or arbitrary commit-sector-corruption protection. The historical 8.0/8.1
+suites remain part of the completed 40-suite qualification.
+
+Download and validate the deployable image for this commit:
+
+```sh
+curl -fL -o arenaos-phase82-complete-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase82-complete/arenaos-phase82-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase82-complete-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase82-complete/arenaos-phase82-complete-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase82-complete-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase82-complete-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+# The separately qualified EFI is bundled beside the ESP for direct receipt verification:
+test "$(sha256sum arena-boot.efi | cut -d' ' -f1)" = "$(cut -d' ' -f1 stability-receipt.txt)"
+grep -qx "$(sha256sum arena-boot.efi | cut -d' ' -f1) 100/100" stability-receipt.txt
+cp ovmf-vars-template.img ovmf-vars.img   # fresh copy each boot
+cp scratch-template.img scratch.img       # FIRST boot only; retain across reboots
+```
+
+Boot with the QEMU command in [the common checkpoint instructions below](#phase-8-checkpoint-boot-the-exact-per-commit-build).
+At `arena>` try `perm request`, `perm show`, `perm acquire` (initial DENY),
+`perm allow-noauth` and `perm allow-wrong` (refused at the receiver), then
+`perm allow`, `perm acquire`, `perm read` and `perm delegate`. With the
+**same** `scratch.img`, reboot to see `perm show` recover ALLOW; bearers
+must be freshly acquired because their bytes were never persisted. Try
+`perm deny` or `perm revoke`, reboot again and observe the recovered DENY.
+`perm restart` requests an opt-in, receiver-authorized *real broker* exit;
+the manager reaps and probes the replacement on the same client endpoint.
+`perm fs-stop` is a **destructive trusted-shell diagnostic**, only for a
+disposable test VM: it shuts down the actual fsd, orphans its endpoint,
+retires cached grants on the next backend probe and prevents replacement
+broker READY until the next normal reboot. Do not run against a disk
+whose data you cannot afford to interrupt. The precise final kernel hash,
+100/100 receipt and extracted-bundle proof are in ADR-0048.
+
+## Historical Phase 8.2 volatile permission integration checkpoint (8.2 incomplete)
 
 This checkpoint's qualified archive contains the default-DENY `permissiond`
 mediator, marker-authorized **in-memory** ALLOW/DENY/REVOKE, rngd-issued

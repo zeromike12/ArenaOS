@@ -14,7 +14,46 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
-The Phase 8.2 **volatile integration checkpoint** adds
+The **Phase 8.2 completion gate** retains all old suites and adds
+`test_m82_permission.py` (single receiver, request/approval/bearer
+separation, ordering and exact-file mediated read),
+`test_m82_policy_restart.py` (same physical platter across DENY/ALLOW/
+REVOKE reboot, real broker reaps, held-endpoint reacquisition, old token
+refusal), `test_m82_policy_crash.py` (all **three** ALLOW/DENY/REVOKE
+transitions killed at seven actual CREATE/WRITE/CLOSE/rescan/ack
+boundaries each, independent AFS1 platter audit before same-disk recovery),
+`test_m82_policy_refusal.py` (eighth/ninth immutable generation, real
+allocator exhaustion with typed NO_SPACE then DEGRADED, visible malformed
+newest record cannot fall back), and `test_m82_policy_negative.py`
+(forgery, independent bearer copy, capacity-four refusal, missing rngd,
+shutdown of the **real production fsd** through its receiver-verified
+marker, kernel-root reap/endpoint orphaning, no stale issuance and no
+false restart READY, same-platter reboot restoration).
+
+The bounded no_std `userspace/permission.rs` codec validates the built-in
+versioned 8-byte READ request separately from the 512-byte durable
+ALLOW/DENY record: malformed version/scope, zero/duplicate/unknown
+operations, overbroad rights and nonzero reserved/decision bytes refuse.
+The manager resolves actual inventory with the already host-tested
+no_std manifest (missing authority, wrong kind, duplicate/overbroad
+rights); the broker independently refuses four malformed requests from
+a real mediator-endpoint holder before considering an ALLOW. Host Rust
+and independent Python record vectors run with a bare-metal
+`x86_64-unknown-none` no_std compilation gate.
+No claim is made for arbitrary commit-sector corruption, malicious disk
+rollback, full no-disk boot, or identity-based permission controls.
+
+The first full pass encountered two unexplained 120-second timeouts, one
+with only 87 bytes of pre-kernel OVMF serial output. Neither was scored a
+pass; `mtest` now retains the serial tail and QMP CPU registers on any
+future timeout for diagnosis rather than hiding it. Subsequent full runs,
+including the **final request-codec image**, passed **40/40**. This evidence
+does not explain or claim to have eliminated the earlier pre-kernel
+intermittent stalls. The final EFI-bound 100/100 (zero failures) receipt
+and independently booted, checksum-verified extracted archive are
+recorded in ADR-0048's completion section.
+
+The earlier Phase 8.2 **volatile integration checkpoint** adds
 `test_m82_permission.py` (receiver-side missing/wrong/genuine marker,
 separate request vs approval vs issued 128-bit bearer, real mediated
 `arena.txt` read, independent bearer copy and endpoint delegation,

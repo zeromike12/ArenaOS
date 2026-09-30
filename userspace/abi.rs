@@ -197,14 +197,19 @@ pub const PERM_OP_REVOKE: u64 = 6;
 // admin policy changes; never exposed to the app.
 pub const PERM_OP_TEST_BAD_PING: u64 = 7;
 pub const PERM_OP_TEST_STALL_PING: u64 = 8;
+pub const PERM_OP_SHOW: u64 = 9; // unauthorizing read-only durable decision state
+pub const PERM_OP_TEST_EXIT: u64 = 10; // marker-only broker exit after reply (restart proof)
 pub const PERM_OK: u64 = 0;
 pub const PERM_DENIED: u64 = 1;
 pub const PERM_BAD_TOKEN: u64 = 2;
 pub const PERM_BAD_INPUT: u64 = 3;
 pub const PERM_IO: u64 = 4;
 pub const PERM_ENTROPY: u64 = 5;
-pub const PERM_VOLATILE: u64 = 6; // admin success; lost at reboot/restart
-pub const PERM_NO_SPACE: u64 = 7; // bounded live bearer table full; no eviction
+pub const PERM_VOLATILE: u64 = 6; // historical 8.2 partial image only; never returned by durable broker
+pub const PERM_NO_SPACE: u64 = 7; // bounded generations or bearer table full; no eviction
+pub const PERM_COMMITTED: u64 = 8; // acknowledged ONLY after exact disk rescan
+pub const PERM_DEGRADED: u64 = 9; // ambiguous prior write; no more writes until recovery
+pub const PERM_CORRUPT: u64 = 10; // visible malformed decision; no old-ALLOW fallback
 
 // ---- Phase 8.1 configuration-service protocol (ADR-0046) --------------------
 // READ needs only Endpoint/WRITE. Every SET and TEST_PLAN must transfer

@@ -981,7 +981,7 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0 and 8.1 complete; 8.2 accepted design, runtime incomplete)
+## Phase 8 — Mature userspace 🔨 (8.0, 8.1 and 8.2 complete; 8.3+ not started)
 
 Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
@@ -1081,26 +1081,23 @@ is not completed by accepting an ADR.
       existing guest tests exercise CREATE/WRITE-commit/CLOSE/reply kill
       boundaries without silently substituting an older visible record.
       No GC or 8.2 UI yet.
-- [ ] **8.2 permission manifests + CLI grant workflow**. Accepted
-      ADR-0048 resolves a single mediator endpoint, receiver-checked
-      trusted-shell marker, manager-owned broker/app with exactly
-      four/one inherited grants, fixed 32-slot cap table, separate
-      transactional `perm8-*` namespace and 128-bit service-issued
-      tokens. Requests are not approvals or issued authority; bearer
-      copies fail after receiver-side revocation. The pre-code static/
-      target resource, policy-namespace and ordering audits are recorded.
-      The first foundation checkpoint raises kernel `CAP_SLOTS` to 32,
-      retaining last-slot attenuation, full-table refusal, frame-exact
-      teardown and all historical suites; it does NOT implement a
-      permission grant or CLI. A separate qualified **volatile** integration
-      checkpoint now proves live denial, marker-checked in-memory approval,
-      128-bit bearer delegation and receiver-side revoke, mediator-only app,
-      bounded readiness and general dead IPC caller teardown. It does NOT
-      persist decisions; same-disk reboot resets to DENY. Finish durable
-      ALLOW/DENY/REVOKE with AFS1 crash-model boundaries, broker-restart
-      stale-bearer and ordering proofs and absent-device negative space;
-      no ambient pid/name authority, graphics, package-signature or
-      unauthenticated filesystem policy.
+- [x] **8.2 permission manifests + CLI grant workflow**. ADR-0048/0049:
+      one mediator endpoint, receiver-checked approval marker, explicit
+      request/decision/issued-authority separation, manager-owned broker
+      and mediator-only app with exact four/one grants, fixed 32-slot cap
+      space, rngd-issued 128-bit bearers and receiver-side invalidation of
+      independently copied bytes. The bound no_std codec and exact
+      transactional `perm8-*` immutable records survive same-disk reboot
+      and real broker Process-cap reap/restart; the old bearer does not.
+      ALLOW, DENY and REVOKE each survived seven actual SIGKILL write
+      boundaries and independent AFS1 audits. Malformed newest records,
+      ninth-generation/full-disk refusal, and absent rngd/real fsd fail
+      closed; ADR-0051 reaps an exited kernel-root fsd to orphan its
+      endpoint instead of stranding callers. No ambient pid/name grant,
+      anti-rollback claim, arbitrary corrupted commit-sector guarantee,
+      graphics, signatures, or package authority. The previous fixed-slot
+      and volatile checkpoints remain available as historical binaries;
+      this completed checkpoint is qualified separately.
 - [ ] **8.3 standard userspace libraries**. Factor stable no_std
       syscall, IPC, filesystem and network clients into reusable
       libraries with ABI compatibility tests and at least two

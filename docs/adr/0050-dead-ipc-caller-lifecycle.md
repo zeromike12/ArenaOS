@@ -31,3 +31,31 @@ The decision is options **1 and 2 together**. Audit no accidental reply to a lat
 `kernel/kernel/src/ipc_adr50_test.rs` is a deterministic in-guest M4 kernel fixture with a real live-process thread ID: it seeds each of the four call states (including staged transfers), destroys that caller process, checks every slot empty with no staged cap, refuses a late reply with `STATUS_BAD_ARG`, reuses the endpoint, and checks exact frame reclamation. It emits `ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact`. The real ring-3 blocked caller diagnostic is in `tools/test_m82_ipc_caller.py`: three guest modes distinguish caller-first, broker-first deadline, and wrong-PING-result refusal, each requiring historical M3/M4 PASS, orderly shutdown, failed-PING/no false READY, endpoint reuse and exact before/after resource counters. Its host semantic-verdict self-test proves QEMU rc=0 with an `[arena ERROR halt]` marker or missing M4 PASS must fail. The shared `tools/mtest.py` QEMU helpers and `tools/stability_loop.sh` also reject fatal markers even with rc=0.
 
 The focused three-mode run and cap-layout/capspace checks passed on the integration image (development logs `build/adr50-focused-verdict.log` and `build/adr50-capspace-baseline.log`). The subsequently rebuilt integration EFI passed **35/35** fresh historical suites and an EFI-hash-bound **100/100** ordinary-boot qualification; the extracted checkpoint archive booted independently (`phase82-volatile-permission`, EFI SHA-256 `98331c626c4febed721682fdddc6ee9c3df5a7aa48067cc9690b8e64620bbc15`). These are evidence for the IPC invariant and the **partial volatile checkpoint**, not 8.2 persistence, crash, restart/ordering proofs or phase completion.
+
+## 8.2 restart handoff addendum (2026-09-30, accepted internal IPC correction)
+
+The persistent broker's first real restart exposed a separate semantic gap:
+`fail_calls_for_server` marks the held endpoint orphaned on server death;
+`ipc::recv` reopens it, but a bounded PING worker can CALL **before**
+the newly spawned broker has completed disk recovery and entered RECV.
+It gets immediate `STATUS_SERVICE_GONE`, falsely failing startup despite
+an existing replacement process. Busy retry of that status did not fix
+the structural sequencing: a running probe consumed its whole 1.5-second
+budget before the newly queued broker entered RECV. Do not fix this by
+lengthening the spin or ignoring an invalid reply.
+
+After `SYS_SPAWN` has successfully created a *new live thread* with an
+attenuated Endpoint/READ inheritance, reactivate ONLY that endpoint's
+orphan flag. The endpoint is still the exact same object held by the
+manager; a WRITE-only client or an uncommitted/rolled-back spawn cannot
+reactivate it. Existing post-death calls before that successful spawn
+still get `STATUS_SERVICE_GONE`; once the new serve-cap holder exists,
+calls may queue until its first RECV, like ordinary initial boot. If the
+new process dies during recovery, its process-teardown failure sweep
+wakes those queued callers with typed `STATUS_SERVICE_GONE`; the manager's
+existing bounded worker/deadline remains the readiness witness. This
+requires no syscall, additional grant, new notification, or trust-model
+change. Remove the speculative worker retry; test both death gap and
+replacement startup with the original endpoint and actual ALLOW/DENY
+rehydration. Reopening at mere COPY of a cap or while a spawn can still
+roll back would be unsound and is explicitly rejected.

@@ -94,6 +94,23 @@ else
     echo "!! host-side configuration record tests FAILED"
 fi
 
+# ADR-0048 completed persistence path: independent codec/reference,
+# fail-closed reserved namespace and no_std bare-metal compilation.
+# Guest crash/restart/refusal fixtures are separate test_m82_policy_*.py.
+echo "== host-side Phase 8.2 immutable permission decision record"
+if (cd "$REPO_ROOT" && rustc --test --edition 2024 -D warnings \
+    userspace/permission.rs -o build/permission-record-tests && build/permission-record-tests && \
+    rustc --crate-type lib --edition 2024 -D warnings \
+    --target x86_64-unknown-none --emit=metadata \
+    tools/permission_no_std.rs -o build/permission-no-std.rmeta && \
+    python3 tools/test_permission_record.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! permission policy record tests FAILED"
+fi
+
 # ADR-0048: source-derived static bounds on both host and bare-metal
 # x86_64; the separate guest suite checks live capacity and resources.
 echo "== host and no_std target cap/IPC layout audit"

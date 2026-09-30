@@ -404,8 +404,8 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // serving the shell's ls/cat/write. Every fsd disk operation is a
     // forwarded block call to storaged; file data DMAs end-to-end
     // between the disk and the CLIENT's frame (zero copy).
-    let fs_eid = match spawn_fsd(blk_eid) {
-        Ok((_pid, eid)) => eid,
+    let (fs_pid, fs_eid, fs_diag_nid) = match spawn_fsd(blk_eid) {
+        Ok((pid, eid, nid)) => (pid, eid, nid),
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
@@ -748,6 +748,13 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             obj: CapObj::Image { img_id: 25 }, rights: R,
         }).unwrap_or_else(|_| crate::halt::halt_machine("shell: delegate fixture image refused"));
     }
+    // ADR-0051: production fsd's separate diagnostic marker is reserved
+    // for the trusted Power/raw-FS shell. No broker/app/worker receives
+    // this authority; both the FS endpoint and marker are needed.
+    crate::cap::issue(shell_pid, 19, crate::cap::Cap {
+        obj: crate::cap::CapObj::Notification { nid: fs_diag_nid },
+        rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
+    }).unwrap_or_else(|_| crate::halt::halt_machine("shell: fsd diagnostic issue refused"));
     info!(
         "kernel",
         "shell spawned: pid {shell_pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
@@ -784,18 +791,19 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
-    // ADR-0048 adds one exact approval marker: 15 notifications at capacity.
-    // The sixteenth must be a typed refusal, never silent over-allocation;
+    // ADR-0051 adds one distinct production-fsd diagnostic marker:
+    // 16 notifications at capacity. The seventeenth must be a typed
+    // refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse a sixteenth object",
+                "servicemgr: notification bound failed to refuse a seventeenth object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 15/15; sixteenth refused"
+            "servicemgr: full fixture notification budget 16/16; seventeenth refused"
         );
     }
 
@@ -806,7 +814,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // return. Between wakes it halts the CPU with IF=1 — interrupts
     // must flow now: the UART RX path IS the input device.
     let mut last_audited_child = None;
+    let mut fs_reaped = false;
     loop {
+        // ADR-0051: fsd is a kernel-boot-root service, not a
+        // user-Process-cap-managed child. If its LAST thread exits,
+        // finish root-owned teardown here (away from its CR3). Without
+        // this sweep callers to the orphaned FS endpoint wait forever.
+        if !fs_reaped && crate::sched::proc_live_threads(fs_pid) == 0 {
+            crate::proc::destroy(fs_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+            crate::spawn::forget(fs_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+            fs_reaped = true;
+            info!("kernel", "fsd root exited; process reaped, endpoint orphaned; filesystem OFFLINE");
+        }
         // ADR-0039: independently audit the child created by the
         // MANAGER's syscall. The kernel sees its Process handle in the
         // manager's actual cap table, then compares five installed
@@ -1212,8 +1231,9 @@ fn spawn_configd(fs_eid: u32) -> Result<(u32, u32), &'static str> {
 /// forwarded block call) and its own FS endpoint's serve side (READ).
 /// Returns the fsd pid and its FS endpoint id (the shell gets the call
 /// side). No Mmio, no notification: fsd never sees the device.
-fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32), &'static str> {
+fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32, u32), &'static str> {
     let eid = crate::ipc::create_endpoint().map_err(|_| "fsd: endpoint table full")?;
+    let diag_nid = crate::ipc::create_notification().map_err(|_| "fsd: diagnostic marker table full")?;
     let grants = [
         crate::cap::Cap {
             obj: crate::cap::CapObj::Endpoint { eid: blk_eid },
@@ -1223,13 +1243,17 @@ fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32), &'static str> {
             obj: crate::cap::CapObj::Endpoint { eid },
             rights: crate::cap::RIGHTS_READ,
         },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: diag_nid },
+            rights: crate::cap::RIGHTS_READ,
+        },
     ];
     let pid = crate::spawn::spawn_init(4, &grants, None)?;
     info!(
         "kernel",
-        "fsd spawned: pid {pid} (caps: 0=Endpoint{blk_eid}/W 1=Endpoint{eid}/R) — AFS1 mount and serve from ring 3"
+        "fsd spawned: pid {pid} (caps: 0=Endpoint{blk_eid}/W 1=Endpoint{eid}/R 2=Notif{diag_nid}/R) — AFS1 mount and serve from ring 3"
     );
-    Ok((pid, eid))
+    Ok((pid, eid, diag_nid))
 }
 
 /// Spawn the production network service (M6.1, ADR-0024): registry

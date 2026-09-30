@@ -147,6 +147,12 @@ pub static ARENA_IPC_LAYOUT: [usize; 5] = [
             raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
         print("x86_64-unknown-none IPC: CallSlot=240 Endpoint=976 Notif=24; "
               "8->9 endpoints +976 B, 14->15 notifications +24 B PASS")
+        # ADR-0051: an *additional* distinct production-fsd marker,
+        # on top of ADR-0048's projection; one Notification is 24 B.
+        actual = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
+        if not re.search(r"pub const MAX_NOTIFS: usize = 16\s*;", actual):
+            raise ValueError("production notification bound not exactly 16")
+        print("ADR-0051 production FS diagnostic: 15->16 notifications +24 B PASS")
 
 
 if __name__ == "__main__":

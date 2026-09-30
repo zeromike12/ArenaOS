@@ -37,3 +37,8 @@ repair. The fresh 35-suite historical run and final-EFI-bound 100/100
 ordinary boots qualified the **volatile** integration checkpoint. The
 persistent permission policy and the remaining ADR-0048 completion gates
 are not implemented or claimed by this witness.
+
+Phase 8.2 was subsequently completed with persistent policy, real
+broker-restart, absent-backend and crash-model proofs; the independently
+qualified final image and receipt are recorded in ADR-0048. This ADR's
+partial-checkpoint evidence remains historical, not the final-image proof.

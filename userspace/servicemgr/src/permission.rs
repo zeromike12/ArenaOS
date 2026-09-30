@@ -1,6 +1,8 @@
 //! ADR-0048/0049: manager-owned broker/app, exact live-cap plan and
 //! two-grant success+exit+deadline readiness on the EXISTING private notif.
-//! No policy persistence is claimed by this volatile integration path.
+//! Broker persists decisions, never bearer bytes; restart replays the original endpoint.
+#[path = "../../permission.rs"]
+mod app_request;
 use arena_servicemgr::inventory::{self, NamedSlot, SyscallProbe};
 use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request, Service, Step};
 #[path = "../../abi.rs"]
@@ -65,6 +67,13 @@ fn log(s: &str) {
     let _ = unsafe { syscall2(SYS_DEBUG_WRITE, s.as_ptr() as u64, s.len() as u64) };
 }
 fn probe_boot() -> Result<[Step; 2], ()> {
+    // The built-in app's versioned description is a REQUEST, not a
+    // decision or a cap. Validate it before resolving the actual held
+    // mediator source; only the latter can be installed by SYS_SPAWN.
+    let request = app_request::decode_request(&app_request::READ_REQUEST).map_err(|_| ())?;
+    if request.rights != manifest::READ as u8
+        || A_GRANTS[0].rights != (manifest::WRITE | manifest::COPY)
+    { return Err(()); }
     let p = SyscallProbe;
     let root = inventory::collect(&SLOTS, &p).map_err(|_| ())?;
     let r = root.as_slice();
@@ -223,7 +232,7 @@ fn start_broker(step: Step) -> Result<Child, ()> {
         }
         return Err(());
     }
-    log("servicemgr: permissiond READY (volatile policy; default DENY)\r\n");
+    log("servicemgr: permissiond READY (validated durable decision; bearer table fresh)\r\n");
     Ok(broker)
 }
 pub fn start() -> Result<State, ()> {
@@ -273,7 +282,7 @@ impl State {
                     return;
                 }
                 self.broker_online = false;
-                log("servicemgr: permission broker reaped; old volatile grant retired\r\n");
+                log("servicemgr: permission broker reaped; old bearer retired; durable policy rescanned on replacement\r\n");
                 if self.broker_restarts < 2 {
                     self.broker_restarts += 1;
                     match start_broker(self.plan[0]) {

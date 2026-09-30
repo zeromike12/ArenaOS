@@ -116,6 +116,13 @@ fn test_arp_service() -> Res {
     let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_NET) else {
         return Err(NO_NIC);
     };
+    // The bundled Phase-7 stack requests rngd for its possession-based
+    // UDP/TCP handles. NIC-only is not a runnable stack fixture; don't
+    // manufacture a deadline failure for an absent entropy dependency.
+    // The independent M6 link-layer netd test still runs with this NIC.
+    if crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_ENTROPY).is_none() {
+        return Err("SKIP:no virtio-rng device — network stack bearer issuance unavailable");
+    }
     let Some(f) = crate::drivers::pci::pci_function(v.pci_index) else {
         return Err("recorded function vanished from the table");
     };

@@ -41,7 +41,7 @@ pub const MAX_ENDPOINTS: usize = 9; // ADR-0048: single mediator endpoint
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 15; // ADR-0048: distinct approval marker, no new probe notif
+pub const MAX_NOTIFS: usize = 16; // ADR-0048 approval + ADR-0051 distinct production FS diagnostic
 #[path = "ipc_adr50_test.rs"]
 mod adr50_test;
 /// In-guest internal-only M4 fixture; no userspace syscall or authority.
@@ -489,6 +489,22 @@ pub fn call(
         install_cap(pid, reply_cap)
     };
     Ok((reply_words, landed, reply_msg))
+}
+
+/// A successfully created process with an inherited READ serve cap may
+/// take up an orphaned endpoint BEFORE its first `recv`. This is the
+/// birth/teardown handoff: callers arriving after the authorized spawn
+/// can queue while its ring-3 loader scans durable state. If it fails
+/// initialization and dies, the normal server-death sweep wakes them
+/// with typed SERVICE_GONE. Only `spawn_from` calls this, and only AFTER
+/// it has successfully started the new child; a failed spawn must not
+/// promise a receiver. A WRITE-only caller cannot clear orphaned state.
+pub(crate) fn reopen_after_server_spawn(eid: u32) {
+    without_interrupts(|| unsafe {
+        if let Some(ep) = (*ENDPOINTS.get()).get_mut(eid as usize).filter(|e| e.live) {
+            ep.orphaned = false;
+        }
+    });
 }
 
 /// Server side: take the oldest request on endpoint `eid`, blocking

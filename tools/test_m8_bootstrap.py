@@ -55,8 +55,8 @@ def main() -> int:
                    and observed.groups() == (netd.group(1), manager.group(2), rngd.group(1))
                    and netd.group(2) != rngd.group(2))
     ok &= check(matched, "ring-3 observed real netd/stack/rng endpoint IDs, matching kernel grants; drivers hold DIFFERENT readiness notifications")
-    ok &= check("servicemgr: full fixture notification budget 15/15; sixteenth refused" in serial,
-                "fifteenth notification is allocated and a sixteenth is refused at boot")
+    ok &= check("servicemgr: full fixture notification budget 16/16; seventeenth refused" in serial,
+                "sixteenth notification is allocated and a seventeenth is refused at boot")
     ok &= check(VALIDATED in serial and OFFLINE not in serial,
                 "two device-originated readiness badges preceded live-cap manifest resolution")
     ok &= check("servicemgr: PANIC" not in serial and "m8: RESULT PASS" not in serial,

@@ -200,7 +200,7 @@ for i in $(seq 1 "$N"); do
     # Destructive fault/stall negatives live in the historical host suite.
     elif ! grep -aqF 'audited 17 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 15/15; sixteenth refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 16/16; seventeenth refused' "$SERIAL"; then
         why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
@@ -249,11 +249,17 @@ for i in $(seq 1 "$N"); do
         why="config updater or its marker survived shell handoff"
     elif grep -aqF 'configup: SET COMMITTED' "$SERIAL"; then
         why="fresh boot unexpectedly consumed an immutable generation"
-    # 8.2 volatile integration: ordinary boot must not invent an ALLOW,
-    # and manager readiness requires both the worker's authenticated PING
-    # result and its observed exit (a false success must fail qualification).
-    elif ! grep -aqF 'permissiond READY (volatile policy; default DENY)' "$SERIAL"; then
-        why="permission mediator absent or default-DENY boot not observed"
+    # 8.2 durable completion: fresh formatted boot must recover UNSET as
+    # DENY. Worker success plus exit and real child-cap audits are mandatory
+    # on every qualified boot. Crash/restart negatives live in host suites.
+    elif ! grep -aqF 'permissiond: validated durable policy generation 0 DENY' "$SERIAL"; then
+        why="fresh permission disk did not rehydrate default DENY"
+    elif ! grep -aqF 'permissiond READY (validated durable decision; bearer table fresh)' "$SERIAL"; then
+        why="permission broker did not pass authenticated PING/readiness"
+    elif ! grep -aqF 'permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty' "$SERIAL"; then
+        why="real broker grants differed from exact four-cap inventory"
+    elif ! grep -aqF 'permapp: audited ONLY mediator WRITE|COPY, 31 other cap slots empty' "$SERIAL"; then
+        why="client app was not independently audited as endpoint-only"
     elif ! grep -aqF 'servicemgr: permission PING result + exit before deadline; worker reaped' "$SERIAL"; then
         why="permission readiness lacked a result-and-exit witness"
     elif grep -aqF 'servicemgr: permission PING failed/deadline; no READY' "$SERIAL"; then

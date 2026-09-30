@@ -500,3 +500,51 @@ malformed/NO_SPACE/DEGRADED cases, old-token refusal across actual broker
 restart, pre/post-REVOKE serialization proofs, and permission-specific
 absent-device/full-table negative-space fixtures. Neither ADR acceptance
 nor this partial checkpoint closes 8.2.
+
+## Completed Phase 8.2 checkpoint (2026-09-30)
+
+The final image implements and separately tests all five completion gates
+above. The built-in versioned eight-byte request codec, no_std
+manifest/inventory resolver and immutable 512-byte decision codec are
+host-tested for unknown/duplicate operations, overbroad rights, stale or
+malformed records and wrong/missing source authority. A real endpoint holder
+sends malformed requests to the receiver; the request never serializes a
+capability and never becomes approval. The separate trusted-shell approval
+marker commits exact `perm8-01`..`perm8-08` records; the broker verifies
+CREATE/WRITE/CLOSE/rescan before ACK and draws fresh 128-bit grants from
+rngd only under validated ALLOW. READ dispatches before REVOKE may succeed;
+a READ dispatched after the verified ACK is refused even with independently
+copied token bytes. Actual broker Process-cap exit/reap/replacement on the
+same held endpoint loses old token bytes, then reissues only under persisted
+ALLOW; name-only requests and endpoint possession under DENY still fail.
+
+`test_m82_policy_crash.py` kills QEMU at seven observed write boundaries
+**for each** ALLOW, DENY and REVOKE, independently audits committed AFS1
+sectors before the next same-platter boot, and checks the exact visible
+decision without retry. The fixed eight-generation bound, guest-derived
+allocator-full NO_SPACE/DEGRADED, malformed visible newest record, four
+live-bearer capacity, absent rngd and **actual production-fsd exit** all
+fail closed. ADR-0051's kernel-root fsd reap orphans its endpoint, so the
+broker gets service-gone instead of stranding a caller; on normal reboot
+the same platter restores fsd and only the durable decision, not a bearer.
+The previously qualified volatile and cap-space archives remain separate.
+
+The final request-codec image passed the **fresh complete 40/40 test-suite
+run**, `build/phase82-final-codec-full-suite.log`. Its EFI SHA-256 is
+`4a1b39cdcd2c42b1acb3e289b4c6c6395b87802db66211cc7d033ae50ab53076`.
+The fresh 100/100 QEMU loop had zero failures; its receipt reads exactly
+`4a1b39cdcd2c42b1acb3e289b4c6c6395b87802db66211cc7d033ae50ab53076 100/100`.
+The matched receipt, EFI file, ESP, firmware pair, fresh AFS1 platter
+and run instructions ship together in
+`releases/checkpoints/phase82-complete/`. The extracted archive is
+checksum-verified and booted separately; both EFI copies (inside ESP and
+next to the receipt) are compared byte-for-byte. This is a **completed 8.2
+checkpoint**, not a claim of completing 8.3, anti-rollback, hostile raw-FS
+writes, arbitrary AFS1 commit-sector corruption or no-disk boot.
+
+An earlier full-suite attempt scored **38/40**, with two unrelated
+120-second timeouts (one preserved at only 87 bytes of pre-kernel OVMF
+serial); they were NOT retried into a PASS. Timeout diagnostics now retain
+serial and QMP CPU registers; later fresh 40/40 runs and this image's
+100/100 passed, but those earlier intermittent pre-kernel stalls were not
+root-caused and no claim is made that the instrumentation fixed them.
