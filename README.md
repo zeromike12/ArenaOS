@@ -51,11 +51,10 @@ the machine waits for you at the `arena> ` prompt — type `help`, and
 For the **in-progress Phase 8** branch, completed code checkpoints include
 their own bootable, 100/100-qualified archives under `releases/checkpoints/`.
 See the download, checksum, extraction and QEMU commands in
-**[docs/RUNNING.md](docs/RUNNING.md#phase-82-proposed-adr-review-commit-no-82-code-yet)**.
+**[docs/RUNNING.md](docs/RUNNING.md#phase-82-revised-proposed-adr-review-no-82-runtime-yet)**.
 These per-commit archives are **not** tagged GitHub release assets.
-The proposed-ADR review snapshot reuses the identical qualified 8.1
-boot bytes; Phase 8.2 is a design investigation, not an implemented
-permission/grant UI.
+The revised proposed-ADR review image reuses the identical qualified 8.1
+boot bytes; Phase 8.2 still has no implemented permission/grant UI.
 
 ## What just booted (current: bounded Phase 8.1 complete; Phase 8.2 design investigation; Phase 8.0 manager and Phase 7 network lifecycle complete)
 

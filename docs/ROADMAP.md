@@ -1085,10 +1085,13 @@ is not completed by accepting an ADR.
       investigation started in proposed ADR-0048: the trusted shell is
       the explicit CLI approver, requests are not grants, and revocable
       operations require receiver-mediated possession checks rather
-      than deleting one copy of a kernel cap. No 8.2 grant or CLI is
-      implemented yet. Audit boot resource bounds and the separate
-      transactional policy namespace before accepting architecture-
-      dependent code. Prove denial, attenuation, delegation, live
+      than deleting one copy of a kernel cap. The reviewed proposal now
+      compares fixed 18/32-slot costs and favors 32, specifies a
+      persistent app-specific endpoint for re-ACQUIRE after broker
+      restart, and selects 128-bit rngd-backed grants. No 8.2 grant or
+      CLI is implemented yet. Audit boot resource bounds and the
+      separate transactional policy namespace before accepting
+      architecture-dependent code. Prove denial, attenuation, delegation, live
       revocation and restart persistence; no ambient pid/name authority,
       graphics, package-signature or unauthenticated filesystem policy.
 - [ ] **8.3 standard userspace libraries**. Factor stable no_std

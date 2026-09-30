@@ -74,14 +74,16 @@ Rejected:
 ## Proposed authority flow (subject to the audits)
 
 1. A dedicated, boot-granted `permissiond` holds an image READ|COPY cap
-   for the one app, only the backend caps it needs, a private permission
-   endpoint/READ, and a READ-only reference to a new otherwise inert
-   approval Notification. The shell holds endpoint/WRITE and a separate
+   for the one app, only the backend caps it needs, a private *admin*
+   endpoint/READ and a distinct *app-specific* endpoint/READ. It also
+   holds a READ-only reference to a new otherwise inert approval
+   Notification. The shell holds admin endpoint/WRITE and a separate
    READ|COPY|DESTROY reference to that **same** marker. The server checks
    kind, object and *exact* transferred rights against its own reference
    and drops every IPC-landed ref, including wrong-kind/missing/forged
    cases. The boot root never grants this marker to the app. Shell text
    cannot authorize an update without this receiver-side check.
+   Neither endpoint is a raw fsd endpoint.
 2. The broker validates a versioned, bounded built-in **request** against
    its live `SYS_CAP_DESCRIBE` inventory. A CLI `perm show/request/allow/
    deny/revoke` displays requests and the **actual** granted rights,
@@ -91,18 +93,35 @@ Rejected:
    initial approval requires the marker-bearing CLI action. Requesting
    WRITE when the held policy permits only READ is refused, not
    silently clamped.
-3. The app receives **only** access to the permission/file mediator
-   (Endpoint/WRITE) and, after approval, an unforgeable 64-bit
-   rngd-backed **service-issued grant** for `arena.txt` READ. The
-   mediator retains the fsd authority; neither the app nor a delegate
-   gets the raw fsd endpoint, an fsd file handle or filesystem WRITE.
-   The grant is checked at the *enforcing receiver* on **every** read.
-   Possession grants access; deliberately passing the grant plus the
-   mediator endpoint delegates access without caller identity. An
-   endpoint or request string alone, a forged grant or an old grant is
-   refused. If entropy is absent, issuance fails closed. No new kernel
-   cap kind, kernel grant tracing, pid authorization or UDP-specific
-   revocation rule is introduced.
+3. **Reacquisition authority is possession of the app-specific mediator
+   Endpoint/WRITE capability**, derived from the broker's boot-held
+   endpoint and installed in the app's spawn grants with COPY for
+   deliberate delegation. The app may hold this endpoint even while
+   policy is DENY; it is *not* itself file-read authority. On ACQUIRE,
+   `permissiond` knows the request arrived on its dedicated app endpoint
+   (not the admin or another app's endpoint), checks the durable ALLOW
+   decision and live backend, then draws and returns a **new 128-bit
+   rngd-backed service-issued grant**. A delegated copy of the endpoint
+   delegates *reacquisition* while ALLOW remains active; no pid, image
+   name or caller-supplied string is considered proof. A future second
+   app needs a distinct acquisition endpoint, not a caller-id field on
+   a shared endpoint. The app has no raw fsd endpoint, file handle or
+   filesystem WRITE, and neither does its delegate.
+
+   The app presents the grant on each READ; the *enforcing receiver*
+   checks it against current state. A different endpoint or request/
+   image name cannot ACQUIRE, and endpoint possession without ALLOW or
+   READ without a current grant is refused. Choose **128 rather than
+   64 bits** because this token is a general security-critical grant
+   rather than ADR-0033's bounded UDP port handle. Sixteen random bytes
+   fit the 64-byte IPC message with an opcode and offset; perform a
+   full-length comparison and never derive tokens from policy or object
+   numbers. Under the rngd entropy assumption, a blind guess has at
+   most 2^-128 success per independent try (approximately q/2^128 for
+   q tries); this is probabilistic unguessability, not a mathematical
+   proof about the entropy source. No rngd or failed draw means **no
+   issuance**, never a predictable fallback. No new kernel cap kind,
+   global cap tracing, pid authorization or UDP-specific rule is added.
 4. Revocation invalidates the active grant in the mediator's state;
    **every copy of those bytes becomes unusable** on the next read,
    including copies held by independent survivors. Deleting the
@@ -130,7 +149,22 @@ Rejected:
    reboot or a broker restart, rebuild the decision from validated
    visible records, revalidate actual backend caps and issue a **fresh**
    random grant only if allowed. Never restore old grant bytes from
-   disk or turn a readable request/decision into a grant.
+   disk or turn a readable request/decision into a grant. The *same
+   app-specific endpoint object must survive broker restart*: the
+   lifecycle owner keeps its serve cap and reattaches the new broker
+   instance, as with ADR-0028. If that cannot be guaranteed in the
+   bounded supervisor model, broker restart cannot claim grant
+   reacquisition: callers get typed SERVICE_GONE until a trusted owner
+   explicitly installs a new acquisition endpoint in the app. No
+   silent replacement based on pid/image name. On restart all old
+   grant bytes are forgotten (not replayed); the app or a deliberate
+   endpoint delegate must call ACQUIRE again on the still-held cap.
+   Required real-guest proof: **old token → refused; possessed
+   app-specific endpoint + persisted ALLOW → freshly drawn token;
+   same endpoint + persisted DENY → refused; a request/image name
+   without that endpoint → refused.** Test endpoint transfer to a
+   distinct process while ALLOW and refusal after DENY. Merely seeing
+   the app image spawned or a policy string printed is not evidence.
 
    The persistence claim is limited to normal reboots and the **AFS1
    ordered-write/atomic-512-byte-sector crash model** of ADR-0046:
@@ -150,35 +184,58 @@ Rejected:
 The current tree has `MAX_IMAGES=24` with IDs 0–23 used,
 `MAX_ENDPOINTS=8` with the production full fixture at its bound,
 `MAX_NOTIFS=14`, `MAX_INHERIT=5`, `MAX_PROCESSES=32` and `CAP_SLOTS=16`.
-The latter was an **early bring-up number** in ADR-0015, not a reason
-for a fragile policy architecture. **Propose `CAP_SLOTS=18`, globally
-fixed, never dynamically expanded**. Reserve shell slots 16 and 17
-for the broker endpoint and boot-issued approval marker; do not touch
-existing slots 0–15. This modifies only ADR-0015's numeric capacity,
-not its per-process ownership, rights, attenuation or destroy semantics.
-The initial static bound of extra references is two `Cap` entries and
-two IPC-landing flags per `Process`, at most 32 process entries, plus
-alignment: verify `size_of::<CapSpace>()` and `size_of::<Process>()` at
-build/test time before claiming a byte count. Any resulting heap/frame
-increase must be measured and bounded, not described as a leak or silently
-ignored. Do not expand the separate spawn inheritance bound. All slots remain
-bounds-checked and a full 18-slot space still gives a typed refusal;
-check COPY, MOVE, IPC landing, table-full rollback and reaping at the
-new last slot and the out-of-range slot 18. Existing manager-local
-`MAX_CAPS=16` describes its own boot inventory, *not* the global kernel
-cap-space bound and must not be casually widened.
+The last is an **early bring-up number** in ADR-0015, not a reason to
+contort policy architecture. Compare the smallest immediate increase
+with a durable fixed bound. On x86_64, Rust 1.97.0, compiling the actual
+`CapObj`, `Cap`, `CapSpace` and `Process` field definitions extracted
+from `kernel/kernel/src/{cap,proc}.rs` with the array length varied
+(reproduce with `python3 tools/probe_capspace_layout.py`):
+
+| Slots | `CapSpace` | `Process` and `Option<Process>` | 32-entry process table | Delta vs 16 |
+| ---: | ---: | ---: | ---: | ---: |
+| 16 (today) | 400 B | 448 B | 14,336 B | — |
+| 18 (exact current need) | 456 B | 504 B | 16,128 B | +1,792 B |
+| 32 (proposed) | 800 B | 848 B | 27,136 B | +12,800 B |
+
+`CapObj` is 16 B and `Cap` is 24 B, aligned to 8 B. This is **static
+maximum table size**, not a measured live-frame delta: padding is
+included, but allocator/page granularity and kernel-image layout may
+change frame counts. A 32-slot space adds 400 B over 16 per process
+and 344 B over 18 in both `CapSpace` and `Process`; the 32-entry bound
+costs 12.5 KiB more than 16 or 10.75 KiB more than 18. The source-extracted host measurement is a design
+estimate; repeat `size_of::<CapSpace>()`, `size_of::<Process>()` and
+actual boot frame accounting **on the final target build** before
+acceptance of the implemented bound.
+
+**Propose `CAP_SLOTS=32`: fixed per process, no dynamic expansion.**
+Eighteen is just sixteen plus this milestone's two shell grants and
+would invite another global ABI/table-size revision at the next
+mature-userspace client. Thirty-two buys 14 additional slots over 18
+for future *held* authority, at a bounded static maximum increase of
+10.75 KiB across 32 process entries; it mints **no** new capability
+objects or rights and does not raise `MAX_INHERIT` or the manager's
+independent `MAX_CAPS=16` inventory. Shell slots 16 and 17 may carry
+the broker admin endpoint and approval marker without moving any
+historical grant in 0–15. A full 32-slot table still refuses
+COPY/MOVE/IPC landing/grant atomically; test the true last slot 31,
+out-of-range slot 32, attenuation, table-full rollback and cleanup on
+reap. Retain all prior M3 capacity assertions (parameterized by
+`CAP_SLOTS`) and add explicit new-bound tests rather than changing a
+failure into a SKIP. This revisits only ADR-0015's numeric capacity,
+not per-process ownership, rights or destruction semantics.
 
 App image and broker require explicitly mapped image IDs and real
-binaries. One broker endpoint and approval marker require accounted
-increases from the currently full endpoint/notification tables, as
-well as a bounded policy namespace, FS/rng dependency order, broker
-inventory, IPC-landed cleanup and manager ownership. Compare exact
-post-EBS-relative free-frame/spawn-record/process use before/after
-issuance, revoke and restart, on both device-present and absent boots.
-Run old M3 capacity/full-table proofs and the historical suite with
-the new fixed bound; a regression is a bug, not a reason to skip a
-fixture. If the resource audit cannot be made bounded, revise the
-proposal before implementing it rather than reusing transient slots.
+binaries. **Two distinct broker endpoints** (admin and app acquisition/
+read) and the approval marker require accounted increases from the
+currently full endpoint/notification tables. Audit the endpoint's
+lifetime across an actual broker restart, bounded policy namespace,
+FS/rng dependency order, broker inventory, IPC-landed cleanup and
+lifecycle owner. Compare exact post-EBS-relative free-frame/spawn-
+record/process consumption before/after issuance, revoke and restart,
+on device-present and absent boots. If that audit cannot be bounded,
+revise this proposal before implementation rather than reusing
+transient slots or claiming restart semantics a new endpoint cannot
+satisfy.
 
 ## Ordered proof gates; 8.2 remains incomplete until all close
 
@@ -206,7 +263,9 @@ proposal before implementing it rather than reusing transient slots.
    gets its own deployable image, fresh full suite, final-EFI-bound
    100/100 QEMU boots, matching receipt, and extracted-archive boot.
 
-This is intentionally **not yet an accepted implementation plan** for
-persistent approvals: the resource census and multi-key transaction
-boundary have to be verified, and `arena.txt`'s in-flight read-versus-
-revoke ordering specified, before code relies on them.
+This remains **Proposed**, not Accepted: the on-target resource census,
+separate policy-namespace crash design/proof and actual in-flight
+read-versus-revoke ordering tests have not passed yet. Record those
+results before accepting the ADR or shipping any architecture-dependent
+8.2 implementation. Updating this proposed ADR after review does not
+change the 8.1 guarantee or qualify an 8.2 runtime.
