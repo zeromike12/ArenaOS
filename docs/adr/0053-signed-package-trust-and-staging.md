@@ -1,11 +1,13 @@
 # ADR-0053 — Phase 8.4 signed packages and verified staging
 
-Status: **Proposed — design approved by user and C, not yet accepted or implemented**
-(2026-09-30). The user approved proceeding with Phase 8.4, subject to the already-defined
-exact-source vendoring, dependency audit, offline target build and independent verifier
-vectors. These are **pre-acceptance / pre-dependent-implementation gates**, not facts
-already established; see [the evidence ledger](0053-gate-evidence.md). Phase 8.3 remains
-the last completed milestone.
+Status: **Accepted — exact-source audit and offline/vector/fuzz gates passed; guest implementation in progress**
+(2026-09-30). The 23 exact archive hashes, vendor/file hashes, feature/build/unsafe
+review, no_std target compile and independent + coverage-guided host verifier/decoder
+proofs are recorded in [the evidence ledger](0053-gate-evidence.md),
+[unsafe review](0053-unsafe-review.md) and [fuzz evidence](0053-fuzz-evidence.md).
+No material dependency, executed crypto backend, signed-wire or trust-model change was
+required. Acceptance authorizes **implementation only**, not a completed/qualified
+Phase 8.4 guest checkpoint; Phase 8.3 remains the last completed milestone.
 
 ## Scope and threat model
 
@@ -41,12 +43,12 @@ offline host tooling; no guest RNG, key generation, private-key parsing, signing
 PEM/PKCS#8, serde, alloc or std feature unless an exact audited dependency proves one
 unavoidable. In particular, never enable `legacy_compatibility` or `hazmat`.
 
-**Only on acceptance** this ADR narrowly amends ADR-0004 for the exact pinned,
+**On this ADR's acceptance**, ADR-0004 is narrowly amended for the exact pinned,
 source-vendored Phase 8.4 cryptographic closure inside the userspace package verifier:
 the Ed25519 verification implementation, SHA-256 directly used for payload/content hashes
 and key IDs, and their required target/runtime dependencies. ADR-0004's zero-third-party
-rule remains controlling everywhere else. While this ADR is Proposed the exception is not
-yet effective; no claim of an audit of any version/configuration not actually audited.
+rule remains controlling everywhere else. This does not approve any changed version,
+feature, backend, target or additional third-party dependency without a new review.
 
 The first guest root is the RFC 8032 test vector 1 **public** 32 bytes
 `d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`; its key ID is SHA-256
@@ -66,11 +68,12 @@ proc macros and feature unification, including target-specific backends; forbid 
 access and runtime code generation. Demonstrate an offline/reproducible
 `x86_64-unknown-none` build using only the vendored sources. Validate RFC 8032 vectors,
 independent OpenSSL-compatible signature results and malformed/noncanonical key/signature
-cases; fuzz the format before accepting this ADR. Until that gate passes, no OS-image
-signature implementation or acceptance claim. The candidate resolution and **unresolved**
-supply-chain evidence are recorded below. Host-only partial vector/negative evidence
-and the still-blocked source/target gates are tracked separately in
-[0053-gate-evidence.md](0053-gate-evidence.md); neither makes this ADR Accepted.
+cases; fuzz the format before accepting this ADR. **Completed for the pinned serial
+x86_64-unknown-none configuration:** source/feature/unsafe review, clean offline
+no_std build, independent OpenSSL/RFC vectors and both Python-transition and
+LLVM-Rust-region coverage-guided fuzz campaigns. See
+[0053-gate-evidence.md](0053-gate-evidence.md). Changing this configuration
+reopens the gate; this acceptance does not claim guest end-to-end proof.
 
 ## Frozen candidate package v1 bytes
 
@@ -300,7 +303,7 @@ are capacity changes, **not** new kernel primitives or rights.
 
 ## Dependency reconnaissance — historical pre-acquisition snapshot
 
-**Update 2026-09-30:** the 23 exact archives were subsequently supplied by the user and independently verified, extracted and committed under `vendor/phase84`; the earlier CDN/cache-blocker statements in this section describe the situation *before* that acquisition. Current gate status and the unresolved unsafe/fuzz review are tracked in [0053-gate-evidence.md](0053-gate-evidence.md) and [0053-source-audit.md](0053-source-audit.md). ADR remains Proposed; only an audit-only no_std verifier probe has compiled, not guest signature code or a checkpoint.
+**Update 2026-09-30:** the 23 exact archives were subsequently supplied by the user and independently verified, extracted and committed under `vendor/phase84`; the earlier CDN/cache-blocker statements in this section describe the situation *before* that acquisition. Current accepted audit evidence is tracked in [0053-gate-evidence.md](0053-gate-evidence.md) and [0053-source-audit.md](0053-source-audit.md). Guest implementation and checkpoint qualification remain separate and incomplete.
 
 Candidate: `ed25519-dalek = { version = "=2.2.0", default-features = false }` and `sha2 =
 { version = "=0.10.9", default-features = false }` targeting `x86_64-unknown-none`. The
@@ -343,7 +346,7 @@ and reviewed vendored source:
 | `version_check` | `0.9.5` | `0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a` |
 
 
-The crates.io sparse index and static crate-source CDN produced TLS failures in this sandbox. A GitHub-hosted crates.io **git index** supplied version resolution and candidate archive checksums, not actual source; do not replace missing exact crates with an arbitrary GitHub HEAD or claim those checksums validate a different git tree. The implementation must source the exact versions through a verifiable route, compare source/release provenance, record vendored tree hashes/licenses/commits, resolve feature unification for *the OS image* and run a real offline build and audit before acceptance. No 8.4 signature code has been built, accepted, qualified or shipped.
+**Historical pre-acquisition note:** crates.io/mirror TLS failed in this sandbox, so the GitHub-hosted index initially supplied only registry archive checksums. The subsequently user-supplied exact archives authenticated against that preexisting index, were vendored with independent file hashes, and were built offline as recorded in the acceptance ledger. Do not replace them with a GitHub HEAD/tag. Acceptance of the source/host gates does not claim a qualified guest image.
 
 ## Rejected alternatives and future rules
 

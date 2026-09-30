@@ -1,6 +1,6 @@
 # ADR-0053 — GitHub archive-cache acquisition search (2026-09-30)
 
-**Result: 1/23 exact candidate `.crate` archives recovered and SHA-256 verified; 22 remain unavailable. This is NOT an accepted dependency audit or permission to implement the guest verifier.** No version substitution was made.
+**Historical acquisition search result (superseded):** before the user supplied `crateFiles.zip`, this GitHub search found only 1/23 exact archives. Subsequently **all 23** exact archives were supplied, verified against the previously recorded SHA-256s, vendored and audited; ADR-0053 has been Accepted. See [current gate evidence](0053-gate-evidence.md). The search details below are retained as an acquisition-method record, **not** a current missing-archive report. No version substitution was made.
 
 ## Method and scope
 

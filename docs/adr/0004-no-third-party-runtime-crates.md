@@ -64,21 +64,23 @@ becomes documentation-grade knowledge of the specs we depend on.
   the prior art and then write our own, deliberately (Phase 2 ADRs will cover
   allocator design).
 
-## Future implications and proposed narrow amendment
+## Future implications and accepted narrow amendment
 
 - If someday a crate proves genuinely irreplaceable (e.g., a formally verified
   crypto primitive), adopting it requires a separately accepted, explicitly
   scoped amending or superseding ADR and an audit — not a casual `Cargo.toml`
   edit.
-- **Proposed, not yet effective:** acceptance of ADR-0053 would narrowly amend
-  decision 1 **only** for the pinned, exact-source-vendored Phase 8.4
-  cryptographic closure inside the userspace package verifier: the Ed25519
-  verification implementation, SHA-256 used directly for payload/content
-  hashes and key IDs, and their required target/runtime dependencies. That
-  exception is conditional on ADR-0053's source/feature/unsafe/build audit,
-  offline target build and independent vector gates. ADR-0004's zero-third-party
-  runtime rule remains controlling for every other OS image and dependency.
-  Until ADR-0053 is Accepted, this is a cross-reference to a **proposed**
-  amendment, not permission to add third-party runtime code.
+- **Accepted narrow exception (ADR-0053, 2026-09-30):** decision 1 is amended
+  **only** for the pinned, exact-source-vendored Phase 8.4 cryptographic
+  closure inside the userspace package verifier: Ed25519 verification,
+  SHA-256 directly used for payload/content hashes and key IDs, and their
+  required target/runtime dependencies. ADR-0053 records the complete
+  source/feature/unsafe/build review, offline no_std target build, independent
+  vectors and coverage-guided fuzz evidence for this exact serial-backend
+  configuration. It does not permit signing/key material in the guest, any
+  other crate/version/feature/target/backend, or a change to the kernel,
+  boot chain, other servers or applications. ADR-0004's zero-third-party
+  runtime rule remains controlling everywhere else. Any expansion requires a
+  separate accepted ADR and new audit.
 - Userspace libraries we write (async runtime, toolkit) follow the same
   policy: they are *our* ecosystem's packages, not imports.

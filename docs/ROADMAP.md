@@ -1123,14 +1123,14 @@ is not completed by accepting an ADR.
       success words remain caller-validated, not library-certified.
       Fresh corrective historical suite 43/43 and final-image-bound
       100/100; `phase83-corrected` archive supersedes original 8.3.
-- [ ] **8.4 package format + signed packages**. ADR-0053 design has final
-      user/C approval but remains **Proposed** until exact source vendoring,
-      dependency audit, offline target build and independent verifier vectors
-      pass; architecture-dependent guest code must wait for acceptance. There is
-      no 8.4 signature code, install authority or qualification yet. Define
-      package identity, public test root, cumulative revocation and canonical
-      signature domains; test tamper and bounded same-disk crash recovery
-      and guest **receiver-side verified staging only**. Installation,
+- [ ] **8.4 package format + signed packages**. ADR-0053 is **Accepted** for
+      the exact source-vendored serial x86_64-unknown-none Ed25519/SHA-256
+      verifier after pinned source/unsafe/build audit, offline target compile,
+      independent vectors and coverage-guided decoder/Rust fuzzing. Guest
+      implementation and final checkpoint qualification remain in progress:
+      define package identity, public test root, cumulative revocation and
+      canonical signature domains; test tamper, bounded same-disk crash
+      recovery and **receiver-side verified staging only**. Installation,
       activation and dynamic linking remain out of scope until 8.5.
 - [ ] **8.5 installer/updater**. Artifact-bound install/upgrade and
       power-loss recovery tests with an explicit trust chain and
