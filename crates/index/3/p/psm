@@ -1,0 +1,1 @@
+{"name":"psm","vers":"0.1.23","deps":[{"name":"cc","req":"^1.0.2","features":[],"optional":false,"default_features":true,"target":null,"kind":"build"}],"cksum":"aa37f80ca58604976033fae9515a8a2989fc13797d953f7c04fb8fa36a11f205","features":{},"yanked":false,"pubtime":"2024-09-03T20:31:26Z"}

@@ -1,0 +1,1 @@
+{"name":"subtle","vers":"2.4.0","deps":[{"name":"rand","req":"^0.7","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"1e81da0851ada1f3e9d4312c704aa4f8806f0f9d69faaf8df2f3464b4a9437c2","features":{"default":["std","i128"],"i128":[],"nightly":[],"std":[]},"yanked":false,"pubtime":"2020-12-17T02:43:13Z"}

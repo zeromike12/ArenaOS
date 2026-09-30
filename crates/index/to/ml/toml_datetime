@@ -1,0 +1,1 @@
+{"name":"toml_datetime","vers":"0.6.8","deps":[{"name":"serde","req":"^1.0.145","features":[],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"0dd7358ecb8fc2f8d014bf86f6f638ce72ba252a2c3a2572f2a795f1d23efb41","features":{},"yanked":false,"rust_version":"1.65","pubtime":"2024-07-30T13:56:51Z"}

@@ -1,0 +1,2 @@
+{"name":"wasm-bindgen-shared","vers":"0.2.73","deps":[],"cksum":"d9a543ae66aa233d14bb765ed9af4a33e81b8b58d1584cf1b47ff8cd0b9e4489","features":{},"yanked":false,"links":"wasm_bindgen","pubtime":"2021-03-29T14:57:18Z"}
+{"name":"wasm-bindgen-shared","vers":"0.2.93","deps":[],"cksum":"c62a0a307cb4a311d3a07867860911ca130c3494e8c2719593806c08bc5d0484","features":{},"yanked":false,"links":"wasm_bindgen","rust_version":"1.57","pubtime":"2024-08-12T23:56:58Z"}

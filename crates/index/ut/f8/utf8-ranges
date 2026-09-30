@@ -1,0 +1,1 @@
+{"name":"utf8-ranges","vers":"1.0.2","deps":[{"name":"quickcheck","req":"^0.7","features":[],"optional":false,"default_features":false,"target":null,"kind":"dev"}],"cksum":"796f7e48bef87609f7ade7e06495a87d5cd06c7866e6a5cbfceffc558a243737","features":{},"yanked":false,"pubtime":"2018-10-29T11:01:32Z"}
