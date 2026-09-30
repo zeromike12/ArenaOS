@@ -39,10 +39,14 @@ Use pure RFC 8032 Ed25519 (not Ed25519ph): `ed25519-dalek` **2.2.0**, candidate
 payloads/key IDs with SHA-256 (`sha2` candidate **0.10.9**, defaults off). Signing is
 offline host tooling; no guest RNG, key generation, private-key parsing, signing, batch,
 PEM/PKCS#8, serde, alloc or std feature unless an exact audited dependency proves one
-unavoidable. In particular, never enable `legacy_compatibility` or `hazmat`. A scoped
-exception to ADR-0004 permits **only** the approved pinned/vendored verifier closure,
-after review; it is not a general permission to add crates. No claim of an audit of any
-version/configuration that has not actually been audited.
+unavoidable. In particular, never enable `legacy_compatibility` or `hazmat`.
+
+**Only on acceptance** this ADR narrowly amends ADR-0004 for the exact pinned,
+source-vendored Phase 8.4 cryptographic closure inside the userspace package verifier:
+the Ed25519 verification implementation, SHA-256 directly used for payload/content hashes
+and key IDs, and their required target/runtime dependencies. ADR-0004's zero-third-party
+rule remains controlling everywhere else. While this ADR is Proposed the exception is not
+yet effective; no claim of an audit of any version/configuration not actually audited.
 
 The first guest root is the RFC 8032 test vector 1 **public** 32 bytes
 `d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`; its key ID is SHA-256
@@ -64,7 +68,9 @@ access and runtime code generation. Demonstrate an offline/reproducible
 independent OpenSSL-compatible signature results and malformed/noncanonical key/signature
 cases; fuzz the format before accepting this ADR. Until that gate passes, no OS-image
 signature implementation or acceptance claim. The candidate resolution and **unresolved**
-supply-chain evidence are recorded below.
+supply-chain evidence are recorded below. Host-only partial vector/negative evidence
+and the still-blocked source/target gates are tracked separately in
+[0053-gate-evidence.md](0053-gate-evidence.md); neither makes this ADR Accepted.
 
 ## Frozen candidate package v1 bytes
 
@@ -155,10 +161,12 @@ from that chain (or the root), and its strictly increasing version; a prior stag
 revoked is structurally valid but **ineligible**. Only the latest stage under the
 **current** policy can yield ELIGIBLE. A malformed, missing or out-of-order visible
 predecessor is an error; never fall back to an older ALLOW or stage. Fifth policy / third
-staged package and clean pre-CREATE object/sector refusals return typed NO_SPACE without
-eviction; late write/commit space exhaustion is ambiguous and returns DEGRADED instead. With at most 4 policy, 2 stage and 2 input objects for the **single test
-namespace** in 8.4, at most 8 new AFS1 files are budgeted; prove the object-count
-preflight alongside existing 8.1/8.2 records, rely on fsd for actual disk-sector refusal
+staged package, or a ninth distinct revoked full-package digest when all eight cumulative
+slots are occupied, returns typed NO_SPACE before CREATE without eviction; clean
+pre-CREATE object/sector refusals also return NO_SPACE. Late write/commit space exhaustion
+is ambiguous and returns DEGRADED instead. With at most 4 policy, 2 stage and 2 input
+objects for the **single test namespace** in 8.4, at most 8 new AFS1 files are
+budgeted; prove the object-count preflight alongside existing 8.1/8.2 records, rely on fsd for actual disk-sector refusal
 (there is no public free-sector query), and never raise their bounds or overwrite them.
 General multi-package storage/GC belongs to 8.5.
 
@@ -186,11 +194,15 @@ POLICY committed generation or ELIGIBLE version. All reply bytes are zero except
 `msg[0..32]` = full-package SHA-256. Probe validation requires all PING words, zero reply
 bytes and **no** returned cap.
 
-A **new** root-issued Notification is the disjoint marker. The receiver keeps its
-reference at READ, while a trusted admin holds READ|COPY|DESTROY and transfers an *exact*
-reference with each mutating call. The receiver verifies kind, object identity and exact
-rights against its held reference with `SYS_CAP_DESCRIBE`, then destroys **every**
-IPC-landed cap (even wrong-kind/forged) under the existing landed-cap provenance rule. It
+A **new** root-issued Notification object X is the disjoint marker. The receiver's
+anchor is exactly Notification / X / READ; the trusted admin's source cap is exactly
+Notification / X / READ|COPY|DESTROY. IPC transfer preserves source rights: a **valid
+landed marker** must describe as exactly Notification / the *same X* /
+READ|COPY|DESTROY, following ADR-0047's `take_diagnostic` model. Compare the two object
+IDs for equality but **do not compare their rights masks for equality**; compare each
+rights mask with its own literal expected mask. Independently destroy **every** landed
+reference on all request paths regardless of validity, including wrong-kind/wrong-rights
+and calls not requiring a marker; preserve the no-cap landing baseline. The receiver
 checks the signature/policy on each accepted staging operation, not only on boot. `QUERY`
 requires Endpoint/WRITE and verifies the latest visible staged bytes/policy afresh but
 changes nothing; it cannot approve staging. `STAGE` and `POLICY` require a transferred
@@ -261,25 +273,26 @@ are capacity changes, **not** new kernel primitives or rights.
   target, flags, reserved bytes, wrong lengths/trailing data, ID collisions and fuzz
   corpus. Confirm no guest signing feature or network/build-time code generation in the
   vendored closure; record exact versions/hashes/licenses/revisions and audit
-  unsafe/build/proc macros. Bare-metal no_std compile and no default features. *
-  **Structural authority:** in a real QEMU guest, no marker, wrong object/kind/rights,
+  unsafe/build/proc macros. Bare-metal no_std compile and no default features.
+* **Structural authority:** in a real QEMU guest, no marker, wrong object/kind/rights,
   guessed slot, endpoint-only and copied app endpoint cannot stage or change policy; valid
   root-signed input with genuine transferred marker is accepted **only** at the receiving
   service. Ensure every landed marker is disposed and 32-slot occupancy stays flat,
   including rejection and restart. Verified output is a digest/version decision, not an
   Image cap. Deliberately break signature or receiver marker check once: focused test MUST
-  go red before trusting its green verdict. * **Persistence/negative space:** actual AFS1
-  host-seeded package and policy, durable stage and same-platter reboot/rescan;
+  go red before trusting its green verdict.
+* **Persistence/negative space:** actual AFS1 host-seeded package and policy, durable stage and same-platter reboot/rescan;
   subordinate ALLOW, test root-direct acceptance, unknown signer, wrong embedded root,
   altered/truncated manifest/payload/signature, wrong namespace/key, revoked subordinate,
   revoked package digest, version downgrade, identical idempotent retry, equal-version
   conflicting digest, policy-chain gap/corruption, fourth policy/second stage successes
-  followed by fifth/third typed NO_SPACE, disk allocation exhaustion, service
+  followed by fifth/third typed NO_SPACE; eight cumulative digests followed by a ninth
+  distinct digest typed NO_SPACE without mutation; disk allocation exhaustion, service
   crash/restart and SIGKILL across CREATE/WRITE/CLOSE/reply boundaries. Every ambiguous
   prefix is audited against the documented AFS1 crash model and fails closed; never claim
   hostile full-disk anti-rollback. Old 8.1 configuration and 8.2 permission disk
-  namespaces and exact guest counts must stay green. * **Closure:** preserve all
-  historical suites, run the full suite on the final source, rebuild the final EFI,
+  namespaces and exact guest counts must stay green.
+* **Closure:** preserve all historical suites, run the full suite on the final source, rebuild the final EFI,
   perform **fresh artifact-bound 100/100 QEMU boots**, verify receipt against EFI inside
   ESP, package exact firmware/AFS1 disk/QEMU instructions, checksum and boot the extracted
   archive. A review-only ADR commit reuses the published corrected Phase 8.3 image without
@@ -334,12 +347,12 @@ The crates.io sparse index and static crate-source CDN produced TLS failures in 
 
 * Handwritten RSA/Ed25519 arithmetic creates an unaudited cryptographic TCB; a narrowly
   pinned verifier closure is preferred **subject to the explicit audit gate**. A blanket
-  third-party OS dependency exception is not accepted. * Host-only signature check,
-  unsigned SHA-256, caller identity, AFS1 filename or a signed success message from an
-  untrusted client cannot replace receiver verification and a held admin marker. * Kernel
-  Package caps, new syscall, on-disk ELF activation, dynamic linking and production
-  root/secure boot ceremony are not justified by 8.4; 8.5 or a separate approved decision
-  must take responsibility if actually required. * Complete-platter rollback, arbitrary
-  commit-sector corruption, hostile raw-FS writer, root-key compromise and signed package
-  distribution security are **not** implied by 8.4's test-root and AFS1 crash-model
+  third-party OS dependency exception is not accepted.
+* Host-only signature check, unsigned SHA-256, caller identity, AFS1 filename or a
+  signed success message from an untrusted client cannot replace receiver verification and a held admin marker.
+* Kernel Package caps, new syscall, on-disk ELF activation, dynamic linking and
+  production root/secure boot ceremony are not justified by 8.4; 8.5 or a separate approved decision
+  must take responsibility if actually required.
+* Complete-platter rollback, arbitrary commit-sector corruption, hostile raw-FS
+  writer, root-key compromise and signed package distribution security are **not** implied by 8.4's test-root and AFS1 crash-model
   proofs.

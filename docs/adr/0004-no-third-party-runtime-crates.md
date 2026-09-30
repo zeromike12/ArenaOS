@@ -64,10 +64,21 @@ becomes documentation-grade knowledge of the specs we depend on.
   the prior art and then write our own, deliberately (Phase 2 ADRs will cover
   allocator design).
 
-## Future implications
+## Future implications and proposed narrow amendment
 
 - If someday a crate proves genuinely irreplaceable (e.g., a formally verified
-  crypto primitive), adopting it requires a superseding ADR plus an audit
-  plan — not a casual `Cargo.toml` edit.
+  crypto primitive), adopting it requires a separately accepted, explicitly
+  scoped amending or superseding ADR and an audit — not a casual `Cargo.toml`
+  edit.
+- **Proposed, not yet effective:** acceptance of ADR-0053 would narrowly amend
+  decision 1 **only** for the pinned, exact-source-vendored Phase 8.4
+  cryptographic closure inside the userspace package verifier: the Ed25519
+  verification implementation, SHA-256 used directly for payload/content
+  hashes and key IDs, and their required target/runtime dependencies. That
+  exception is conditional on ADR-0053's source/feature/unsafe/build audit,
+  offline target build and independent vector gates. ADR-0004's zero-third-party
+  runtime rule remains controlling for every other OS image and dependency.
+  Until ADR-0053 is Accepted, this is a cross-reference to a **proposed**
+  amendment, not permission to add third-party runtime code.
 - Userspace libraries we write (async runtime, toolkit) follow the same
   policy: they are *our* ecosystem's packages, not imports.
