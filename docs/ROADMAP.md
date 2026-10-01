@@ -1143,13 +1143,18 @@ is not completed by accepting an ADR.
       rollback defense, installation, activation and linking remain out of
       scope until separate decisions/8.5.
 - [ ] **8.5 installer/updater**. [Proposed ADR-0054](adr/0054-installed-images-and-atomic-upgrade.md)
-      opens the on-disk Image-cap/public-ABI, executable payload-size,
-      durable installed-vs-active, copied authority/revocation and
-      crash-prefix decisions; none is accepted yet. Artifact-bound
-      install/upgrade and power-loss recovery tests need an explicit
-      trust chain and rollback rules. No assumption of real-hardware
-      drivers, production key custody or secure-boot integration without
-      separate proof.
+      owns immutable installed/active records and AFS1 crash-prefix
+      recovery; [Proposed ADR-0055](adr/0055-capability-gated-dynamic-image-registry.md)
+      isolates capability-gated kernel Image registration/revocation and
+      manager-death fail-stop. A purpose-built meaningful 648-byte
+      strict-subset ET_EXEC passed the existing production ELF validator
+      and fits an 840-byte test-root-signed APKG **v1** file in host-only
+      measurement; actual disk-backed guest launch is **not proven**.
+      C selected one namespace/test root, no boot auto-launch, production
+      custody, dynamic linking or GC. Both ADR mechanisms remain Proposed;
+      no dependent installer code until accepted. Artifact-bound real
+      install/upgrade, power-loss recovery, full regression suite and
+      fresh final-image 100/100 remain mandatory.
 
 ## Phase 9 — Graphics (outline)
 
