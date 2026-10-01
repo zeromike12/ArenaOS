@@ -66,6 +66,9 @@ pub const MGR_BADGE_ADMIN_DEPFAIL: u64 = 1 << 2;
 pub const MGR_BADGE_ADMIN_DEPSTALL: u64 = 1 << 3;
 pub const MGR_BADGE_ADMIN_PERM_PROBE: u64 = 1 << 4; // private manager request, test only
 pub const MGR_BADGE_ADMIN_PERM_CALLER_FIRST: u64 = 1 << 6; // ADR-0050 regression mode
+/// ADR-0053 test-only Power-shell request: manager-owned package Process
+/// cap performs a bounded replacement; shared wake alone never suffices.
+pub const MGR_BADGE_ADMIN_PKG_RESTART: u64 = 1 << 7;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.
@@ -79,6 +82,12 @@ pub const MGR_BADGE_PROBE_DEADLINE: u64 = 1 << 8;
 pub const MGR_BADGE_PERM_PROBE_OK: u64 = 1 << 12;
 pub const MGR_BADGE_PERM_PROBE_EXIT: u64 = 1 << 13;
 pub const MGR_BADGE_PERM_PROBE_DEADLINE: u64 = 1 << 14;
+/// ADR-0053: package probe uses the same private result channel, but its
+/// own disjoint bits. A shared event badge never substitutes for success.
+pub const MGR_BADGE_PKG_PROBE_OK: u64 = 1 << 15;
+pub const MGR_BADGE_PKG_PROBE_EXIT: u64 = 1 << 16;
+pub const MGR_BADGE_PKG_PROBE_DEADLINE: u64 = 1 << 17;
+pub const MGR_BADGE_PKG_EXIT: u64 = 1 << 18;
 /// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
 pub const STATUS_BUSY: i64 = -4;
 
@@ -175,6 +184,27 @@ pub const BLOCK_FRAME_BYTES: u64 = 4096;
 pub fn block_req_w1(op: u64, buf_offset: u64) -> u64 {
     op | (buf_offset << 8)
 }
+
+// ---- Phase 8.4 signed package staging (ADR-0053) ---------------------------
+// Endpoint/WRITE conveys the request, not approval. POLICY and STAGE also
+// require the receiver-verified *separate* Notification marker. Replies
+// never transfer a cap and never mean installed or active.
+pub const PKG_OP_PING: u64 = 0;
+pub const PKG_OP_QUERY: u64 = 1;
+pub const PKG_OP_POLICY: u64 = 2;
+pub const PKG_OP_STAGE: u64 = 3;
+pub const PKG_OK: u64 = 0;
+pub const PKG_ELIGIBLE: u64 = 1;
+pub const PKG_UNSET: u64 = 2;
+pub const PKG_INELIGIBLE: u64 = 3;
+pub const PKG_BAD_FORMAT: u64 = (-1i64) as u64;
+pub const PKG_DENY: u64 = (-2i64) as u64;
+pub const PKG_NO_SPACE: u64 = (-3i64) as u64;
+pub const PKG_DEGRADED: u64 = (-4i64) as u64;
+pub const PKG_CORRUPT: u64 = (-5i64) as u64;
+pub const PKG_COLLISION: u64 = (-6i64) as u64;
+pub const PKG_OFFLINE: u64 = (-7i64) as u64;
+pub const PKG_PING_MAGIC: u64 = 0x504b4731;
 
 // ---- Phase 8.2 mediated, VOLATILE grant exercise (ADR-0048) ------------------
 // This first integration path deliberately makes NO persistence claim.

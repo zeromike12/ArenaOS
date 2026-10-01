@@ -106,7 +106,7 @@ DEFAULT_FEED: list[tuple[bytes, int, bytes]] = [(b"arena>", 1, b"shutdown\r")]
 # keystroke at a time, exactly as a user would. Marker-paced, never
 # sleep-based: the usual harness discipline, applied to a second
 # channel.
-KeyScript = list[tuple[bytes, int, str]]
+KeyScript = list[tuple[bytes | tuple[bytes, ...], int, str]]
 
 # The default typing script, symmetric with DEFAULT_FEED: the m6 suite's
 # input_service test blocks until REAL key events arrive (unlike the net
@@ -132,7 +132,8 @@ def _typist(script: KeyScript, serial_log: Path, sock: Path,
                     data = serial_log.read_bytes()
                 except OSError:
                     data = b""
-                if data.count(marker) >= nth:
+                markers = marker if isinstance(marker, tuple) else (marker,)
+                if all(data.count(m) >= nth for m in markers):
                     break
                 time.sleep(0.02)
             if stop.is_set():
@@ -180,7 +181,14 @@ def timeout_diagnostics(label: str, serial_log: Path, vcon_capture: Path,
         session = qmp.Qmp(str(qmp_sock), connect_timeout_s=2)
         info.append(f"QMP status={session.command('query-status')}")
         for _ in range(2):
-            info.append(f"CPU={session.command('human-monitor-command', **{'command-line': 'info registers'})}")
+            registers = session.command('human-monitor-command', **{'command-line': 'info registers'})
+            info.append(f"CPU={registers}")
+            rip = re.search(r'RIP=([0-9a-fA-F]+)', registers)
+            if rip:
+                # Capture the actual firmware/guest instructions too. A
+                # fixed CPL0 RIP in OVMF cannot be attributed to ArenaOS
+                # without seeing what code the firmware is executing.
+                info.append(f"RIP-instructions={session.command('human-monitor-command', **{'command-line': 'x/16i 0x'+rip.group(1)})}")
             time.sleep(0.05)
         session.close()
     except Exception as exc:  # diagnostics must not override the timeout

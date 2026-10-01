@@ -1,4 +1,5 @@
-# ADR-0053 PRE-ACCEPTANCE AUDIT PROBE ONLY. Not linked into any ArenaOS image.
+# ADR-0053 pinned verification-only primitives; independently tested here
+# and linked by the Phase 8.4 userspace staging receiver.
 [package]
 name = "arena-phase84-crypto-audit"
 version = "0.1.0"

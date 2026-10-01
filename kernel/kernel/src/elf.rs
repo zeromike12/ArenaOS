@@ -255,6 +255,11 @@ pub static PERMISSIOND_IMAGE: &[u8] = include_bytes!(
 pub static PERMAPP_IMAGE: &[u8] =
     include_bytes!("../../../userspace/permissiond/target/x86_64-unknown-none/release/permapp");
 
+/// ADR-0053: verify-only stage receiver, offline pinned source closure.
+/// This image never acquires an on-disk Image capability or private key.
+pub static PACKAGED_IMAGE: &[u8] =
+    include_bytes!("../../../userspace/packaged/target/x86_64-unknown-none/release/arena-packaged");
+
 /// One accepted `PT_LOAD` segment.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegInfo {

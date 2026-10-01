@@ -1,4 +1,5 @@
-//! ADR-0053 audit-only no_std compile probe; NOT an OS package implementation.
+//! ADR-0053 pinned no_std, verification-only primitives, now also linked by
+//! the Phase 8.4 guest staging receiver. No signing, RNG or private keys.
 #![no_std]
 use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};

@@ -217,6 +217,12 @@ for PERM_ELF in \
     echo "permission image: ${PERM_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PERM_ELF") bytes)"
 done
 
+echo "== building ADR-0053 verify-only package receiver (offline pinned sources) =="
+( cd "$REPO_ROOT/userspace/packaged" && cargo build --offline --locked --release )
+PKG_ELF="$REPO_ROOT/userspace/packaged/target/x86_64-unknown-none/release/arena-packaged"
+test -f "$PKG_ELF"
+echo "package image: ${PKG_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PKG_ELF") bytes)"
+
 echo "== building userspace depcheck (userspace/depcheck, x86_64-unknown-none) =="
 ( cd "$REPO_ROOT/userspace/depcheck" && cargo build --release )
 DEPCHECK_ELF="$REPO_ROOT/userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck"

@@ -99,6 +99,7 @@ pub fn image_bytes(img_id: u32) -> Option<&'static [u8]> {
         23 => Some(elf::CONFIGUP_IMAGE),
         24 => Some(elf::PERMISSIOND_IMAGE),
         25 => Some(elf::PERMAPP_IMAGE),
+        26 => Some(elf::PACKAGED_IMAGE),
         _ => None,
     }
 }

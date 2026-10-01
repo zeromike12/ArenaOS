@@ -56,16 +56,16 @@ LABEL = "test-m6-typing"
 # Every boot replays the full suite first, and the m6 input_service
 # test waits on real keystrokes — so this boot supplies that fixture
 # too, from the same keyboard, before the shell ever prompts.
-# The first shell line waits for the REAL shell prompt. The old fixture
-# used the production fsd's second mount as a surrogate. After ADR-0046
-# added a separate pre-shell updater, that mount precedes the updater's
-# device-bound drain: typing at mount echoed the first 'e' *before* the
-# shell existed and split the exact serial-echo proof. The command was
-# still executed, but the assertion correctly caught the split. Wait
-# for the boundary we actually need, without weakening byte-exact echo.
+# Require the REAL shell prompt AND the completion of the independent
+# permission app's startup/reap log. With an extra Phase-8.4 resident,
+# typing on the prompt alone can interleave that app's log between the
+# echoed 'e' and 'cho', splitting the byte-exact serial-echo proof even
+# though the keyboard and command both work. Wait on both observable
+# boundaries; never weaken the byte-exact echo check or use sleeps.
 KEY_SCRIPT = [
     (b"inputd: virtio-input ready", 1, "arena"),
-    (b"arena>", 1, "echo Hello-From-The-Keyboard\r"),
+    ((b"arena>", b"servicemgr: permission app reaped through held Process cap"),
+     1, "echo Hello-From-The-Keyboard\r"),
     (b"arena>", 2, "psX\x08\r"),
     (b"arena>", 3, "shutdown\r"),
 ]

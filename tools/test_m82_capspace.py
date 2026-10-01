@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ADR-0048 fixed cap-table foundation plus integrated volatile broker.
 
-The broker is one real live manager child at this snapshot; its
-short-lived app and readiness worker must both have been reaped.
+The broker AND ADR-0053 verify-only package receiver are two real live
+manager children. Their short-lived apps/readiness workers must be reaped.
 """
 import sys
 from pathlib import Path
@@ -26,7 +26,12 @@ def main() -> int:
     passed = (rc == 0 and "m3:test:capability_spaces: PASS" in serial
               and "capability_spaces: 32 slots/space" in serial
               and "m8: stackstress PASS" in serial and counters is not None
-              and counters[1:] == (11, 11)
+              # Phase 8.3 was 11/11; ADR-0053 deliberately adds exactly
+              # one resident, cap-audited packaged child. No probe/app
+              # survives to inflate this measured 12/12 baseline.
+              and counters[1:] == (12, 12)
+              and "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)" in serial
+              and "packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified" in serial
               and "servicemgr: permission PING result + exit before deadline; worker reaped" in serial
               and "servicemgr: permission app reaped through held Process cap" in serial
               and "servicemgr: permissiond READY" in serial

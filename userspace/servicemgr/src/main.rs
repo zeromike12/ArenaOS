@@ -12,6 +12,7 @@ use arena_servicemgr::readiness::Gate;
 use arena_servicemgr::restart::{Refusal as RestartRefusal, Restart};
 use core::panic::PanicInfo;
 mod permission;
+mod package;
 
 #[path = "../../abi.rs"]
 mod abi;
@@ -458,31 +459,34 @@ fn child_still_live(pid: u64) -> Result<bool, ()> {
     Err(())
 }
 
-fn permission_only(perm: &mut Option<permission::State>) -> ! {
+fn permission_only(perm: &mut Option<permission::State>, pkg: &mut Option<package::State>) -> ! {
     log("servicemgr: stack OFFLINE; independent permission lifecycle continues\r\n");
     loop {
         let b = unsafe { syscall1(SYS_WAIT, SLOT_EVENTS as u64) };
         if b < 0 { park(); }
         if let Some(state) = perm.as_mut() { state.event(b as u64); }
+        if let Some(state) = pkg.as_mut() { state.event(b as u64); }
     }
 }
 
-fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission::State>) -> ! {
+fn monitor(mut pid: u64, mut handle: u8, step: Step,
+           mut perm: Option<permission::State>, mut pkg: Option<package::State>) -> ! {
     let mut next_probe_fixture = 0u8;
     let mut policy = match Restart::new(pid, step.restart_limit, step.backoff_us) {
         Ok(p) => p,
         Err(_) => {
             log("servicemgr: OFFLINE — invalid restart policy\r\n");
-            permission_only(&mut perm);
+            permission_only(&mut perm, &mut pkg);
         }
     };
     loop {
         let badge = unsafe { syscall1(SYS_WAIT, SLOT_EVENTS as u64) };
         if badge < 0 {
             log("servicemgr: OFFLINE — event wait refused\r\n");
-            permission_only(&mut perm);
+            permission_only(&mut perm, &mut pkg);
         }
         if let Some(ref mut state) = perm { state.event(badge as u64); }
+        if let Some(ref mut state) = pkg { state.event(badge as u64); }
         // Shared events can be forged by netd. STOP authority is the
         // separate private notification (shell/W, manager/R), taken
         // nonblocking so a forged wake cannot stall the monitor.
@@ -491,7 +495,7 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
             let request = unsafe { syscall1(SYS_TRY_WAIT, SLOT_ADMIN as u64) };
             if request < 0 {
                 log("servicemgr: OFFLINE — private admin channel refused\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
             if request as u64 == MGR_BADGE_ADMIN_STOP
                 || request as u64 == MGR_BADGE_ADMIN_DEPFAIL
@@ -516,7 +520,7 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
                     }
                     Err(()) => {
                         log("servicemgr: OFFLINE — no observable held child for admin stop\r\n");
-                        permission_only(&mut perm);
+                        permission_only(&mut perm, &mut pkg);
                     }
                 }
             } else if request as u64 == MGR_BADGE_ADMIN_PERM_PROBE
@@ -524,6 +528,8 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
                 if let Some(state) = perm.as_mut() {
                     state.test_probe(request as u64 == MGR_BADGE_ADMIN_PERM_CALLER_FIRST);
                 }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_RESTART {
+                if let Some(state) = pkg.as_mut() { state.test_restart(); }
             } else if request != 0 {
                 log("servicemgr: refused unknown private admin request\r\n");
             } else {
@@ -538,7 +544,7 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
         // child even when the caller really holds the Process cap.
         if inventory::child_handle(pid, &SyscallProbe) != Ok(handle) {
             log("servicemgr: OFFLINE — unique child Process cap missing\r\n");
-            permission_only(&mut perm);
+            permission_only(&mut perm, &mut pkg);
         }
         let mut finished = inventory::finish(handle, force_live);
         if force_live && finished == Err(STATUS_BUSY) && child_still_live(pid) == Ok(false) {
@@ -552,18 +558,18 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
             Err(STATUS_BUSY) => {
                 if force_live {
                     log("servicemgr: OFFLINE — forced live stop BUSY\r\n");
-                    permission_only(&mut perm);
+                    permission_only(&mut perm, &mut pkg);
                 }
                 if child_still_live(pid) == Ok(true) {
                     log("servicemgr: ignored exit hint: held child is still live\r\n");
                     continue;
                 }
                 log("servicemgr: OFFLINE — child dead but Process-cap finish BUSY\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
             Err(_) => {
                 log("servicemgr: OFFLINE — Process-cap reap REFUSED\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
             Ok(()) => {
                 if force_live {
@@ -577,30 +583,30 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
             Ok(delay) => delay,
             Err(RestartRefusal::BudgetExhausted) => {
                 log("servicemgr: OFFLINE — bounded restart budget exhausted\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
             Err(_) => {
                 log("servicemgr: OFFLINE — child lifecycle mismatch\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
         };
         log("servicemgr: production child reaped through Process cap; bounded backoff\r\n");
         if backoff(delay).is_err() {
             log("servicemgr: OFFLINE — restart backoff deadline/refusal\r\n");
-            permission_only(&mut perm);
+            permission_only(&mut perm, &mut pkg);
         }
         let next = match planned_step(next_probe_fixture) {
             Ok(s) if s.service_id == step.service_id => s,
             _ => {
                 log("servicemgr: OFFLINE — restart authority/dependency plan refused\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
         };
         match launch(next) {
             Ok((new_pid, new_handle)) => {
                 if policy.ready(new_pid).is_err() {
                     log("servicemgr: OFFLINE — restart state mismatch\r\n");
-                    permission_only(&mut perm);
+                    permission_only(&mut perm, &mut pkg);
                 }
                 pid = new_pid;
                 handle = new_handle;
@@ -609,7 +615,7 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step, mut perm: Option<permission
             }
             Err(()) => {
                 log("servicemgr: OFFLINE — replacement spawn/readiness refused\r\n");
-                permission_only(&mut perm);
+                permission_only(&mut perm, &mut pkg);
             }
         }
     }
@@ -654,7 +660,14 @@ pub extern "C" fn _start() -> ! {
                     None
                 }
             };
-            monitor(pid, handle, step, perm);
+            let pkg = match package::start() {
+                Ok(state) => Some(state),
+                Err(()) => {
+                    log("servicemgr: packaged OFFLINE (authority, boot scan, or readiness refused)\r\n");
+                    None
+                }
+            };
+            monitor(pid, handle, step, perm, pkg);
         }
         Err(()) => {
             log("servicemgr: OFFLINE — spawn or stack readiness refused\r\n");

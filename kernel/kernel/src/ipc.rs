@@ -37,11 +37,11 @@ use crate::sched;
 use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
-pub const MAX_ENDPOINTS: usize = 9; // ADR-0048: single mediator endpoint
+pub const MAX_ENDPOINTS: usize = 10; // ADR-0053: separate package receiver endpoint
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 16; // ADR-0048 approval + ADR-0051 distinct production FS diagnostic
+pub const MAX_NOTIFS: usize = 17; // ADR-0053 distinct package approval marker
 #[path = "ipc_adr50_test.rs"]
 mod adr50_test;
 /// In-guest internal-only M4 fixture; no userspace syscall or authority.

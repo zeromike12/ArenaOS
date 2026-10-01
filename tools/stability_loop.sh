@@ -200,9 +200,9 @@ for i in $(seq 1 "$N"); do
     # Shipping fixture: real manager caps, two bounded active driver
     # probes, then two production children and a real-wire restart.
     # Destructive fault/stall negatives live in the historical host suite.
-    elif ! grep -aqF 'audited 17 literal caps; no device/Power/Process grants' "$SERIAL"; then
+    elif ! grep -aqF 'audited 20 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 16/16; seventeenth refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 17/17; eighteenth refused' "$SERIAL"; then
         why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"

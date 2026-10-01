@@ -164,9 +164,13 @@ from that chain (or the root), and its strictly increasing version; a prior stag
 revoked is structurally valid but **ineligible**. Only the latest stage under the
 **current** policy can yield ELIGIBLE. A malformed, missing or out-of-order visible
 predecessor is an error; never fall back to an older ALLOW or stage. Fifth policy / third
-staged package, or a ninth distinct revoked full-package digest when all eight cumulative
-slots are occupied, returns typed NO_SPACE before CREATE without eviction; clean
-pre-CREATE object/sector refusals also return NO_SPACE. Late write/commit space exhaustion
+staged package returns typed NO_SPACE before CREATE without eviction; clean
+pre-CREATE object/sector refusals also return NO_SPACE. The accepted eight-slot signed
+wire cannot represent a ninth distinct digest: by explicit user decision on 2026-09-30,
+the ninth-digest capacity proof is a typed **issuer-side** `NoSpace` before any mutation
+or signature, plus real guest verification of an authentic root-signed eight-digest
+policy. This does *not* assert a ninth-digest guest request; extending APOL v1 padding
+or the public IPC ABI would require a separate signed-wire decision. Late write/commit space exhaustion
 is ambiguous and returns DEGRADED instead. With at most 4 policy, 2 stage and 2 input
 objects for the **single test namespace** in 8.4, at most 8 new AFS1 files are
 budgeted; prove the object-count preflight alongside existing 8.1/8.2 records, rely on fsd for actual disk-sector refusal
@@ -289,8 +293,9 @@ are capacity changes, **not** new kernel primitives or rights.
   altered/truncated manifest/payload/signature, wrong namespace/key, revoked subordinate,
   revoked package digest, version downgrade, identical idempotent retry, equal-version
   conflicting digest, policy-chain gap/corruption, fourth policy/second stage successes
-  followed by fifth/third typed NO_SPACE; eight cumulative digests followed by a ninth
-  distinct digest typed NO_SPACE without mutation; disk allocation exhaustion, service
+  followed by fifth/third guest typed NO_SPACE; root-signed eight-digest policy accepted
+  in guest plus issuer-side ninth-distinct-digest typed NO_SPACE before mutation/signing
+  (not a guest-ninth proof, per explicit 2026-09-30 user decision); disk allocation exhaustion, service
   crash/restart and SIGKILL across CREATE/WRITE/CLOSE/reply boundaries. Every ambiguous
   prefix is audited against the documented AFS1 crash model and fails closed; never claim
   hostile full-disk anti-rollback. Old 8.1 configuration and 8.2 permission disk

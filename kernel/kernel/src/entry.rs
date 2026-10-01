@@ -538,7 +538,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // of kernel-minted driver grants. It starts the production stack
     // after live-cap and driver-readiness checks. One orderly restart
     // can be tested; full lifecycle/failure proof remains open.
-    let (manager_pid, expected_stack_caps, permission_root) = spawn_servicemgr(
+    let (manager_pid, expected_stack_caps, permission_root, package_root) = spawn_servicemgr(
         fs_eid,
         manager_nid,
         rng_ready_nid,
@@ -748,6 +748,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             obj: CapObj::Image { img_id: 25 }, rights: R,
         }).unwrap_or_else(|_| crate::halt::halt_machine("shell: delegate fixture image refused"));
     }
+    // ADR-0053: separate package endpoint and marker. Neither fsd nor
+    // permission approval is a substitute, and no app inherits either.
+    if let Some((eid, nid)) = package_root {
+        use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R,
+            RIGHTS_WRITE as W, RIGHTS_DESTROY as D};
+        crate::cap::issue(shell_pid, 20, Cap {
+            obj: CapObj::Endpoint { eid }, rights: W | C,
+        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: package endpoint issue refused"));
+        crate::cap::issue(shell_pid, 21, Cap {
+            obj: CapObj::Notification { nid }, rights: R | C | D,
+        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: package marker issue refused"));
+    }
     // ADR-0051: production fsd's separate diagnostic marker is reserved
     // for the trusted Power/raw-FS shell. No broker/app/worker receives
     // this authority; both the FS endpoint and marker are needed.
@@ -791,19 +803,19 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
-    // ADR-0051 adds one distinct production-fsd diagnostic marker:
-    // 16 notifications at capacity. The seventeenth must be a typed
-    // refusal, never silent over-allocation;
+    // ADR-0051/0053: production fsd and package approval markers are
+    // separate. 17 notifications at capacity; the eighteenth must be
+    // a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         if crate::ipc::create_notification().is_ok() {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse a seventeenth object",
+                "servicemgr: notification bound failed to refuse an eighteenth object",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 16/16; seventeenth refused"
+            "servicemgr: full fixture notification budget 17/17; eighteenth refused"
         );
     }
 
@@ -929,7 +941,7 @@ fn spawn_servicemgr(
     rng: Option<u32>,
     rng_diag_nid: u32,
     stack_diag_nid: u32,
-) -> Result<(u64, Option<[crate::cap::Cap; 5]>, Option<(u32, u32)>), &'static str> {
+) -> Result<(u64, Option<[crate::cap::Cap; 5]>, Option<(u32, u32)>, Option<(u32, u32)>), &'static str> {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let root = [
         Cap {
@@ -941,7 +953,7 @@ fn spawn_servicemgr(
             rights: R | W,
         },
     ];
-    let (grants, stack, permission) = match (net, rng) {
+    let (grants, stack, permission, package) = match (net, rng) {
         (Some(net_eid), Some(rng_eid)) => {
             let stack_eid = crate::ipc::create_endpoint()
                 .map_err(|_| "servicemgr: stack endpoint table full")?;
@@ -951,6 +963,10 @@ fn spawn_servicemgr(
                 .map_err(|_| "permissiond: endpoint table full")?;
             let approval_nid = crate::ipc::create_notification()
                 .map_err(|_| "permissiond: approval marker table full")?;
+            let package_eid = crate::ipc::create_endpoint()
+                .map_err(|_| "packaged: endpoint table full")?;
+            let package_nid = crate::ipc::create_notification()
+                .map_err(|_| "packaged: separate marker table full")?;
             let all = [
                 root[0],
                 root[1],
@@ -1004,6 +1020,10 @@ fn spawn_servicemgr(
                 Cap { obj: CapObj::Endpoint { eid: fs_eid }, rights: W | C },
                 Cap { obj: CapObj::Endpoint { eid: permission_eid }, rights: R | W | C },
                 Cap { obj: CapObj::Notification { nid: approval_nid }, rights: R | C },
+                // ADR-0053 exact package sources at manager slots 17..19.
+                Cap { obj: CapObj::Image { img_id: 26 }, rights: R },
+                Cap { obj: CapObj::Endpoint { eid: package_eid }, rights: R | W | C },
+                Cap { obj: CapObj::Notification { nid: package_nid }, rights: R | C },
             ];
             let child = [
                 Cap {
@@ -1027,9 +1047,10 @@ fn spawn_servicemgr(
                     rights: R,
                 },
             ];
-            (Some(all), Some((stack_eid, child)), Some((permission_eid, approval_nid)))
+            (Some(all), Some((stack_eid, child)), Some((permission_eid, approval_nid)),
+                Some((package_eid, package_nid)))
         }
-        _ => (None, None, None),
+        _ => (None, None, None, None),
     };
     let pid = if let Some(all) = grants {
         crate::spawn::spawn_init(19, &all, None)?
@@ -1060,7 +1081,7 @@ fn spawn_servicemgr(
         stack.map(|(eid, _)| eid),
         expected.len()
     );
-    Ok((pid, stack.map(|(_, child)| child), permission))
+    Ok((pid, stack.map(|(_, child)| child), permission, package))
 }
 
 /// True after the manager has spawned one child and all four caps

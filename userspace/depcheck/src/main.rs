@@ -31,10 +31,10 @@ fn challenge_wrong_marker(op: u64) {
     }
 }
 
-/// ADR-0049: strictly typed second mode of the already registered
-/// image20. The worker cannot manufacture this result channel: its
-/// manager spawns it with exactly mediator/W and private result/W.
-fn permission_ping_mode() -> ! {
+/// ADR-0049/0053: the two-grant mode of image20. The reply identifies
+/// which of the two distinct receiver protocols actually responded; only
+/// the manager can grant the endpoint and the private result notification.
+fn receiver_ping_mode() -> ! {
     let mut ep = [0u64; 3];
     let mut result = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, 0, ep.as_mut_ptr() as u64) } != 0
@@ -48,13 +48,41 @@ fn permission_ping_mode() -> ! {
     }
     let mut msg = [0u8; MSG_BYTES];
     let mut out = [0u64; 3];
-    let rc = unsafe { syscall6(SYS_IPC_CALL, 0, PERM_OP_PING, 0, CAP_NONE,
+    // The frozen ABIs differ: package PING=0, mediator PING=1.
+    // Permissiond must refuse opcode 0 with its exact typed BAD_INPUT;
+    // only then try its own PING. Never treat an arbitrary failure as
+    // permission success, and dispose of any already-landed reply cap.
+    let mut rc = unsafe { syscall6(SYS_IPC_CALL, 0, PKG_OP_PING, 0, CAP_NONE,
         out.as_mut_ptr() as u64, msg.as_mut_ptr() as u64) };
-    if rc != 0 || out != [PERM_OK, PERM_PING_VERSION, CAP_NONE]
-        || msg[..4] != PERM_PING_MAGIC || msg[4..].iter().any(|b| *b != 0)
-    { fail("depcheck: permission PING incomplete or refused\r\n"); }
-    if unsafe { syscall2(SYS_NOTIFY, 1, MGR_BADGE_PERM_PROBE_OK) } != 0 {
-        fail("depcheck: permission result signal refused\r\n");
+    if rc != 0 || out[2] != CAP_NONE {
+        if rc == 0 && out[2] != CAP_NONE {
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+        }
+        fail("depcheck: receiver PING transport/cap refused\r\n");
+    }
+    let badge = if out == [PKG_OK, PKG_PING_MAGIC, CAP_NONE] && msg == [0; MSG_BYTES] {
+        MGR_BADGE_PKG_PROBE_OK
+    } else if out == [PERM_BAD_INPUT, 0, CAP_NONE] && msg == [0; MSG_BYTES] {
+        out = [0; 3];
+        msg = [0; MSG_BYTES];
+        rc = unsafe { syscall6(SYS_IPC_CALL, 0, PERM_OP_PING, 0, CAP_NONE,
+            out.as_mut_ptr() as u64, msg.as_mut_ptr() as u64) };
+        if rc != 0 || out[2] != CAP_NONE {
+            if rc == 0 && out[2] != CAP_NONE {
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+            }
+            fail("depcheck: permission PING incomplete or refused\r\n");
+        }
+        if out != [PERM_OK, PERM_PING_VERSION, CAP_NONE]
+            || msg[..4] != PERM_PING_MAGIC || msg[4..].iter().any(|b| *b != 0) {
+            fail("depcheck: permission PING incomplete or refused\r\n");
+        }
+        MGR_BADGE_PERM_PROBE_OK
+    } else {
+        fail("depcheck: receiver PING incomplete or refused\r\n");
+    };
+    if unsafe { syscall2(SYS_NOTIFY, 1, badge) } != 0 {
+        fail("depcheck: receiver result signal refused\r\n");
     }
     unsafe { syscall1(SYS_THREAD_EXIT, 42) };
     loop { core::hint::spin_loop() }
@@ -66,7 +94,7 @@ pub extern "C" fn _start() -> ! {
     // Original driver mode always has rngd Endpoint in slot 1. A
     // Notification in slot 1 is exclusively the mediator probe mode.
     if unsafe { syscall2(SYS_CAP_DESCRIBE, 1, second.as_mut_ptr() as u64) } == 0
-        && second[0] == 3 { permission_ping_mode(); }
+        && second[0] == 3 { receiver_ping_mode(); }
     // Slots 0/1 are netd/rngd Endpoint/WRITE, slot 2 is the manager's
     // PRIVATE notification/WRITE. No shutdown or device rights are held.
     if !diagnostic_refused(0, 0, NET_OP_SHUTDOWN, CAP_NONE, NET_S_BAD_OP)
