@@ -11,7 +11,13 @@ an Image. C selected a ring-3 verified snapshot handed to a narrow capability-ga
 kernel copy/validation primitive. Ring 0 must not parse AFS1/APKG/APOL or verify
 signatures; the registrar bearer is the execution-verification TCB. Neither caller
 name/pid/path nor an old `ELIGIBLE` reply establishes verification. The kernel does not
-know that an ELF is signed.
+know that an ELF is signed. **Both registrar holders — servicemgr and packaged — are in
+the dynamic-execution TCB.** Servicemgr's held `ImageRegistrar/WRITE` can register
+*arbitrary* bytes accepted by the kernel ELF validator without asking packaged to
+verify an APKG signature. This design provides signature/current-policy enforcement
+only while **both** holders follow the approved ring-3 protocol; it does **not**
+protect against compromise of either holder, and image registration alone is not a
+signature proof. The root is test-only, not production signing custody.
 
 A genuine static `ET_EXEC` with cap-mediated package QUERY behavior builds twice
 byte-identically to **648 bytes**, passes the *unmodified* production `elf::validate` in
@@ -40,19 +46,21 @@ Use the **existing** packaged endpoint, not a speculative private eleventh endpo
 current `ipc::MAX_ENDPOINTS=10` is filled by ten boot-created endpoints. A separate
 newly created Notification object, distinct from the 8.4 STAGE approval object, is the
 receiver-checked 8.5 manager-approval marker. **Notification capacity is also currently
-full (17/17)**; this proposal explicitly requires a reviewed increase to **18 fixed
-entries** solely for this one disjoint marker, with a boot inventory proving 18/18 and
-the nineteenth creation refusing without mutation. This is an additive
-resource-bound/boot-policy decision, **not** an implemented or automatically approved
-table change. The manager holds a `READ|COPY|DESTROY` source; packaged holds a `READ`
-anchor and verifies *object ID plus exact sent rights* (`READ|COPY|DESTROY`) on every
+full (17/17)**; C **approved** the bounded increase to **18 fixed entries** solely
+for this one disjoint marker, contingent on an actual full-fixture 18/18 guest proof
+and mutation-free nineteenth-object refusal. This remains a *design approval*, not
+an implemented or completed capacity test. The manager holds a
+`READ|COPY|DESTROY` source; packaged holds a `READ` anchor and verifies *object ID plus exact sent rights* (`READ|COPY|DESTROY`) on every
 INSTALL, SELECT prepare/commit, DEACTIVATE and privileged LAUNCH/return-Image operation.
 The received IPC-landed marker is discarded **on all paths**, including malformed calls
 and PING; an integer slot, endpoint/WRITE or stale STAGE marker alone never approves.
 This marker is manager-only, **not** silently granted to shell. Normal unprivileged
-QUERY remains marker-free. Whether INSTALL and SELECT need *separate* new markers is a
-trust-policy acceptance gate in ADR-0054; if yes, the current five-grant budget cannot
-be pretended away.
+QUERY remains marker-free. C approved **one coarse Phase-8.5 lifecycle-admin
+capability** for INSTALL, SELECT/PREPARE, SELECT/COMMIT, DEACTIVATE and privileged
+LAUNCH (and the cleanup ABORT), not fine-grained per-operation rights. A future
+install-only delegate or distinct administrator would require a separately reviewed
+marker split and grant-inventory redesign; never describe this coarse marker as
+per-operation authority separation.
 
 The current packaged inherited grants are fsd Endpoint/WRITE (0), package Endpoint/READ
 (1), STAGE Notification/READ (2). Candidate additional registrar (3) and new manager
@@ -209,6 +217,43 @@ LIVE IDs, tombstones are unnecessary; stale caps can never target new IDs. Befor
 freeing a revoked object's bytes, require pins=0. A failed `cap::grant` in IPC cannot be
 treated as a landed cap for accounting.
 
+### Independent conservation oracle required before acceptance/implementation claim
+
+At every **stable syscall/IPC transition boundary** (after any IF=0 transfer escrow
+has resolved, before returning/blocking/waking), an independent kernel test-only
+walker must recompute, by **full ID**, the number of LIVE dynamic Image references
+from all 32 process capspaces' 32 slots **plus** every nonempty endpoint queue's
+`send_cap` and `reply_cap`. It must not call the production ref-increment/decrement
+hooks or derive the result from `registry.refs`. Compare the independently
+recomputed count with `registry.refs` **per LIVE ID**, not only a global sum;
+`REVOKED`/retired IDs must never be counted as live even if inert caps still
+occupy slots. Separately count and verify loader `pins` against in-flight
+`spawn::prepare`/`elf::load` owners; a pin is not a cap reference. The oracle
+must detect a live object with zero counted refs, stale-ID alias after slot reuse,
+negative/overflowed counts, and any escrow left at a stable boundary. Do not
+confuse cap-space `ipc_landed` provenance with a second reference.
+
+Exercise the oracle after mint, local copy/move/attenuation/destroy, inherited
+child grant and rollback, request enqueue/delivery/drop (including a full
+receiver), reply enqueue/landing/drop, **Waiting/Delivered/Replied/Failed** server
+and caller deaths in both orders, late reply, complete `proc::destroy` cap sweep,
+explicit revoke, last-ref auto-retire and slot reuse. Include a test with a
+blocked call whose request cap landed but whose reply cap remains staged when
+one participant dies. At least **one deliberate red control** must remove a
+specific reference hook (e.g. skip the `reply_cap` enqueue increment or caller
+sweep decrement) and demonstrate that the independent walker detects the
+mismatch at the predicted boundary; restore the original source and rerun
+GREEN. A model using the same accounting code as the implementation is not
+independent proof. The **host-only** independent design model (see the
+[design-only review ledger](0054-final-freeze-review-evidence.md))
+`python3 tools/test_phase85_ref_model.py` passed 76 stable-boundary checks and
+caught three deliberately omitted-hook RED controls (`send_enqueue`,
+`reply_enqueue`, `caller_sweep`). It counts process slots and queued caps by
+scanning separate state, not by trusting its modeled registry ledger; it is a
+*design consistency proof*, **not** a proof of production kernel hooks. No
+dynamic registry, kernel walker, in-guest mutation or runtime proof yet exists;
+the above actual-implementation oracle remains an acceptance/qualification gate.
+
 ## Manager death and dynamic-child ownership (fail-stop candidate)
 
 Current `SYS_SPAWN` hands its caller Process/READ|DESTROY (no COPY), and
@@ -266,10 +311,10 @@ For C's acceptance, audit actual boot grants and manager/package high-water cap
 inventory, marker authority and exact request/reply protocol; freeze registrar
 kind/rights, number/status encodings, scratch-memory/page-budget rules, reference hooks
 including every IPC state and capspace sweep, spawn/revoke linearization, and
-manager-death path. If one 8.5 marker cannot legitimately authorize both INSTALL and
-SELECT, or the five-grant limit/32-slot capspaces cannot support the chosen flow, return
-to design review; do **not** add an unreviewed endpoint, expand grants or fake a private
-channel. ADR-0054 must independently freeze its persistent wire, crash-prefix and
+manager-death path. The single coarse 8.5 marker and 18-notification budget have C's design approval;
+implementation must prove actual 18/18 and nineteenth refusal, five-grant limit and
+32-slot capspaces. Do **not** add an unreviewed endpoint, expand grants or fake a
+private channel. ADR-0054 must independently freeze its persistent wire, crash-prefix and
 capacity rules. Neither ADR is Accepted yet.
 
 Mandatory host tests: two-slot refusal, ID 27..u32::MAX without wrap (model near

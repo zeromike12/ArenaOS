@@ -206,10 +206,10 @@ requires a **fresh call carrying the new 8.5 manager marker** (the same
 new object proposed for INSTALL, **never** the STAGE marker), plus
 independent SELECT operation validation, a complete installed record,
 freshly verified exact APKG bytes, present valid chain and current-policy
-eligibility. Whether one 8.5 marker suffices for both privileged operations
-is a deliberate trust-policy acceptance gate: a requirement for distinct
-INSTALL and SELECT markers would exceed packaged's current five inherited
-grants once registrar authority is included, and must return to review. **Before**
+eligibility. C approved this **single coarse Phase-8.5 lifecycle-admin marker** for
+INSTALL, SELECT/PREPARE, SELECT/COMMIT, DEACTIVATE, privileged LAUNCH and
+ABORT in the one-manager scope. It is not install-only delegation: splitting
+operations for a future delegate requires separate review and grant accounting. **Before**
 creating an `AACT select`, pass a copy of the already-verified payload to
 ADR-0055's capability-gated kernel registration: only the kernel's
 existing ELF validator can declare it loadable; keep that Image cap
@@ -221,9 +221,10 @@ or DEACTIVATED, then acknowledge; only then may a manager receive launch
 authority. The provisional registry object must not leak on verifier death
 before the durable commit (ADR-0055 object-lifetime gate). No automatic
 boot launch. The subsequent explicit LAUNCH must reverify current policy
-and the exact signed file, use or recreate a byte-exact registered Image
-through Proposed ADR-0055, and spawn only
-through its held Image cap with explicit bounded grants. Reboot discards
+and the exact signed file, freshly register a byte-exact Image through
+Proposed ADR-0055 (two-slot overlap with the old image, then revoke the
+old ID), and spawn only through its held Image cap with explicit bounded
+grants. Reboot discards
 Image authority and reconstructs the durable selection only after full
 rescan; it may register again only on such a fresh verified explicit
 LAUNCH. An earlier installed/active stage need not be the **latest staged
@@ -242,10 +243,12 @@ its private local slot and replies PREPARED **without transferring a cap**.
 A volatile, single-use prepare token binds the full signed APKG digest,
 complete `AINS` record digest, next `AACT` generation and current signed
 policy digest. At most **one** token/provisional Image exists at a time;
-use a checked, never-repeated-within-that-verifier-lifetime `u64` token
-(start at 1; refuse on exhaustion). A marker-approved ABORT, verifier
-teardown, superseding prepare or *any* policy/stage mutation revokes and
-drops the provisional cap, invalidating the token. A manager stalled while
+use the checked, never-repeated-within-that-verifier-lifetime encoded
+`u64` token defined in the IPC section below (refuse on exhaustion). A byte-identical PREPARE with unchanged policy/file returns the **same** token
+and does not register again. A *different* PREPARE while one is pending
+returns BUSY until marker-approved ABORT; verifier teardown or *any*
+policy/stage mutation revokes and drops the provisional cap and invalidates
+the token. A manager stalled while
 still alive may temporarily consume one slot; it must explicitly abort
 or stay OFFLINE, not invoke unreviewed GC. On manager death with a LIVE
 registration, the proposed ADR-0055 fail-stop takes precedence. Never
@@ -289,6 +292,111 @@ persisted old selection is then INELIGIBLE, not a fallback. Neither
 userspace sequencing nor an old QUERY status substitutes for the kernel
 liveness/last-reference hooks.
 
+### Candidate packaged IPC extension (exact proposed wire; **not** implemented)
+
+Reuse the existing package Endpoint/WRITE and IPC v1.1 `CALL`:
+`words=[op,arg,CAP_NONE-or-landed-slot]`, an **exactly 64-byte** in/out
+message, and `REPLY=[status,value,CAP_NONE-or-landed-slot]`. `op=0..3`
+retain frozen 8.4 PING/QUERY/POLICY/STAGE bytes/statuses. Every new op
+`4..9` requires a fresh IPC-landed **Phase-8.5 manager lifecycle marker**
+(anchored at packaged, exact Notification object and literal READ anchor /
+READ|COPY|DESTROY sender). The receiver destroys **every** landed cap on
+all paths, even on malformed, missing, failed or old-v1 requests; only
+successful COMMIT/LAUNCH may return an Image cap. New request `msg[0..32]`
+is the canonical padded ID; `msg[32..64]` has the operation-specific
+32-byte digest below (no ignored padding). An unrelated/unknown op, wrong
+marker, wrong digest/arg/size or unexpected reply cap fails closed. Reply
+`msg` is **all zero on every refusal**, `value=0`, `reply_cap=CAP_NONE`;
+IPC transport errors (`STATUS_SERVICE_GONE`, BUSY) are separate from
+application statuses. A caller destroys any unexpected landed reply cap
+**before** interpreting a status (ADR-0053/8.3 discipline).
+
+| `words[0]` and name | `words[1]` / `msg[32..64]` request | Successful reply `status`, `value`, `msg[0..32]`, `msg[32..64]`, cap |
+|---|---|---|
+| **4 INSTALL** | Stage ordinal `1..2` / expected SHA-256 of complete signed staged APKG | `4=INSTALLED`, immutable `AINS` generation `1..2`, APKG full digest, complete `AINS` record SHA-256, **no cap**. |
+| **5 SELECT_PREPARE** | Installed generation `1..2` / complete `AINS` record SHA-256 | `5=PREPARED`, nonzero token, APKG full digest, `AINS` record SHA-256, **no cap**; if identical selected newest decision already exists, `6=ACTIVE` with current generation, digest pair, **no cap** (no new decision). |
+| **6 SELECT_COMMIT** | Token from PREPARE / same `AINS` record SHA-256 | First commit: `6=ACTIVE`, value `(img_id<<8) | AACT_generation`, full APKG digest, complete newest `AACT` SHA-256, **one** Image/READ|COPY|DESTROY cap. Exact durable replay: same status/digest pair, value is **only** `AACT_generation` (no ID), **no cap**; a new explicit LAUNCH is needed before spawn. |
+| **7 DEACTIVATE** | Expected **next** `AACT` generation `1..4` / full previous `AACT` SHA-256 (zero if none, but deactivation of UNSET is refused) | `7=DEACTIVATED`, committed generation, full new `AACT` record SHA-256, 32 zero bytes, **no cap**. Exact durable replay returns same with no new generation. |
+| **8 LAUNCH** | Current selected `AACT` generation / complete selected `AACT` SHA-256 | `8=LAUNCH_READY`, value `(img_id<<8) | selected_generation`, full APKG digest, exact selected `AACT` record SHA-256, **one** freshly registered Image/READ|COPY|DESTROY cap. The manager alone may `SYS_SPAWN` after checking all reply fields, the live Image cap, and its one-child limit. |
+| **9 ABORT** | Outstanding token / `AINS` record SHA-256 | `0=OK`, value zero, 64 zero bytes, **no cap** after revoking/dropping the matching provisional Image; same-token repeat in this verifier lifetime is a no-op. |
+
+New statuses are positive `4..8` as named in the table; the existing
+8.4 `0..3` and `-1..-7` are unchanged. For the two replies **with** an
+Image cap, `value=(u64(img_id)<<8)|u64(AACT_generation)`, with all other
+bits zero, ID in `27..=u32::MAX` and generation `1..4`; compare that ID
+with `SYS_CAP_DESCRIBE` of the landed LIVE kind-1 Image and require exact
+READ|COPY|DESTROY before attenuating. For every no-cap reply, `value`
+is exactly the unshifted generation/token stated in its table row;
+never infer an Image ID from a digest or a pid. Additional negative application
+statuses (encoded as two's-complement `u64`): `-8=CONFLICT` (equal version,
+different complete signed digest); `-9=DOWNGRADE` (lower installed/selected
+version); `-10=STALE` (token/generation/hash mismatch, restart-lost token
+without exact durable replay); `-11=BUSY` (another PREPARE pending or
+serialized lifecycle operation). Existing `-2=DENY` includes absent/bad
+manager marker or signature/current-policy failure; `-3=NO_SPACE` is
+**pre-CREATE** capacity refusal; `-4=DEGRADED` means possible mutation,
+and `-5=CORRUPT`/`-7=OFFLINE` refuse malformed visible history/service
+unavailability. On valid `QUERY`, old replies remain unchanged and never
+return a cap. A success with `CAP_NONE` when the table promised a cap is
+**not** launch authority, including if IPC silently dropped a reply cap
+into a full 32-slot caller; the manager stays OFFLINE and reconciles.
+
+A token is `u64 = (counter << 8) | expected_next_AACT_generation`, where
+`counter` starts at 1 and increases only for a new PREPARE in that verifier
+lifetime (`<= 2^56-1`, otherwise `NO_SPACE`); low byte is 1..4 and the
+upper 56 bits must be nonzero. Token reuse after a verifier restart is
+**not** trusted as authority: only a byte-matching committed `AACT` at
+the token-encoded generation can satisfy the replay rule. At most
+one outstanding token/image exists. A byte-identical PREPARE with unchanged
+signed file, current policy, installed record and target generation
+returns the **same** token and Image ID, with no new kernel mint. A
+different PREPARE returns BUSY until ABORT. COMMIT requires the exact
+in-memory token and the same reverified digests/policy; it consumes the
+token after a fully reread durable decision, **not** on a mere WRITE
+reply. If the verifier restarts, no in-memory token survives: a COMMIT
+replay may return ACTIVE/no-cap **only if** the newest complete `AACT`
+record has exactly the token's encoded next generation, selects exactly
+the requested full `AINS` hash/ID, links the correct predecessor and
+matches freshly verified APKG/current policy. Otherwise STALE; it never
+writes again on an unknown token. After success, an identical COMMIT
+within the process lifetime follows the same no-cap replay rule. ABORT
+invalidates the token; after verifier restart its old token is STALE.
+Policy/STAGE mutation invalidates a pending token and revokes its Image.
+After a committed COMMIT an ABORT of that token is STALE; only an ABORTed
+*most recently* ABORTed token repeated within the same verifier lifetime
+is idempotent OK (keep one `last_aborted_token`, which cannot authorize
+another operation; earlier aborted tokens are STALE). A
+PREPARE reply of ACTIVE/no-cap means the same decision was already
+selected: the manager does **not** revoke or stop its current child for
+that no-op; it may request a separate explicit LAUNCH if it needs a cap.
+No timeout invents success or consumes another generation.
+
+INSTALL is **idempotent only for the newest installed generation**: with
+an exact request (same stage ordinal, complete signed-file digest,
+canonical ID, payload digest and version) still eligible under *current*
+policy, reread and return that `AINS` without creating a file. A lower
+version than newest installed returns DOWNGRADE; an equal version with
+a **different complete signed-file digest** returns CONFLICT, before
+CREATE; a higher version may consume the second slot after re-verification.
+An older exact install is not a rollback loophole after a newer install.
+A lost INSTALL reply is retried with the identical request **only after**
+required DEGRADED recovery/restart and full same-platter rescan; compare
+the durable record, not a previous in-memory answer. SELECT enforces
+similar no-lower-version and equal-version/different-digest refusals
+against the latest committed select; deactivation does not erase the
+version floor. DEACTIVATE repeats only if the *same next generation* and
+previous-record hash match its newest exact deactivation; a later decision
+makes the old request STALE. DEACTIVATE validates the durable record chain
+and held lifecycle marker but may **disable** a package whose signer or
+payload is now revoked; it must never require current-policy eligibility
+to stop code safely. SELECT and LAUNCH, by contrast, require eligibility. LAUNCH is a fresh authority check/registration,
+**not** a disk decision: refuse while a PREPARE is pending, require no
+other live dynamic child, reverify selected bytes/current policy and
+create a new Image ID through ADR-0055. The manager revokes/destroys its
+old Image cap after accepting the fresh one; no cap/ID is inferred from
+an earlier ACTIVE reply. Lost LAUNCH reply cannot authorize spawn and
+must be reconciled/retired before retry.
+
 If an interrupted upgrade has **no visible new activation record**, the
 last committed activation remains selected only while its exact signed
 bytes still exist and satisfy current policy. A complete committed newer
@@ -318,10 +426,21 @@ sequence before consuming any record. A matching digest is a binding
 within the documented non-hostile AFS1 crash model, **not** an adversarial
 integrity or rollback proof.
 
-At theoretical maximum the namespace uses up to **four `p8-` policies,
+The package namespace's theoretical maximum is **four `p8-` policies,
 two `s8-` staged files, two `n8-` installs, four `v8-` decisions and up to
 two live source/intent files = 14 AFS1 objects**, *plus* all other system
-objects. `n8`/`v8` are separately capped 2/4; preflight the entire real
+objects. The already documented maximum 8.1/8.2 fixture consumes **19**
+(`arena.txt`, eight cfg, two intents, eight permission), so the combined
+formal maxima total **19+8 (8.4)+2+4 = 33, one beyond AFS1's 32 slots**.
+The `AACT` v1 schema accepts decision numbers 1..4, but **four decisions
+cannot be promised on that full platter**: 2 installs + only 3 decisions
+fit at 32/32. The fourth must refuse typed pre-CREATE NO_SPACE with the
+prior exact state intact. This is a real availability tradeoff under the
+no-GC/32-slot scope, not a reason to raise fsd's table bound or pretend
+all limits can be simultaneously realized. C must explicitly confirm
+this conditional fourth-decision limit at final freeze; a guarantee of
+all four on the full historical fixture would be a material capacity
+redesign. `n8`/`v8` are separately capped 2/4; preflight the entire real
 32-entry fsd object table, all reserved names and disk sectors (including
 AFS1 metadata CoW and a maximum 4288-byte APKG), kernel's two Image slots,
 manager/verifier cap slots, one provisional token and child Process/Record
@@ -330,22 +449,75 @@ not an empty test disk; a lower safe quota is preferable to claiming an
 unproved 14-object allowance. With no GC or overwrite, a full generation
 returns typed NO_SPACE before mutation; after a possibly durable CREATE,
 WRITE or CLOSE failure return DEGRADED/unknown until same-platter rescan.
-The Proposed ADR-0055 8.5 manager marker additionally needs an explicit
-fixed Notification capacity increase **17 -> 18** (nineteenth refused);
-no new endpoint is in the candidate inventory.
+C approved the fixed Notification increase **17 -> 18** for the 8.5
+lifecycle-admin marker; an actual full-fixture 18/18 and mutation-free
+nineteenth refusal are still mandatory guest proofs. No new endpoint is in
+the candidate inventory.
 
-| Observable AFS1 prefix / event | Candidate decision after full same-platter rescan |
+**Reproducible host-side full-platter measurement:** see the
+[design-only review ledger](0054-final-freeze-review-evidence.md).
+`python3 tools/test_phase85_design_capacity.py` extracts the **qualified
+Phase 8.4 bundle's actual 8 MiB AFS1 scratch template** (16,384 sectors,
+initial 11 used), populates a *synthetic* 19+8+2+3 = **32/32** object-table
+fixture with maximal candidate file sizes and one extent per file, and
+runs `afs1.audit` on the resulting 8 MiB image. Observed **99 sectors
+allocated, 16,285 free**; a fourth decision's name does not exist and
+its object preflight refuses **without changing a byte** despite ample
+free sectors. This is an offline AFS1 *geometry/count* measurement, not
+guest fsd CREATE/WRITE execution: the synthetic config/policy/AINS/AACT
+contents are not signed or semantically acceptable to packaged. The
+later full guest fixture must confirm real commit/CoW sector usage and
+typed refusal; a 32/32 object cap, not free sectors, is the measured
+constraint.
+
+**Source-anchored cap high-water *projection*, not guest measurement:**
+the manager currently has 20 literal boot caps; proposed registrar and
+lifecycle marker make **22**. Reserving **four** other resident Process
+handles (stack, broker, app if live, packaged) gives 26; at most one
+dynamic child and its Image cap give **28/32** during PREPARE; after old
+child/cap teardown, COMMIT's landed Image + attenuated copy give
+**28/32**, LAUNCH with an old Image plus two transitional new references
+peaks at **29/32**. A separately scheduled readiness worker yields
+**29/32**, never concurrently with cutover; packaged's five inherited
+caps + LENT buffer + landed marker + provisional Image give **8/32**.
+The 8.4 guest evidence counted 12/12 baseline resident processes/records;
+the **one** additional dynamic child needs separately proven process/record
+headroom. The source-checked host schedule in the capacity script proves
+only arithmetic under the stated **one-live-dynamic-child**, no-overlap
+assumptions. C must confirm this narrow child-concurrency limit at the
+final freeze; more simultaneous children require a new occupancy bound
+and Process-cap teardown plan, not an extrapolation. Actual 8.5 guest
+cap/Process/record/frame peaks, including
+restart and a full caller capspace, must be instrumented and tested;
+exceeding the model is a refusal/diagnostic, not permission to bump 32.
+
+| Cut point / observable committed AFS1 prefix | Candidate decision after complete same-platter scan (policy eligibility to SELECT/LAUNCH, not to disable) |
 |---|---|
-| Refused pre-CREATE preflight | NO_SPACE, old exact history unchanged. |
-| Name absent (no committed CREATE) | Old committed selection remains *only if* exact signed file and current policy still verify. |
-| Visible newly created file but empty/short/bad length/hash/sequence/name | DEGRADED/OFFLINE; never silently select older history. |
-| Complete newest `AINS` but no `AACT` | Installed only; old active decision unchanged subject to fresh policy. |
-| Complete newest `AACT` select/deactivate with reply lost | Newest decision wins; reread/reverify bytes and policy, return idempotent result only for the same exact request; do not append another record. Image cap presence is volatile and not inferred. |
-| Package/policy now revoked, absent, wrong digest or ambiguous response | INELIGIBLE/OFFLINE even when records are complete; no earlier decision or staged QUERY fallback. |
+| Preflight before INSTALL/PREPARE/COMMIT/DEACTIVATE; 32 objects or exhausted generation | Typed NO_SPACE before CREATE, old exact bytes unchanged. PREPARE's kernel registration may instead return BUSY before any disk mutation. No assumption of a public free-sector API. |
+| INSTALL before CREATE / CREATE not committed | No new `AINS`; old installed/active state only if every exact signed file/current policy still verifies. Retry exact INSTALL safely. |
+| INSTALL CREATE visible, before or during its 512-byte WRITE or before metadata commit | Newest empty/short/malformed `n8` makes namespace DEGRADED/OFFLINE; no older installed/active fallback until explicitly repaired under separately accepted policy. |
+| INSTALL WRITE committed, CLOSE pending/fails, before rescan | If full exact `AINS` visible, scan validates chain and digest; retry exact INSTALL returns same generation without new file. If corrupt/partial, refuse. CLOSE return is not proof either way. |
+| INSTALL reread done, acknowledgement or caller/server reply lost | Durable `AINS` stays installed, **not** active; exact eligible retry returns same record; lower/equal-different request refuses. No Image inferred. |
+| SELECT before PREPARE or bad signed/current-policy/AINS check | No new registry object or decision; old selection only if still current-policy-eligible. |
+| PREPARE copied Image minted but response lost; verifier killed/ABORT/policy change | No new `AACT`; verifier's last Image reference retires or explicit REVOKE stales all. Same-manager identical PREPARE while service lives returns same token; restart loses token, retry must freshly verify/register. |
+| PREPARE answered; before/after old Image REVOKE, before/during old Process stop/reap | Old durable `AACT` may remain while volatile old code is stopped; no COMMIT/ACTIVE acknowledgement; manager stays OFFLINE until teardown proven and explicit reverify. A failed stop is not an acknowledged deactivate. |
+| After old teardown, before `AACT` CREATE / CREATE absent | Old durable selection is still the only recorded decision, but old Image cap is stale and child gone. Explicit future LAUNCH must freshly verify and register; never auto-resume old code. |
+| `AACT` CREATE committed but before/during WRITE/commit | Newest empty/short/malformed `v8` means DEGRADED/OFFLINE; do not silently run old or new. |
+| `AACT` full WRITE committed; CLOSE or reread pending/fails | Rescan decides: valid newest select/deactivate becomes authoritative; partial newest refuses. Reply/close status alone cannot roll back a committed record. |
+| COMMIT reread succeeds but reply not staged, server dies, caller dies, cap dropped into full caller, or reply lost | Durable newest `AACT` wins after scan; **no cap is inferred**. Exact next-generation replay returns ACTIVE/no-cap, then explicit LAUNCH re-verifies/registers. Provisional Image auto-retires on last reference (ADR-0055 oracle gate). |
+| DEACTIVATE before/after old Image REVOKE and child teardown; CREATE absent | Old durable decision remains but old volatile authority/child may be gone; OFFLINE until explicit recheck. |
+| DEACTIVATE CREATE/WRITE/CLOSE/rescan/reply cuts | Same empty/corrupt-newest refusal vs complete-authoritative decision as SELECT; exact-generation/hash retry does not consume another slot. No new cap exists. |
+| LAUNCH after fresh verification/registration but before reply, in staged REPLIED queue, dropped on landing, or verifier death | No disk decision changes. Caller may launch **only** with a validated landed LIVE Image and exact success reply; otherwise drop/revoke provisional refs, rescan and explicitly retry. No Image created merely by ACTIVE. |
+| Policy/STAGE mutation or package revocation at any boundary | Invalidate PREPARE token, revoke provisional/selected Image, stop/reap child before acknowledged lifecycle completion. Previously committed selection may remain but is INELIGIBLE, not fallback authority. |
+| Manager last-thread exit/fault/kernel destroy while LIVE registration or unretired dynamic child exists | Proposed ADR-0055 fail-stop **before** cap/IPC teardown; not a recoverable userspace restart or a QEMU PASS. Without live dynamic state its registrar is dead, and no implicit boot launch occurs. |
+| Whole-platter revert, malicious write, or torn commit sector | **Outside** documented AFS1 crash model; no anti-rollback or arbitrary-commit-corruption claim. |
 
-The precise fsd acknowledgements, per-operation user IPC wire, volatile
-prepare-token bound/expiry, idempotence key and every real sector-cut
-replay remain **acceptance gates**. Do not infer atomic multi-file commit
+The per-operation IPC wire, volatile prepare token, idempotence rules and
+fsd acknowledgement/crash responses above are now **specified for final
+review**, not implemented. Actual guest sector-cut replay, measured cap/
+Process/record high-water and the full-fixture fourth-decision capacity
+choice remain **acceptance/qualification gates**. Do not infer atomic
+multi-file commit
 from AFS1; the immutable per-record commit prefix and explicit rescan are
 the only proposed linearization points. This candidate ordering binds
 the **Proposed** ADR-0055 primitive; if C revises that ABI or its marker
@@ -369,9 +541,12 @@ inventory, re-review this transaction before acceptance.
    supervisor-death fail-stop in focused [ADR-0055](0055-capability-gated-dynamic-image-registry.md)
    **before** writing dependent installer code.
 3. **Persistent transaction still Proposed:** review/freeze the exact
-   `AINS`/`AACT` 512-byte schema, 2+4 generation capacity, disjoint
-   receiver markers/cap inventory, commit acknowledgement and loss-of-
-   reply recovery above. Prove same-platter AFS1 prefixes and distinguish
+   `AINS`/`AACT` 512-byte schema, two installs plus up to four decisions
+   **only when AFS1 has space** (the measured full fixture fits three),
+   one approved coarse 8.5 lifecycle-admin marker distinct from STAGE,
+   exact IPC/reply/token behavior and crash-cut matrix above. Explicitly
+   resolve the 33-object simultaneous-maxima conflict with C, without
+   silent GC/table expansion. Prove real guest/platter AFS1 prefixes and distinguish
    last *committed and still-policy-eligible* active version from a
    visible malformed newest record. No silent fallback, no overwrite.
 4. **Running-child lifetime still Proposed:** active != running; manager
@@ -384,8 +559,10 @@ inventory, re-review this transaction before acceptance.
 
 ## Decision (pending)
 
-C accepted these **directions**, not either new public ABI or persistent
-record wire. ADR-0054 owns the install/activation transaction; ADR-0055
+C approved APKG v1 fit, the **17→18** Notification capacity direction,
+**one** coarse 8.5-only manager marker, and ADR-0055's two-slot/fresh-ID/
+revoke/page-budget/fail-stop directions. These design approvals are **not**
+acceptance of either new public ABI or persistent record wire. ADR-0054 owns the install/activation transaction; ADR-0055
 owns kernel Image objects and the manager-death lifecycle. Both remain
 Proposed. No new syscall, install/activation record, launch command or
 Image authority may be implemented until their exact mechanisms are
