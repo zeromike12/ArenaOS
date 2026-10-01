@@ -25,6 +25,7 @@ pub mod halt;
 pub mod handoff;
 pub mod heap;
 pub mod ipc;
+pub mod image_registry;
 pub mod log;
 pub mod m3;
 pub mod m4;

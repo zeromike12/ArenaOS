@@ -92,6 +92,9 @@ pub enum CapObj {
     /// registry is kernel-side and fixed; a filesystem-backed source
     /// arrives later without changing this shape.
     Image { img_id: u32 },
+    /// ADR-0055: possession of WRITE, not process identity, authorizes
+    /// exact copied-image registration and full-ID revocation.
+    ImageRegistrar,
     /// The machine-power singleton (ADR-0020): WRITE = may halt the
     /// machine through `SYS_SHUTDOWN`. One kernel object, no identity —
     /// holding the cap with the right IS the authority. The kernel's
@@ -157,6 +160,13 @@ impl CapSpace {
     }
 
     /// Occupied-slot count (computed, never tracked — no sync bug).
+    /// Independent registry oracle traverses the actual capspace slots.
+    pub(crate) fn each_cap(&self, mut f: impl FnMut(Cap)) {
+        for &cap in &self.slots {
+            f(cap);
+        }
+    }
+
     fn used(&self) -> u32 {
         self.slots
             .iter()
@@ -220,6 +230,7 @@ pub fn grant(pid: u64, cap: Cap) -> Result<usize, &'static str> {
             let Some(slot) = cs.slots.iter().position(|c| matches!(c.obj, CapObj::None)) else {
                 return Err("capability space full (CAP_SLOTS)");
             };
+            crate::image_registry::add_cap(cap);
             cs.slots[slot] = cap;
             cs.ipc_landed[slot] = false;
             Ok(slot)
@@ -238,7 +249,8 @@ pub fn mark_ipc_landed(pid: u64, slot: usize) -> Result<(), &'static str> {
             }
             cs.ipc_landed[slot] = true;
             Ok(())
-        }).ok_or("IPC recipient process missing")?
+        })
+        .ok_or("IPC recipient process missing")?
     })
 }
 
@@ -543,7 +555,12 @@ fn install(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
             let Some(entry) = cs.slots.get_mut(slot) else {
                 return Err("cap slot out of bounds");
             };
+            // Credit the incoming reference before retiring the old one:
+            // moving the last LIVE Image cap cannot transiently retire it.
+            crate::image_registry::add_cap(cap);
+            let old = *entry;
             *entry = cap;
+            crate::image_registry::drop_cap(old);
             cs.ipc_landed[slot] = false;
             Ok(())
         })

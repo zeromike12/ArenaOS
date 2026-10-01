@@ -11,6 +11,7 @@ mod abi;
 pub const IMAGE_KIND: u64 = 1;
 pub const ENDPOINT_KIND: u64 = 2;
 pub const NOTIFICATION_KIND: u64 = 3;
+pub const REGISTRAR_KIND: u64 = 5;
 pub const PROCESS_KIND: u64 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +121,7 @@ pub fn collect<P: Probe>(slots: &[NamedSlot], probe: &P) -> Result<Inventory, Er
             IMAGE_KIND => Kind::Image,
             ENDPOINT_KIND => Kind::Endpoint,
             NOTIFICATION_KIND => Kind::Notification,
+            REGISTRAR_KIND => Kind::ImageRegistrar,
             _ => return Err(Error::UnsupportedKind), // never reinterpret MMIO or Power
         };
         if desc.rights == 0

@@ -231,6 +231,9 @@ def run_qemu(label: str, esp: Path,
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
             "-cpu", "qemu64,+nx,+smep,+smap",
+            # Prefer the ESP boot drive to the raw scratch virtio device on
+            # each freshly seeded OVMF NVRAM boot.
+            "-boot", "order=c",
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
             "-drive", f"format=raw,file={esp}",
@@ -384,6 +387,9 @@ def boot(label: str, esp: Path,
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
             "-cpu", "qemu64,+nx,+smep,+smap",
+            # Prefer the ESP boot drive to the raw scratch virtio device on
+            # each freshly seeded OVMF NVRAM boot.
+            "-boot", "order=c",
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
             "-drive", f"format=raw,file={esp}",

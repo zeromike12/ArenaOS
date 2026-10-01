@@ -49,6 +49,9 @@ pub const SYS_PROC_FINISH: u64 = 30;
 pub const SYS_RESOURCE_SNAPSHOT: u64 = 31;
 /// ADR-0043: nonblocking take of a held Notification/READ; 0=empty.
 pub const SYS_TRY_WAIT: u64 = 32;
+/// ADR-0055 additive, possession-gated immutable dynamic image ABI.
+pub const SYS_IMAGE_REGISTER: u64 = 33;
+pub const SYS_IMAGE_REVOKE: u64 = 34;
 
 // ADR-0037: trusted boot driver-readiness signals on the manager's
 // notification (different object from each driver's interrupt notif).

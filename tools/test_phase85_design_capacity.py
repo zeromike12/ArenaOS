@@ -90,29 +90,29 @@ def disk_measure() -> tuple[int, int]:
     assert free>1024  # refusal caused by object slots, NOT disk sectors.
     print(f'qualified 8.4 AFS1 template: 16384 sectors, {initial_used} allocated; '
           f'synthetic full fixture: 19 old + 8 staged + 2 AINS + 3 AACT = 32/32, '
-          f'used={used}, free={free}; proposed fourth AACT refused without mutation')
+          f'used={used}, free={free}; accepted conditional fourth AACT refused without mutation')
     return used,free
 
 
 def cap_projection() -> None:
     entry=(ROOT/'kernel/kernel/src/entry.rs').read_text()
     literal=entry.split('let all = [',1)[1].split('];',1)[0]
-    assert literal.count('Cap {') == 18 and 'let root = [' in entry  # root[0..2] + 18 = 20
+    assert literal.count('Cap {') == 20 and 'let root = [' in entry  # root[0..2] + 20 = 22
     assert 'pub const CAP_SLOTS: usize = 32;' in (ROOT/'kernel/kernel/src/cap.rs').read_text()
     assert 'pub const MAX_INHERIT: usize = 5;' in (ROOT/'kernel/kernel/src/spawn.rs').read_text()
     assert 'pub const MAX_GRANTS: usize = 5;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
     package=(ROOT/'userspace/servicemgr/src/package.rs').read_text()
-    assert 'const GRANTS: [Request; 3]' in package
+    assert 'const GRANTS: [Request; 5]' in package
     packaged=(ROOT/'userspace/packaged/src/main.rs').read_text()
     assert 'const BUFFER: u64 = 7;' in packaged and 'const LENT: u64 = 8;' in packaged
     assert 'pub const MAX_PROCESSES: usize = 32;' in (ROOT/'kernel/kernel/src/proc.rs').read_text()
     ipc=(ROOT/'kernel/kernel/src/ipc.rs').read_text()
     assert 'pub const MAX_ENDPOINTS: usize = 10;' in ipc
-    assert 'pub const MAX_NOTIFS: usize = 17;' in ipc  # 18 is APPROVED, not implemented.
-    # Source-anchored upper schedule: existing manager 20 literal boot caps;
-    # proposal adds registrar and lifecycle-admin marker. Conservatively
+    assert 'pub const MAX_NOTIFS: usize = 18;' in ipc  # accepted marker is actually allocated.
+    # Source-anchored upper schedule: actual manager 22 literal boot caps,
+    # including registrar and lifecycle-admin marker. Conservatively
     # include four other resident Process handles (stack/broker/app/package).
-    boot=20+2; resident=4
+    boot=22; resident=4
     # Serialized one dynamic child + Image; at most one readiness worker,
     # but no worker overlaps SELECT/COMMIT. No Image is transferred until
     # OLD child and its held Process cap have been finished.

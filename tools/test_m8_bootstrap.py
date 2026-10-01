@@ -46,8 +46,8 @@ def main() -> int:
     ok &= check(rc == 0 and "PANIC" not in serial and "m7: RESULT PASS (2/2)" in serial,
                 "full fixture booted with all historical M7 tests green")
     manager = re.search(r"servicemgr spawned: pid (\d+), image19; stack endpoint Some\((\d+)\); audited (\d+) literal caps; no device/Power/Process grants", serial)
-    ok &= check(manager is not None and manager.group(3) == "20" if manager else False,
-                "kernel installed and audited exactly twenty bounded manager grants (12 historical + 5 permission + 3 package sources)")
+    ok &= check(manager is not None and manager.group(3) == "22" if manager else False,
+                "kernel installed and audited exactly twenty-two bounded manager grants (20 historical + registrar + lifecycle marker)")
     netd = re.search(r"netd spawned: pid \d+ .*?1=Endpoint(\d+)/R.*?3=Notif(\d+)/W", serial)
     rngd = re.search(r"rngd spawned: pid \d+ .*?1=Endpoint(\d+)/R.*?3=Notif(\d+)/W", serial)
     observed = re.search(r"servicemgr: live caps image17 netd=(\d+) stack=(\d+) rngd=(\d+)", serial)
@@ -55,8 +55,8 @@ def main() -> int:
                    and observed.groups() == (netd.group(1), manager.group(2), rngd.group(1))
                    and netd.group(2) != rngd.group(2))
     ok &= check(matched, "ring-3 observed real netd/stack/rng endpoint IDs, matching kernel grants; drivers hold DIFFERENT readiness notifications")
-    ok &= check("servicemgr: full fixture notification budget 17/17; eighteenth refused" in serial,
-                "seventeenth notification is allocated and an eighteenth is refused at boot")
+    ok &= check("servicemgr: full fixture notification budget 18/18; nineteenth refused" in serial,
+                "eighteenth notification is allocated and a nineteenth is refused at boot")
     ok &= check(VALIDATED in serial and OFFLINE not in serial,
                 "two device-originated readiness badges preceded live-cap manifest resolution")
     ok &= check("servicemgr: PANIC" not in serial and "m8: RESULT PASS" not in serial,

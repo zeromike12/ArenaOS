@@ -412,8 +412,8 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // ADR-0046: a separate ring-3 config reader owns neither fsd nor
     // the update marker. Only the configd process sees the raw FS cap;
     // the inert marker is a receiver-side anchor, NOT an opcode secret.
-    let (config_eid, config_marker) = spawn_configd(fs_eid)
-        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let (config_eid, config_marker) =
+        spawn_configd(fs_eid).unwrap_or_else(|e| crate::halt::halt_machine(e));
 
     // --- M6.1: the production network service (ADR-0024) --------------------
     // netd parks serving raw Ethernet frames (NET_SEND/NET_RECV/NET_MAC)
@@ -550,6 +550,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         stack_diag_nid,
     )
     .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::image_registry::set_manager(manager_pid);
 
     // The proof client has the ordinary endpoint only, never the raw
     // filesystem endpoint or a marker. Wait for its exact success exit,
@@ -561,7 +562,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     let reader_pid = crate::spawn::spawn_init(22, &read_grants, Some((shell_nid, 0xC081)))
         .unwrap_or_else(|e| crate::halt::halt_machine(e));
     let rec = crate::spawn::records_snapshot();
-    let reader_tid = rec.iter().flatten().find(|&&(pid, _)| pid == reader_pid)
+    let reader_tid = rec
+        .iter()
+        .flatten()
+        .find(|&&(pid, _)| pid == reader_pid)
         .map(|&(_, tid)| tid)
         .unwrap_or_else(|| crate::halt::halt_machine("configread: spawn record missing"));
     // Before the boot thread becomes idle it must NOT block on a
@@ -585,9 +589,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             {
                 if last_audited_probe != Some(pid) {
                     if mode == 0 {
-                        info!("m8", "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras");
+                        info!(
+                            "m8",
+                            "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras"
+                        );
                     } else {
-                        info!("m8", "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited");
+                        info!(
+                            "m8",
+                            "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited"
+                        );
                     }
                     last_audited_probe = Some(pid);
                 }
@@ -595,7 +605,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         }
         if let Some(status) = crate::arch::x86_64::syscall::exit_status_of(reader_tid) {
             if status != 42 {
-                crate::halt::halt_machine("configread: ordinary client refused read/authority proof");
+                crate::halt::halt_machine(
+                    "configread: ordinary client refused read/authority proof",
+                );
             }
             break;
         }
@@ -604,13 +616,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         }
         crate::sched::yield_now();
     }
-    if !if_before { crate::arch::x86_64::cli(); }
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
     if crate::ipc::try_wait(shell_nid) != Ok(0xC081) {
         crate::halt::halt_machine("configread: proof client exit badge missing");
     }
     crate::proc::destroy(reader_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
     crate::spawn::forget(reader_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
-    info!("kernel", "configread: boot-root reader reaped; no update authority delegated");
+    info!(
+        "kernel",
+        "configread: boot-root reader reaped; no update authority delegated"
+    );
 
     // A separate updater holds the only transferable update marker.
     // It first reads a marker-gated test plan from configd and SKIPs
@@ -635,7 +652,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         }
     }
     let up_rec = crate::spawn::records_snapshot();
-    let updater_tid = up_rec.iter().flatten().find(|&&(pid, _)| pid == updater_pid)
+    let updater_tid = up_rec
+        .iter()
+        .flatten()
+        .find(|&&(pid, _)| pid == updater_pid)
         .map(|&(_, tid)| tid)
         .unwrap_or_else(|| crate::halt::halt_machine("configup: spawn record missing"));
     let if_before = crate::arch::x86_64::interrupts_enabled();
@@ -651,9 +671,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             {
                 if last_audited_probe != Some(pid) {
                     if mode == 0 {
-                        info!("m8", "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras");
+                        info!(
+                            "m8",
+                            "manager-owned dependency probe pid {pid}: netd/W rngd/W private-notification/W audited, no privileged extras"
+                        );
                     } else {
-                        info!("m8", "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited");
+                        info!(
+                            "m8",
+                            "manager-owned dependency probe pid {pid}: diagnostic mode {mode}, exact attenuated caps audited"
+                        );
                     }
                     last_audited_probe = Some(pid);
                 }
@@ -670,13 +696,18 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         }
         crate::sched::yield_now();
     }
-    if !if_before { crate::arch::x86_64::cli(); }
+    if !if_before {
+        crate::arch::x86_64::cli();
+    }
     if crate::ipc::try_wait(shell_nid) != Ok(0xC082) {
         crate::halt::halt_machine("configup: proof client exit badge missing");
     }
     crate::proc::destroy(updater_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
     crate::spawn::forget(updater_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
-    info!("kernel", "configup: boot-root updater reaped; marker never delegated to shell");
+    info!(
+        "kernel",
+        "configup: boot-root updater reaped; marker never delegated to shell"
+    );
 
     let shell_grants = [
         crate::cap::Cap {
@@ -689,8 +720,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         },
         crate::cap::Cap {
             obj: crate::cap::CapObj::Notification { nid: shell_nid },
-            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE
-                | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
+            rights: crate::cap::RIGHTS_READ
+                | crate::cap::RIGHTS_WRITE
+                | crate::cap::RIGHTS_COPY
+                | crate::cap::RIGHTS_DESTROY,
         },
         crate::cap::Cap {
             obj: crate::cap::CapObj::Endpoint { eid: fs_eid },
@@ -727,46 +760,92 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     if expected_stack_caps.is_some() {
-        crate::cap::issue(shell_pid, 15, crate::cap::Cap {
-            obj: crate::cap::CapObj::Notification { nid: stack_diag_nid },
-            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
-        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: diagnostic marker issue refused"));
+        crate::cap::issue(
+            shell_pid,
+            15,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Notification {
+                    nid: stack_diag_nid,
+                },
+                rights: crate::cap::RIGHTS_READ
+                    | crate::cap::RIGHTS_COPY
+                    | crate::cap::RIGHTS_DESTROY,
+            },
+        )
+        .unwrap_or_else(|_| crate::halt::halt_machine("shell: diagnostic marker issue refused"));
     }
     if let Some((eid, nid)) = permission_root {
-        use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W,
-            RIGHTS_DESTROY as D};
-        crate::cap::issue(shell_pid, 16, Cap {
-            obj: CapObj::Endpoint { eid }, rights: W | C,
-        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: mediator issue refused"));
-        crate::cap::issue(shell_pid, 17, Cap {
-            obj: CapObj::Notification { nid }, rights: R | C | D,
-        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: approval marker issue refused"));
+        use crate::cap::{
+            Cap, CapObj, RIGHTS_COPY as C, RIGHTS_DESTROY as D, RIGHTS_READ as R, RIGHTS_WRITE as W,
+        };
+        crate::cap::issue(
+            shell_pid,
+            16,
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W | C,
+            },
+        )
+        .unwrap_or_else(|_| crate::halt::halt_machine("shell: mediator issue refused"));
+        crate::cap::issue(
+            shell_pid,
+            17,
+            Cap {
+                obj: CapObj::Notification { nid },
+                rights: R | C | D,
+            },
+        )
+        .unwrap_or_else(|_| crate::halt::halt_machine("shell: approval marker issue refused"));
         // Trusted shell can deliberately transfer its held mediator
         // client cap to an independent proof child of the same app image.
         // That child inherits ONLY the transferred endpoint, not this Image.
-        crate::cap::issue(shell_pid, 18, Cap {
-            obj: CapObj::Image { img_id: 25 }, rights: R,
-        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: delegate fixture image refused"));
+        crate::cap::issue(
+            shell_pid,
+            18,
+            Cap {
+                obj: CapObj::Image { img_id: 25 },
+                rights: R,
+            },
+        )
+        .unwrap_or_else(|_| crate::halt::halt_machine("shell: delegate fixture image refused"));
     }
     // ADR-0053: separate package endpoint and marker. Neither fsd nor
     // permission approval is a substitute, and no app inherits either.
     if let Some((eid, nid)) = package_root {
-        use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R,
-            RIGHTS_WRITE as W, RIGHTS_DESTROY as D};
-        crate::cap::issue(shell_pid, 20, Cap {
-            obj: CapObj::Endpoint { eid }, rights: W | C,
-        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: package endpoint issue refused"));
-        crate::cap::issue(shell_pid, 21, Cap {
-            obj: CapObj::Notification { nid }, rights: R | C | D,
-        }).unwrap_or_else(|_| crate::halt::halt_machine("shell: package marker issue refused"));
+        use crate::cap::{
+            Cap, CapObj, RIGHTS_COPY as C, RIGHTS_DESTROY as D, RIGHTS_READ as R, RIGHTS_WRITE as W,
+        };
+        crate::cap::issue(
+            shell_pid,
+            20,
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W | C,
+            },
+        )
+        .unwrap_or_else(|_| crate::halt::halt_machine("shell: package endpoint issue refused"));
+        crate::cap::issue(
+            shell_pid,
+            21,
+            Cap {
+                obj: CapObj::Notification { nid },
+                rights: R | C | D,
+            },
+        )
+        .unwrap_or_else(|_| crate::halt::halt_machine("shell: package marker issue refused"));
     }
     // ADR-0051: production fsd's separate diagnostic marker is reserved
     // for the trusted Power/raw-FS shell. No broker/app/worker receives
     // this authority; both the FS endpoint and marker are needed.
-    crate::cap::issue(shell_pid, 19, crate::cap::Cap {
-        obj: crate::cap::CapObj::Notification { nid: fs_diag_nid },
-        rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
-    }).unwrap_or_else(|_| crate::halt::halt_machine("shell: fsd diagnostic issue refused"));
+    crate::cap::issue(
+        shell_pid,
+        19,
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: fs_diag_nid },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
+        },
+    )
+    .unwrap_or_else(|_| crate::halt::halt_machine("shell: fsd diagnostic issue refused"));
     info!(
         "kernel",
         "shell spawned: pid {shell_pid} (caps: 0=Power/W 1=Image0/R 2=Notif{shell_nid}/RW 3=Endpoint{fs_eid}/W) — the console is live; type 'help'"
@@ -804,18 +883,22 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     }
 
     // ADR-0051/0053: production fsd and package approval markers are
-    // separate. 17 notifications at capacity; the eighteenth must be
+    // separate. 18 notifications at capacity; the nineteenth must be
     // a typed refusal, never silent over-allocation;
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
-        if crate::ipc::create_notification().is_ok() {
+        let before = crate::ipc::notification_snapshot();
+        if crate::ipc::notification_occupancy() != 18
+            || crate::ipc::create_notification().is_ok()
+            || crate::ipc::notification_snapshot() != before
+        {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed to refuse an eighteenth object",
+                "servicemgr: notification bound failed mutation-free nineteenth refusal",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 17/17; eighteenth refused"
+            "servicemgr: full fixture notification budget 18/18; nineteenth refused"
         );
     }
 
@@ -836,7 +919,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             crate::proc::destroy(fs_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
             crate::spawn::forget(fs_pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
             fs_reaped = true;
-            info!("kernel", "fsd root exited; process reaped, endpoint orphaned; filesystem OFFLINE");
+            info!(
+                "kernel",
+                "fsd root exited; process reaped, endpoint orphaned; filesystem OFFLINE"
+            );
         }
         // ADR-0039: independently audit the child created by the
         // MANAGER's syscall. The kernel sees its Process handle in the
@@ -941,7 +1027,15 @@ fn spawn_servicemgr(
     rng: Option<u32>,
     rng_diag_nid: u32,
     stack_diag_nid: u32,
-) -> Result<(u64, Option<[crate::cap::Cap; 5]>, Option<(u32, u32)>, Option<(u32, u32)>), &'static str> {
+) -> Result<
+    (
+        u64,
+        Option<[crate::cap::Cap; 5]>,
+        Option<(u32, u32)>,
+        Option<(u32, u32)>,
+    ),
+    &'static str,
+> {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let root = [
         Cap {
@@ -959,14 +1053,16 @@ fn spawn_servicemgr(
                 .map_err(|_| "servicemgr: stack endpoint table full")?;
             let backoff_nid = crate::ipc::create_notification()
                 .map_err(|_| "servicemgr: backoff notification table full")?;
-            let permission_eid = crate::ipc::create_endpoint()
-                .map_err(|_| "permissiond: endpoint table full")?;
+            let permission_eid =
+                crate::ipc::create_endpoint().map_err(|_| "permissiond: endpoint table full")?;
             let approval_nid = crate::ipc::create_notification()
                 .map_err(|_| "permissiond: approval marker table full")?;
-            let package_eid = crate::ipc::create_endpoint()
-                .map_err(|_| "packaged: endpoint table full")?;
+            let package_eid =
+                crate::ipc::create_endpoint().map_err(|_| "packaged: endpoint table full")?;
             let package_nid = crate::ipc::create_notification()
                 .map_err(|_| "packaged: separate marker table full")?;
+            let lifecycle_nid = crate::ipc::create_notification()
+                .map_err(|_| "packaged: lifecycle marker table full")?;
             let all = [
                 root[0],
                 root[1],
@@ -1011,19 +1107,57 @@ fn spawn_servicemgr(
                     rights: R | C | crate::cap::RIGHTS_DESTROY, // transferable, disposable proof
                 },
                 Cap {
-                    obj: CapObj::Notification { nid: stack_diag_nid },
+                    obj: CapObj::Notification {
+                        nid: stack_diag_nid,
+                    },
                     rights: R | C | crate::cap::RIGHTS_DESTROY, // stack receives READ only
                 },
                 // ADR-0048 exact five manager-held permission sources.
-                Cap { obj: CapObj::Image { img_id: 24 }, rights: R },
-                Cap { obj: CapObj::Image { img_id: 25 }, rights: R },
-                Cap { obj: CapObj::Endpoint { eid: fs_eid }, rights: W | C },
-                Cap { obj: CapObj::Endpoint { eid: permission_eid }, rights: R | W | C },
-                Cap { obj: CapObj::Notification { nid: approval_nid }, rights: R | C },
+                Cap {
+                    obj: CapObj::Image { img_id: 24 },
+                    rights: R,
+                },
+                Cap {
+                    obj: CapObj::Image { img_id: 25 },
+                    rights: R,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: fs_eid },
+                    rights: W | C,
+                },
+                Cap {
+                    obj: CapObj::Endpoint {
+                        eid: permission_eid,
+                    },
+                    rights: R | W | C,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: approval_nid },
+                    rights: R | C,
+                },
                 // ADR-0053 exact package sources at manager slots 17..19.
-                Cap { obj: CapObj::Image { img_id: 26 }, rights: R },
-                Cap { obj: CapObj::Endpoint { eid: package_eid }, rights: R | W | C },
-                Cap { obj: CapObj::Notification { nid: package_nid }, rights: R | C },
+                Cap {
+                    obj: CapObj::Image { img_id: 26 },
+                    rights: R,
+                },
+                Cap {
+                    obj: CapObj::Endpoint { eid: package_eid },
+                    rights: R | W | C,
+                },
+                Cap {
+                    obj: CapObj::Notification { nid: package_nid },
+                    rights: R | C,
+                },
+                // ADR-0055: possession (not pid) is registration authority.
+                Cap {
+                    obj: CapObj::ImageRegistrar,
+                    rights: W | C,
+                },
+                // Distinct from STAGE; one receiver-verified 8.5 marker.
+                Cap {
+                    obj: CapObj::Notification { nid: lifecycle_nid },
+                    rights: R | C,
+                },
             ];
             let child = [
                 Cap {
@@ -1043,12 +1177,18 @@ fn spawn_servicemgr(
                     rights: W,
                 },
                 Cap {
-                    obj: CapObj::Notification { nid: stack_diag_nid },
+                    obj: CapObj::Notification {
+                        nid: stack_diag_nid,
+                    },
                     rights: R,
                 },
             ];
-            (Some(all), Some((stack_eid, child)), Some((permission_eid, approval_nid)),
-                Some((package_eid, package_nid)))
+            (
+                Some(all),
+                Some((stack_eid, child)),
+                Some((permission_eid, approval_nid)),
+                Some((package_eid, package_nid)),
+            )
         }
         _ => (None, None, None, None),
     };
@@ -1109,7 +1249,9 @@ fn audit_manager_child(
                 // This historical audit selects only the netd-sourced
                 // stack or its worker. The manager now also owns a
                 // separate broker and app; audit those independently.
-                if crate::cap::read(pid, 0).ok().is_some_and(|first| first.obj == expected[0].obj)
+                if crate::cap::read(pid, 0)
+                    .ok()
+                    .is_some_and(|first| first.obj == expected[0].obj)
                     && child.replace(pid).is_some()
                 {
                     return Err("servicemgr: stack child Process cap ambiguous");
@@ -1150,13 +1292,20 @@ fn audit_manager_child(
         let diagnostic = first.rights & crate::cap::RIGHTS_COPY != 0
             || crate::cap::read(pid, 1).ok().unwrap().rights & crate::cap::RIGHTS_COPY != 0;
         if diagnostic {
-            let wrong = crate::cap::read(pid, 3).map_err(|_| "probe missing wrong-marker fixture")?;
+            let wrong =
+                crate::cap::read(pid, 3).map_err(|_| "probe missing wrong-marker fixture")?;
             let correct = crate::cap::read(pid, 4).map_err(|_| "probe missing rngd marker")?;
             let root = crate::cap::read(manager_pid, 10).map_err(|_| "manager lost rngd marker")?;
-            if wrong.obj != expected[4].obj || wrong.rights != crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY
+            if wrong.obj != expected[4].obj
+                || wrong.rights
+                    != crate::cap::RIGHTS_READ
+                        | crate::cap::RIGHTS_COPY
+                        | crate::cap::RIGHTS_DESTROY
                 || correct != root
                 || correct.obj == wrong.obj
-            { return Err("probe diagnostic authority shape differs from root policy"); }
+            {
+                return Err("probe diagnostic authority shape differs from root policy");
+            }
         }
         // Later slots are allocated/copied by the live worker itself;
         // inherited authority is bounded by SYS_SPAWN, not by a
@@ -1232,9 +1381,18 @@ fn spawn_configd(fs_eid: u32) -> Result<(u32, u32), &'static str> {
     let eid = crate::ipc::create_endpoint().map_err(|_| "configd: endpoint table full")?;
     let nid = crate::ipc::create_notification().map_err(|_| "configd: marker table full")?;
     let grants = [
-        Cap { obj: CapObj::Endpoint { eid: fs_eid }, rights: W },
-        Cap { obj: CapObj::Endpoint { eid }, rights: R },
-        Cap { obj: CapObj::Notification { nid }, rights: R },
+        Cap {
+            obj: CapObj::Endpoint { eid: fs_eid },
+            rights: W,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: R,
+        },
+        Cap {
+            obj: CapObj::Notification { nid },
+            rights: R,
+        },
     ];
     let pid = crate::spawn::spawn_init(21, &grants, None)?;
     for (slot, &wanted) in grants.iter().enumerate() {
@@ -1242,7 +1400,10 @@ fn spawn_configd(fs_eid: u32) -> Result<(u32, u32), &'static str> {
             return Err("configd: boot grant did not match literal policy");
         }
     }
-    info!("kernel", "configd spawned: pid {pid}, image21, FS/W + cfg/R + marker/R anchor; updater separately granted");
+    info!(
+        "kernel",
+        "configd spawned: pid {pid}, image21, FS/W + cfg/R + marker/R anchor; updater separately granted"
+    );
     Ok((eid, nid))
 }
 
@@ -1254,7 +1415,8 @@ fn spawn_configd(fs_eid: u32) -> Result<(u32, u32), &'static str> {
 /// side). No Mmio, no notification: fsd never sees the device.
 fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32, u32), &'static str> {
     let eid = crate::ipc::create_endpoint().map_err(|_| "fsd: endpoint table full")?;
-    let diag_nid = crate::ipc::create_notification().map_err(|_| "fsd: diagnostic marker table full")?;
+    let diag_nid =
+        crate::ipc::create_notification().map_err(|_| "fsd: diagnostic marker table full")?;
     let grants = [
         crate::cap::Cap {
             obj: crate::cap::CapObj::Endpoint { eid: blk_eid },

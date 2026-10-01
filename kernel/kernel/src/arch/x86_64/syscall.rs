@@ -150,6 +150,9 @@ pub const SYS_PROC_FINISH: u64 = 30;
 pub const SYS_RESOURCE_SNAPSHOT: u64 = 31;
 /// Nonblocking take of a held Notification/READ's pending badge.
 pub const SYS_TRY_WAIT: u64 = 32;
+/// ADR-0055: possession-gated volatile Image registry (additive ABI v1).
+pub const SYS_IMAGE_REGISTER: u64 = 33;
+pub const SYS_IMAGE_REVOKE: u64 = 34;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -617,7 +620,7 @@ extern "C" fn syscall_dispatch(
     unsafe {
         (*STATS.get()).calls += 1;
     }
-    match nr {
+    let result = match nr {
         SYS_DEBUG_WRITE => sys_debug_write(a0, a1) as u64,
         SYS_THREAD_EXIT => sys_thread_exit(a0),
         SYS_PROVE_RING3 => sys_prove_ring3(frame),
@@ -653,12 +656,16 @@ extern "C" fn syscall_dispatch(
         SYS_PROC_FINISH => sys_proc_finish(a0, a1) as u64,
         SYS_RESOURCE_SNAPSHOT => sys_resource_snapshot(a0, a1) as u64,
         SYS_TRY_WAIT => sys_try_wait(a0) as u64,
+        SYS_IMAGE_REGISTER => sys_image_register(a0, a1, a2, a3, a4, a5) as u64,
+        SYS_IMAGE_REVOKE => sys_image_revoke(a0, a1, a2, a3, a4, a5) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
             STATUS_BAD_CALL as u64
         }
-    }
+    };
+    crate::image_registry::assert_conservation();
+    result
 }
 
 /// SYS_DEBUG_WRITE(buf, len): copy `buf[..len]` from the *calling
@@ -747,6 +754,7 @@ fn notify_last_thread_exit() {
     // live count is exactly 1: us.
     if let Some(pid) = crate::sched::current_proc_id() {
         if crate::sched::proc_live_threads(pid) == 1 {
+            crate::image_registry::manager_death_check(pid);
             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
                 if let Err(e) = crate::ipc::notify(nid, badge) {
                     error!("syscall", "exit notification failed for pid {pid}: {e}");
@@ -1045,6 +1053,91 @@ fn sys_try_wait(a0: u64) -> Status {
 /// creation sequence to `spawn::spawn_from`. Returns the child's pid as
 /// a positive payload. The child's Process cap lands in the caller's
 /// first free slot.
+/// ADR-0055: registrar possession, exact copied user bytes, preflight,
+/// production ELF validation, then atomic publish and cap mint under IF=0.
+fn sys_image_register(reg: u64, addr: u64, len: u64, dst: u64, r8: u64, r9: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if reg >= crate::cap::CAP_SLOTS as u64
+        || dst >= crate::cap::CAP_SLOTS as u64
+        || len == 0
+        || len > crate::image_registry::MAX_BYTES as u64
+        || r8 != 0
+        || r9 != 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, reg as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if c.obj != crate::cap::CapObj::ImageRegistrar
+        || c.rights & crate::cap::RIGHTS_WRITE == 0
+        || crate::cap::read(pid, dst as usize).is_ok()
+    {
+        return STATUS_BAD_ARG;
+    }
+    // Explicit user-half/overflow check, then registered readable regions
+    // checked page by page before STAC. No recoverable #PF is assumed.
+    let Some(end) = addr.checked_add(len) else {
+        return STATUS_BAD_ADDRESS;
+    };
+    if addr == 0 || end > 0x0000_8000_0000_0000 || !user_range_ok(addr, len) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Some(idx) = crate::image_registry::reserve() else {
+        return STATUS_BUSY;
+    };
+    // SAFETY: the full user span has been checked against current regions;
+    // IF=0, no intervening unmap; the reserved destination is kernel-owned.
+    unsafe {
+        super::stac();
+        crate::image_registry::copy_from_user(idx, addr as *const u8, len as usize);
+        super::clac();
+    }
+    if !crate::image_registry::validate_reserved(idx) {
+        crate::image_registry::abandon(idx);
+        return STATUS_BAD_ARG;
+    }
+    let id = crate::image_registry::begin_mint(idx);
+    let cap = crate::cap::Cap {
+        obj: crate::cap::CapObj::Image { img_id: id },
+        rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_COPY | crate::cap::RIGHTS_DESTROY,
+    };
+    if crate::cap::issue(pid, dst as usize, cap).is_err() {
+        crate::image_registry::undo_mint(idx);
+        return STATUS_BUSY;
+    }
+    crate::image_registry::commit_mint(idx);
+    id as Status
+}
+
+fn sys_image_revoke(reg: u64, id: u64, rdx: u64, r10: u64, r8: u64, r9: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if reg >= crate::cap::CAP_SLOTS as u64
+        || id < crate::image_registry::FIRST as u64
+        || id > u32::MAX as u64
+        || rdx != 0
+        || r10 != 0
+        || r8 != 0
+        || r9 != 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(c) = crate::cap::read(pid, reg as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if c.obj != crate::cap::CapObj::ImageRegistrar || c.rights & crate::cap::RIGHTS_WRITE == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !crate::image_registry::revoke(id as u32) {
+        return STATUS_BAD_ARG;
+    }
+    STATUS_OK
+}
+
 fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG; // kernel threads have no cap space
@@ -1062,6 +1155,17 @@ fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     let crate::cap::CapObj::Image { img_id } = img_cap.obj else {
         return STATUS_BAD_ARG;
     };
+    // Full-ID liveness wins over BUSY for stale copies. A second dynamic
+    // child is refused *before* loader pin, record, process, frame or cap
+    // reservation. prepare repeats this IF=0 check at its record commit.
+    if img_id >= crate::image_registry::FIRST {
+        if !crate::image_registry::live(img_id) {
+            return STATUS_BAD_ARG;
+        }
+        if crate::spawn::unretired_dynamic_child() {
+            return STATUS_BUSY;
+        }
+    }
     // The inheritance spec lives in the caller's memory: page-validate,
     // then read it under STAC in THIS (the caller's own) context.
     if a2 > crate::spawn::MAX_INHERIT as u64 {
@@ -1815,7 +1919,12 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         return STATUS_BAD_ARG;
     };
     let (kind, object) = match cap.obj {
-        crate::cap::CapObj::Image { img_id } => (1u64, u64::from(img_id)),
+        crate::cap::CapObj::Image { img_id }
+            if img_id < crate::image_registry::FIRST || crate::image_registry::live(img_id) =>
+        {
+            (1u64, u64::from(img_id))
+        }
+        crate::cap::CapObj::ImageRegistrar => (5, 0),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {

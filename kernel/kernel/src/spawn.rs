@@ -43,6 +43,8 @@ pub const MAX_INHERIT: usize = 5;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten).
 pub const MAX_SPAWN_RECS: usize = 20;
+/// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
+pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
 
 /// The kernel-side image registry (ADR-0019/0020/0022): image 0 is the
 /// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
@@ -113,6 +115,9 @@ struct SpawnRec {
     child_tid: u64,
     /// Only spawn_from creates user-lifecycle targets. Boot roots belong to the kernel.
     user_child: bool,
+    /// ADR-0055: structural dynamic-child tag. Keep it until successful
+    /// SYS_PROC_FINISH retirement, including after the thread exits.
+    dynamic_img_id: Option<u32>,
     entry: u64,
     stack_top: u64,
     /// Page-granular (lo, hi) user regions: the image's segments plus
@@ -125,12 +130,25 @@ const EMPTY_REC: SpawnRec = SpawnRec {
     child_pid: 0,
     child_tid: 0,
     user_child: false,
+    dynamic_img_id: None,
     entry: 0,
     stack_top: 0,
     regions: [(0, 0); sched::USER_REGIONS_MAX],
 };
 
 static RECORDS: SyncCell<[SpawnRec; MAX_SPAWN_RECS]> = SyncCell::new([EMPTY_REC; MAX_SPAWN_RECS]);
+/// Independent loader-pin owner witness; separate from registry.pins.
+static LOADER_OWNER: SyncCell<Option<u32>> = SyncCell::new(None);
+pub fn loader_pin_count(id: u32) -> u32 {
+    without_interrupts(|| unsafe { u32::from(*LOADER_OWNER.get() == Some(id)) })
+}
+pub fn unretired_dynamic_child() -> bool {
+    without_interrupts(|| unsafe {
+        (*RECORDS.get())
+            .iter()
+            .any(|r| r.live && r.dynamic_img_id.is_some())
+    })
+}
 
 /// Machine-state evidence for the suites: `(child_pid, child_tid)` per
 /// live record, in table order.
@@ -224,10 +242,38 @@ impl Prepared {
 /// the image, derive and map the stack page (first page above the
 /// image's top segment VA — derived from the image, never hardcoded,
 /// ADR-0019), and compute the page-granular user regions.
+struct LoaderPin(Option<u32>);
+impl Drop for LoaderPin {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            without_interrupts(|| unsafe {
+                assert_eq!(*LOADER_OWNER.get(), Some(id));
+                *LOADER_OWNER.get() = None;
+            });
+            crate::image_registry::unpin(id);
+        }
+    }
+}
+
 fn prepare(img_id: u32) -> Result<Prepared, Status> {
-    // 1. Validate BEFORE allocating anything: the registry lookup and
-    //    the ADR-0016 validator both run on the caller's kernel stack.
-    let bytes = image_bytes(img_id).ok_or(STATUS_BAD_ARG)?;
+    // 1. Resolve full LIVE ID and pin immutable kernel bytes BEFORE
+    // allocating. The guard covers validate/load and every rollback;
+    // revoke/last-ref can retire storage only after this pin drains.
+    let bytes = if img_id >= DYNAMIC_FIRST_ID {
+        crate::image_registry::pin(img_id).ok_or(STATUS_BAD_ARG)?
+    } else {
+        image_bytes(img_id).ok_or(STATUS_BAD_ARG)?
+    };
+    let _pin = LoaderPin((img_id >= DYNAMIC_FIRST_ID).then_some(img_id));
+    if img_id >= DYNAMIC_FIRST_ID {
+        without_interrupts(|| unsafe {
+            assert!(
+                (*LOADER_OWNER.get()).is_none(),
+                "concurrent dynamic loader on one core"
+            );
+            *LOADER_OWNER.get() = Some(img_id);
+        });
+    }
     let parsed = elf::validate(bytes).map_err(|_| STATUS_BAD_ARG)?;
     // Regions: one per segment + the stack page must fit the thread's
     // region table.
@@ -253,11 +299,20 @@ fn prepare(img_id: u32) -> Result<Prepared, Status> {
     // SAFETY: single writer under IF=0.
     let idx = without_interrupts(|| unsafe {
         let recs = &mut *RECORDS.get();
+        // ADR-0055: one UNRETIRED dynamic child system-wide. Even a child
+        // whose last thread has exited retains its record and blocks a new
+        // dynamic spawn until the Process-cap finish path calls `forget`.
+        // This IF=0 scan happens BEFORE record, process, frame or Process
+        // cap reservation; boot/embedded spawns do not consume the bound.
+        if img_id >= DYNAMIC_FIRST_ID && recs.iter().any(|r| r.live && r.dynamic_img_id.is_some()) {
+            return None;
+        }
         let Some(i) = recs.iter().position(|r| !r.live) else {
             return None;
         };
         recs[i] = SpawnRec {
             live: true,
+            dynamic_img_id: (img_id >= DYNAMIC_FIRST_ID).then_some(img_id),
             ..EMPTY_REC
         };
         Some(i)
@@ -427,7 +482,7 @@ pub fn spawn_from(
                 }
             }
             Ok(pid)
-        },
+        }
         Err(status) => {
             // finish rolled the child back; the handle in the PARENT's
             // space still needs undoing (it carries DESTROY exactly for

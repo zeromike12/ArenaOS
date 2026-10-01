@@ -137,6 +137,19 @@ else
     echo "!! Phase 8.2 cap/IPC layout audit FAILED"
 fi
 
+# ADR-0054 accepted persistent-record byte codec (not fsd/guest proof).
+echo "== host-independent Phase 8.5 AINS/AACT records and no_std compile"
+if (cd "$REPO_ROOT" && python3 tools/test_phase85_records.py && \
+    rustc --crate-type lib --edition 2024 -D warnings \
+    --target x86_64-unknown-none --emit=metadata \
+    tools/installed_no_std.rs -o build/installed-no-std.rmeta); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! Phase 8.5 records/refusal tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

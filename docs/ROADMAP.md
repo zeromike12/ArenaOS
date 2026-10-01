@@ -1142,17 +1142,18 @@ is not completed by accepting an ADR.
       and ADR-0053 ledger. Production key custody, Secure Boot, hostile-disk
       rollback defense, installation, activation and linking remain out of
       scope until separate decisions/8.5.
-- [ ] **8.5 installer/updater**. [Proposed ADR-0054](adr/0054-installed-images-and-atomic-upgrade.md)
+- [ ] **8.5 installer/updater**. [Accepted ADR-0054](adr/0054-installed-images-and-atomic-upgrade.md)
       owns immutable installed/active records and AFS1 crash-prefix
-      recovery; [Proposed ADR-0055](adr/0055-capability-gated-dynamic-image-registry.md)
+      recovery; [Accepted ADR-0055](adr/0055-capability-gated-dynamic-image-registry.md)
       isolates capability-gated kernel Image registration/revocation and
       manager-death fail-stop. A purpose-built meaningful 648-byte
       strict-subset ET_EXEC passed the existing production ELF validator
       and fits an 840-byte test-root-signed APKG **v1** file in host-only
       measurement; actual disk-backed guest launch is **not proven**.
       C selected one namespace/test root, no boot auto-launch, production
-      custody, dynamic linking or GC. Both ADR mechanisms remain Proposed;
-      no dependent installer code until accepted. Artifact-bound real
+      custody, dynamic linking or GC. Both ADRs are accepted architecture,
+      not a completed 8.5 checkpoint. A second dynamic SYS_SPAWN is BUSY
+      while any system-wide tagged child is unretired. Artifact-bound real
       install/upgrade, power-loss recovery, full regression suite and
       fresh final-image 100/100 remain mandatory.
 

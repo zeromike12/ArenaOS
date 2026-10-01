@@ -31,7 +31,7 @@ def main() -> int:
               # survives to inflate this measured 12/12 baseline.
               and counters[1:] == (12, 12)
               and "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)" in serial
-              and "packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified" in serial
+              and "packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified" in serial
               and "servicemgr: permission PING result + exit before deadline; worker reaped" in serial
               and "servicemgr: permission app reaped through held Process cap" in serial
               and "servicemgr: permissiond READY" in serial

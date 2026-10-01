@@ -150,9 +150,10 @@ pub static ARENA_IPC_LAYOUT: [usize; 5] = [
         # ADR-0051: an *additional* distinct production-fsd marker,
         # on top of ADR-0048's projection; one Notification is 24 B.
         actual = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
-        if not re.search(r"pub const MAX_NOTIFS: usize = 17\s*;", actual):
-            raise ValueError("production notification bound not exactly 17")
-        print("ADR-0051/0053 FS and package diagnostics: 15->17 notifications +48 B PASS")
+        if not re.search(r"pub const MAX_NOTIFS: usize = 18\s*;", actual):
+            raise ValueError("production notification bound not exactly 18")
+        print("ADR-0051/0053 FS and package diagnostics: 15->17 notifications +48 B; "
+              "ADR-0055 lifecycle marker: 17->18 +24 B PASS")
 
 
 if __name__ == "__main__":

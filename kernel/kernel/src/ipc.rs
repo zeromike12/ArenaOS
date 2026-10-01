@@ -41,11 +41,13 @@ pub const MAX_ENDPOINTS: usize = 10; // ADR-0053: separate package receiver endp
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 17; // ADR-0053 distinct package approval marker
+pub const MAX_NOTIFS: usize = 18; // ADR-0055 distinct Phase 8.5 lifecycle marker
 #[path = "ipc_adr50_test.rs"]
 mod adr50_test;
 /// In-guest internal-only M4 fixture; no userspace syscall or authority.
-pub(crate) use adr50_test::{stage as stage_abandoned_caller_fixture, verify as verify_abandoned_caller_fixture};
+pub(crate) use adr50_test::{
+    stage as stage_abandoned_caller_fixture, verify as verify_abandoned_caller_fixture,
+};
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
 const QUEUE_DEPTH: usize = 4;
@@ -269,6 +271,15 @@ pub fn destroy_endpoint(eid: u32) -> Result<(), &'static str> {
 }
 
 /// Mint a live notification object; returns its `nid`.
+/// Complete immutable scalar snapshot for mutation-free table-full proof.
+pub fn notification_snapshot() -> [(bool, u64, u64); MAX_NOTIFS] {
+    without_interrupts(|| unsafe { (*NOTIFS.get()).map(|n| (n.live, n.pending, n.waiter)) })
+}
+
+pub fn notification_occupancy() -> usize {
+    without_interrupts(|| unsafe { (*NOTIFS.get()).iter().filter(|n| n.live).count() })
+}
+
 pub fn create_notification() -> Result<u32, &'static str> {
     without_interrupts(|| {
         // SAFETY: single writer under IF=0.
@@ -365,6 +376,9 @@ fn take_request(
     } else {
         install_cap(server_pid, send_cap)
     };
+    // Queue ownership is escrowed in the local copy until landing/drop;
+    // credit the recipient before releasing the staged reference.
+    crate::image_registry::drop_cap(send_cap);
     // SAFETY: as above.
     without_interrupts(|| unsafe {
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
@@ -412,12 +426,14 @@ pub fn call(
             let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Empty) else {
                 return Err(STATUS_BUSY);
             };
+            let staged = send_cap.unwrap_or(Cap::EMPTY);
+            crate::image_registry::add_cap(staged);
             ep.q[qi] = CallSlot {
                 state: SlotState::Waiting,
                 caller: sched::current_thread_id(),
                 words,
                 msg,
-                send_cap: send_cap.unwrap_or(Cap::EMPTY),
+                send_cap: staged,
                 ..EMPTY_SLOT
             };
             let parked = ep.server;
@@ -458,6 +474,8 @@ pub fn call(
     let failed = without_interrupts(|| unsafe {
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
         if slot.state == SlotState::Failed {
+            crate::image_registry::drop_cap(slot.send_cap);
+            crate::image_registry::drop_cap(slot.reply_cap);
             *slot = EMPTY_SLOT;
             true
         } else {
@@ -488,6 +506,8 @@ pub fn call(
     } else {
         install_cap(pid, reply_cap)
     };
+    // The reply's local escrow stays credited until landing/drop.
+    crate::image_registry::drop_cap(reply_cap);
     Ok((reply_words, landed, reply_msg))
 }
 
@@ -608,7 +628,9 @@ pub fn reply(
             };
             slot.reply_words = words;
             slot.reply_msg = msg;
-            slot.reply_cap = send_cap.unwrap_or(Cap::EMPTY);
+            let staged = send_cap.unwrap_or(Cap::EMPTY);
+            crate::image_registry::add_cap(staged);
+            slot.reply_cap = staged;
             slot.state = SlotState::Replied;
             Ok(slot.caller)
         }
@@ -722,6 +744,19 @@ pub fn fail_calls_for_server(pid: u64) -> usize {
     n
 }
 
+/// Independent registry oracle: inspect both actual staged cap fields in
+/// every nonempty endpoint slot, including Failed and Replied states.
+pub fn for_each_staged_cap(mut f: impl FnMut(Cap)) {
+    without_interrupts(|| unsafe {
+        for ep in (*ENDPOINTS.get()).iter().filter(|ep| ep.live) {
+            for slot in ep.q.iter().filter(|s| s.state != SlotState::Empty) {
+                f(slot.send_cap);
+                f(slot.reply_cap);
+            }
+        }
+    });
+}
+
 /// Drop every kernel-side reference to threads belonging to `pid`
 /// (ADR-0028/0050): parked endpoint servers, notification waiters,
 /// AND in-flight endpoint callers in all nonempty queue states.
@@ -747,7 +782,9 @@ pub fn release_blocked_of(pid: u64) -> (usize, usize, usize) {
             let mut waiters = 0;
             let mut calls = 0;
             for ep in (*ENDPOINTS.get()).iter_mut() {
-                if !ep.live { continue; }
+                if !ep.live {
+                    continue;
+                }
                 if ep.server != NO_TID && sched::proc_id_of(ep.server) == Some(pid) {
                     ep.server = NO_TID;
                     servers += 1;
@@ -758,7 +795,10 @@ pub fn release_blocked_of(pid: u64) -> (usize, usize, usize) {
                 // The real server (if any) is not stopped or orphaned;
                 // its later SYS_IPC_REPLY receives STATUS_BAD_ARG.
                 for slot in ep.q.iter_mut() {
-                    if slot.state != SlotState::Empty && sched::proc_id_of(slot.caller) == Some(pid) {
+                    if slot.state != SlotState::Empty && sched::proc_id_of(slot.caller) == Some(pid)
+                    {
+                        crate::image_registry::drop_cap(slot.send_cap);
+                        crate::image_registry::drop_cap(slot.reply_cap);
                         *slot = EMPTY_SLOT;
                         calls += 1;
                     }

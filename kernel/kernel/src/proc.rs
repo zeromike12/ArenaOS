@@ -148,6 +148,7 @@ pub fn pml4_of(pid: u64) -> Option<u64> {
 /// kernel view when the incoming thread's cr3 differs; the bootstrap
 /// thread carries the kernel-view cr3, so any switch back to it does).
 pub fn destroy(pid: u64) -> Result<u64, &'static str> {
+    crate::image_registry::manager_death_check(pid);
     // M6.5 (ADR-0028): FIRST, answer everyone this process owed a
     // reply to, with a typed status. A client blocked in
     // `SYS_IPC_CALL` has no timeout and no way to observe its
@@ -230,6 +231,9 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             }
             let freed = paging::destroy_user_half(p.pml4_phys) as u64;
             frames::free(p.pml4_phys).map_err(|_| "destroy: root frame free rejected")?;
+            // A dying capspace drops every Image reference, including
+            // inherited and IPC-landed copies, before releasing its slot.
+            p.caps.each_cap(crate::image_registry::drop_cap);
             procs[idx] = None;
             // Sweep the process's owned IRQ relays (M5.2, ADR-0022): a
             // dead driver's armed vectors must not keep notifying a dead
@@ -251,6 +255,16 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             Ok(freed + 1)
         }
     })
+}
+
+/// Test-only independent Image conservation oracle: traverse every actual
+/// occupied process capspace slot (not the production ref counters).
+pub fn for_each_cap(mut f: impl FnMut(cap::Cap)) {
+    without_interrupts(|| unsafe {
+        for p in (*PROCESSES.get()).iter().flatten() {
+            p.caps.each_cap(&mut f);
+        }
+    });
 }
 
 /// Run `f` against a live process's capability space (ADR-0015: the cap

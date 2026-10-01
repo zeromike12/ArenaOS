@@ -1,8 +1,8 @@
 # ADR-0055 — Capability-gated, revocable dynamic Image objects
 
-Status: **Proposed — literal ABI/lifetime proposal for C's review; nothing below exists yet**
+Status: **Accepted (Phase 8.5 architecture, C final review; implementation and guest proofs pending)**
 Date: 2026-09-30
-Milestone: Phase 8.5 kernel mechanism. [ADR-0054](0054-installed-images-and-atomic-upgrade.md) owns the distinct persistent install/activation transaction. This ADR does not accept that transaction or authorize installer code.
+Milestone: Phase 8.5 kernel mechanism. [ADR-0054](0054-installed-images-and-atomic-upgrade.md) owns the distinct persistent install/activation transaction. Both ADRs are accepted as Phase 8.5 architecture; neither is an implementation or a completed checkpoint.
 
 ## Boundary and measured input
 
@@ -26,10 +26,10 @@ a host adapter, and fits a separately host-signed/verified **840-byte APKG v1**.
 4096-byte payload ceiling for this narrow proof; larger general applications may require
 a *separate*, explicitly versioned signed-wire decision, not an unmeasured v2 now.
 
-The following is a **candidate exact contract**, additive to syscall ABI v1. Reviewing
-it is not accepting it.
+The following is the **accepted design contract**, additive to syscall ABI v1.
+Production syscall and guest proofs remain mandatory before milestone completion.
 
-## Cap inventory and transfer topology (proposed)
+## Accepted cap inventory and transfer topology
 
 New `CapObj::ImageRegistrar` is a single kernel-created boot object. Only `WRITE`
 authorizes `REGISTER` and `REVOKE`; object possession, not pid, grants access. The
@@ -63,7 +63,7 @@ marker split and grant-inventory redesign; never describe this coarse marker as
 per-operation authority separation.
 
 The current packaged inherited grants are fsd Endpoint/WRITE (0), package Endpoint/READ
-(1), STAGE Notification/READ (2). Candidate additional registrar (3) and new manager
+(1), STAGE Notification/READ (2). The accepted additional registrar (3) and new manager
 marker anchor (4) total **5**, exactly `spawn::MAX_INHERIT=5` and manager
 `MAX_GRANTS=5`. The manager's audited 20 literal boot caps would become 22 (registrar
 and new marker), below 32; the actual dynamic Process-cap and temporary cap-slot
@@ -92,7 +92,7 @@ explicit LAUNCH can freshly reverify and register. Any other service receiving a
 unexpected transferred Image must destroy it; no new app gets a registrar or a
 transferable Image.
 
-## Additive syscall ABI v1 (candidate numbers 33 and 34)
+## Accepted additive syscall ABI v1 (numbers 33 and 34)
 
 Use the existing x86-64 ABI: RAX number; RDI, RSI, RDX, R10, R8, R9 arguments in order;
 RAX signed `i64` result. All unused argument registers for each new call must be zero
@@ -119,7 +119,7 @@ for stack strictly in the user half, and region count including stack. Do **not*
 replace or weaken the existing ELF validator. Cache no signer/policy assertion in the
 kernel.
 
-`SYS_CAP_DESCRIBE` remains `[kind, object_id, rights]`; propose ImageRegistrar **kind
+`SYS_CAP_DESCRIBE` remains `[kind, object_id, rights]`; ImageRegistrar is **kind
 5**, object ID **0** (descriptive, not an invoke token). Existing live Image remains
 kind **1** with the full monotonic ID. Describe a **stale** dynamic Image as `BAD_ARG`,
 without writing the output buffer; READ permission alone on Image still gates SPAWN.
@@ -164,12 +164,31 @@ cap refs may remain, but ref release for that ID must not affect a new slot occu
 Treat ref/pin overflow, underflow and impossible duplicate mutation as a fatal kernel
 invariant, not success or silent wraparound.
 
+**Accepted system-wide dynamic-child bound:** at most **one unretired dynamic
+user-child spawn record** may exist, independent of which registrar holder,
+manager request, or registry storage slot produced its Image. A child remains
+counted after its last thread exits until successful Process-cap-gated
+`SYS_PROC_FINISH` calls `spawn::forget`; a pid, death notification, cap deletion
+or registry REVOKE does not release the bound. In the dynamic `SYS_SPAWN`
+path, scan the tagged spawn-record table under IF=0 for *any* dynamic record
+**before** `spawn::prepare` reserves a record/process/frame or mints a Process
+cap; return `STATUS_BUSY=-4` on the second attempt with no state mutation.
+The successful first spawn tags its record with its full dynamic Image ID
+before its child thread starts; rollback clears the tag and record.
+`SYS_PROC_FINISH` retirement of that record permits the next dynamic spawn.
+Embedded-image spawns retain their existing limits/behavior. Lifting this
+one-child bound requires a later reviewed concurrency/ownership decision.
+Test second-spawn BUSY both while the first child is running and while it
+has exited but is unreaped; independently snapshot capspace, frames,
+processes and spawn records before and after each refusal (host model and
+real guest), then reap and prove a subsequent dynamic spawn succeeds.
+
 On **every** `SYS_SPAWN`, first read the held Image/READ cap, resolve the full ID under
 IF=0 and check `LIVE` before reserving any child/record/frame/Process cap. Pin the
 registry object across `spawn::prepare`, its second `elf::validate`, and `elf::load`
 until all image bytes have been copied into child-owned frames; unpin on *all* exits and
 rollback paths. Calls are serialized under the one-core IF=0 discipline for this
-proposal: a blocking/preemptible operation must never retain a naked borrow of the
+contract: a blocking/preemptible operation must never retain a naked borrow of the
 registry table. A concurrent revoke cannot cross the pin without an explicit reviewed
 locking change. After load, child pages belong to its address space and revoke affects
 **future** spawns only. Source mutability, dynamic-ID slot aliasing and stale-cap/revoke
@@ -212,12 +231,12 @@ preserves all accounting and does not reuse ID metadata unsafely. Because IDs ne
 repeat and `refs` is bounded, a safe alternative is to *not* count stale refs after
 revoke, so REVOKE drops all object-reference accounting while the cap slots retain only
 inert numeric IDs; subsequent slot clear skips ref decrement after ID lookup misses.
-This alternative is the **selected candidate**: the conservation equation applies to
+This is the **accepted bounded design**: the conservation equation applies to
 LIVE IDs, tombstones are unnecessary; stale caps can never target new IDs. Before
 freeing a revoked object's bytes, require pins=0. A failed `cap::grant` in IPC cannot be
 treated as a landed cap for accounting.
 
-### Independent conservation oracle required before acceptance/implementation claim
+### Independent conservation oracle required for implementation proof
 
 At every **stable syscall/IPC transition boundary** (after any IF=0 transfer escrow
 has resolved, before returning/blocking/waking), an independent kernel test-only
@@ -254,7 +273,7 @@ scanning separate state, not by trusting its modeled registry ledger; it is a
 dynamic registry, kernel walker, in-guest mutation or runtime proof yet exists;
 the above actual-implementation oracle remains an acceptance/qualification gate.
 
-## Manager death and dynamic-child ownership (fail-stop candidate)
+## Accepted manager-death and dynamic-child ownership (fail-stop)
 
 Current `SYS_SPAWN` hands its caller Process/READ|DESTROY (no COPY), and
 `SYS_PROC_FINISH` consumes that held cap to stop/reap the child. A different userspace
@@ -291,14 +310,14 @@ Place the last-thread check at the start of both `sys_thread_exit` and
 `proc::destroy`, before its IPC sweep. `SYS_PROC_FINISH` already refuses
 kernel-bootstrapped manager targets; this hook also covers internal destroy.
 One-core IF=0 ordering means a committed spawn record cannot slip between the
-manager-death check and halt. If a proposed implementation can miss a manager death
+manager-death check and halt. If an implementation can miss a manager death
 route (kernel-driven destroy, return from fault, thread exit, last-thread scheduling),
 fail-stop is **not** proved and dynamic-child execution must not ship. A fatal halt is a
 deliberate fail-closed availability cost, not a QEMU PASS or an anti-rollback guarantee.
 Only an accepted, separately justified general ownership/reacquisition design can
 replace this rule.
 
-## Explicitly out of scope and acceptance gate
+## Explicitly out of scope and qualification gates
 
 No production-key ceremony, Secure Boot, hostile-disk rollback guarantee, dynamic
 linking, GC, multi-package namespace, kernel fsd/crypto, ambient pid-based register
@@ -307,15 +326,15 @@ images and Phase 8.4 staging remain unchanged. Reboot discards registry/caps/IDs
 creates no dynamic Image until ADR-0054's complete durable rescan and fresh exact
 signed-file/current-policy verification on an explicit request.
 
-For C's acceptance, audit actual boot grants and manager/package high-water cap
-inventory, marker authority and exact request/reply protocol; freeze registrar
+During implementation, audit actual boot grants and manager/package high-water cap
+inventory, marker authority and exact request/reply protocol; implement the accepted registrar
 kind/rights, number/status encodings, scratch-memory/page-budget rules, reference hooks
 including every IPC state and capspace sweep, spawn/revoke linearization, and
 manager-death path. The single coarse 8.5 marker and 18-notification budget have C's design approval;
 implementation must prove actual 18/18 and nineteenth refusal, five-grant limit and
 32-slot capspaces. Do **not** add an unreviewed endpoint, expand grants or fake a
-private channel. ADR-0054 must independently freeze its persistent wire, crash-prefix and
-capacity rules. Neither ADR is Accepted yet.
+private channel. ADR-0054 already freezes its persistent wire, crash-prefix and conditional
+capacity rules; production and guest proofs remain pending. Both ADRs are Accepted as architecture; neither implementation nor qualification is complete.
 
 Mandatory host tests: two-slot refusal, ID 27..u32::MAX without wrap (model near
 exhaustion), stale-slot reuse, malformed/cross-page/mutated caller bytes, huge

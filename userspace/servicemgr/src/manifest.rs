@@ -26,6 +26,7 @@ pub enum Kind {
     Image,
     Endpoint,
     Notification,
+    ImageRegistrar,
 }
 /// Symbolic bootstrap slot name; a name is NOT authority. The boot root
 /// decides what object (if any) actually occupies this entry.

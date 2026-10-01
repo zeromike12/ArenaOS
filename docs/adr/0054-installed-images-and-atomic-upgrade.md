@@ -1,6 +1,6 @@
 # ADR-0054 — Phase 8.5 installed images, activation and atomic upgrade
 
-Status: **Proposed — C's direction recorded; persistent format and focused ADR-0055 kernel ABI not accepted; no installer or disk-image execution authorized**
+Status: **Accepted (Phase 8.5 architecture, C final review; implementation and guest proofs pending)**
 Date: 2026-09-30
 Milestone context: Phase 8.5, following the qualified, staging-only Phase 8.4 ([ADR-0053](0053-signed-package-trust-and-staging.md)).
 
@@ -16,10 +16,11 @@ across reboot and crashes, and when an old image may safely remain runnable.
 A shell message, pathname, staged reply, or old eligibility check cannot be
 the authority to register executable bytes.
 
-This is a design **start**, not an acceptance of a new syscall, executable
-format, persistent record, key, service or security guarantee. Keep Phase 8.4's
-qualified checkpoint bootable while resolving the questions below. Record and
-review material ABI/trust/persistence choices **before** dependent code.
+This is the **accepted Phase 8.5 architecture**, not a claim that any new
+syscall, persistent record, install service or security guarantee has been
+implemented or qualified. Keep Phase 8.4's
+qualified checkpoint bootable while implementing the accepted design below.
+Return material ABI/trust/persistence changes to M/C **before** dependent code.
 
 ## Existing constraints and measured work to do
 
@@ -88,9 +89,9 @@ review material ABI/trust/persistence choices **before** dependent code.
 **C's selected direction:** option 2, ring-3 verified snapshot plus a
 capability-gated kernel copy/production-ELF validation. The substantial
 new ABI, fresh dynamic object IDs, stale-cap revocation and fail-closed
-lifecycle are specified **for review** in focused [Proposed ADR-0055](0055-capability-gated-dynamic-image-registry.md).
-Neither option 1 nor option 3 is authorized. The ABI is not accepted merely
-by choosing the direction. Do not call a mutable file or LENT frame “sealed”.
+lifecycle are frozen in [Accepted ADR-0055](0055-capability-gated-dynamic-image-registry.md).
+Neither option 1 nor option 3 is authorized. The exact ABI is accepted by C’s final review, not merely by choosing
+the direction. Do not call a mutable file or LENT frame “sealed”.
 
 ### Durable installed/active state
 
@@ -115,11 +116,12 @@ additional to 8.4's STAGE marker; copies of the old marker cannot silently
 gain new authority. An installed, active or reverified image is **not**
 a running process. No automatic boot launch. One package namespace only;
 no GC, general multi-package manager or dynamic linking. The concrete
-schema and grant inventory below remain **Proposed**.
+schema and grant inventory below are **Accepted architecture**; guest
+proof remains pending.
 
-## Proposed state machine and fail-closed rules to evaluate
+## Accepted state machine and fail-closed rules
 
-The following are **candidate invariants**, not a frozen on-disk/API spec:
+The following are accepted invariants for the frozen on-disk/API design:
 
 ```text
 signed bytes verified -> stage-eligible -> installed (durable digest binding)
@@ -159,10 +161,10 @@ signed bytes verified -> stage-eligible -> installed (durable digest binding)
   Do not add GC or multi-namespace capacity merely by raising a table
   constant; choose and prove safe reclaim separately.
 
-## Candidate bounded AFS1 transaction (wire **not** accepted yet)
+## Accepted bounded AFS1 transaction (wire not implemented)
 
 Keep the **single** APKG/APOL v1 namespace and the 8.4 `p8-`/`s8-`
-predecessor scan. Proposal: immutable `n8-<20-lowercase-hex>-01..02`
+predecessor scan. Use immutable `n8-<20-lowercase-hex>-01..02`
 installed-generation files and `v8-<same-namespace>-01..04` activation
 files, each exactly **512 bytes** with its own checksum. The namespace is
 SHA-256 of the full canonical ID field as in 8.4; recheck the **full** ID
@@ -174,7 +176,7 @@ AFS1 objects/sectors already consumed by 8.1/8.2/8.4; it may return typed
 NO_SPACE without changing history. Post-CREATE ambiguity latches DEGRADED.
 No renaming, overwriting, GC or enlargement of 8.4's signed wire.
 
-**Candidate `AINS` record:** offsets `0..4` magic `AINS`, `4..6` format 1,
+**Accepted `AINS` record:** offsets `0..4` magic `AINS`, `4..6` format 1,
 `6..8` length 512, `8..16` contiguous generation 1..2,
 `16..48` canonical full ID, `48..80` SHA-256 of **entire signed APKG file**,
 `80..88` signed package version, `88..120` manifest payload digest,
@@ -183,7 +185,7 @@ No renaming, overwriting, GC or enlargement of 8.4's signed wire.
 `128..160` SHA-256 of preceding complete `AINS` record (all zero at gen1),
 `160..480` zero, `480..512` SHA-256 of exactly `0..480`.
 An `INSTALL` request requires the **new 8.5-only receiver-verified
-manager marker** from Proposed ADR-0055 (never the 8.4 STAGE marker), full
+manager marker** from Accepted ADR-0055 (never the 8.4 STAGE marker), full
 current-policy/package verification from the exact staged file and an
 available object slot. An installed package is not yet a validated Image:
 the existing **kernel** ELF validator is used at the activation boundary
@@ -194,7 +196,7 @@ running child results from INSTALL. A record checksum is an AFS1 crash-
 prefix/integrity check, **not** a hostile-disk authenticity proof; APKG
 signature/current policy are rechecked at every authorization boundary.
 
-**Candidate `AACT` record:** offsets `0..4` magic `AACT`, `4..6` format 1,
+**Accepted `AACT` record:** offsets `0..4` magic `AACT`, `4..6` format 1,
 `6..8` length 512, `8..16` contiguous decision generation 1..4,
 `16..48` full ID, `48..80` SHA-256 of the selected **complete `AINS`
 record**, `80..112` full signed APKG digest from that record,
@@ -203,7 +205,7 @@ record**, `80..112` full signed APKG digest from that record,
 record (zero at gen1), `160..480` zero, `480..512` SHA-256 of `0..480`.
 For action 2 all selected-image fields `48..120` are **zero**. Activation
 requires a **fresh call carrying the new 8.5 manager marker** (the same
-new object proposed for INSTALL, **never** the STAGE marker), plus
+new object used for INSTALL, **never** the STAGE marker), plus
 independent SELECT operation validation, a complete installed record,
 freshly verified exact APKG bytes, present valid chain and current-policy
 eligibility. C approved this **single coarse Phase-8.5 lifecycle-admin marker** for
@@ -222,7 +224,7 @@ authority. The provisional registry object must not leak on verifier death
 before the durable commit (ADR-0055 object-lifetime gate). No automatic
 boot launch. The subsequent explicit LAUNCH must reverify current policy
 and the exact signed file, freshly register a byte-exact Image through
-Proposed ADR-0055 (two-slot overlap with the old image, then revoke the
+Accepted ADR-0055 (two-slot overlap with the old image, then revoke the
 old ID), and spawn only through its held Image cap with explicit bounded
 grants. Reboot discards
 Image authority and reconstructs the durable selection only after full
@@ -232,8 +234,7 @@ candidate**; reverify it against the current policy and monotonically
 committed activation version without pretending 8.4's latest-stage QUERY
 was an installer authorization.
 
-**Candidate two-phase volatile/durable cutover, contingent on accepting
-ADR-0055:** the manager serializes LAUNCH, SELECT and DEACTIVATE for this
+**Accepted two-phase volatile/durable cutover (ADR-0055):** the manager serializes LAUNCH, SELECT and DEACTIVATE for this
 namespace and freezes launches before the first SELECT call. It calls the
 *existing packaged endpoint* with the distinct 8.5 marker; the verifier
 checks the exact staged file, installed record, signed policy, current
@@ -251,7 +252,7 @@ policy/stage mutation revokes and drops the provisional cap and invalidates
 the token. A manager stalled while
 still alive may temporarily consume one slot; it must explicitly abort
 or stay OFFLINE, not invoke unreviewed GC. On manager death with a LIVE
-registration, the proposed ADR-0055 fail-stop takes precedence. Never
+registration, the accepted ADR-0055 fail-stop takes precedence. Never
 acknowledge ACTIVE or hand the manager Image authority merely for PREPARED.
 
 With the manager no longer blocked in IPC, it uses its **held**
@@ -284,7 +285,7 @@ restart/rescan, never optimistically fall back. A lost reply after a
 committed select does **not** undo `AACT`: rescan decides durable state,
 then a new explicit LAUNCH rechecks and, if necessary, registers again.
 A manager death with a LIVE dynamic registration **or any unretired
-dynamic spawn record** invokes ADR-0055's **proposed** kernel fail-stop,
+dynamic spawn record** invokes ADR-0055's **accepted** kernel fail-stop,
 not a fictional Process-cap reacquisition. New policy revocation blocks
 launch immediately, invalidates the selected Image ID and requires
 stopping/reaping affected children before acknowledging completion; the
@@ -292,7 +293,7 @@ persisted old selection is then INELIGIBLE, not a fallback. Neither
 userspace sequencing nor an old QUERY status substitutes for the kernel
 liveness/last-reference hooks.
 
-### Candidate packaged IPC extension (exact proposed wire; **not** implemented)
+### Accepted packaged IPC extension (exact wire; **not** implemented)
 
 Reuse the existing package Endpoint/WRITE and IPC v1.1 `CALL`:
 `words=[op,arg,CAP_NONE-or-landed-slot]`, an **exactly 64-byte** in/out
@@ -406,11 +407,11 @@ record** blocks readiness rather than rolling back silently. A newly
 revoked selected package is INELIGIBLE; earlier `AACT`/`AINS` generations
 are not fallback authority. Already running children and stale Image
 caps are separate volatile lifecycle concerns addressed by ADR-0055.
-The record wire and limits above are **proposal for review, not an
-accepted persistent ABI**; test the candidate AFS1 byte/crash/capacity
-model before freezing it.
+The record wire and limits above are **accepted architecture**, not
+implemented persistence. Test real AFS1 byte/crash/capacity behavior before
+claiming Phase 8.5 completion.
 
-### Proposed wire, capacity and crash decision table (not frozen)
+### Accepted wire, capacity and crash decision table
 
 All record offsets above are **half-open byte offsets**; multi-byte
 integers are unsigned **little-endian**, not host-layout structs. Record
@@ -434,11 +435,11 @@ objects. The already documented maximum 8.1/8.2 fixture consumes **19**
 formal maxima total **19+8 (8.4)+2+4 = 33, one beyond AFS1's 32 slots**.
 The `AACT` v1 schema accepts decision numbers 1..4, but **four decisions
 cannot be promised on that full platter**: 2 installs + only 3 decisions
-fit at 32/32. The fourth must refuse typed pre-CREATE NO_SPACE with the
-prior exact state intact. This is a real availability tradeoff under the
+fit at 32/32. On that maximal fixture the fourth must return typed NO_SPACE **before
+CREATE**, leaving the prior platter byte-exact and its previously committed,
+still-policy-eligible selection usable. This is a real availability tradeoff under the
 no-GC/32-slot scope, not a reason to raise fsd's table bound or pretend
-all limits can be simultaneously realized. C must explicitly confirm
-this conditional fourth-decision limit at final freeze; a guarantee of
+all limits can be simultaneously realized. C confirmed this conditional fourth-decision limit at final freeze; a guarantee of
 all four on the full historical fixture would be a material capacity
 redesign. `n8`/`v8` are separately capped 2/4; preflight the entire real
 32-entry fsd object table, all reserved names and disk sectors (including
@@ -452,7 +453,7 @@ WRITE or CLOSE failure return DEGRADED/unknown until same-platter rescan.
 C approved the fixed Notification increase **17 -> 18** for the 8.5
 lifecycle-admin marker; an actual full-fixture 18/18 and mutation-free
 nineteenth refusal are still mandatory guest proofs. No new endpoint is in
-the candidate inventory.
+the accepted inventory.
 
 **Reproducible host-side full-platter measurement:** see the
 [design-only review ledger](0054-final-freeze-review-evidence.md).
@@ -483,15 +484,18 @@ caps + LENT buffer + landed marker + provisional Image give **8/32**.
 The 8.4 guest evidence counted 12/12 baseline resident processes/records;
 the **one** additional dynamic child needs separately proven process/record
 headroom. The source-checked host schedule in the capacity script proves
-only arithmetic under the stated **one-live-dynamic-child**, no-overlap
-assumptions. C must confirm this narrow child-concurrency limit at the
-final freeze; more simultaneous children require a new occupancy bound
-and Process-cap teardown plan, not an extrapolation. Actual 8.5 guest
-cap/Process/record/frame peaks, including
-restart and a full caller capspace, must be instrumented and tested;
+only arithmetic under the accepted **one-unretired-dynamic-child
+system-wide** bound (running or exited-but-not-reaped), plus no-overlap
+assumptions. C approved the system-wide one-**unretired**-dynamic-child limit at final
+freeze; the kernel must enforce it from the tagged spawn records. More
+simultaneous children require a new occupancy bound and Process-cap teardown
+plan, not an extrapolation.
+
+Actual 8.5 guest cap/Process/record/frame peaks, including restart and
+a full caller capspace, must be instrumented and tested;
 exceeding the model is a refusal/diagnostic, not permission to bump 32.
 
-| Cut point / observable committed AFS1 prefix | Candidate decision after complete same-platter scan (policy eligibility to SELECT/LAUNCH, not to disable) |
+| Cut point / observable committed AFS1 prefix | Accepted decision after complete same-platter scan (policy eligibility to SELECT/LAUNCH, not to disable) |
 |---|---|
 | Preflight before INSTALL/PREPARE/COMMIT/DEACTIVATE; 32 objects or exhausted generation | Typed NO_SPACE before CREATE, old exact bytes unchanged. PREPARE's kernel registration may instead return BUSY before any disk mutation. No assumption of a public free-sector API. |
 | INSTALL before CREATE / CREATE not committed | No new `AINS`; old installed/active state only if every exact signed file/current policy still verifies. Retry exact INSTALL safely. |
@@ -509,70 +513,61 @@ exceeding the model is a refusal/diagnostic, not permission to bump 32.
 | DEACTIVATE CREATE/WRITE/CLOSE/rescan/reply cuts | Same empty/corrupt-newest refusal vs complete-authoritative decision as SELECT; exact-generation/hash retry does not consume another slot. No new cap exists. |
 | LAUNCH after fresh verification/registration but before reply, in staged REPLIED queue, dropped on landing, or verifier death | No disk decision changes. Caller may launch **only** with a validated landed LIVE Image and exact success reply; otherwise drop/revoke provisional refs, rescan and explicitly retry. No Image created merely by ACTIVE. |
 | Policy/STAGE mutation or package revocation at any boundary | Invalidate PREPARE token, revoke provisional/selected Image, stop/reap child before acknowledged lifecycle completion. Previously committed selection may remain but is INELIGIBLE, not fallback authority. |
-| Manager last-thread exit/fault/kernel destroy while LIVE registration or unretired dynamic child exists | Proposed ADR-0055 fail-stop **before** cap/IPC teardown; not a recoverable userspace restart or a QEMU PASS. Without live dynamic state its registrar is dead, and no implicit boot launch occurs. |
+| Manager last-thread exit/fault/kernel destroy while LIVE registration or unretired dynamic child exists | Accepted ADR-0055 fail-stop **before** cap/IPC teardown; not a recoverable userspace restart or a QEMU PASS. Without live dynamic state its registrar is dead, and no implicit boot launch occurs. |
 | Whole-platter revert, malicious write, or torn commit sector | **Outside** documented AFS1 crash model; no anti-rollback or arbitrary-commit-corruption claim. |
 
 The per-operation IPC wire, volatile prepare token, idempotence rules and
 fsd acknowledgement/crash responses above are now **specified for final
 review**, not implemented. Actual guest sector-cut replay, measured cap/
 Process/record high-water and the full-fixture fourth-decision capacity
-choice remain **acceptance/qualification gates**. Do not infer atomic
-multi-file commit
-from AFS1; the immutable per-record commit prefix and explicit rescan are
-the only proposed linearization points. This candidate ordering binds
-the **Proposed** ADR-0055 primitive; if C revises that ABI or its marker
-inventory, re-review this transaction before acceptance.
+choice remain **implementation/qualification gates**, not open design
+choices. Do not infer atomic multi-file commit from AFS1; the immutable
+per-record commit prefix and explicit rescan are the accepted linearization
+points. This ordering binds Accepted ADR-0055; any material change to its
+ABI, trust boundary, resource bounds, lifecycle or crash semantics returns
+to M/C before implementation continues.
 
-## Resolved direction and acceptance questions
+## Accepted decisions and implementation gates
 
-1. **Payload/keys/scope settled for a mechanism proof:** the host-built
-   meaningful strict-subset ELF is 648 bytes and the independent root-
-   signed v1 file is 840 bytes. Keep **APKG/APOL v1** and the 4096-byte
-   payload limit; do not add a signed-wire version without new evidence.
-   Keep the public test root, one namespace, no implicit boot launch, GC,
-   general multi-package management, production ceremony, Secure Boot or
-   dynamic linking. Guest execution of that exact ELF is **still unproven**.
-2. **Image authority direction settled; exact ABI still Proposed:** the
-   ring-3 verifier supplies exact checked bytes, the kernel copies them to
-   immutable storage and uses its existing ELF validator. Only possession
-   of a registrar cap permits minting; dynamic IDs are disjoint from 0..26,
-   never reused, and liveness is rechecked on *every* spawn. Approve the
-   exact calls, cap rights, copy/transfer lifecycle, failure accounting and
-   supervisor-death fail-stop in focused [ADR-0055](0055-capability-gated-dynamic-image-registry.md)
-   **before** writing dependent installer code.
-3. **Persistent transaction still Proposed:** review/freeze the exact
-   `AINS`/`AACT` 512-byte schema, two installs plus up to four decisions
-   **only when AFS1 has space** (the measured full fixture fits three),
-   one approved coarse 8.5 lifecycle-admin marker distinct from STAGE,
-   exact IPC/reply/token behavior and crash-cut matrix above. Explicitly
-   resolve the 33-object simultaneous-maxima conflict with C, without
-   silent GC/table expansion. Prove real guest/platter AFS1 prefixes and distinguish
-   last *committed and still-policy-eligible* active version from a
-   visible malformed newest record. No silent fallback, no overwrite.
-4. **Running-child lifetime still Proposed:** active != running; manager
-   retains the non-copyable Process/DESTROY handle for explicit stop/reap.
-   Review ADR-0055's narrow fail-stop machine halt if the manager dies
-   while a dynamically launched child survives. No other service can
-   reacquire the current Process cap. If a reviewer rejects the fail-stop
-   hook, return for a separately justified ownership decision; do not
-   claim managed execution on orphaned authority.
+1. **Signed payload:** the useful host-built strict-subset ELF is 648 bytes;
+   the test-root-signed APKG v1 file is 840 bytes. Keep APKG/APOL v1 and
+   the 4096-byte payload ceiling for the narrow mechanism proof; guest
+   execution is still unproven. No production key, Secure Boot, GC,
+   multi-package namespace, linking or automatic boot launch.
+2. **Image authority:** Accepted ADR-0055 defines cap-possession-gated
+   registration, immutable copied ELF, production validation, two slots,
+   monotonic IDs, immediate all-copy revocation, a 16-page limit, and
+   manager-death fail-stop. **Both** registrar holders (manager and packaged)
+   are execution TCB; signature enforcement is not guaranteed against
+   compromise of either. The independent production ref walker, deliberate
+   mutation red control and guest proofs are completion gates.
+3. **Persistence:** AINS two-generation and AACT **1..4** wire is accepted.
+   Generation four requires real whole-platter preflight: the maximal
+   historical fixture supports **three**, and fourth returns NO_SPACE
+   before CREATE with byte-exact old platter. No GC/table growth. One
+   coarse 8.5 manager-only lifecycle marker, separate from STAGE, authorizes
+   the exact IPC protocol above. Host synthetic counts are not guest commits.
+4. **Lifecycle:** at most **one unretired dynamic child system-wide**, even
+   if exited but not reaped, enforced in the kernel's tagged spawn record
+   before any child resource reservation. A second dynamic spawn returns
+   BUSY without mutation; successful Process-cap `SYS_PROC_FINISH` frees
+   the bound. Stop/reap through the manager-held non-copyable Process cap,
+   not pid lookup or replacement service. Lifting this bound requires a
+   reviewed concurrency/ownership decision.
 
-## Decision (pending)
+## Decision (C final architectural freeze)
 
-C approved APKG v1 fit, the **17→18** Notification capacity direction,
-**one** coarse 8.5-only manager marker, and ADR-0055's two-slot/fresh-ID/
-revoke/page-budget/fail-stop directions. These design approvals are **not**
-acceptance of either new public ABI or persistent record wire. ADR-0054 owns the install/activation transaction; ADR-0055
-owns kernel Image objects and the manager-death lifecycle. Both remain
-Proposed. No new syscall, install/activation record, launch command or
-Image authority may be implemented until their exact mechanisms are
-accepted. A future production-key ceremony or versioned package format
-requires its own explicit decision.
+ADR-0054 and ADR-0055 are **Accepted as Phase 8.5 architecture** after C's
+capacity and structural dynamic-child corrections. This status authorizes
+implementation, not an 8.5 checkpoint, guest Image registration success or
+historical qualification. Return to M/C **only** if implementation requires
+a material change in accepted ABI, persistent wire, trust boundary,
+lifecycle ordering, resource bounds or crash semantics. The Phase 8.4
+artifact remains the last qualified deployable image until all gates pass.
 
-## Proof obligations for a future accepted design
+## Mandatory Phase 8.5 implementation and qualification proofs
 
-Before implementing, capture an option decision, threat model, state/byte
-schema and cap inventory in this or a superseding ADR. Then test a
+The accepted state/byte schema and cap inventory are recorded above. Test a
 *real signed, runnable guest executable* through actual fsd bytes and the
 production kernel ELF loader/spawn path; independently compare its bytes,
 digest, resulting Process cap, strict child grants and observed behavior.
@@ -587,7 +582,7 @@ baselines across repeated upgrades; add deliberate red controls for the
 signature/marker/byte-binding or loader boundary. Preserve historical
 suites, qualify a final-artifact-bound **100/100** QEMU run, and ship a
 checksummed deployable image extracted and booted from its own bundle.
-This proposed document is **not** an 8.5 checkpoint; the last qualified
+This accepted architecture is **not** an 8.5 checkpoint; the last qualified
 checkpoint is Phase 8.4.
 
 ## Downsides and future implications
@@ -597,5 +592,6 @@ ABI/persistent-format work, not a bounded hardening tweak. The test root
 and non-adversarial AFS1 crash model bound any accepted security claim;
 production keys, Secure Boot, hostile rollback resistance, dynamic linking
 or running arbitrary third-party software need separate decisions. Until
-this ADR's open decisions are resolved and accepted, continue to use the
-qualified staging-only Phase 8.4 image; no on-disk Image cap is permitted.
+Phase 8.5 is implemented and qualified, continue to ship the qualified
+staging-only Phase 8.4 image. No disk-backed Image exists **yet**; the
+accepted architecture permits its implementation under the gates above.
