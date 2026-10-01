@@ -763,6 +763,7 @@ impl State {
             {
                 return Err(());
             }
+            observed_caps("two-live-images");
             let (busy, empty) = call(PKG_OP_LAUNCH, 3, &active)?;
             expected_no_cap(&busy)?;
             if busy != [PKG_BUSY, 0, CAP_NONE] || empty != [0; 64] {
@@ -782,7 +783,6 @@ impl State {
             {
                 return Err(());
             }
-            observed_caps("two-live-images");
             log(
                 "servicemgr: two concurrent signed Image IDs, BUSY third, stale copied bearer and monotonic slot reuse PASS\r\n",
             );
@@ -823,6 +823,47 @@ impl State {
                 observed_caps("after-finish");
                 log(
                     "servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT\r\n",
+                );
+                // Test-only bounded repeated lifecycle on the unchanged
+                // signed old Image. Each STOP+FINISH must release the single
+                // dynamic-child bound without retaining a Process bearer.
+                observed_caps("cycle-pre");
+                for _ in 0..4 {
+                    let pid = unsafe {
+                        syscall5(
+                            SYS_SPAWN,
+                            old_slot,
+                            grants.as_ptr() as u64,
+                            1,
+                            PRIVATE as u64,
+                            MGR_BADGE_PKG_PROBE_EXIT,
+                        )
+                    };
+                    if pid <= 0 {
+                        return Err(());
+                    }
+                    let next = Child {
+                        pid: pid as u64,
+                        slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
+                    };
+                    if unsafe {
+                        syscall5(
+                            SYS_SPAWN,
+                            old_slot,
+                            grants.as_ptr() as u64,
+                            1,
+                            PRIVATE as u64,
+                            MGR_BADGE_PKG_PROBE_EXIT,
+                        )
+                    } != STATUS_BUSY
+                        || finish(next).is_err()
+                    {
+                        return Err(());
+                    }
+                }
+                observed_caps("cycle-post");
+                log(
+                    "servicemgr: four repeated signed-child STOP/FINISH cycles and BUSY refusals PASS\r\n",
                 );
             }
             let mut desc = [0; 3];

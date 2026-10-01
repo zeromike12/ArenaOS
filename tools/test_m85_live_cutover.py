@@ -51,7 +51,8 @@ def main():
         ((b'arena>',b'servicemgr: Phase 8.5 second distinct signed ELF version 8 installed, selected and ran in ring 3'),1,b'pkg resources\r'),
         (b'pkg: observed frames=',3,b'shutdown\r')])
     assert s.count('phase85-hold: first signed v7 launch exited normally')>=1
-    assert s.count('phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP')==1
+    assert s.count('phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP')>=1
+    assert 'servicemgr: four repeated signed-child STOP/FINISH cycles and BUSY refusals PASS' in s
     assert 'servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT' in s
     assert 'servicemgr: distinct signed v7/v8 registry slots live together at PREPARE; old copied ID revoked before COMMIT' in s
     assert 'phase85-v2: version-eight image queried signed stage via inherited endpoint' in s
@@ -63,6 +64,7 @@ def main():
     assert 'servicemgr: full fixture notification budget 18/18; nineteenth refused' in s
     mgr={name:int(n) for name,n in re.findall(r'servicemgr: observed cap occupancy ([\w-]+)=(\d+)',s)}
     assert all(0<mgr[k]<=32 for k in ('baseline','two-live-images','unretired-child','after-finish')),mgr
+    assert mgr['two-live-images']>mgr['unretired-child']>=mgr['baseline'] and mgr['after-finish']<mgr['two-live-images'],mgr
     peaks=[int(n) for n in re.findall(r'packaged: observed cap high-water (\d+)',s)]
     assert peaks and max(peaks)<=32 and max(peaks)>=7,peaks
     print(f'[{LABEL}] measured frames/records/processes={samples}; manager caps={mgr}; packaged cap peak={max(peaks)}',flush=True)
