@@ -22,6 +22,13 @@ replace the Phase 8.4 deployable/checksummed release in `RUNNING.md`.
   root**, execute as versions 7 and 8 on separate boots. AINS2 links AINS1;
   AACT4 selects version 8 after the committed version-7 decisions. The
   second-version test does **not** exercise a live old/new child overlap.
+- The v1 POLICY request now refuses with its existing `DENY` status before
+  CREATE whenever a durable selection is active: the older staging marker
+  has no authority to stop the child or revoke Image copies. A guest upgrade
+  fixture presents a valid independently root-signed next policy that would
+  revoke the selected v7 package, observes that refusal, and verifies no
+  new policy record was written. This is a conservative mutation freeze,
+  **not yet proof of a live revocation/deactivation cutover**.
 - `test_m85_select.py` proves three committed decisions and a fourth
   pre-CREATE `NO_SPACE` on a **synthetic** full 32-object platter, with
   unchanged three prior records. This is not a maximal historical fixture.
@@ -36,12 +43,15 @@ replace the Phase 8.4 deployable/checksummed release in `RUNNING.md`.
   omitted IPC reply-cap credit (RED) and the exact restored source/EFI
   passed the real guest again (GREEN). This covers one production hook,
   **not** all IPC/death/rollback paths.
-- After these changes `tools/run_tests.sh` returned zero and printed
-  **ALL TESTS PASSED (54 test suites)**. The build script produced an EFI and
-  ESP; a local, intermediate image SHA-256 was
+- The preceding pushed implementation checkpoint (`c1766d1`) completed
+  `tools/run_tests.sh` with **ALL TESTS PASSED (54 test suites)**. Its build
+  produced an EFI and ESP; the intermediate SHA-256 was
   `aca3268824f4aefda1ddf2642ad3798ad3a0d3d255805c1ef8afc5800a871d86`
   (EFI) and `a6e224c2c5de6ad6ea1ccb794909228078232750028848534a0da32c2d16bbb6`
-  (ESP). These are not a final artifact-bound qualification receipt.
+  (ESP). The later active-selection POLICY freeze passed the targeted
+  two-image QEMU upgrade test on the recovered workspace; rerun the full
+  suite here after the final code change. These are not final artifact-bound
+  qualification receipts.
 
 ## Reproduce or boot the source checkpoint
 
@@ -64,8 +74,9 @@ picker or production update workflow.
 
 ## Not yet closed
 
-The manager's full live old/new overlap, policy-revocation cutover and
-already-running child teardown; complete Image reference and all manager-
+Concurrent old/new registered Image lifetime, a one-child-bounded live
+cutover, policy-revocation/deactivation cutover and already-running child
+teardown; complete Image reference and all manager-
 death paths; observed guest resource high-water marks; actual maximal
 historical AFS1 fixture; robust negative ABI and token tests; and production
 custody remain outstanding. The currently accepted test root is not a

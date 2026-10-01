@@ -60,16 +60,26 @@ def main():
     assert 'phase85: bounded image queried signed stage via inherited endpoint' in s
     old=t.contents(disk); assert t.STAGE1 in old and old[t.STAGE1]==s1
     assert all(('v8-'+t.PREFIX+f'-{n:02d}').encode() in old for n in (1,2,3))
-    t.host_seed(disk,{t.INPUT:s2}) # offline replacement of unsigned candidate only
-    s=boot(esp,disk,'second',[((b'arena>',b'packaged READY'),1,b'pkg stage app.test\r'),
-        (b'arena>',2,b'pkg upgradetest\r'),
+    # A *valid* independently root-signed generation-2 intent would revoke
+    # active v7. The old STAGE/POLICY marker cannot stop an already running
+    # child or revoke every Image copy, so POLICY must refuse pre-CREATE
+    # until manager-approved DEACTIVATE has made the prior selection safe.
+    unsigned_policy=record.signed_policy(t.ID,2,t.SUB_PUB,7,1,(H(s1),))
+    policy2=unsigned_policy+openssl_sign(RFC_SEED,record.POL_DOMAIN+unsigned_policy)
+    assert len(policy2)==512 and record.parse_policy(policy2).generation==2
+    t.host_seed(disk,{t.INPUT:s2,t.INTENT:policy2}) # offline candidates only
+    s=boot(esp,disk,'second',[((b'arena>',b'packaged READY'),1,b'pkg policy app.test\r'),
+        (b'arena>',2,b'pkg stage app.test\r'),
+        (b'arena>',3,b'pkg upgradetest\r'),
         (b'servicemgr: Phase 8.5 second distinct signed ELF version 8 installed, selected and ran in ring 3',1,b'shutdown\r')])
+    assert 'pkg: refused status -2' in s and s.count('packaged: POLICY CREATE submitted')==0
     assert 'phase85-v2: version-eight image queried signed stage via inherited endpoint' in s
     assert 'servicemgr: UPGRADETEST refused' not in s
     now=t.contents(disk)
     n2=('n8-'+t.PREFIX+'-02').encode();v4=('v8-'+t.PREFIX+'-04').encode()
     assert now[t.STAGE1]==s1 and now[t.STAGE2]==s2 and now[t.POLICY1]==t.POLICY
-    assert all(now[n]==b for n,b in old.items() if n!=t.INPUT)
+    assert now[t.INTENT]==policy2 and t.POLICY1.replace(b'-01',b'-02') not in now
+    assert all(now[n]==b for n,b in old.items() if n not in (t.INPUT,t.INTENT))
     assert n2 in now and v4 in now and not afs1.audit(disk)
     ins=now[n2]; act=now[v4]
     assert len(ins)==512 and ins[:4]==b'AINS' and ins[8:16]==(2).to_bytes(8,'little')

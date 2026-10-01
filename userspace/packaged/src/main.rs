@@ -1168,6 +1168,19 @@ fn dispatch(
         };
     }
     if op == PKG_OP_POLICY {
+        // A Power shell still holds the frozen 8.4 STAGE/POLICY marker, not
+        // the 8.5 manager's Process caps. It cannot revoke a running child
+        // or every copied Image ID. Refuse *before CREATE* while a durable
+        // select exists: the manager must first freeze launches, revoke its
+        // ID, stop/reap the child and commit DEACTIVATE using its distinct
+        // lifecycle marker. This preserves v1 op/status bytes (DENY=-2)
+        // without ever acknowledging an unsafe policy revocation.
+        if lifecycle
+            .latest
+            .is_some_and(|(decision, _)| decision.select)
+        {
+            return (DENY, 0);
+        }
         // POLICY: offline-root-signed intent, no local signing.
         if state.chain.count >= package::MAX_POLICIES {
             return (NO_SPACE, 0);
