@@ -10,5 +10,5 @@ offline = true
 target = "x86_64-unknown-none"
 [target.x86_64-unknown-none]
 rustflags = ['--cfg', 'curve25519_dalek_backend="serial"',
-    '-C', 'link-arg=-T../configd/configd.ld', '-C', 'link-arg=-no-pie',
+    '-C', 'link-arg=-T../packaged/packaged.ld', '-C', 'link-arg=-no-pie',
     '-C', 'relocation-model=static']

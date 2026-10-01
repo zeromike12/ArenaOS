@@ -223,8 +223,10 @@ fn netlib() {
     // An Image/READ is not an Endpoint/WRITE even if it has a valid slot.
     // Refusal is from the kernel's actual kind/rights check, not from a
     // userspace name filter or a guessed process identity.
-    if !matches!(net::Client::new(SLOT_IMAGE).resolve([10, 0, 2, 2]),
-                 Err(net::Error::Transport(_))) {
+    if !matches!(
+        net::Client::new(SLOT_IMAGE).resolve([10, 0, 2, 2]),
+        Err(net::Error::Transport(_))
+    ) {
         write_str("m83: netlib FAIL (wrong-kind Image accepted as endpoint)\r\n");
         return;
     }
@@ -239,8 +241,9 @@ fn netlib() {
         return;
     }
     match net::Client::new(SLOT_STACK).resolve([10, 0, 2, 2]) {
-        Ok(mac) if mac != [0; 6] =>
-            write_str("m83: netlib PASS (linked client, live gateway ARP)\r\n"),
+        Ok(mac) if mac != [0; 6] => {
+            write_str("m83: netlib PASS (linked client, live gateway ARP)\r\n")
+        }
         _ => write_str("m83: netlib FAIL (real ARP or IPC refused)\r\n"),
     }
 }
@@ -1223,23 +1226,78 @@ fn do_spawn() {
 /// transfers the distinct marker; `packaged` verifies it at receipt and
 /// validates actual AFS1 bytes before acknowledging any staged record.
 fn package_command(o: &mut Out, rest: &[u8]) {
-    if eq(rest, b"restart") {
+    if eq(rest, b"restart")
+        || eq(rest, b"installtest")
+        || eq(rest, b"selecttest")
+        || eq(rest, b"selectlite")
+        || eq(rest, b"upgradetest")
+        || eq(rest, b"deathtest")
+    {
+        let installtest = eq(rest, b"installtest");
+        let selecttest = eq(rest, b"selecttest");
+        let selectlite = eq(rest, b"selectlite");
+        let upgradetest = eq(rest, b"upgradetest");
+        let deathtest = eq(rest, b"deathtest");
         let mut private = [0u64; 3];
         let mut wake = [0u64; 3];
         let mut endpoint = [0u64; 3];
-        if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_MGR_ADMIN, private.as_mut_ptr() as u64) } != 0
+        if unsafe {
+            syscall2(
+                SYS_CAP_DESCRIBE,
+                SLOT_MGR_ADMIN,
+                private.as_mut_ptr() as u64,
+            )
+        } != 0
             || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_MGR_WAKE, wake.as_mut_ptr() as u64) } != 0
-            || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_PACKAGE, endpoint.as_mut_ptr() as u64) } != 0
-            || private[0] != 3 || private[2] != RIGHTS_WRITE
-            || wake[0] != 3 || wake[2] != RIGHTS_WRITE || private[1] == wake[1]
-            || endpoint[0] != 2 || endpoint[2] != RIGHTS_WRITE | RIGHTS_COPY {
-            o.str("pkg: private restart authority unavailable\r\n"); return;
+            || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_PACKAGE, endpoint.as_mut_ptr() as u64) }
+                != 0
+            || private[0] != 3
+            || private[2] != RIGHTS_WRITE
+            || wake[0] != 3
+            || wake[2] != RIGHTS_WRITE
+            || private[1] == wake[1]
+            || endpoint[0] != 2
+            || endpoint[2] != RIGHTS_WRITE | RIGHTS_COPY
+        {
+            o.str("pkg: private restart authority unavailable\r\n");
+            return;
         }
-        if unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_ADMIN, MGR_BADGE_ADMIN_PKG_RESTART) } != 0
-            || unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0 {
-            o.str("pkg: private restart request refused\r\n"); return;
+        let badge = if installtest {
+            MGR_BADGE_ADMIN_PKG_INSTALLTEST
+        } else if selecttest {
+            MGR_BADGE_ADMIN_PKG_SELECTTEST
+        } else if selectlite {
+            MGR_BADGE_ADMIN_PKG_SELECTLITE
+        } else if upgradetest {
+            MGR_BADGE_ADMIN_PKG_UPGRADETEST
+        } else if deathtest {
+            MGR_BADGE_ADMIN_PKG_DEATHTEST
+        } else {
+            MGR_BADGE_ADMIN_PKG_RESTART
+        };
+        if unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_ADMIN, badge) } != 0
+            || unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0
+        {
+            o.str(
+                if installtest || selecttest || selectlite || upgradetest || deathtest {
+                    "pkg: private manager lifecycle fixture request refused\r\n"
+                } else {
+                    "pkg: private restart request refused\r\n"
+                },
+            );
+            return;
         }
-        o.str("pkg: private manager restart requested; no receipt yet\r\n");
+        o.str(if installtest {
+            "pkg: fixed signed INSTALL fixture requested; no receipt yet\r\n"
+        } else if selecttest || selectlite {
+            "pkg: fixed signed SELECT fixture requested; no receipt yet\r\n"
+        } else if upgradetest {
+            "pkg: fixed signed version-eight UPGRADE fixture requested; no receipt yet\r\n"
+        } else if deathtest {
+            "pkg: fatal manager-death negative fixture requested; no PASS expected\r\n"
+        } else {
+            "pkg: private manager restart requested; no receipt yet\r\n"
+        });
         return;
     }
     let (verb, remainder) = split_word(rest);
@@ -1254,14 +1312,28 @@ fn package_call(o: &mut Out, verb: &[u8], id: &[u8]) {
     // Diagnostic variants deliberately exercise the SAME stage opcode
     // without approval, with a different marker, or with attenuated
     // marker rights. They cannot mutate the AFS1 namespace.
-    let (op, admin, diag_cap) = if eq(verb, b"query") { (PKG_OP_QUERY, false, CAP_NONE) }
-        else if eq(verb, b"stage") { (PKG_OP_STAGE, true, SLOT_PACKAGE_MARKER) }
-        else if eq(verb, b"policy") { (PKG_OP_POLICY, true, SLOT_PACKAGE_MARKER) }
-        else if eq(verb, b"stage-noauth") { (PKG_OP_STAGE, false, CAP_NONE) }
-        else if eq(verb, b"stage-wrong") { (PKG_OP_STAGE, false, SLOT_APPROVAL) }
-        else if eq(verb, b"stage-wrongkind") { (PKG_OP_STAGE, false, SLOT_MEDIATOR) }
-        else if eq(verb, b"stage-attenuated") { (PKG_OP_STAGE, true, 22) }
-        else { o.str("pkg: use query|stage|policy ID\r\n"); return; };
+    let (op, admin, diag_cap) = if eq(verb, b"query") {
+        (PKG_OP_QUERY, false, CAP_NONE)
+    } else if eq(verb, b"stage") {
+        (PKG_OP_STAGE, true, SLOT_PACKAGE_MARKER)
+    } else if eq(verb, b"policy") {
+        (PKG_OP_POLICY, true, SLOT_PACKAGE_MARKER)
+    } else if eq(verb, b"stage-noauth") {
+        (PKG_OP_STAGE, false, CAP_NONE)
+    } else if eq(verb, b"stage-wrong") {
+        (PKG_OP_STAGE, false, SLOT_APPROVAL)
+    } else if eq(verb, b"stage-wrongkind") {
+        (PKG_OP_STAGE, false, SLOT_MEDIATOR)
+    } else if eq(verb, b"stage-attenuated") {
+        (PKG_OP_STAGE, true, 22)
+    } else if eq(verb, b"install-wrong") {
+        (PKG_OP_INSTALL, false, SLOT_PACKAGE_MARKER)
+    } else if eq(verb, b"install-noauth") {
+        (PKG_OP_INSTALL, false, CAP_NONE)
+    } else {
+        o.str("pkg: use query|stage|policy ID\r\n");
+        return;
+    };
     if id.is_empty() || id.len() > 31 || id.contains(&b' ') {
         o.str("pkg: ID must be 1..31 ASCII bytes, no spaces\r\n");
         return;
@@ -1270,14 +1342,24 @@ fn package_call(o: &mut Out, verb: &[u8], id: &[u8]) {
     let mut marker = [0u64; 3];
     let mut other = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_PACKAGE, ep.as_mut_ptr() as u64) } != 0
-        || ep[0] != 2 || ep[2] != RIGHTS_WRITE | RIGHTS_COPY
+        || ep[0] != 2
+        || ep[2] != RIGHTS_WRITE | RIGHTS_COPY
         || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_MEDIATOR, other.as_mut_ptr() as u64) } != 0
         || ep[1] == other[1]
-        || admin && (unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_PACKAGE_MARKER,
-                    marker.as_mut_ptr() as u64) } != 0
-            || marker[0] != 3 || marker[2] != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
-            || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_APPROVAL, other.as_mut_ptr() as u64) } != 0
-            || marker[1] == other[1]) {
+        || admin
+            && (unsafe {
+                syscall2(
+                    SYS_CAP_DESCRIBE,
+                    SLOT_PACKAGE_MARKER,
+                    marker.as_mut_ptr() as u64,
+                )
+            } != 0
+                || marker[0] != 3
+                || marker[2] != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
+                || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_APPROVAL, other.as_mut_ptr() as u64) }
+                    != 0
+                || marker[1] == other[1])
+    {
         o.str("pkg: package authority unavailable (OFFLINE)\r\n");
         return;
     }
@@ -1288,44 +1370,72 @@ fn package_call(o: &mut Out, verb: &[u8], id: &[u8]) {
             // Test-only local R|C cap occupies ONE fixed shell slot until
             // shell exit: it has no DESTROY and cannot be removed locally.
             // Its IPC-landed copy must be destroyed by the receiver.
-            if unsafe { syscall3(SYS_CAP_COPY, SLOT_PACKAGE_MARKER, 22,
-                                  RIGHTS_READ | RIGHTS_COPY) } != 0
-                || unsafe { syscall2(SYS_CAP_DESCRIBE, 22,
-                                     attenuated.as_mut_ptr() as u64) } != 0 {
-                o.str("pkg: attenuated diagnostic cap unavailable\r\n"); return;
+            if unsafe {
+                syscall3(
+                    SYS_CAP_COPY,
+                    SLOT_PACKAGE_MARKER,
+                    22,
+                    RIGHTS_READ | RIGHTS_COPY,
+                )
+            } != 0
+                || unsafe { syscall2(SYS_CAP_DESCRIBE, 22, attenuated.as_mut_ptr() as u64) } != 0
+            {
+                o.str("pkg: attenuated diagnostic cap unavailable\r\n");
+                return;
             }
         }
         if attenuated != [3, marker[1], RIGHTS_READ | RIGHTS_COPY] {
-            o.str("pkg: attenuated diagnostic source mismatch\r\n"); return;
+            o.str("pkg: attenuated diagnostic source mismatch\r\n");
+            return;
         }
     }
     let mut msg = [0u8; MSG_BYTES];
     msg[..id.len()].copy_from_slice(id);
     let mut reply = [0u64; 3];
-    let rc = unsafe { syscall6(SYS_IPC_CALL, SLOT_PACKAGE, op, 0,
-        diag_cap,
-        reply.as_mut_ptr() as u64, msg.as_mut_ptr() as u64) };
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            SLOT_PACKAGE,
+            op,
+            if op == PKG_OP_INSTALL { 1 } else { 0 },
+            diag_cap,
+            reply.as_mut_ptr() as u64,
+            msg.as_mut_ptr() as u64,
+        )
+    };
     if rc < 0 {
-        o.str("pkg: transport refused "); o.i64(rc); o.crlf();
+        o.str("pkg: transport refused ");
+        o.i64(rc);
+        o.crlf();
         return;
     }
     if reply[2] != CAP_NONE {
         let dropped = unsafe { syscall1(SYS_CAP_DESTROY, reply[2]) };
-        o.str(if dropped == 0 { "pkg: unexpected reply cap destroyed\r\n" }
-              else { "pkg: unexpected reply cap disposal FAILED\r\n" });
+        o.str(if dropped == 0 {
+            "pkg: unexpected reply cap destroyed\r\n"
+        } else {
+            "pkg: unexpected reply cap disposal FAILED\r\n"
+        });
         return;
     }
     o.str("pkg: ");
     if reply[0] == PKG_ELIGIBLE {
-        o.str("ELIGIBLE (staged, NOT installed/active) version "); o.u64(reply[1]);
+        o.str("ELIGIBLE (staged, NOT installed/active) version ");
+        o.u64(reply[1]);
         o.str(" digest ");
-        for b in &msg[..32] { o.hex2(*b); }
-    } else if reply[0] == PKG_UNSET { o.str("UNSET"); }
-    else if reply[0] == PKG_INELIGIBLE { o.str("INELIGIBLE"); }
-    else if reply[0] == PKG_OK && op == PKG_OP_POLICY {
-        o.str("POLICY committed generation "); o.u64(reply[1]);
+        for b in &msg[..32] {
+            o.hex2(*b);
+        }
+    } else if reply[0] == PKG_UNSET {
+        o.str("UNSET");
+    } else if reply[0] == PKG_INELIGIBLE {
+        o.str("INELIGIBLE");
+    } else if reply[0] == PKG_OK && op == PKG_OP_POLICY {
+        o.str("POLICY committed generation ");
+        o.u64(reply[1]);
     } else {
-        o.str("refused status "); o.i64(reply[0] as i64);
+        o.str("refused status ");
+        o.i64(reply[0] as i64);
     }
     o.crlf();
 }

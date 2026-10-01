@@ -47,20 +47,30 @@ struct Registry {
     next_id: u64,
 }
 static MANAGER_PID: SyncCell<u64> = SyncCell::new(0);
+static MANAGER_ALIVE: SyncCell<bool> = SyncCell::new(false);
 pub fn set_manager(pid: u64) {
     without_interrupts(|| unsafe {
         assert!(*MANAGER_PID.get() == 0 && pid != 0);
         *MANAGER_PID.get() = pid;
+        *MANAGER_ALIVE.get() = true;
     });
 }
-/// Fail-stop BEFORE notification, IPC, cap or process teardown on every
-/// last-thread path (normal exit, user fault, kernel-driven destroy).
+/// Registrar authority is held by cap *possession* AND the kernel-owned
+/// singleton's liveness. Death permanently disables even surviving copies.
+pub fn registrar_alive() -> bool {
+    without_interrupts(|| unsafe { *MANAGER_ALIVE.get() })
+}
+/// Fail-stop BEFORE record_exit, notification, IPC, cap or process teardown
+/// on every last-thread and pre-destroy path. No pid check is used for
+/// REGISTER authorization: this records only the root manager's demise.
 pub fn manager_death_check(pid: u64) {
-    if without_interrupts(|| unsafe { *MANAGER_PID.get() == pid })
-        && (active() || crate::spawn::unretired_dynamic_child())
-    {
+    if !without_interrupts(|| unsafe { *MANAGER_PID.get() == pid }) {
+        return;
+    }
+    if active() || crate::spawn::unretired_dynamic_child() {
         crate::halt::halt_machine("ADR-0055: manager death with dynamic authority/child");
     }
+    without_interrupts(|| unsafe { *MANAGER_ALIVE.get() = false });
 }
 
 static REG: SyncCell<Registry> = SyncCell::new(Registry {

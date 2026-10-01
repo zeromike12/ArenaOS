@@ -1,0 +1,14 @@
+[package]
+name = "arena-phase85-elf-probe-v2"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Host-side size proof for a purpose-built 8.5 guest executable; NOT installed by 8.4"
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+codegen-units = 1
+strip = "symbols"

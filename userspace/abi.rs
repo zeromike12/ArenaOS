@@ -72,6 +72,15 @@ pub const MGR_BADGE_ADMIN_PERM_CALLER_FIRST: u64 = 1 << 6; // ADR-0050 regressio
 /// ADR-0053 test-only Power-shell request: manager-owned package Process
 /// cap performs a bounded replacement; shared wake alone never suffices.
 pub const MGR_BADGE_ADMIN_PKG_RESTART: u64 = 1 << 7;
+/// Test-only fixed public app.test fixture; manager still owns lifecycle marker.
+pub const MGR_BADGE_ADMIN_PKG_INSTALLTEST: u64 = 1 << 9;
+/// Test-only fixed runnable signed fixture, manager-owned lifecycle sequence.
+pub const MGR_BADGE_ADMIN_PKG_SELECTTEST: u64 = 1 << 10;
+/// Fatal negative control: exit the manager while a provisional ID is LIVE.
+pub const MGR_BADGE_ADMIN_PKG_DEATHTEST: u64 = 1 << 11;
+/// Test-only small-platter first-version selection, then second signed ELF.
+pub const MGR_BADGE_ADMIN_PKG_SELECTLITE: u64 = 1 << 12;
+pub const MGR_BADGE_ADMIN_PKG_UPGRADETEST: u64 = 1 << 13;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.
@@ -208,6 +217,22 @@ pub const PKG_CORRUPT: u64 = (-5i64) as u64;
 pub const PKG_COLLISION: u64 = (-6i64) as u64;
 pub const PKG_OFFLINE: u64 = (-7i64) as u64;
 pub const PKG_PING_MAGIC: u64 = 0x504b4731;
+// ADR-0054 additive exact lifecycle wire; op 0..3 retain 8.4 meanings.
+pub const PKG_OP_INSTALL: u64 = 4;
+pub const PKG_OP_SELECT_PREPARE: u64 = 5;
+pub const PKG_OP_SELECT_COMMIT: u64 = 6;
+pub const PKG_OP_DEACTIVATE: u64 = 7;
+pub const PKG_OP_LAUNCH: u64 = 8;
+pub const PKG_OP_ABORT: u64 = 9;
+pub const PKG_INSTALLED: u64 = 4;
+pub const PKG_PREPARED: u64 = 5;
+pub const PKG_ACTIVE: u64 = 6;
+pub const PKG_DEACTIVATED: u64 = 7;
+pub const PKG_LAUNCH_READY: u64 = 8;
+pub const PKG_CONFLICT: u64 = (-8i64) as u64;
+pub const PKG_DOWNGRADE: u64 = (-9i64) as u64;
+pub const PKG_STALE: u64 = (-10i64) as u64;
+pub const PKG_BUSY: u64 = (-11i64) as u64;
 
 // ---- Phase 8.2 mediated, VOLATILE grant exercise (ADR-0048) ------------------
 // This first integration path deliberately makes NO persistence claim.

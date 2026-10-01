@@ -11,8 +11,8 @@ use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request,
 use arena_servicemgr::readiness::Gate;
 use arena_servicemgr::restart::{Refusal as RestartRefusal, Restart};
 use core::panic::PanicInfo;
-mod permission;
 mod package;
+mod permission;
 
 #[path = "../../abi.rs"]
 mod abi;
@@ -165,9 +165,13 @@ fn boot_inventory() -> Result<(u64, u64, u64), ()> {
         || rng_diag.rights != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
         || stack_diag.rights != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
         || rng_diag.object == stack_diag.object
-        || rng_diag.object == restart.object || stack_diag.object == restart.object
-        || rng_diag.object == admin.object || stack_diag.object == admin.object
-    { return Err(()); }
+        || rng_diag.object == restart.object
+        || stack_diag.object == restart.object
+        || rng_diag.object == admin.object
+        || stack_diag.object == admin.object
+    {
+        return Err(());
+    }
     if image.kind != inventory::IMAGE_KIND
         || image.object != 20
         || image.rights != manifest::READ as u64
@@ -331,8 +335,14 @@ fn probe_dependencies(fixture: u8) -> Result<(), ()> {
             RIGHTS_WRITE | if fixture == 2 { RIGHTS_COPY } else { 0 },
         ),
         (SLOT_RESTART as u64, RIGHTS_WRITE),
-        (SLOT_STACK_DIAG as u64, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY), // wrong-object negative
-        (SLOT_RNG_DIAG as u64, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY), // real proof
+        (
+            SLOT_STACK_DIAG as u64,
+            RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY,
+        ), // wrong-object negative
+        (
+            SLOT_RNG_DIAG as u64,
+            RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY,
+        ), // real proof
     ];
     let child = unsafe {
         syscall5(
@@ -463,14 +473,25 @@ fn permission_only(perm: &mut Option<permission::State>, pkg: &mut Option<packag
     log("servicemgr: stack OFFLINE; independent permission lifecycle continues\r\n");
     loop {
         let b = unsafe { syscall1(SYS_WAIT, SLOT_EVENTS as u64) };
-        if b < 0 { park(); }
-        if let Some(state) = perm.as_mut() { state.event(b as u64); }
-        if let Some(state) = pkg.as_mut() { state.event(b as u64); }
+        if b < 0 {
+            park();
+        }
+        if let Some(state) = perm.as_mut() {
+            state.event(b as u64);
+        }
+        if let Some(state) = pkg.as_mut() {
+            state.event(b as u64);
+        }
     }
 }
 
-fn monitor(mut pid: u64, mut handle: u8, step: Step,
-           mut perm: Option<permission::State>, mut pkg: Option<package::State>) -> ! {
+fn monitor(
+    mut pid: u64,
+    mut handle: u8,
+    step: Step,
+    mut perm: Option<permission::State>,
+    mut pkg: Option<package::State>,
+) -> ! {
     let mut next_probe_fixture = 0u8;
     let mut policy = match Restart::new(pid, step.restart_limit, step.backoff_us) {
         Ok(p) => p,
@@ -485,8 +506,12 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step,
             log("servicemgr: OFFLINE — event wait refused\r\n");
             permission_only(&mut perm, &mut pkg);
         }
-        if let Some(ref mut state) = perm { state.event(badge as u64); }
-        if let Some(ref mut state) = pkg { state.event(badge as u64); }
+        if let Some(ref mut state) = perm {
+            state.event(badge as u64);
+        }
+        if let Some(ref mut state) = pkg {
+            state.event(badge as u64);
+        }
         // Shared events can be forged by netd. STOP authority is the
         // separate private notification (shell/W, manager/R), taken
         // nonblocking so a forged wake cannot stall the monitor.
@@ -524,12 +549,35 @@ fn monitor(mut pid: u64, mut handle: u8, step: Step,
                     }
                 }
             } else if request as u64 == MGR_BADGE_ADMIN_PERM_PROBE
-                || request as u64 == MGR_BADGE_ADMIN_PERM_CALLER_FIRST {
+                || request as u64 == MGR_BADGE_ADMIN_PERM_CALLER_FIRST
+            {
                 if let Some(state) = perm.as_mut() {
                     state.test_probe(request as u64 == MGR_BADGE_ADMIN_PERM_CALLER_FIRST);
                 }
             } else if request as u64 == MGR_BADGE_ADMIN_PKG_RESTART {
-                if let Some(state) = pkg.as_mut() { state.test_restart(); }
+                if let Some(state) = pkg.as_mut() {
+                    state.test_restart();
+                }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_INSTALLTEST {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_install_fixture();
+                }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_SELECTTEST {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_select_fixture();
+                }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_SELECTLITE {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_select_lite();
+                }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_UPGRADETEST {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_upgrade_fixture();
+                }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_DEATHTEST {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_die_with_provisional();
+                }
             } else if request != 0 {
                 log("servicemgr: refused unknown private admin request\r\n");
             } else {
@@ -656,14 +704,18 @@ pub extern "C" fn _start() -> ! {
             let perm = match permission::start() {
                 Ok(state) => Some(state),
                 Err(()) => {
-                    log("servicemgr: permission path OFFLINE (broker/app or readiness refused)\r\n");
+                    log(
+                        "servicemgr: permission path OFFLINE (broker/app or readiness refused)\r\n",
+                    );
                     None
                 }
             };
             let pkg = match package::start() {
                 Ok(state) => Some(state),
                 Err(()) => {
-                    log("servicemgr: packaged OFFLINE (authority, boot scan, or readiness refused)\r\n");
+                    log(
+                        "servicemgr: packaged OFFLINE (authority, boot scan, or readiness refused)\r\n",
+                    );
                     None
                 }
             };

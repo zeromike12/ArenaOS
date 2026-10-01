@@ -9,6 +9,8 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+#[path = "../../installed.rs"]
+mod installed;
 
 const FS: u64 = 0;
 const SERVER: u64 = 1;
@@ -17,6 +19,89 @@ const REGISTRAR: u64 = 3;
 const LIFECYCLE: u64 = 4;
 const BUFFER: u64 = 7;
 const LENT: u64 = 8;
+// Private provisional Image cap: never an inherited grant or a public slot.
+const PROVISIONAL: u64 = 9;
+
+#[derive(Clone, Copy)]
+struct Pending {
+    token: u64,
+    next_counter: u64,
+    last_aborted: u64,
+    id: [u8; 32],
+    installed_hash: [u8; 32],
+    package_digest: [u8; 32],
+    policy_digest: [u8; 32],
+    image_id: u32,
+}
+impl Pending {
+    const fn empty() -> Self {
+        Self {
+            token: 0,
+            next_counter: 1,
+            last_aborted: 0,
+            id: [0; 32],
+            installed_hash: [0; 32],
+            package_digest: [0; 32],
+            policy_digest: [0; 32],
+            image_id: 0,
+        }
+    }
+    fn abort(&mut self) {
+        if self.token == 0 {
+            return;
+        }
+        // A failed revoke is a TCB invariant violation; leaving a runnable
+        // provisional ID behind is not an acceptable typed refusal.
+        if unsafe {
+            syscall6(
+                SYS_IMAGE_REVOKE,
+                REGISTRAR,
+                self.image_id as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        } != 0
+            || unsafe { syscall1(SYS_CAP_DESTROY, PROVISIONAL) } != 0
+        {
+            fail("provisional Image revoke/drop refused");
+        }
+        self.token = 0;
+        self.image_id = 0;
+    }
+}
+
+fn register_payload(buf: &Buffers, size: usize) -> Result<u32, u64> {
+    let n = size.checked_sub(192).ok_or(BAD_FORMAT)?;
+    if !(1..=4096).contains(&n) {
+        return Err(BAD_FORMAT);
+    }
+    let id = unsafe {
+        syscall6(
+            SYS_IMAGE_REGISTER,
+            REGISTRAR,
+            buf.file[128..].as_ptr() as u64,
+            n as u64,
+            PROVISIONAL,
+            0,
+            0,
+        )
+    };
+    if id < 0 {
+        return Err(if id == -4 { PKG_BUSY } else { DENY });
+    }
+    if !(27..=u32::MAX as i64).contains(&id) {
+        fail("invalid minted Image ID");
+    }
+    let mut observed = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, PROVISIONAL, observed.as_mut_ptr() as u64) } != 0
+        || observed != [1, id as u64, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+    {
+        fail("minted Image cap inventory mismatch");
+    }
+    Ok(id as u32)
+}
 const BAD_FORMAT: u64 = PKG_BAD_FORMAT;
 const DENY: u64 = PKG_DENY;
 const NO_SPACE: u64 = PKG_NO_SPACE;
@@ -175,14 +260,24 @@ fn write_new(
     // committed an empty visible file; latch DEGRADED on any later failure.
     *degraded = true;
     let stage = name.starts_with(b"s8-");
+    let install = name.starts_with(b"n8-");
+    let decision = name.starts_with(b"v8-");
     say(if stage {
         "STAGE CREATE submitted"
+    } else if install {
+        "INSTALL CREATE submitted"
+    } else if decision {
+        "AACT CREATE submitted"
     } else {
         "POLICY CREATE submitted"
     });
     let fh = fs_name(name, true).map_err(|_| DEGRADED)?;
     say(if stage {
         "STAGE CREATE committed empty"
+    } else if install {
+        "INSTALL CREATE committed empty"
+    } else if decision {
+        "AACT CREATE committed empty"
     } else {
         "POLICY CREATE committed empty"
     });
@@ -193,6 +288,10 @@ fn write_new(
         unsafe { core::ptr::copy_nonoverlapping(file[offset..].as_ptr(), va as *mut u8, amount) };
         say(if stage {
             "STAGE WRITE submitted"
+        } else if install {
+            "INSTALL WRITE submitted"
+        } else if decision {
+            "AACT WRITE submitted"
         } else {
             "POLICY WRITE submitted"
         });
@@ -201,6 +300,10 @@ fn write_new(
                 offset += amount;
                 say(if stage {
                     "STAGE WRITE reply exact"
+                } else if install {
+                    "INSTALL WRITE reply exact"
+                } else if decision {
+                    "AACT WRITE reply exact"
                 } else {
                     "POLICY WRITE reply exact"
                 });
@@ -213,6 +316,10 @@ fn write_new(
     }
     say(if stage {
         "STAGE CLOSE submitted"
+    } else if install {
+        "INSTALL CLOSE submitted"
+    } else if decision {
+        "AACT CLOSE submitted"
     } else {
         "POLICY CLOSE submitted"
     });
@@ -222,6 +329,10 @@ fn write_new(
     }
     say(if stage {
         "STAGE CLOSE completed"
+    } else if install {
+        "INSTALL CLOSE completed"
+    } else if decision {
+        "AACT CLOSE completed"
     } else {
         "POLICY CLOSE completed"
     });
@@ -376,24 +487,655 @@ fn scan(va: u64, buf: &mut Buffers, requested: &[u8; 32]) -> Result<State, u64> 
     })
 }
 
-/// Return (typed status, word1), with at most one digest in reply bytes.
+/// A complete same-platter lifecycle scan. Checks every visible newest record
+/// and its predecessors, full IDs, exact signed staged bytes and immutable
+/// SHA-256 links. Checksums are crash-prefix checks, not signatures.
+struct Lifecycle {
+    installs: [Option<(installed::Installed, installed::Digest)>; 2],
+    n_ins: u8,
+    latest: Option<(installed::Activation, installed::Digest)>,
+    n_act: u8,
+    selected_floor: Option<(u64, [u8; 32])>,
+}
+fn scan_lifecycle(
+    va: u64,
+    buf: &mut Buffers,
+    requested: &[u8; 32],
+    state: &State,
+) -> Result<Lifecycle, u64> {
+    let mut ins_names = [None::<[u8; 26]>; 2];
+    let mut act_names = [None::<[u8; 26]>; 4];
+    let mut cursor = 0u32;
+    let expected_prefix = package::namespace(requested).map_err(|_| BAD_FORMAT)?;
+    for _ in 0..=32 {
+        let mut msg = [0u8; MSG_BYTES];
+        let value = fs_reply(Client::new(FS).list(cursor as u64, &mut msg))?;
+        let next = u32::from_le_bytes(msg[..4].try_into().unwrap());
+        if next == FS_CURSOR_END {
+            break;
+        }
+        let n = u32::from_le_bytes(msg[12..16].try_into().unwrap()) as usize;
+        if n == 0
+            || n >= FS_NAME_MAX
+            || next <= cursor
+            || next > 32
+            || value >= 32
+            || u64::from(next) != value + 1
+        {
+            return Err(CORRUPT);
+        }
+        let name = &msg[16..16 + n];
+        let install = name.starts_with(b"n8-");
+        let activation = name.starts_with(b"v8-");
+        if install || activation {
+            if n != 26
+                || name[23] != b'-'
+                || name[24] != b'0'
+                || !(b'1'..=if install { b'2' } else { b'4' }).contains(&name[25])
+                || name[3..23]
+                    .iter()
+                    .any(|b| !b.is_ascii_hexdigit() || b.is_ascii_uppercase())
+                || u64::from_le_bytes(msg[4..12].try_into().unwrap()) != 512
+            {
+                return Err(CORRUPT);
+            }
+            if name[3..23] != expected_prefix {
+                return Err(COLLISION);
+            }
+            let mut full = [0u8; 26];
+            full.copy_from_slice(name);
+            let idx = (name[25] - b'1') as usize;
+            let target = if install {
+                &mut ins_names[idx]
+            } else {
+                &mut act_names[idx]
+            };
+            if target.replace(full).is_some() {
+                return Err(CORRUPT);
+            }
+        }
+        cursor = next;
+    }
+    let mut result = Lifecycle {
+        installs: [None; 2],
+        n_ins: 0,
+        latest: None,
+        n_act: 0,
+        selected_floor: None,
+    };
+    let mut prev = None::<[u8; 512]>;
+    for (idx, name) in ins_names.into_iter().enumerate() {
+        let Some(name) = name else {
+            if ins_names[idx + 1..].iter().any(Option::is_some) {
+                return Err(CORRUPT);
+            }
+            break;
+        };
+        read_named(&name, 512, va, &mut buf.file)?;
+        let wire: [u8; 512] = buf.file[..512].try_into().unwrap();
+        let rec = installed::parse_installed(&wire, sha256).map_err(|_| CORRUPT)?;
+        if rec.id != *requested || rec.generation != (idx + 1) as u64 {
+            return Err(CORRUPT);
+        }
+        installed::check_predecessor(
+            requested,
+            rec.generation,
+            &rec.previous,
+            prev.as_ref(),
+            true,
+            sha256,
+        )
+        .map_err(|_| CORRUPT)?;
+        if rec.stage > state.history.count {
+            return Err(CORRUPT);
+        }
+        let stage_name =
+            package::numbered_name(b"s8-", requested, rec.stage, 2).map_err(|_| CORRUPT)?;
+        let size = visible_size(&stage_name)?;
+        if !(193..=PACKAGE_MAX as u64).contains(&size) {
+            return Err(CORRUPT);
+        }
+        read_named(&stage_name, size as usize, va, &mut buf.file)?;
+        let pkg = package::parse_package(&buf.file[..size as usize]).map_err(|_| CORRUPT)?;
+        state
+            .chain
+            .verified_signer(&pkg, &mut buf.signed)
+            .map_err(|_| CORRUPT)?;
+        if pkg.id != *requested
+            || pkg.version != rec.version
+            || pkg.full_digest != rec.full_digest
+            || buf.file[56..88] != rec.payload_digest
+        {
+            return Err(CORRUPT);
+        }
+        result.installs[idx] = Some((rec, sha256(&wire)));
+        result.n_ins += 1;
+        prev = Some(wire);
+    }
+    let mut prev = None::<[u8; 512]>;
+    let mut active = false;
+    let mut selected_floor = None::<(u64, [u8; 32])>;
+    for (idx, name) in act_names.into_iter().enumerate() {
+        let Some(name) = name else {
+            if act_names[idx + 1..].iter().any(Option::is_some) {
+                return Err(CORRUPT);
+            }
+            break;
+        };
+        read_named(&name, 512, va, &mut buf.file)?;
+        let wire: [u8; 512] = buf.file[..512].try_into().unwrap();
+        let rec = installed::parse_activation(&wire, sha256).map_err(|_| CORRUPT)?;
+        if rec.id != *requested || rec.generation != (idx + 1) as u64 {
+            return Err(CORRUPT);
+        }
+        installed::check_predecessor(
+            requested,
+            rec.generation,
+            &rec.previous,
+            prev.as_ref(),
+            false,
+            sha256,
+        )
+        .map_err(|_| CORRUPT)?;
+        if rec.select {
+            if !result.installs.iter().flatten().any(|(i, hash)| {
+                *hash == rec.installed_hash
+                    && i.full_digest == rec.full_digest
+                    && i.version == rec.version
+            }) {
+                return Err(CORRUPT);
+            }
+            if let Some((version, digest)) = selected_floor {
+                if rec.version < version || (rec.version == version && rec.full_digest != digest) {
+                    return Err(CORRUPT);
+                }
+            }
+            selected_floor = Some((rec.version, rec.full_digest));
+            active = true;
+        } else {
+            if !active {
+                return Err(CORRUPT);
+            }
+            active = false;
+        }
+        result.latest = Some((rec, sha256(&wire)));
+        result.selected_floor = selected_floor;
+        result.n_act += 1;
+        prev = Some(wire);
+    }
+    Ok(result)
+}
+
+/// The exact signed current policy file, not its ordinal or a cached flag,
+/// binds a volatile PREPARE across any subsequent request.
+fn current_policy_hash(
+    state: &State,
+    requested: &[u8; 32],
+    va: u64,
+    buf: &mut Buffers,
+) -> Result<[u8; 32], u64> {
+    if state.chain.count == 0 {
+        return Ok([0; 32]);
+    }
+    let name =
+        package::numbered_name(b"p8-", requested, state.chain.count, 4).map_err(|_| CORRUPT)?;
+    read_named(&name, 512, va, &mut buf.file)?;
+    Ok(sha256(&buf.file[..512]))
+}
+
+/// Leave the exact independently verified signed staged bytes in buf.file for
+/// the kernel's single-copy registration. Never infer eligibility from QUERY.
+fn verified_install(
+    rec: &installed::Installed,
+    state: &State,
+    requested: &[u8; 32],
+    va: u64,
+    buf: &mut Buffers,
+) -> Result<usize, u64> {
+    let name = package::numbered_name(b"s8-", requested, rec.stage, 2).map_err(|_| CORRUPT)?;
+    let size = visible_size(&name)?;
+    if !(193..=PACKAGE_MAX as u64).contains(&size) {
+        return Err(CORRUPT);
+    }
+    read_named(&name, size as usize, va, &mut buf.file)?;
+    let pkg = package::parse_package(&buf.file[..size as usize]).map_err(|_| CORRUPT)?;
+    if pkg.id != *requested
+        || pkg.full_digest != rec.full_digest
+        || pkg.version != rec.version
+        || buf.file[56..88] != rec.payload_digest
+    {
+        return Err(CORRUPT);
+    }
+    state
+        .chain
+        .eligible(&pkg, &mut buf.signed)
+        .map_err(|_| DENY)?;
+    Ok(size as usize)
+}
+
+/// Return (typed status, word1); an Image may only be replied to a fresh
+/// marker-approved COMMIT/LAUNCH after exact disk/signer/authority checks.
 fn dispatch(
     op: u64,
+    arg: u64,
     requested: &[u8; 32],
+    expected_digest: &[u8; 32],
     va: u64,
     buf: &mut Buffers,
     degraded: &mut bool,
     answer: &mut [u8; MSG_BYTES],
+    pending: &mut Pending,
+    reply_cap: &mut u64,
 ) -> (u64, u64) {
     if *degraded {
+        pending.abort();
         return (DEGRADED, 0);
     }
     let state = match scan(va, buf, requested) {
         Ok(s) => s,
-        Err(e) => return (e, 0),
+        Err(e) => {
+            pending.abort();
+            return (e, 0);
+        }
     };
     if state.id.is_some_and(|id| id != *requested) {
+        pending.abort();
         return (COLLISION, 0);
+    }
+    let lifecycle = match scan_lifecycle(va, buf, requested, &state) {
+        Ok(s) => s,
+        Err(e) => {
+            pending.abort();
+            return (e, 0);
+        }
+    };
+    // Every request rechecks a live provisional binding, including ordinary
+    // QUERY; a modified staged file or signed policy cannot retain an old ID.
+    if pending.token != 0 {
+        let bound = lifecycle
+            .installs
+            .iter()
+            .flatten()
+            .find(|(_, h)| *h == pending.installed_hash)
+            .copied();
+        let unchanged = if let Some((rec, _)) = bound {
+            current_policy_hash(&state, requested, va, buf).ok() == Some(pending.policy_digest)
+                && verified_install(&rec, &state, requested, va, buf).is_ok()
+                && rec.full_digest == pending.package_digest
+                && rec.id == pending.id
+        } else {
+            false
+        };
+        if !unchanged {
+            pending.abort();
+        }
+    }
+    // No policy/STAGE mutation may leave an old provisional Image live.
+    if matches!(
+        op,
+        PKG_OP_POLICY | PKG_OP_STAGE | PKG_OP_INSTALL | PKG_OP_DEACTIVATE
+    ) {
+        pending.abort();
+    }
+    if op == PKG_OP_INSTALL {
+        if !(1..=2).contains(&arg) || state.history.count < arg as u8 {
+            return (BAD_FORMAT, 0);
+        }
+        let stage_name = package::numbered_name(b"s8-", requested, arg as u8, 2).unwrap();
+        let size = match visible_size(&stage_name) {
+            Ok(n) if (193..=PACKAGE_MAX as u64).contains(&n) => n as usize,
+            Ok(_) => return (CORRUPT, 0),
+            Err(e) => return (e, 0),
+        };
+        if let Err(e) = read_named(&stage_name, size, va, &mut buf.file) {
+            return (e, 0);
+        }
+        let pkg = match package::parse_package(&buf.file[..size]) {
+            Ok(p) => p,
+            Err(_) => return (CORRUPT, 0),
+        };
+        if pkg.id != *requested || pkg.full_digest != *expected_digest {
+            return (PKG_STALE, 0);
+        }
+        if state.chain.eligible(&pkg, &mut buf.signed).is_err() {
+            return (DENY, 0);
+        }
+        let version = pkg.version;
+        let digest = pkg.full_digest;
+        let mut payload = [0u8; 32];
+        payload.copy_from_slice(&buf.file[56..88]);
+        if lifecycle.n_ins > 0 {
+            let (prev, prev_hash) = lifecycle.installs[(lifecycle.n_ins - 1) as usize].unwrap();
+            if version < prev.version {
+                return (PKG_DOWNGRADE, 0);
+            }
+            if version == prev.version {
+                if digest != prev.full_digest {
+                    return (PKG_CONFLICT, 0);
+                }
+                if prev.stage != arg as u8 {
+                    return (PKG_CONFLICT, 0);
+                }
+                answer[..32].copy_from_slice(&digest);
+                answer[32..64].copy_from_slice(&prev_hash);
+                return (PKG_INSTALLED, prev.generation);
+            }
+        }
+        if lifecycle.n_ins >= 2 || state.objects >= 32 {
+            return (NO_SPACE, 0);
+        }
+        let generation = lifecycle.n_ins + 1;
+        let prev = lifecycle.installs[0].map_or([0; 32], |(_, h)| h);
+        let record = installed::Installed {
+            generation: generation as u64,
+            id: *requested,
+            full_digest: digest,
+            version,
+            payload_digest: payload,
+            stage: arg as u8,
+            observed_policy: state.chain.count,
+            previous: prev,
+        };
+        let mut wire = [0u8; 512];
+        if installed::encode_installed(&record, &mut wire, sha256).is_err() {
+            return (CORRUPT, 0);
+        }
+        let record_hash = sha256(&wire);
+        let name = package::numbered_name(b"n8-", requested, generation, 2).unwrap();
+        buf.file[..512].copy_from_slice(&wire);
+        if write_new(&name, 512, va, &buf.file, degraded).is_err() {
+            return (DEGRADED, 0);
+        }
+        let after = match scan(va, buf, requested) {
+            Ok(s) => s,
+            Err(_) => return (DEGRADED, 0),
+        };
+        let history = match scan_lifecycle(va, buf, requested, &after) {
+            Ok(s) => s,
+            Err(_) => return (DEGRADED, 0),
+        };
+        if history.n_ins != generation
+            || history.installs[(generation - 1) as usize] != Some((record, record_hash))
+            || read_named(&name, 512, va, &mut buf.file).is_err()
+            || buf.file[..512] != wire
+        {
+            return (DEGRADED, 0);
+        }
+        *degraded = false;
+        answer[..32].copy_from_slice(&digest);
+        answer[32..64].copy_from_slice(&record_hash);
+        return (PKG_INSTALLED, generation as u64);
+    }
+    if op == PKG_OP_SELECT_PREPARE {
+        if !(1..=2).contains(&arg) {
+            return (BAD_FORMAT, 0);
+        }
+        let Some((rec, hash)) = lifecycle.installs[(arg - 1) as usize] else {
+            return (PKG_STALE, 0);
+        };
+        if hash != *expected_digest {
+            return (PKG_STALE, 0);
+        }
+        let policy = match current_policy_hash(&state, requested, va, buf) {
+            Ok(p) => p,
+            Err(e) => {
+                pending.abort();
+                return (e, 0);
+            }
+        };
+        let size = match verified_install(&rec, &state, requested, va, buf) {
+            Ok(n) => n,
+            Err(e) => {
+                pending.abort();
+                return (e, 0);
+            }
+        };
+        if let Some((version, digest)) = lifecycle.selected_floor {
+            if rec.version < version {
+                return (PKG_DOWNGRADE, 0);
+            }
+            if rec.version == version && rec.full_digest != digest {
+                return (PKG_CONFLICT, 0);
+            }
+        }
+        if let Some((latest, _)) = lifecycle.latest {
+            if latest.select && latest.installed_hash == hash {
+                pending.abort();
+                answer[..32].copy_from_slice(&rec.full_digest);
+                answer[32..].copy_from_slice(&hash);
+                return (PKG_ACTIVE, latest.generation);
+            }
+        }
+        if pending.token != 0 {
+            if pending.id != *requested
+                || pending.installed_hash != hash
+                || pending.package_digest != rec.full_digest
+                || pending.policy_digest != policy
+                || pending.token as u8 != lifecycle.n_act + 1
+            {
+                return (PKG_BUSY, 0);
+            }
+            answer[..32].copy_from_slice(&rec.full_digest);
+            answer[32..].copy_from_slice(&hash);
+            return (PKG_PREPARED, pending.token);
+        }
+        if lifecycle.n_act >= 4 || state.objects >= 32 || pending.next_counter > (u64::MAX >> 8) {
+            return (NO_SPACE, 0);
+        }
+        let image_id = match register_payload(buf, size) {
+            Ok(id) => id,
+            Err(e) => return (e, 0),
+        };
+        let token = (pending.next_counter << 8) | u64::from(lifecycle.n_act + 1);
+        pending.next_counter += 1;
+        pending.token = token;
+        pending.id = *requested;
+        pending.installed_hash = hash;
+        pending.package_digest = rec.full_digest;
+        pending.policy_digest = policy;
+        pending.image_id = image_id;
+        answer[..32].copy_from_slice(&rec.full_digest);
+        answer[32..].copy_from_slice(&hash);
+        return (PKG_PREPARED, token);
+    }
+    if op == PKG_OP_ABORT {
+        if arg == 0 || arg >> 8 == 0 || expected_digest == &[0; 32] {
+            return (BAD_FORMAT, 0);
+        }
+        if pending.token == arg
+            && pending.id == *requested
+            && pending.installed_hash == *expected_digest
+        {
+            pending.abort();
+            pending.last_aborted = arg;
+            return (OK, 0);
+        }
+        if pending.last_aborted == arg
+            && pending.id == *requested
+            && pending.installed_hash == *expected_digest
+        {
+            return (OK, 0);
+        }
+        return (PKG_STALE, 0);
+    }
+    if op == PKG_OP_SELECT_COMMIT {
+        let generation = (arg & 255) as u8;
+        if arg >> 8 == 0 || !(1..=4).contains(&generation) {
+            return (BAD_FORMAT, 0);
+        }
+        let Some((rec, hash)) = lifecycle
+            .installs
+            .iter()
+            .flatten()
+            .find(|(_, h)| h == expected_digest)
+            .copied()
+        else {
+            pending.abort();
+            return (PKG_STALE, 0);
+        };
+        let policy = match current_policy_hash(&state, requested, va, buf) {
+            Ok(p) => p,
+            Err(e) => {
+                pending.abort();
+                return (e, 0);
+            }
+        };
+        let _size = match verified_install(&rec, &state, requested, va, buf) {
+            Ok(n) => n,
+            Err(e) => {
+                pending.abort();
+                return (e, 0);
+            }
+        };
+        // A lost reply or verifier restart cannot fabricate a new commit.
+        if let Some((latest, latest_hash)) = lifecycle.latest {
+            if latest.select
+                && latest.generation == generation as u64
+                && latest.installed_hash == hash
+                && latest.full_digest == rec.full_digest
+            {
+                pending.abort();
+                answer[..32].copy_from_slice(&rec.full_digest);
+                answer[32..].copy_from_slice(&latest_hash);
+                return (PKG_ACTIVE, latest.generation);
+            }
+        }
+        if pending.token != arg
+            || pending.id != *requested
+            || pending.installed_hash != hash
+            || pending.package_digest != rec.full_digest
+            || pending.policy_digest != policy
+            || generation != lifecycle.n_act + 1
+        {
+            pending.abort();
+            return (PKG_STALE, 0);
+        }
+        if lifecycle.n_act >= 4 || state.objects >= 32 {
+            pending.abort();
+            return (NO_SPACE, 0);
+        }
+        let previous = lifecycle.latest.map_or([0; 32], |(_, h)| h);
+        let selected = installed::Activation {
+            generation: generation as u64,
+            id: *requested,
+            installed_hash: hash,
+            full_digest: rec.full_digest,
+            version: rec.version,
+            select: true,
+            previous,
+        };
+        let mut wire = [0u8; 512];
+        if installed::encode_activation(&selected, &mut wire, sha256).is_err() {
+            pending.abort();
+            return (CORRUPT, 0);
+        }
+        let record_hash = sha256(&wire);
+        let name = package::numbered_name(b"v8-", requested, generation, 4).unwrap();
+        buf.file[..512].copy_from_slice(&wire);
+        if write_new(&name, 512, va, &buf.file, degraded).is_err() {
+            pending.abort();
+            return (DEGRADED, 0);
+        }
+        let exact = scan(va, buf, requested).and_then(|s| scan_lifecycle(va, buf, requested, &s));
+        if !matches!(exact, Ok(l) if l.latest == Some((selected, record_hash)))
+            || read_named(&name, 512, va, &mut buf.file).is_err()
+            || buf.file[..512] != wire
+        {
+            pending.abort();
+            return (DEGRADED, 0);
+        }
+        *degraded = false;
+        answer[..32].copy_from_slice(&rec.full_digest);
+        answer[32..].copy_from_slice(&record_hash);
+        *reply_cap = PROVISIONAL;
+        pending.token = 0; // keep the cap through IPC_REPLY, destroy source afterwards
+        return (
+            PKG_ACTIVE,
+            (u64::from(pending.image_id) << 8) | generation as u64,
+        );
+    }
+    if op == PKG_OP_DEACTIVATE {
+        if !(1..=4).contains(&arg) {
+            return (BAD_FORMAT, 0);
+        }
+        let Some((last, hash)) = lifecycle.latest else {
+            return (PKG_STALE, 0);
+        };
+        if !last.select && arg == last.generation && last.previous == *expected_digest {
+            answer[..32].copy_from_slice(&hash);
+            return (PKG_DEACTIVATED, arg);
+        }
+        if !last.select || arg != last.generation + 1 || *expected_digest != hash {
+            return (PKG_STALE, 0);
+        }
+        if state.objects >= 32 {
+            return (NO_SPACE, 0);
+        }
+        let disabled = installed::Activation {
+            generation: arg,
+            id: *requested,
+            installed_hash: [0; 32],
+            full_digest: [0; 32],
+            version: 0,
+            select: false,
+            previous: hash,
+        };
+        let mut wire = [0u8; 512];
+        if installed::encode_activation(&disabled, &mut wire, sha256).is_err() {
+            return (CORRUPT, 0);
+        }
+        let record_hash = sha256(&wire);
+        let name = package::numbered_name(b"v8-", requested, arg as u8, 4).unwrap();
+        buf.file[..512].copy_from_slice(&wire);
+        if write_new(&name, 512, va, &buf.file, degraded).is_err() {
+            return (DEGRADED, 0);
+        }
+        let exact = scan(va, buf, requested).and_then(|s| scan_lifecycle(va, buf, requested, &s));
+        if !matches!(exact, Ok(l) if l.latest == Some((disabled, record_hash)))
+            || read_named(&name, 512, va, &mut buf.file).is_err()
+            || buf.file[..512] != wire
+        {
+            return (DEGRADED, 0);
+        }
+        *degraded = false;
+        answer[..32].copy_from_slice(&record_hash);
+        return (PKG_DEACTIVATED, arg);
+    }
+    if op == PKG_OP_LAUNCH {
+        if !(1..=4).contains(&arg) {
+            return (BAD_FORMAT, 0);
+        }
+        let Some((selected, hash)) = lifecycle.latest else {
+            return (PKG_STALE, 0);
+        };
+        if !selected.select
+            || selected.generation != arg
+            || hash != *expected_digest
+            || pending.token != 0
+        {
+            return (PKG_STALE, 0);
+        }
+        let Some((rec, _)) = lifecycle
+            .installs
+            .iter()
+            .flatten()
+            .find(|(_, h)| *h == selected.installed_hash)
+            .copied()
+        else {
+            return (CORRUPT, 0);
+        };
+        let size = match verified_install(&rec, &state, requested, va, buf) {
+            Ok(n) => n,
+            Err(e) => return (e, 0),
+        };
+        let image_id = match register_payload(buf, size) {
+            Ok(id) => id,
+            Err(e) => return (e, 0),
+        };
+        answer[..32].copy_from_slice(&rec.full_digest);
+        answer[32..].copy_from_slice(&hash);
+        *reply_cap = PROVISIONAL;
+        return (PKG_LAUNCH_READY, (u64::from(image_id) << 8) | arg);
     }
     if op == PKG_OP_QUERY {
         // QUERY never mutates disk or authorizes a stage
@@ -616,28 +1358,38 @@ fn boot_scan(va: u64, buf: &mut Buffers) -> Result<(), u64> {
         }
         let name = &msg[16..16 + n];
         let pol = name.starts_with(b"p8-");
-        if pol || name.starts_with(b"s8-") {
+        let stage = name.starts_with(b"s8-");
+        let installed_record = name.starts_with(b"n8-");
+        let decision_record = name.starts_with(b"v8-");
+        if pol || stage || installed_record || decision_record {
             if n != 26 || size > PACKAGE_MAX as u64 || size == 0 {
                 return Err(CORRUPT);
             }
             read_named(name, size as usize, va, &mut buf.file)?;
-            let signed_id = if pol {
-                package::parse_policy(&buf.file[..size as usize])
+            let full = &buf.file[..size as usize];
+            let observed_id = if pol {
+                package::parse_policy(full).map_err(|_| CORRUPT)?.id
+            } else if stage {
+                package::parse_package(full).map_err(|_| CORRUPT)?.id
+            } else if installed_record {
+                installed::parse_installed(full, sha256)
                     .map_err(|_| CORRUPT)?
                     .id
             } else {
-                package::parse_package(&buf.file[..size as usize])
+                installed::parse_activation(full, sha256)
                     .map_err(|_| CORRUPT)?
                     .id
             };
-            if id.is_none() {
-                id = Some(signed_id);
+            if id.is_some_and(|prior| prior != observed_id) {
+                return Err(COLLISION);
             }
+            id = Some(observed_id);
         }
         cursor = next;
     }
     if let Some(id) = id {
-        scan(va, buf, &id)?;
+        let state = scan(va, buf, &id)?;
+        scan_lifecycle(va, buf, &id, &state)?;
     }
     Ok(())
 }
@@ -686,6 +1438,7 @@ pub extern "C" fn start_on_private_stack() -> ! {
     }
     say("boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified");
     let mut degraded = false;
+    let mut pending = Pending::empty();
     loop {
         let mut words = [0u64; 3];
         let mut req = [0u8; MSG_BYTES];
@@ -708,10 +1461,20 @@ pub extern "C" fn start_on_private_stack() -> ! {
         let marked = if landed == CAP_NONE {
             false
         } else {
-            take_diagnostic(landed, MARKER)
+            take_diagnostic(
+                landed,
+                if (PKG_OP_INSTALL..=PKG_OP_ABORT).contains(&op) {
+                    LIFECYCLE
+                } else {
+                    MARKER
+                },
+            )
         };
         let mut reply = [0u8; MSG_BYTES];
-        let (status, value) = if arg != 0 || req[32..].iter().any(|&b| b != 0) {
+        let mut reply_cap = CAP_NONE;
+        let (status, value) = if op <= PKG_OP_STAGE
+            && (arg != 0 || req[32..].iter().any(|&b| b != 0))
+        {
             (BAD_FORMAT, 0)
         } else if op == PKG_OP_PING {
             if landed != CAP_NONE || req != [0; MSG_BYTES] {
@@ -719,7 +1482,7 @@ pub extern "C" fn start_on_private_stack() -> ! {
             } else {
                 (OK, PING_MAGIC)
             }
-        } else if !(PKG_OP_QUERY..=PKG_OP_STAGE).contains(&op) || !package::canonical_id(&req[..32])
+        } else if !(PKG_OP_QUERY..=PKG_OP_ABORT).contains(&op) || !package::canonical_id(&req[..32])
         {
             (BAD_FORMAT, 0)
         } else if op == PKG_OP_QUERY && landed != CAP_NONE {
@@ -729,14 +1492,29 @@ pub extern "C" fn start_on_private_stack() -> ! {
         } else {
             let mut id = [0u8; 32];
             id.copy_from_slice(&req[..32]);
-            dispatch(op, &id, va as u64, buf, &mut degraded, &mut reply)
+            let mut digest = [0u8; 32];
+            digest.copy_from_slice(&req[32..64]);
+            dispatch(
+                op,
+                arg,
+                &id,
+                &digest,
+                va as u64,
+                buf,
+                &mut degraded,
+                &mut reply,
+                &mut pending,
+                &mut reply_cap,
+            )
         };
         // Exact post-dispatch occupancy: 0..4 bootstrap, slot 8 local
         // LENT frame; slot 7 was consumed by self-map. A wrong-kind or
         // attenuated landed cap may lack DESTROY but IPC provenance still
         // permits disposal. Never leave it to exhaust the 32-slot table.
         for slot in 5..32 {
-            if slot == LENT {
+            if slot == LENT
+                || (slot == PROVISIONAL && (pending.token != 0 || reply_cap == PROVISIONAL))
+            {
                 continue;
             }
             let mut found = [0u64; 3];
@@ -750,12 +1528,28 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 SERVER,
                 status,
                 value,
-                CAP_NONE,
+                reply_cap,
                 reply.as_ptr() as u64,
             )
         } < 0
         {
+            if reply_cap == PROVISIONAL {
+                let mut described = [0u64; 3];
+                if unsafe { syscall2(SYS_CAP_DESCRIBE, PROVISIONAL, described.as_mut_ptr() as u64) }
+                    == 0
+                {
+                    let _ =
+                        unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR, described[1], 0, 0, 0, 0) };
+                    let _ = unsafe { syscall1(SYS_CAP_DESTROY, PROVISIONAL) };
+                }
+            }
             fail("reply refused");
+        }
+        // IPC_REPLY snapshots the source; deleting it does NOT revoke the
+        // receiver's landed reference. No provisional Image survives COMMIT
+        // or LAUNCH in the verifier after a successful transfer.
+        if reply_cap == PROVISIONAL && unsafe { syscall1(SYS_CAP_DESTROY, PROVISIONAL) } != 0 {
+            fail("transferred Image source destroy refused");
         }
     }
 }

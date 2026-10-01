@@ -722,6 +722,7 @@ fn sys_thread_exit(status: u64) -> ! {
     unsafe {
         (*STATS.get()).exit_calls += 1;
     }
+    manager_check_last_thread(); // before even recording the exit status
     let id = crate::sched::current_thread_id();
     record_exit(id, status);
     notify_last_thread_exit();
@@ -745,6 +746,14 @@ fn sys_thread_exit(status: u64) -> ! {
 /// Shared last-thread hook for both voluntary exit and an unarmed CPL3
 /// exception (ADR-0042). The exception entered via IDT, not the syscall
 /// swapgs window, so its caller must NOT swap GS again.
+fn manager_check_last_thread() {
+    if let Some(pid) = crate::sched::current_proc_id() {
+        if crate::sched::proc_live_threads(pid) == 1 {
+            crate::image_registry::manager_death_check(pid);
+        }
+    }
+}
+
 fn notify_last_thread_exit() {
     // Spawn-protocol hook (ADR-0019): if this is the LAST live thread of
     // a process with a registered exit notification, badge it now — the
@@ -754,7 +763,6 @@ fn notify_last_thread_exit() {
     // live count is exactly 1: us.
     if let Some(pid) = crate::sched::current_proc_id() {
         if crate::sched::proc_live_threads(pid) == 1 {
-            crate::image_registry::manager_death_check(pid);
             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
                 if let Err(e) = crate::ipc::notify(nid, badge) {
                     error!("syscall", "exit notification failed for pid {pid}: {e}");
@@ -769,6 +777,7 @@ fn notify_last_thread_exit() {
 /// Process cap must still authorize teardown, including failing a
 /// client IPC already delivered to this server. Called IF=0 from IDT.
 pub(crate) fn exit_on_user_fault(vector: u64) -> ! {
+    manager_check_last_thread();
     record_exit(crate::sched::current_thread_id(), 0x100 + vector);
     notify_last_thread_exit();
     // The driver supervisor cannot destroy a process in its own live
@@ -1073,6 +1082,7 @@ fn sys_image_register(reg: u64, addr: u64, len: u64, dst: u64, r8: u64, r9: u64)
     };
     if c.obj != crate::cap::CapObj::ImageRegistrar
         || c.rights & crate::cap::RIGHTS_WRITE == 0
+        || !crate::image_registry::registrar_alive()
         || crate::cap::read(pid, dst as usize).is_ok()
     {
         return STATUS_BAD_ARG;
@@ -1129,7 +1139,10 @@ fn sys_image_revoke(reg: u64, id: u64, rdx: u64, r10: u64, r8: u64, r9: u64) -> 
     let Ok(c) = crate::cap::read(pid, reg as usize) else {
         return STATUS_BAD_ARG;
     };
-    if c.obj != crate::cap::CapObj::ImageRegistrar || c.rights & crate::cap::RIGHTS_WRITE == 0 {
+    if c.obj != crate::cap::CapObj::ImageRegistrar
+        || c.rights & crate::cap::RIGHTS_WRITE == 0
+        || !crate::image_registry::registrar_alive()
+    {
         return STATUS_BAD_ARG;
     }
     if !crate::image_registry::revoke(id as u32) {
@@ -1924,7 +1937,7 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         {
             (1u64, u64::from(img_id))
         }
-        crate::cap::CapObj::ImageRegistrar => (5, 0),
+        crate::cap::CapObj::ImageRegistrar if crate::image_registry::registrar_alive() => (5, 0),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {

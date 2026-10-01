@@ -1156,7 +1156,7 @@ fn spawn_servicemgr(
                 // Distinct from STAGE; one receiver-verified 8.5 marker.
                 Cap {
                     obj: CapObj::Notification { nid: lifecycle_nid },
-                    rights: R | C,
+                    rights: R | C | crate::cap::RIGHTS_DESTROY, // full sender marker; child gets READ only
                 },
             ];
             let child = [
