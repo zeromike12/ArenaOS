@@ -1,6 +1,6 @@
 # Phase 8.5 rebuilt qualification — evidence ledger
 
-ADR-0054/0055 are the accepted architecture. This ledger refers to the **current rebuilt tree**, not observations from the missing pre-`6a96911` work. Source-preservation commits are not milestone qualification. The historical suite and exact-final-EFI 100/100 are observed in this rebuild; independently extracted bundle boot and GitHub push remain independently checked gates.
+ADR-0054/0055 are the accepted architecture. This ledger refers to the **current rebuilt tree**, not observations from the missing pre-`6a96911` work. Source-preservation commits are not milestone qualification. The rebuilt source passed its historical suite and exact-final-EFI 100/100; the checksummed archive was independently extracted and booted. The final source/artifact commit was pushed to this branch.
 
 ## Actual guest proof in this rebuild
 
