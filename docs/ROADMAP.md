@@ -1142,10 +1142,14 @@ is not completed by accepting an ADR.
       and ADR-0053 ledger. Production key custody, Secure Boot, hostile-disk
       rollback defense, installation, activation and linking remain out of
       scope until separate decisions/8.5.
-- [ ] **8.5 installer/updater**. Artifact-bound install/upgrade and
-      power-loss recovery tests with an explicit trust chain and
-      rollback rules. No assumption of real-hardware drivers or
-      secure-boot integration without separate proof.
+- [ ] **8.5 installer/updater**. [Proposed ADR-0054](adr/0054-installed-images-and-atomic-upgrade.md)
+      opens the on-disk Image-cap/public-ABI, executable payload-size,
+      durable installed-vs-active, copied authority/revocation and
+      crash-prefix decisions; none is accepted yet. Artifact-bound
+      install/upgrade and power-loss recovery tests need an explicit
+      trust chain and rollback rules. No assumption of real-hardware
+      drivers, production key custody or secure-boot integration without
+      separate proof.
 
 ## Phase 9 — Graphics (outline)
 

@@ -69,7 +69,8 @@ Rules:
 | [0050](0050-dead-ipc-caller-lifecycle.md) | General IPC caller sweep and broker-first deadline; four-state staged-cap/typed-refusal M4 proof plus caller-first real guest regression; qualified partial integration | Accepted (8.2 subsequently complete) |
 | [0051](0051-filesystem-absence-proof.md) | Distinct receiver-verified fsd shutdown marker and kernel-root exited-service reap to orphan the real FS endpoint; typed absence and restoration | Accepted (8.2 complete) |
 | [0052](0052-standard-userspace-client-libraries.md) | Linked no_std syscall/IPC/AFS1/network clients; independent guest consumers; corrected IPC-landed reply-cap disposal, real mutation-tested 40×2 guest proof; 43/43 + fresh corrected-EFI 100/100 + extracted boot | Accepted (8.3 reclosed) |
-| [0053](0053-signed-package-trust-and-staging.md) | Phase 8.4 signed packages and verified staging: exact vendored Ed25519/SHA-256 closure, test-only root, canonical bytes/domains, bounded revocation, receiver authority and same-disk crash refusal; source/unsafe/offline/vector/fuzz gates passed | Accepted (guest implementation and checkpoint qualification in progress) |
+| [0053](0053-signed-package-trust-and-staging.md) | Phase 8.4 signed packages and verified staging: exact vendored Ed25519/SHA-256 closure, test-only root, canonical bytes/domains, bounded revocation, receiver authority and same-disk crash refusal; 47/47, final EFI 100/100 and extracted bundle boot | Accepted (8.4 staging checkpoint complete) |
+| [0054](0054-installed-images-and-atomic-upgrade.md) | Phase 8.5 design start: executable image authority, installed/active distinction, bounded upgrade/crash recovery and revocation; public ABI and durable-format choices open | Proposed (no installer authorized) |
 
 ## Template
 
