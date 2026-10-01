@@ -4,9 +4,51 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
+## Phase 8.5 verified dynamic Image / signed cutover checkpoint
+
+This is the **current qualified QEMU build**. A manager-only lifecycle
+marker authorizes the independently managed receiver to commit immutable
+AINS/AACT records and prepare/select a test-root-signed Image. A separate
+kernel Registrar capability admits a bounded live Image; the held Process
+cap stops and retires the single system-wide unretired dynamic child before
+the old Image ID is revoked and a new signed version selected. The fixed
+`app.test` Power `pkg ...test` commands used in the qualification scripts
+are **test-only fixtures**, not a general production installer, key
+custody/rotation workflow, Secure Boot, dynamic linker or protection against
+hostile rollback/arbitrary commit-sector corruption. An ordinary unseeded
+boot does not automatically install, register or launch any dynamic Image.
+
+The rebuilt source passed **60/60 historical and new test suites** and
+this exact EFI's fresh **100/100** QEMU boot gate. The signed v7 child was
+alive when v8 was registered at PREPARE; its held Process cap STOP/FINISH
+preceded full old-ID revocation and durable AACT4. A real historical 32/32
+AFS1 platter refused the fourth AACT before CREATE without changing a byte.
+AINS2/AACT4 crash-prefix kill/reboots, measured guest resource highs and
+Notification 18/18, manager-death/destroy fail-stops and a production IPC
+reply-hook omission RED/GREEN are in `docs/PHASE85-WIP.md`.
+
+The deployable archive is also at `releases/checkpoints/phase85-complete/`
+in this checkout; use its `.sha256` file locally if the branch has not yet
+been published to GitHub. Once published, download and verify the
+per-commit archive, then use the
+[common QEMU command below](#phase-8-checkpoint-boot-the-exact-per-commit-build):
+
+```sh
+curl -fL -o arenaos-phase85-complete-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase85-complete/arenaos-phase85-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase85-complete-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase85-complete/arenaos-phase85-complete-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase85-complete-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase85-complete-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+test "$(sha256sum arena-boot.efi | cut -d' ' -f1) 100/100" = "$(cat stability-receipt.txt)"
+cp ovmf-vars-template.img ovmf-vars.img  # fresh copy each boot
+cp scratch-template.img scratch.img      # only FIRST boot; retain for durability
+```
+
 ## Phase 8.4 verified signed-package staging checkpoint
 
-This is the **current qualified QEMU build**. ADR-0053's test-only public
+This is the **previous qualified QEMU build**. ADR-0053's test-only public
 Ed25519 root (SHA-256 fingerprint
 `21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`)
 verifies canonical signed packages and root-signed cumulative policies in a

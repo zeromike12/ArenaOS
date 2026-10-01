@@ -78,6 +78,10 @@ enum SlotState {
     /// caller is woken and `call` returns `STATUS_SERVICE_GONE`
     /// instead of a reply (M6.5, ADR-0028).
     Failed,
+    /// Caller died after its request woke the server but before the
+    /// server resumed recv. Keep the server TID until it consumes this
+    /// cancellation; otherwise a legitimate wake looks like corruption.
+    Cancelled,
 }
 
 #[derive(Clone, Copy)]
@@ -535,68 +539,101 @@ pub(crate) fn reopen_after_server_spawn(eid: u32) {
 /// Errors: `STATUS_BAD_ARG` (dead eid), `STATUS_BUSY` (a second server
 /// on one endpoint — v1 is single-server, ADR-0018).
 pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
-    // Phase 1 — either a Waiting request exists (self-deliver) or park.
-    // SAFETY: single writer under IF=0.
-    let queued = without_interrupts(|| -> Result<Option<usize>, Status> {
-        bump!(recvs);
-        unsafe {
-            let eps = &mut *ENDPOINTS.get();
-            let Some(ep) = eps.get_mut(eid as usize).filter(|e| e.live) else {
-                return Err(STATUS_BAD_ARG);
-            };
-            // Somebody is serving this endpoint again (M7.1b). A
-            // restarted service announces itself simply by asking for
-            // work — no re-registration step, and no way for the
-            // orphan flag to outlive the situation it describes.
-            ep.orphaned = false;
-            if let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Waiting) {
-                return Ok(Some(qi));
+    // The caller can die after waking us but before we resume here. Its
+    // Delivered slot becomes a one-shot cancellation tombstone; consume it
+    // and retry the same recv, rather than falsely fail-stop or lose a wake.
+    loop {
+        // Phase 1 — either a Waiting request exists (self-deliver) or park.
+        // SAFETY: single writer under IF=0.
+        let queued = without_interrupts(|| -> Result<Option<usize>, Status> {
+            bump!(recvs);
+            unsafe {
+                let eps = &mut *ENDPOINTS.get();
+                let Some(ep) = eps.get_mut(eid as usize).filter(|e| e.live) else {
+                    return Err(STATUS_BAD_ARG);
+                };
+                // Somebody is serving this endpoint again (M7.1b). A
+                // restarted service announces itself simply by asking for
+                // work — no re-registration step, and no way for the
+                // orphan flag to outlive the situation it describes.
+                ep.orphaned = false;
+                // The caller may also have died AFTER this server already
+                // returned from recv. Its old Delivered slot cannot be
+                // consumed by the past recv: retire that tombstone here,
+                // before parking for the next request (or taking a queued
+                // one). This keeps repeated cancel/reply/recv cycles flat.
+                let tid = sched::current_thread_id();
+                for slot in ep.q.iter_mut() {
+                    if slot.state == SlotState::Cancelled && slot.server == tid {
+                        *slot = EMPTY_SLOT;
+                    }
+                }
+                if let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Waiting) {
+                    return Ok(Some(qi));
+                }
+                if ep.server != NO_TID {
+                    return Err(STATUS_BUSY);
+                }
+                ep.server = sched::current_thread_id();
+                Ok(None)
             }
-            if ep.server != NO_TID {
-                return Err(STATUS_BUSY);
+        })?;
+
+        let tid = sched::current_thread_id();
+        let qi = match queued {
+            Some(qi) => {
+                // A caller was already blocked: deliver to ourselves (no
+                // wake — we ARE the server thread). The slot carries words
+                // + msg; phase 2 reads them back out.
+                let _ = take_request(eid as usize, qi, tid, pid);
+                qi
             }
-            ep.server = sched::current_thread_id();
-            Ok(None)
-        }
-    })?;
+            None => {
+                // Park; the wake comes from a future call's phase 2, which
+                // has already run take_request by then.
+                bump!(blocks);
+                sched::block_current();
+                // SAFETY: single reader under IF=0.
+                let found = without_interrupts(|| unsafe {
+                    let ep = &mut (*ENDPOINTS.get())[eid as usize];
+                    if let Some(qi) =
+                        ep.q.iter()
+                            .position(|s| s.state == SlotState::Delivered && s.server == tid)
+                    {
+                        Some(Ok(qi))
+                    } else if let Some(qi) =
+                        ep.q.iter()
+                            .position(|s| s.state == SlotState::Cancelled && s.server == tid)
+                    {
+                        ep.q[qi] = EMPTY_SLOT;
+                        Some(Err(()))
+                    } else {
+                        None
+                    }
+                });
+                match found {
+                    Some(Ok(qi)) => qi,
+                    Some(Err(())) => continue,
+                    None => {
+                        error!(
+                            "ipc",
+                            "recv: resumed with no delivered request or cancellation (eid={eid})"
+                        );
+                        crate::halt::halt_machine("ipc: recv woken without a delivery");
+                    }
+                }
+            }
+        };
 
-    let tid = sched::current_thread_id();
-    let qi = match queued {
-        Some(qi) => {
-            // A caller was already blocked: deliver to ourselves (no
-            // wake — we ARE the server thread). The slot carries words
-            // + msg; phase 2 reads them back out.
-            let _ = take_request(eid as usize, qi, tid, pid);
-            qi
-        }
-        None => {
-            // Park; the wake comes from a future call's phase 2, which
-            // has already run take_request by then.
-            bump!(blocks);
-            sched::block_current();
-            // SAFETY: single reader under IF=0.
-            let found = without_interrupts(|| unsafe {
-                (*ENDPOINTS.get())[eid as usize]
-                    .q
-                    .iter()
-                    .position(|s| s.state == SlotState::Delivered && s.server == tid)
-            });
-            let Some(qi) = found else {
-                error!("ipc", "recv: resumed with no delivered request (eid={eid})");
-                crate::halt::halt_machine("ipc: recv woken without a delivery");
-            };
-            qi
-        }
-    };
-
-    // Phase 2 — copy the request facts out (the slot stays Delivered
-    // until reply; the words are immutable after call staged them).
-    // SAFETY: single reader under IF=0.
-    let (words, landed, msg) = without_interrupts(|| unsafe {
-        let slot = &(*ENDPOINTS.get())[eid as usize].q[qi];
-        (slot.words, slot.landed_cap, slot.msg)
-    });
-    Ok((words, landed, msg))
+        // Phase 2 — copy the request facts out (the slot stays Delivered
+        // until reply; the words are immutable after call staged them).
+        // SAFETY: single reader under IF=0.
+        let (words, landed, msg) = without_interrupts(|| unsafe {
+            let slot = &(*ENDPOINTS.get())[eid as usize].q[qi];
+            (slot.words, slot.landed_cap, slot.msg)
+        });
+        return Ok((words, landed, msg));
+    }
 }
 
 /// Server side: stage the reply `[w0, w1]` (+ optional cap for the
@@ -795,11 +832,27 @@ pub fn release_blocked_of(pid: u64) -> (usize, usize, usize) {
                 // The real server (if any) is not stopped or orphaned;
                 // its later SYS_IPC_REPLY receives STATUS_BAD_ARG.
                 for slot in ep.q.iter_mut() {
-                    if slot.state != SlotState::Empty && sched::proc_id_of(slot.caller) == Some(pid)
+                    // A cancelled delivery has no caller, but its server
+                    // may itself die before consuming the one-shot marker.
+                    if slot.state == SlotState::Cancelled
+                        && sched::proc_id_of(slot.server) == Some(pid)
                     {
+                        *slot = EMPTY_SLOT;
+                    } else if slot.state != SlotState::Empty
+                        && sched::proc_id_of(slot.caller) == Some(pid)
+                    {
+                        let delivered = slot.state == SlotState::Delivered;
+                        let server = slot.server;
                         crate::image_registry::drop_cap(slot.send_cap);
                         crate::image_registry::drop_cap(slot.reply_cap);
                         *slot = EMPTY_SLOT;
+                        // take_request has already woken this still-live
+                        // server. Preserve the cause of its otherwise
+                        // inexplicable wake, without retaining caller caps.
+                        if delivered && sched::proc_id_of(server).is_some() {
+                            slot.state = SlotState::Cancelled;
+                            slot.server = server;
+                        }
                         calls += 1;
                     }
                 }

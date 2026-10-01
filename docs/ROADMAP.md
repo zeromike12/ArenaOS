@@ -981,7 +981,7 @@ decision — if a milestone starts shaping the stack around
 `bind`/`listen`/`accept` semantics, that is a scope violation unless
 an ADR has explicitly chosen it first.
 
-## Phase 8 — Mature userspace 🔨 (8.0–8.3 complete; 8.4+ not started)
+## Phase 8 — Mature userspace ✅ (8.0–8.5 qualified; production custody separately gated)
 
 Authority model: accepted ADR-0037–0045 and ADR-0047. The roadmap below is the sequence,
 not permission to implement later steps early. Every completed
@@ -1142,20 +1142,23 @@ is not completed by accepting an ADR.
       and ADR-0053 ledger. Production key custody, Secure Boot, hostile-disk
       rollback defense, installation, activation and linking remain out of
       scope until separate decisions/8.5.
-- [ ] **8.5 installer/updater**. [Accepted ADR-0054](adr/0054-installed-images-and-atomic-upgrade.md)
-      owns immutable installed/active records and AFS1 crash-prefix
-      recovery; [Accepted ADR-0055](adr/0055-capability-gated-dynamic-image-registry.md)
-      isolates capability-gated kernel Image registration/revocation and
-      manager-death fail-stop. A purpose-built meaningful 648-byte
-      strict-subset ET_EXEC passed the existing production ELF validator
-      and fits an 840-byte test-root-signed APKG **v1** file in host-only
-      measurement; actual disk-backed guest launch is **not proven**.
-      C selected one namespace/test root, no boot auto-launch, production
-      custody, dynamic linking or GC. Both ADRs are accepted architecture,
-      not a completed 8.5 checkpoint. A second dynamic SYS_SPAWN is BUSY
-      while any system-wide tagged child is unretired. Artifact-bound real
-      install/upgrade, power-loss recovery, full regression suite and
-      fresh final-image 100/100 remain mandatory.
+- [x] **8.5 installer/updater**. [Accepted ADR-0054](adr/0054-installed-images-and-atomic-upgrade.md)
+      specifies immutable installed/active AINS/AACT records and AFS1 crash
+      recovery; [accepted ADR-0055](adr/0055-capability-gated-dynamic-image-registry.md)
+      specifies capability-gated kernel Image registration/revocation and
+      manager-death fail-stop. The rebuilt tree has targeted **real guest**
+      signed v7→v8 live cutover, held Process STOP/FINISH before ID revoke
+      and durable AACT4, bounded four-cycle teardown, Notification 18/18,
+      genuine historical 32/32 refusal, AINS2/AACT4 crash-prefix reboot,
+      ref/pin omitted-hook RED/GREEN and direct destroy guard proof.
+      `docs/PHASE85-WIP.md` records precise measurements and limits.
+      Historical **60/60**, exact final EFI-bound **100/100**, and
+      independently extracted/booted checksummed `phase85-complete`
+      archive close this deliberately bounded 8.5 milestone. One tagged dynamic
+      child may be unretired system-wide; a second spawn is BUSY. No
+      production signing custody, automatic boot launch, generic package
+      picker, dynamic linking, GC, hostile rollback or Secure Boot.
+
 
 ## Phase 9 — Graphics (outline)
 

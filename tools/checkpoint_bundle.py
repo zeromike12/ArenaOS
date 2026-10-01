@@ -120,6 +120,21 @@ def main() -> int:
                     "root-signed ZIP-215 subordinate-key alias refused")
         if any(item not in log for item in required):
             raise ValueError("8.4 bundle requires every historical suite and guest staging/crash/red/capacity proofs")
+    if args.checkpoint == "phase85-complete":
+        log = args.suite_log.read_text()
+        total = len(list((ROOT / "tools").glob("test_m*.py"))) + 11
+        required = (
+            f"ALL TESTS PASSED ({total} test suites)",
+            "[m85-live-cutover] old signed v7 child ALIVE at v8 PREPARE",
+            "[m85-resources] guest Power snapshots baseline/live/retired=",
+            "[m85-maximal]", "[m85-crash-upgrade] real AINS2/AACT4 CREATE->WRITE->CLOSE crash-prefix matrix PASS",
+            "[m85-ref-hook] RED omitted real IPC reply credit: PASS; GREEN restored exact source/EFI and guest: PASS",
+            "[m85-manager-destroy] direct production proc::destroy guard under LIVE manager ID HALT",
+            "[m85-manager-death-live] genuinely LIVE signed v7 child and manager Image ID:",
+            "[m84-stage] TARGETED GUEST RESULT: PASS",
+        )
+        if any(item not in log for item in required):
+            raise ValueError("8.5 bundle requires all historical/real guest/crash/red/resource proofs")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -135,12 +150,18 @@ def main() -> int:
     shutil.copy2(arena_env.ovmf_vars_template(), stage / "ovmf-vars-template.img")
     shutil.copy2(ROOT / "docs/RUNNING.md", stage / "RUNNING.md")
     afs1.mkfs(stage / "scratch-template.img", 8 * 1024 * 1024 // afs1.SECTOR)
+    completed_suites = ("47/47" if args.checkpoint == "phase84-complete" else
+                        f"{len(list((ROOT / 'tools').glob('test_m*.py'))) + 11}/"
+                        f"{len(list((ROOT / 'tools').glob('test_m*.py'))) + 11}"
+                        if args.checkpoint == "phase85-complete" else "see commit gate")
     (stage / "QUALIFICATION.txt").write_text(
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
-        f"Historical suite: all passed ({'47/47' if args.checkpoint == 'phase84-complete' else 'see commit gate'})\n"
+        f"Historical suite: all passed ({completed_suites})\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1/8.2/8.3: COMPLETE. Phase 8.4: COMPLETE — USERSPACE VERIFIED STAGING ONLY; public TEST root, signed canonical package/policy, revocation/version refusal, bounded immutable AFS1 stages, documented crash prefixes. NOT installed, activated or an Image cap. No production-key custody, Secure Boot, hostile-disk rollback defense or 8.5 installer. Eight signed revocations in guest; ninth distinct typed issuer-side refusal before signing (user-approved v1 interpretation).\n"
+        + ("Phase 8.1–8.4: COMPLETE. Phase 8.5: COMPLETE — offline TEST-root-signed AINS/AACT install/selection, actual ring-3 v7→v8 live cutover under one unretired dynamic child, held Process STOP/FINISH before old Image ID revocation and durable commit, authentic 32/32 historical AFS1 refusal, AFS1 ordered-commit crash prefixes, fail-stop/ref-pin checks. No production key custody, production general-purpose package picker, arbitrary-sector corruption, hostile rollback, dynamic linking, Secure Boot, GC or broader concurrent children.\n"
+           if args.checkpoint == "phase85-complete" else
+           "Phase 8.1/8.2/8.3: COMPLETE. Phase 8.4: COMPLETE — USERSPACE VERIFIED STAGING ONLY; public TEST root, signed canonical package/policy, revocation/version refusal, bounded immutable AFS1 stages, documented crash prefixes. NOT installed, activated or an Image cap. No production-key custody, Secure Boot, hostile-disk rollback defense or 8.5 installer. Eight signed revocations in guest; ninth distinct typed issuer-side refusal before signing (user-approved v1 interpretation).\n"
            if args.checkpoint == "phase84-complete" else
            "Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: VOLATILE INTEGRATION ONLY: default-DENY mediator, marker-authorized in-memory ALLOW/DENY/REVOKE, 128-bit service bearer and mediated arena.txt READ; IPC dead-caller teardown corrected. No persisted decision or reboot/restart/crash-model permission guarantee; 8.2 INCOMPLETE\n"
            if args.checkpoint == "phase82-volatile-permission" else
@@ -212,8 +233,10 @@ def main() -> int:
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",
                     "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
-        if args.checkpoint == "phase84-complete":
-            required += ("packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified",
+        if args.checkpoint in ("phase84-complete", "phase85-complete"):
+            required += (("packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified"
+                          if args.checkpoint == "phase85-complete" else
+                          "packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified"),
                          "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)",
                          "permissiond: validated durable policy generation 0 DENY",
                          "m83: returncap PASS (40 real reply caps rejected and discarded")

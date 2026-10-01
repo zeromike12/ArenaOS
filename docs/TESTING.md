@@ -873,3 +873,28 @@ the deployable image. A cold source-identical rebuild produced an EFI with
 12 different bytes: the PE COFF timestamps and linked RSDS/PDB identifier.
 Do not transfer a 100/100 receipt between those hashes; the archive's
 own EFI and matching receipt remain the qualified 8.0 build.
+
+## Phase 8.5 rebuilt dynamic Image and offline-signed update gates
+
+Accepted ADR-0054/0055 fix the exact AINS/AACT format, one system-wide
+unretired dynamic child, the existing lifecycle-admin bearer, and 18-slot
+Notification table. `docs/PHASE85-WIP.md` identifies all current targeted
+real guest observations and their scope. The automatic historical suite
+`tools/run_tests.sh` includes `test_m85_install.py`, `test_m85_select.py`,
+`test_m85_upgrade.py`, `test_m85_live_cutover.py`,
+`test_m85_resources.py`, `test_m85_maximal.py`, both AINS/AACT crash
+matrices, the omitted-production-hook RED/GREEN control, provisional and
+live-child manager-death controls and the direct production destroy guard.
+The signed fixed `app.test` commands are **private test fixtures**; they
+are not a production package picker.
+
+A clean result requires the complete `ALL TESTS PASSED (N test suites)`
+line from one nonoverlapping run, then a **new**
+`tools/build.sh --image; tools/stability_loop.sh 100` run with the latter's
+receipt SHA-256 equal to the exact final `build/arena-boot.efi`. If there
+is an OVMF-only stall or any semantic fatal/error, count it as a failed
+boot; a firmware exit code of zero alone never qualifies the guest.
+Run `python3 tools/checkpoint_bundle.py phase85-complete
+build/phase85-qualified-suite.log` only after those gates: it rejects a
+missing/stale receipt, verifies internal archive checksums, independently
+extracts and boots bundled ESP/firmware/formatted disk.
