@@ -574,9 +574,17 @@ fn monitor(
                 if let Some(state) = pkg.as_mut() {
                     state.test_upgrade_fixture();
                 }
-            } else if request as u64 == MGR_BADGE_ADMIN_PKG_DEATHTEST {
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_DEATHTEST
+                || request as u64 == MGR_BADGE_ADMIN_PKG_DEATHFAULT
+            {
                 if let Some(state) = pkg.as_mut() {
-                    state.test_die_with_provisional();
+                    state.test_die_with_provisional(
+                        request as u64 == MGR_BADGE_ADMIN_PKG_DEATHFAULT,
+                    );
+                }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_OLDLIVE {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_start_old_live();
                 }
             } else if request != 0 {
                 log("servicemgr: refused unknown private admin request\r\n");

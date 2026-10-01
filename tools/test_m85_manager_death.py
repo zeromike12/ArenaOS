@@ -5,6 +5,7 @@ QEMU rc=0 on UEFI fatal ResetSystem is NOT success. This test only passes
 when the exact kernel fail-stop ERROR occurs before normal teardown; the
 signed/staged/installed platter must have no activation decision.
 """
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,19 +34,21 @@ def main():
     rc,s=boot(esp,disk,'baseline',[(b'arena>',1,b'shutdown\r')])
     assert rc==0 and 'm7: RESULT PASS (2/2)' in s and list(t.contents(disk))==[b'arena.txt']
     t.host_seed(disk,{t.INPUT:signed,t.INTENT:t.POLICY})
-    rc,s=boot(esp,disk,'fatal',[( (b'arena>',b'packaged READY'),1,b'pkg stage app.test\r'),
-        (b'arena>',2,b'pkg policy app.test\r'),
-        (b'arena>',3,b'pkg installtest\r'),
-        ((b'arena>',b'servicemgr: Phase 8.5 signed app.test INSTALL committed'),1,b'pkg deathtest\r')])
+    fault=arena_env.build_dir()/f'{LABEL}-fault.img';shutil.copyfile(disk,fault)
     expected='[arena ERROR halt] halting machine: ADR-0055: manager death with dynamic authority/child'
-    # mtest maps QEMU's firmware rc=0 to semantic 97 for an ERROR halt.
-    # This is an EXPECTED fatal negative, never a normal-success boot.
-    assert rc==97 and s.count(expected)==1 and 'm7: RESULT PASS (2/2)' in s, 'fatal path was not reached'
-    assert 'servicemgr: deliberate manager last-thread exit with PREPARED LIVE ID' in s
-    assert 'shutting down...' not in s and 'servicemgr: FATAL death fixture exit returned' not in s
-    items=t.contents(disk)
-    assert ('n8-'+t.PREFIX+'-01').encode() in items and not any(n.startswith(b'v8-') for n in items)
-    assert items[t.STAGE1]==signed and not afs1.audit(disk)
-    print(f'[{LABEL}] expected *fatal* manager-death halt before exit bookkeeping/IPC sweep; no durable selection PASS',flush=True)
+    for tag,platter,command,marker in (
+        ('fatal-exit',disk,b'pkg deathtest\r','deliberate manager last-thread exit with PREPARED LIVE ID'),
+        ('fatal-fault',fault,b'pkg deathfault\r','deliberate manager ring-3 #UD fault with PREPARED LIVE ID'),
+    ):
+        rc,s=boot(esp,platter,tag,[((b'arena>',b'packaged READY'),1,b'pkg stage app.test\r'),
+            (b'arena>',2,b'pkg policy app.test\r'),(b'arena>',3,b'pkg installtest\r'),
+            ((b'arena>',b'servicemgr: Phase 8.5 signed app.test INSTALL committed'),1,command)])
+        assert rc==97 and s.count(expected)==1 and 'm7: RESULT PASS (2/2)' in s,tag
+        assert marker in s and 'shutting down...' not in s
+        assert 'servicemgr: FATAL death fixture exit returned' not in s
+        items=t.contents(platter)
+        assert ('n8-'+t.PREFIX+'-01').encode() in items and not any(n.startswith(b'v8-') for n in items)
+        assert items[t.STAGE1]==signed and not afs1.audit(platter)
+    print(f'[{LABEL}] expected fatal exit and genuine ring-3 #UD manager-death halts before bookkeeping/IPC sweep; no durable selection PASS',flush=True)
 
 if __name__=='__main__':main()

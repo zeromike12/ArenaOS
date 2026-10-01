@@ -104,6 +104,9 @@ pub struct State {
     step: Step,
     restarts: u8,
     online: bool,
+    test_last_active: Option<[u8; 32]>,
+    test_old_image: Option<(u64, u64)>,
+    test_old_child: Option<Child>,
 }
 
 fn plan() -> Result<Step, ()> {
@@ -302,6 +305,9 @@ pub fn start() -> Result<State, ()> {
         step,
         restarts: 0,
         online: true,
+        test_last_active: None,
+        test_old_image: None,
+        test_old_child: None,
     })
 }
 impl State {
@@ -403,6 +409,53 @@ impl State {
             "servicemgr: Phase 8.5 signed app.test INSTALL committed and exact replay idempotent; no Image cap\r\n",
         );
     }
+    /// Test-only live-cutover setup: signed v7 stays running and is owned by
+    /// our held Process cap when v8 PREPARE registers the second Image.
+    pub fn test_start_old_live(&mut self) {
+        let result = (|| -> Result<(), ()> {
+            let active = self.test_last_active.ok_or(())?;
+            if self.test_old_child.is_some()
+                || self.test_old_image.is_none()
+                || !self.online
+                || alive(self.receiver) != Ok(true)
+            {
+                return Err(());
+            }
+            let (old_id, old_slot) = self.test_old_image.ok_or(())?;
+            let mut desc = [0; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, old_slot, desc.as_mut_ptr() as u64) } != 0
+                || desc != [1, old_id, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+            {
+                return Err(());
+            }
+            let grant = [(ENDPOINT as u64, RIGHTS_WRITE)];
+            let pid = unsafe {
+                syscall5(
+                    SYS_SPAWN,
+                    old_slot,
+                    grant.as_ptr() as u64,
+                    1,
+                    PRIVATE as u64,
+                    MGR_BADGE_PKG_PROBE_EXIT,
+                )
+            };
+            if pid <= 0 {
+                return Err(());
+            }
+            let child = Child {
+                pid: pid as u64,
+                slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
+            };
+            self.test_old_child = Some(child);
+            let _ = active;
+            Ok(())
+        })();
+        log(if result.is_ok() {
+            "servicemgr: old signed v7 dynamic child spawned, Process cap held for live v8 cutover\r\n"
+        } else {
+            "servicemgr: old signed v7 live child setup REFUSED\r\n"
+        });
+    }
     /// Second independently signed ELF, version 8, in the same namespace.
     /// The prior version-7 child and ID were retired before reboot; this
     /// proves durable AINS/AACT linkage and new execution, NOT live overlap.
@@ -454,6 +507,33 @@ impl State {
                 Err(())
             }
         }
+        // Same-boot cutover keeps v7 registered while signed v8 enters the
+        // second registry slot. A rebooted upgrade has no volatile hint.
+        let old = if let Some(existing) = self.test_old_image {
+            Some(existing)
+        } else if let Some(active) = self.test_last_active {
+            let (r, msg) = call(PKG_OP_LAUNCH, 3, &active)?;
+            if r[2] == CAP_NONE
+                || r[0] != PKG_LAUNCH_READY
+                || r[1] & 255 != 3
+                || msg[32..] != active
+            {
+                if r[2] != CAP_NONE {
+                    let _ = unsafe { syscall1(SYS_CAP_DESTROY, r[2]) };
+                }
+                return Err(());
+            }
+            let mut desc = [0; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, r[2], desc.as_mut_ptr() as u64) } != 0
+                || desc != [1, r[1] >> 8, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+            {
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, r[2]) };
+                return Err(());
+            }
+            Some((desc[1], r[2]))
+        } else {
+            None
+        };
         let (r, msg) = call(PKG_OP_QUERY, 0, &[0; 32])?;
         expected_no_cap(&r)?;
         if r[0] != PKG_ELIGIBLE || r[1] != 8 || msg[..32] == [0; 32] {
@@ -468,6 +548,56 @@ impl State {
         }
         let mut installed = [0; 32];
         installed.copy_from_slice(&msg[32..]);
+        // On this boot v7 already owns one signed Image ID. Independently
+        // register the same verified selection into slot two and require a
+        // third request to refuse BUSY before minting any ID or cap. Retire
+        // only the temporary second ID; PREPARE then admits signed v8 next
+        // to the still-live old ID (and possibly its still-running child).
+        if let Some((first_id, _)) = old {
+            let active = self.test_last_active.ok_or(())?;
+            let (second, reply) = call(PKG_OP_LAUNCH, 3, &active)?;
+            if second[0] != PKG_LAUNCH_READY
+                || second[2] == CAP_NONE
+                || second[1] & 255 != 3
+                || reply[32..] != active
+            {
+                return Err(());
+            }
+            let mut desc = [0; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, second[2], desc.as_mut_ptr() as u64) } != 0
+                || desc
+                    != [
+                        1,
+                        second[1] >> 8,
+                        RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY,
+                    ]
+                || desc[1] == first_id
+            {
+                return Err(());
+            }
+            let (busy, empty) = call(PKG_OP_LAUNCH, 3, &active)?;
+            expected_no_cap(&busy)?;
+            if busy != [PKG_BUSY, 0, CAP_NONE] || empty != [0; 64] {
+                return Err(());
+            }
+            if unsafe { syscall3(SYS_CAP_COPY, second[2], 31, RIGHTS_READ | RIGHTS_DESTROY) } != 0
+                || unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, desc[1], 0, 0, 0, 0) } != 0
+                || unsafe { syscall1(SYS_CAP_DESTROY, second[2]) } != 0
+            {
+                return Err(());
+            }
+            let mut stale = [u64::MAX; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, 31, stale.as_mut_ptr() as u64) } != -2
+                || stale != [u64::MAX; 3]
+                || unsafe { syscall5(SYS_SPAWN, 31, 0, 0, CAP_NONE, 0) } != -2
+                || unsafe { syscall1(SYS_CAP_DESTROY, 31) } != 0
+            {
+                return Err(());
+            }
+            log(
+                "servicemgr: two concurrent signed Image IDs, BUSY third, stale copied bearer and monotonic slot reuse PASS\r\n",
+            );
+        }
         let (r, msg) = call(PKG_OP_SELECT_PREPARE, 2, &installed)?;
         expected_no_cap(&r)?;
         if r[0] != PKG_PREPARED
@@ -478,7 +608,58 @@ impl State {
         {
             return Err(());
         }
-        let (r, msg) = call(PKG_OP_SELECT_COMMIT, r[1], &installed)?;
+        let token = r[1];
+        if let Some((old_id, old_slot)) = old {
+            // At PREPARE two signed IDs must coexist. A third registration
+            // refuses before allocation; then retire any running old child
+            // before revoking its ID and committing the new selection.
+            if let Some(child) = self.test_old_child {
+                let grants = [(ENDPOINT as u64, RIGHTS_WRITE)];
+                if alive(child) != Ok(true)
+                    || unsafe {
+                        syscall5(
+                            SYS_SPAWN,
+                            old_slot,
+                            grants.as_ptr() as u64,
+                            1,
+                            PRIVATE as u64,
+                            MGR_BADGE_PKG_PROBE_EXIT,
+                        )
+                    } != STATUS_BUSY
+                    || finish(child).is_err()
+                {
+                    return Err(());
+                }
+                self.test_old_child = None;
+                log(
+                    "servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT\r\n",
+                );
+            }
+            let mut desc = [0; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, old_slot, desc.as_mut_ptr() as u64) } != 0
+                || desc != [1, old_id, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+                || unsafe { syscall3(SYS_CAP_COPY, old_slot, 30, RIGHTS_READ | RIGHTS_DESTROY) }
+                    != 0
+                || unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, old_id, 0, 0, 0, 0) } != 0
+                || unsafe { syscall1(SYS_CAP_DESTROY, old_slot) } != 0
+            {
+                return Err(());
+            }
+            let mut stale = [u64::MAX; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, 30, stale.as_mut_ptr() as u64) } != -2
+                || stale != [u64::MAX; 3]
+                || unsafe { syscall5(SYS_SPAWN, 30, 0, 0, CAP_NONE, 0) } != -2
+                || unsafe { syscall1(SYS_CAP_DESTROY, 30) } != 0
+            {
+                return Err(());
+            }
+            self.test_last_active = None;
+            self.test_old_image = None;
+            log(
+                "servicemgr: distinct signed v7/v8 registry slots live together at PREPARE; old copied ID revoked before COMMIT\r\n",
+            );
+        }
+        let (r, msg) = call(PKG_OP_SELECT_COMMIT, token, &installed)?;
         if r[2] == CAP_NONE {
             return Err(());
         }
@@ -601,9 +782,35 @@ impl State {
     /// Fatal guest negative control. The manager is *not* recoverable by
     /// merely restarting a Process when it dies owning a LIVE dynamic ID.
     /// Only the Power shell's private manager request can trigger this.
-    pub fn test_die_with_provisional(&mut self) {
+    pub fn test_die_with_provisional(&mut self, fault: bool) {
         if !self.online || alive(self.receiver) != Ok(true) {
             log("servicemgr: death fixture OFFLINE\r\n");
+            return;
+        }
+        if let Some(child) = self.test_old_child {
+            let Some((id, slot)) = self.test_old_image else {
+                log("servicemgr: death fixture missing held Image\r\n");
+                return;
+            };
+            let mut desc = [0; 3];
+            if alive(child) != Ok(true)
+                || unsafe { syscall2(SYS_CAP_DESCRIBE, slot, desc.as_mut_ptr() as u64) } != 0
+                || desc != [1, id, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+            {
+                log("servicemgr: death fixture live child/ID refused\r\n");
+                return;
+            }
+            if fault {
+                log(
+                    "servicemgr: deliberate manager ring-3 #UD with genuinely LIVE signed v7 child/ID (expect fatal halt)\r\n",
+                );
+                unsafe { core::arch::asm!("ud2", options(noreturn)) };
+            }
+            log(
+                "servicemgr: deliberate manager last-thread exit with genuinely LIVE signed v7 child/ID (expect fatal halt)\r\n",
+            );
+            unsafe { syscall1(SYS_THREAD_EXIT, 85) };
+            log("servicemgr: FATAL live-child death fixture returned\r\n");
             return;
         }
         let mut msg = [0u8; MSG_BYTES];
@@ -686,6 +893,12 @@ impl State {
         {
             log("servicemgr: death fixture PREPARE refused\r\n");
             return;
+        }
+        if fault {
+            log(
+                "servicemgr: deliberate manager ring-3 #UD fault with PREPARED LIVE ID (expect fatal halt)\r\n",
+            );
+            unsafe { core::arch::asm!("ud2", options(noreturn)) };
         }
         log(
             "servicemgr: deliberate manager last-thread exit with PREPARED LIVE ID (expect fatal halt)\r\n",
@@ -849,10 +1062,54 @@ impl State {
         let (image_id, image_slot) = image(r, PKG_ACTIVE, 1, &digest, &msg)?;
         let mut active = [0; 32];
         active.copy_from_slice(&msg[32..]);
+        // A genuine LIVE Image travels through the kernel's send queue to
+        // packaged. Its unexpected landed copy must be disposed, while the
+        // independent sender source is still live. No new endpoint/grant.
+        let mut wrong = [0u8; MSG_BYTES];
+        wrong[..8].copy_from_slice(b"app.test");
+        let mut answer = [0u64, 0, CAP_NONE];
+        if unsafe {
+            syscall6(
+                SYS_IPC_CALL,
+                ENDPOINT as u64,
+                PKG_OP_QUERY,
+                0,
+                image_slot,
+                answer.as_mut_ptr() as u64,
+                wrong.as_mut_ptr() as u64,
+            )
+        } != 0
+            || answer != [PKG_BAD_FORMAT, 0, CAP_NONE]
+            || wrong != [0; MSG_BYTES]
+        {
+            return Err(());
+        }
+        let mut retained = [0; 3];
+        if unsafe { syscall2(SYS_CAP_DESCRIBE, image_slot, retained.as_mut_ptr() as u64) } != 0
+            || retained != [1, image_id, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+        {
+            return Err(());
+        }
+        log(
+            "servicemgr: LIVE Image IPC send-queue escrow, receiver unexpected-cap disposal and source retention PASS\r\n",
+        );
+        // Copy possession survives destruction, but an explicit ID revoke
+        // makes the copied bearer stale even after another slot is reused.
+        if unsafe { syscall3(SYS_CAP_COPY, image_slot, 30, RIGHTS_READ | RIGHTS_DESTROY) } != 0 {
+            return Err(());
+        }
         // Before a new explicit LAUNCH, retire *every* copy of the old ID;
         // dropping the returned cap alone cannot invalidate copies.
         if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, image_id, 0, 0, 0, 0) } != 0
             || unsafe { syscall1(SYS_CAP_DESTROY, image_slot) } != 0
+        {
+            return Err(());
+        }
+        let mut stale = [u64::MAX; 3];
+        if unsafe { syscall2(SYS_CAP_DESCRIBE, 30, stale.as_mut_ptr() as u64) } != -2
+            || stale != [u64::MAX; 3]
+            || unsafe { syscall5(SYS_SPAWN, 30, 0, 0, CAP_NONE, 0) } != -2
+            || unsafe { syscall1(SYS_CAP_DESTROY, 30) } != 0
         {
             return Err(());
         }
@@ -950,8 +1207,73 @@ impl State {
         if seen != MGR_BADGE_PKG_PROBE_EXIT || alive(child) != Ok(false) {
             bad = true;
         }
+        if !bad
+            && unsafe {
+                syscall5(
+                    SYS_SPAWN,
+                    steady,
+                    grants.as_ptr() as u64,
+                    1,
+                    PRIVATE as u64,
+                    MGR_BADGE_PKG_PROBE_EXIT,
+                )
+            } != STATUS_BUSY
+        {
+            bad = true;
+        }
         if finish(child).is_err() {
             bad = true;
+        }
+        if !bad {
+            let again = unsafe {
+                syscall5(
+                    SYS_SPAWN,
+                    steady,
+                    grants.as_ptr() as u64,
+                    1,
+                    PRIVATE as u64,
+                    MGR_BADGE_PKG_PROBE_EXIT,
+                )
+            };
+            if again <= 0 {
+                bad = true;
+            } else {
+                let later = Child {
+                    pid: again as u64,
+                    slot: inventory::child_handle(again as u64, &SyscallProbe).map_err(|_| ())?,
+                };
+                let timer = unsafe {
+                    syscall3(
+                        SYS_TIMER_ARM,
+                        PRIVATE as u64,
+                        MGR_BADGE_PKG_PROBE_DEADLINE,
+                        TIMEOUT_US,
+                    )
+                };
+                let mut bits = 0u64;
+                if timer >= 0 {
+                    while bits & (MGR_BADGE_PKG_PROBE_EXIT | MGR_BADGE_PKG_PROBE_DEADLINE) == 0 {
+                        let n = unsafe { syscall1(SYS_WAIT, PRIVATE as u64) };
+                        if n < 0 {
+                            break;
+                        }
+                        bits |= n as u64;
+                    }
+                    let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
+                }
+                if timer < 0
+                    || bits != MGR_BADGE_PKG_PROBE_EXIT
+                    || alive(later) != Ok(false)
+                    || finish(later).is_err()
+                {
+                    bad = true;
+                }
+            }
+        }
+        if !bad {
+            log(
+                "servicemgr: second dynamic child BUSY while live and exited-unreaped; FINISH permits next spawn PASS\r\n",
+            );
         }
         if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, next_id, 0, 0, 0, 0) } != 0
             || unsafe { syscall1(SYS_CAP_DESTROY, steady) } != 0
@@ -996,11 +1318,19 @@ impl State {
         let (third_id, third_slot) = image(r, PKG_ACTIVE, 3, &digest, &msg)?;
         let mut third_hash = [0; 32];
         third_hash.copy_from_slice(&msg[32..]);
-        if third_id == next_id
-            || unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, third_id, 0, 0, 0, 0) } != 0
-            || unsafe { syscall1(SYS_CAP_DESTROY, third_slot) } != 0
-        {
+        if third_id == next_id {
             return Err(());
+        }
+        if full_platter {
+            if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, third_id, 0, 0, 0, 0) } != 0
+                || unsafe { syscall1(SYS_CAP_DESTROY, third_slot) } != 0
+            {
+                return Err(());
+            }
+        } else {
+            self.test_last_active = Some(third_hash);
+            self.test_old_image = Some((third_id, third_slot));
+            log("servicemgr: selected signed v7 Image held LIVE for same-boot v8 PREPARE\r\n");
         }
         if full_platter {
             // At 32/32 the fourth wire decision fits v1 but AFS1 cannot

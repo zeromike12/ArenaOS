@@ -81,6 +81,8 @@ pub const MGR_BADGE_ADMIN_PKG_DEATHTEST: u64 = 1 << 11;
 /// Test-only small-platter first-version selection, then second signed ELF.
 pub const MGR_BADGE_ADMIN_PKG_SELECTLITE: u64 = 1 << 12;
 pub const MGR_BADGE_ADMIN_PKG_UPGRADETEST: u64 = 1 << 13;
+pub const MGR_BADGE_ADMIN_PKG_OLDLIVE: u64 = 1 << 19;
+pub const MGR_BADGE_ADMIN_PKG_DEATHFAULT: u64 = 1 << 18;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.

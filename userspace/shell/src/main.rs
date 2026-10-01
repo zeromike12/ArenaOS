@@ -1232,12 +1232,16 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         || eq(rest, b"selectlite")
         || eq(rest, b"upgradetest")
         || eq(rest, b"deathtest")
+        || eq(rest, b"deathfault")
+        || eq(rest, b"oldlive")
     {
         let installtest = eq(rest, b"installtest");
         let selecttest = eq(rest, b"selecttest");
         let selectlite = eq(rest, b"selectlite");
         let upgradetest = eq(rest, b"upgradetest");
         let deathtest = eq(rest, b"deathtest");
+        let deathfault = eq(rest, b"deathfault");
+        let oldlive = eq(rest, b"oldlive");
         let mut private = [0u64; 3];
         let mut wake = [0u64; 3];
         let mut endpoint = [0u64; 3];
@@ -1270,6 +1274,10 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             MGR_BADGE_ADMIN_PKG_SELECTLITE
         } else if upgradetest {
             MGR_BADGE_ADMIN_PKG_UPGRADETEST
+        } else if oldlive {
+            MGR_BADGE_ADMIN_PKG_OLDLIVE
+        } else if deathfault {
+            MGR_BADGE_ADMIN_PKG_DEATHFAULT
         } else if deathtest {
             MGR_BADGE_ADMIN_PKG_DEATHTEST
         } else {
@@ -1279,7 +1287,14 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             || unsafe { syscall2(SYS_NOTIFY, SLOT_MGR_WAKE, MGR_BADGE_ADMIN_WAKE) } != 0
         {
             o.str(
-                if installtest || selecttest || selectlite || upgradetest || deathtest {
+                if installtest
+                    || selecttest
+                    || selectlite
+                    || upgradetest
+                    || deathtest
+                    || deathfault
+                    || oldlive
+                {
                     "pkg: private manager lifecycle fixture request refused\r\n"
                 } else {
                     "pkg: private restart request refused\r\n"
@@ -1293,7 +1308,9 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             "pkg: fixed signed SELECT fixture requested; no receipt yet\r\n"
         } else if upgradetest {
             "pkg: fixed signed version-eight UPGRADE fixture requested; no receipt yet\r\n"
-        } else if deathtest {
+        } else if oldlive {
+            "pkg: signed old-child live cutover fixture requested; no receipt yet\r\n"
+        } else if deathtest || deathfault {
             "pkg: fatal manager-death negative fixture requested; no PASS expected\r\n"
         } else {
             "pkg: private manager restart requested; no receipt yet\r\n"
