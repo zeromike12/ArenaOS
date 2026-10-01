@@ -2,9 +2,9 @@
 """Package a qualified Phase 8 commit with its OWN bootable QEMU build.
 
 Run after tools/run_tests.sh and tools/stability_loop.sh 100, before the
-single source+artifact commit. This complete-8.0 checkpoint is not a
-GitHub release; qualification is still bound to its exact EFI. Reject an unrelated
-EFI, an ESP with different bytes, or a partial/stale receipt. Extract
+source+artifact checkpoint commit. This is not a GitHub release;
+qualification is bound to its exact EFI. Reject an unrelated EFI, an ESP
+with different bytes, or a partial/stale receipt. Extract
 and boot the actual tarball from a formatted bundled disk before exit.
 """
 import argparse
@@ -24,7 +24,8 @@ import mtest  # noqa: E402
 from pyfatfs.PyFatFS import PyFatFS  # noqa: E402
 
 ROOT = arena_env.REPO_ROOT
-FILES = ("arena-esp.img", "scratch-template.img", "edk2-x86_64-code.fd",
+FILES = ("arena-boot.efi", "stability-receipt.txt", "arena-esp.img",
+         "scratch-template.img", "edk2-x86_64-code.fd",
          "ovmf-vars-template.img", "RUNNING.md", "QUALIFICATION.txt")
 
 
@@ -106,6 +107,19 @@ def main() -> int:
                          "broker-first timeout returned typed SERVICE_GONE")
         if any(item not in log for item in required):
             raise ValueError("8.2 checkpoint requires its complete historical and focused guest proofs")
+    if args.checkpoint == "phase84-complete":
+        log = args.suite_log.read_text()
+        required = ("ALL TESTS PASSED (47 test suites)",
+                    "[m84-crash] PREFIX CRASH MODEL: PASS",
+                    "[m84-stage] TARGETED GUEST RESULT: PASS",
+                    "[m84-red-control] PASS: red mutant allows unauthorized real stage",
+                    "[m84-wrong-root] PASS: guest embedded wrong root refuses",
+                    "guest verifies root-signed eight-digest cumulative capacity",
+                    "32/32 AFS1 objects: typed pre-CREATE NO_SPACE",
+                    "same-platter reboot detects partial highest and refuses old/false stage",
+                    "root-signed ZIP-215 subordinate-key alias refused")
+        if any(item not in log for item in required):
+            raise ValueError("8.4 bundle requires every historical suite and guest staging/crash/red/capacity proofs")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
@@ -115,16 +129,20 @@ def main() -> int:
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
     (stage / "arena-esp.img").write_bytes(esp_bytes)
+    shutil.copy2(ROOT / "build/arena-boot.efi", stage / "arena-boot.efi")
+    shutil.copy2(ROOT / "build/stability-receipt.txt", stage / "stability-receipt.txt")
     shutil.copy2(arena_env.ovmf_code(), stage / "edk2-x86_64-code.fd")
     shutil.copy2(arena_env.ovmf_vars_template(), stage / "ovmf-vars-template.img")
     shutil.copy2(ROOT / "docs/RUNNING.md", stage / "RUNNING.md")
     afs1.mkfs(stage / "scratch-template.img", 8 * 1024 * 1024 // afs1.SECTOR)
     (stage / "QUALIFICATION.txt").write_text(
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
-        "Historical suite: all passed (see commit gate)\n"
+        f"Historical suite: all passed ({'47/47' if args.checkpoint == 'phase84-complete' else 'see commit gate'})\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: VOLATILE INTEGRATION ONLY: default-DENY mediator, marker-authorized in-memory ALLOW/DENY/REVOKE, 128-bit service bearer and mediated arena.txt READ; IPC dead-caller teardown corrected. No persisted decision or reboot/restart/crash-model permission guarantee; 8.2 INCOMPLETE\n"
+        + ("Phase 8.1/8.2/8.3: COMPLETE. Phase 8.4: COMPLETE — USERSPACE VERIFIED STAGING ONLY; public TEST root, signed canonical package/policy, revocation/version refusal, bounded immutable AFS1 stages, documented crash prefixes. NOT installed, activated or an Image cap. No production-key custody, Secure Boot, hostile-disk rollback defense or 8.5 installer. Eight signed revocations in guest; ninth distinct typed issuer-side refusal before signing (user-approved v1 interpretation).\n"
+           if args.checkpoint == "phase84-complete" else
+           "Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: VOLATILE INTEGRATION ONLY: default-DENY mediator, marker-authorized in-memory ALLOW/DENY/REVOKE, 128-bit service bearer and mediated arena.txt READ; IPC dead-caller teardown corrected. No persisted decision or reboot/restart/crash-model permission guarantee; 8.2 INCOMPLETE\n"
            if args.checkpoint == "phase82-volatile-permission" else
            "Phase 8.1: COMPLETE (unchanged transactional store); Phase 8.2: CAP-SPACE FOUNDATION ONLY: 32 fixed slots with full-table refusal and accounting; no permissiond/CLI/approval/grant; 8.2 INCOMPLETE\n"
            if args.checkpoint == "phase82-capspace-foundation" else
@@ -163,6 +181,9 @@ def main() -> int:
             sha, path = line.split(maxsplit=1)
             if digest((unpacked / path).read_bytes()) != sha:
                 raise ValueError(f"archive checksum mismatch: {path}")
+        if digest((unpacked / "arena-boot.efi").read_bytes()) != efi_sha or \
+                (unpacked / "stability-receipt.txt").read_text().strip() != f"{efi_sha} 100/100":
+            raise ValueError("extracted ELF/100-boot receipt differs from qualified image")
         scratch = unpacked / "scratch.img"
         shutil.copy2(unpacked / "scratch-template.img", scratch)
         old_code = os.environ.get("ARENA_OVMF_CODE")
@@ -191,6 +212,11 @@ def main() -> int:
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",
                     "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
+        if args.checkpoint == "phase84-complete":
+            required += ("packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified",
+                         "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)",
+                         "permissiond: validated durable policy generation 0 DENY",
+                         "m83: returncap PASS (40 real reply caps rejected and discarded")
         if args.checkpoint.startswith("phase81-") or args.checkpoint.startswith("phase82-"):
             required += ("configread: SET absent/wrong-kind refused x20 by receiver",
                          "configread: READ UNSET",

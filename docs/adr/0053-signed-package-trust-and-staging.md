@@ -1,13 +1,15 @@
 # ADR-0053 — Phase 8.4 signed packages and verified staging
 
-Status: **Accepted — exact-source audit and offline/vector/fuzz gates passed; guest implementation in progress**
+Status: **Accepted — exact-source audit and offline/vector/fuzz gates passed; guest implementation subsequently qualified**
 (2026-09-30). The 23 exact archive hashes, vendor/file hashes, feature/build/unsafe
 review, no_std target compile and independent + coverage-guided host verifier/decoder
 proofs are recorded in [the evidence ledger](0053-gate-evidence.md),
 [unsafe review](0053-unsafe-review.md) and [fuzz evidence](0053-fuzz-evidence.md).
 No material dependency, executed crypto backend, signed-wire or trust-model change was
 required. Acceptance authorizes **implementation only**, not a completed/qualified
-Phase 8.4 guest checkpoint; Phase 8.3 remains the last completed milestone.
+Phase 8.4 guest checkpoint. Its separate implementation, 47/47 historical suite,
+final-artifact-bound 100/100 and extracted boot bundle are recorded in the
+evidence ledger; Phase 8.4 is now complete **for verified staging only**.
 
 ## Scope and threat model
 
@@ -308,7 +310,7 @@ are capacity changes, **not** new kernel primitives or rights.
 
 ## Dependency reconnaissance — historical pre-acquisition snapshot
 
-**Update 2026-09-30:** the 23 exact archives were subsequently supplied by the user and independently verified, extracted and committed under `vendor/phase84`; the earlier CDN/cache-blocker statements in this section describe the situation *before* that acquisition. Current accepted audit evidence is tracked in [0053-gate-evidence.md](0053-gate-evidence.md) and [0053-source-audit.md](0053-source-audit.md). Guest implementation and checkpoint qualification remain separate and incomplete.
+**Update 2026-09-30:** the 23 exact archives were subsequently supplied by the user and independently verified, extracted and committed under `vendor/phase84`; the earlier CDN/cache-blocker statements in this section describe the situation *before* that acquisition. Current accepted audit evidence is tracked in [0053-gate-evidence.md](0053-gate-evidence.md) and [0053-source-audit.md](0053-source-audit.md). Guest implementation and checkpoint qualification were completed separately after ADR acceptance; see the evidence ledger.
 
 Candidate: `ed25519-dalek = { version = "=2.2.0", default-features = false }` and `sha2 =
 { version = "=0.10.9", default-features = false }` targeting `x86_64-unknown-none`. The

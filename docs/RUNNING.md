@@ -4,9 +4,51 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 8.3 corrected linked-client checkpoint
+## Phase 8.4 verified signed-package staging checkpoint
 
-This is the **current qualified 8.3 build**. It retains two independent
+This is the **current qualified QEMU build**. ADR-0053's test-only public
+Ed25519 root (SHA-256 fingerprint
+`21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9`)
+verifies canonical signed packages and root-signed cumulative policies in a
+userspace receiver. The Power-gated shell has `pkg query ID`, `pkg stage ID`
+and `pkg policy ID`; the latter two require both the receiver-verified
+approval marker and an offline-signed, immutable AFS1 input file. On an
+unseeded disk, `pkg query app.test` reports `UNSET`; stage/policy refuse
+without suitable signed bytes. The independent host acceptance fixture
+`tools/test_m84_stage.py` prepares signed test inputs **offline** and checks
+committed bytes after real-QEMU staging/reboots. This bundle contains **no
+private key or pre-signed update**. Verification and staging are **not**
+installation or activation: there is no on-disk executable Image cap, boot
+registration, production key custody, Secure Boot or hostile-disk anti-rollback.
+
+The full historical suite passed **47/47** and the exact final EFI passed a
+fresh artifact-bound **100/100** QEMU qualification. Nine stage and seven
+policy SIGKILL boundaries were audited against AFS1's documented ordered
+atomic-sector prefix model, not arbitrary corruption. The approved APOL v1
+wire holds eight revocation digests: the guest accepts eight, while a ninth
+distinct digest is refused by the offline issuer before signing. An earlier
+intermittent OVMF-only stall had no ArenaOS entry; it was recorded as a failure
+in that separate run, **not** as part of this successful 100/100.
+
+Download and verify this per-commit deployable archive, then use the
+[common QEMU command below](#phase-8-checkpoint-boot-the-exact-per-commit-build):
+
+```sh
+curl -fL -o arenaos-phase84-complete-qemu-x86_64.tar.gz \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase84-complete/arenaos-phase84-complete-qemu-x86_64.tar.gz
+curl -fL -o arenaos-phase84-complete-qemu-x86_64.tar.gz.sha256 \
+  https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/01a0e95e-arenaos/releases/checkpoints/phase84-complete/arenaos-phase84-complete-qemu-x86_64.tar.gz.sha256
+sha256sum -c arenaos-phase84-complete-qemu-x86_64.tar.gz.sha256
+tar xzf arenaos-phase84-complete-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+test "$(sha256sum arena-boot.efi | cut -d' ' -f1) 100/100" = "$(cat stability-receipt.txt)"
+cp ovmf-vars-template.img ovmf-vars.img  # fresh copy each boot
+cp scratch-template.img scratch.img      # only FIRST boot; reuse for durability
+```
+
+## Historical Phase 8.3 corrected linked-client checkpoint
+
+This is the **previous qualified 8.3 build**. It retains two independent
 filesystem and network consumers and the complete durable 8.2 permission
 workflow. The syscall-backed `arena-lib` client now **destroys an
 unexpected IPC-landed reply cap before returning `ReturnedCap`**; the

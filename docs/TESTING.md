@@ -14,6 +14,27 @@ SHA-256 of `build/arena-boot.efi`. A rebuilt/different kernel invalidates
 the receipt. This is now a commit discipline, not only a release gate;
 release staging/publishing retains its own full-suite and receipt check.
 
+**Phase 8.4 signed-package staging completion gate (ADR-0053):** the
+pinned exact-source/no_std guest verifier, static stack bound and signed
+canonical bytes are tested by `tools/test_m84_stage.py` (durable root/
+subordinate stages and policy, cap/marker refusals, eight authentic signed
+revocations, downgrade/conflict, full table/disk, degraded reboot and held-
+Process-cap manager restart), `tools/test_m84_crash.py` (nine STAGE and seven
+POLICY actual SIGKILL AFS1-prefix boundaries), and controlled guest
+`test_m84_red_control.py` and `test_m84_wrong_root.py` (mutant images
+restored byte-exact afterward). A ninth distinct APOL v1 digest cannot be
+encoded in its eight slots; the user approved an issuer-side typed
+pre-signing `NoSpace` proof instead of a fictitious guest-ninth artifact.
+The final full suite passed **47/47**, final EFI SHA-256
+`5fd9101725a955e7846204b16df6bc8fc87cea93eb359e04a535bac38bc66508`
+passed an artifact-bound **100/100**, and the extracted
+`phase84-complete` bundle booted from its bundled firmware/AFS1 platter.
+Old OVMF-only pre-entry timeouts were recorded as failures of earlier runs,
+not counted as part of the successful final 100/100; their exact firmware
+cause remains unknown. This milestone is **staging only**, not an installer,
+activation path or a production signing/release ceremony. Full proof and
+qualification receipt are in `docs/adr/0053-gate-evidence.md`.
+
 **Phase 8.3 linked-library completion gate (ADR-0052, reopened for reply-cap disposal):**
 `test_m83_returned_cap.py` exercises the *production* linked `Syscall`
 client in two real ring-3 faulttest instances. The isolated faultd

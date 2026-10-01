@@ -268,6 +268,13 @@ for i in $(seq 1 "$N"); do
         why="permission readiness lacked a result-and-exit witness"
     elif grep -aqF 'servicemgr: permission PING failed/deadline; no READY' "$SERIAL"; then
         why="permission readiness failed during ordinary qualification"
+    # 8.4: even an empty staging namespace must be scanned under the
+    # packaged receiver's exact attenuated grants. The manager demands
+    # real PING result AND worker exit before announcing READY.
+    elif ! grep -aqF 'packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified' "$SERIAL"; then
+        why="package receiver did not scan fresh AFS1 under exact grants"
+    elif ! grep -aqF 'servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)' "$SERIAL"; then
+        why="package receiver did not pass result-and-exit readiness"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

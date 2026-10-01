@@ -1123,15 +1123,25 @@ is not completed by accepting an ADR.
       success words remain caller-validated, not library-certified.
       Fresh corrective historical suite 43/43 and final-image-bound
       100/100; `phase83-corrected` archive supersedes original 8.3.
-- [ ] **8.4 package format + signed packages**. ADR-0053 is **Accepted** for
-      the exact source-vendored serial x86_64-unknown-none Ed25519/SHA-256
-      verifier after pinned source/unsafe/build audit, offline target compile,
-      independent vectors and coverage-guided decoder/Rust fuzzing. Guest
-      implementation and final checkpoint qualification remain in progress:
-      define package identity, public test root, cumulative revocation and
-      canonical signature domains; test tamper, bounded same-disk crash
-      recovery and **receiver-side verified staging only**. Installation,
-      activation and dynamic linking remain out of scope until 8.5.
+- [x] **8.4 package format + signed packages**. ADR-0053's pinned,
+      source-vendored serial no_std Ed25519/SHA-256 verifier passed exact
+      unsafe/build/feature review, offline target compile, independent vectors
+      and coverage-guided fuzzing. The guest verifies a fingerprinted public
+      **test-only** root, immutable canonical signed bytes, subordinate policy,
+      revocation and version; only the Power-gated shell with a separate
+      receiver-verified marker can **stage**, never install or activate. Nine
+      STAGE and seven POLICY SIGKILL boundaries passed same-platter AFS1
+      crash-prefix audit, plus marker/wrong-root red/negative controls,
+      capacity, reboot and manager restart proofs. The fixed APOL v1 wire
+      accepts eight digest revocations; per explicit user decision a ninth
+      distinct digest is typed issuer-side NO_SPACE before signing (no guest
+      ninth artifact). Full historical suite **47/47**, final EFI-bound
+      **100/100** QEMU boots, and checksummed/extracted bundle boot. Prior
+      unrelated OVMF-only timeouts are documented as failures of their own
+      runs, never counted as guest passes. See `phase84-complete` checkpoint
+      and ADR-0053 ledger. Production key custody, Secure Boot, hostile-disk
+      rollback defense, installation, activation and linking remain out of
+      scope until separate decisions/8.5.
 - [ ] **8.5 installer/updater**. Artifact-bound install/upgrade and
       power-loss recovery tests with an explicit trust chain and
       rollback rules. No assumption of real-hardware drivers or
