@@ -312,7 +312,7 @@ def run_qemu(label: str, esp: Path,
                 if all(data.count(m) >= nth for m in markers):
                     try:
                         assert proc.stdin is not None
-                        proc.stdin.write(payload)
+                        proc.stdin.write(payload() if callable(payload) else payload)
                         proc.stdin.flush()
                     except (BrokenPipeError, OSError):
                         return  # VM gone; nothing left to feed
@@ -449,7 +449,7 @@ def boot(label: str, esp: Path,
                         break
                     try:
                         assert proc.stdin is not None
-                        proc.stdin.write(payload)
+                        proc.stdin.write(payload() if callable(payload) else payload)
                         proc.stdin.flush()
                     except (BrokenPipeError, OSError):
                         return

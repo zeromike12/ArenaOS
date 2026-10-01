@@ -94,6 +94,22 @@ const SERVICES: [Service<'static>; 1] = [Service {
 fn log(s: &str) {
     let _ = unsafe { syscall2(SYS_DEBUG_WRITE, s.as_ptr() as u64, s.len() as u64) };
 }
+fn observed_caps(label: &str) {
+    let mut count = 0u64;
+    for slot in 0..32u64 {
+        let mut d = [0; 3];
+        if unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0 {
+            count += 1;
+        }
+    }
+    log_line(|o| {
+        o.str("servicemgr: observed cap occupancy ");
+        o.str(label);
+        o.str("=");
+        o.u64(count);
+        o.crlf();
+    });
+}
 #[derive(Clone, Copy)]
 struct Child {
     pid: u64,
@@ -107,6 +123,7 @@ pub struct State {
     test_last_active: Option<[u8; 32]>,
     test_old_image: Option<(u64, u64)>,
     test_old_child: Option<Child>,
+    test_maximal: bool,
 }
 
 fn plan() -> Result<Step, ()> {
@@ -308,6 +325,7 @@ pub fn start() -> Result<State, ()> {
         test_last_active: None,
         test_old_image: None,
         test_old_child: None,
+        test_maximal: false,
     })
 }
 impl State {
@@ -447,6 +465,7 @@ impl State {
                 slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
             };
             self.test_old_child = Some(child);
+            observed_caps("unretired-child");
             let _ = active;
             Ok(())
         })();
@@ -454,6 +473,175 @@ impl State {
             "servicemgr: old signed v7 dynamic child spawned, Process cap held for live v8 cutover\r\n"
         } else {
             "servicemgr: old signed v7 live child setup REFUSED\r\n"
+        });
+    }
+    /// Real maximal-platter second immutable install: a signed v8 stage is
+    /// independently verified by packaged; no Image is minted by INSTALL.
+    pub fn test_install_two(&mut self) {
+        let result = (|| -> Result<(), ()> {
+            if !self.online || alive(self.receiver) != Ok(true) {
+                return Err(());
+            }
+            let mut msg = [0u8; MSG_BYTES];
+            msg[..8].copy_from_slice(b"app.test");
+            let mut r = [0u64, 0, CAP_NONE];
+            if unsafe {
+                syscall6(
+                    SYS_IPC_CALL,
+                    ENDPOINT as u64,
+                    PKG_OP_QUERY,
+                    0,
+                    CAP_NONE,
+                    r.as_mut_ptr() as u64,
+                    msg.as_mut_ptr() as u64,
+                )
+            } != 0
+                || r[0] != PKG_ELIGIBLE
+                || r[1] != 8
+                || r[2] != CAP_NONE
+                || msg[..32] == [0; 32]
+            {
+                return Err(());
+            }
+            let mut req = [0u8; MSG_BYTES];
+            req[..8].copy_from_slice(b"app.test");
+            req[32..].copy_from_slice(&msg[..32]);
+            r = [0, 0, CAP_NONE];
+            if unsafe {
+                syscall6(
+                    SYS_IPC_CALL,
+                    ENDPOINT as u64,
+                    PKG_OP_INSTALL,
+                    2,
+                    LIFECYCLE as u64,
+                    r.as_mut_ptr() as u64,
+                    req.as_mut_ptr() as u64,
+                )
+            } != 0
+                || r != [PKG_INSTALLED, 2, CAP_NONE]
+                || req[..32] != msg[..32]
+                || req[32..] == [0; 32]
+            {
+                return Err(());
+            }
+            Ok(())
+        })();
+        log(if result.is_ok() {
+            "servicemgr: maximal signed AINS2 committed without Image cap\r\n"
+        } else {
+            "servicemgr: maximal historical platter second AINS refused\r\n"
+        });
+    }
+    /// At the approved 19+8+2+3=32 object bound, fourth AACT is a
+    /// pre-CREATE NO_SPACE. After refusal the prior signed v7 remains
+    /// launchable through its still-valid active decision and held ID.
+    pub fn test_fourth(&mut self) {
+        let result = (|| -> Result<(), ()> {
+            let active = self.test_last_active.ok_or(())?;
+            if !self.online || alive(self.receiver) != Ok(true) {
+                return Err(());
+            }
+            let mut msg = [0u8; MSG_BYTES];
+            msg[..8].copy_from_slice(b"app.test");
+            msg[32..].copy_from_slice(&active);
+            let mut r = [0u64, 0, CAP_NONE];
+            if unsafe {
+                syscall6(
+                    SYS_IPC_CALL,
+                    ENDPOINT as u64,
+                    PKG_OP_DEACTIVATE,
+                    4,
+                    LIFECYCLE as u64,
+                    r.as_mut_ptr() as u64,
+                    msg.as_mut_ptr() as u64,
+                )
+            } != 0
+                || r != [PKG_NO_SPACE, 0, CAP_NONE]
+                || msg != [0; MSG_BYTES]
+            {
+                return Err(());
+            }
+            log("servicemgr: maximal AACT4 typed NO_SPACE before CREATE\r\n");
+            msg.fill(0);
+            msg[..8].copy_from_slice(b"app.test");
+            msg[32..].copy_from_slice(&active);
+            r = [0, 0, CAP_NONE];
+            if unsafe {
+                syscall6(
+                    SYS_IPC_CALL,
+                    ENDPOINT as u64,
+                    PKG_OP_LAUNCH,
+                    3,
+                    LIFECYCLE as u64,
+                    r.as_mut_ptr() as u64,
+                    msg.as_mut_ptr() as u64,
+                )
+            } != 0
+                || r[0] != PKG_LAUNCH_READY
+                || r[1] & 255 != 3
+                || r[2] == CAP_NONE
+                || msg[32..] != active
+            {
+                return Err(());
+            }
+            let mut desc = [0; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, r[2], desc.as_mut_ptr() as u64) } != 0
+                || desc != [1, r[1] >> 8, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+            {
+                return Err(());
+            }
+            let grants = [(ENDPOINT as u64, RIGHTS_WRITE)];
+            let pid = unsafe {
+                syscall5(
+                    SYS_SPAWN,
+                    r[2],
+                    grants.as_ptr() as u64,
+                    1,
+                    PRIVATE as u64,
+                    MGR_BADGE_PKG_PROBE_EXIT,
+                )
+            };
+            if pid <= 0 {
+                return Err(());
+            }
+            let child = Child {
+                pid: pid as u64,
+                slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
+            };
+            let timer = unsafe {
+                syscall3(
+                    SYS_TIMER_ARM,
+                    PRIVATE as u64,
+                    MGR_BADGE_PKG_PROBE_DEADLINE,
+                    15_000_000,
+                )
+            };
+            if timer < 0 {
+                return Err(());
+            }
+            let mut bits = 0u64;
+            while bits & (MGR_BADGE_PKG_PROBE_DEADLINE | MGR_BADGE_PKG_PROBE_EXIT) == 0 {
+                let n = unsafe { syscall1(SYS_WAIT, PRIVATE as u64) };
+                if n < 0 {
+                    return Err(());
+                }
+                bits |= n as u64;
+            }
+            let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
+            if bits != MGR_BADGE_PKG_PROBE_DEADLINE
+                || alive(child) != Ok(true)
+                || finish(child).is_err()
+                || unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, desc[1], 0, 0, 0, 0) } != 0
+                || unsafe { syscall1(SYS_CAP_DESTROY, r[2]) } != 0
+            {
+                return Err(());
+            }
+            Ok(())
+        })();
+        log(if result.is_ok() {
+            "servicemgr: maximal platter fourth refusal preserved usable signed v7 LAUNCH\r\n"
+        } else {
+            "servicemgr: maximal platter fourth refusal or prior LAUNCH FAILED\r\n"
         });
     }
     /// Second independently signed ELF, version 8, in the same namespace.
@@ -594,6 +782,7 @@ impl State {
             {
                 return Err(());
             }
+            observed_caps("two-live-images");
             log(
                 "servicemgr: two concurrent signed Image IDs, BUSY third, stale copied bearer and monotonic slot reuse PASS\r\n",
             );
@@ -631,6 +820,7 @@ impl State {
                     return Err(());
                 }
                 self.test_old_child = None;
+                observed_caps("after-finish");
                 log(
                     "servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT\r\n",
                 );
@@ -917,11 +1107,17 @@ impl State {
     pub fn test_select_lite(&mut self) {
         self.run_select_fixture(false);
     }
+    pub fn test_maximal_select(&mut self) {
+        self.test_maximal = true;
+        self.run_select_fixture(false);
+        self.test_maximal = false;
+    }
     fn run_select_fixture(&mut self, full_platter: bool) {
         if !self.online || alive(self.receiver) != Ok(true) {
             log("servicemgr: SELECTTEST refused: receiver unavailable\r\n");
             return;
         }
+        observed_caps("baseline");
         let result = self.select_fixture_inner(full_platter);
         log(if result.is_ok() {
             if full_platter {
@@ -1184,7 +1380,11 @@ impl State {
                 SYS_TIMER_ARM,
                 PRIVATE as u64,
                 MGR_BADGE_PKG_PROBE_DEADLINE,
-                TIMEOUT_US,
+                if self.test_maximal {
+                    15_000_000
+                } else {
+                    TIMEOUT_US
+                },
             )
         };
         if timer < 0 {
@@ -1247,7 +1447,11 @@ impl State {
                         SYS_TIMER_ARM,
                         PRIVATE as u64,
                         MGR_BADGE_PKG_PROBE_DEADLINE,
-                        TIMEOUT_US,
+                        if self.test_maximal {
+                            15_000_000
+                        } else {
+                            TIMEOUT_US
+                        },
                     )
                 };
                 let mut bits = 0u64;

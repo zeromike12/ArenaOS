@@ -172,6 +172,17 @@ fn say(s: &str) {
         o.str(s);
     });
 }
+fn cap_occupancy() -> u64 {
+    let mut n = 0;
+    for slot in 0..32u64 {
+        let mut d = [0; 3];
+        if unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0 {
+            n += 1;
+        }
+    }
+    n
+}
+
 fn fail(s: &str) -> ! {
     say(s);
     unsafe { syscall1(SYS_THREAD_EXIT, 89) };
@@ -1449,6 +1460,13 @@ pub extern "C" fn start_on_private_stack() -> ! {
     if boot_scan(va as u64, buf).is_err() {
         fail("boot namespace scan refused: corrupt/offline, no READY");
     }
+    let initial_caps = cap_occupancy();
+    log_line(|o| {
+        o.str("packaged: observed initial cap occupancy ");
+        o.u64(initial_caps);
+        o.crlf();
+    });
+    let mut cap_peak = initial_caps;
     say("boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified");
     let mut degraded = false;
     let mut pending = Pending::empty();
@@ -1467,6 +1485,16 @@ pub extern "C" fn start_on_private_stack() -> ! {
             fail("recv refused");
         }
         let (op, arg, landed) = (words[0], words[1], words[2]);
+        let occupancy = cap_occupancy();
+        if occupancy > cap_peak {
+            cap_peak = occupancy;
+            log_line(|o| {
+                o.str("packaged: observed cap high-water ");
+                o.u64(cap_peak);
+                o.crlf();
+            });
+        }
+
         // Consume every landed reference, even on PING, malformed requests,
         // wrong-kind/rights/marker or backend failure. A numeric slot is never
         // approval. `take_diagnostic` compares Notification object identity

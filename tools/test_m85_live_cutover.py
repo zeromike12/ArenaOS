@@ -44,15 +44,28 @@ def main():
     s=boot(esp,disk,'cutover',[
         ((b'arena>',b'packaged READY'),1,b'pkg selectlite\r'),
         ((b'arena>',b'servicemgr: Phase 8.5 first signed ELF ran, v8-03 active'),1,b'pkg stage app.test\r'),
-        ((b'arena>',b'pkg: ELIGIBLE (staged, NOT installed/active) version 8'),1,b'pkg oldlive\r'),
-        ((b'arena>',b'phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP'),1,b'pkg upgradetest\r'),
-        ((b'arena>',b'servicemgr: Phase 8.5 second distinct signed ELF version 8 installed, selected and ran in ring 3'),1,b'shutdown\r')])
+        ((b'arena>',b'pkg: ELIGIBLE (staged, NOT installed/active) version 8'),1,b'pkg resources\r'),
+        (b'pkg: observed frames=',1,b'pkg oldlive\r'),
+        ((b'arena>',b'phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP'),1,b'pkg resources\r'),
+        (b'pkg: observed frames=',2,b'pkg upgradetest\r'),
+        ((b'arena>',b'servicemgr: Phase 8.5 second distinct signed ELF version 8 installed, selected and ran in ring 3'),1,b'pkg resources\r'),
+        (b'pkg: observed frames=',3,b'shutdown\r')])
     assert s.count('phase85-hold: first signed v7 launch exited normally')>=1
     assert s.count('phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP')==1
     assert 'servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT' in s
     assert 'servicemgr: distinct signed v7/v8 registry slots live together at PREPARE; old copied ID revoked before COMMIT' in s
     assert 'phase85-v2: version-eight image queried signed stage via inherited endpoint' in s
     assert 'UPGRADETEST refused' not in s and 'SELECTTEST refused' not in s
+    import re
+    samples=[tuple(map(int,x)) for x in re.findall(r'pkg: observed frames=(\d+) records=(\d+) processes=(\d+)',s)]
+    assert len(samples)==3 and samples[0]==samples[2] and samples[1][0]<samples[0][0]
+    assert samples[1][1:]==(samples[0][1]+1,samples[0][2]+1),samples
+    assert 'servicemgr: full fixture notification budget 18/18; nineteenth refused' in s
+    mgr={name:int(n) for name,n in re.findall(r'servicemgr: observed cap occupancy ([\w-]+)=(\d+)',s)}
+    assert all(0<mgr[k]<=32 for k in ('baseline','two-live-images','unretired-child','after-finish')),mgr
+    peaks=[int(n) for n in re.findall(r'packaged: observed cap high-water (\d+)',s)]
+    assert peaks and max(peaks)<=32 and max(peaks)>=7,peaks
+    print(f'[{LABEL}] measured frames/records/processes={samples}; manager caps={mgr}; packaged cap peak={max(peaks)}',flush=True)
     now=t.contents(disk)
     assert all(now[k]==v for k,v in before.items()) and now[t.STAGE2]==s2
     n1=('n8-'+t.PREFIX+'-01').encode();n2=('n8-'+t.PREFIX+'-02').encode()

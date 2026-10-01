@@ -1234,6 +1234,10 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         || eq(rest, b"deathtest")
         || eq(rest, b"deathfault")
         || eq(rest, b"oldlive")
+        || eq(rest, b"resources")
+        || eq(rest, b"installtwo")
+        || eq(rest, b"fourthtest")
+        || eq(rest, b"maximalselect")
     {
         let installtest = eq(rest, b"installtest");
         let selecttest = eq(rest, b"selecttest");
@@ -1242,6 +1246,24 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         let deathtest = eq(rest, b"deathtest");
         let deathfault = eq(rest, b"deathfault");
         let oldlive = eq(rest, b"oldlive");
+        let resources = eq(rest, b"resources");
+        let installtwo = eq(rest, b"installtwo");
+        let fourthtest = eq(rest, b"fourthtest");
+        let maximalselect = eq(rest, b"maximalselect");
+        if resources {
+            if let Some([frames, records, processes]) = resource_snapshot() {
+                o.str("pkg: observed frames=");
+                o.u64(frames);
+                o.str(" records=");
+                o.u64(records);
+                o.str(" processes=");
+                o.u64(processes);
+                o.crlf();
+            } else {
+                o.str("pkg: resource snapshot refused\r\n");
+            }
+            return;
+        }
         let mut private = [0u64; 3];
         let mut wake = [0u64; 3];
         let mut endpoint = [0u64; 3];
@@ -1274,6 +1296,12 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             MGR_BADGE_ADMIN_PKG_SELECTLITE
         } else if upgradetest {
             MGR_BADGE_ADMIN_PKG_UPGRADETEST
+        } else if maximalselect {
+            MGR_BADGE_ADMIN_PKG_MAXIMAL_SELECT
+        } else if installtwo {
+            MGR_BADGE_ADMIN_PKG_INSTALL_TWO
+        } else if fourthtest {
+            MGR_BADGE_ADMIN_PKG_FOURTH
         } else if oldlive {
             MGR_BADGE_ADMIN_PKG_OLDLIVE
         } else if deathfault {
@@ -1294,6 +1322,9 @@ fn package_command(o: &mut Out, rest: &[u8]) {
                     || deathtest
                     || deathfault
                     || oldlive
+                    || installtwo
+                    || fourthtest
+                    || maximalselect
                 {
                     "pkg: private manager lifecycle fixture request refused\r\n"
                 } else {
@@ -1308,6 +1339,8 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             "pkg: fixed signed SELECT fixture requested; no receipt yet\r\n"
         } else if upgradetest {
             "pkg: fixed signed version-eight UPGRADE fixture requested; no receipt yet\r\n"
+        } else if installtwo || fourthtest || maximalselect {
+            "pkg: maximal historical platter fixture requested; no receipt yet\r\n"
         } else if oldlive {
             "pkg: signed old-child live cutover fixture requested; no receipt yet\r\n"
         } else if deathtest || deathfault {
