@@ -1536,7 +1536,14 @@ fn test_capability_spaces() -> Result<(), &'static str> {
     }
     let last = cap::CAP_SLOTS - 1;
     if cap::read(pa, last)? != filler
-        || cap::grant(pa, cap::Cap { rights: 0, ..filler }).is_ok()
+        || cap::grant(
+            pa,
+            cap::Cap {
+                rights: 0,
+                ..filler
+            },
+        )
+        .is_ok()
         || cap::copy(pa, s_mem, pa, last, cap::RIGHTS_READ).is_ok()
         || cap::move_cap(pa, s_mem, pa, last, cap::RIGHTS_READ).is_ok()
         || cap::read(pa, s_mem)? != mem_cap

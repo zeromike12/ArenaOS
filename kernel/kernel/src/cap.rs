@@ -104,6 +104,9 @@ pub enum CapObj {
     /// A separate bearer for physical backing queries (READ); only the
     /// display service receives this, and must also hold the region cap.
     SharedDma,
+    /// ADR-0060: inert root-issued keyboard-producer witness. No invocation,
+    /// mint syscall or implicit identity; copies preserve authority.
+    ProofToken { id: u64 },
     /// ADR-0055: possession of WRITE, not process identity, authorizes
     /// exact copied-image registration and full-ID revocation.
     ImageRegistrar,

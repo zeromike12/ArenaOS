@@ -980,7 +980,10 @@ fn test_block_service() -> Result<(), &'static str> {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(
         2,
@@ -989,11 +992,15 @@ fn test_block_service() -> Result<(), &'static str> {
     )
     .map_err(|_| "storaged (image 2) spawn failed")?;
     // blktest (image 3): slot 0 = the call side of the same endpoint.
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid = crate::spawn::spawn_init(3, &client_grants, Some((nid_client, CLIENT_EXIT_BADGE)))
         .map_err(|_| "blktest (image 3) spawn failed")?;
@@ -1194,7 +1201,8 @@ fn test_fs_service() -> Result<(), &'static str> {
     let nid_fsd = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_storaged = ipc::create_notification().map_err(|_| "notification table full")?;
     let nid_fs_diag = ipc::create_notification().map_err(|_| "diagnostic marker table full")?;
-    let nid_blk_diag = ipc::create_notification().map_err(|_| "block diagnostic marker table full")?;
+    let nid_blk_diag =
+        ipc::create_notification().map_err(|_| "block diagnostic marker table full")?;
 
     // storaged (registry image 2), exactly as block_service grants it:
     // the device window, the block endpoint's serve side, the irq
@@ -1215,7 +1223,10 @@ fn test_fs_service() -> Result<(), &'static str> {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_blk_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_blk_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(
         2,
@@ -1238,7 +1249,10 @@ fn test_fs_service() -> Result<(), &'static str> {
             obj: CapObj::Endpoint { eid: eid_fs },
             rights: cap::RIGHTS_READ,
         },
-        Cap { obj: CapObj::Notification { nid: nid_fs_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_fs_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let f_pid = crate::spawn::spawn_init(4, &fsd_grants, Some((nid_fsd, FSD_EXIT_BADGE)))
         .map_err(|_| "fsd (image 4) spawn failed")?;
@@ -1254,8 +1268,14 @@ fn test_fs_service() -> Result<(), &'static str> {
             obj: CapObj::Endpoint { eid: eid_blk },
             rights: cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_fs_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
-        Cap { obj: CapObj::Notification { nid: nid_blk_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+        Cap {
+            obj: CapObj::Notification { nid: nid_fs_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_blk_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid = crate::spawn::spawn_init(5, &fstest_grants, Some((nid_fstest, FSTEST_EXIT_BADGE)))
         .map_err(|_| "fstest (image 5) spawn failed")?;

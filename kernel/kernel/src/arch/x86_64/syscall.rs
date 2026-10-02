@@ -162,6 +162,8 @@ pub const SYS_SHARED_PHYS: u64 = 38;
 /// ADR-0057: read-only size/generation of a *held* generic SharedRegion.
 pub const SYS_SHARED_INFO: u64 = 39;
 pub const SYS_SHARED_UNMAP: u64 = 40;
+/// ADR-0060: only a held Process/READ witness may inspect thread liveness.
+pub const SYS_PROC_LIVE: u64 = 41;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -673,6 +675,7 @@ extern "C" fn syscall_dispatch(
         SYS_SHARED_PHYS => sys_shared_phys(a0, a1, a2) as u64,
         SYS_SHARED_INFO => sys_shared_info(a0, a1, [a2, a3, a4, a5]) as u64,
         SYS_SHARED_UNMAP => sys_shared_unmap(a0, [a1, a2, a3, a4, a5]) as u64,
+        SYS_PROC_LIVE => sys_proc_live(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -2190,6 +2193,29 @@ fn sys_shared_unmap(va: u64, reserved: [u64; 5]) -> Status {
     STATUS_OK
 }
 
+/// SYS_PROC_LIVE(slot): read-only check through a *held* Process/READ cap.
+/// A still-recorded process whose last thread exited returns 0. A destroyed
+/// process, wrong kind or insufficient right returns BAD_ARG; no numeric PID
+/// supplied by a caller is ever treated as an authority witness.
+fn sys_proc_live(slot: u64) -> Status {
+    let Some(caller) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(caller, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::Process { pid: target } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0 || crate::proc::pml4_of(target).is_none() {
+        return STATUS_BAD_ARG;
+    }
+    i64::from(crate::sched::proc_live_threads(target) != 0)
+}
+
 /// SYS_SHARED_INFO(region_slot, out[2], zero, zero, zero, zero):
 /// descriptor-only bound, NOT physical backing or allocation authority.
 /// Clients can determine the actual page count of a received region before
@@ -2324,6 +2350,7 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         }
         crate::cap::CapObj::MemoryPool => (8, 0),
         crate::cap::CapObj::SharedDma => (9, 0),
+        crate::cap::CapObj::ProofToken { id } if id != 0 => (10, id),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {

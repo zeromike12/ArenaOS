@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draft independent QMP pre/post input visual oracle, not registered in suite."""
+"""ADR-0060 live guest: two owned windows, injected virtio key and actual QMP pixels."""
 import re
 import sys
 from pathlib import Path

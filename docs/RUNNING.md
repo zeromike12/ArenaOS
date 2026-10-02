@@ -7,14 +7,20 @@ are separate publication events. This page explains how to boot locally.
 ## Phase 9 development image (NOT milestone-qualified)
 
 The source checkout can build a provisional userspace display demo with
-`bash tools/run.sh`. That helper now prebinds the controlled host M7 DNS UDP
+`bash tools/run.sh`. That helper prebinds the controlled host M7 DNS UDP
 peer before QEMU starts and reaps it on exit. This peer is required while
 the boot self-test sends real packets to `10.0.2.2:1053`; it does **not**
-prove external/public DNS or general connectivity. This is **not** the
-Phase-9-complete archive, compositor/input demonstration or 100-boot
-qualification; continue using the Phase-8.5 archive for the last qualified
-milestone. The earlier 72/73 and interrupted 31/74 test runs remain failed
-records, not evidence of completion.
+prove external/public DNS or general connectivity. The current development
+image boots a ring-3 compositor and two independent colored bitmap-font
+windows. `python3 tools/test_m9_compositor_input.py` captures real QMP
+before/after pixels and injects a key through the virtual keyboard.
+Additional guest tests prove original-client teardown and deliberate
+compositor death fail-stop; the final historical/graphics suite and exact-EFI
+100-boot gate remain open. This
+is **not** the Phase-9-complete archive or 100-boot qualification; continue
+using the Phase-8.5 archive for the last qualified milestone. The earlier
+72/73 and interrupted 31/74 test runs remain failed records, not evidence
+of completion.
 
 ## Phase 8.5 verified dynamic Image / signed cutover checkpoint
 

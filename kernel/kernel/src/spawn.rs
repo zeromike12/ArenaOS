@@ -46,7 +46,7 @@ pub const MAX_SPAWN_RECS: usize = 20;
 /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
 pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
 /// Separate from ALL Image IDs, including future dynamic u32 values.
-pub const MAX_BOOT_IMAGES: u32 = 4;
+pub const MAX_BOOT_IMAGES: u32 = 6;
 pub fn boot_image_live(index: u32) -> bool {
     index < MAX_BOOT_IMAGES && boot_image_bytes(index).is_some()
 }
@@ -64,6 +64,18 @@ fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
         2 => Some(include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../userspace/displayd/target/x86_64-unknown-none/release/displayprobe"
+        ))),
+        3 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../phase9-work/target/x86_64-unknown-none/release/arena-compositord"
+        ))),
+        4 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../phase9-work/target/x86_64-unknown-none/release/arena-window-a"
+        ))),
+        5 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../phase9-work/target/x86_64-unknown-none/release/arena-window-b"
         ))),
         _ => None,
     }

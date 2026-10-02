@@ -49,6 +49,10 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+// The exact same bounded, versioned wire parser is linked into the driver
+// and the compositor; neither side can invent an untyped keyboard message.
+#[path = "../../compositord/src/wire.rs"]
+mod graphics_wire;
 
 #[path = "../../virtio.rs"]
 mod virtio;
@@ -517,6 +521,60 @@ pub unsafe extern "C" fn _start() -> ! {
     }
 }
 
+/// Forward one decoded printable key only with the root-issued producer
+/// token and the compositor's call-side cap. Before graphics start this is a
+/// no-op; the existing shell path is always served first. A dead compositor
+/// is not silently treated as a successful input delivery.
+unsafe fn forward_graphical_key(b: u8) {
+    if !(b' '..=b'~').contains(&b) {
+        return;
+    }
+    let mut token = [0u64; 3];
+    let mut ep = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_DIAG, token.as_mut_ptr() as u64) } != 0
+        || token[0] != 10
+        || token[1] == 0
+        || token[2] & RIGHTS_READ == 0
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_EP, ep.as_mut_ptr() as u64) } != 0
+        || ep[0] != 2
+        || ep[2] & RIGHTS_WRITE == 0
+    {
+        return;
+    }
+    let frame = graphics_wire::Frame::Key {
+        ascii: b,
+        pressed: true,
+    };
+    let mut inline = [0u8; graphics_wire::BYTES];
+    if frame.encode(&mut inline).is_err() {
+        fail(EXIT_PUSH, "invalid graphics key frame")
+    }
+    let mut out = [0u64; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            SLOT_EP,
+            0,
+            0,
+            SLOT_DIAG,
+            out.as_mut_ptr() as u64,
+            inline.as_mut_ptr() as u64,
+        )
+    };
+    if out[2] != CAP_NONE {
+        let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+        fail(EXIT_PUSH, "graphics key response carried an unexpected cap")
+    }
+    // A key before any surface is focused may be refused honestly. The
+    // compositor still has to return the exact typed echo when routed.
+    if rc < 0
+        || (out[0] != 0 && out[0] != 2)
+        || (out[0] == 0 && graphics_wire::Frame::decode(&inline) != Ok(frame))
+    {
+        fail(EXIT_PUSH, "graphics input service refused or died")
+    }
+}
+
 /// PRODUCTION: decode keystrokes into the kernel's console line
 /// discipline forever. Never returns — the machine outlives this loop.
 ///
@@ -553,6 +611,9 @@ unsafe fn console_loop(drv: &mut Drv) -> ! {
                         o.i64(r);
                     });
                     fail(EXIT_PUSH, "SYS_CONSOLE_PUSH refused");
+                }
+                for &key in &buf[..n] {
+                    forward_graphical_key(key)
                 }
             }
         }

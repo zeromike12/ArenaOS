@@ -78,7 +78,8 @@ Rules:
 | [0058](0058-phase9-virtio-gpu-2d-transport.md) | Audited virtio-gpu 2D transport with GOP fallback | Accepted (design; Phase 9 in progress) |
 | [0059](0059-deterministic-host-dns-wire-fixture.md) | Controlled external host UDP fixture across the real SLIRP/virtio-net path, explicitly not public DNS | Accepted (integration; full-suite requalification pending) |
 
-| [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Proposed (guest bridge/qualification pending) |
+| [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Implemented for two boot clients; death qualification open |
+| [0061](0061-phase9-graphics-fail-closed-boot-root.md) | Fail-stop service death and explicit client-death proof without claiming restart | Proposed (guest negatives pending) |
 
 ## Template
 

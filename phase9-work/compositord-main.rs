@@ -188,13 +188,47 @@ fn region(slot: u64, scanout_id: u64) -> Option<(u64, u64)> {
     Some((id, pages))
 }
 fn owner_slot(id: u64) -> Option<u64> {
-    if describe(BACKING_A)?.get(1).copied() == Some(id) {
-        Some(WORKER_A)
-    } else if describe(BACKING_B)?.get(1).copied() == Some(id) {
-        Some(WORKER_B)
-    } else {
-        None
+    for (backing, process) in [(BACKING_A, WORKER_A), (BACKING_B, WORKER_B)] {
+        let (Some([kind, actual, rights]), Some([pkind, _, prights])) =
+            (describe(backing), describe(process))
+        else {
+            continue;
+        };
+        if kind == CAP_KIND_REGION
+            && actual == id
+            && rights & RIGHTS_READ != 0
+            && pkind == 4
+            && prights & RIGHTS_READ != 0
+        {
+            return Some(process);
+        }
     }
+    None
+}
+/// Retire a dead original child before accepting another landed cap.
+/// Copies in other processes survive, but cannot resurrect its surface.
+fn expire_dead(state: &mut State, surfaces: &mut [Surface; render::MAX_LAYERS]) -> bool {
+    let mut changed = false;
+    for (backing, process) in [(BACKING_A, WORKER_A), (BACKING_B, WORKER_B)] {
+        let life = unsafe { syscall1(SYS_PROC_LIVE, process) };
+        if life != 1 {
+            // Root may already have destroyed the exited child's record:
+            // a stale Process cap then returns BAD_ARG, not liveness. After
+            // stable retirement root also removes both comparator caps.
+            let Some([CAP_KIND_REGION, id, _]) = describe(backing) else {
+                continue;
+            };
+            for slot in surfaces.iter_mut().filter(|s| s.id == id) {
+                let old = *slot;
+                *slot = NONE;
+                unmap(old.va);
+                destroy(old.cap);
+                state.retire_owner(id).unwrap_or_else(|_| die(100));
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 fn owned(surfaces: &[Surface; render::MAX_LAYERS], id: u64, handle: u64) -> Option<usize> {
     surfaces
@@ -263,6 +297,10 @@ pub extern "C" fn _start() -> ! {
             die(94)
         }
         let transferred = request[2];
+        if expire_dead(&mut state, &mut surfaces) {
+            draw(base, scanout, ram, w, h, &surfaces);
+            log(b"[compositord] dead original child retired and underlying pixels presented\n");
+        }
         let frame = Frame::decode(&payload);
         let mut status = REFUSED;
         let mut result = 0;
@@ -272,7 +310,8 @@ pub extern "C" fn _start() -> ! {
             match frame {
                 Ok(Frame::Create { x, y, w: sw, h: sh }) => {
                     if let Some((source_id, pages)) = region(transferred, id) {
-                        if owner_slot(source_id).is_some()
+                        if owner_slot(source_id)
+                            .is_some_and(|slot| unsafe { syscall1(SYS_PROC_LIVE, slot) } == 1)
                             && (sw as usize)
                                 .checked_mul(sh as usize)
                                 .and_then(|v| v.checked_mul(4))
@@ -393,6 +432,19 @@ pub extern "C" fn _start() -> ! {
                         }
                     }
                 }
+                Ok(Frame::Poll { handle }) => {
+                    if let Some((source_id, _)) = region(transferred, id) {
+                        if owned(&surfaces, source_id, handle).is_some() {
+                            if let Ok(key) = state.pop_key(source_id) {
+                                status = 0;
+                                result = key.map_or(0, |k| {
+                                    u64::from(k.ascii) | (u64::from(k.pressed) << 8)
+                                });
+                                echo = Frame::Poll { handle };
+                            }
+                        }
+                    }
+                }
                 Ok(Frame::Key { ascii, pressed }) => {
                     if let Some([kind, token, rights]) = describe(transferred) {
                         if kind == CAP_KIND_TOKEN
@@ -402,7 +454,9 @@ pub extern "C" fn _start() -> ! {
                         {
                             status = 0;
                             echo = Frame::Key { ascii, pressed };
-                            log(b"[compositord] receiver-verified input routed to focus\n");
+                            // No per-key diagnostic writes: asynchronous
+                            // output must never split the shell's historical
+                            // contiguous echoed keyboard command.
                         }
                     }
                 }

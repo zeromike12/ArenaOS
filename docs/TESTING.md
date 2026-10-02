@@ -982,3 +982,77 @@ and a fresh `tools/stability_loop.sh 2` passed **2/2** with real QMP pixels
 and three per-boot DNS receipts. Neither this preliminary EFI nor 2/2 is
 Phase-9 milestone qualification. Restore/add renderer and held-cap graphics
 negative tests to the final suite before re-running all targeted gates.
+
+### ADR-0060 live compositor / input integration (provisional, NOT Phase-9 closure)
+
+`python3 tools/test_m9_compositor_input.py` builds the EFI and independently
+captures QMP PPMs before/after a `q` key sent through QEMU's real virtio-input
+path. Two separately linked ring-3 programs own disjoint 19-page SharedRegion
+windows; before pixels assert each color, the later z-order in their overlap,
+the bounded bitmap-font title foreground, and unchanged display pixels.
+After client B takes its focused key from the compositor's bounded queue and
+issues DAMAGE, screenshot pixel (200,190) changes from RGB `(61,207,122)`
+to `(255,187,17)` while distant pixels remain exact. Client A sends forty
+cap-bearing forged KEY requests without the input proof token and receives
+forty refusals. This passes on the integrated EFI. `tools/test_m82_capspace.py`
+passes with actual post-EBS guest `(frames,records,processes)=(1672,16,16)`:
+three new static graphics residents over the old 13/13 display baseline;
+no increase in the one-unretired dynamic-child system-wide bound. Historical
+`tools/test_m7.py` and both GPU display/pixel and default-oversize refusal
+checks remain passing after integration.
+
+A fresh *provisional* `bash tools/stability_loop.sh 2` passed 2/2 on one
+integrated EFI. Per boot, its actor saves independently hashed **two QMP
+captures**, injects the actual keyboard key, checks owned pixels and bitmap
+font/z-order before and the focused window's changed pixel after, along with
+all three real host DNS receipts and historical manager restart probes. The
+actor's `INPUT before-sha after-sha` receipt differs across the two captured
+frames; it does not count a serial PASS as a pixel. Neither 2/2 nor the
+nonfinal EFI is the required final 100/100. Forced client/service deaths,
+full clean historical suite, RED/GREEN lifecycle mutation, final resource
+peaks and extracted-archive pixel boot remain open; ADR-0060 records the
+current limitation of cleanup only on a following compositor IPC request.
+
+The first post-integration full-suite attempt was STOPPED after
+`tools/test_m6_typing.py` failed: each accepted keyboard key caused the
+compositor to print a per-key serial diagnostic, interleaving with the
+historical byte-exact echoed `echo Hello-From-The-Keyboard` line. This is a
+real regression, not a flaky test. Removed the per-key diagnostic and gated
+the historical keyboard command on the two *actual* one-time client startup
+markers, preserving its byte-exact echo/output assertions. Both
+`tools/test_m6_typing.py` and the live compositor/QMP test then passed on the
+corrected image. The stopped run is not a full-suite PASS.
+
+The next complete diagnostic run reached **73/74**, failing only
+`tools/test_m9_compositor_model.py`'s pre-existing `cargo fmt --check` gate:
+the new GRAPHICS v1 `Poll` arm had not yet been rustfmt-formatted. It was not
+counted as a green full suite. All historical QEMU tests, including the full
+M8.5 crash-prefix matrix, passed in that run; the new live compositor/QMP
+input test passed. The formatter failure is mechanical and will be fixed
+before a fresh complete run.
+
+ADR-0061 targeted live-death tests (not a final suite):
+`python3 tools/test_m9_client_death.py` PASS (forced original B exit with
+no DESTROY, compositor presents uncovered base, root reaps full Process and
+region refs/maps); `python3 tools/test_m9_client_death_red.py` PASS (omit
+Process-witness check, stale QMP pixel + real bounded fail-stop RED and
+exact-restored source/EFI uncovered-pixel GREEN); and
+`python3 tools/test_m9_service_death_red.py` PASS (mutant service dies during
+production inputd's call, real IPC sweep answers `STATUS_SERVICE_GONE`,
+root ERROR halts, exact-restored QMP injected-key pixel GREEN).
+`python3 tools/test_m9_resources.py` PASS: Power-only guest snapshots
+`(frames,records,processes)=(114445,16,16)->(114482,15,15)` across real
+child exit, with shared runs/pages/maps `3/507/6 -> 2/488/4`, compositor cap
+occupancy 10 then 7 or 8 (one legitimate transient A IPC landing). This is
+bounded live evidence, not a source-derived capacity estimate. The final
+full historical suite, exact final-EFI 100/100 and extracted graphical
+archive must still run after the last code change.
+
+Phase-9 GPU-only compositor integration: `python3 tools/test_m9_gpu_compositor_input.py` passed with `-vga none` and a real
+virtio-gpu command chain, two owned overlapping windows and QMP-before/after
+800×600 pixel assertions after an injected focused keyboard event. Receipt:
+`build/phase9-gpu-compositor-input.log`. A previous 78-test full-suite
+attempt was interrupted deliberately after historical tests through M8.1 to
+add this missing GPU-only integration control. **Do not count that interrupted
+run as a complete historical/graphics PASS.** Run the fresh 79-test suite
+before the final artifact-bound 100/100.

@@ -30,6 +30,20 @@ pub fn usage_snapshot() -> (usize, u32, usize) {
     })
 }
 
+/// Root-only, read-only stable-boundary witness for an exact full region ID.
+/// Never used to authorize a user request; only the original root-allocated
+/// region's own cap and mapping hooks can change these counters. The caller
+/// must independently check the conservation oracle before retirement.
+pub fn reference_snapshot(id: u32) -> Option<(u32, u32)> {
+    without_interrupts(|| unsafe {
+        (*REG.get())
+            .regions
+            .iter()
+            .find(|r| r.pages != 0 && r.id == id)
+            .map(|r| (r.refs, r.pins))
+    })
+}
+
 #[derive(Clone, Copy)]
 struct Region {
     id: u32,

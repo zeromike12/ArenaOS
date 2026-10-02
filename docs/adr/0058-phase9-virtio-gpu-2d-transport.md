@@ -1,6 +1,6 @@
 # ADR-0058 — Phase-9 virtio-gpu 2D device service transport
 
-Status: **Partial live transport: GPU-only real QMP pixels verified; no compositor, client input, teardown or Phase-9 qualification**
+Status: **Live GPU-only transport and compositor/input QMP integration verified; final full-suite/100-boot/archive qualification pending**. The partial-implementation ledger below records the earlier transport-only checkpoint; see the later integration evidence at the end.
 Date: 2026-10-01
 
 ## Resource and authority budget
@@ -22,3 +22,18 @@ Prefer GPU only when the actual command handshake and display-info succeed. If i
 ## Evidence, not assumptions
 
 Boot QEMU with `-vga none -device virtio-gpu-pci` and real QMP screendump; assert expected pixels after CREATE→ATTACH→SCANOUT→TRANSFER→FLUSH and inject an input event independently if compositor input is ready. Boot with `-vga std` and no GPU for the existing GOP oracle, and with no GPU/no VGA for clean headless refusal. Force a GPU-handshake rejection to test *genuine* GOP fallback, plus unexpected response, missing DMA cap, malformed backing/span, queue exhaustion and teardown/last-ref controls. Correlate guest resource peaks and PCI command counters with QMP pixels, not serial-only claims. Do not mark GPU present in tests or docs until this actual service and its negative controls pass.
+
+## Subsequent live GPU-only compositor integration (2026-10-02)
+
+`tools/test_m9_gpu_compositor_input.py` uses the **same** actual image on
+QEMU `-vga none -device virtio-gpu-pci,xres=800,yres=600`: it confirms the
+GPU-only ring-3 handshake and absence of GOP handoff, waits for two separate
+original clients to paint their owned overlapping windows, captures an
+800×600 QMP PPM, injects a `q` through the real virtio keyboard, then captures
+another PPM after focused delivery. Exact pixels establish window ownership,
+z-order, linked bitmap title glyph and preserved base; `(200,190)` changes
+from `(61,207,122)` to `(255,187,17)`, while distant display pixels and A's
+window remain unchanged. The run passed independently after integration;
+GOP-only compositor/input has the symmetric QMP control in
+`tools/test_m9_compositor_input.py`. This is *not* an independent GPU device
+failure/restart proof or the final 100-boot qualification.

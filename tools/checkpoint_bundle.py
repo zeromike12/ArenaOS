@@ -12,6 +12,7 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -27,6 +28,11 @@ ROOT = arena_env.REPO_ROOT
 FILES = ("arena-boot.efi", "stability-receipt.txt", "arena-esp.img",
          "scratch-template.img", "edk2-x86_64-code.fd",
          "ovmf-vars-template.img", "RUNNING.md", "QUALIFICATION.txt")
+# ADR-0059: an archive with the network-attached M7 guest cannot omit its
+# actual host peer. ADR-0060: extracted QMP/input proof cannot import from
+# this checkout. All files below are independently hashed and extracted.
+PHASE9_EXTRA = ("phase9_archive_boot.py", "check_phase9_pixels.py", "qmp.py",
+                "network_fixture.py", "tcp_fixture.py", "udp_dns_fixture.py")
 
 
 def digest(blob: bytes) -> str:
@@ -135,10 +141,29 @@ def main() -> int:
         )
         if any(item not in log for item in required):
             raise ValueError("8.5 bundle requires all historical/real guest/crash/red/resource proofs")
+    if args.checkpoint == "phase9-complete":
+        log = args.suite_log.read_text()
+        total = len(list((ROOT / "tools").glob("test_m*.py"))) + 11
+        required = (
+            f"ALL TESTS PASSED ({total} test suites)",
+            "[m9-compositor-input] distinct owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS",
+            "[m9-client-death] real original-child exit, exact Process/region/map/cap retirement and independent QMP base/window uncover PASS",
+            "[m9-client-death-red] omitted Process-liveness guest stale-pixel/timeout RED: PASS; exact restored source/EFI and QMP uncovered-pixel GREEN: PASS",
+            "[m9-service-death] actual boot-root IPC fail-stop RED: PASS; byte-exact restored source/EFI and QMP key pixel GREEN: PASS",
+            "[m9-resources] guest Power high-water resident 16/16 then exact child retire 15/15;",
+            "[m9-compositor-model] 12/12 host state/churn and typed-wire/fuzz tests, fmt/clippy, bare-metal no_std build PASS",
+            "[m9-host-dns] real guest wrong-TXID RED; same-EFI restored host peer and three guest wire queries GREEN: PASS",
+            "[m85-crash-upgrade] real AINS2/AACT4 CREATE->WRITE->CLOSE crash-prefix matrix PASS",
+            "[m85-resources] guest Power snapshots baseline/live/retired=",
+            "[m9-gpu-pixels] GPU-only guest commands + QMP 800x600 bars/font PASS",
+        )
+        if any(item not in log for item in required):
+            raise ValueError("phase9-complete requires complete historical, renderer, injected pixels, death/RED and resource proofs")
     release_dir = ROOT / "releases/checkpoints" / args.checkpoint
     release_dir.mkdir(parents=True, exist_ok=True)
     name = f"arenaos-{args.checkpoint}-qemu-x86_64.tar.gz"
     archive = release_dir / name
+    files = FILES + PHASE9_EXTRA if args.checkpoint == "phase9-complete" else FILES
     stage = ROOT / "build/checkpoint-stage"
     if stage.exists():
         shutil.rmtree(stage)
@@ -149,17 +174,32 @@ def main() -> int:
     shutil.copy2(arena_env.ovmf_code(), stage / "edk2-x86_64-code.fd")
     shutil.copy2(arena_env.ovmf_vars_template(), stage / "ovmf-vars-template.img")
     shutil.copy2(ROOT / "docs/RUNNING.md", stage / "RUNNING.md")
+    if args.checkpoint == "phase9-complete":
+        for script in PHASE9_EXTRA:
+            shutil.copy2(ROOT / "tools" / script, stage / script)
+        (stage / "RUNNING.md").write_text(
+            "# Phase-9 qualified QEMU image\n\n"
+            "Verify the outer .tar.gz.sha256 and the extracted sha256sums.txt, "
+            "install QEMU and Python 3, then run `python3 phase9_archive_boot.py` "
+            "in this directory. The script copies fresh OVMF vars and a fresh "
+            "AFS1 scratch platter, prebinds the included exact-query host "
+            "UDP/TCP peers before QEMU, captures the actual display twice, "
+            "injects a virtual keyboard key and checks the focused client "
+            "pixel before orderly shutdown. The host DNS peer is required "
+            "for the attached NIC and does not prove public/external DNS.\n")
     afs1.mkfs(stage / "scratch-template.img", 8 * 1024 * 1024 // afs1.SECTOR)
     completed_suites = ("47/47" if args.checkpoint == "phase84-complete" else
                         f"{len(list((ROOT / 'tools').glob('test_m*.py'))) + 11}/"
                         f"{len(list((ROOT / 'tools').glob('test_m*.py'))) + 11}"
-                        if args.checkpoint == "phase85-complete" else "see commit gate")
+                        if args.checkpoint in ("phase85-complete", "phase9-complete") else "see commit gate")
     (stage / "QUALIFICATION.txt").write_text(
         f"Checkpoint: {args.checkpoint}\nEFI SHA-256: {efi_sha}\n"
         f"Historical suite: all passed ({completed_suites})\n"
         "Artifact-bound QEMU boots: 100/100\n"
         "Phase 8.0: COMPLETE; all four exit areas plus service-side diagnostic authority proven\n"
-        + ("Phase 8.1–8.4: COMPLETE. Phase 8.5: COMPLETE — offline TEST-root-signed AINS/AACT install/selection, actual ring-3 v7→v8 live cutover under one unretired dynamic child, held Process STOP/FINISH before old Image ID revocation and durable commit, authentic 32/32 historical AFS1 refusal, AFS1 ordered-commit crash prefixes, fail-stop/ref-pin checks. No production key custody, production general-purpose package picker, arbitrary-sector corruption, hostile rollback, dynamic linking, Secure Boot, GC or broader concurrent children.\n"
+        + ("Phase 8.1–8.5: COMPLETE with the qualified 8.5 trust boundaries. Phase 9: userspace GOP/virtio-gpu display, isolated compositor, two owned ring-3 bitmap windows, actual QMP injected keyboard/pixels, forced original-child retirement and fail-stop service death without a restart claim. Controlled host DNS peer proves virtual UDP traffic, NOT external public DNS. No Phase-10 applications, production signing keys, hostile rollback, dynamic linking, or broader concurrent dynamic children.\n"
+           if args.checkpoint == "phase9-complete" else
+           "Phase 8.1–8.4: COMPLETE. Phase 8.5: COMPLETE — offline TEST-root-signed AINS/AACT install/selection, actual ring-3 v7→v8 live cutover under one unretired dynamic child, held Process STOP/FINISH before old Image ID revocation and durable commit, authentic 32/32 historical AFS1 refusal, AFS1 ordered-commit crash prefixes, fail-stop/ref-pin checks. No production key custody, production general-purpose package picker, arbitrary-sector corruption, hostile rollback, dynamic linking, Secure Boot, GC or broader concurrent children.\n"
            if args.checkpoint == "phase85-complete" else
            "Phase 8.1/8.2/8.3: COMPLETE. Phase 8.4: COMPLETE — USERSPACE VERIFIED STAGING ONLY; public TEST root, signed canonical package/policy, revocation/version refusal, bounded immutable AFS1 stages, documented crash prefixes. NOT installed, activated or an Image cap. No production-key custody, Secure Boot, hostile-disk rollback defense or 8.5 installer. Eight signed revocations in guest; ninth distinct typed issuer-side refusal before signing (user-approved v1 interpretation).\n"
            if args.checkpoint == "phase84-complete" else
@@ -175,10 +215,10 @@ def main() -> int:
            if args.checkpoint.startswith("phase81-") else "")
     )
     (stage / "sha256sums.txt").write_text("".join(
-        f"{digest((stage / path).read_bytes())}  {path}\n" for path in FILES
+        f"{digest((stage / path).read_bytes())}  {path}\n" for path in files
     ))
     with tarfile.open(archive, "w:gz") as tar:
-        for path in (*FILES, "sha256sums.txt"):
+        for path in (*files, "sha256sums.txt"):
             tar.add(stage / path, arcname=path)
     archive_sha = digest(archive.read_bytes())
     (release_dir / f"{name}.sha256").write_text(f"{archive_sha}  {name}\n")
@@ -190,7 +230,7 @@ def main() -> int:
         # Only names we generated are allowed; extractfile avoids
         # Python-version-dependent extractall filters and path traversal.
         with tarfile.open(archive, "r:gz") as tar:
-            allowed = set((*FILES, "sha256sums.txt"))
+            allowed = set((*files, "sha256sums.txt"))
             if {m.name for m in tar} != allowed or any(not m.isfile() for m in tar):
                 raise ValueError("archive contains unexpected entries")
             for m in tar:
@@ -233,9 +273,9 @@ def main() -> int:
                     "servicemgr: forcibly stopped LIVE production child through held Process cap",
                     "m8: stackstop PASS (manager mode-1 stopped live production child, new wire, resources flat)",
                     "halting via UEFI ResetSystem(shutdown)")
-        if args.checkpoint in ("phase84-complete", "phase85-complete"):
+        if args.checkpoint in ("phase84-complete", "phase85-complete", "phase9-complete"):
             required += (("packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified"
-                          if args.checkpoint == "phase85-complete" else
+                          if args.checkpoint in ("phase85-complete", "phase9-complete") else
                           "packaged: boot with exact FS/W endpoint/R marker/R; namespace scan verified"),
                          "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)",
                          "permissiond: validated durable policy generation 0 DENY",
@@ -263,6 +303,11 @@ def main() -> int:
                 or "m8: stackstop FAIL" in serial or "servicemgr: OFFLINE" in serial):
             (ROOT / "build/checkpoint-bundle-failure.log").write_text(serial)
             raise ValueError("extracted bundle did not boot and shut down cleanly")
+        if args.checkpoint == "phase9-complete":
+            # Separate process with cwd pointing ONLY at extracted files:
+            # archived peer, firmware and QMP/keyboard pixel oracle.
+            subprocess.run([sys.executable, "phase9_archive_boot.py"],
+                           cwd=unpacked, check=True, timeout=120)
 
     print(f"VERIFIED checkpoint bundle: {archive.relative_to(ROOT)}")
     print(f"archive SHA-256: {archive_sha}; qualified EFI SHA-256: {efi_sha}")

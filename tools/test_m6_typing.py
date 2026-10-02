@@ -64,7 +64,13 @@ LABEL = "test-m6-typing"
 # boundaries; never weaken the byte-exact echo check or use sleeps.
 KEY_SCRIPT = [
     (b"inputd: virtio-input ready", 1, "arena"),
-    ((b"arena>", b"servicemgr: permission app reaped through held Process cap"),
+    # The two new independent graphics clients also print their one-time
+    # readiness/forty-cap-refusal results. Await those observable boundaries
+    # BEFORE typing the byte-exact historical echo command; otherwise a
+    # legitimate asynchronous boot log splits the echoed line.
+    ((b"arena>", b"servicemgr: permission app reaped through held Process cap",
+      b"[window_b] held-cap focused surface painted",
+      b"[window_a] forged input token refused"),
      1, "echo Hello-From-The-Keyboard\r"),
     (b"arena>", 2, "psX\x08\r"),
     (b"arena>", 3, "shutdown\r"),

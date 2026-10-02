@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draft independent QMP pre/post input visual oracle, not registered in suite."""
+"""ADR-0060 live guest: virtio-gpu-only owned windows and injected QMP key."""
 import re
 import sys
 from pathlib import Path
@@ -8,7 +8,7 @@ import arena_env
 import mtest
 import qmp
 
-LABEL = 'm9-compositor-input'
+LABEL = 'm9-gpu-compositor-input'
 BUILD = arena_env.build_dir()
 
 def picture(name: str) -> bytes:
@@ -36,8 +36,10 @@ def main():
         ((b'[window_b] real key pixel painted',
           b'[window_a] forged input token refused',b'arena>'),1,
          lambda:picture('after')),
-    ],arena_env.make_scratch_disk())
+    ],arena_env.make_scratch_disk(), video='gpu')
     assert rc==0 and 'm7: RESULT PASS (2/2)' in serial
+    assert '[displayd] ring3 virtio-gpu 2D pixels ready' in serial
+    assert 'GOP handoff: unavailable or unsupported mode' in serial
     assert '[window_a] forged input token refused' in serial
     before,after=pixels('before'),pixels('after')
     assert before(60,70)==(0xbd,0x53,0x38) and before(190,160)==(0x3d,0xcf,0x7a)
@@ -48,6 +50,6 @@ def main():
     assert after(200,190)==(0xff,0xbb,0x11)
     for xy in ((0,100),(700,300),(799,599),(60,70)):
         assert before(*xy)==after(*xy),(xy,before(*xy),after(*xy))
-    print('[m9-compositor-input] distinct owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS')
+    print('[m9-compositor-input] virtio-gpu-only owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS')
 
 if __name__=='__main__': main()

@@ -127,11 +127,10 @@ for i in $(seq 1 "$N"); do
     python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
         "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
     typist_pid=$!
-    # Phase-9 GOP fallback: per-boot INDEPENDENT QMP framebuffer capture,
-    # not just a guest serial claim. The pixel actor waits until ring-3
-    # displayd reports painted/parked, screendumps the real virtual screen
-    # and checks four exact distant RGB samples before writing a hash
-    # receipt. Shell shutdown is gated on the receipt (or a loud error).
+    # Phase-9 per-boot independent before/after QMP captures. The actor
+    # waits for both real windows, injects a virtio key, verifies the
+    # focused client's newly painted pixel, and checks preserved base.
+    # The serial feeder waits for its receipt before running stacktest.
     PIXEL_RECEIPT="$REPO_ROOT/build/stability-pixels-boot-$i.txt"
     PIXEL_IMAGE="$REPO_ROOT/build/stability-display-boot-$i.ppm"
     PIXEL_ERROR="$PIXEL_RECEIPT.error"
@@ -156,17 +155,17 @@ for i in $(seq 1 "$N"); do
               ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL" 2>/dev/null; do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
-        printf 'stacktest\r'
+        # Keyboard 'q' was injected by the pixel actor. It is ALSO a
+        # console byte, so erase it in the shared shell line discipline
+        # before issuing stacktest; do not race the input image receipt.
+        n=0
+        while [[ ! -s "$PIXEL_RECEIPT" && ! -s "$PIXEL_ERROR" ]]; do
+            sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
+        done
+        printf '\bstacktest\r'
         n=0
         while ! grep -aqF 'm8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)' "$SERIAL" 2>/dev/null || \
               (( $(grep -ac 'arena>' "$SERIAL" 2>/dev/null || true) < 2 )); do
-            sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
-        done
-        # A serial PASS without real QMP pixels cannot finish a graphics
-        # qualification. If the actor failed, shut down and report WHY
-        # instead of hanging until the QEMU timeout.
-        n=0
-        while [[ ! -s "$PIXEL_RECEIPT" && ! -s "$PIXEL_ERROR" ]]; do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
         printf 'shutdown\r'
@@ -212,8 +211,9 @@ for i in $(seq 1 "$N"); do
         why="qemu exit rc=$rc (timeout is 124)"
     elif (( pixel_actor_rc != 0 )) || [[ ! -s "$PIXEL_RECEIPT" ]]; then
         why="QMP graphical pixels were not independently verified ($(cat "$PIXEL_ERROR" 2>/dev/null || cat "$REPO_ROOT/build/stability-pixel-actor.log" 2>/dev/null || true))"
-    elif ! grep -Eq '^800x600 [0-9a-f]{64}$' "$PIXEL_RECEIPT"; then
-        why="QMP graphic pixel receipt malformed"
+    elif ! grep -Eq '^800x600 [0-9a-f]{64}$' "$PIXEL_RECEIPT" || \
+         ! grep -Eq '^INPUT [0-9a-f]{64} [0-9a-f]{64}$' "$PIXEL_RECEIPT"; then
+        why="QMP owned compositor / injected-key pixel receipt malformed"
     elif [[ ! -f "$SERIAL" ]]; then
         why="no serial output"
     elif grep -aq 'PANIC' "$SERIAL"; then

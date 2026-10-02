@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Independent QMP PPM pixel witness for ArenaOS's ring-3 GOP fallback.
+"""Independent QMP witness: real base, two windows and injected key pixels.
 
-One call captures one *actual guest display* after displayd's ready line;
-returns a receipt only when dimension, full image length, and four spatially
-distant RGB samples match the userspace renderer. A boot's serial PASS alone
-cannot produce this receipt. This is a GOP smoke, not a compositor proof.
+Captures before and after sending a key to the actual virtio-input device;
+checks owned, clipped scene pixels, a bitmap glyph, preserved base, and a
+client-painted response pixel. Serial assertions alone never make a receipt.
 """
 import hashlib
 import re
@@ -13,7 +12,9 @@ import time
 from pathlib import Path
 import qmp
 
-READY = b'[displayd] ring3 GOP pixels ready (staged font v2)'
+READY = b'[window_b] held-cap focused surface painted'
+KEY_READY = b'[window_b] real key pixel painted'
+FORGED_READY = b'[window_a] forged input token refused'
 SAMPLES = (
     ((0, 0), (0x22, 0x33, 0x55)),
     ((20, 20), (0x22, 0x33, 0x55)),   # 'A' has no pixel in column zero of its first row
@@ -39,21 +40,51 @@ def verify(ppm: bytes) -> tuple[int, int, str]:
     return width, height, hashlib.sha256(ppm).hexdigest()
 
 
+def pixel(ppm: bytes, x: int, y: int) -> tuple[int, int, int]:
+    header = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s', ppm)
+    if header is None:
+        raise ValueError('missing P6 pixel header')
+    start = header.end() + 3 * (y * int(header[1]) + x)
+    return tuple(ppm[start:start + 3])
+
+
+def await_marker(serial: Path, markers: tuple[bytes, ...], deadline: float) -> None:
+    while time.monotonic() < deadline:
+        if serial.is_file() and all(m in serial.read_bytes() for m in markers):
+            return
+        time.sleep(0.05)
+    raise TimeoutError(f'live graphics marker(s) absent: {markers!r}')
+
+
 def capture(sock: Path, serial: Path, image: Path, receipt: Path, timeout: float) -> None:
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if serial.is_file() and READY in serial.read_bytes():
-            break
-        time.sleep(0.05)
-    else:
-        raise TimeoutError('ring-3 service never painted and reached ready marker')
+    await_marker(serial, (READY,), deadline)
+    before_path = image.with_suffix('.before.ppm')
     conn = qmp.Qmp(str(sock), connect_timeout_s=4)
     try:
+        conn.command('screendump', filename=str(before_path), format='ppm')
+        before = before_path.read_bytes()
+        _, _, before_sha = verify(before)
+        for xy, rgb in (((60, 70), (0xbd, 0x53, 0x38)),
+                        ((190, 160), (0x3d, 0xcf, 0x7a)),
+                        ((200, 190), (0x3d, 0xcf, 0x7a)),
+                        ((193, 160), (0xf8, 0xee, 0xcc))):
+            if pixel(before, *xy) != rgb:
+                raise ValueError(f'pre-key QMP owned window pixel {xy}: {pixel(before, *xy)} != {rgb}')
+        conn.key('q')  # real keyboard interrupt; NOT serial or host-side PPM edit
+        await_marker(serial, (KEY_READY, FORGED_READY), deadline)
         conn.command('screendump', filename=str(image), format='ppm')
     finally:
         conn.close()
-    width, height, sha = verify(image.read_bytes())
-    receipt.write_text(f'{width}x{height} {sha}\n')
+    after = image.read_bytes()
+    width, height, sha = verify(after)
+    if pixel(after, 200, 190) != (0xff, 0xbb, 0x11):
+        raise ValueError('injected key did not change the live client backing pixel')
+    for xy in ((60, 70), (0, 100), (700, 300), (799, 599)):
+        if pixel(before, *xy) != pixel(after, *xy):
+            raise ValueError(f'input changed an unrelated pixel: {xy}')
+    receipt.write_text(f'{width}x{height} {sha}\nINPUT {before_sha} {sha}\n')
+    before_path.unlink()
 
 
 def main() -> int:

@@ -63,6 +63,11 @@ pub enum Frame {
         h: u16,
     },
     Mode,
+    /// Check the calling owner's key queue. A live server requires an
+    /// independently verified, root-provisioned region cap with this handle.
+    Poll {
+        handle: u64,
+    },
 }
 impl Frame {
     fn fields(self) -> (u8, u64, i32, i32, u16, u16, u8, u8) {
@@ -75,6 +80,7 @@ impl Frame {
             Self::Key { ascii, pressed } => (6, 0, 0, 0, 0, 0, ascii, u8::from(pressed)),
             Self::Present { x, y, w, h } => (7, 0, x, y, w, h, 0, 0),
             Self::Mode => (8, 0, 0, 0, 0, 0, 0, 0),
+            Self::Poll { handle } => (9, handle, 0, 0, 0, 0, 0, 0),
         }
     }
     /// Refuse invalid content *before* touching a caller-owned buffer.
@@ -129,6 +135,7 @@ impl Frame {
             6 => return Err(WireError::Key),
             7 => Self::Present { x, y, w, h },
             8 => Self::Mode,
+            9 => Self::Poll { handle },
             _ => return Err(WireError::UnknownOp),
         };
         frame.check()?;
@@ -139,7 +146,7 @@ impl Frame {
     }
     fn check(self) -> Result<(), WireError> {
         let (op, handle, x, y, w, h, key, _) = self.fields();
-        if matches!(op, 2..=5) && handle == 0 {
+        if matches!(op, 2..=5 | 9) && handle == 0 {
             return Err(WireError::Handle);
         }
         if op == 6 && !(b' '..=b'~').contains(&key) {
@@ -183,6 +190,7 @@ mod tests {
         assert_eq!(Frame::decode(&b), Ok(create));
         for frame in [
             Frame::Mode,
+            Frame::Poll { handle: 7 },
             Frame::Focus { handle: 7 },
             Frame::Destroy { handle: 7 },
             Frame::Move {
@@ -235,6 +243,11 @@ mod tests {
         b[5] = 4;
         assert_eq!(Frame::decode(&b), Err(WireError::Handle));
         let old = b;
+        assert_eq!(
+            Frame::Poll { handle: 0 }.encode(&mut b),
+            Err(WireError::Handle)
+        );
+        assert_eq!(b, old);
         assert_eq!(
             Frame::Focus { handle: 0 }.encode(&mut b),
             Err(WireError::Handle)

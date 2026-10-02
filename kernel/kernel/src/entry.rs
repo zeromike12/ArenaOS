@@ -765,7 +765,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // A real, parked ring-3 server has already painted and finished its
     // bounded allocation before shell/manager resource commands can run.
     // This avoids a one-frame startup race across historical reboot tests.
-    start_boot_display();
+    let mut graphics = start_boot_display(_input_pid);
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     if expected_stack_caps.is_some() {
@@ -920,6 +920,64 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     let mut last_audited_child = None;
     let mut fs_reaped = false;
     loop {
+        // ADR-0061: there is no authorized compositor restart protocol.
+        // Preserve possession-based IPC teardown and fail-stop the machine
+        // rather than leave inputd blocked or advertise stale windows as
+        // usable after either original boot-root graphics service died.
+        if let Some(ref mut g) = graphics {
+            for pid in [g.compositor, g.display] {
+                if crate::sched::proc_live_threads(pid) == 0 {
+                    crate::proc::destroy(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::spawn::forget(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::halt::halt_machine(
+                        "graphics: original boot service died; IPC failed; fail-closed, no restart",
+                    );
+                }
+            }
+            for i in 0..2 {
+                if !g.exited[i] && crate::sched::proc_live_threads(g.clients[i]) == 0 {
+                    // Real original-child retirement (not a dropped cap).
+                    // IPC cancellation is swept by proc::destroy as usual.
+                    crate::proc::destroy(g.clients[i])
+                        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::spawn::forget(g.clients[i])
+                        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    g.exited[i] = true;
+                    g.deadline[i] = crate::timekeeping::now_us().saturating_add(2_000_000);
+                }
+                if g.exited[i] && !g.retired[i] {
+                    // Only the root-issued comparator may remain. A copy
+                    // or mapped surface keeps refs/pins above this bound;
+                    // never consume the last witness prematurely.
+                    if crate::shared::reference_snapshot(g.regions[i]) == Some((1, 0)) {
+                        crate::shared::assert_conservation();
+                        crate::cap::consume(g.compositor, 5 + i)
+                            .unwrap_or_else(|e| crate::halt::halt_machine(e));
+                        crate::cap::consume(g.compositor, 3 + i)
+                            .unwrap_or_else(|e| crate::halt::halt_machine(e));
+                        if crate::shared::reference_snapshot(g.regions[i]).is_some() {
+                            crate::halt::halt_machine("graphics: retired region still referenced");
+                        }
+                        g.retired[i] = true;
+                        let (runs, pages, maps) = crate::shared::usage_snapshot();
+                        info!(
+                            "m9",
+                            "graphics original child {} retired: Process record, region refs, mappings and comparator cap conserved; shared {runs}/{} runs, {pages}/{} pages, {maps}/{} maps; compositor caps {:?}; free frames {}",
+                            i,
+                            crate::shared::MAX_REGIONS,
+                            crate::shared::TOTAL_PAGES,
+                            crate::shared::MAX_MAPS,
+                            crate::cap::occupancy(g.compositor),
+                            crate::frames::free_frames()
+                        );
+                    } else if crate::timekeeping::now_us() >= g.deadline[i] {
+                        crate::halt::halt_machine(
+                            "graphics: dead original child never retired its copied region",
+                        );
+                    }
+                }
+            }
+        }
         // ADR-0051: fsd is a kernel-boot-root service, not a
         // user-Process-cap-managed child. If its LAST thread exits,
         // finish root-owned teardown here (away from its CR3). Without
@@ -1021,11 +1079,23 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     }
 }
 
+/// The exact boot-root objects retained for structural graphics teardown.
+/// No user-provided PID, wire handle or cap-slot number enters this record.
+struct GraphicsRuntime {
+    display: u64,
+    compositor: u64,
+    clients: [u64; 2],
+    regions: [u32; 2],
+    exited: [bool; 2],
+    retired: [bool; 2],
+    deadline: [u64; 2],
+}
+
 /// One boot-root graphics service: explicit optional GOP and/or modern 2D
 /// virtio GPU. A capability BAR, not the PCI numeric address, is delegated.
 /// The endpoint is parked before boot continues; graphical readiness is a
 /// separate service concern, never inferred from the mere presence of a BAR.
-fn start_boot_display() {
+fn start_boot_display(input_pid: Option<u64>) -> Option<GraphicsRuntime> {
     let gop = crate::handoff::display();
     if let Some(mode) = gop {
         if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
@@ -1071,7 +1141,7 @@ fn start_boot_display() {
             "kernel",
             "displayd: no validated GOP or virtio-gpu; headless boot"
         );
-        return;
+        return None;
     }
     let eid = crate::ipc::create_endpoint()
         .unwrap_or_else(|_| crate::halt::halt_machine("displayd: endpoint table full"));
@@ -1208,6 +1278,149 @@ fn start_boot_display() {
         "m9",
         "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
     );
+    Some(start_boot_compositor(display_pid, eid, input_pid))
+}
+
+/// Root provides *exactly two* disjoint original-child Process/READ and
+/// SharedRegion witnesses. No client inherits an allocation pool or display
+/// bearer; the compositor's only display access is the typed endpoint.
+fn start_boot_compositor(
+    display_pid: u64,
+    display_eid: u32,
+    input_pid: Option<u64>,
+) -> GraphicsRuntime {
+    use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let eid = crate::ipc::create_endpoint()
+        .unwrap_or_else(|_| crate::halt::halt_machine("compositor: endpoint bound"));
+    let comp = crate::spawn::spawn_init_boot(
+        3,
+        &[
+            Cap {
+                obj: CapObj::Endpoint { eid: display_eid },
+                rights: W,
+            },
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: R,
+            },
+            Cap {
+                obj: CapObj::ProofToken {
+                    id: 0x4152_454e_4149_4e50,
+                },
+                rights: R,
+            },
+        ],
+        None,
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let child_grants = [Cap {
+        obj: CapObj::Endpoint { eid },
+        rights: W,
+    }];
+    let a = crate::spawn::spawn_init_boot(4, &child_grants, None)
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let b = crate::spawn::spawn_init_boot(5, &child_grants, None)
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let mut region_ids = [0u32; 2];
+    for (i, (child, proc_slot, region_slot)) in [(a, 3, 5), (b, 4, 6)].into_iter().enumerate() {
+        let (slot, id) = crate::shared::create(child, 19)
+            .unwrap_or_else(|| crate::halt::halt_machine("compositor: owned region allocation"));
+        if slot != 1 {
+            crate::halt::halt_machine("compositor: region not in expected child slot")
+        }
+        region_ids[i] = id;
+        crate::cap::issue(
+            comp,
+            proc_slot,
+            Cap {
+                obj: CapObj::Process { pid: child },
+                rights: R,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            comp,
+            region_slot,
+            Cap {
+                obj: CapObj::SharedRegion { id },
+                rights: R | W | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    // The production input instance never serves its inherited READ-only
+    // endpoint. Reclaim that object before substituting the compositor call
+    // side; the m6 diagnostic input instance is a separate process and
+    // retains its existing endpoint/marker topology unchanged.
+    if let Some(pid) = input_pid {
+        let old = crate::cap::read(pid, 1).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        let CapObj::Endpoint { eid: old_eid } = old.obj else {
+            crate::halt::halt_machine("compositor: input endpoint grant changed")
+        };
+        // Kernel root retires its own old READ-only grant; userspace may
+        // not destroy it (no DESTROY bit) and receives no authority to do so.
+        crate::cap::consume(pid, 1).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::ipc::destroy_endpoint(old_eid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            pid,
+            1,
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            pid,
+            4,
+            Cap {
+                obj: CapObj::ProofToken {
+                    id: 0x4152_454e_4149_4e50,
+                },
+                rights: R | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    let was_if = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+    while crate::shared::usage_snapshot().2 < 6 || !crate::ipc::parked_server(eid, comp) {
+        if crate::sched::proc_live_threads(comp) == 0
+            || crate::sched::proc_live_threads(a) == 0
+            || crate::sched::proc_live_threads(b) == 0
+            || crate::timekeeping::now_us() >= deadline
+        {
+            crate::halt::halt_machine("compositor: clients or service died before owned pixels");
+        }
+        crate::sched::yield_now();
+    }
+    if !was_if {
+        crate::arch::x86_64::cli()
+    }
+    let (regions, pages, maps) = crate::shared::usage_snapshot();
+    info!(
+        "m9",
+        "compositor: live processes {}; display/compositor/client cap counts {:?}/{:?}/{:?}/{:?}; shared {regions}/{}, pages {pages}/{}, maps {maps}/{}; free frames {}",
+        crate::proc::live_count(),
+        crate::cap::occupancy(display_pid),
+        crate::cap::occupancy(comp),
+        crate::cap::occupancy(a),
+        crate::cap::occupancy(b),
+        crate::shared::MAX_REGIONS,
+        crate::shared::TOTAL_PAGES,
+        crate::shared::MAX_MAPS,
+        crate::frames::free_frames()
+    );
+    GraphicsRuntime {
+        display: display_pid,
+        compositor: comp,
+        clients: [a, b],
+        regions: region_ids,
+        exited: [false; 2],
+        retired: [false; 2],
+        deadline: [0; 2],
+    }
 }
 
 /// A short-lived *guest* capacity proof, not a kernel-side allocator model.

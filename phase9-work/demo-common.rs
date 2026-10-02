@@ -108,9 +108,50 @@ pub fn run(name: &'static [u8], color: u32, title: &'static str, x: i32, y: i32,
         }
     }
     log(name);
-    // No keyboard claim until the receiver-authenticated input IPC and
-    // Process-cap owner death checks are actually linked and guest-tested.
+    if !focus {
+        // The nonfocused independent client has no key authority. 40 cap-
+        // bearing forged requests must refuse without leaking landed slots.
+        for _ in 0..40 {
+            let (answer, _) = call(
+                Frame::Key {
+                    ascii: b'q',
+                    pressed: true,
+                },
+                cap,
+            );
+            if answer[0] != 2 {
+                die(92)
+            }
+        }
+        log(b"[window_a] forged input token refused\n");
+    }
     loop {
-        core::hint::spin_loop()
+        let request = Frame::Poll { handle };
+        let (answer, echo) = call(request, cap);
+        if answer[0] != 0 || echo != request {
+            die(93)
+        }
+        if focus && answer[1] == (u64::from(b'x') | (1 << 8)) {
+            // Deliberately exit without DESTROY: root and compositor must
+            // retire an original child, not just a polite surface request.
+            log(b"[window_b] original child exiting without DESTROY\n");
+            die(42)
+        }
+        if focus && answer[1] == (u64::from(b'q') | (1 << 8)) {
+            // Unique pixel on the actual client's shared backing. The
+            // compositor cannot manufacture this through a serial marker.
+            unsafe { core::ptr::write_volatile(ptr.add(40 * WIDTH + 20), 0x00_ff_bb_11) };
+            let region = Frame::Damage {
+                handle,
+                x: 20,
+                y: 40,
+                w: 1,
+                h: 1,
+            };
+            if call(region, cap).0[0] != 0 {
+                die(94)
+            }
+            log(b"[window_b] real key pixel painted\n");
+        }
     }
 }

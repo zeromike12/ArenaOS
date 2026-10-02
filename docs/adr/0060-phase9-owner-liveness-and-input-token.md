@@ -1,6 +1,6 @@
 # ADR-0060 — Bounded boot-client liveness and input-producer witness
 
-Status: proposed for Phase-9 service integration; no guest proof claimed.
+Status: implemented for the bounded two-boot-client topology; Phase-9 lifecycle/service-death qualification remains OPEN.
 Date: 2026-10-02
 
 The current pure compositor model cannot know that an original client died
@@ -84,3 +84,61 @@ the historical 13/13 or an unchecked count. Update that assertion only with
 an exact guest measurement and retain the pre-graphics 13/13 evidence.
 Record shared-registry runs/pages/maps, capability-slot peaks, free frames,
 spawn records and resident process high-water after both clients are live.
+
+## Implemented integration and provisional evidence (not milestone closure)
+
+The BootImage table now has six indices. The displayprobe's historical
+completion/retirement barrier runs first. Root grants the compositor a
+call-side display endpoint, serve-side client endpoint, and proof comparator;
+it separately issues two held Process/READ and corresponding root-allocated
+SharedRegion witnesses. Each independent client receives only the compositor
+call endpoint and its own 19-page region. There is no MemoryPool grant to
+either window, no client token and no cap-table expansion. The production
+inputd swaps its unused serve-side endpoint for compositor-W, receives the
+fifth-slot token and forwards decoded printable virtio-keyboard presses while
+continuing to feed the original console; its diagnostic instance is unchanged.
+A generic held-Process/READ-only `SYS_PROC_LIVE=41` returns one for live
+threads, zero for an exited but still recorded original process, and refuses
+wrong-kind/right or retired references. The compositor checks both witnesses
+on every request, retires dead-owner surfaces and queued keys before serving
+that request, validates landed full-region generation against root's held
+witness for every owner operation, and consumes landed caps on all paths.
+It only accepts KEY when the transferred proof matches its held comparator.
+
+`tools/test_m9_compositor_input.py` boots the actual EFI, captures an 800x600
+QMP PPM with both real client windows, overlap z-order, bitmap title and
+base pixels, injects `q` through QMP/virtio-input, then checks a second
+actual screenshot for the client-painted key pixel while unchanged pixels
+stay exact. A separate client sends forty forged KEY requests carrying its
+region cap and sees forty refusals. The first guest run failed because root
+tried to delete its own historical READ-only input endpoint grant through
+`cap::destroy` (which correctly requires DESTROY); root now retires that
+kernel-granted cap through the private internal `cap::consume` path before
+issuing the new endpoint. A subsequent guest run succeeded but the test
+failed because it checked the asynchronous forged-request marker before the
+client had finished forty IPC round trips. The test now waits for all markers
+before stopping the machine, and the complete guest/pixel proof passes.
+`tools/test_m82_capspace.py` measured post-EBS `(frames,records,processes)=
+(1672,16,16)` in the full guest: the exact 13/13 prior baseline plus three
+static graphics residents, not an expansion of the dynamic-child allowance.
+A provisional `tools/stability_loop.sh 2` passed 2/2 on one EFI with **two
+real QMP captures, injected input and exact host DNS receipts per boot**.
+The bootstrap root additionally reports occupied cap slots, shared runs,
+page total, map pins, live process count and free frames after both client
+surfaces map; a final peak-accounting report is still required.
+
+ADR-0061 now supplies real forced original-client exit, root/compositor
+ref/pin retirement and QMP base uncover, a mutation that leaves a stale
+pixel and fails the bounded deadline RED, and a real service-death/IPC
+fail-stop RED with restored pixel GREEN. Power-only guest measurements
+record 16/16 residents, 507 pages/6 maps at the client high-water and
+15/15 residents, 488 pages/4 maps after one death. There is **no service
+restart claim**. Compositor cleanup is still triggered by its next receive;
+if no requester drives it, root's bounded deadline fails closed rather than
+pretend cleanup occurred. This evidence is not Phase-9 completion.
+
+**Still open:** fresh complete historical/graphics suite, final-image
+100/100 with per-boot graphics input, and independently extracted
+pixel-verified archive. Model capacity/queue overflow and real SharedRegion
+capacity/refusal gates remain part of the complete suite; an arbitrary
+malicious client's copied cap cannot be revoked by deleting its original.

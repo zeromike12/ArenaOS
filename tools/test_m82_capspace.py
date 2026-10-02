@@ -26,12 +26,12 @@ def main() -> int:
     passed = (rc == 0 and "m3:test:capability_spaces: PASS" in serial
               and "capability_spaces: 32 slots/space" in serial
               and "m8: stackstress PASS" in serial and counters is not None
-              # Phase 8.3 was 11/11; ADR-0053 deliberately adds exactly
-              # one resident, cap-audited packaged child. No probe/app
-              # survives to inflate this measured baseline. ADR-0056 adds
-              # one isolated boot-root display service (one process and
-              # spawn record), without changing dynamic-child limits.
-              and counters[1:] == (13, 13)
+              # Phase 8.3 was 11/11; packaged adds one, displayd adds
+              # one (13/13 before live graphics). ADR-0060 adds exactly
+              # three disjoint BootImage residents: compositor and TWO
+              # owned windows, measured 16/16 in a real QEMU guest.
+              # No extra dynamic child or readiness worker remains live.
+              and counters[1:] == (16, 16)
               and "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)" in serial
               and "packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified" in serial
               and "servicemgr: permission PING result + exit before deadline; worker reaped" in serial

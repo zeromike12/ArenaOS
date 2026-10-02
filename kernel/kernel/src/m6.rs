@@ -235,16 +235,23 @@ fn net_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(6, &netd_grants, Some((nid_netd, NETD_EXIT_BADGE)))
         .map_err(|_| fail("netd (image 6) spawn failed"))?;
     // nettest (image 7): slot 0 = the call side of the same endpoint.
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid = crate::spawn::spawn_init(7, &client_grants, Some((nid_client, NETTEST_EXIT_BADGE)))
         .map_err(|_| fail("nettest (image 7) spawn failed"))?;
@@ -470,16 +477,23 @@ fn rng_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(8, &rngd_grants, Some((nid_rngd, RNGD_EXIT_BADGE)))
         .map_err(|_| fail("rngd (image 8) spawn failed"))?;
     // rngtest (image 9): slot 0 = the call side of the same endpoint.
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid = crate::spawn::spawn_init(9, &client_grants, Some((nid_client, RNGTEST_EXIT_BADGE)))
         .map_err(|_| fail("rngtest (image 9) spawn failed"))?;
@@ -743,15 +757,22 @@ fn service_death_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_void },
             rights: cap::RIGHTS_READ | cap::RIGHTS_COPY,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(14, &server_grants, Some((nid_server, FAULTD_EXIT_BADGE)))
         .map_err(|_| fail("faultd (image 14) spawn failed"))?;
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid =
         crate::spawn::spawn_init(15, &client_grants, Some((nid_client, FAULTTEST_EXIT_BADGE)))
@@ -922,7 +943,10 @@ fn service_restart_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_void },
             rights: cap::RIGHTS_READ | cap::RIGHTS_COPY,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let first_pid = crate::spawn::spawn_init(14, &server_grants, None)
         .map_err(|_| fail("faultd (image 14) spawn failed"))?;
@@ -932,11 +956,15 @@ fn service_restart_inner() -> NetResult {
     // A client that will be blocked in a call when the service dies —
     // the same shape as service_death, because that is the case a
     // restart has to be survivable from.
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid =
         crate::spawn::spawn_init(15, &client_grants, Some((nid_client, CONTEST_EXIT_BADGE)))
@@ -1146,7 +1174,10 @@ fn console_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(
         12,
@@ -1154,11 +1185,15 @@ fn console_service_inner() -> NetResult {
         Some((nid_consoled, CONSOLED_EXIT_BADGE)),
     )
     .map_err(|_| fail("consoled (image 12) spawn failed"))?;
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid =
         crate::spawn::spawn_init(13, &client_grants, Some((nid_client, CONTEST_EXIT_BADGE)))
@@ -1234,7 +1269,15 @@ fn console_service_inner() -> NetResult {
     // Nobody was attached to the port's far end: tear down exactly as a
     // passing run does and report the honest SKIP.
     if client_status == Some(CONSOLE_EXIT_NO_DATA) {
-        console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled, nid_diag)?;
+        console_teardown(
+            s_pid,
+            c_pid,
+            eid,
+            nid_irq,
+            nid_client,
+            nid_consoled,
+            nid_diag,
+        )?;
         if frames::free_frames() != baseline {
             return Err(fail("console-service teardown is not frame-exact"));
         }
@@ -1296,7 +1339,15 @@ fn console_service_inner() -> NetResult {
         ));
     }
 
-    console_teardown(s_pid, c_pid, eid, nid_irq, nid_client, nid_consoled, nid_diag)?;
+    console_teardown(
+        s_pid,
+        c_pid,
+        eid,
+        nid_irq,
+        nid_client,
+        nid_consoled,
+        nid_diag,
+    )?;
 
     let after = frames::free_frames();
     if after != baseline {
@@ -1402,16 +1453,23 @@ fn input_service_inner() -> NetResult {
             obj: CapObj::Notification { nid: nid_irq },
             rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let s_pid = crate::spawn::spawn_init(10, &inputd_grants, Some((nid_inputd, INPUTD_EXIT_BADGE)))
         .map_err(|_| fail("inputd (image 10) spawn failed"))?;
     // inputtest (image 11): slot 0 = the call side of the same endpoint.
-    let client_grants = [Cap {
-        obj: CapObj::Endpoint { eid },
-        rights: cap::RIGHTS_WRITE,
-    },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+    let client_grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: cap::RIGHTS_WRITE,
+        },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let c_pid =
         crate::spawn::spawn_init(11, &client_grants, Some((nid_client, INPUTTEST_EXIT_BADGE)))

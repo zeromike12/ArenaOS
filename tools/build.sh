@@ -243,6 +243,16 @@ DISPLAY_PROBE_ELF="$REPO_ROOT/userspace/displayd/target/x86_64-unknown-none/rele
 test -f "$DISPLAY_PROBE_ELF"
 echo "display protocol probe image: ${DISPLAY_PROBE_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DISPLAY_PROBE_ELF") bytes)"
 
+# ADR-0060: three disjoint, statically linked ring-3 graphics programs.
+# Their binaries are embedded in the bounded BootImage namespace; none is
+# dynamically loaded, a registrant or a privileged guest package.
+echo "== building Phase-9 compositor and two independent windows =="
+( cd "$REPO_ROOT/phase9-work" && cargo build --offline --locked --release )
+for GRAPHICS_ELF in arena-compositord arena-window-a arena-window-b; do
+    test -f "$REPO_ROOT/phase9-work/target/x86_64-unknown-none/release/$GRAPHICS_ELF"
+    echo "graphics image: $GRAPHICS_ELF ($(stat -c%s "$REPO_ROOT/phase9-work/target/x86_64-unknown-none/release/$GRAPHICS_ELF") bytes)"
+done
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

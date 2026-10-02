@@ -1597,9 +1597,16 @@ fn test_ipc_echo() -> Result<(), &'static str> {
 fn test_abandoned_caller_states() -> Result<(), &'static str> {
     let baseline = frames::free_frames();
     let pid = proc::create("ipcDeadCall")?;
-    let tid = sched::spawn_in_proc("ipcDeadCaller", |_| {
-        loop { sched::yield_now(); }
-    }, 0, pid)?;
+    let tid = sched::spawn_in_proc(
+        "ipcDeadCaller",
+        |_| {
+            loop {
+                sched::yield_now();
+            }
+        },
+        0,
+        pid,
+    )?;
     let eid = ipc::stage_abandoned_caller_fixture(tid)?;
     proc::destroy(pid)?;
     ipc::verify_abandoned_caller_fixture(eid)?;
@@ -1607,7 +1614,10 @@ fn test_abandoned_caller_states() -> Result<(), &'static str> {
     if frames::free_frames() != baseline {
         return Err("dead-caller four-state sweep leaked process/thread frames");
     }
-    info!("m4", "ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact");
+    info!(
+        "m4",
+        "ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact"
+    );
     Ok(())
 }
 

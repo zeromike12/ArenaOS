@@ -236,7 +236,10 @@ fn test_arp_service() -> Res {
             obj: CapObj::Endpoint { eid: ep_rng },
             rights: cap::RIGHTS_WRITE,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ,
+        },
     ];
     let stack_pid =
         crate::spawn::spawn_init(17, &stack_grants, Some((nid_stack, NETSTACKD_EXIT_BADGE)))
@@ -262,7 +265,10 @@ fn test_arp_service() -> Res {
             obj: CapObj::Notification { nid: nid_go },
             rights: cap::RIGHTS_READ,
         },
-        Cap { obj: CapObj::Notification { nid: nid_diag }, rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY },
+        Cap {
+            obj: CapObj::Notification { nid: nid_diag },
+            rights: cap::RIGHTS_READ | cap::RIGHTS_COPY | cap::RIGHTS_DESTROY,
+        },
     ];
     let client_pid =
         crate::spawn::spawn_init(18, &client_grants, Some((nid_client, ARPTEST_EXIT_BADGE)))
