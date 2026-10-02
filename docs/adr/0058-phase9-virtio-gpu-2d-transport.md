@@ -1,6 +1,6 @@
 # ADR-0058 — Phase-9 virtio-gpu 2D device service transport
 
-Status: **Proposed design only; no GPU implementation or qualification claimed**
+Status: **Proposed transport design; standalone wire codec only, no GPU service or qualification claimed**
 Date: 2026-10-01
 
 ## Resource and authority budget
@@ -14,6 +14,10 @@ Displayd owns all queue descriptor memory and device-visible scanout backing in 
 Follow OASIS virtio v1.3 §5.7, version-1 PCI transport and the existing ArenaOS userspace virtio core: reset, acknowledge/driver status, negotiate VERSION_1, reject unrecognized mandatory bits, choose one controlq, preflight queue descriptors/buffer lengths and announce DRIVER_OK only after validation. The Phase-9 path is strictly 2D; negotiate no virgl/3D features. GET_DISPLAY_INFO must return a success response with a live scanout, 32-bit dimensions within the same checked ≤2 MiB buffer bound and a supported color layout; a returned display ID, resource ID or host framebuffer address cannot authorize anything. Reserve one resource ID with a monotonic local generation. CREATE_2D(XRGB8888/BGRX-compatible), ATTACH_BACKING (checked backing length), SET_SCANOUT, TRANSFER_TO_HOST_2D and RESOURCE_FLUSH are the only ordinary rendering command chain. Response type, response used-length, echoed fence (if negotiated), bounded rectangle/offset and a wall-clock completion deadline are validated for **every** command; a completion that is short, unexpected or late fails closed, not a synthetic success. On controlled teardown: SET_SCANOUT to zero, DETACH_BACKING and UNREF, checking the same response discipline. Never pass an arbitrary client physical number into an attach descriptor.
 
 Prefer GPU only when the actual command handshake and display-info succeed. If initialization fails before accepting clients, use the real GOP fallback only if its cap and handoff geometry are valid; otherwise explicitly report headless/refusal. Once an active transport fails, refuse presents and drain/retire its outstanding command state. Do not switch transport mid-frame or advertise a restart without proven resource/endpoint semantics. GPU and GOP must use the same typed display MODE/PRESENT protocol, with displayd alone performing checked transfers/flushes or volatile MMIO copies.
+
+## Partial implementation ledger
+
+`userspace/gpu2d` is an independent, allocation-free `no_std` 2D wire encoder/response parser with fixed command lengths, checked geometry/backing/refusal and three passing host tests plus bare-metal build/clippy. It does not interact with a real virtqueue, DMA, graphics endpoint or QEMU display. Keep its result separate from every guest claim below.
 
 ## Evidence, not assumptions
 

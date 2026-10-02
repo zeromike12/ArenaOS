@@ -1,0 +1,11 @@
+[package]
+name = "arena-gpu2d-wire"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Bounded no_std virtio-gpu 2D wire codec; transport integration pending"
+
+[workspace]
+
+[profile.release]
+panic = "abort"

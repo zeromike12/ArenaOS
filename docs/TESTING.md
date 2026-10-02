@@ -910,7 +910,9 @@ virtio-gpu, two-window demo or graphical keyboard route.
 
 Run `source tools/dev-env/env.sh`, then `python3 tools/test_m9_gfxkit.py`,
 `python3 tools/test_m9_compositor_model.py` (host-only pure state model,
-**not** a compositor service), `python3 tools/test_m9_gop_handoff.py`,
+**not** a compositor service), `python3 tools/test_m9_gpu2d_wire.py`
+(host/bare-metal 2D wire codec only, **not** a virtio-gpu device proof),
+`python3 tools/test_m9_gop_handoff.py`,
 `python3 tools/test_m9_font_red.py` and
 `python3 tools/test_m9_shared_ref_hook.py`. The GOP check captures an
 actual QMP PPM and checks width, full byte length, distant colored pixels
