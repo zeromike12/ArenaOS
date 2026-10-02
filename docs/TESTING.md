@@ -913,7 +913,9 @@ Run `source tools/dev-env/env.sh`, then `python3 tools/test_m9_gfxkit.py`,
 **not** a compositor service), `python3 tools/test_m9_gpu2d_wire.py`
 (host/bare-metal 2D wire codec only, **not** a virtio-gpu device proof),
 `python3 tools/test_m9_gpu2d_red.py` (host-only omitted device ACK check
-RED/restored GREEN), `python3 tools/test_m9_gop_handoff.py`,
+RED/restored GREEN), `python3 tools/test_m9_bar_gate_red.py` (real guest
+truncated-BAR MMIO-cap refusal plus omitted-coverage RED),
+`python3 tools/test_m9_gop_handoff.py`,
 `python3 tools/test_m9_font_red.py`,
 `python3 tools/test_m9_shared_ref_hook.py` and
 `python3 tools/test_m9_shared_info_red.py`. The GOP check captures an
