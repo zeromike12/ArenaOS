@@ -64,3 +64,8 @@ Python child bound to 1053. Its owned orphan was identified and terminated;
 is the actual socket owner. A fresh two-boot run passed **2/2**, with three
 per-boot host DNS receipts, the existing QMP display pixels and no leftover
 listener. This is not an exact-final-EFI 100/100 qualification.
+
+The subsequent complete Phase-9 suite passed 79/79, its exact EFI passed
+100/100 graphical boots with exactly three host DNS receipts each, and the
+independently extracted archive included and exercised the controlled peer.
+This closes the integration gate without claiming public DNS access.

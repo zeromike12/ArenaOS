@@ -1160,10 +1160,16 @@ is not completed by accepting an ADR.
       picker, dynamic linking, GC, hostile rollback or Secure Boot.
 
 
-## Phase 9 — Graphics (outline)
+## Phase 9 — Graphics (qualified 2026-10-02)
 
-GOP/virtio-gpu display server → compositor → input routing → font rendering
-(own rasterizer or audited import — ADR) → toolkit.
+ADR-0056–0061: bounded generic SharedRegions; isolated ring-3 GOP/virtio-gpu
+2D display service; userspace compositor with held-cap owned/clipped/z-ordered
+surfaces and focus, Process-witness owner retirement, fail-stop service death;
+real keyboard routing, own bounded 5×7 bitmap renderer and no_std toolkit;
+two independent ring-3 clients. 79/79 complete host/guest/history suites,
+fresh graphics-aware exact-EFI 100/100, and independently extracted,
+pixel-verified `phase9-complete` archive. Pointer and live restart remain
+outside the demonstrated scope. Phase 10 desktop applications are next.
 
 ## Phase 10 — Desktop (outline)
 

@@ -70,16 +70,16 @@ Rules:
 | [0051](0051-filesystem-absence-proof.md) | Distinct receiver-verified fsd shutdown marker and kernel-root exited-service reap to orphan the real FS endpoint; typed absence and restoration | Accepted (8.2 complete) |
 | [0052](0052-standard-userspace-client-libraries.md) | Linked no_std syscall/IPC/AFS1/network clients; independent guest consumers; corrected IPC-landed reply-cap disposal, real mutation-tested 40×2 guest proof; 43/43 + fresh corrected-EFI 100/100 + extracted boot | Accepted (8.3 reclosed) |
 | [0053](0053-signed-package-trust-and-staging.md) | Phase 8.4 signed packages and verified staging: exact vendored Ed25519/SHA-256 closure, test-only root, canonical bytes/domains, bounded revocation, receiver authority and same-disk crash refusal; 47/47, final EFI 100/100 and extracted bundle boot | Accepted (8.4 staging checkpoint complete) |
-| [0054](0054-installed-images-and-atomic-upgrade.md) | Phase 8.5 installed/active AINS/AACT wire and crash transaction; AACT generation 4 conditional on complete AFS1 capacity; [host-only evidence](0054-final-freeze-review-evidence.md) is not guest proof | Accepted (architecture; implementation/qualification pending) |
-| [0055](0055-capability-gated-dynamic-image-registry.md) | Phase 8.5 ImageRegistrar ABI, immutable ELF copy, monotonic IDs/revoke, system-wide one-unretired-child BUSY, manager-death fail-stop; manager+verifier TCB and production ref-oracle obligation | Accepted (architecture; implementation/qualification pending) |
+| [0054](0054-installed-images-and-atomic-upgrade.md) | Phase 8.5 installed/active AINS/AACT wire and crash transaction; AACT generation 4 conditional on complete AFS1 capacity; [host-only evidence](0054-final-freeze-review-evidence.md) is not guest proof | Accepted (Phase 8.5 implemented and qualified) |
+| [0055](0055-capability-gated-dynamic-image-registry.md) | Phase 8.5 ImageRegistrar ABI, immutable ELF copy, monotonic IDs/revoke, system-wide one-unretired-child BUSY, manager-death fail-stop; manager+verifier TCB and production ref-oracle obligation | Accepted (Phase 8.5 implemented and qualified) |
 
-| [0056](0056-phase9-graphics-and-shared-regions.md) | Phase 9 isolated display and bounded shared-region mechanism; qualification pending | Accepted (design; Phase 9 in progress) |
-| [0057](0057-phase9-compositor-authority-and-input.md) | Userspace compositor, held-cap ownership, focus, input routing and lifecycle obligations | Accepted (design; Phase 9 in progress) |
-| [0058](0058-phase9-virtio-gpu-2d-transport.md) | Audited virtio-gpu 2D transport with GOP fallback | Accepted (design; Phase 9 in progress) |
-| [0059](0059-deterministic-host-dns-wire-fixture.md) | Controlled external host UDP fixture across the real SLIRP/virtio-net path, explicitly not public DNS | Accepted (integration; full-suite requalification pending) |
+| [0056](0056-phase9-graphics-and-shared-regions.md) | Phase 9 isolated display and bounded shared-region mechanism; qualified | Accepted (implemented; Phase 9 complete) |
+| [0057](0057-phase9-compositor-authority-and-input.md) | Userspace compositor, held-cap ownership, focus, input routing and lifecycle obligations | Accepted (implemented; Phase 9 complete) |
+| [0058](0058-phase9-virtio-gpu-2d-transport.md) | Audited virtio-gpu 2D transport with GOP fallback | Accepted (implemented; Phase 9 complete) |
+| [0059](0059-deterministic-host-dns-wire-fixture.md) | Controlled external host UDP fixture across the real SLIRP/virtio-net path, explicitly not public DNS | Accepted (integration; 79/79 full-suite, 100/100 EFI and extracted archive qualified) |
 
-| [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Implemented for two boot clients; death qualification open |
-| [0061](0061-phase9-graphics-fail-closed-boot-root.md) | Fail-stop service death and explicit client-death proof without claiming restart | Proposed (guest negatives pending) |
+| [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Implemented; real guest death/RED and final exact-EFI artifact qualification proved |
+| [0061](0061-phase9-graphics-fail-closed-boot-root.md) | Fail-stop service death and explicit client-death proof without claiming restart | Implemented; real guest death/RED and final exact-EFI artifact qualification proved |
 
 ## Template
 

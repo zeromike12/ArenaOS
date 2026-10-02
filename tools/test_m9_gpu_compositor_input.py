@@ -50,6 +50,6 @@ def main():
     assert after(200,190)==(0xff,0xbb,0x11)
     for xy in ((0,100),(700,300),(799,599),(60,70)):
         assert before(*xy)==after(*xy),(xy,before(*xy),after(*xy))
-    print('[m9-compositor-input] virtio-gpu-only owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS')
+    print('[m9-gpu-compositor-input] virtio-gpu-only owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS')
 
 if __name__=='__main__': main()

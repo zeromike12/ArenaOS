@@ -4,27 +4,49 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
-## Phase 9 development image (NOT milestone-qualified)
+## Phase 9 qualified graphical image
 
-The source checkout can build a provisional userspace display demo with
-`bash tools/run.sh`. That helper prebinds the controlled host M7 DNS UDP
-peer before QEMU starts and reaps it on exit. This peer is required while
-the boot self-test sends real packets to `10.0.2.2:1053`; it does **not**
-prove external/public DNS or general connectivity. The current development
-image boots a ring-3 compositor and two independent colored bitmap-font
-windows. `python3 tools/test_m9_compositor_input.py` captures real QMP
-before/after pixels and injects a key through the virtual keyboard.
-Additional guest tests prove original-client teardown and deliberate
-compositor death fail-stop; the final historical/graphics suite and exact-EFI
-100-boot gate remain open. This
-is **not** the Phase-9-complete archive or 100-boot qualification; continue
-using the Phase-8.5 archive for the last qualified milestone. The earlier
-72/73 and interrupted 31/74 test runs remain failed records, not evidence
-of completion.
+The current deployable image is the hashed
+`releases/checkpoints/phase9-complete/arenaos-phase9-complete-qemu-x86_64.tar.gz`.
+Its exact EFI SHA-256 is
+`a1cb60cb8749b5cc355e146a6ea4b768dd27367959338cdd2d795811c5a8f925`.
+The complete historical/graphics suite passed **79/79** and a fresh
+**100/100** QEMU boots of this EFI checked actual 800×600 QMP window and
+bitmap glyph pixels *before and after* an injected virtual keyboard event.
+Both the GOP fallback and virtio-gpu-only paths independently rendered the
+two overlapping ring-3 clients. The original-client death and deliberate
+compositor-death tests proved teardown and fail-stop; **service restart and
+pointer routing are not claimed**.
+
+From this checkout, with QEMU and Python 3 installed, verify, extract and
+boot the archive **without importing from the source checkout**:
+
+```sh
+cd releases/checkpoints/phase9-complete
+sha256sum -c arenaos-phase9-complete-qemu-x86_64.tar.gz.sha256
+mkdir -p extracted
+cd extracted
+tar -xzf ../arenaos-phase9-complete-qemu-x86_64.tar.gz
+sha256sum -c sha256sums.txt
+python3 phase9_archive_boot.py
+```
+
+The extracted script checks its qualified EFI receipt, copies fresh OVMF
+vars and an AFS1 scratch disk, prebinds the bundled host TCP and DNS-test
+peers, injects historical keyboard-fixture keys and the focused window key
+through QMP, asserts actual captured pixels and a clean guest shutdown.
+The host DNS actor reaches `10.0.2.2:1053` through SLIRP; this proves the
+controlled guest wire, **not** public Internet DNS. To build/test from source,
+run `source tools/dev-env/env.sh; bash tools/build.sh --image`, then
+`bash tools/run_tests.sh`; use `bash tools/run.sh` for a live QEMU boot.
+The 100/100 qualification belongs only to the exact EFI above and must not
+be transferred to a different rebuild hash. Earlier incomplete runs (72/73,
+interrupted 31/74, 73/74 and interrupted 78) remain failures or incomplete
+diagnostics, not milestone receipts.
 
 ## Phase 8.5 verified dynamic Image / signed cutover checkpoint
 
-This is the **current qualified QEMU build**. A manager-only lifecycle
+This is the **previous qualified QEMU build**. A manager-only lifecycle
 marker authorizes the independently managed receiver to commit immutable
 AINS/AACT records and prepare/select a test-root-signed Image. A separate
 kernel Registrar capability admits a bounded live Image; the held Process

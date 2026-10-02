@@ -1,6 +1,6 @@
 # ADR-0058 — Phase-9 virtio-gpu 2D device service transport
 
-Status: **Live GPU-only transport and compositor/input QMP integration verified; final full-suite/100-boot/archive qualification pending**. The partial-implementation ledger below records the earlier transport-only checkpoint; see the later integration evidence at the end.
+Status: **Qualified with GPU-only compositor QMP input pixels, full 79/79 suite, exact-EFI 100/100 graphics boots and extracted-archive graphical boot**. The partial-implementation ledger below records the earlier transport-only checkpoint; see the later integration evidence at the end.
 Date: 2026-10-01
 
 ## Resource and authority budget

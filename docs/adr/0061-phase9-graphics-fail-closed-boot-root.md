@@ -1,6 +1,6 @@
 # ADR-0061 — Fail-stop graphics boot-root service death, no implied restart
 
-Status: implemented with real guest client/service death and restored-source pixel controls; final full-suite/stability/archive gates remain OPEN. Date: 2026-10-02.
+Status: qualified with real guest death/RED controls, 79/79 historical suites, exact-EFI 100/100 graphical boots and independently pixel-verified extracted archive. Date: 2026-10-02.
 
 ## Context
 
@@ -57,7 +57,7 @@ access or kernel display policy is authorized by this ADR. The kernel change
 is only root-owned liveness supervision using existing process/IPC teardown;
 the user-space compositor retains all clipping, window, font and focus policy.
 
-## Provisional real-guest evidence (not final Phase-9 qualification)
+## Real-guest lifecycle evidence (qualified with final Phase-9 image)
 
 `tools/test_m9_service_death_red.py`: a test-only mutation exits the real
 compositor after a receiver-authenticated QMP keyboard KEY while production
@@ -94,5 +94,6 @@ keyboard control in `tools/test_m9_gpu_compositor_input.py` (see ADR-0058).
 Both the real GOP and GPU-only paths preserve identical owned-window pixel
 semantics. This does not change the no-restart decision. A 78-test historical
 suite run was deliberately interrupted after M8.1 to add this missing
-integration check; it is not a completed gate. The fresh full suite must
-include the new test before the final 100-boot/archive release gates.
+integration check; it was not a completed gate. The subsequent fresh 79/79
+suite, exact-EFI 100/100 pixel boots and independently extracted-archive
+pixel boot all passed. See `docs/TESTING.md` and the hashed archive receipt.

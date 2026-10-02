@@ -175,6 +175,7 @@ for i in $(seq 1 "$N"); do
         done
     } | timeout "$BOOT_TIMEOUT" "${QEMU[@]}" \
         -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
+        -boot order=c \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$VARS" \
         -drive format=raw,file="$ESP" \

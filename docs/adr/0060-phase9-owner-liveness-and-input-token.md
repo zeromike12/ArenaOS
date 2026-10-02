@@ -1,6 +1,6 @@
 # ADR-0060 — Bounded boot-client liveness and input-producer witness
 
-Status: implemented for the bounded two-boot-client topology; Phase-9 lifecycle/service-death qualification remains OPEN.
+Status: implemented and qualified for the bounded two-boot-client topology; original-client-death RED/GREEN and service-death fail-stop proved, exact-EFI 100/100 and extracted archive boot passed.
 Date: 2026-10-02
 
 The current pure compositor model cannot know that an original client died
@@ -125,7 +125,7 @@ A provisional `tools/stability_loop.sh 2` passed 2/2 on one EFI with **two
 real QMP captures, injected input and exact host DNS receipts per boot**.
 The bootstrap root additionally reports occupied cap slots, shared runs,
 page total, map pins, live process count and free frames after both client
-surfaces map; a final peak-accounting report is still required.
+surfaces map; the later Power-only high-water and teardown measurements below close the peak-accounting obligation.
 
 ADR-0061 now supplies real forced original-client exit, root/compositor
 ref/pin retirement and QMP base uncover, a mutation that leaves a stale
@@ -135,10 +135,11 @@ record 16/16 residents, 507 pages/6 maps at the client high-water and
 15/15 residents, 488 pages/4 maps after one death. There is **no service
 restart claim**. Compositor cleanup is still triggered by its next receive;
 if no requester drives it, root's bounded deadline fails closed rather than
-pretend cleanup occurred. This evidence is not Phase-9 completion.
+pretend cleanup occurred. By itself this targeted evidence did not qualify Phase 9; the full-suite,
+100-boot and archive gates below now do.
 
-**Still open:** fresh complete historical/graphics suite, final-image
-100/100 with per-boot graphics input, and independently extracted
+**Final gates closed:** 79/79 historical/graphics suites, final-image
+100/100 with per-boot graphics input and an independently extracted
 pixel-verified archive. Model capacity/queue overflow and real SharedRegion
-capacity/refusal gates remain part of the complete suite; an arbitrary
-malicious client's copied cap cannot be revoked by deleting its original.
+capacity/refusal gates ran in the complete suite; an arbitrary
+malicious client's copied cap still cannot be revoked by deleting its original.

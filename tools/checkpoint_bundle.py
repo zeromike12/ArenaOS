@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a qualified Phase 8 commit with its OWN bootable QEMU build.
+"""Package a qualified Phase 8/9 commit with its OWN bootable QEMU build.
 
 Run after tools/run_tests.sh and tools/stability_loop.sh 100, before the
 source+artifact checkpoint commit. This is not a GitHub release;
@@ -147,6 +147,7 @@ def main() -> int:
         required = (
             f"ALL TESTS PASSED ({total} test suites)",
             "[m9-compositor-input] distinct owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS",
+            "[m9-gpu-compositor-input] virtio-gpu-only owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS",
             "[m9-client-death] real original-child exit, exact Process/region/map/cap retirement and independent QMP base/window uncover PASS",
             "[m9-client-death-red] omitted Process-liveness guest stale-pixel/timeout RED: PASS; exact restored source/EFI and QMP uncovered-pixel GREEN: PASS",
             "[m9-service-death] actual boot-root IPC fail-stop RED: PASS; byte-exact restored source/EFI and QMP key pixel GREEN: PASS",

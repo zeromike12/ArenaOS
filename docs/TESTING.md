@@ -899,15 +899,16 @@ build/phase85-qualified-suite.log` only after those gates: it rejects a
 missing/stale receipt, verifies internal archive checksums, independently
 extracts and boots bundled ESP/firmware/formatted disk.
 
-## Phase 9 partial graphics gates (NOT a completed milestone)
+## Earlier Phase 9 partial graphics gates (historical checkpoint, superseded by final qualification)
 
 ADR-0056, ADR-0057 and ADR-0058 describe the authority and remaining exit criteria.
-The current standalone `no_std` toolkit has bounded clipping/text and a
-linked 5×7 owned glyph renderer. Displayd stages frames in a checked
+The earlier transport-only checkpoint already had a standalone `no_std`
+toolkit with bounded clipping/text and a linked 5×7 owned glyph renderer. Displayd stages frames in a checked
 SharedRegion RAM mapping: on a validated modern virtio-gpu BAR it runs a
 one-outstanding polled 2D command chain; otherwise GOP fallback copies
-pixels to its exclusive MMIO window with volatile stores. Neither path is
-yet a compositor, two-window demo or graphical keyboard route. The **72/72** historical-plus-partial-graphics suite passed after exact
+pixels to its exclusive MMIO window with volatile stores. At that point
+neither path was yet a compositor, two-window demo or graphical keyboard
+route. The **72/72** historical-plus-partial-graphics suite passed after exact
 shared-unmap integration and its omitted-pin guest RED control. This is a
 kernel/shared-lifecycle checkpoint, **not** the final multi-client graphics
 qualification or a 100/100 EFI-bound receipt.
@@ -1054,5 +1055,49 @@ virtio-gpu command chain, two owned overlapping windows and QMP-before/after
 `build/phase9-gpu-compositor-input.log`. A previous 78-test full-suite
 attempt was interrupted deliberately after historical tests through M8.1 to
 add this missing GPU-only integration control. **Do not count that interrupted
-run as a complete historical/graphics PASS.** Run the fresh 79-test suite
-before the final artifact-bound 100/100.
+run as a complete historical/graphics PASS.** The required fresh 79-test
+suite subsequently passed; see the final qualification below.
+
+## Phase 9 final graphics qualification — 2026-10-02
+
+- `bash tools/run_tests.sh` **79/79** host, guest, historical and Phase-9
+  suites, including the real GOP fallback and GPU-only two-client QMP
+  before/after injected-key pixels, malformed/capacity/authority refusals,
+  owner-death stale-pixel RED/restored GREEN, service-death in-flight IPC
+  `STATUS_SERVICE_GONE` RED/restored GREEN, all Phase-8.5 crash prefixes and
+  guest Power resource measurements. Full receipt:
+  `build/phase9-full-suite-after-resume.log`.
+- After the suite and last image code change, `bash tools/build.sh --image`
+  produced EFI SHA-256
+  `a1cb60cb8749b5cc355e146a6ea4b768dd27367959338cdd2d795811c5a8f925`.
+  `bash tools/stability_loop.sh 100` on **that** EFI passed **100/100** with
+  zero failures in 773 seconds. Every boot captured/checked two actual QMP
+  frames, bitmap glyph, clipped owned windows, preserved base and a focused
+  keyboard-driven RGB change, plus historical service/IPC/wire checks.
+  `build/phase9-stability100.log`, `build/stability-receipt.txt`, and 100
+  `build/stability-pixels-boot-*.txt` are the receipts; before/after pixel
+  SHA-256 for each boot are retained, with full PPM samples for boots 1/100.
+- `python3 tools/checkpoint_bundle.py phase9-complete
+  build/phase9-full-suite-after-resume.log` checked the exact ESP EFI,
+  suite markers and receipt; extracted the hashed
+  `releases/checkpoints/phase9-complete/arenaos-phase9-complete-qemu-x86_64.tar.gz`;
+  and independently booted the extracted image with genuine QMP pixel/input
+  assertions. The archive SHA-256 is
+  `ff4bb21ee7a8b31560404bc0e5c7a3232fa7f0d5f21900b2c9b15d1382c0db83`.
+  Separately extracting into `build/phase9-independent-extract`, running
+  `sha256sum -c sha256sums.txt` and `python3 phase9_archive_boot.py` from
+  that directory **also passed**, using only packaged scripts and QEMU;
+  receipt: `build/phase9-independent-boot.log`. The pixel hashes matched the
+  100-boot receipt: before
+  `f7b5cf77eb9dd4f5a378c1231b8953446d9609193a820157dfabcbc1e5f9b3c3`,
+  after `cda78402690ce87b888f07251b264d60dd997c3841acc758896fc326303991d6`.
+- `cargo fmt --check` passed for kernel, phase9-work, inputd, compositor,
+  gfxkit and gpu2d; Python bytecode compilation, Bash syntax and
+  `git diff --check` passed. Strict `cargo clippy -- -D warnings` passed on
+  phase9-work, inputd, compositor, gfxkit and gpu2d; kernel bare-metal
+  `cargo check` passed, as did non-strict kernel clippy (55 baseline
+  warnings, `build/phase9-final-kernel-clippy-warnings.log`). Repository-wide
+  strict kernel clippy **did not pass** and is not claimed as a green gate.
+  Bare-metal builds are exercised by the full suite. No false
+  release claim of pointer routing, compositor restart, public DNS or
+  production signing is made.
