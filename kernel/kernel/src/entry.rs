@@ -1091,12 +1091,34 @@ fn run_shared_probe() {
         .filter(|rec| rec.is_some())
         .count();
     let processes_before = crate::proc::live_count();
-    let grants = [crate::cap::Cap {
+    let pool = crate::cap::Cap {
         obj: crate::cap::CapObj::MemoryPool,
         rights: crate::cap::RIGHTS_WRITE,
-    }];
-    let pid = crate::spawn::spawn_init_boot(1, &grants, None)
-        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    };
+    // ADR-0058 negative: a one-page *prefix* of the boot fixture's real
+    // four-page block BAR is insufficient for the device's notify window
+    // in page four. Grant it only to this short-lived probe process;
+    // displayd, shell and manager never inherit it. Absent virtio-blk
+    // keeps the old one-grant/headless fixture unchanged.
+    let truncated = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_BLOCK)
+        .and_then(|v| {
+            let bar = v.common.bar as usize;
+            let f = crate::drivers::pci::pci_function(v.pci_index)?;
+            (bar < 6 && !f.bar_is_io[bar] && f.bar_base[bar] != 0 && f.bar_size[bar] >= 2 * 4096)
+                .then_some(crate::cap::Cap {
+                    obj: crate::cap::CapObj::Mmio {
+                        phys: f.bar_base[bar],
+                        pages: 1,
+                    },
+                    rights: crate::cap::RIGHTS_READ,
+                })
+        });
+    let pid = if let Some(short_bar) = truncated {
+        crate::spawn::spawn_init_boot(1, &[pool, short_bar], None)
+    } else {
+        crate::spawn::spawn_init_boot(1, &[pool], None)
+    }
+    .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     let tid = crate::spawn::records_snapshot()
         .iter()
         .flatten()

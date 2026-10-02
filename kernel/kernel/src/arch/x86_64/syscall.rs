@@ -159,6 +159,8 @@ pub const SYS_DISPLAY_INFO: u64 = 35;
 pub const SYS_SHARED_CREATE: u64 = 36;
 pub const SYS_SHARED_MAP: u64 = 37;
 pub const SYS_SHARED_PHYS: u64 = 38;
+/// ADR-0057: read-only size/generation of a *held* generic SharedRegion.
+pub const SYS_SHARED_INFO: u64 = 39;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -668,6 +670,7 @@ extern "C" fn syscall_dispatch(
         SYS_SHARED_CREATE => sys_shared_create(a0, a1, a2) as u64,
         SYS_SHARED_MAP => sys_shared_map(a0, a1) as u64,
         SYS_SHARED_PHYS => sys_shared_phys(a0, a1, a2) as u64,
+        SYS_SHARED_INFO => sys_shared_info(a0, a1, [a2, a3, a4, a5]) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1766,6 +1769,7 @@ const DEV_INFO_WORDS: u64 = 12;
 fn virtio_for_caller(
     pid: u64,
     dev_idx: u64,
+    required_rights: u32,
 ) -> Result<
     (
         crate::drivers::pci::VirtioDevice,
@@ -1779,6 +1783,9 @@ fn virtio_for_caller(
         return Err(STATUS_BAD_ARG);
     };
     if !v.common.present
+        || !v.notify.present
+        || !v.isr.present
+        || !v.device_cfg.present
         || v.notify.bar != v.common.bar
         || v.isr.bar != v.common.bar
         || v.device_cfg.bar != v.common.bar
@@ -1789,14 +1796,37 @@ fn virtio_for_caller(
     let Some(f) = pci::pci_function(v.pci_index) else {
         return Err(STATUS_BAD_ARG);
     };
-    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 {
+    if bar > 5 || f.bar_is_io[bar] || f.bar_base[bar] == 0 || f.bar_size[bar] == 0 {
         return Err(STATUS_BAD_ARG);
     }
-    // The gate itself: an Mmio cap whose phys is the structure BAR's base.
+    // ADR-0058: an untrusted PCI capability cannot describe registers
+    // outside its recorded BAR or the caller's actually granted MMIO cap.
+    // Device-info alone does not grant the right to map or dereference.
+    let bounds = [
+        (v.common, 0x38u32),
+        (v.notify, 2),
+        (v.isr, 1),
+        (v.device_cfg, 1),
+    ];
+    let Some(last_byte) = bounds.iter().try_fold(0u64, |max_end, &(loc, minimum)| {
+        if loc.length < minimum || loc.bar as usize != bar {
+            return None;
+        }
+        let end = u64::from(loc.offset).checked_add(u64::from(loc.length))?;
+        (end <= f.bar_size[bar]).then_some(max_end.max(end))
+    }) else {
+        return Err(STATUS_BAD_ARG);
+    };
+    // The gate itself: held cap, exact BAR base, requested right and
+    // coverage of every capability span. A one-page prefix of a four-page
+    // BAR is not authority to address its notify doorbell in page four.
     let base = f.bar_base[bar];
     let holds = (0..crate::cap::CAP_SLOTS).any(|slot| {
-        crate::cap::read(pid, slot)
-            .is_ok_and(|c| matches!(c.obj, crate::cap::CapObj::Mmio { phys, .. } if phys == base))
+        crate::cap::read(pid, slot).is_ok_and(|c| {
+            matches!(c.obj, crate::cap::CapObj::Mmio { phys, pages }
+                if phys == base && u64::from(pages) * 4096 >= last_byte)
+                && c.rights & required_rights == required_rights
+        })
     });
     if !holds {
         return Err(STATUS_BAD_ARG);
@@ -1819,7 +1849,7 @@ fn sys_dev_info(a0: u64, a1: u64) -> Status {
     if !user_range_ok(a1, DEV_INFO_WORDS * 8) {
         return STATUS_BAD_ADDRESS;
     }
-    let Ok((v, bar, f)) = virtio_for_caller(pid, a0) else {
+    let Ok((v, bar, f)) = virtio_for_caller(pid, a0, crate::cap::RIGHTS_READ) else {
         return STATUS_BAD_ARG;
     };
     let loc =
@@ -1874,7 +1904,7 @@ fn sys_irq_relay(a0: u64, a1: u64, a2: u64, a3: u64) -> Status {
     if a3 == 0 {
         return STATUS_BAD_ARG; // the merged-badge protocol has no empty word
     }
-    let Ok((v, _bar, f)) = virtio_for_caller(pid, a0) else {
+    let Ok((v, _bar, f)) = virtio_for_caller(pid, a0, crate::cap::RIGHTS_WRITE) else {
         return STATUS_BAD_ARG;
     };
     if !v.msix.present || a1 >= u64::from(v.msix.table_size) {
@@ -2097,6 +2127,45 @@ fn sys_shared_map(slot: u64, writable: u64) -> Status {
         .unwrap_or_else(|_| crate::halt::halt_machine("SharedRegion region after preflight"));
     crate::shared::pin_map(id, pid, chosen);
     chosen as Status
+}
+
+/// SYS_SHARED_INFO(region_slot, out[2], zero, zero, zero, zero):
+/// descriptor-only bound, NOT physical backing or allocation authority.
+/// Clients can determine the actual page count of a received region before
+/// accepting untrusted surface geometry. Reserved args and the entire
+/// caller output are validated before any write.
+fn sys_shared_info(slot: u64, out: u64, reserved: [u64; 4]) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 || reserved != [0; 4] {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::SharedRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let Some((_, pages)) = crate::shared::backing(id) else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_ok(out, 16) {
+        return STATUS_BAD_ADDRESS;
+    }
+    // SAFETY: one IF=0 owner-context write to a prevalidated 16-byte span;
+    // neither the physical address nor a new bearer is disclosed.
+    unsafe {
+        super::stac();
+        let dst = out as *mut u64;
+        core::ptr::write_unaligned(dst, u64::from(id));
+        core::ptr::write_unaligned(dst.add(1), u64::from(pages));
+        super::clac();
+    }
+    STATUS_OK
 }
 
 /// DMA is a second, independent designation. The caller must hold both a

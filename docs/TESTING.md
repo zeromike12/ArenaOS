@@ -909,19 +909,24 @@ MMIO window with volatile stores. This is **not** the planned compositor,
 virtio-gpu, two-window demo or graphical keyboard route.
 
 Run `source tools/dev-env/env.sh`, then `python3 tools/test_m9_gfxkit.py`,
-`python3 tools/test_m9_compositor_model.py` (host-only pure state model,
+`python3 tools/test_m9_compositor_model.py` (host-only pure state and versioned-wire model,
 **not** a compositor service), `python3 tools/test_m9_gpu2d_wire.py`
 (host/bare-metal 2D wire codec only, **not** a virtio-gpu device proof),
-`python3 tools/test_m9_gop_handoff.py`,
-`python3 tools/test_m9_font_red.py` and
-`python3 tools/test_m9_shared_ref_hook.py`. The GOP check captures an
+`python3 tools/test_m9_gpu2d_red.py` (host-only omitted device ACK check
+RED/restored GREEN), `python3 tools/test_m9_gop_handoff.py`,
+`python3 tools/test_m9_font_red.py`,
+`python3 tools/test_m9_shared_ref_hook.py` and
+`python3 tools/test_m9_shared_info_red.py`. The GOP check captures an
 actual QMP PPM and checks width, full byte length, distant colored pixels
 and both a bitmap glyph foreground/background sample. The font RED test
 alters an actual shipping glyph before building/booting, requires the
 **real QMP pixel** assertion to reject it, restores source/EFI/ESP and
 boots the green image. The SharedRegion hook control omits one real
 production retirement credit and requires an independent guest
-conservation halt, then restores/boots green. The headless GOP absence
+conservation halt, then restores/boots green. The INFO control omits
+only the actual size-query READ-cap check, requires the ring-3
+WRITE-only probe to halt, then restores byte-exact EFI and checks QMP
+pixels on green. The headless GOP absence
 fixture must boot cleanly without any false graphical PASS claim.
 
 `tools/stability_loop.sh N` now captures and validates QMP pixels on every

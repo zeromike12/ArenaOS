@@ -34,6 +34,8 @@ def main():
     assert rc == 0 and marker is not None and 'm7: RESULT PASS (2/2)' in s
     assert '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' in s
     assert '[sharedprobe] capacity/rights/zero PASS' in s
+    assert '[sharedprobe] held SharedRegion INFO bound/refusal PASS' in s
+    assert '[sharedprobe] truncated virtio BAR device-info refused PASS' in s
     assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s
     assert '[arena ERROR halt]' not in s and 'PANIC' not in s
     w,h,pitch,fmt,phys,length = (int(x, 16) if i==4 else int(x) for i,x in enumerate(marker.groups()))
@@ -61,6 +63,8 @@ def main():
     assert rc2 == 0 and 'GOP handoff: unavailable or unsupported mode' in s2
     assert '[displayd] ring3 GOP pixels ready' not in s2
     assert '[sharedprobe] capacity/rights/zero PASS' in s2
+    assert '[sharedprobe] held SharedRegion INFO bound/refusal PASS' in s2
+    assert '[sharedprobe] truncated virtio BAR device-info refused PASS' in s2
     assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s2
     assert 'm7: RESULT PASS (2/2)' in s2 and '[arena ERROR halt]' not in s2
     print(f'[{LABEL}] QMP {w}x{h} matches GOP regions and linked toolkit font foreground/background; guest SharedRegion authority/zero/capacity + exact 512-page process teardown PASS; headless boot clean; no compositor, virtio-gpu or graphics input claim',flush=True)

@@ -167,6 +167,25 @@ pub extern "C" fn _start() -> ! {
     {
         exit(95)
     }
+    // Derive the actual allocation bound from the held region itself.
+    // The same read-only ABI lets a future compositor validate a *received*
+    // surface cap without ever seeing its physical backing.
+    let mut measured = [0u64; 2];
+    if unsafe {
+        syscall6(
+            SYS_SHARED_INFO,
+            scanout[0],
+            measured.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+            0,
+        )
+    } != 0
+        || measured != [scanout[1], pages]
+    {
+        exit(100)
+    }
     let ram = unsafe { syscall2(SYS_SHARED_MAP, scanout[0], 1) };
     if ram <= 0 {
         exit(96)

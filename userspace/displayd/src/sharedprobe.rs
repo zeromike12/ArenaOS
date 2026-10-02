@@ -26,7 +26,7 @@ pub extern "C" fn _start() -> ! {
     // Power, process or image authority enters this guest.
     let mut out = [0u64; 3];
     if unsafe { syscall3(SYS_SHARED_CREATE, 0, 512, out.as_mut_ptr() as u64) } != 0
-        || out[0] != 1
+        || !matches!(out[0], 1 | 2)
         || out[1] == 0
         || out[2] != 2 * 1024 * 1024
     {
@@ -34,6 +34,80 @@ pub extern "C" fn _start() -> ! {
     }
     let original = out[0];
     let first_id = out[1];
+    let read_copy_slot = if original == 2 { 3 } else { 2 };
+    // The optional slot-1 Mmio cap is deliberately a *truncated* BAR,
+    // read-only and owned by this throwaway process. SYS_DEV_INFO may
+    // not disclose any matched device record without coverage of the
+    // full common/notify/ISR/device structure spans. Failure may not
+    // write to the guest's output, even when other devices are present.
+    if original == 2 {
+        for idx in 0..8 {
+            let mut denied = [0xa5a5_1729_u64; 12];
+            if unsafe { syscall2(SYS_DEV_INFO, idx, denied.as_mut_ptr() as u64) } != -2
+                || denied != [0xa5a5_1729_u64; 12]
+            {
+                exit(95)
+            }
+        }
+        let marker = b"[sharedprobe] truncated virtio BAR device-info refused PASS\n";
+        unsafe {
+            let _ = syscall2(SYS_DEBUG_WRITE, marker.as_ptr() as u64, marker.len() as u64);
+        }
+    }
+    // A server cannot trust a client's claimed surface size. The generic
+    // possession-gated INFO query returns [full ID, pages], never phys.
+    // All wrong/missing/attenuated/reserved/address cases must preserve
+    // its sentinel unchanged (the service has no ambient pid grant).
+    let mut info = [0xdec0_de01_u64; 2];
+    if unsafe { syscall6(SYS_SHARED_INFO, 0, info.as_mut_ptr() as u64, 0, 0, 0, 0) } != -2
+        || info != [0xdec0_de01_u64; 2]
+        || unsafe {
+            syscall6(
+                SYS_SHARED_INFO,
+                original,
+                info.as_mut_ptr() as u64,
+                1,
+                0,
+                0,
+                0,
+            )
+        } != -2
+        || info != [0xdec0_de01_u64; 2]
+        || unsafe { syscall6(SYS_SHARED_INFO, original, 0, 0, 0, 0, 0) } != -3
+        || info != [0xdec0_de01_u64; 2]
+        || unsafe {
+            syscall6(
+                SYS_SHARED_INFO,
+                original,
+                info.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        } != 0
+        || info != [first_id, 512]
+    {
+        exit(92)
+    }
+    if unsafe { syscall3(SYS_CAP_COPY, original, 3, RIGHTS_WRITE | RIGHTS_DESTROY) } != 0 {
+        exit(93)
+    }
+    info = [0xdec0_de01_u64; 2];
+    if unsafe { syscall6(SYS_SHARED_INFO, 3, info.as_mut_ptr() as u64, 0, 0, 0, 0) } != -2
+        || info != [0xdec0_de01_u64; 2]
+        || unsafe { syscall1(SYS_CAP_DESTROY, 3) } != 0
+    {
+        exit(94)
+    }
+    let info_marker = b"[sharedprobe] held SharedRegion INFO bound/refusal PASS\n";
+    unsafe {
+        let _ = syscall2(
+            SYS_DEBUG_WRITE,
+            info_marker.as_ptr() as u64,
+            info_marker.len() as u64,
+        );
+    }
     if unsafe { syscall1(SYS_CAP_PHYS, original) } != -2
         || unsafe { syscall3(SYS_SHARED_PHYS, original, 0, out.as_mut_ptr() as u64) } != -2
     {
@@ -49,19 +123,26 @@ pub extern "C" fn _start() -> ! {
         }
     }
     unsafe { core::ptr::write_volatile((va as *mut u8).add(2 * 1024 * 1024 - 1), 0x7d) }
-    if unsafe { syscall3(SYS_CAP_COPY, original, 2, RIGHTS_READ | RIGHTS_DESTROY) } != 0
-        || unsafe { syscall2(SYS_SHARED_MAP, 2, 1) } != -2
+    if unsafe {
+        syscall3(
+            SYS_CAP_COPY,
+            original,
+            read_copy_slot,
+            RIGHTS_READ | RIGHTS_DESTROY,
+        )
+    } != 0
+        || unsafe { syscall2(SYS_SHARED_MAP, read_copy_slot, 1) } != -2
     {
         exit(85)
     }
-    let ro = unsafe { syscall2(SYS_SHARED_MAP, 2, 0) };
+    let ro = unsafe { syscall2(SYS_SHARED_MAP, read_copy_slot, 0) };
     if ro <= 0
         || unsafe { core::ptr::read_volatile((ro as *const u8).add(2 * 1024 * 1024 - 1)) } != 0x7d
     {
         exit(86)
     }
     if unsafe { syscall1(SYS_CAP_DESTROY, original) } != 0
-        || unsafe { syscall1(SYS_CAP_DESTROY, 2) } != 0
+        || unsafe { syscall1(SYS_CAP_DESTROY, read_copy_slot) } != 0
         || unsafe { core::ptr::read_volatile((ro as *const u8).add(2 * 1024 * 1024 - 1)) } != 0x7d
     {
         exit(87)

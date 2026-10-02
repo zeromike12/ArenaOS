@@ -25,7 +25,7 @@ def main():
          '--release', '--target', 'x86_64-unknown-none'],
     ):
         subprocess.run(command, cwd=ROOT, env=env, check=True)
-    print('[m9-compositor-model] 4/4 host state/capacity/focus/exhaustion tests, fmt/clippy, '
+    print('[m9-compositor-model] 9/9 host state/churn and typed-wire/fuzz tests, fmt/clippy, '
           'bare-metal no_std build PASS; no running service or input proof')
 
 

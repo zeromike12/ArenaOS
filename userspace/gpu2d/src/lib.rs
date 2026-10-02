@@ -5,6 +5,9 @@
 //! authority. It is not a GPU service or evidence of actual guest pixels.
 #![no_std]
 
+pub mod device;
+pub mod queue;
+
 pub const HEADER: usize = 24;
 pub const MAX_REQUEST: usize = 56;
 pub const DISPLAY_MODES: usize = 16;

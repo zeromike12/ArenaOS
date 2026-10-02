@@ -6,6 +6,8 @@
 //! do not connect untrusted requests before ADR-0057's cap/lifecycle bridge.
 #![no_std]
 
+pub mod wire;
+
 use arena_gfxkit::{Canvas, Rect};
 
 pub const MAX_OWNERS: usize = 4;
@@ -415,6 +417,30 @@ mod tests {
         let mut target = Canvas::new(&mut pixels, 8, 8, 8).unwrap();
         assert_eq!(s.compose(&mut target, &[]), Err(Refusal::BadBacking));
         assert_eq!(pixels, [0x123; 64]); // no partial frame
+    }
+
+    #[test]
+    fn repeated_owner_retirement_clears_all_state_before_reuse() {
+        let mut s = State::new();
+        let mut last = 0;
+        for i in 1..=1024u64 {
+            s.register_owner(i).unwrap();
+            let h = s.create(i, i as u32, 3, 3, -1, 2).unwrap();
+            assert!(h > last);
+            last = h;
+            s.focus(i, i as u32, h).unwrap();
+            s.route_verified_key(Key {
+                ascii: b'X',
+                pressed: true,
+            })
+            .unwrap();
+            s.retire_owner(i).unwrap();
+            assert_eq!(s.surface_count(), 0);
+            assert_eq!(s.focused(), None);
+            assert_eq!(s.pop_key(i), Err(Refusal::NotOwner));
+            assert_eq!(s.move_to(i, i as u32, h, 0, 0), Err(Refusal::Stale));
+        }
+        assert_eq!(s.next_handle, 1025);
     }
 
     #[test]
