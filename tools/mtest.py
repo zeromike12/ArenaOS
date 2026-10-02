@@ -41,6 +41,7 @@ honest-SKIP compatibility tests.
 Exit code: 0 = PASS, 1 = FAIL (with the serial tail printed for diagnosis).
 """
 
+import os
 import re
 import shutil
 import socket
@@ -55,6 +56,7 @@ import arena_env  # noqa: E402
 import qmp  # noqa: E402
 import vcon as vconsole  # noqa: E402 — `vcon` is a run_qemu parameter
 import tcp_fixture  # noqa: E402
+import udp_dns_fixture  # noqa: E402
 
 TIMEOUT_S = 120  # TCG is slow; a healthy boot takes <10s
 MEM_MIB = 512
@@ -281,6 +283,16 @@ def run_qemu(label: str, esp: Path,
     # one-line explanation into a bisect. (Learned while chasing an
     # rc=1 that QEMU had explained perfectly the whole time.)
     err_log = arena_env.build_dir() / f"qemu-stderr-{label}.log"
+    dns_stop = threading.Event()
+    dns_sock = udp_dns_fixture.bind() if net else None
+    dns_log = bdir / f"udp-dns-{label}.log"
+    dns_log.write_text("")
+    dns_thread = None
+    if dns_sock is not None:
+        dns_thread = threading.Thread(target=udp_dns_fixture.actor,
+            args=(dns_sock, dns_stop, dns_log,
+                  os.environ.get("ARENA_DNS_WRONG_TXID") == "1"), daemon=True)
+        dns_thread.start()
     peer_stop = threading.Event()
     peer_listener = tcp_fixture.bind() if net and tcp_peer else None
     peer_log = bdir / f"tcp-{label}.log"
@@ -339,14 +351,22 @@ def run_qemu(label: str, esp: Path,
             proc.wait()
             stop.set()
             peer_stop.set()
+            dns_stop.set()
             if peer_thread is not None: peer_thread.join(timeout=2)
+            if dns_thread is not None: dns_thread.join(timeout=2)
             raise
         stop.set()
     peer_stop.set()
     if peer_thread is not None: peer_thread.join(timeout=2)
+    dns_stop.set()
+    if dns_thread is not None: dns_thread.join(timeout=2)
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
-    return semantic_exit_rc(rc, serial, label), serial, dt
+    verdict = semantic_exit_rc(rc, serial, label)
+    if verdict == 0 and net and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
+        print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")
+        verdict = 97
+    return verdict, serial, dt
 
 
 def boot(label: str, esp: Path,
@@ -422,6 +442,14 @@ def boot(label: str, esp: Path,
     # one-line explanation into a bisect. (Learned while chasing an
     # rc=1 that QEMU had explained perfectly the whole time.)
     err_log = arena_env.build_dir() / f"qemu-stderr-{label}.log"
+    dns_stop = threading.Event()
+    dns_sock = udp_dns_fixture.bind()
+    dns_log = bdir / f"udp-dns-{label}.log"
+    dns_log.write_text("")
+    dns_thread = threading.Thread(target=udp_dns_fixture.actor,
+        args=(dns_sock, dns_stop, dns_log,
+                  os.environ.get("ARENA_DNS_WRONG_TXID") == "1"), daemon=True)
+    dns_thread.start()
     peer_stop = threading.Event()
     peer_listener = tcp_fixture.bind()
     peer_thread = threading.Thread(target=tcp_fixture.actor,
@@ -509,11 +537,17 @@ def boot(label: str, esp: Path,
         th.join(timeout=2)
     peer_stop.set()
     peer_thread.join(timeout=2)
+    dns_stop.set()
+    dns_thread.join(timeout=2)
     if killed:
         rc = None
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
-    return semantic_exit_rc(rc, serial, label), serial, dt
+    verdict = semantic_exit_rc(rc, serial, label)
+    if verdict == 0 and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
+        print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")
+        verdict = 97
+    return verdict, serial, dt
 
 
 def evaluate(label: str, milestone: str, expected_tests: list[str],

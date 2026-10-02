@@ -1300,7 +1300,7 @@ unsafe fn dns_lookup(st8: &mut Stack, name: &[u8]) -> Result<[u8; 4], u64> {
         let Some(slot) = (0..UDP_BINDINGS).find(|&i| !st8.bindings[i].live) else {
             return Err(DNS_S_BUSY);
         };
-        let Some(mac) = resolve(st8, [10, 0, 2, 3]) else {
+        let Some(mac) = resolve(st8, [10, 0, 2, 2]) else {
             return Err(ARP_S_UNREACHABLE);
         };
         let Some(id) = dns_id(st8) else {
@@ -1314,7 +1314,7 @@ unsafe fn dns_lookup(st8: &mut Stack, name: &[u8]) -> Result<[u8; 4], u64> {
             ..NO_BINDING
         };
         let result = (|| {
-            let flen = build_udp(st8, mac, [10, 0, 2, 3], DNS_PORT, 53, q.as_ptr(), qlen);
+            let flen = build_udp(st8, mac, [10, 0, 2, 2], DNS_PORT, 1053, q.as_ptr(), qlen);
             if transmit(st8, flen) != NET_S_OK {
                 return Err(ARP_S_LINK_DOWN);
             }
@@ -1326,7 +1326,7 @@ unsafe fn dns_lookup(st8: &mut Stack, name: &[u8]) -> Result<[u8; 4], u64> {
                 }
             }
             let b = st8.bindings[slot];
-            if b.src_ip != [10, 0, 2, 3] || b.src_port != 53 {
+            if b.src_ip != [10, 0, 2, 2] || b.src_port != 1053 {
                 return Err(DNS_S_BAD_REPLY);
             }
             dns::answer(&b.data[..b.len], id, &q[..qlen]).ok_or(DNS_S_BAD_REPLY)

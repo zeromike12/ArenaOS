@@ -103,15 +103,16 @@ for i in $(seq 1 "$N"); do
     # filename — a disk inherited from the previous boot answers
     # FS_ERR_EXISTS and fails the suite by design).
     ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk()' >/dev/null )
-    rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK" "$REPO_ROOT/build/tcp-stability.log"
+    rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK" "$REPO_ROOT/build/tcp-stability.log" "$REPO_ROOT/build/udp-dns-stability.log"
     # M7.6: bind the host TCP fixture BEFORE QEMU starts. READY is
     # emitted only after listen() succeeds; no sleep/race and no
     # in-guest fake peer. One actor, one boot, like the typist.
-    coproc TCP_PEER { python3 -u "$REPO_ROOT/tools/tcp_fixture.py" \
-        "$REPO_ROOT/build/tcp-stability.log"; }
+    coproc TCP_PEER { python3 -u "$REPO_ROOT/tools/network_fixture.py" \
+        "$REPO_ROOT/build/tcp-stability.log" \
+        "$REPO_ROOT/build/udp-dns-stability.log"; }
     tcp_pid=$TCP_PEER_PID
     if ! read -r ready <&"${TCP_PEER[0]}" || [[ "$ready" != READY ]]; then
-        echo "boot $i: FAIL — TCP host actor could not bind port 54321" >&2
+        echo "boot $i: FAIL — TCP/UDP host actor could not bind ports 54321/1053" >&2
         exit 1
     fi
     rc=0
@@ -203,6 +204,8 @@ for i in $(seq 1 "$N"); do
     # its listener cannot trespass into the next boot's fixture.
     kill "$tcp_pid" 2>/dev/null || true
     wait "$tcp_pid" 2>/dev/null || true
+    cp "$REPO_ROOT/build/udp-dns-stability.log" \
+        "$REPO_ROOT/build/udp-dns-stability-boot-$i.log" 2>/dev/null || true
 
     why=""
     if (( rc != 0 )); then
@@ -220,6 +223,8 @@ for i in $(seq 1 "$N"); do
     elif ! grep -aq 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' \
         "$REPO_ROOT/build/tcp-stability.log"; then
         why="TCP host peer did not verify request/200-byte response/FIN"
+    elif [[ $(grep -c 'DNS_FIXTURE_QUERY ' "$REPO_ROOT/build/udp-dns-stability.log" || true) -ne 3 ]]; then
+        why="host UDP fixture did not observe exactly three independent DNS requests"
     elif grep -aq 'TCP SKIP' "$SERIAL"; then
         why="TCP was skipped although this is a fixture-equipped qualification"
     elif [[ $(grep -acF 'm83: returncap PASS (40 real reply caps rejected and discarded; slot 2 empty, occupancy 2/32 exact; ordinary no-cap PING unchanged)' "$SERIAL" || true) -ne 2 ]]; then

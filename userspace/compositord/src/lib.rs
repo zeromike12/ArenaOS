@@ -6,6 +6,7 @@
 //! do not connect untrusted requests before ADR-0057's cap/lifecycle bridge.
 #![no_std]
 
+pub mod render;
 pub mod wire;
 
 use arena_gfxkit::{Canvas, Rect};

@@ -30,7 +30,18 @@ EOF
 mkdir -p "$REPO_ROOT/build"
 cp "$OVMF_VARS" "$REPO_ROOT/build/ovmf-vars-interactive.img"
 
-exec "${QEMU[@]}" \
+# ADR-0059: production image retains a real host UDP peer fixture for
+# its boot-time M7 self-test. Bind synchronously; do not silently fall back
+# to flaky public DNS or to an in-guest answer. Reap this owned peer on exit.
+coproc DNS_PEER { python3 -u "$REPO_ROOT/tools/udp_dns_fixture.py" \
+    "$REPO_ROOT/build/udp-dns-interactive.log"; }
+dns_pid=$DNS_PEER_PID
+if ! read -r ready <&"${DNS_PEER[0]}" || [[ "$ready" != READY ]]; then
+    echo "controlled M7 DNS host peer could not bind UDP port 1053" >&2
+    exit 1
+fi
+trap 'kill "$dns_pid" 2>/dev/null || true; wait "$dns_pid" 2>/dev/null || true' EXIT
+"${QEMU[@]}" \
     -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$REPO_ROOT/build/ovmf-vars-interactive.img" \

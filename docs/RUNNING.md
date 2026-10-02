@@ -4,6 +4,18 @@ Every completed milestone checkpoint ships a deployable, qualified QEMU
 archive with its exact verified UEFI firmware pair. Tagged GitHub releases
 are separate publication events. This page explains how to boot locally.
 
+## Phase 9 development image (NOT milestone-qualified)
+
+The source checkout can build a provisional userspace display demo with
+`bash tools/run.sh`. That helper now prebinds the controlled host M7 DNS UDP
+peer before QEMU starts and reaps it on exit. This peer is required while
+the boot self-test sends real packets to `10.0.2.2:1053`; it does **not**
+prove external/public DNS or general connectivity. This is **not** the
+Phase-9-complete archive, compositor/input demonstration or 100-boot
+qualification; continue using the Phase-8.5 archive for the last qualified
+milestone. The earlier 72/73 and interrupted 31/74 test runs remain failed
+records, not evidence of completion.
+
 ## Phase 8.5 verified dynamic Image / signed cutover checkpoint
 
 This is the **current qualified QEMU build**. A manager-only lifecycle

@@ -949,3 +949,17 @@ injected input. A green GOP-only stability loop is merely a precursor.
 The `phase9-complete` archive must independently extract and boot with a
 freshly captured, asserted display image. Never reuse a Phase-8.5 receipt,
 a pre-final Phase-9 hash or a synthetic PPM as this qualification.
+
+### ADR-0059: M7 controlled host UDP peer (Phase-9 integration, not qualification)
+
+Historical M7 raw IPC/native API/stack DNS still sends real virtio-net UDP
+packets, now to the prebound host test actor at `10.0.2.2:1053`. A successful
+network-equipped boot requires exactly three independent `DNS_FIXTURE_QUERY`
+receipts in `build/udp-dns-<label>.log`. `tools/stability_loop.sh` starts one
+TCP+UDP host coprocess and checks each boot's three DNS queries. The 61-byte
+response exercises the inline/continuation boundary. This fixture does **not**
+prove external public DNS. A standalone QEMU boot with the network attached
+requires that host peer; archive boot instructions must package or document
+that requirement. `tools/test_m9_host_dns_red.py` proves wrong-TXID guest RED
+and unchanged-EFI restored GREEN. A prior 72/73 and stopped 31/74 were
+failures, not reclassified PASS; a new full run is mandatory.

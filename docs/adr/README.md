@@ -73,6 +73,13 @@ Rules:
 | [0054](0054-installed-images-and-atomic-upgrade.md) | Phase 8.5 installed/active AINS/AACT wire and crash transaction; AACT generation 4 conditional on complete AFS1 capacity; [host-only evidence](0054-final-freeze-review-evidence.md) is not guest proof | Accepted (architecture; implementation/qualification pending) |
 | [0055](0055-capability-gated-dynamic-image-registry.md) | Phase 8.5 ImageRegistrar ABI, immutable ELF copy, monotonic IDs/revoke, system-wide one-unretired-child BUSY, manager-death fail-stop; manager+verifier TCB and production ref-oracle obligation | Accepted (architecture; implementation/qualification pending) |
 
+| [0056](0056-phase9-graphics-and-shared-regions.md) | Phase 9 isolated display and bounded shared-region mechanism; qualification pending | Accepted (design; Phase 9 in progress) |
+| [0057](0057-phase9-compositor-authority-and-input.md) | Userspace compositor, held-cap ownership, focus, input routing and lifecycle obligations | Accepted (design; Phase 9 in progress) |
+| [0058](0058-phase9-virtio-gpu-2d-transport.md) | Audited virtio-gpu 2D transport with GOP fallback | Accepted (design; Phase 9 in progress) |
+| [0059](0059-deterministic-host-dns-wire-fixture.md) | Controlled external host UDP fixture across the real SLIRP/virtio-net path, explicitly not public DNS | Accepted (integration; full-suite requalification pending) |
+
+| [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Proposed (guest bridge/qualification pending) |
+
 ## Template
 
 ```markdown

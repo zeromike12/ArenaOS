@@ -239,11 +239,11 @@ def extra_checks(serial: str) -> bool:
           "bind-once is enforced (a namespace rule) and a forged handle is "
           "refused (the authority rule) — the two are separate questions "
           "and are tested separately")
-    m = re.search(r"UDP round trip to 10\.0\.2\.3:53, (\d+)-byte response "
+    m = re.search(r"UDP round trip to 10\.0\.2\.2:1053, (\d+)-byte response "
                   r"with our transaction id 0x0*([0-9a-f]+) and the response "
                   r"bit set", serial)
     check(m is not None,
-          "a real UDP round trip against slirp's resolver — the response is "
+          "a real UDP round trip against the host UDP fixture — the response is "
           "matched on OUR transaction id, so a datagram that merely arrived "
           "would not pass")
     if m:
@@ -269,7 +269,7 @@ def extra_checks(serial: str) -> bool:
           "CLOSE really revokes authority even when a binding slot is reused")
     check(re.search(r"DNS resolver returned example\.com A = "
                     r"(\d+)\.(\d+)\.(\d+)\.(\d+)", serial) is not None,
-          "DNS LOOKUP parsed and validated a real A answer from slirp's resolver")
+          "DNS LOOKUP parsed and validated a real A answer from the host UDP fixture")
     check("a malformed name was refused BEFORE sending" in serial,
           "bad DNS input was rejected before any network operation")
 

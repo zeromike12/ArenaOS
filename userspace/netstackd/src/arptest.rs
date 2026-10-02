@@ -69,6 +69,8 @@ const BADGE_GO: u64 = 1 << 17;
 /// wire through the new driver instance. Re-resolving the gateway
 /// would be served from cache and would prove nothing.
 const SLIRP_DNS_IP: [u8; 4] = [10, 0, 2, 3];
+const HOST_DNS_IP: [u8; 4] = [10, 0, 2, 2];
+const HOST_DNS_PORT: u16 = 1053;
 
 const EXIT_CALL: u64 = 60;
 const EXIT_RESOLVE: u64 = 61;
@@ -443,12 +445,11 @@ pub unsafe extern "C" fn _start() -> ! {
             "arptest: PASS — a second bind of the same port was refused, and a FORGED handle bought nothing",
         );
 
-        // A real DNS query to slirp's resolver: 12-byte header, one
+        // A real DNS query to the controlled host UDP peer: 12-byte header, one
         // question for example.com, type A, class IN.
         let mut msg = [0u8; MSG_BYTES];
-        msg[0..4].copy_from_slice(&SLIRP_DNS_IP);
-        msg[4] = 0;
-        msg[5] = 53;
+        msg[0..4].copy_from_slice(&HOST_DNS_IP);
+        msg[4..6].copy_from_slice(&HOST_DNS_PORT.to_be_bytes());
         let q = build_dns_query(&mut msg[8..]);
         msg[6] = (q >> 8) as u8;
         msg[7] = (q & 0xFF) as u8;
@@ -479,7 +480,7 @@ pub unsafe extern "C" fn _start() -> ! {
         let src_port = ((rx[4] as u16) << 8) | rx[5] as u16;
         let txid = ((rx[8] as u16) << 8) | rx[9] as u16;
         let flags = ((rx[10] as u16) << 8) | rx[11] as u16;
-        if txid != DNS_TXID || flags & 0x8000 == 0 || src_port != 53 {
+        if txid != DNS_TXID || flags & 0x8000 == 0 || src_port != HOST_DNS_PORT {
             log_line(|o| {
                 o.str("arptest: DNS reply txid ");
                 o.u64(txid as u64);
@@ -494,7 +495,7 @@ pub unsafe extern "C" fn _start() -> ! {
             );
         }
         log_line(|o| {
-            o.str("arptest: PASS — UDP round trip to 10.0.2.3:53, ");
+            o.str("arptest: PASS — UDP round trip to 10.0.2.2:1053, ");
             o.u64(total);
             o.str("-byte response with our transaction id ");
             o.hex(txid as u64);
@@ -585,20 +586,19 @@ pub unsafe extern "C" fn _start() -> ! {
         // just pass host-side packet-layout tests. Send another query
         // through its typed bearer API and drain the live DNS reply.
         let mut socket = api
-            .bind_udp(5353)
+            .bind_udp(5355)
             .unwrap_or_else(|_| fail(EXIT_BIND, "API bind refused"));
         let old_handle = socket.handle();
         let mut query = [0u8; UDP_INLINE];
         let qlen = build_dns_query(&mut query);
-        // The preceding raw-IPC DNS proof used this same source port,
-        // destination and TXID. A second identical wire tuple can be
-        // coalesced by the external DNS proxy; use a distinct transaction
-        // to prove the native client actually received its OWN reply.
+        // The preceding raw-IPC proof used source port 5353. Use an
+        // independently bound 5355 and distinct TXID to prove the native
+        // client receives its own reply from the host-controlled peer.
         let api_txid = DNS_TXID.wrapping_add(1);
         query[..2].copy_from_slice(&api_txid.to_be_bytes());
         let peer = net::Address {
-            ip: SLIRP_DNS_IP,
-            port: 53,
+            ip: HOST_DNS_IP,
+            port: HOST_DNS_PORT,
         };
         if socket.send(peer, &query[..qlen]) != Ok(qlen) {
             fail(EXIT_UDP_SEND, "API UDP query failed");
