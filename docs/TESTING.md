@@ -901,7 +901,7 @@ extracts and boots bundled ESP/firmware/formatted disk.
 
 ## Phase 9 partial graphics gates (NOT a completed milestone)
 
-ADR-0056 and ADR-0057 describe the authority and remaining exit criteria.
+ADR-0056, ADR-0057 and ADR-0058 describe the authority and remaining exit criteria.
 The current standalone `no_std` toolkit has bounded clipping/text and a
 linked 5×7 owned glyph renderer. Displayd stages its GOP fallback frame in
 a checked SharedRegion RAM mapping before copying pixels to its exclusive
