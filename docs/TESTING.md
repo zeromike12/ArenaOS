@@ -963,3 +963,22 @@ requires that host peer; archive boot instructions must package or document
 that requirement. `tools/test_m9_host_dns_red.py` proves wrong-TXID guest RED
 and unchanged-EFI restored GREEN. A prior 72/73 and stopped 31/74 were
 failures, not reclassified PASS; a new full run is mandatory.
+
+Targeted ADR-0059 recheck: `python3 tools/test_m7.py` PASS with three host
+query receipts, and `python3 tools/test_m9_host_dns_red.py` wrong-response-ID
+guest RED / restored same-EFI GREEN PASS. The initial red-control GREEN
+attempt had no shell feeder and timed out at `arena>`; fixing that test
+feeder produced the passing run. No full-suite or final-image 100/100 claim
+is implied by these targeted results.
+
+ADR-0059 complete historical/early-graphics recheck: `tools/run_tests.sh`
+passed **73/73** current suites (the live compositor, two clients and
+injected graphical input are not yet integrated or covered). The first
+provisional two-boot stability run **failed boot 2** due to an orphaned UDP
+host actor: Bash had killed a coprocess wrapper rather than its Python child.
+After ownership correction (`exec python3` in the one Bash coprocess, plus
+same correction in the interactive launcher), the owned orphan was stopped
+and a fresh `tools/stability_loop.sh 2` passed **2/2** with real QMP pixels
+and three per-boot DNS receipts. Neither this preliminary EFI nor 2/2 is
+Phase-9 milestone qualification. Restore/add renderer and held-cap graphics
+negative tests to the final suite before re-running all targeted gates.

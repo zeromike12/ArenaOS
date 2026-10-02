@@ -45,3 +45,42 @@ negative, a fail-closed stale endpoint and QMP pixel proof. Neither a host
 model nor a source-only draft proves any of that; do not ship a restart claim
 from this ADR alone. Raising CAP_SLOTS or the dynamic-child bound is outside
 this decision. Pointer routing is optional and not inferred from keyboard.
+
+## Boot integration order and fixed capacities
+
+Existing BootImage slots 0 displayd, 1 sharedprobe and 2 displayprobe stay
+byte-identical; new indices 3 compositor, 4 window A and 5 window B raise
+only the bounded BootImage index table to 6 (ADR-0057 correction). Keep the
+legacy displayprobe completion/retirement barrier *before* compositor takes
+its base image, so historical QMP pixels remain visible outside windows.
+Only once a validated display is present, root creates the compositor endpoint,
+spawns the compositor with display-W/compositor-R/token-R, spawns the two
+independent client executables with only compositor-W, creates one 19-page
+region for each child (slot 1 in each), and issues to compositor slots 3..6
+the two Process/R and two matching region/RWC witness caps. The root knows
+these pairs from its own `shared::create(pid, pages)` operation; no IPC PID or
+new region-provenance syscall is needed. No client receives `MemoryPool`,
+`Mmio`, `SharedDma`, another client's region, a Process cap or input token.
+A compositor that cannot verify both root-issued pairs fails closed.
+
+Production inputd is launched earlier and keeps its current four grants,
+including slot 1's legacy READ-only service endpoint. Its no-ConsoleInput
+fixture uses that endpoint unchanged. After the compositor has checked MODE
+and parked, root installs the inert proof token in production inputd's fifth
+slot, destroys its unused legacy endpoint cap (retiring the endpoint), and
+replaces slot 1 with compositor-W. Console mode forwards keys **only** when
+slot 4 describes the expected held proof and slot 1 actually has WRITE;
+before that boundary it still pushes bytes to the existing console and does
+not block on a compositor which is not yet serving. On compositor exit, root
+must reap/retire the endpoint or fail-stop; the input service must not leave
+the shell blocked by a dead compositor. No new notification, no sixth
+inherited grant, no dynamic-child slot, no cap-table increase.
+
+The current Phase-8.5/early-9 `test_m82_capspace.py` snapshots measure a
+post-EBS 13-record/13-process baseline after displayd. A successful
+three-additional-BootImage topology should produce 16/16 in that same
+fixture (and one more only during the separate dynamic-child cutover), not
+the historical 13/13 or an unchecked count. Update that assertion only with
+an exact guest measurement and retain the pre-graphics 13/13 evidence.
+Record shared-registry runs/pages/maps, capability-slot peaks, free frames,
+spawn records and resident process high-water after both clients are live.

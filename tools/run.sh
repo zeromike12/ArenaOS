@@ -33,7 +33,7 @@ cp "$OVMF_VARS" "$REPO_ROOT/build/ovmf-vars-interactive.img"
 # ADR-0059: production image retains a real host UDP peer fixture for
 # its boot-time M7 self-test. Bind synchronously; do not silently fall back
 # to flaky public DNS or to an in-guest answer. Reap this owned peer on exit.
-coproc DNS_PEER { python3 -u "$REPO_ROOT/tools/udp_dns_fixture.py" \
+coproc DNS_PEER { exec python3 -u "$REPO_ROOT/tools/udp_dns_fixture.py" \
     "$REPO_ROOT/build/udp-dns-interactive.log"; }
 dns_pid=$DNS_PEER_PID
 if ! read -r ready <&"${DNS_PEER[0]}" || [[ "$ready" != READY ]]; then

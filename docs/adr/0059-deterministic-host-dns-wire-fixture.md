@@ -41,3 +41,26 @@ A historical pre-kernel firmware stall was observed; explicit ESP boot-drive
 selection hardens the harness but does not establish a root cause for that
 stall. Earlier incomplete/full-suite failures remain failed evidence until a
 fresh complete run succeeds; no intermediate checkpoint qualifies Phase 9.
+
+## Targeted evidence to date (not a full-suite or Phase-9 qualification)
+
+`tools/test_m7.py` passed with three separately logged 29-byte host queries
+and 61-byte replies (`build/udp-dns-test-m7.log`). A real M7 boot with
+`ARENA_DNS_WRONG_TXID=1` halted on the wrong response ID; the same EFI and
+restored actor then booted M7 GREEN with three receipts under
+`tools/test_m9_host_dns_red.py`. One first attempt of that test failed its
+GREEN stage at the shell because the test itself provided an empty feeder;
+the guest was not shut down. The feeder was corrected to the established
+marker-paced default, and the complete RED/GREEN test passed. The full
+historical/graphics suite is still pending at the time of this entry.
+
+The first complete replacement run passed **73/73 current test suites** on
+this controlled peer; it is not the final Phase-9 suite because the live
+compositor/client/input and their future focused tests do not yet exist. A
+first provisional two-boot stability attempt passed boot 1 but failed boot 2
+when Bash killed the *coprocess wrapper* and left its `network_fixture.py`
+Python child bound to 1053. Its owned orphan was identified and terminated;
+`coproc ... { exec python3 ...; }` now replaces that wrapper so `$TCP_PEER_PID`
+is the actual socket owner. A fresh two-boot run passed **2/2**, with three
+per-boot host DNS receipts, the existing QMP display pixels and no leftover
+listener. This is not an exact-final-EFI 100/100 qualification.

@@ -107,7 +107,7 @@ for i in $(seq 1 "$N"); do
     # M7.6: bind the host TCP fixture BEFORE QEMU starts. READY is
     # emitted only after listen() succeeds; no sleep/race and no
     # in-guest fake peer. One actor, one boot, like the typist.
-    coproc TCP_PEER { python3 -u "$REPO_ROOT/tools/network_fixture.py" \
+    coproc TCP_PEER { exec python3 -u "$REPO_ROOT/tools/network_fixture.py" \
         "$REPO_ROOT/build/tcp-stability.log" \
         "$REPO_ROOT/build/udp-dns-stability.log"; }
     tcp_pid=$TCP_PEER_PID
