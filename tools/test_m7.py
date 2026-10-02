@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""Milestone 7 automated boot test (docs/TESTING.md, ADR-0029).
+
+Phase 7 opens with the facility every protocol in it depends on, and
+with the rule that makes it necessary: NO polling loops and NO
+busy-waits anywhere in the stack. A timeout has to be a thing the
+kernel delivers, so the first thing built is timers and the first
+thing proven is that they keep time.
+
+Pipeline and verdict logic live in tools/mtest.py, including the
+cross-milestone regression guard — the same boot must still carry
+PASSing m1..m6 RESULT lines.
+
+Coverage:
+  M7.0 — the timer facility (ADR-0029):
+  * timer_facility — the kernel spawns timertest (registry image 16)
+                     with ONE notification, and the image arms real
+                     timers against it, measuring each against the
+                     monotonic clock SYS_CLOCK_NOW returns:
+
+                       - a 50 ms deadline never delivers EARLY (the
+                         one property a timeout must have — a timer
+                         that can fire early makes every
+                         retransmission rule built on it wrong in a
+                         way that only appears under load),
+                       - and lands within one tick plus slack,
+                       - a CANCELLED timer stays silent,
+                       - cancelling it a second time is REFUSED (a
+                         protocol cancelling a retransmission that
+                         already went out must be able to tell),
+                       - two due timers on one notification both
+                         deliver, which is what lets a service wait
+                         for "work OR timeout" in one blocking call,
+                       - a STALE id (whose slot has since been handed
+                         to a later timer) is REFUSED, and the timer
+                         it aliases still fires. Timer ids carry a
+                         generation for exactly this: a TCP stack
+                         holds dozens of retransmission timers in one
+                         process, so an owner check is no protection,
+                         and replaying stale bookkeeping would kill a
+                         stranger's timer silently.
+
+                     The kernel then proves its own side: it counted
+                     the arms, firings and cancellations the client
+                     claims, and the timer the client deliberately
+                     left armed is SWEPT when the process is
+                     destroyed — a dead process must not keep
+                     signalling. Frame-exact teardown.
+
+This suite needs no device fixture and no host actor: it is about the
+kernel's own clock, so it runs and must pass on the barest machine.
+
+Exit status 0 = every check passed.
+"""
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import arena_env  # noqa: E402
+import mtest  # noqa: E402
+
+EXPECTED_TESTS = ["timer_facility", "arp_service"]
+
+
+def extra_checks(serial: str) -> bool:
+    """Evidence beyond the suite's own PASS marker."""
+    ok = True
+
+    def check(cond: bool, msg: str) -> None:
+        nonlocal ok
+        print(f"[test-m7] {'PASS' if cond else 'FAIL'}: {msg}")
+        ok = ok and cond
+
+    check("timer facility ready: 32 slots" in serial,
+          "the kernel installed the timer facility before running anything "
+          "that needs it")
+
+    # The measurement itself, quoted back from the guest. This is the
+    # line that makes the milestone a fact rather than a claim.
+    m = re.search(r"timertest: PASS — 50000us timer delivered after (\d+)us "
+                  r"\(never early, (\d+)us of lag", serial)
+    check(m is not None,
+          "the client measured a real 50 ms deadline against the monotonic "
+          "clock")
+    if m:
+        elapsed, lag = int(m.group(1)), int(m.group(2))
+        check(elapsed >= 50_000,
+              f"the deadline was NOT early ({elapsed}us >= 50000us)")
+        check(lag <= 60_000,
+              f"the lag stayed inside one tick plus slack ({lag}us)")
+
+    check("a cancelled timer stayed silent, and a second cancel was refused"
+          in serial,
+          "a cancelled timer never fired, and cancelling it twice was an "
+          "error rather than a silent success")
+    check("two timers on one notification both delivered" in serial,
+          "badges merge — a service can wait for work OR a timeout in one "
+          "blocking call")
+    check("a stale id was refused and the live timer it aliased" in serial,
+          "a STALE timer id was refused — ids carry a generation, so a "
+          "reused slot cannot be cancelled by an old handle (C's review "
+          "of v0.11.0)")
+    check("swept the timer the client abandoned" in serial,
+          "the kernel swept a timer whose owner died (the fourth thing "
+          "proc::destroy sweeps, after relays, the console mirror and "
+          "blocked-thread references)")
+    check("teardown is frame-exact" in serial,
+          "the whole cycle is frame-exact")
+
+    # M7.0 also wires ADR-0028's supervisor into production. Its
+    # absence of noise IS the evidence here: nothing died, so nothing
+    # was restarted, and the idle loop said nothing about it.
+    check("supervisor: restarted" not in serial,
+          "the production supervisor ran quietly — nothing died, so nothing "
+          "was restarted")
+
+    # ---- M7.1: the first protocol (ADR-0030) -------------------------
+    check(re.search(r"^m7:test:arp_service: PASS", serial, re.MULTILINE)
+          is not None,
+          "the arp_service test PASSED — a protocol on the real wire")
+    m = re.search(r"netstackd: resolved 10\.0\.2\.2 → "
+                  r"([0-9a-f:]{17}) on attempt (\d+)", serial)
+    check(m is not None,
+          "the stack resolved the gateway by putting a real ARP request on "
+          "the wire")
+    if m:
+        check(m.group(1) != "00:00:00:00:00:00",
+              f"the resolved MAC is a real address ({m.group(1)})")
+    check("cache HIT for 10.0.2.2 — no frame touched the wire" in serial,
+          "the second lookup was served from cache")
+    check(re.search(r"the second lookup was a cache HIT \(\d+ hit\(s\), "
+                    r"wire requests still \d+\)", serial) is not None,
+          "the cache is proven the only honest way — the count of requests "
+          "PUT ON THE WIRE did not move")
+    check("no ARP reply after every retry — reporting unreachable, not "
+          "guessing" in serial,
+          "a silent address was reported UNREACHABLE rather than invented")
+    check("a silent address came back UNREACHABLE after real deadlines"
+          in serial,
+          "and that call TERMINATED — before M7.0 it could not have "
+          "(netd bounds its own wait with a timer, because a client "
+          "blocked in SYS_IPC_CALL cannot observe its own)")
+    check("the driver never parsed a protocol and the stack never touched "
+          "a virtqueue" in serial,
+          "the L2/protocol split held: netd stayed a device driver, "
+          "netstackd stayed a protocol service")
+    m = re.search(r"netstackd: shutdown — (\d+) ARP request\(s\) on the "
+                  r"wire, (\d+) reply/replies, (\d+) cache hit\(s\), "
+                  r"(\d+) timeout\(s\)", serial)
+    check(m is not None and int(m.group(4)) > 0,
+          "the stack really did time out on the silent address (its own "
+          "accounting, not the test's)")
+
+    # ---- M7.1b: surviving the driver (ADR-0030) ----------------------
+    check("the driver is GONE — waiting for the supervisor" in serial,
+          "the stack MET a dead driver — its call was answered "
+          "STATUS_SERVICE_GONE rather than queued on an endpoint nobody "
+          "would ever read")
+    check("the stack has met the dead driver and is backing off" in serial,
+          "the test produced a genuinely dead dependency before letting "
+          "the supervisor work (the first version restarted netd so fast "
+          "the stack never noticed, and proved nothing)")
+    check(re.search(r"RE-ATTACHED to the restarted driver on attempt \d+",
+                    serial) is not None,
+          "the stack RE-ESTABLISHED with the new instance — it re-acquired "
+          "its device facts rather than assuming anything survived")
+    check(re.search(r"netd died as pid (\d+) and came back as pid (\d+)",
+                    serial) is not None,
+          "the supervisor restarted netd with its capabilities replayed")
+    check("10.0.2.3 resolved to" in serial
+          and "through a driver that was RESTARTED under the stack" in serial,
+          "a resolve that had to reach the WIRE succeeded through the new "
+          "instance (a cache hit would have proven nothing)")
+    m = re.search(r"netstackd: shutdown — .*?(\d+) re-attach\(es\)", serial)
+    check(m is not None and int(m.group(1)) >= 1,
+          "the stack's own accounting records the re-attach")
+
+    # ---- M7.2: IPv4 + ICMP on the same boundary (ADR-0031) -----------
+    m = re.search(r"netstackd: echo reply from 10\.0\.2\.2 seq (\d+) in "
+                  r"(\d+)us — identifier, sequence and all (\d+) payload "
+                  r"bytes matched across the chunked receive", serial)
+    check(m is not None,
+          "an ICMP echo reply came back and was MATCHED on identifier and "
+          "sequence — a reply that merely arrived could be an answer to "
+          "somebody else's ping")
+    if m:
+        rtt = int(m.group(2))
+        check(0 < rtt < 2_000_000,
+              f"the round-trip time is plausible and measured on the "
+              f"monotonic clock ({rtt}us)")
+    # ---- M7.3: frames bigger than one message (ADR-0032) -------------
+    if m:
+        check(int(m.group(3)) >= 200,
+              f"the echo carried a {m.group(3)}-byte payload — a frame far "
+              f"larger than one 64-byte IPC message, which the driver used "
+              f"to DROP outright")
+    mm = re.search(r"(\d+) continuation chunk\(s\) read, (\d+) oversize, "
+                   r"(\d+) corrupt payload", serial)
+    check(mm is not None and int(mm.group(1)) >= 3,
+          "the frame really was reassembled from multiple chunks (not a "
+          "single message that happened to fit)")
+    check(mm is not None and int(mm.group(3)) == 0,
+          "every payload byte survived reassembly — the pattern is "
+          "position-dependent, so a dropped, duplicated or reordered chunk "
+          "could not pass")
+
+    check("failed as UNREACHABLE (no host), not NO_REPLY (a silent host)"
+          in serial,
+          "the layers report distinctly: a ping to an unresolvable address "
+          "fails at ARP, not as a silent host")
+    check("receive-parser self-test PASSED 7/7" in serial,
+          "the receive parser REFUSES what its specification forbids — "
+          "options headers, fragments, over-long declared lengths, bad "
+          "checksums, and an echo reply from the wrong host — while still "
+          "accepting the genuine article (C's v0.14.0 review; the wire "
+          "never sends these, so they would otherwise ship untested)")
+
+    m = re.search(r"demux saw (\d+) frame\(s\): (\d+) ARP, (\d+) IPv4, "
+                  r"(\d+) dropped, (\d+) bad checksum", serial)
+    check(m is not None,
+          "the demultiplexer can account for every frame it saw")
+    if m:
+        arp_n, ipv4_n, bad = int(m.group(2)), int(m.group(3)), int(m.group(5))
+        check(arp_n > 0 and ipv4_n > 0,
+              f"it sorted BOTH protocols ({arp_n} ARP, {ipv4_n} IPv4) — with "
+              f"one consumer there is no demultiplexing to prove")
+        check(bad == 0,
+              "no frame failed a checksum (they are verified on receive, not "
+              "assumed)")
+
+    # ---- M7.4: UDP, with authority by possession (ADR-0033) ----------
+    check("unguessable UDP handles from rngd" in serial,
+          "UDP handles are drawn from the entropy service — a handle is "
+          "authority by POSSESSION, so a guessable one would be authority "
+          "by arithmetic")
+    check("a second bind of the same port was refused, and a FORGED handle "
+          "bought nothing" in serial,
+          "bind-once is enforced (a namespace rule) and a forged handle is "
+          "refused (the authority rule) — the two are separate questions "
+          "and are tested separately")
+    m = re.search(r"UDP round trip to 10\.0\.2\.2:1053, (\d+)-byte response "
+                  r"with our transaction id 0x0*([0-9a-f]+) and the response "
+                  r"bit set", serial)
+    check(m is not None,
+          "a real UDP round trip against the host UDP fixture — the response is "
+          "matched on OUR transaction id, so a datagram that merely arrived "
+          "would not pass")
+    if m:
+        check(m.group(2) == "a7e5",
+              f"the transaction id came back as sent (0x{m.group(2)})")
+    mu = re.search(r"netstackd: UDP — (\d+) delivered, (\d+) unbound, "
+                   r"(\d+) bad handle\(s\) refused", serial)
+    check(mu is not None and int(mu.group(1)) >= 1 and int(mu.group(3)) >= 1,
+          "the stack's own accounting shows a datagram delivered to a "
+          "binding and a bad handle refused")
+
+    # ---- M7.5: DNS is a RESOLVER, not just a UDP round trip ----------
+    check("UDP checksum self-test PASSED 4/4" in serial,
+          "outgoing UDP checksum computed and verified; corrupt incoming payload "
+          "counted and refused; the IPv4 zero-checksum exception accepted")
+    chunks = re.search(r"UDP answer drained across IPC messages: (\d+)/ (\d+) bytes", serial)
+    check(chunks is not None and int(chunks.group(1)) == int(chunks.group(2))
+          and int(chunks.group(2)) > 56,
+          "the real DNS answer exceeded one UDP inline message and its tail "
+          "was read through a bearer-authorised continuation")
+    check("closing and rebinding rotated the bearer; the old handle stayed "
+          "revoked" in serial,
+          "CLOSE really revokes authority even when a binding slot is reused")
+    check(re.search(r"DNS resolver returned example\.com A = "
+                    r"(\d+)\.(\d+)\.(\d+)\.(\d+)", serial) is not None,
+          "DNS LOOKUP parsed and validated a real A answer from the host UDP fixture")
+    check("a malformed name was refused BEFORE sending" in serial,
+          "bad DNS input was rejected before any network operation")
+
+    # ---- M7.7: public native library on the actual wire -------------
+    check("native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer"
+          in serial,
+          "the public library crossed the bearer/continuation/revocation boundary on real packets")
+
+    # ---- M7.6: independent Linux TCP peer, not an in-tree echo ------
+    check("TCP SKIP" not in serial and
+          "TCP active OPEN returned a bearer; POLL completed the real three-way handshake" in serial,
+          "OPEN returns a bearer; POLL completes the three-way handshake against a real host")
+    check("TCP read 200 position-dependent bytes from the host in IPC chunks "
+          "without loss or reordering" in serial,
+          "the TCP byte stream crosses several IPC messages and every position is checked")
+    check("TCP FIN was acknowledged, the peer closed, and the bearer was revoked" in serial,
+          "close is an acknowledged FIN, followed by revocation of the bearer")
+    peer = (arena_env.build_dir() / "tcp-test-m7.log").read_text()
+    check("TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True" in peer,
+          "the independent host TCP stack received the request, sent the bytes and saw EOF")
+    check("RX FIFO full" not in serial,
+          "netd retained all burst arrivals instead of dropping TCP data behind an ACK")
+
+    # Phase 7's standing rule, checked the only way a log can: the
+    # machine reached its prompt without a suite hanging on a clock.
+    check("arena>" in serial,
+          "the machine still reaches the shell with the timer facility live")
+    return ok
+
+
+def main() -> int:
+    rc = mtest.run_milestone("m7", EXPECTED_TESTS)
+    if rc != 0:
+        return rc
+    serial = (arena_env.build_dir() / "serial-m7.log").read_text()
+    ok = extra_checks(serial)
+    print(f"[test-m7] M7.0-7.7 TIMERS + ARP + IPv4/ICMP + UDP + DNS + TCP + NATIVE API: {'PASS' if ok else 'FAIL'}  "
+          f"(serial: build/serial-m7.log)")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

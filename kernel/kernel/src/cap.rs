@@ -1,0 +1,587 @@
+//! Capability spaces (ROADMAP 3.4, ADR-0015): the reference model for
+//! kernel objects. A capability is a *name* — `(object reference, rights)`
+//! — living in a fixed per-process slot table embedded in [`crate::proc`]
+//! (`Process.caps`). Nothing references a kernel object except through a
+//! validated slot in some space, and every operation re-checks bounds,
+//! occupancy, rights, and the referenced object's liveness at invoke time.
+//!
+//! Security invariants (all tested by the m3 suite):
+//! * delegation attenuates only — `copy`/`move` demand an explicit rights
+//!   subset of the source's and `COPY` on the source; amplification is a
+//!   loud `Err`, never a silent clamp;
+//! * destroy removes the *reference*, not the object — object lifetime
+//!   stays with its owning subsystem, so caps can dangle and every invoke
+//!   re-validates liveness (`proc::pml4_of` for process caps);
+//! * rights gate real actions: `process_root` (READ — the target's PML4
+//!   PHYS is information) and `map_memory` (WRITE on a memory cap *and*
+//!   WRITE on a live process cap — mapping untyped frames into an address
+//!   space is the mutation this model exists to control).
+//!
+//! Kernel-internal only at this milestone: the sole writer path is kernel
+//! code under IF=0 (`grant` is the boot/root-task trust primitive). The
+//! M4 syscall surface will pass slot indices against the calling thread's
+//! process space and add unmarshalling — the validation core below is
+//! already that surface's semantics.
+
+use crate::arch::x86_64::paging;
+use crate::frames;
+use crate::proc;
+use crate::sync::without_interrupts;
+
+/// Fixed per-process capacity (ADR-0015, revised by ADR-0048): 32 is
+/// bounded mature-userspace headroom, not authority. Source COPY and
+/// destination occupancy/rights are still checked on every delegation;
+/// a full table refuses rather than growing or replacing a cap.
+pub const CAP_SLOTS: usize = 32;
+
+/// Inspect what the cap references (and, for process caps, obtain the
+/// target's PML4 root through [`process_root`]).
+pub const RIGHTS_READ: u32 = 1 << 0;
+/// Mutate the referenced object through an invoke ([`map_memory`]).
+pub const RIGHTS_WRITE: u32 = 1 << 1;
+/// Delegate: required *on the source* of [`copy`]/[`move_cap`].
+pub const RIGHTS_COPY: u32 = 1 << 2;
+/// Remove the cap from its slot ([`destroy`]).
+pub const RIGHTS_DESTROY: u32 = 1 << 3;
+/// Every right defined at this milestone.
+pub const RIGHTS_ALL: u32 = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
+
+/// The object a capability names. Both kinds are real kernel objects
+/// today: address spaces (M3.3, `proc.rs`) and untyped-style physical
+/// memory ranges (the seed of the ARCHITECTURE §4 untyped ABI). New
+/// kinds (endpoints, threads, untyped-kernel-allocated memory) extend
+/// this enum; the slot/rights machinery is kind-agnostic.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CapObj {
+    /// Empty slot marker (the space is a plain array; `None` *is* the
+    /// option type — no `Option<Cap>` size games).
+    None,
+    /// A process address-space object, by pid.
+    Process { pid: u64 },
+    /// Untyped memory: `pages` 4 KiB frames starting at `phys`. The
+    /// granter vouches the frames are owned (ADR-0015, Downsides);
+    /// the cap *describes* them — it never owns them, so destroying the
+    /// cap frees nothing and teardown stays exact.
+    Memory { phys: u64, pages: u32 },
+    /// An IPC endpoint (ADR-0018): rendezvous point for synchronous
+    /// call/reply. Rights: WRITE = call side, READ = serve side
+    /// (recv/reply). The object lives in `ipc::ENDPOINTS`; the cap
+    /// references it by index — destroying the cap frees nothing.
+    Endpoint { eid: u32 },
+    /// Physical frame (ADR-0021/0022) — the driver-substrate primitive.
+    /// `owned` marks the ONE cap that owns the frame: `destroy` returns
+    /// it to the allocator and `map_memory` TRANSFERS ownership into the
+    /// target's address space, consuming the cap (the teardown walk then
+    /// reclaims the frame when the process dies). Copies and IPC-landed
+    /// caps are LENT (`owned: false`, structural — `copy` and the IPC
+    /// installer force it): they describe the frame for zero-copy DMA
+    /// (`SYS_CAP_PHYS`) but freeing or mapping through them is refused,
+    /// so a frame is owned by exactly one cap at any time and freed
+    /// exactly once either way.
+    Untyped { phys: u64, owned: bool },
+    /// Kernel-minted device register window (ADR-0021): MMIO physical
+    /// base + page count. Descriptive — never owned, frees nothing, never
+    /// executable; ring 3 can only receive one from a kernel scan or the
+    /// kernel's own test suites.
+    Mmio { phys: u64, pages: u32 },
+    /// A badged, merged notification flag word (ADR-0018, ARCHITECTURE
+    /// §7.2). Rights: WRITE = notify, READ = wait.
+    Notification { nid: u32 },
+    /// A registered executable image (ADR-0019): the thing `SYS_SPAWN`
+    /// builds processes from. Rights: READ = may spawn from it. v1's
+    /// registry is kernel-side and fixed; a filesystem-backed source
+    /// arrives later without changing this shape.
+    Image { img_id: u32 },
+    /// ADR-0056: disjoint, kernel-embedded graphics service bytes. This is
+    /// never a dynamic Image ID, does not take a registrar, and does not
+    /// consume the one-unretired-dynamic-child budget. READ gates spawn.
+    BootImage { index: u32 },
+    /// ADR-0056: a generation-checked, physically owned RAM run. The
+    /// registry owns frames until both caps and mapping pins are gone.
+    SharedRegion { id: u32 },
+    /// Grants allocation (WRITE); never grants physical access by itself.
+    MemoryPool,
+    /// A separate bearer for physical backing queries (READ); only the
+    /// display service receives this, and must also hold the region cap.
+    SharedDma,
+    /// ADR-0060: inert root-issued keyboard-producer witness. No invocation,
+    /// mint syscall or implicit identity; copies preserve authority.
+    ProofToken { id: u64 },
+    /// ADR-0055: possession of WRITE, not process identity, authorizes
+    /// exact copied-image registration and full-ID revocation.
+    ImageRegistrar,
+    /// The machine-power singleton (ADR-0020): WRITE = may halt the
+    /// machine through `SYS_SHUTDOWN`. One kernel object, no identity —
+    /// holding the cap with the right IS the authority. The kernel's
+    /// own panic/suite halt paths are ring-0 internals, not invokes of
+    /// this object.
+    Power,
+    /// The console-input singleton (M6.3, ADR-0026): WRITE = may inject
+    /// bytes into the kernel's console line discipline through
+    /// `SYS_CONSOLE_PUSH`. Like `Power`, one kernel object with no
+    /// identity — holding the cap with the right IS the authority, and
+    /// the kernel hands it to exactly ONE process (the production
+    /// `inputd`). Without the gate any ring-3 process could forge the
+    /// keystrokes the shell trusts; the kernel's own UART RX ISR feeds
+    /// the same discipline as a ring-0 internal, not an invoke.
+    ConsoleInput,
+    /// The console-OUTPUT singleton (M6.4, ADR-0027): READ = may
+    /// attach a mirror of the kernel's console output stream
+    /// (`SYS_CONSOLE_ATTACH`) and drain it (`SYS_CONSOLE_PULL`). The
+    /// twin of `ConsoleInput`, and deliberately a SEPARATE object: a
+    /// channel that only injects keystrokes (a keyboard) must not
+    /// thereby gain the power to read everything the machine prints,
+    /// and a log sink must not gain the power to forge input. The
+    /// kernel hands both to exactly one process — the production
+    /// `consoled`, which needs the pair to be a console.
+    ConsoleOutput,
+}
+
+/// One capability: an object reference plus its rights mask.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Cap {
+    pub obj: CapObj,
+    pub rights: u32,
+}
+
+impl Cap {
+    /// The empty capability (slot-free marker; rights are meaningless).
+    pub const EMPTY: Cap = Cap {
+        obj: CapObj::None,
+        rights: 0,
+    };
+}
+
+/// A process's capability space: the fixed slot table itself. Embedded
+/// in [`proc::Process`], so it is born with `proc::create` and dies with
+/// `proc::destroy` — the ADR-0014 anchor promise.
+#[derive(Clone, Copy)]
+pub struct CapSpace {
+    slots: [Cap; CAP_SLOTS],
+    ipc_landed: [bool; CAP_SLOTS], // ADR-0047: receiver may discard a hostile transferred reference
+}
+
+impl CapSpace {
+    /// All-empty space (`proc::create` starts every process with this).
+    pub const fn new() -> Self {
+        CapSpace {
+            slots: [Cap::EMPTY; CAP_SLOTS],
+            ipc_landed: [false; CAP_SLOTS],
+        }
+    }
+
+    fn get(&self, slot: usize) -> Option<Cap> {
+        self.slots.get(slot).copied()
+    }
+
+    /// Occupied-slot count (computed, never tracked — no sync bug).
+    /// Independent registry oracle traverses the actual capspace slots.
+    pub(crate) fn each_cap(&self, mut f: impl FnMut(Cap)) {
+        for &cap in &self.slots {
+            f(cap);
+        }
+    }
+
+    fn used(&self) -> u32 {
+        self.slots
+            .iter()
+            .filter(|c| !matches!(c.obj, CapObj::None))
+            .count() as u32
+    }
+}
+
+/// Read the cap at `(pid, slot)`. Kernel-internal introspection
+/// primitive: bounds- and occupancy-checked, no rights gate (the whole
+/// module is kernel-only until M4; user-facing reads are invokes).
+pub fn read(pid: u64, slot: usize) -> Result<Cap, &'static str> {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| -> Result<Cap, &'static str> {
+            let cap = cs.get(slot).ok_or("cap slot out of bounds")?;
+            if matches!(cap.obj, CapObj::None) {
+                return Err("cap slot empty");
+            }
+            Ok(cap)
+        })
+        .ok_or("cap: no such process")?
+    })
+}
+
+/// Does `pid` hold the SERVE side of endpoint `eid`? (M6.5, ADR-0028.)
+///
+/// The serve side is `Endpoint` + READ — the same test `SYS_IPC_RECV`
+/// applies. Asking the cap space is how the kernel discovers which
+/// endpoints a dying process owed answers on: no separate registry to
+/// keep in step, and no way for the two to disagree, because the
+/// capability IS the authority to serve.
+pub fn serves_endpoint(pid: u64, eid: u32) -> bool {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| {
+            cs.slots.iter().any(|c| {
+                matches!(c.obj, CapObj::Endpoint { eid: e } if e == eid)
+                    && c.rights & RIGHTS_READ != 0
+            })
+        })
+        .unwrap_or(false)
+    })
+}
+
+/// Occupancy evidence for the suites: `(used, CAP_SLOTS)` of a live
+/// process's space (`None` for an unknown pid).
+pub fn occupancy(pid: u64) -> Option<(u32, u32)> {
+    without_interrupts(|| proc::with_caps(pid, |cs| (cs.used(), CAP_SLOTS as u32)))
+}
+
+/// The root-of-trust grant: install `cap` into the first empty slot of
+/// `pid`'s space and return the slot index. This is the boot/root-task
+/// policy path (ADR-0015): it may name any object with any rights, and
+/// it is the *only* creation path — every other operation derives from
+/// an existing cap with attenuated rights.
+pub fn grant(pid: u64, cap: Cap) -> Result<usize, &'static str> {
+    if matches!(cap.obj, CapObj::None) {
+        return Err("grant: cannot grant an empty cap");
+    }
+    without_interrupts(|| {
+        proc::with_caps_mut(pid, |cs| -> Result<usize, &'static str> {
+            let Some(slot) = cs.slots.iter().position(|c| matches!(c.obj, CapObj::None)) else {
+                return Err("capability space full (CAP_SLOTS)");
+            };
+            crate::image_registry::add_cap(cap);
+            crate::shared::add_cap(cap);
+            cs.slots[slot] = cap;
+            cs.ipc_landed[slot] = false;
+            Ok(slot)
+        })
+        .ok_or("grant: no such process")?
+    })
+}
+
+/// IPC transfer metadata: mark ONLY the recipient's slot. Grant and
+/// marking are sequential IF=0 phases with no scheduling boundary.
+pub fn mark_ipc_landed(pid: u64, slot: usize) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        proc::with_caps_mut(pid, |cs| {
+            if slot >= CAP_SLOTS || matches!(cs.slots[slot].obj, CapObj::None) {
+                return Err("IPC landing missing from recipient cap space");
+            }
+            cs.ipc_landed[slot] = true;
+            Ok(())
+        })
+        .ok_or("IPC recipient process missing")?
+    })
+}
+
+/// Delegate by copy: install `(source obj, `rights`)` into
+/// `(dst_pid, dst_slot)`. Refuses — loudly, never by clamping — when the
+/// source lacks `COPY`, when `rights` is not a subset of the source's
+/// (amplification), or when the destination slot is occupied. Source and
+/// destination may be the same space (different slots).
+pub fn copy(
+    src_pid: u64,
+    src_slot: usize,
+    dst_pid: u64,
+    dst_slot: usize,
+    rights: u32,
+) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        let src = read(src_pid, src_slot)?;
+        if src.rights & RIGHTS_COPY == 0 {
+            return Err("cap copy: source lacks the COPY right");
+        }
+        if rights & !src.rights != 0 {
+            return Err("cap copy: rights amplification refused");
+        }
+        let dst = read_or_empty(dst_pid, dst_slot)?;
+        if !matches!(dst.obj, CapObj::None) {
+            return Err("cap copy: destination slot occupied");
+        }
+        // Ownership is NEVER duplicated (ADR-0022): a copy of an Untyped
+        // cap is a LENT reference — it names the frame (so a driver can
+        // point a device at it) but destroying it frees nothing and
+        // mapping through it is refused. The one owned cap stays with
+        // its original holder.
+        let obj = match src.obj {
+            CapObj::Untyped { phys, .. } => CapObj::Untyped { phys, owned: false },
+            other => other,
+        };
+        install(dst_pid, dst_slot, Cap { obj, rights })
+    })
+}
+
+/// Delegate by move: [`copy`] semantics, then the source slot is
+/// cleared. Atomic under IF=0 — no window where the cap exists twice or
+/// not at all.
+pub fn move_cap(
+    src_pid: u64,
+    src_slot: usize,
+    dst_pid: u64,
+    dst_slot: usize,
+    rights: u32,
+) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        let src = read(src_pid, src_slot)?;
+        if src.rights & RIGHTS_COPY == 0 {
+            return Err("cap move: source lacks the COPY right");
+        }
+        if rights & !src.rights != 0 {
+            return Err("cap move: rights amplification refused");
+        }
+        let dst = read_or_empty(dst_pid, dst_slot)?;
+        if !matches!(dst.obj, CapObj::None) {
+            return Err("cap move: destination slot occupied");
+        }
+        // A move transfers the object AS-IS — unlike `copy`, ownership
+        // travels with it (an owned Untyped cap stays owned; the source
+        // slot is emptied in the same IF=0 window, so the frame never
+        // has two owners and is never ownerless).
+        install(
+            dst_pid,
+            dst_slot,
+            Cap {
+                obj: src.obj,
+                rights,
+            },
+        )?;
+        install(src_pid, src_slot, Cap::EMPTY)
+    })
+}
+
+/// Kernel-side issuance (ADR-0021): install a freshly minted cap into
+/// `pid`'s `slot`. Refuses to clobber an occupied slot — issuance must
+/// never silently drop (and leak) a live cap; the caller picks free
+/// slots. This is the only public write path that does not move or
+/// attenuate an existing cap (`SYS_ALLOC_FRAME` mints Untyped caps
+/// through it).
+pub fn issue(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        if read(pid, slot).is_ok() {
+            return Err("cap issue: slot occupied");
+        }
+        install(pid, slot, cap)
+    })
+}
+
+/// Consume an OWNED cap whose object was just transferred (ADR-0021:
+/// `SYS_MAP_MEMORY` moves an Untyped cap's frame into the address
+/// space). Kernel-side: the caller has already validated kind, rights,
+/// and the transfer itself; this only empties the slot.
+pub fn consume(pid: u64, slot: usize) -> Result<(), &'static str> {
+    install(pid, slot, Cap::EMPTY)
+}
+
+/// Remove the cap from its slot — the *reference*, not the object
+/// (ADR-0015: object lifetime belongs to the owning subsystem; caps may
+/// dangle and invokes re-validate). Ordinarily requires DESTROY. A
+/// recipient may also DISCARD an IPC-landed reference without it: the
+/// kernel proved that slot was transferred in, not minted or inherited;
+/// its owned Untyped frame cannot arrive through IPC (ADR-0047).
+///
+/// Kind-aware since ADR-0021: destroying an [`CapObj::Untyped`] cap
+/// returns its frame to the allocator — exactly once, because mapping
+/// such a cap consumes it (ownership moves to the address space, whose
+/// teardown walk reclaims the frame instead). All other kinds are
+/// descriptive and free nothing.
+pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        let cap = read(pid, slot)?;
+        let landed = proc::with_caps(pid, |cs| cs.ipc_landed.get(slot).copied().unwrap_or(false))
+            .ok_or("cap destroy: process missing")?;
+        if cap.rights & RIGHTS_DESTROY == 0 && !landed {
+            return Err("cap destroy: cap lacks the DESTROY right");
+        }
+        // Owned frame: return it. A LENT Untyped cap (a copy or an
+        // IPC-landed reference, ADR-0022) frees nothing — its frame
+        // belongs to the original owner's cap. If the allocator refuses
+        // (a state bug — the frame is not ours to free), the slot is NOT
+        // cleared: the loud refusal beats a silent leak.
+        if let CapObj::Untyped { phys, owned: true } = cap.obj {
+            crate::frames::free(phys).map_err(|_| "cap destroy: untyped frame free refused")?;
+        }
+        install(pid, slot, Cap::EMPTY)
+    })
+}
+
+/// Gated query (ADR-0022): the physical base of a memory-kind cap —
+/// `Untyped` (one frame, owned or lent), `Memory`/`Mmio` (a range).
+/// Requires `READ`. This is what makes zero-copy DMA safe: a driver
+/// learns a caller's buffer address ONLY through a cap the caller
+/// handed over — a phys in a message word without a cap would let any
+/// process aim a bus master at any frame.
+pub fn phys_of(pid: u64, slot: usize) -> Result<u64, &'static str> {
+    without_interrupts(|| {
+        let cap = read(pid, slot)?;
+        if cap.rights & RIGHTS_READ == 0 {
+            return Err("cap phys: cap lacks the READ right");
+        }
+        match cap.obj {
+            CapObj::Untyped { phys, .. } => Ok(phys),
+            CapObj::Memory { phys, .. } | CapObj::Mmio { phys, .. } => Ok(phys),
+            _ => Err("cap phys: cap does not name a memory kind"),
+        }
+    })
+}
+
+/// Gated invoke: the PML4 root PHYS of the process a `Process` cap
+/// names. Requires `READ` on the cap and re-validates the target's
+/// liveness — a cap to a destroyed process fails cleanly instead of
+/// naming freed frames.
+pub fn process_root(pid: u64, slot: usize) -> Result<u64, &'static str> {
+    without_interrupts(|| {
+        let cap = read(pid, slot)?;
+        let CapObj::Process { pid: target } = cap.obj else {
+            return Err("process_root: cap does not name a process");
+        };
+        if cap.rights & RIGHTS_READ == 0 {
+            return Err("process_root: cap lacks the READ right");
+        }
+        proc::pml4_of(target).ok_or("process_root: target process is dead (cap dangles)")
+    })
+}
+
+/// Gated invoke: map a memory-kind cap's frames into the user half of
+/// the process a `Process` cap names — the untyped-memory →
+/// address-space binding of ARCHITECTURE §4, in miniature. Both caps
+/// must live in the *same* space (`pid`); the process cap needs `WRITE`
+/// and a live target. `va` is page-aligned, lower-half, and must have
+/// room for all `pages`; W^X flags are the caller's (`writable && exec`
+/// is rejected by the mapper, ADR-0008).
+///
+/// Memory-cap gates, relaxed by ADR-0021 (the old WRITE-for-everything
+/// rule made read-only descriptor windows impossible):
+///
+/// * the requested access mode decides the right: `writable` needs
+///   `WRITE`, a read-only window needs `READ`;
+/// * [`CapObj::Untyped`] (one owned frame) additionally needs `DESTROY`
+///   and is CONSUMED on success — ownership transfers to the target's
+///   address space, whose teardown walk reclaims the frame;
+/// * [`CapObj::Untyped`]/[`CapObj::Mmio`] windows are never executable.
+///
+/// Partial failure (a later page refused) leaves earlier pages mapped —
+/// the mapper has no undo at this milestone; the suites map into fresh
+/// VAs and account frames exactly through `proc::destroy`.
+pub fn map_memory(
+    pid: u64,
+    mem_slot: usize,
+    proc_slot: usize,
+    va: u64,
+    writable: bool,
+    exec: bool,
+) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        let mem = read(pid, mem_slot)?;
+        // Normalize the memory kinds (ADR-0021): Memory/Mmio describe
+        // (phys, pages); Untyped is one frame — mapping it transfers
+        // ownership, so success consumes the cap. A LENT Untyped cap
+        // (copy/IPC-landed, ADR-0022) can never be mapped: consuming it
+        // would hand the address space a frame its teardown would later
+        // free out from under the real owner.
+        let (phys, pages, owned) = match mem.obj {
+            CapObj::Memory { phys, pages } => (phys, pages, false),
+            CapObj::Mmio { phys, pages } => (phys, pages, false),
+            CapObj::Untyped { phys, owned: true } => (phys, 1, true),
+            CapObj::Untyped { owned: false, .. } => {
+                return Err("map_memory: lent frame — only the owning cap may map it");
+            }
+            _ => return Err("map_memory: memory slot does not name a memory cap"),
+        };
+        // The access mode decides the right (ADR-0021): a writable
+        // window needs WRITE, a read-only window needs READ.
+        if writable {
+            if mem.rights & RIGHTS_WRITE == 0 {
+                return Err("map_memory: memory cap lacks the WRITE right");
+            }
+        } else if mem.rights & RIGHTS_READ == 0 {
+            return Err("map_memory: memory cap lacks the READ right");
+        }
+        if owned {
+            if mem.rights & RIGHTS_DESTROY == 0 {
+                return Err("map_memory: untyped map consumes the cap — DESTROY required");
+            }
+            if exec {
+                return Err("map_memory: untyped/mmio windows are never executable");
+            }
+        }
+        if exec && matches!(mem.obj, CapObj::Mmio { .. }) {
+            return Err("map_memory: untyped/mmio windows are never executable");
+        }
+        let target_cap = read(pid, proc_slot)?;
+        let CapObj::Process { pid: target } = target_cap.obj else {
+            return Err("map_memory: process slot does not name a process cap");
+        };
+        if target_cap.rights & RIGHTS_WRITE == 0 {
+            return Err("map_memory: process cap lacks the WRITE right");
+        };
+        let root =
+            proc::pml4_of(target).ok_or("map_memory: target process is dead (cap dangles)")?;
+        if pages == 0 {
+            return Err("map_memory: memory cap covers no pages");
+        }
+        let span = u64::from(pages) * paging::PAGE;
+        if va % paging::PAGE != 0 || phys % paging::PAGE != 0 {
+            return Err("map_memory: unaligned va or phys");
+        }
+        // Lower-half check with overflow guard: the whole span must fit
+        // below the kernel half.
+        let Some(va_end) = va.checked_add(span) else {
+            return Err("map_memory: va span overflows");
+        };
+        if va_end > 0x0000_8000_0000_0000 {
+            return Err("map_memory: va span reaches the kernel half");
+        }
+        // SAFETY: IF=0 (enclosing without_interrupts); `root` is the
+        // live process's owned PML4 (liveness just re-checked); the
+        // frames are the granter-vouched memory the cap describes.
+        unsafe {
+            for i in 0..u64::from(pages) {
+                paging::map_user_page_4k(
+                    root,
+                    va + i * paging::PAGE,
+                    phys + i * frames::FRAME_BYTES,
+                    writable,
+                    exec,
+                )
+                .map_err(|_| "map_memory: page mapping refused")?;
+            }
+        }
+        // Ownership transfer (ADR-0021): the consumed Untyped cap's slot
+        // goes empty — the frame now belongs to the target's address
+        // space and is reclaimed by its teardown walk.
+        if owned {
+            install(pid, mem_slot, Cap::EMPTY)?;
+        }
+        Ok(())
+    })
+}
+
+/// Bounds-checked slot read that tolerates empties (copy/move's
+/// destination probe): `Cap::EMPTY` for a free slot, `Err` for an
+/// out-of-range slot or dead process.
+fn read_or_empty(pid: u64, slot: usize) -> Result<Cap, &'static str> {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| cs.get(slot).ok_or("cap slot out of bounds"))
+            .ok_or("cap: no such process")?
+    })
+}
+
+/// Write a cap value into a specific slot (bounds-checked). The single
+/// mutation point besides `grant`; used by copy/move/destroy so every
+/// write goes through one validated path.
+fn install(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        proc::with_caps_mut(pid, |cs| {
+            let Some(entry) = cs.slots.get_mut(slot) else {
+                return Err("cap slot out of bounds");
+            };
+            // Credit the incoming reference before retiring the old one:
+            // moving the last LIVE Image cap cannot transiently retire it.
+            crate::image_registry::add_cap(cap);
+            crate::shared::add_cap(cap);
+            let old = *entry;
+            *entry = cap;
+            crate::image_registry::drop_cap(old);
+            crate::shared::drop_cap(old);
+            cs.ipc_landed[slot] = false;
+            Ok(())
+        })
+        .ok_or("cap: no such process")?
+    })
+}

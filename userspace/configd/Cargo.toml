@@ -1,0 +1,25 @@
+[package]
+name = "arena-configd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Phase 8.1 bounded transactional configuration service (ADR-0046)"
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "arena-configd"
+path = "src/main.rs"
+
+[[bin]]
+name = "configread"
+path = "src/configread.rs"
+
+[[bin]]
+name = "configup"
+path = "src/configup.rs"

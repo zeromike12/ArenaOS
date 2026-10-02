@@ -1,0 +1,9 @@
+[package]
+name = "arena-sync"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS synchronization primitives: spinlock with owner tracking (M2.6, ADR-0010). no_std, zero dependencies, host-testable."
+
+[dependencies]
+# Zero dependencies by policy (ADR-0004).

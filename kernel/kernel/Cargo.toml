@@ -1,0 +1,11 @@
+[package]
+name = "arena-kernel"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS kernel proper: machine-level subsystems (arch, drivers, frames, heap glue, logging, timekeeping, halt). Split from the boot stage at M2.7 (ADR-0011). No UEFI dependencies — firmware facts arrive through the handoff record."
+
+[dependencies]
+# Zero third-party crates (ADR-0004); workspace-internal only:
+arena-heap = { path = "../libs/heap" }
+arena-sync = { path = "../libs/sync" }

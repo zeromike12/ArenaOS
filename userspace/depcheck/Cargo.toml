@@ -1,0 +1,17 @@
+[package]
+name = "arena-depcheck"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Bounded pre-spawn netd/rngd active probe worker (ADR-0045)"
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "arena-depcheck"
+path = "src/main.rs"

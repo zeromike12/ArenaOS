@@ -1,0 +1,28 @@
+[package]
+name = "arena-consoled"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS console channel service (M6.4, ADR-0027) — the userspace virtio-console driver on the shared virtio core. Two images from one crate: `arena-consoled` (spawn-registry image 12, the resident driver: two split virtqueues, host bytes pushed into the kernel's line discipline through ConsoleInput and kernel console output pulled through ConsoleOutput, making a virtio-console port a full second console) and `contest` (image 13, the m6 suite's client: a port round trip — guest→host bytes the harness reads back off the socket, host→guest bytes the harness sends, verified through the service boundary)."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+# The console driver (registry image 12), spawned at boot when the
+# virtio-console fixture is attached.
+[[bin]]
+name = "arena-consoled"
+path = "src/main.rs"
+
+# The console-service test client (registry image 13), spawned only by
+# the m6 suite's console_service test.
+[[bin]]
+name = "contest"
+path = "src/contest.rs"

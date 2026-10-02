@@ -1,0 +1,24 @@
+[package]
+name = "arena-permissiond"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Phase 8.2 receiver-checked mediated file permission service"
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "arena-permissiond"
+path = "src/main.rs"
+
+[[bin]]
+name = "permapp"
+path = "src/permapp.rs"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }

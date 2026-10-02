@@ -1,0 +1,17 @@
+[package]
+name = "arena-servicemgr"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Bounded ring-3 service manager (ADRs 0037-0047; Phase 8.0)"
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "arena-servicemgr"
+path = "src/main.rs"
