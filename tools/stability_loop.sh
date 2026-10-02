@@ -310,7 +310,7 @@ for i in $(seq 1 "$N"); do
          ! grep -aqF 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' "$SERIAL"; then
         why="bounded SharedRegion guest capacity/authority/teardown proof absent"
     elif ! grep -aqF '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' "$SERIAL" || \
-         ! grep -aqF '[displayd] ring3 GOP pixels ready (pattern v1)' "$SERIAL"; then
+         ! grep -aqF '[displayd] ring3 GOP pixels ready (staged font v2)' "$SERIAL"; then
         why="isolated display service did not paint the verified QMP pixels"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"

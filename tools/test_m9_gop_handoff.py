@@ -49,6 +49,8 @@ def main():
     # Colors originate from userspace/displayd/src/main.rs, not OVMF's
     # firmware splash/background; exact bytes across four distant regions.
     for xy, expected in [((0,0),(0x22,0x33,0x55)),
+                         ((20,20),(0x22,0x33,0x55)),
+                         ((21,20),(0xf8,0xee,0xcc)),  # bitmap 'A' actual pixel
                          ((0,100),(0xe3,0x35,0x42)),
                          ((400,100),(0x2e,0xc7,0x71)),
                          ((799,599),(0x3b,0x67,0xe1))]:
@@ -61,5 +63,5 @@ def main():
     assert '[sharedprobe] capacity/rights/zero PASS' in s2
     assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s2
     assert 'm7: RESULT PASS (2/2)' in s2 and '[arena ERROR halt]' not in s2
-    print(f'[{LABEL}] QMP {w}x{h} matches four ring-3 GOP regions; guest SharedRegion authority/zero/capacity + exact 512-page process teardown PASS; headless boot clean; no compositor, virtio-gpu or graphics input claim',flush=True)
+    print(f'[{LABEL}] QMP {w}x{h} matches GOP regions and linked toolkit font foreground/background; guest SharedRegion authority/zero/capacity + exact 512-page process teardown PASS; headless boot clean; no compositor, virtio-gpu or graphics input claim',flush=True)
 if __name__=='__main__':main()

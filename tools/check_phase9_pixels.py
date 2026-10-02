@@ -13,9 +13,11 @@ import time
 from pathlib import Path
 import qmp
 
-READY = b'[displayd] ring3 GOP pixels ready (pattern v1)'
+READY = b'[displayd] ring3 GOP pixels ready (staged font v2)'
 SAMPLES = (
     ((0, 0), (0x22, 0x33, 0x55)),
+    ((20, 20), (0x22, 0x33, 0x55)),   # 'A' has no pixel in column zero of its first row
+    ((21, 20), (0xf8, 0xee, 0xcc)),   # bitmap 'A', first row, one foreground bit
     ((0, 100), (0xe3, 0x35, 0x42)),
     ((400, 100), (0x2e, 0xc7, 0x71)),
     ((799, 599), (0x3b, 0x67, 0xe1)),

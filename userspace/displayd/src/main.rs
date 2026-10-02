@@ -7,6 +7,7 @@
 #![no_main]
 
 use core::panic::PanicInfo;
+use arena_gfxkit::{Canvas, Rect};
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
@@ -141,6 +142,45 @@ pub extern "C" fn _start() -> ! {
     }
     write_log(b"[displayd] SharedRegion guest authority/zero/copy/mapping PASS\n");
 
+    // Allocate the complete pitch, not just visible columns. A normal RAM
+    // SharedRegion is a sound borrowed Canvas backing; *never* create a
+    // Rust reference to the UC framebuffer MMIO mapping. The source cap and
+    // mapping stay with displayd, not a client or an unimplemented compositor.
+    let pixel_count = pitch.checked_mul(h).unwrap_or_else(|| exit(94));
+    let bytes = pixel_count.checked_mul(4).unwrap_or_else(|| exit(94));
+    let pages = bytes.div_ceil(4096);
+    if pages == 0 || pages > 512 {
+        exit(94)
+    }
+    let mut scanout = [0u64; 3];
+    if unsafe { syscall3(SYS_SHARED_CREATE, SLOT_POOL, pages, scanout.as_mut_ptr() as u64) } != 0
+        || scanout[1] == 0
+        || scanout[2] != pages * 4096
+    {
+        exit(95)
+    }
+    let ram = unsafe { syscall2(SYS_SHARED_MAP, scanout[0], 1) };
+    if ram <= 0 {
+        exit(96)
+    }
+    // SAFETY: the kernel minted a fresh zeroed run, mapped it RW into this
+    // address space, and confirmed its size. `pixel_count * 4 <= pages *
+    // 4096`; no other thread accesses it. Frame lifetime is pinned by the
+    // mapping even if its cap is later removed.
+    let backing = unsafe { core::slice::from_raw_parts_mut(ram as *mut u32, pixel_count as usize) };
+    let mut canvas = Canvas::new(backing, w as usize, h as usize, pitch as usize)
+        .unwrap_or_else(|_| exit(97));
+    canvas.clear(0x00_3b_67_e1);
+    canvas.fill_rect(Rect { x: 0, y: 0, width: w as u32, height: (h / 8) as u32 }, 0x00_22_33_55);
+    canvas.fill_rect(Rect { x: 0, y: (h / 8) as i32, width: (w / 3) as u32, height: h as u32 }, 0x00_e3_35_42);
+    canvas.fill_rect(Rect { x: (w / 3) as i32, y: (h / 8) as i32, width: (w * 2 / 3 - w / 3) as u32, height: h as u32 }, 0x00_2e_c7_71);
+    // The title is drawn by the *linked no_std bitmap toolkit* in ordinary
+    // RAM. A QMP font foreground sample distinguishes this from a serial
+    // marker or a synthetic host-side image.
+    if canvas.text(20, 20, "ARENAOS", 0x00_f8_ee_cc).is_err() {
+        exit(98)
+    }
+
     let va = unsafe { syscall2(SYS_MAP_MEMORY, SLOT_GOP, 1) };
     if va <= 0 {
         exit(83)
@@ -148,11 +188,11 @@ pub extern "C" fn _start() -> ! {
     let fb = va as *mut u32;
     for y in 0..h as usize {
         for x in 0..w as usize {
-            let color = encode(pattern(x, y, w as usize, h as usize), fmt);
+            let color = encode(backing[y * pitch as usize + x], fmt);
             unsafe { core::ptr::write_volatile(fb.add(y * pitch as usize + x), color) }
         }
     }
-    write_log(b"[displayd] ring3 GOP pixels ready (pattern v1)\n");
+    write_log(b"[displayd] ring3 GOP pixels ready (staged font v2)\n");
     // No compositor or client exists yet: do not interpret input as a
     // framebuffer command. The reserved endpoint remains an owned service
     // capability and all unrecognized traffic receives a typed refusal.
