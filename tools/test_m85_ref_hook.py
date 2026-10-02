@@ -16,8 +16,11 @@ ROOT=Path(__file__).resolve().parent.parent
 SOURCE=ROOT/'kernel/kernel/src/ipc.rs'
 EFI=ROOT/'build/arena-boot.efi'
 ESP=ROOT/'build/arena-esp.img'
-NEEDLE=b'            crate::image_registry::add_cap(staged);\n            slot.reply_cap = staged;'
-MUTANT=b'            // RED ONLY: intentionally omitted production reply-cap credit.\n            slot.reply_cap = staged;'
+# Phase 9 added an independent SharedRegion credit between the existing
+# Image credit and the reply slot. RED must omit only the Image hook, not
+# both kinds of authority or the actual reply staging.
+NEEDLE=b'            crate::image_registry::add_cap(staged);\n            crate::shared::add_cap(staged);\n            slot.reply_cap = staged;'
+MUTANT=b'            // RED ONLY: intentionally omitted production Image reply-cap credit.\n            crate::shared::add_cap(staged);\n            slot.reply_cap = staged;'
 
 def run_fixture(log):
     with log.open('w') as f:

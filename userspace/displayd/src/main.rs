@@ -6,8 +6,8 @@
 #![no_std]
 #![no_main]
 
-use core::panic::PanicInfo;
 use arena_gfxkit::{Canvas, Rect};
+use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
@@ -36,8 +36,9 @@ fn panic(_: &PanicInfo<'_>) -> ! {
     exit(99)
 }
 
-/// Pure arithmetic, shared with unit tests. The lower 24 bits represent
-/// native RGB values, independently converted to the GOP's observed mode.
+/// Pure arithmetic reference for the host unit test; production bars are
+/// drawn by the linked toolkit. Lower 24 bits are native RGB values.
+#[cfg(test)]
 fn pattern(x: usize, y: usize, w: usize, h: usize) -> u32 {
     if y < h / 8 {
         return 0x00_22_33_55;
@@ -153,7 +154,14 @@ pub extern "C" fn _start() -> ! {
         exit(94)
     }
     let mut scanout = [0u64; 3];
-    if unsafe { syscall3(SYS_SHARED_CREATE, SLOT_POOL, pages, scanout.as_mut_ptr() as u64) } != 0
+    if unsafe {
+        syscall3(
+            SYS_SHARED_CREATE,
+            SLOT_POOL,
+            pages,
+            scanout.as_mut_ptr() as u64,
+        )
+    } != 0
         || scanout[1] == 0
         || scanout[2] != pages * 4096
     {
@@ -168,12 +176,36 @@ pub extern "C" fn _start() -> ! {
     // 4096`; no other thread accesses it. Frame lifetime is pinned by the
     // mapping even if its cap is later removed.
     let backing = unsafe { core::slice::from_raw_parts_mut(ram as *mut u32, pixel_count as usize) };
-    let mut canvas = Canvas::new(backing, w as usize, h as usize, pitch as usize)
-        .unwrap_or_else(|_| exit(97));
+    let mut canvas =
+        Canvas::new(backing, w as usize, h as usize, pitch as usize).unwrap_or_else(|_| exit(97));
     canvas.clear(0x00_3b_67_e1);
-    canvas.fill_rect(Rect { x: 0, y: 0, width: w as u32, height: (h / 8) as u32 }, 0x00_22_33_55);
-    canvas.fill_rect(Rect { x: 0, y: (h / 8) as i32, width: (w / 3) as u32, height: h as u32 }, 0x00_e3_35_42);
-    canvas.fill_rect(Rect { x: (w / 3) as i32, y: (h / 8) as i32, width: (w * 2 / 3 - w / 3) as u32, height: h as u32 }, 0x00_2e_c7_71);
+    canvas.fill_rect(
+        Rect {
+            x: 0,
+            y: 0,
+            width: w as u32,
+            height: (h / 8) as u32,
+        },
+        0x00_22_33_55,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: 0,
+            y: (h / 8) as i32,
+            width: (w / 3) as u32,
+            height: h as u32,
+        },
+        0x00_e3_35_42,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: (w / 3) as i32,
+            y: (h / 8) as i32,
+            width: (w * 2 / 3 - w / 3) as u32,
+            height: h as u32,
+        },
+        0x00_2e_c7_71,
+    );
     // The title is drawn by the *linked no_std bitmap toolkit* in ordinary
     // RAM. A QMP font foreground sample distinguishes this from a serial
     // marker or a synthetic host-side image.
