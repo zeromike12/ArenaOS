@@ -354,6 +354,7 @@ def boot(label: str, esp: Path,
          scratch: Path,
          kill: tuple[bytes, int, float] | None = None,
          timeout_s: int = TIMEOUT_S,
+         video: str = "default",
          ) -> tuple[int | None, str, float]:
     """One QEMU boot against an EXPLICIT scratch-disk path (M5.4).
 
@@ -403,6 +404,7 @@ def boot(label: str, esp: Path,
             *arena_env.input_args(),
             *arena_env.console_args(vcon_sock),
             *arena_env.qmp_args(qmp_sock),
+            *(["-vga", "none"] if video == "none" else []),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",
             "-serial", "chardev:con0",

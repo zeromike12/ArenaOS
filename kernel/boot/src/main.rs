@@ -167,6 +167,25 @@ pub extern "efiapi" fn efi_main(
         }
     };
 
+    // Phase 9: ask firmware for GOP *before* EBS and retain only validated
+    // physical geometry. No display write or policy runs in the boot stage.
+    let display = uefi::graphics_output_info();
+    arena_kernel::handoff::set_display(display);
+    if let Some(d) = display {
+        info!(
+            "boot",
+            "GOP handoff: {}x{} pitch={} format={} phys={:#x} bytes={}",
+            d.width,
+            d.height,
+            d.pitch_pixels,
+            d.format,
+            d.phys,
+            d.bytes
+        );
+    } else {
+        info!("boot", "GOP handoff: unavailable or unsupported mode");
+    }
+
     // --- Step 3: verified diagnostics -------------------------------------
     info!("m1", "running milestone-1 self-tests");
     let (passed, total) = m1::run_all();

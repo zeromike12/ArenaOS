@@ -76,6 +76,34 @@ static OVERFLOW: SyncCell<usize> = SyncCell::new(0);
 static MAP_KEY: SyncCell<u64> = SyncCell::new(0);
 static IMAGE: SyncCell<ImageLayout> = SyncCell::new(ImageLayout { base: 0, size: 0 });
 
+/// UEFI GOP's bounded direct-color framebuffer facts (UEFI pointers and
+/// methods never cross ExitBootServices). `format`: RGBX=0, BGRX=1.
+/// The only owner of the eventual device-memory cap is the display server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Display {
+    pub phys: u64,
+    pub bytes: u64,
+    pub width: u32,
+    pub height: u32,
+    pub pitch_pixels: u32,
+    pub format: u32,
+}
+static DISPLAY: SyncCell<Option<Display>> = SyncCell::new(None);
+
+/// Boot-stage only: store validated GOP scalar facts before EBS.
+pub fn set_display(display: Option<Display>) {
+    // SAFETY: one writer before kernel handoff, IF=0.
+    unsafe {
+        *DISPLAY.get() = display;
+    }
+}
+
+/// Kernel phase: immutable copy; no firmware pointers to dereference.
+pub fn display() -> Option<Display> {
+    // SAFETY: written only before EBS, read after handoff.
+    unsafe { *DISPLAY.get() }
+}
+
 /// Reset the region list and record the map key that belongs to it. The
 /// boot stage calls this before re-pushing regions (initial capture *and*
 /// the final pre-`ExitBootServices` capture).

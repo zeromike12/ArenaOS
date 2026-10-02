@@ -111,7 +111,7 @@ pub struct BootServices {
     // EFI_NOT_FOUND. Verified against EDK2's DxeCore mBootServices table
     // and this firmware's own HeaderSize (376 = 24 + 44 slots).
     pub allocate_pool: usize,
-    pub free_pool: usize,
+    pub free_pool: unsafe extern "efiapi" fn(buffer: *const u8) -> Status,
     pub create_event: usize,
     pub set_timer: usize,
     pub wait_for_event: usize,
@@ -154,10 +154,19 @@ pub struct BootServices {
         data_size: usize,
         watchdog_data: *const u16,
     ) -> Status,
-    // Later slots (ConnectController at 30 through CreateEventEx at 43)
-    // are not consumed at M2; add them typed, in spec order, when needed.
+    // Slots 30..36, in UEFI 2.10 §7.3 order: ConnectController,
+    // DisconnectController, OpenProtocol, CloseProtocol,
+    // OpenProtocolInformation, ProtocolsPerHandle, LocateHandleBuffer.
+    pub graphics_preceding_services: [usize; 7],
+    /// Slot 37: EFI_LOCATE_PROTOCOL — called only before EBS.
+    pub locate_protocol: unsafe extern "efiapi" fn(
+        protocol: *const Guid,
+        registration: *const u8,
+        interface: *mut *const u8,
+    ) -> Status,
+    // Slots 38..43 remain unused.
 }
-const _: () = assert!(core::mem::size_of::<BootServices>() == 24 + 30 * 8);
+const _: () = assert!(core::mem::size_of::<BootServices>() == 24 + 38 * 8);
 
 impl BootServices {
     /// The table's own claimed spec revision (this firmware reports 0x20046,
@@ -342,6 +351,144 @@ pub const LOADED_IMAGE_PROTOCOL_GUID: Guid = Guid(
     0x11D2,
     [0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
 );
+
+/// UEFI 2.10 §12.9: GOP discovery only; no protocol pointer survives EBS.
+pub const GRAPHICS_OUTPUT_PROTOCOL_GUID: Guid = Guid(
+    0x9042_A9DE,
+    0x23DC,
+    0x4A38,
+    [0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A],
+);
+
+#[repr(C)]
+struct GraphicsOutput {
+    query_mode: unsafe extern "efiapi" fn(
+        *const GraphicsOutput,
+        u32,
+        *mut usize,
+        *mut *const GraphicsModeInfo,
+    ) -> Status,
+    set_mode: unsafe extern "efiapi" fn(*const GraphicsOutput, u32) -> Status,
+    blt: usize,
+    mode: *const GraphicsMode,
+}
+const _: () = assert!(core::mem::size_of::<GraphicsOutput>() == 32);
+
+#[repr(C)]
+struct GraphicsMode {
+    max_mode: u32,
+    mode: u32,
+    info: *const GraphicsModeInfo,
+    size_of_info: usize,
+    framebuffer_base: u64,
+    framebuffer_size: usize,
+}
+const _: () = assert!(core::mem::size_of::<GraphicsMode>() == 40);
+
+#[repr(C)]
+struct GraphicsModeInfo {
+    version: u32,
+    horizontal: u32,
+    vertical: u32,
+    format: u32,
+    red_mask: u32,
+    green_mask: u32,
+    blue_mask: u32,
+    reserved_mask: u32,
+    pitch_pixels: u32,
+}
+const _: () = assert!(core::mem::size_of::<GraphicsModeInfo>() == 36);
+
+/// Capture a bounded direct-color GOP mode, preferring 800×600 and then
+/// 640×480. The firmware owns all pointers here: copy scalar facts and
+/// release every QueryMode buffer BEFORE ExitBootServices. Unsupported
+/// machines return None rather than fabricating a display. This routine
+/// never paints and never gives the kernel a firmware protocol pointer.
+pub fn graphics_output_info() -> Option<arena_kernel::handoff::Display> {
+    // SAFETY: called in the boot stage before EBS, with a live system table.
+    unsafe {
+        let bs = boot_services()?;
+        if bs.hdr.header_size < core::mem::size_of::<BootServices>() as u32 {
+            return None;
+        }
+        let mut interface = core::ptr::null();
+        if (bs.locate_protocol)(
+            &GRAPHICS_OUTPUT_PROTOCOL_GUID,
+            core::ptr::null(),
+            &mut interface,
+        ) != EFI_SUCCESS
+            || interface.is_null()
+        {
+            return None;
+        }
+        let gop = &*interface.cast::<GraphicsOutput>();
+        if gop.mode.is_null() {
+            return None;
+        }
+        let current = &*gop.mode;
+        if current.max_mode == 0 || current.max_mode > 64 {
+            return None;
+        }
+        // First valid preferred resolution, never a blind SetMode.
+        for &(w, h) in &[(800, 600), (640, 480)] {
+            for idx in 0..current.max_mode {
+                let mut size = 0usize;
+                let mut info: *const GraphicsModeInfo = core::ptr::null();
+                let status = (gop.query_mode)(gop, idx, &mut size, &mut info);
+                let wanted = status == EFI_SUCCESS
+                    && !info.is_null()
+                    && size >= core::mem::size_of::<GraphicsModeInfo>()
+                    && (*info).horizontal == w
+                    && (*info).vertical == h
+                    && (*info).format <= 1
+                    && (*info).pitch_pixels >= w
+                    && (*info).pitch_pixels <= 1024;
+                if !info.is_null() {
+                    let _ = (bs.free_pool)(info.cast::<u8>());
+                }
+                if wanted && (gop.set_mode)(gop, idx) == EFI_SUCCESS {
+                    return validated_graphics_mode(&*gop.mode);
+                }
+            }
+        }
+        // Some firmware exposes only its current mode. If it is within
+        // the bounded 2 MiB scanout budget, use it without resetting it.
+        validated_graphics_mode(current)
+    }
+}
+
+fn validated_graphics_mode(mode: &GraphicsMode) -> Option<arena_kernel::handoff::Display> {
+    // SAFETY: mode/info are firmware-owned and valid through EBS; caller is
+    // still inside this pre-EBS boot routine.
+    let info = unsafe { mode.info.as_ref()? };
+    let (w, h, pitch) = (info.horizontal, info.vertical, info.pitch_pixels);
+    if info.format > 1
+        || w == 0
+        || h == 0
+        || w > 800
+        || h > 600
+        || pitch < w
+        || pitch > 1024
+        || mode.framebuffer_base & 4095 != 0
+    {
+        return None;
+    }
+    let bytes = u64::from(pitch).checked_mul(u64::from(h))?.checked_mul(4)?;
+    if bytes > 2 * 1024 * 1024
+        || bytes > mode.framebuffer_size as u64
+        || mode.framebuffer_base.checked_add(bytes).is_none()
+    {
+        return None;
+    }
+    Some(arena_kernel::handoff::Display {
+        phys: mode.framebuffer_base,
+        bytes,
+        width: w,
+        height: h,
+        pitch_pixels: pitch,
+        format: info.format,
+    })
+}
 
 /// EFI_LOADED_IMAGE_PROTOCOL — UEFI 2.10 §9.1 (fields up to ImageSize; the
 /// rest is opaque to us). Offsets are spec-mandated and asserted below —
