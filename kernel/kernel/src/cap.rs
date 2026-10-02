@@ -92,6 +92,10 @@ pub enum CapObj {
     /// registry is kernel-side and fixed; a filesystem-backed source
     /// arrives later without changing this shape.
     Image { img_id: u32 },
+    /// ADR-0056: disjoint, kernel-embedded graphics service bytes. This is
+    /// never a dynamic Image ID, does not take a registrar, and does not
+    /// consume the one-unretired-dynamic-child budget. READ gates spawn.
+    BootImage { index: u32 },
     /// ADR-0055: possession of WRITE, not process identity, authorizes
     /// exact copied-image registration and full-ID revocation.
     ImageRegistrar,

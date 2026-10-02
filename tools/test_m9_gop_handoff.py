@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Phase-9 boot-only GOP handoff probe; NOT a graphics milestone proof.
+"""Phase-9 GOP discovery plus first actual ring-3 display-pixel proof.
 
-No user display service is present yet. The actual virtual screen is
-captured with QMP and its geometry compared to the independently captured
-UEFI scalar handoff, without pretending this boot drew application pixels.
+The framebuffer screen is captured via QMP *after* userspace displayd has
+mapped its exclusive Mmio cap and painted the fixed bounded test bars. This
+is not yet a compositor, SharedRegion, input, or virtio-gpu proof.
 """
 import re
 import sys
@@ -27,7 +27,8 @@ def capture() -> bytes:
 def main():
     esp = mtest.build(LABEL)
     disk = arena_env.make_scratch_disk()
-    rc, s, elapsed = mtest.boot(LABEL, esp, [(b'arena>', 1, capture)], disk)
+    rc, s, elapsed = mtest.boot(LABEL, esp,
+                               [(b'[displayd] ring3 GOP pixels ready', 1, capture)], disk)
     marker = re.search(r'GOP handoff: (\d+)x(\d+) pitch=(\d+) format=(\d+) phys=0x([0-9a-f]+) bytes=(\d+)', s)
     assert rc == 0 and marker is not None and 'm7: RESULT PASS (2/2)' in s
     assert '[arena ERROR halt]' not in s and 'PANIC' not in s
@@ -38,10 +39,21 @@ def main():
     header = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s',ppm)
     assert header and (int(header[1]),int(header[2]))==(w,h)
     assert len(ppm)-header.end() == w*h*3
+    def pixel(x, y):
+        pos = header.end() + (y*w+x)*3
+        return tuple(ppm[pos:pos+3])
+    # Colors originate from userspace/displayd/src/main.rs, not OVMF's
+    # firmware splash/background; exact bytes across four distant regions.
+    for xy, expected in [((0,0),(0x22,0x33,0x55)),
+                         ((0,100),(0xe3,0x35,0x42)),
+                         ((400,100),(0x2e,0xc7,0x71)),
+                         ((799,599),(0x3b,0x67,0xe1))]:
+        assert pixel(*xy) == expected, (xy, pixel(*xy), expected)
     no_display = arena_env.make_scratch_disk()
     rc2, s2, _ = mtest.boot(f'{LABEL}-absent', esp,
                             [(b'arena>', 1, b'shutdown\r')], no_display, video='none')
     assert rc2 == 0 and 'GOP handoff: unavailable or unsupported mode' in s2
+    assert '[displayd] ring3 GOP pixels ready' not in s2
     assert 'm7: RESULT PASS (2/2)' in s2 and '[arena ERROR halt]' not in s2
-    print(f'[{LABEL}] real QMP display {w}x{h} agrees with pre-EBS GOP {pitch=}, {fmt=}, phys=0x{phys:x}; no-VGA boot reports absent without fake acceleration; both guest boots clean; no compositor/pixel claim',flush=True)
+    print(f'[{LABEL}] real QMP {w}x{h} capture matches four ring-3 rendered GOP pixel regions; no-VGA boot reports absence; both boots clean; no compositor, virtio-gpu, SharedRegion or input claim',flush=True)
 if __name__=='__main__':main()

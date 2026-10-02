@@ -28,8 +28,10 @@ def main() -> int:
               and "m8: stackstress PASS" in serial and counters is not None
               # Phase 8.3 was 11/11; ADR-0053 deliberately adds exactly
               # one resident, cap-audited packaged child. No probe/app
-              # survives to inflate this measured 12/12 baseline.
-              and counters[1:] == (12, 12)
+              # survives to inflate this measured baseline. ADR-0056 adds
+              # one isolated boot-root display service (one process and
+              # spawn record), without changing dynamic-child limits.
+              and counters[1:] == (13, 13)
               and "servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)" in serial
               and "packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified" in serial
               and "servicemgr: permission PING result + exit before deadline; worker reaped" in serial

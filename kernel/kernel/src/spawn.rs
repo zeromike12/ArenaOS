@@ -45,6 +45,21 @@ pub const MAX_INHERIT: usize = 5;
 pub const MAX_SPAWN_RECS: usize = 20;
 /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
 pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
+/// Separate from ALL Image IDs, including future dynamic u32 values.
+pub const MAX_BOOT_IMAGES: u32 = 4;
+pub fn boot_image_live(index: u32) -> bool {
+    index < MAX_BOOT_IMAGES && boot_image_bytes(index).is_some()
+}
+
+fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
+    match index {
+        0 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/displayd/target/x86_64-unknown-none/release/arena-displayd"
+        ))),
+        _ => None,
+    }
+}
 
 /// The kernel-side image registry (ADR-0019/0020/0022): image 0 is the
 /// embedded test payload — the same bytes the M4.1–M4.3 suites parse,
@@ -255,17 +270,20 @@ impl Drop for LoaderPin {
     }
 }
 
-fn prepare(img_id: u32) -> Result<Prepared, Status> {
+fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
+    let dynamic = boot_index.is_none() && img_id >= DYNAMIC_FIRST_ID;
     // 1. Resolve full LIVE ID and pin immutable kernel bytes BEFORE
     // allocating. The guard covers validate/load and every rollback;
     // revoke/last-ref can retire storage only after this pin drains.
-    let bytes = if img_id >= DYNAMIC_FIRST_ID {
+    let bytes = if let Some(idx) = boot_index {
+        boot_image_bytes(idx).ok_or(STATUS_BAD_ARG)?
+    } else if dynamic {
         crate::image_registry::pin(img_id).ok_or(STATUS_BAD_ARG)?
     } else {
         image_bytes(img_id).ok_or(STATUS_BAD_ARG)?
     };
-    let _pin = LoaderPin((img_id >= DYNAMIC_FIRST_ID).then_some(img_id));
-    if img_id >= DYNAMIC_FIRST_ID {
+    let _pin = LoaderPin(dynamic.then_some(img_id));
+    if dynamic {
         without_interrupts(|| unsafe {
             assert!(
                 (*LOADER_OWNER.get()).is_none(),
@@ -304,7 +322,7 @@ fn prepare(img_id: u32) -> Result<Prepared, Status> {
         // dynamic spawn until the Process-cap finish path calls `forget`.
         // This IF=0 scan happens BEFORE record, process, frame or Process
         // cap reservation; boot/embedded spawns do not consume the bound.
-        if img_id >= DYNAMIC_FIRST_ID && recs.iter().any(|r| r.live && r.dynamic_img_id.is_some()) {
+        if dynamic && recs.iter().any(|r| r.live && r.dynamic_img_id.is_some()) {
             return None;
         }
         let Some(i) = recs.iter().position(|r| !r.live) else {
@@ -312,7 +330,7 @@ fn prepare(img_id: u32) -> Result<Prepared, Status> {
         };
         recs[i] = SpawnRec {
             live: true,
-            dynamic_img_id: (img_id >= DYNAMIC_FIRST_ID).then_some(img_id),
+            dynamic_img_id: dynamic.then_some(img_id),
             ..EMPTY_REC
         };
         Some(i)
@@ -415,7 +433,31 @@ pub fn spawn_from(
     inherit: &[(u64, u64)],
     notif: Option<(u32, u64)>,
 ) -> Result<u64, Status> {
-    let half = prepare(img_id)?;
+    spawn_from_source(parent, img_id, None, inherit, notif)
+}
+
+/// Only a held BootImage/READ cap reaches this path; there is no bare
+/// numeric-index syscall and no change to dynamic Image ID allocation.
+pub fn spawn_boot_from(
+    parent: u64,
+    index: u32,
+    inherit: &[(u64, u64)],
+    notif: Option<(u32, u64)>,
+) -> Result<u64, Status> {
+    if index >= MAX_BOOT_IMAGES {
+        return Err(STATUS_BAD_ARG);
+    }
+    spawn_from_source(parent, 0, Some(index), inherit, notif)
+}
+
+fn spawn_from_source(
+    parent: u64,
+    img_id: u32,
+    boot_index: Option<u32>,
+    inherit: &[(u64, u64)],
+    notif: Option<(u32, u64)>,
+) -> Result<u64, Status> {
+    let half = prepare(img_id, boot_index)?;
 
     // 4. Explicit handle inheritance: delegation-by-copy under the
     //    ADR-0015 attenuation rule — the source must hold COPY, and any
@@ -509,7 +551,30 @@ pub fn spawn_init(
     grants: &[Cap],
     notif: Option<(u32, u64)>,
 ) -> Result<u64, &'static str> {
-    let half = match prepare(img_id) {
+    spawn_init_source(img_id, None, grants, notif)
+}
+
+/// Kernel boot grants for the disjoint embedded service namespace. These
+/// grants are literal caps; the service never inherits ambient framebuffer
+/// or input access based on its image index or process name.
+pub fn spawn_init_boot(
+    index: u32,
+    grants: &[Cap],
+    notif: Option<(u32, u64)>,
+) -> Result<u64, &'static str> {
+    if index >= MAX_BOOT_IMAGES {
+        return Err("spawn_init_boot: index out of range");
+    }
+    spawn_init_source(0, Some(index), grants, notif)
+}
+
+fn spawn_init_source(
+    img_id: u32,
+    boot_index: Option<u32>,
+    grants: &[Cap],
+    notif: Option<(u32, u64)>,
+) -> Result<u64, &'static str> {
+    let half = match prepare(img_id, boot_index) {
         Ok(h) => h,
         Err(status) => {
             error!(

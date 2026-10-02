@@ -882,6 +882,37 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
+    // ADR-0056: one independent userspace display service; only this
+    // process owns the framebuffer Mmio capability. No framebuffer cap is
+    // copied to the shell, the manager or a package child. Absent GOP is
+    // a clean headless boot, not a fake linear framebuffer.
+    if let Some(mode) = crate::handoff::display() {
+        if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
+            crate::halt::halt_machine("displayd: invalid GOP handoff bounds");
+        }
+        let eid = crate::ipc::create_endpoint()
+            .unwrap_or_else(|_| crate::halt::halt_machine("displayd: endpoint table full"));
+        let grants = [
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Mmio {
+                    phys: mode.phys,
+                    pages: mode.bytes.div_ceil(4096) as u32,
+                },
+                rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+            },
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Endpoint { eid },
+                rights: crate::cap::RIGHTS_READ,
+            },
+        ];
+        let display_pid = crate::spawn::spawn_init_boot(0, &grants, None)
+            .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+        info!(
+            "kernel",
+            "displayd spawned: pid {display_pid}; GOP-only Mmio and Endpoint/R; no other service receives framebuffer access"
+        );
+    }
+
     // ADR-0051/0053: production fsd and package approval markers are
     // separate. 18 notifications at capacity; the nineteenth must be
     // a typed refusal, never silent over-allocation;

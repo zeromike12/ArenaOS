@@ -1,0 +1,17 @@
+[package]
+name = "arena-displayd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS Phase-9 userspace GOP fallback display service"
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "arena-displayd"
+path = "src/main.rs"

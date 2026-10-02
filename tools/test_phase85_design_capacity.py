@@ -107,7 +107,9 @@ def cap_projection() -> None:
     assert 'const BUFFER: u64 = 7;' in packaged and 'const LENT: u64 = 8;' in packaged
     assert 'pub const MAX_PROCESSES: usize = 32;' in (ROOT/'kernel/kernel/src/proc.rs').read_text()
     ipc=(ROOT/'kernel/kernel/src/ipc.rs').read_text()
-    assert 'pub const MAX_ENDPOINTS: usize = 10;' in ipc
+    # ADR-0056 adds exactly two disjoint graphics endpoints without
+    # disturbing the ten Phase-8.5 endpoint slots or raising CAP_SLOTS.
+    assert 'pub const MAX_ENDPOINTS: usize = 12;' in ipc
     assert 'pub const MAX_NOTIFS: usize = 18;' in ipc  # accepted marker is actually allocated.
     # Source-anchored upper schedule: actual manager 22 literal boot caps,
     # including registrar and lifecycle-admin marker. Conservatively

@@ -229,6 +229,14 @@ DEPCHECK_ELF="$REPO_ROOT/userspace/depcheck/target/x86_64-unknown-none/release/a
 test -f "$DEPCHECK_ELF"
 echo "depcheck image: ${DEPCHECK_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DEPCHECK_ELF") bytes)"
 
+# ADR-0056: disjoint static boot-image namespace, built before kernel
+# include_bytes! exactly like historical embedded images 0..26.
+echo "== building Phase-9 userspace display service (GOP fallback) =="
+( cd "$REPO_ROOT/userspace/displayd" && cargo build --release )
+DISPLAY_ELF="$REPO_ROOT/userspace/displayd/target/x86_64-unknown-none/release/arena-displayd"
+test -f "$DISPLAY_ELF"
+echo "display image: ${DISPLAY_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DISPLAY_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG

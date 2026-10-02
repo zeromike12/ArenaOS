@@ -29,6 +29,8 @@ pub const SYS_PROC_LIST: u64 = 14;
 pub const SYS_SHUTDOWN: u64 = 15;
 pub const SYS_ALLOC_FRAME: u64 = 16;
 pub const SYS_MAP_MEMORY: u64 = 17;
+/// ADR-0056: exact held GOP Mmio/READ grants five u64 geometry words.
+pub const SYS_DISPLAY_INFO: u64 = 35;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;

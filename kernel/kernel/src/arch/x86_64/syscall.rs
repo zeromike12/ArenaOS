@@ -153,6 +153,8 @@ pub const SYS_TRY_WAIT: u64 = 32;
 /// ADR-0055: possession-gated volatile Image registry (additive ABI v1).
 pub const SYS_IMAGE_REGISTER: u64 = 33;
 pub const SYS_IMAGE_REVOKE: u64 = 34;
+/// ADR-0056: information only for a held exact GOP framebuffer Mmio/READ.
+pub const SYS_DISPLAY_INFO: u64 = 35;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -658,6 +660,7 @@ extern "C" fn syscall_dispatch(
         SYS_TRY_WAIT => sys_try_wait(a0) as u64,
         SYS_IMAGE_REGISTER => sys_image_register(a0, a1, a2, a3, a4, a5) as u64,
         SYS_IMAGE_REVOKE => sys_image_revoke(a0, a1, a2, a3, a4, a5) as u64,
+        SYS_DISPLAY_INFO => sys_display_info(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1165,20 +1168,25 @@ fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     if img_cap.rights & crate::cap::RIGHTS_READ == 0 {
         return STATUS_BAD_ARG;
     }
-    let crate::cap::CapObj::Image { img_id } = img_cap.obj else {
-        return STATUS_BAD_ARG;
+    let source = match img_cap.obj {
+        crate::cap::CapObj::Image { img_id } => {
+            // Full-ID liveness wins over BUSY for stale copies. A second
+            // dynamic child refuses before any loader/resource reservation.
+            if img_id >= crate::image_registry::FIRST {
+                if !crate::image_registry::live(img_id) {
+                    return STATUS_BAD_ARG;
+                }
+                if crate::spawn::unretired_dynamic_child() {
+                    return STATUS_BUSY;
+                }
+            }
+            (img_id, false)
+        }
+        crate::cap::CapObj::BootImage { index } if crate::spawn::boot_image_live(index) => {
+            (index, true)
+        }
+        _ => return STATUS_BAD_ARG,
     };
-    // Full-ID liveness wins over BUSY for stale copies. A second dynamic
-    // child is refused *before* loader pin, record, process, frame or cap
-    // reservation. prepare repeats this IF=0 check at its record commit.
-    if img_id >= crate::image_registry::FIRST {
-        if !crate::image_registry::live(img_id) {
-            return STATUS_BAD_ARG;
-        }
-        if crate::spawn::unretired_dynamic_child() {
-            return STATUS_BUSY;
-        }
-    }
     // The inheritance spec lives in the caller's memory: page-validate,
     // then read it under STAC in THIS (the caller's own) context.
     if a2 > crate::spawn::MAX_INHERIT as u64 {
@@ -1221,7 +1229,12 @@ fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
         }
         Some((nid, a4))
     };
-    match crate::spawn::spawn_from(pid, img_id, &spec[..n], notif) {
+    let created = if source.1 {
+        crate::spawn::spawn_boot_from(pid, source.0, &spec[..n], notif)
+    } else {
+        crate::spawn::spawn_from(pid, source.0, &spec[..n], notif)
+    };
+    match created {
         Ok(child_pid) => child_pid as Status, // pid > 0 = success payload
         Err(status) => status,
     }
@@ -1893,6 +1906,55 @@ fn sys_irq_relay(a0: u64, a1: u64, a2: u64, a3: u64) -> Status {
     vector as Status
 }
 
+/// ADR-0056: scalar geometry is disclosable only to the holder of the
+/// *exact* GOP Mmio window; this never mints a mapping or a device cap.
+fn sys_display_info(slot: u64, output: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Some(d) = crate::handoff::display() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::Mmio { phys, pages } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0
+        || phys != d.phys
+        || u64::from(pages) * 4096 < d.bytes
+    {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(output, 40) {
+        return STATUS_BAD_ADDRESS;
+    }
+    // SAFETY: validated caller-owned 40-byte region, five plain scalars;
+    // no untrusted pointer is dereferenced without paired STAC/CLAC.
+    unsafe {
+        super::stac();
+        let dst = output as *mut u64;
+        for (i, value) in [
+            u64::from(d.width),
+            u64::from(d.height),
+            u64::from(d.pitch_pixels),
+            u64::from(d.format),
+            d.bytes,
+        ]
+        .iter()
+        .enumerate()
+        {
+            core::ptr::write_unaligned(dst.add(i), *value);
+        }
+        super::clac();
+    }
+    STATUS_OK
+}
+
 /// SYS_CAP_PHYS(slot): the physical address a memory-kind cap names
 /// (`Untyped` owned OR lent, `Memory`, `Mmio`). Needs READ. This is the
 /// zero-copy DMA seam: a driver points a device at a caller's buffer
@@ -1938,6 +2000,9 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
             (1u64, u64::from(img_id))
         }
         crate::cap::CapObj::ImageRegistrar if crate::image_registry::registrar_alive() => (5, 0),
+        crate::cap::CapObj::BootImage { index } if crate::spawn::boot_image_live(index) => {
+            (6, u64::from(index))
+        }
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {
