@@ -898,3 +898,35 @@ Run `python3 tools/checkpoint_bundle.py phase85-complete
 build/phase85-qualified-suite.log` only after those gates: it rejects a
 missing/stale receipt, verifies internal archive checksums, independently
 extracts and boots bundled ESP/firmware/formatted disk.
+
+## Phase 9 partial graphics gates (NOT a completed milestone)
+
+ADR-0056 and ADR-0057 describe the authority and remaining exit criteria.
+The current standalone `no_std` toolkit has bounded clipping/text and a
+linked 5×7 owned glyph renderer. Displayd stages its GOP fallback frame in
+a checked SharedRegion RAM mapping before copying pixels to its exclusive
+MMIO window with volatile stores. This is **not** the planned compositor,
+virtio-gpu, two-window demo or graphical keyboard route.
+
+Run `source tools/dev-env/env.sh`, then `python3 tools/test_m9_gfxkit.py`,
+`python3 tools/test_m9_compositor_model.py` (host-only pure state model,
+**not** a compositor service), `python3 tools/test_m9_gop_handoff.py`,
+`python3 tools/test_m9_font_red.py` and
+`python3 tools/test_m9_shared_ref_hook.py`. The GOP check captures an
+actual QMP PPM and checks width, full byte length, distant colored pixels
+and both a bitmap glyph foreground/background sample. The font RED test
+alters an actual shipping glyph before building/booting, requires the
+**real QMP pixel** assertion to reject it, restores source/EFI/ESP and
+boots the green image. The SharedRegion hook control omits one real
+production retirement credit and requires an independent guest
+conservation halt, then restores/boots green. The headless GOP absence
+fixture must boot cleanly without any false graphical PASS claim.
+
+`tools/stability_loop.sh N` now captures and validates QMP pixels on every
+boot; it is not a completion receipt until **after** the final code change,
+all historical plus Phase-9 targeted suites pass, and a fresh exact-EFI
+100/100 run exercises the actual compositor, font, both clients and real
+injected input. A green GOP-only stability loop is merely a precursor.
+The `phase9-complete` archive must independently extract and boot with a
+freshly captured, asserted display image. Never reuse a Phase-8.5 receipt,
+a pre-final Phase-9 hash or a synthetic PPM as this qualification.
