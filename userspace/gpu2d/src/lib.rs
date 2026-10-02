@@ -425,6 +425,34 @@ mod tests {
         assert_eq!(response_no_data(&ok, HEADER), Err(WireError::WrongResponse));
     }
     #[test]
+    fn short_hostile_response_fuzz_never_reads_past_used_length() {
+        let mut bytes = [0u8; DISPLAY_REPLY];
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        for length in 0..=DISPLAY_REPLY {
+            for b in &mut bytes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *b = state as u8;
+            }
+            let _ = response_display_info(&bytes[..length], length);
+            let _ = response_no_data(&bytes[..length], length);
+            if length < DISPLAY_REPLY {
+                assert_eq!(
+                    response_display_info(&bytes, length),
+                    Err(WireError::MalformedResponse)
+                );
+            }
+            if length != HEADER {
+                assert_eq!(
+                    response_no_data(&bytes, length),
+                    Err(WireError::MalformedResponse)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn display_response_only_one_checked_mode() {
         let mut b = [0u8; DISPLAY_REPLY];
         put32(&mut b, 0, OK_DISPLAY_INFO);

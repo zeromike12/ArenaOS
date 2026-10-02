@@ -20,7 +20,7 @@ def main():
          '--release', '--target', 'x86_64-unknown-none'],
     ):
         subprocess.run(command, cwd=ROOT, env=env, check=True)
-    print('[m9-gpu2d-wire] 3/3 strict wire format/refusal tests, fmt/clippy, '
+    print('[m9-gpu2d-wire] 4/4 strict wire format/refusal/fuzz tests, fmt/clippy, '
           'bare-metal no_std build PASS; device transport/guest pixels pending')
 
 
