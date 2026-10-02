@@ -96,6 +96,14 @@ pub enum CapObj {
     /// never a dynamic Image ID, does not take a registrar, and does not
     /// consume the one-unretired-dynamic-child budget. READ gates spawn.
     BootImage { index: u32 },
+    /// ADR-0056: a generation-checked, physically owned RAM run. The
+    /// registry owns frames until both caps and mapping pins are gone.
+    SharedRegion { id: u32 },
+    /// Grants allocation (WRITE); never grants physical access by itself.
+    MemoryPool,
+    /// A separate bearer for physical backing queries (READ); only the
+    /// display service receives this, and must also hold the region cap.
+    SharedDma,
     /// ADR-0055: possession of WRITE, not process identity, authorizes
     /// exact copied-image registration and full-ID revocation.
     ImageRegistrar,
@@ -235,6 +243,7 @@ pub fn grant(pid: u64, cap: Cap) -> Result<usize, &'static str> {
                 return Err("capability space full (CAP_SLOTS)");
             };
             crate::image_registry::add_cap(cap);
+            crate::shared::add_cap(cap);
             cs.slots[slot] = cap;
             cs.ipc_landed[slot] = false;
             Ok(slot)
@@ -562,9 +571,11 @@ fn install(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
             // Credit the incoming reference before retiring the old one:
             // moving the last LIVE Image cap cannot transiently retire it.
             crate::image_registry::add_cap(cap);
+            crate::shared::add_cap(cap);
             let old = *entry;
             *entry = cap;
             crate::image_registry::drop_cap(old);
+            crate::shared::drop_cap(old);
             cs.ipc_landed[slot] = false;
             Ok(())
         })

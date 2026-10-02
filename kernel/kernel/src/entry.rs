@@ -382,6 +382,11 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 7 suite failed");
     }
 
+    // ADR-0056: run the bounded ring-3 SharedRegion capacity/teardown
+    // probe before ANY production residents start. Exact resource delta
+    // then belongs to this process, not asynchronously starting drivers.
+    run_shared_probe();
+
     // --- M5.2: the production block service (ADR-0022) ----------------------
     // storaged — the userspace virtio-blk driver — starts at boot as a
     // resident service: the kernel mints its device window (an Mmio cap
@@ -757,6 +762,10 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     } else {
         &shell_grants
     };
+    // A real, parked ring-3 server has already painted and finished its
+    // bounded allocation before shell/manager resource commands can run.
+    // This avoids a one-frame startup race across historical reboot tests.
+    start_boot_display();
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     if expected_stack_caps.is_some() {
@@ -879,37 +888,6 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         info!(
             "m8",
             "lifecycle protected refs shell={shell_pid} manager={manager_pid} netd={net} rngd={rng}; foreign placeholder READ-only"
-        );
-    }
-
-    // ADR-0056: one independent userspace display service; only this
-    // process owns the framebuffer Mmio capability. No framebuffer cap is
-    // copied to the shell, the manager or a package child. Absent GOP is
-    // a clean headless boot, not a fake linear framebuffer.
-    if let Some(mode) = crate::handoff::display() {
-        if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
-            crate::halt::halt_machine("displayd: invalid GOP handoff bounds");
-        }
-        let eid = crate::ipc::create_endpoint()
-            .unwrap_or_else(|_| crate::halt::halt_machine("displayd: endpoint table full"));
-        let grants = [
-            crate::cap::Cap {
-                obj: crate::cap::CapObj::Mmio {
-                    phys: mode.phys,
-                    pages: mode.bytes.div_ceil(4096) as u32,
-                },
-                rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
-            },
-            crate::cap::Cap {
-                obj: crate::cap::CapObj::Endpoint { eid },
-                rights: crate::cap::RIGHTS_READ,
-            },
-        ];
-        let display_pid = crate::spawn::spawn_init_boot(0, &grants, None)
-            .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
-        info!(
-            "kernel",
-            "displayd spawned: pid {display_pid}; GOP-only Mmio and Endpoint/R; no other service receives framebuffer access"
         );
     }
 
@@ -1041,6 +1019,122 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         // and the interrupt gate masks IF again for the handler.
         unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
     }
+}
+
+/// Boot-root GOP fallback only. A parked endpoint is a *synchronization*
+/// witness for the static fixture, not a substitute for a receiver-checked
+/// user-space service readiness protocol. Headless boots skip this service.
+fn start_boot_display() {
+    // ADR-0056: one independent userspace display service; only this
+    // process owns the framebuffer Mmio capability. No framebuffer cap is
+    // copied to the shell, the manager or a package child. Absent GOP is
+    // a clean headless boot, not a fake linear framebuffer.
+    if let Some(mode) = crate::handoff::display() {
+        if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
+            crate::halt::halt_machine("displayd: invalid GOP handoff bounds");
+        }
+        let eid = crate::ipc::create_endpoint()
+            .unwrap_or_else(|_| crate::halt::halt_machine("displayd: endpoint table full"));
+        let grants = [
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Mmio {
+                    phys: mode.phys,
+                    pages: mode.bytes.div_ceil(4096) as u32,
+                },
+                rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+            },
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Endpoint { eid },
+                rights: crate::cap::RIGHTS_READ,
+            },
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::MemoryPool,
+                rights: crate::cap::RIGHTS_WRITE,
+            },
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::SharedDma,
+                rights: crate::cap::RIGHTS_READ,
+            },
+        ];
+        let display_pid = crate::spawn::spawn_init_boot(0, &grants, None)
+            .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+        info!(
+            "kernel",
+            "displayd spawned: pid {display_pid}; GOP-only Mmio and Endpoint/R; no other service receives framebuffer access"
+        );
+        let was_if = crate::arch::x86_64::interrupts_enabled();
+        crate::arch::x86_64::sti();
+        let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+        while !crate::ipc::parked_server(eid, display_pid) {
+            if crate::sched::proc_live_threads(display_pid) == 0
+                || crate::timekeeping::now_us() >= deadline
+            {
+                crate::halt::halt_machine(
+                    "displayd: no painted, parked ring-3 service by deadline",
+                );
+            }
+            crate::sched::yield_now();
+        }
+        if !was_if {
+            crate::arch::x86_64::cli();
+        }
+    }
+}
+
+/// A short-lived *guest* capacity proof, not a kernel-side allocator model.
+/// The kernel checks the observed exit code and independently reclaims its
+/// page tables, caps, mapping pins, contiguous physical runs and record.
+fn run_shared_probe() {
+    let frames_before = crate::frames::free_frames();
+    let records_before = crate::spawn::records_snapshot()
+        .iter()
+        .filter(|rec| rec.is_some())
+        .count();
+    let processes_before = crate::proc::live_count();
+    let grants = [crate::cap::Cap {
+        obj: crate::cap::CapObj::MemoryPool,
+        rights: crate::cap::RIGHTS_WRITE,
+    }];
+    let pid = crate::spawn::spawn_init_boot(1, &grants, None)
+        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    let tid = crate::spawn::records_snapshot()
+        .iter()
+        .flatten()
+        .find_map(|&(child, thread)| (child == pid).then_some(thread))
+        .unwrap_or_else(|| crate::halt::halt_machine("sharedprobe: no spawn thread record"));
+    let was_if = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+    while crate::sched::proc_live_threads(pid) != 0 {
+        if crate::timekeeping::now_us() >= deadline {
+            crate::halt::halt_machine("sharedprobe: guest did not exit by deadline");
+        }
+        crate::sched::yield_now();
+    }
+    crate::sched::yield_now();
+    if !was_if {
+        crate::arch::x86_64::cli();
+    }
+    if crate::arch::x86_64::syscall::exit_status_of(tid) != Some(42) {
+        crate::halt::halt_machine("sharedprobe: ring3 refusal/rights/zero assertion failed");
+    }
+    crate::proc::destroy(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::spawn::forget(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::shared::assert_conservation();
+    if crate::frames::free_frames() != frames_before
+        || crate::spawn::records_snapshot()
+            .iter()
+            .filter(|rec| rec.is_some())
+            .count()
+            != records_before
+        || crate::proc::live_count() != processes_before
+    {
+        crate::halt::halt_machine("sharedprobe: teardown not resource-exact");
+    }
+    info!(
+        "m9",
+        "SharedRegion guest 512-page zero/authority/capacity refusals; dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)"
+    );
 }
 
 /// The fixed kernel trust root for the Phase 8.0 manager. On a machine

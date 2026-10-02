@@ -701,7 +701,7 @@ pub unsafe fn destroy_user_half(pml4_phys: u64) -> usize {
                         // Those pages are never ours to free; RAM leaves
                         // are reclaimed exactly as before.
                         let leaf = e1 & ADDR_MASK;
-                        if frames::is_ram(leaf) {
+                        if frames::is_ram(leaf) && !crate::shared::is_backing(leaf) {
                             halt_free(frames::free(leaf));
                             freed += 1;
                         }

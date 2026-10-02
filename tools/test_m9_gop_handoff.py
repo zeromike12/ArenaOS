@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Phase-9 GOP discovery plus first actual ring-3 display-pixel proof.
+"""Phase-9 GOP pixels and bounded SharedRegion guest smoke proof.
 
 The framebuffer screen is captured via QMP *after* userspace displayd has
-mapped its exclusive Mmio cap and painted the fixed bounded test bars. This
-is not yet a compositor, SharedRegion, input, or virtio-gpu proof.
+mapped its exclusive Mmio cap and painted fixed bounded bars. Its prior
+SharedRegion smoke includes zeroed pages, rights, copies and mapping pins.
+This is not yet a compositor, shared teardown, input or virtio-gpu proof.
 """
 import re
 import sys
@@ -31,6 +32,9 @@ def main():
                                [(b'[displayd] ring3 GOP pixels ready', 1, capture)], disk)
     marker = re.search(r'GOP handoff: (\d+)x(\d+) pitch=(\d+) format=(\d+) phys=0x([0-9a-f]+) bytes=(\d+)', s)
     assert rc == 0 and marker is not None and 'm7: RESULT PASS (2/2)' in s
+    assert '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' in s
+    assert '[sharedprobe] capacity/rights/zero PASS' in s
+    assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s
     assert '[arena ERROR halt]' not in s and 'PANIC' not in s
     w,h,pitch,fmt,phys,length = (int(x, 16) if i==4 else int(x) for i,x in enumerate(marker.groups()))
     assert (w,h,pitch,fmt) == (800,600,800,1)
@@ -54,6 +58,8 @@ def main():
                             [(b'arena>', 1, b'shutdown\r')], no_display, video='none')
     assert rc2 == 0 and 'GOP handoff: unavailable or unsupported mode' in s2
     assert '[displayd] ring3 GOP pixels ready' not in s2
+    assert '[sharedprobe] capacity/rights/zero PASS' in s2
+    assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s2
     assert 'm7: RESULT PASS (2/2)' in s2 and '[arena ERROR halt]' not in s2
-    print(f'[{LABEL}] real QMP {w}x{h} capture matches four ring-3 rendered GOP pixel regions; no-VGA boot reports absence; both boots clean; no compositor, virtio-gpu, SharedRegion or input claim',flush=True)
+    print(f'[{LABEL}] QMP {w}x{h} matches four ring-3 GOP regions; guest SharedRegion authority/zero/capacity + exact 512-page process teardown PASS; headless boot clean; no compositor, virtio-gpu or graphics input claim',flush=True)
 if __name__=='__main__':main()

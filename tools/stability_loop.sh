@@ -126,6 +126,19 @@ for i in $(seq 1 "$N"); do
     python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
         "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
     typist_pid=$!
+    # Phase-9 GOP fallback: per-boot INDEPENDENT QMP framebuffer capture,
+    # not just a guest serial claim. The pixel actor waits until ring-3
+    # displayd reports painted/parked, screendumps the real virtual screen
+    # and checks four exact distant RGB samples before writing a hash
+    # receipt. Shell shutdown is gated on the receipt (or a loud error).
+    PIXEL_RECEIPT="$REPO_ROOT/build/stability-pixels-boot-$i.txt"
+    PIXEL_IMAGE="$REPO_ROOT/build/stability-display-boot-$i.ppm"
+    PIXEL_ERROR="$PIXEL_RECEIPT.error"
+    rm -f "$PIXEL_RECEIPT" "$PIXEL_IMAGE" "$PIXEL_ERROR"
+    python3 "$REPO_ROOT/tools/check_phase9_pixels.py" "$QMP_SOCK" "$SERIAL" \
+        "$PIXEL_IMAGE" "$PIXEL_RECEIPT" "$BOOT_TIMEOUT" \
+        >"$REPO_ROOT/build/stability-pixel-actor.log" 2>&1 &
+    pixel_pid=$!
     # The console actor, reaped with the typist for the same reason.
     python3 "$REPO_ROOT/tools/vcon.py" "$VCON_SOCK" \
         "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" \
@@ -146,6 +159,13 @@ for i in $(seq 1 "$N"); do
         n=0
         while ! grep -aqF 'm8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)' "$SERIAL" 2>/dev/null || \
               (( $(grep -ac 'arena>' "$SERIAL" 2>/dev/null || true) < 2 )); do
+            sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
+        done
+        # A serial PASS without real QMP pixels cannot finish a graphics
+        # qualification. If the actor failed, shut down and report WHY
+        # instead of hanging until the QEMU timeout.
+        n=0
+        while [[ ! -s "$PIXEL_RECEIPT" && ! -s "$PIXEL_ERROR" ]]; do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
         printf 'shutdown\r'
@@ -170,6 +190,13 @@ for i in $(seq 1 "$N"); do
     # Reap this boot's typist before the next one starts.
     kill "$typist_pid" 2>/dev/null || true
     wait "$typist_pid" 2>/dev/null || true
+    pixel_actor_rc=0
+    wait "$pixel_pid" 2>/dev/null || pixel_actor_rc=$?
+    # Hash receipts retain evidence for every boot; preserve two actual
+    # PPMs as viewable samples without accumulating 100 full frames.
+    if (( i != 1 && i != N )) && (( pixel_actor_rc == 0 )); then
+        rm -f "$PIXEL_IMAGE"
+    fi
     kill "$vcon_pid" 2>/dev/null || true
     wait "$vcon_pid" 2>/dev/null || true
     # The peer exits when it sees the guest's orderly FIN. Reap it so
@@ -180,6 +207,10 @@ for i in $(seq 1 "$N"); do
     why=""
     if (( rc != 0 )); then
         why="qemu exit rc=$rc (timeout is 124)"
+    elif (( pixel_actor_rc != 0 )) || [[ ! -s "$PIXEL_RECEIPT" ]]; then
+        why="QMP graphical pixels were not independently verified ($(cat "$PIXEL_ERROR" 2>/dev/null || cat "$REPO_ROOT/build/stability-pixel-actor.log" 2>/dev/null || true))"
+    elif ! grep -Eq '^800x600 [0-9a-f]{64}$' "$PIXEL_RECEIPT"; then
+        why="QMP graphic pixel receipt malformed"
     elif [[ ! -f "$SERIAL" ]]; then
         why="no serial output"
     elif grep -aq 'PANIC' "$SERIAL"; then
@@ -275,6 +306,12 @@ for i in $(seq 1 "$N"); do
         why="package receiver did not scan fresh AFS1 under exact grants"
     elif ! grep -aqF 'servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)' "$SERIAL"; then
         why="package receiver did not pass result-and-exit readiness"
+    elif ! grep -aqF '[sharedprobe] capacity/rights/zero PASS' "$SERIAL" || \
+         ! grep -aqF 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' "$SERIAL"; then
+        why="bounded SharedRegion guest capacity/authority/teardown proof absent"
+    elif ! grep -aqF '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' "$SERIAL" || \
+         ! grep -aqF '[displayd] ring3 GOP pixels ready (pattern v1)' "$SERIAL"; then
+        why="isolated display service did not paint the verified QMP pixels"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then

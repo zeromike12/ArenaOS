@@ -40,19 +40,26 @@ def get(disk: Path, seq: int):
 
 
 def resource_use(serial: str):
-    """Exact boot-relative counts, not absolute UEFI-dependent free RAM.
+    """Exact post-paging boot-relative consumption; reject EBS leaks.
 
-    OVMF can hand the kernel 15 more/fewer usable frames on a different
-    boot (different initial map/key). Subtract the actual post-EBS free
-    pool before comparing, with zero tolerated *consumption* drift.
+    GOP mode selection changes OVMF's descriptor fragmentation: observed
+    real boots had 115 vs 112 regions and 8 vs 10 boot page-table frames.
+    Post-EBS free RAM is therefore before a firmware-map-shaped amount of
+    *kernel* page-table construction, not a stable resource baseline. The
+    m3 thread-churn marker is an independently checked, exact free->free
+    snapshot AFTER VM construction and BEFORE any production residents.
+    Subtract it, requiring EBS reconcile=0 and exact m3 churn on every
+    boot. This still permits ZERO later resource drift: observed 338/338
+    from m3 to stackstress across old skip/commit/no-op runs.
     """
-    start = re.findall(r"frames: post-EBS reconcile leaked 0 frame\(s\); (\d+) free", serial)
+    early = re.findall(r"frames: post-EBS reconcile leaked 0 frame\(s\); (\d+) free", serial)
+    stable = re.findall(r"thread_churn_accounting: 127 threads created/run/reaped; free frames (\d+) -> (\d+) \(exact\)", serial)
     snap = re.findall(r"m8: stackstress baseline frames=(\d+) records=(\d+) processes=(\d+)",
                       serial)
-    if len(start) != 1 or len(snap) != 1:
+    if len(early) != 1 or len(stable) != 1 or len(snap) != 1 or stable[0][0] != stable[0][1]:
         return None
     free, records, processes = map(int, snap[0])
-    return (int(start[0]) - free, records, processes)
+    return (int(stable[0][1]) - free, records, processes)
 
 
 def boot(tag: str, esp: Path, disk: Path, feed=None, kill=None):

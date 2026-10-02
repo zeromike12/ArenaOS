@@ -201,6 +201,21 @@ static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
 static ENDPOINTS: SyncCell<[Endpoint; MAX_ENDPOINTS]> = SyncCell::new([EMPTY_EP; MAX_ENDPOINTS]);
 static NOTIFS: SyncCell<[Notif; MAX_NOTIFS]> = SyncCell::new([EMPTY_NOTIF; MAX_NOTIFS]);
 
+/// Boot synchronization for an isolated server: the named live endpoint
+/// must have an actually parked receive-side thread owned by `pid`. This
+/// is not a readiness/authentication protocol for user-managed services;
+/// it only ensures the boot-root display's bounded allocation and paint
+/// have completed before the shell can run resource-snapshot commands.
+pub fn parked_server(eid: u32, pid: u64) -> bool {
+    let tid = without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())
+            .get(eid as usize)
+            .filter(|ep| ep.live && !ep.orphaned)
+            .map_or(NO_TID, |ep| ep.server)
+    });
+    tid != NO_TID && sched::proc_id_of(tid) == Some(pid)
+}
+
 /// Snapshot of the IPC counters.
 /// Is endpoint `eid` still a live kernel object? (M6.5, ADR-0028: a
 /// server dying must not take its endpoint with it — the clients'
@@ -383,6 +398,7 @@ fn take_request(
     // Queue ownership is escrowed in the local copy until landing/drop;
     // credit the recipient before releasing the staged reference.
     crate::image_registry::drop_cap(send_cap);
+    crate::shared::drop_cap(send_cap);
     // SAFETY: as above.
     without_interrupts(|| unsafe {
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
@@ -432,6 +448,7 @@ pub fn call(
             };
             let staged = send_cap.unwrap_or(Cap::EMPTY);
             crate::image_registry::add_cap(staged);
+            crate::shared::add_cap(staged);
             ep.q[qi] = CallSlot {
                 state: SlotState::Waiting,
                 caller: sched::current_thread_id(),
@@ -479,7 +496,9 @@ pub fn call(
         let slot = &mut (*ENDPOINTS.get())[eidx].q[qi];
         if slot.state == SlotState::Failed {
             crate::image_registry::drop_cap(slot.send_cap);
+            crate::shared::drop_cap(slot.send_cap);
             crate::image_registry::drop_cap(slot.reply_cap);
+            crate::shared::drop_cap(slot.reply_cap);
             *slot = EMPTY_SLOT;
             true
         } else {
@@ -512,6 +531,7 @@ pub fn call(
     };
     // The reply's local escrow stays credited until landing/drop.
     crate::image_registry::drop_cap(reply_cap);
+    crate::shared::drop_cap(reply_cap);
     Ok((reply_words, landed, reply_msg))
 }
 
@@ -667,6 +687,7 @@ pub fn reply(
             slot.reply_msg = msg;
             let staged = send_cap.unwrap_or(Cap::EMPTY);
             crate::image_registry::add_cap(staged);
+            crate::shared::add_cap(staged);
             slot.reply_cap = staged;
             slot.state = SlotState::Replied;
             Ok(slot.caller)
@@ -844,7 +865,9 @@ pub fn release_blocked_of(pid: u64) -> (usize, usize, usize) {
                         let delivered = slot.state == SlotState::Delivered;
                         let server = slot.server;
                         crate::image_registry::drop_cap(slot.send_cap);
+                        crate::shared::drop_cap(slot.send_cap);
                         crate::image_registry::drop_cap(slot.reply_cap);
+                        crate::shared::drop_cap(slot.reply_cap);
                         *slot = EMPTY_SLOT;
                         // take_request has already woken this still-live
                         // server. Preserve the cause of its otherwise

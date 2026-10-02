@@ -31,6 +31,10 @@ pub const SYS_ALLOC_FRAME: u64 = 16;
 pub const SYS_MAP_MEMORY: u64 = 17;
 /// ADR-0056: exact held GOP Mmio/READ grants five u64 geometry words.
 pub const SYS_DISPLAY_INFO: u64 = 35;
+/// ADR-0056 generic bounded physical-RAM sharing (not graphics policy).
+pub const SYS_SHARED_CREATE: u64 = 36;
+pub const SYS_SHARED_MAP: u64 = 37;
+pub const SYS_SHARED_PHYS: u64 = 38;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;

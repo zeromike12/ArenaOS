@@ -57,6 +57,10 @@ fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
             env!("CARGO_MANIFEST_DIR"),
             "/../../userspace/displayd/target/x86_64-unknown-none/release/arena-displayd"
         ))),
+        1 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/displayd/target/x86_64-unknown-none/release/sharedprobe"
+        ))),
         _ => None,
     }
 }

@@ -236,6 +236,9 @@ echo "== building Phase-9 userspace display service (GOP fallback) =="
 DISPLAY_ELF="$REPO_ROOT/userspace/displayd/target/x86_64-unknown-none/release/arena-displayd"
 test -f "$DISPLAY_ELF"
 echo "display image: ${DISPLAY_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DISPLAY_ELF") bytes)"
+SHARED_PROBE_ELF="$REPO_ROOT/userspace/displayd/target/x86_64-unknown-none/release/sharedprobe"
+test -f "$SHARED_PROBE_ELF"
+echo "shared probe image: ${SHARED_PROBE_ELF#"$REPO_ROOT"/} ($(stat -c%s "$SHARED_PROBE_ELF") bytes)"
 
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086

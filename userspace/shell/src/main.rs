@@ -906,6 +906,13 @@ fn do_ps(o: &mut Out) {
             o.str("  threads ");
             o.u64(threads);
             o.crlf();
+            // ADR-0056 adds a resident display service. The bounded Out
+            // chunk is 256 bytes, while the fixed process table permits
+            // 32 rows. Flush whole rows before saturation rather than
+            // silently omitting the shell's later table slot.
+            if o.n > 192 {
+                o.flush();
+            }
         }
     }
 }

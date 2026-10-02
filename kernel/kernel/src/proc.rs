@@ -234,7 +234,11 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             // A dying capspace drops every Image reference, including
             // inherited and IPC-landed copies, before releasing its slot.
             p.caps.each_cap(crate::image_registry::drop_cap);
+            p.caps.each_cap(crate::shared::drop_cap);
             procs[idx] = None;
+            // PTE teardown has already skipped live SharedRegion backings.
+            // Mapping pins outlive the caps, then disappear exactly once.
+            crate::shared::release_maps(pid);
             // Sweep the process's owned IRQ relays (M5.2, ADR-0022): a
             // dead driver's armed vectors must not keep notifying a dead
             // notification — the relay table entries die with the owner.

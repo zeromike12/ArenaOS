@@ -13,6 +13,8 @@ use abi::*;
 
 const SLOT_GOP: u64 = 0;
 const SLOT_EP: u64 = 1;
+const SLOT_POOL: u64 = 2;
+const SLOT_DMA: u64 = 3;
 const BOOT_PATTERN: u64 = 0x5048_3901;
 
 fn write_log(bytes: &[u8]) {
@@ -77,6 +79,68 @@ pub extern "C" fn _start() -> ! {
     {
         exit(82)
     }
+    // Stable-boundary guest probe: this is real ring-3 memory, not an
+    // allocator model. The writer loses all caps; two mappings keep its
+    // zeroed physical run alive while a read-only copy cannot write-map.
+    let mut created = [0u64; 3];
+    if unsafe { syscall3(SYS_SHARED_CREATE, SLOT_POOL, 4, created.as_mut_ptr() as u64) } != 0 {
+        exit(86)
+    }
+    let shared = created[0];
+    if shared != 4 || created[1] == 0 || created[2] != 4 * 4096 {
+        exit(87)
+    }
+    let mut backing = [0u64; 3];
+    if unsafe {
+        syscall3(
+            SYS_SHARED_PHYS,
+            shared,
+            SLOT_EP,
+            backing.as_mut_ptr() as u64,
+        )
+    } != -2
+        || unsafe { syscall1(SYS_CAP_PHYS, shared) } != -2
+        || unsafe {
+            syscall3(
+                SYS_SHARED_PHYS,
+                shared,
+                SLOT_DMA,
+                backing.as_mut_ptr() as u64,
+            )
+        } != 0
+        || backing[0] == 0
+        || backing[1] != 4
+        || backing[2] != created[1]
+    {
+        exit(88)
+    }
+    let rw = unsafe { syscall2(SYS_SHARED_MAP, shared, 1) };
+    if rw <= 0 {
+        exit(89)
+    }
+    for i in [0, 4095, 4096, 12288, 16383] {
+        if unsafe { core::ptr::read_volatile((rw as *const u8).add(i)) } != 0 {
+            exit(90)
+        }
+    }
+    unsafe { core::ptr::write_volatile((rw as *mut u8).add(12288), 0xa7) }
+    if unsafe { syscall3(SYS_CAP_COPY, shared, 5, RIGHTS_READ | RIGHTS_DESTROY) } != 0
+        || unsafe { syscall2(SYS_SHARED_MAP, 5, 1) } != -2
+    {
+        exit(91)
+    }
+    let ro = unsafe { syscall2(SYS_SHARED_MAP, 5, 0) };
+    if ro <= 0 || unsafe { core::ptr::read_volatile((ro as *const u8).add(12288)) } != 0xa7 {
+        exit(92)
+    }
+    if unsafe { syscall1(SYS_CAP_DESTROY, shared) } != 0
+        || unsafe { syscall1(SYS_CAP_DESTROY, 5) } != 0
+        || unsafe { core::ptr::read_volatile((ro as *const u8).add(12288)) } != 0xa7
+    {
+        exit(93)
+    }
+    write_log(b"[displayd] SharedRegion guest authority/zero/copy/mapping PASS\n");
+
     let va = unsafe { syscall2(SYS_MAP_MEMORY, SLOT_GOP, 1) };
     if va <= 0 {
         exit(83)

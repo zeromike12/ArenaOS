@@ -155,6 +155,10 @@ pub const SYS_IMAGE_REGISTER: u64 = 33;
 pub const SYS_IMAGE_REVOKE: u64 = 34;
 /// ADR-0056: information only for a held exact GOP framebuffer Mmio/READ.
 pub const SYS_DISPLAY_INFO: u64 = 35;
+/// ADR-0056: bounded generic RAM sharing; all operations are cap-gated.
+pub const SYS_SHARED_CREATE: u64 = 36;
+pub const SYS_SHARED_MAP: u64 = 37;
+pub const SYS_SHARED_PHYS: u64 = 38;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -661,6 +665,9 @@ extern "C" fn syscall_dispatch(
         SYS_IMAGE_REGISTER => sys_image_register(a0, a1, a2, a3, a4, a5) as u64,
         SYS_IMAGE_REVOKE => sys_image_revoke(a0, a1, a2, a3, a4, a5) as u64,
         SYS_DISPLAY_INFO => sys_display_info(a0, a1) as u64,
+        SYS_SHARED_CREATE => sys_shared_create(a0, a1, a2) as u64,
+        SYS_SHARED_MAP => sys_shared_map(a0, a1) as u64,
+        SYS_SHARED_PHYS => sys_shared_phys(a0, a1, a2) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -668,6 +675,7 @@ extern "C" fn syscall_dispatch(
         }
     };
     crate::image_registry::assert_conservation();
+    crate::shared::assert_conservation();
     result
 }
 
@@ -1955,6 +1963,184 @@ fn sys_display_info(slot: u64, output: u64) -> Status {
     STATUS_OK
 }
 
+/// SYS_SHARED_CREATE(pool_slot, pages, out[3]): allocates one zeroed,
+/// generation-safe object and mints its first cap. No numeric ID grants
+/// authority; output contains (slot, full ID, byte length).
+fn sys_shared_create(pool: u64, pages: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if pool >= crate::cap::CAP_SLOTS as u64
+        || pages == 0
+        || pages > u64::from(crate::shared::MAX_PAGES)
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(authority) = crate::cap::read(pid, pool as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if authority.obj != crate::cap::CapObj::MemoryPool
+        || authority.rights & crate::cap::RIGHTS_WRITE == 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(out, 24) {
+        return STATUS_BAD_ADDRESS;
+    }
+    // All bounded capacity checks precede physical allocation. No staged
+    // registry entry, ID or cap is consumed when the slot table is full.
+    if !crate::cap::occupancy(pid).is_some_and(|(used, total)| used < total) {
+        return STATUS_BUSY;
+    }
+    let Some((slot, id)) = crate::shared::create(pid, pages as u32) else {
+        return STATUS_BUSY;
+    };
+    // SAFETY: full 24-byte caller-owned span prevalidated under IF=0.
+    unsafe {
+        super::stac();
+        let dst = out as *mut u64;
+        for (i, value) in [slot as u64, u64::from(id), pages * 4096]
+            .iter()
+            .enumerate()
+        {
+            core::ptr::write_unaligned(dst.add(i), *value);
+        }
+        super::clac();
+    }
+    STATUS_OK
+}
+
+/// SYS_SHARED_MAP(region_slot, writable): a single NX registered user
+/// window. The bound is one region-table entry, not one entry per page.
+fn sys_shared_map(slot: u64, writable: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 || writable > 1 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::SharedRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    let required = if writable == 1 {
+        crate::cap::RIGHTS_WRITE
+    } else {
+        crate::cap::RIGHTS_READ
+    };
+    if cap.rights & required == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let Some((phys, pages)) = crate::shared::backing(id) else {
+        return STATUS_BAD_ARG;
+    };
+    let Some(root) = crate::proc::pml4_of(pid) else {
+        return STATUS_BAD_ARG;
+    };
+    let span = u64::from(pages) * 4096;
+    // The 2MiB-aligned map slot uses at most one new PT and two parent
+    // tables. IF=0 from preflight through publication; the existing
+    // mapper's OOM assertion is unreachable with this reserve count.
+    if !crate::shared::has_map_slot()
+        || crate::frames::free_frames() < 3
+        || !crate::sched::current_user_regions()
+            .iter()
+            .any(|&(lo, hi)| lo == 0 && hi == 0)
+    {
+        return STATUS_BUSY;
+    }
+    let regions = crate::sched::current_user_regions();
+    let mut va = MMAP_BASE;
+    // At most 32 live shared maps plus 16 registered private windows can
+    // occupy distinct strides. Never search an unbounded 1-TiB VA range
+    // under IF=0 on malformed or adversarial input.
+    let mut probes = 0usize;
+    let chosen = loop {
+        if probes >= crate::shared::MAX_MAPS + crate::sched::USER_REGIONS_MAX + 1 {
+            return STATUS_BUSY;
+        }
+        probes += 1;
+        let Some(end) = va.checked_add(span) else {
+            return STATUS_BUSY;
+        };
+        if end > MMAP_LIMIT {
+            return STATUS_BUSY;
+        }
+        let overlap = regions
+            .iter()
+            .any(|&(lo, hi)| (lo != 0 || hi != 0) && va < hi && lo < end);
+        let used = (0..u64::from(pages))
+            .any(|i| unsafe { crate::arch::x86_64::paging::user_va_mapped(root, va + i * 4096) });
+        if !overlap && !used {
+            break va;
+        }
+        va += MMAP_STRIDE;
+    };
+    for i in 0..u64::from(pages) {
+        // SAFETY: exclusive IF=0, validated fresh VA and allocator-owned
+        // contiguous physical range; NX regardless of cap rights.
+        unsafe {
+            crate::arch::x86_64::paging::map_user_page_4k(
+                root,
+                chosen + i * 4096,
+                phys + i * 4096,
+                writable == 1,
+                false,
+            )
+            .unwrap_or_else(|_| crate::halt::halt_machine("SharedRegion map after preflight"));
+            super::invlpg(chosen + i * 4096);
+        }
+    }
+    crate::sched::append_current_user_region(chosen, chosen + span)
+        .unwrap_or_else(|_| crate::halt::halt_machine("SharedRegion region after preflight"));
+    crate::shared::pin_map(id, pid, chosen);
+    chosen as Status
+}
+
+/// DMA is a second, independent designation. The caller must hold both a
+/// READ region reference and the display server's SharedDma/READ bearer.
+fn sys_shared_phys(region: u64, dma: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if region >= crate::cap::CAP_SLOTS as u64 || dma >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(rc) = crate::cap::read(pid, region as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(dc) = crate::cap::read(pid, dma as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::SharedRegion { id } = rc.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if rc.rights & crate::cap::RIGHTS_READ == 0
+        || dc.obj != crate::cap::CapObj::SharedDma
+        || dc.rights & crate::cap::RIGHTS_READ == 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Some((phys, pages)) = crate::shared::backing(id) else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_ok(out, 24) {
+        return STATUS_BAD_ADDRESS;
+    }
+    // SAFETY: prevalidated caller output and two independent held caps.
+    unsafe {
+        super::stac();
+        let dst = out as *mut u64;
+        for (i, value) in [phys, u64::from(pages), u64::from(id)].iter().enumerate() {
+            core::ptr::write_unaligned(dst.add(i), *value);
+        }
+        super::clac();
+    }
+    STATUS_OK
+}
+
 /// SYS_CAP_PHYS(slot): the physical address a memory-kind cap names
 /// (`Untyped` owned OR lent, `Memory`, `Mmio`). Needs READ. This is the
 /// zero-copy DMA seam: a driver points a device at a caller's buffer
@@ -2003,6 +2189,11 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         crate::cap::CapObj::BootImage { index } if crate::spawn::boot_image_live(index) => {
             (6, u64::from(index))
         }
+        crate::cap::CapObj::SharedRegion { id } if crate::shared::backing(id).is_some() => {
+            (7, u64::from(id))
+        }
+        crate::cap::CapObj::MemoryPool => (8, 0),
+        crate::cap::CapObj::SharedDma => (9, 0),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {
