@@ -1021,64 +1021,193 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     }
 }
 
-/// Boot-root GOP fallback only. A parked endpoint is a *synchronization*
-/// witness for the static fixture, not a substitute for a receiver-checked
-/// user-space service readiness protocol. Headless boots skip this service.
+/// One boot-root graphics service: explicit optional GOP and/or modern 2D
+/// virtio GPU. A capability BAR, not the PCI numeric address, is delegated.
+/// The endpoint is parked before boot continues; graphical readiness is a
+/// separate service concern, never inferred from the mere presence of a BAR.
 fn start_boot_display() {
-    // ADR-0056: one independent userspace display service; only this
-    // process owns the framebuffer Mmio capability. No framebuffer cap is
-    // copied to the shell, the manager or a package child. Absent GOP is
-    // a clean headless boot, not a fake linear framebuffer.
-    if let Some(mode) = crate::handoff::display() {
+    let gop = crate::handoff::display();
+    if let Some(mode) = gop {
         if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
             crate::halt::halt_machine("displayd: invalid GOP handoff bounds");
         }
-        let eid = crate::ipc::create_endpoint()
-            .unwrap_or_else(|_| crate::halt::halt_machine("displayd: endpoint table full"));
-        let grants = [
-            crate::cap::Cap {
+    }
+    // Refusal-only filter before granting any BAR: a single common BAR
+    // covers *all* four checked virtio structures, is aligned MMIO, and
+    // has a bounded map size. SYS_DEV_INFO rechecks held-cap coverage for
+    // every caller, rather than trusting this boot-time discovery.
+    let gpu =
+        crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_GPU).and_then(|v| {
+            let bar = v.common.bar as usize;
+            let f = crate::drivers::pci::pci_function(v.pci_index)?;
+            if v.device_id != 0x1050
+                || v.transitional
+                || bar >= 6
+                || f.bar_is_io[bar]
+                || f.bar_base[bar] & 4095 != 0
+                || f.bar_size[bar] == 0
+                || f.bar_size[bar] > 64 * 1024
+                || [v.common, v.notify, v.isr, v.device_cfg].iter().any(|loc| {
+                    !loc.present
+                        || loc.bar as usize != bar
+                        || loc
+                            .offset
+                            .checked_add(loc.length)
+                            .is_none_or(|end| u64::from(end) > f.bar_size[bar])
+                })
+            {
+                return None;
+            }
+            Some(crate::cap::Cap {
                 obj: crate::cap::CapObj::Mmio {
-                    phys: mode.phys,
-                    pages: mode.bytes.div_ceil(4096) as u32,
+                    phys: f.bar_base[bar],
+                    pages: f.bar_size[bar].div_ceil(4096) as u32,
                 },
                 rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
-            },
-            crate::cap::Cap {
-                obj: crate::cap::CapObj::Endpoint { eid },
-                rights: crate::cap::RIGHTS_READ,
-            },
-            crate::cap::Cap {
-                obj: crate::cap::CapObj::MemoryPool,
-                rights: crate::cap::RIGHTS_WRITE,
-            },
-            crate::cap::Cap {
-                obj: crate::cap::CapObj::SharedDma,
-                rights: crate::cap::RIGHTS_READ,
-            },
-        ];
-        let display_pid = crate::spawn::spawn_init_boot(0, &grants, None)
-            .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+            })
+        });
+    if gop.is_none() && gpu.is_none() {
         info!(
             "kernel",
-            "displayd spawned: pid {display_pid}; GOP-only Mmio and Endpoint/R; no other service receives framebuffer access"
+            "displayd: no validated GOP or virtio-gpu; headless boot"
         );
-        let was_if = crate::arch::x86_64::interrupts_enabled();
-        crate::arch::x86_64::sti();
-        let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
-        while !crate::ipc::parked_server(eid, display_pid) {
-            if crate::sched::proc_live_threads(display_pid) == 0
-                || crate::timekeeping::now_us() >= deadline
-            {
-                crate::halt::halt_machine(
-                    "displayd: no painted, parked ring-3 service by deadline",
-                );
-            }
-            crate::sched::yield_now();
-        }
-        if !was_if {
-            crate::arch::x86_64::cli();
-        }
+        return;
     }
+    let eid = crate::ipc::create_endpoint()
+        .unwrap_or_else(|_| crate::halt::halt_machine("displayd: endpoint table full"));
+    let first = if let Some(mode) = gop {
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Mmio {
+                phys: mode.phys,
+                pages: mode.bytes.div_ceil(4096) as u32,
+            },
+            rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+        }
+    } else {
+        gpu.unwrap_or_else(|| crate::halt::halt_machine("displayd: missing GPU cap"))
+    };
+    let grants = [
+        first,
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::MemoryPool,
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::SharedDma,
+            rights: crate::cap::RIGHTS_READ,
+        },
+    ];
+    let display_pid = if gop.is_some() {
+        if let Some(gpu_cap) = gpu {
+            crate::spawn::spawn_init_boot(
+                0,
+                &[grants[0], grants[1], grants[2], grants[3], gpu_cap],
+                None,
+            )
+        } else {
+            crate::spawn::spawn_init_boot(0, &grants, None)
+        }
+    } else {
+        crate::spawn::spawn_init_boot(0, &grants, None)
+    }
+    .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    info!(
+        "kernel",
+        "displayd spawned: pid {display_pid}; GOP={} virtio-gpu={}; sole framebuffer/BAR holder",
+        gop.is_some(),
+        gpu.is_some()
+    );
+    let was_if = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+    while !crate::ipc::parked_server(eid, display_pid) {
+        if crate::sched::proc_live_threads(display_pid) == 0
+            || crate::timekeeping::now_us() >= deadline
+        {
+            crate::halt::halt_machine("displayd: no painted, parked ring-3 service by deadline");
+        }
+        crate::sched::yield_now();
+    }
+    if !was_if {
+        crate::arch::x86_64::cli();
+    }
+    let (regions, pages, maps) = crate::shared::usage_snapshot();
+    let (held, slots) = crate::cap::occupancy(display_pid)
+        .unwrap_or_else(|| crate::halt::halt_machine("displayd: lost capability space"));
+    info!(
+        "kernel",
+        "displayd resources at parked boundary: shared {regions}/{} runs, {pages}/{} pages, {maps}/{} maps; caps {held}/{slots}; free frames {}; live processes {}",
+        crate::shared::MAX_REGIONS,
+        crate::shared::TOTAL_PAGES,
+        crate::shared::MAX_MAPS,
+        crate::frames::free_frames(),
+        crate::proc::live_count(),
+    );
+    // The first independent ring-3 client tests receiver-checked MODE and
+    // PRESENT while the compositor bridge is still under construction.
+    // It has neither GOP/GPU BAR nor DMA bearer. The bootstrap root reaps
+    // it and checks this client's own process/record retirement plus
+    // global shared/cap conservation. Other production workers may be
+    // born/die concurrently, so a global frame delta is not an isolated
+    // client credit. The presented pixel stays in displayd's scanout.
+    let shared_before = crate::shared::usage_snapshot();
+    let display_caps_before = crate::cap::occupancy(display_pid);
+    let grants = [
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::MemoryPool,
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    let client = crate::spawn::spawn_init_boot(2, &grants, None)
+        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    let tid = crate::spawn::records_snapshot()
+        .iter()
+        .flatten()
+        .find_map(|&(child, thread)| (child == client).then_some(thread))
+        .unwrap_or_else(|| crate::halt::halt_machine("displayprobe: missing spawn record"));
+    let was_if = crate::arch::x86_64::interrupts_enabled();
+    crate::arch::x86_64::sti();
+    let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+    while crate::sched::proc_live_threads(client) != 0 {
+        if crate::timekeeping::now_us() >= deadline {
+            crate::halt::halt_machine("displayprobe: ring-3 client deadline expired");
+        }
+        crate::sched::yield_now();
+    }
+    crate::sched::yield_now();
+    if !was_if {
+        crate::arch::x86_64::cli();
+    }
+    let observed = crate::arch::x86_64::syscall::exit_status_of(tid);
+    if observed != Some(42) {
+        error!("m9", "displayprobe ring-3 exit code: {observed:?}");
+        crate::halt::halt_machine("displayprobe: typed present/cap refusal failed");
+    }
+    crate::proc::destroy(client).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::spawn::forget(client).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::shared::assert_conservation();
+    if crate::proc::pml4_of(client).is_some()
+        || crate::spawn::records_snapshot()
+            .iter()
+            .flatten()
+            .any(|&(pid, _)| pid == client)
+        || crate::shared::usage_snapshot() != shared_before
+        || crate::cap::occupancy(display_pid) != display_caps_before
+    {
+        crate::halt::halt_machine("displayprobe: client record/shared cap teardown mismatch");
+    }
+    info!(
+        "m9",
+        "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
+    );
 }
 
 /// A short-lived *guest* capacity proof, not a kernel-side allocator model.
@@ -1137,7 +1266,9 @@ fn run_shared_probe() {
     if !was_if {
         crate::arch::x86_64::cli();
     }
-    if crate::arch::x86_64::syscall::exit_status_of(tid) != Some(42) {
+    let observed = crate::arch::x86_64::syscall::exit_status_of(tid);
+    if observed != Some(42) {
+        error!("m9", "sharedprobe ring-3 exit code: {observed:?}");
         crate::halt::halt_machine("sharedprobe: ring3 refusal/rights/zero assertion failed");
     }
     crate::proc::destroy(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));

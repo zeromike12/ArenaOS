@@ -182,9 +182,66 @@ pub extern "C" fn _start() -> ! {
     {
         exit(91)
     }
-    // Deliberately leave that cap + BOTH original map pins behind. The
-    // kernel bootstrap thread will destroy this dead process and prove
-    // exact physical, record and process accounting across the sweep.
+    // Exact own-mapping lifecycle: revoke the last cap *before* unmap
+    // and prove its PTE pin still holds the byte; wrong/partial/duplicate
+    // VAs and noncanonical flags refuse. Forty-eight create/map/destroy/
+    // unmap rounds must reuse one region-table stride instead of slowly
+    // exhausting its 16 slots or the global 32-map/8-object tables.
+    for round in 0..48u64 {
+        let current = if round == 0 {
+            again
+        } else {
+            let mut next = [0u64; 3];
+            if unsafe { syscall3(SYS_SHARED_CREATE, 0, 1, next.as_mut_ptr() as u64) } != 0
+                || next[1] != first_id + 8 + round
+            {
+                exit(96)
+            }
+            next
+        };
+        let addr = unsafe { syscall2(SYS_SHARED_MAP, current[0], 1) };
+        if addr <= 0 {
+            log_line(|o| {
+                o.str("sharedprobe: unmap map failed round=");
+                o.u64(round);
+                o.str(" slot=");
+                o.u64(current[0]);
+                o.str(" status=");
+                o.i64(addr);
+            });
+            exit(97)
+        }
+        if unsafe { syscall6(SYS_SHARED_UNMAP, addr as u64 + 1, 0, 0, 0, 0, 0) } != -2
+            || unsafe { syscall6(SYS_SHARED_UNMAP, addr as u64, 1, 0, 0, 0, 0) } != -2
+            || unsafe { syscall6(SYS_SHARED_UNMAP, addr as u64 + 4096, 0, 0, 0, 0, 0) } != -2
+        {
+            exit(98)
+        }
+        unsafe { core::ptr::write_volatile(addr as *mut u8, (round as u8) + 1) };
+        if unsafe { syscall1(SYS_CAP_DESTROY, current[0]) } != 0
+            || unsafe { core::ptr::read_volatile(addr as *const u8) } != (round as u8) + 1
+            || unsafe { syscall6(SYS_SHARED_UNMAP, addr as u64, 0, 0, 0, 0, 0) } != 0
+            || unsafe { syscall6(SYS_SHARED_UNMAP, addr as u64, 0, 0, 0, 0, 0) } != -2
+        {
+            exit(99)
+        }
+    }
+    let mut leave = [0u64; 3];
+    if unsafe { syscall3(SYS_SHARED_CREATE, 0, 1, leave.as_mut_ptr() as u64) } != 0
+        || leave[1] != first_id + 56
+    {
+        exit(100)
+    }
+    let unmap_marker = b"[sharedprobe] exact own SharedRegion UNMAP 48x capless churn PASS\n";
+    unsafe {
+        let _ = syscall2(
+            SYS_DEBUG_WRITE,
+            unmap_marker.as_ptr() as u64,
+            unmap_marker.len() as u64,
+        );
+    }
+    // Deliberately leave the last cap + BOTH original map pins behind.
+    // Kernel bootstrap must sweep them and account every physical page.
     let marker = b"[sharedprobe] capacity/rights/zero PASS\n";
     unsafe {
         let _ = syscall2(SYS_DEBUG_WRITE, marker.as_ptr() as u64, marker.len() as u64);

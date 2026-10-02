@@ -450,7 +450,7 @@ pub unsafe fn map_mmio_page_4k(
 /// only reads tables through their kernel-view aliases).
 pub unsafe fn user_va_mapped(pml4_phys: u64, va: u64) -> bool {
     // SAFETY: caller contract.
-    unsafe { find_pte(pml4_phys, va).is_some() }
+    unsafe { find_pte(pml4_phys, va).is_some_and(|pte| *pte & PTE_PRESENT != 0) }
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +586,40 @@ pub unsafe fn unmap_user_page_kernel_view(va: u64) -> Option<u64> {
         *pte = 0;
         super::invlpg(va);
         Some(e & ADDR_MASK)
+    }
+}
+
+/// Read-only exact comparison for a registry-owned shared leaf. Raw PTE
+/// flags or a guessed physical address are never exposed to ring 3.
+///
+/// # Safety
+/// `root` belongs to the live current process, IF=0, VA page aligned.
+pub unsafe fn shared_user_leaf_matches(root: u64, va: u64, phys: u64) -> bool {
+    unsafe { user_pte_flags(root, va) }.is_some_and(|entry| {
+        entry & ADDR_MASK == phys
+            && entry & (PTE_PRESENT | PTE_USER | PTE_NX) == (PTE_PRESENT | PTE_USER | PTE_NX)
+    })
+}
+
+/// Remove one *prevalidated* 4-KiB user PTE from this process's page
+/// tables. This does not free its shared physical page; the registry's
+/// last-cap/last-pin rule owns that decision. Parent tables remain cached
+/// until normal process teardown and may serve a later map at the same VA.
+///
+/// # Safety
+/// Ring 0, IF=0, `root` is current CR3 and live, `va` is aligned, and
+/// SYS_SHARED_UNMAP already verified this PTE belongs to the exact
+/// registry map. There is no post-preflight failure under IF=0.
+pub unsafe fn unmap_shared_user_page(root: u64, va: u64) -> Option<u64> {
+    unsafe {
+        let pte = find_pte(root, va)?;
+        let old = *pte;
+        if old & (PTE_PRESENT | PTE_USER) != (PTE_PRESENT | PTE_USER) {
+            return None;
+        }
+        *pte = 0;
+        super::invlpg(va);
+        Some(old & ADDR_MASK)
     }
 }
 

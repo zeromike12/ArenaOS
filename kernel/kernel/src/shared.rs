@@ -15,6 +15,21 @@ pub const MAX_PAGES: u32 = 512;
 pub const TOTAL_PAGES: u32 = 2048;
 pub const MAX_MAPS: usize = 32;
 
+/// Read-only bounded resource snapshot for boot diagnostics. This never
+/// grants access to region IDs, physical addresses or mapped pages.
+pub fn usage_snapshot() -> (usize, u32, usize) {
+    without_interrupts(|| {
+        // SAFETY: the registry is read while IF=0, with no held mutable
+        // borrow or other CPU writing in this single-CPU implementation.
+        let r = unsafe { &*REG.get() };
+        (
+            r.regions.iter().filter(|region| region.pages != 0).count(),
+            r.used_pages,
+            r.maps.iter().filter(|map| map.id != 0).count(),
+        )
+    })
+}
+
 #[derive(Clone, Copy)]
 struct Region {
     id: u32,
@@ -167,6 +182,43 @@ pub fn backing(id: u32) -> Option<(u64, u32)> {
             .map(|e| (e.phys, e.pages))
     })
 }
+/// Exact own-mapping lookup; no numeric ID lookup or raw physical address
+/// is exposed to userland. SYS_SHARED_UNMAP preflights this against both
+/// the thread's registered user span and every owned PTE before mutation.
+pub fn own_mapping(pid: u64, va: u64) -> Option<(u32, u64, u32)> {
+    without_interrupts(|| unsafe {
+        let r = &*REG.get();
+        let m = r
+            .maps
+            .iter()
+            .find(|m| m.id != 0 && m.pid == pid && m.va == va)?;
+        let entry = r.regions.iter().find(|e| e.pages != 0 && e.id == m.id)?;
+        Some((m.id, entry.phys, entry.pages))
+    })
+}
+
+/// Called only after the exact PTE run and user region were removed at
+/// IF=0. Last-pin retirement cannot occur while any cap/escrow remains.
+pub fn unpin_own_mapping(pid: u64, va: u64, id: u32) {
+    without_interrupts(|| unsafe {
+        let r = &mut *REG.get();
+        let mi = r
+            .maps
+            .iter()
+            .position(|m| m.id == id && m.pid == pid && m.va == va)
+            .expect("SharedRegion mapping disappeared after PTE preflight");
+        let ri = r
+            .regions
+            .iter()
+            .position(|e| e.pages != 0 && e.id == id)
+            .expect("SharedRegion region disappeared while mapped");
+        assert!(r.regions[ri].pins > 0);
+        r.maps[mi] = EMPTY_MAP;
+        r.regions[ri].pins -= 1;
+        release_empty(r, ri);
+    });
+}
+
 pub fn has_map_slot() -> bool {
     without_interrupts(|| unsafe { (*REG.get()).maps.iter().any(|m| m.id == 0) })
 }

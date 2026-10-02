@@ -29,12 +29,16 @@ def main():
     esp = mtest.build(LABEL)
     disk = arena_env.make_scratch_disk()
     rc, s, elapsed = mtest.boot(LABEL, esp,
-                               [(b'[displayd] ring3 GOP pixels ready', 1, capture)], disk)
+                               [(b'[arena INFO  m9] displayprobe: cap-bearing MODE/PRESENT guest', 1, capture)], disk)
     marker = re.search(r'GOP handoff: (\d+)x(\d+) pitch=(\d+) format=(\d+) phys=0x([0-9a-f]+) bytes=(\d+)', s)
     assert rc == 0 and marker is not None and 'm7: RESULT PASS (2/2)' in s
     assert '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' in s
+    assert re.search(r'displayd resources at parked boundary: shared 1/8 runs, 469/2048 pages, 1/32 maps; caps 5/32; free frames \d+; live processes \d+', s)
     assert '[sharedprobe] capacity/rights/zero PASS' in s
     assert '[sharedprobe] held SharedRegion INFO bound/refusal PASS' in s
+    assert '[sharedprobe] exact own SharedRegion UNMAP 48x capless churn PASS' in s
+    assert '[displayprobe] ring3 MODE/cap-refusal/PRESENT 80x drain PASS' in s
+    assert 'displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS' in s
     assert '[sharedprobe] truncated virtio BAR device-info refused PASS' in s
     assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s
     assert '[arena ERROR halt]' not in s and 'PANIC' not in s
@@ -55,6 +59,7 @@ def main():
                          ((21,20),(0xf8,0xee,0xcc)),  # bitmap 'A' actual pixel
                          ((0,100),(0xe3,0x35,0x42)),
                          ((400,100),(0x2e,0xc7,0x71)),
+                         ((700,300),(0xa2,0x51,0xf4)), # ring-3 client PRESENT, not initial pattern
                          ((799,599),(0x3b,0x67,0xe1))]:
         assert pixel(*xy) == expected, (xy, pixel(*xy), expected)
     no_display = arena_env.make_scratch_disk()
@@ -64,6 +69,7 @@ def main():
     assert '[displayd] ring3 GOP pixels ready' not in s2
     assert '[sharedprobe] capacity/rights/zero PASS' in s2
     assert '[sharedprobe] held SharedRegion INFO bound/refusal PASS' in s2
+    assert '[sharedprobe] exact own SharedRegion UNMAP 48x capless churn PASS' in s2
     assert '[sharedprobe] truncated virtio BAR device-info refused PASS' in s2
     assert 'dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)' in s2
     assert 'm7: RESULT PASS (2/2)' in s2 and '[arena ERROR halt]' not in s2

@@ -82,6 +82,9 @@ pub const VIRTIO_TYPE_INPUT: u16 = 18;
 /// Transitional ID 0x1003 (the type arrives in the subsystem id, the
 /// generic path below), modern 0x1043.
 pub const VIRTIO_TYPE_CONSOLE: u16 = 3;
+/// Phase-9 2D display device; the polled control queue is userspace-owned.
+/// Modern 0x1050 only (legacy/transitional transport is not supported).
+pub const VIRTIO_TYPE_GPU: u16 = 16;
 
 /// PCI capability ID: vendor-specific — VirtIO structures live in these.
 const CAP_ID_VENDOR: u8 = 0x09;
@@ -601,6 +604,8 @@ fn log_virtio(v: &VirtioDevice) {
             "entropy"
         } else if v.virtio_type == VIRTIO_TYPE_INPUT {
             "input"
+        } else if v.virtio_type == VIRTIO_TYPE_GPU {
+            "gpu"
         } else if v.virtio_type == VIRTIO_TYPE_CONSOLE {
             "console"
         } else {

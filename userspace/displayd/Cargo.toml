@@ -7,6 +7,8 @@ description = "ArenaOS Phase-9 userspace GOP fallback display service"
 
 [dependencies]
 arena-gfxkit = { path = "../gfxkit" }
+arena-gpu2d-wire = { path = "../gpu2d" }
+arena-compositor-model = { path = "../compositord" }
 
 [workspace]
 
@@ -22,3 +24,7 @@ path = "src/main.rs"
 [[bin]]
 name = "sharedprobe"
 path = "src/sharedprobe.rs"
+
+[[bin]]
+name = "displayprobe"
+path = "src/displayprobe.rs"

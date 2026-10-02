@@ -37,6 +37,7 @@ pub const SYS_SHARED_MAP: u64 = 37;
 pub const SYS_SHARED_PHYS: u64 = 38;
 /// ADR-0057: possession-gated SharedRegion generation/page count, no phys.
 pub const SYS_SHARED_INFO: u64 = 39;
+pub const SYS_SHARED_UNMAP: u64 = 40;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;

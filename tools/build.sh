@@ -239,6 +239,9 @@ echo "display image: ${DISPLAY_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DISPLAY_ELF") b
 SHARED_PROBE_ELF="$REPO_ROOT/userspace/displayd/target/x86_64-unknown-none/release/sharedprobe"
 test -f "$SHARED_PROBE_ELF"
 echo "shared probe image: ${SHARED_PROBE_ELF#"$REPO_ROOT"/} ($(stat -c%s "$SHARED_PROBE_ELF") bytes)"
+DISPLAY_PROBE_ELF="$REPO_ROOT/userspace/displayd/target/x86_64-unknown-none/release/displayprobe"
+test -f "$DISPLAY_PROBE_ELF"
+echo "display protocol probe image: ${DISPLAY_PROBE_ELF#"$REPO_ROOT"/} ($(stat -c%s "$DISPLAY_PROBE_ELF") bytes)"
 
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086

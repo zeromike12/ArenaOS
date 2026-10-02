@@ -161,6 +161,7 @@ pub const SYS_SHARED_MAP: u64 = 37;
 pub const SYS_SHARED_PHYS: u64 = 38;
 /// ADR-0057: read-only size/generation of a *held* generic SharedRegion.
 pub const SYS_SHARED_INFO: u64 = 39;
+pub const SYS_SHARED_UNMAP: u64 = 40;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -671,6 +672,7 @@ extern "C" fn syscall_dispatch(
         SYS_SHARED_MAP => sys_shared_map(a0, a1) as u64,
         SYS_SHARED_PHYS => sys_shared_phys(a0, a1, a2) as u64,
         SYS_SHARED_INFO => sys_shared_info(a0, a1, [a2, a3, a4, a5]) as u64,
+        SYS_SHARED_UNMAP => sys_shared_unmap(a0, [a1, a2, a3, a4, a5]) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -2127,6 +2129,65 @@ fn sys_shared_map(slot: u64, writable: u64) -> Status {
         .unwrap_or_else(|_| crate::halt::halt_machine("SharedRegion region after preflight"));
     crate::shared::pin_map(id, pid, chosen);
     chosen as Status
+}
+
+/// SYS_SHARED_UNMAP(exact_own_va, zero x5): remove only the exact
+/// registry-backed self-map, not an arbitrary VA or another process's
+/// mapping. Last-pin release follows PTE/TLB and region removal.
+fn sys_shared_unmap(va: u64, reserved: [u64; 5]) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if va % 4096 != 0 || reserved != [0; 5] {
+        return STATUS_BAD_ARG;
+    }
+    let Some((id, phys, pages)) = crate::shared::own_mapping(pid, va) else {
+        return STATUS_BAD_ARG;
+    };
+    let Some(root) = crate::proc::pml4_of(pid) else {
+        return STATUS_BAD_ARG;
+    };
+    let Some(span) = u64::from(pages).checked_mul(4096) else {
+        return STATUS_BAD_ARG;
+    };
+    let Some(end) = va.checked_add(span) else {
+        return STATUS_BAD_ARG;
+    };
+    if !crate::sched::current_user_regions()
+        .iter()
+        .any(|&(lo, hi)| lo == va && hi == end)
+    {
+        return STATUS_BAD_ARG;
+    }
+    // Entire run preflight precedes *any* PTE/region/pin mutation. A
+    // corrupt or replaced leaf never permits partially unmapping a run.
+    for i in 0..u64::from(pages) {
+        let off = i * 4096;
+        let Some(expected) = phys.checked_add(off) else {
+            return STATUS_BAD_ARG;
+        };
+        // SAFETY: current process's root, exact registry record, IF=0.
+        if !unsafe {
+            crate::arch::x86_64::paging::shared_user_leaf_matches(root, va + off, expected)
+        } {
+            return STATUS_BAD_ARG;
+        }
+    }
+    for i in 0..u64::from(pages) {
+        let off = i * 4096;
+        // SAFETY: complete prior preflight, single CPU/IF=0. A failure
+        // here is an internal broken invariant, never a partial refusal.
+        let removed =
+            unsafe { crate::arch::x86_64::paging::unmap_shared_user_page(root, va + off) };
+        if removed != Some(phys + off) {
+            crate::halt::halt_machine("SharedRegion unmap diverged after preflight");
+        }
+    }
+    crate::sched::remove_current_user_region(va, end).unwrap_or_else(|_| {
+        crate::halt::halt_machine("SharedRegion user span changed during unmap")
+    });
+    crate::shared::unpin_own_mapping(pid, va, id);
+    STATUS_OK
 }
 
 /// SYS_SHARED_INFO(region_slot, out[2], zero, zero, zero, zero):

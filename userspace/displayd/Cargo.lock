@@ -3,12 +3,25 @@
 version = 4
 
 [[package]]
-name = "arena-displayd"
+name = "arena-compositor-model"
 version = "0.1.0"
 dependencies = [
  "arena-gfxkit",
 ]
 
 [[package]]
+name = "arena-displayd"
+version = "0.1.0"
+dependencies = [
+ "arena-compositor-model",
+ "arena-gfxkit",
+ "arena-gpu2d-wire",
+]
+
+[[package]]
 name = "arena-gfxkit"
+version = "0.1.0"
+
+[[package]]
+name = "arena-gpu2d-wire"
 version = "0.1.0"

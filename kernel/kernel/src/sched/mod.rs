@@ -934,6 +934,27 @@ pub fn append_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> 
     })
 }
 
+/// Forget *only* an exactly matched current-thread mapped region after
+/// SYS_SHARED_UNMAP has validated its registry record and removed the PTEs.
+/// The hole becomes reusable; all other spans (ELF, stack, MMIO, private
+/// windows) remain registered. IF=0 holds across preflight and mutation.
+pub fn remove_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        // SAFETY: single writer, with exactly one expected `(lo, hi)`.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let t = (*THREADS.get())[cur]
+                .as_mut()
+                .expect("current thread vanished");
+            let Some(r) = t.regions.iter_mut().find(|r| **r == (lo, hi)) else {
+                return Err("remove region: exact span absent");
+            };
+            *r = (0, 0);
+        }
+        Ok(())
+    })
+}
+
 /// Terminate the current thread from kernel context — the SYS_THREAD_EXIT door
 /// into the normal zombie/reap path (ADR-0014). Diverges like `exit_now`.
 pub fn terminate() -> ! {

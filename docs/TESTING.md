@@ -903,10 +903,14 @@ extracts and boots bundled ESP/firmware/formatted disk.
 
 ADR-0056, ADR-0057 and ADR-0058 describe the authority and remaining exit criteria.
 The current standalone `no_std` toolkit has bounded clipping/text and a
-linked 5×7 owned glyph renderer. Displayd stages its GOP fallback frame in
-a checked SharedRegion RAM mapping before copying pixels to its exclusive
-MMIO window with volatile stores. This is **not** the planned compositor,
-virtio-gpu, two-window demo or graphical keyboard route.
+linked 5×7 owned glyph renderer. Displayd stages frames in a checked
+SharedRegion RAM mapping: on a validated modern virtio-gpu BAR it runs a
+one-outstanding polled 2D command chain; otherwise GOP fallback copies
+pixels to its exclusive MMIO window with volatile stores. Neither path is
+yet a compositor, two-window demo or graphical keyboard route. The **72/72** historical-plus-partial-graphics suite passed after exact
+shared-unmap integration and its omitted-pin guest RED control. This is a
+kernel/shared-lifecycle checkpoint, **not** the final multi-client graphics
+qualification or a 100/100 EFI-bound receipt.
 
 Run `source tools/dev-env/env.sh`, then `python3 tools/test_m9_gfxkit.py`,
 `python3 tools/test_m9_compositor_model.py` (host-only pure state and versioned-wire model,
@@ -916,9 +920,15 @@ Run `source tools/dev-env/env.sh`, then `python3 tools/test_m9_gfxkit.py`,
 RED/restored GREEN), `python3 tools/test_m9_bar_gate_red.py` (real guest
 truncated-BAR MMIO-cap refusal plus omitted-coverage RED),
 `python3 tools/test_m9_gop_handoff.py`,
+`python3 tools/test_m9_gpu_pixels.py` (GPU-only real-device QMP pixels,
+strict ACK chain and oversized-device-mode refusal),
+`python3 tools/test_m9_gpu_fallback_red.py` (forced pre-command GPU feature
+rejection, actual GOP QMP pixels, byte-exact restored GPU QMP green),
 `python3 tools/test_m9_font_red.py`,
 `python3 tools/test_m9_shared_ref_hook.py` and
-`python3 tools/test_m9_shared_info_red.py`. The GOP check captures an
+`python3 tools/test_m9_shared_info_red.py` and
+`python3 tools/test_m9_shared_unmap_red.py` (omitted pin-removal guest PANIC,
+exact restored GOP QMP GREEN). The GOP check captures an
 actual QMP PPM and checks width, full byte length, distant colored pixels
 and both a bitmap glyph foreground/background sample. The font RED test
 alters an actual shipping glyph before building/booting, requires the
