@@ -9,6 +9,13 @@ import qmp
 from test_m10_desktop import ppm, crop
 
 BUILD=arena_env.build_dir()
+NATIVE_COUNTERS=re.compile(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n')
+
+def serial_text(path):
+    # QEMU appends while the host reads. A final digit/UTF-8 code point may
+    # still be incomplete; only newline-committed records are observations.
+    data=path.read_bytes()
+    return data[:data.rfind(b'\n')+1].decode('utf-8',errors='replace')
 
 def file_bytes(path,name):
     d=afs1.Disk(path.read_bytes());_,ot,_=d.commit();o=d.find(name,ot)
@@ -19,6 +26,10 @@ class Desktop:
     def __init__(self,label):
         self.label=label
         self.q=qmp.Qmp(str(BUILD/f'qmp-{label}.sock'))
+        try:self.wait(lambda:NATIVE_COUNTERS.search(self.serial()),'initial complete native accounting sample absent')
+        except BaseException:
+            self.q.close()
+            raise
     def point(self,x,y,down=None):
         events=[{'type':'abs','data':{'axis':'x','value':(x*32767+799)//799}},
                 {'type':'abs','data':{'axis':'y','value':(y*32767+599)//599}}]
@@ -55,7 +66,7 @@ class Desktop:
         self.click(255+kind*58,570)
         return self.opened(name,index)
     def close(self,index=0):self.click(506+index*26,70+index*24)
-    def serial(self):return (BUILD/f'serial-{self.label}.log').read_text()
+    def serial(self):return serial_text(BUILD/f'serial-{self.label}.log')
     def dispose(self):self.q.close()
 
 def workflow(label,disk):
@@ -142,7 +153,7 @@ def workflow(label,disk):
         d.shot('reopened-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
         d.wait(lambda:d.serial().count('[desktop] application retired:')>=23,'last application not reaped before shutdown')
         def clean_snapshot():
-            samples=re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())
+            samples=NATIVE_COUNTERS.findall(d.serial())
             return len(samples)>1 and samples[-1][1:]==samples[0][1:]
         d.wait(clean_snapshot,'final measured teardown not complete before shutdown')
         return b'shutdown\r'
@@ -154,7 +165,7 @@ def main(esp=None):
     rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>'),1,lambda:workflow(label,disk))],disk,pointer=True)
     assert rc==0
     assert afs1.audit(disk)==[] and file_bytes(disk,b'user-note')==b'saved hello desktop'
-    samples=[tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',s)]
+    samples=[tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(s)]
     assert samples and samples[-1][1:]==samples[0][1:],(samples[0],samples[-1])
     assert samples[0][0]-samples[-1][0]==6,'unexpected retained frames beyond the six existing intermediate PTs'
     empty=[row for row in samples if row[1:]==samples[0][1:]]

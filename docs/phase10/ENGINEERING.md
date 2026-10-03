@@ -130,6 +130,11 @@ from application allocation leaks.
   Process witness is now retired before checking the combined result.
 - Clock upper-bound measurement could include host descheduling; bounded
   three-window sampling retains strict early-return and persistent-stall gates.
+- Host workflows could observe the first frame before its initial accounting
+  record completed. Fixtures now wait for native baseline readiness and consume
+  only newline-complete serial records; every possible byte split is tested.
+  The invalid partial run is preserved in `phase10-discovery-3`, alongside the
+  earlier discovery archives. No partial run qualifies the baseline.
 
 ## Qualification and handoff
 

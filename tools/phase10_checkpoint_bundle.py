@@ -76,6 +76,9 @@ def main():
         second=ROOT/'releases/checkpoints/phase10-discovery-2'
         for filename in ('interrupted-full-eeb7808e-failures.tar.gz','interrupted-full-eeb7808e-failures.tar.gz.sha256'):
             shutil.copyfile(second/filename,stage/filename)
+        third=ROOT/'releases/checkpoints/phase10-discovery-3'
+        for filename in ('incomplete-full-5ecc4aec-startup-race.tar.gz','incomplete-full-5ecc4aec-startup-race.tar.gz.sha256'):
+            shutil.copyfile(third/filename,stage/filename)
         shutil.copyfile(BUILD/'phase10-screenshots/manifest.json',stage/'screenshot-manifest.json')
         for entry in manifest['entries']:shutil.copyfile(BUILD/'phase10-screenshots'/entry['path'],stage/entry['path'])
         for proof in sorted(BUILD.glob('m10-*-red.log')):shutil.copyfile(proof,stage/('evidence-'+proof.name))

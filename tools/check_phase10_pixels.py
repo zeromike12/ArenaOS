@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 import qmp
 READY=b'[desktop] real desktop frame presented'
-COUNTERS=re.compile(rb'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)')
+COUNTERS=re.compile(rb'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n')
 def capture(sock,serial,image,receipt,timeout):
     deadline=time.monotonic()+timeout
     def log():return serial.read_bytes() if serial.is_file() else b''

@@ -2,11 +2,25 @@
 """Host presentation/policy gate. Does not claim running apps or QMP input."""
 import hashlib
 import subprocess
+import tempfile
 from pathlib import Path
 import arena_env
 ROOT=Path(__file__).resolve().parent.parent
 
 def main():
+    # Exercise every possible live-stream cut, including a split UTF-8 glyph
+    # and a final caps digit. Neither harness may treat a prefix as a sample.
+    from test_m10_apps import serial_text, NATIVE_COUNTERS
+    from check_phase10_pixels import COUNTERS
+    records=[(113704,14,14,1,469,2,16),(112762,20,20,7,1231,14,28)]
+    data='boot \u03bb\n'.encode()+b''.join(b'[desktop] measured frames/records/processes/regions/pages/maps/caps='+b'/'.join(str(v).encode() for v in row)+b'\r\n' for row in records)
+    with tempfile.TemporaryDirectory() as temporary:
+        stream=Path(temporary)/'serial.log'
+        for cut in range(len(data)+1):
+            prefix=data[:cut];stream.write_bytes(prefix)
+            expected=records[:prefix.count(b'\r\n')]
+            assert [tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(serial_text(stream))]==expected
+            assert [tuple(map(int,m)) for m in COUNTERS.findall(prefix)]==expected
     env=arena_env.rust_env()
     for crate in ('ui','desktop'):
         manifest=str(ROOT/f'userspace/{crate}/Cargo.toml')

@@ -5,6 +5,7 @@ import time
 import arena_env
 import mtest
 import qmp
+from test_m10_apps import serial_text, NATIVE_COUNTERS
 BUILD=arena_env.build_dir()
 def workflow(label,width,height):
     serial=BUILD/f'serial-{label}.log';conn=qmp.Qmp(str(BUILD/f'qmp-{label}.sock'))
@@ -14,8 +15,8 @@ def workflow(label,width,height):
             if predicate():return
             time.sleep(.04)
         raise AssertionError(message)
-    def text():return serial.read_text()
-    def samples():return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',text())]
+    def text():return serial_text(serial)
+    def samples():return [tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(text())]
     def crop(p,x,y,w,h):return b''.join(p[((y+r)*width+x)*3:((y+r)*width+x+w)*3] for r in range(h))
     def shot(name,predicate=lambda p:True):
         path=BUILD/f'{label}-{name}.ppm';end=time.monotonic()+12
@@ -35,6 +36,7 @@ def workflow(label,width,height):
     def click(x,y):point(x,y,True);point(x,y,False);point(width-20,height-100)
     def key(name):conn.command('input-send-event',events=[conn._ev(name,True),conn._ev(name,False)])
     try:
+        wait(lambda:samples(),'initial complete mode/native accounting sample absent')
         base=samples()[0];empty=shot('empty');dock_x=(width-348)//2+29
         click(dock_x+5*58,height-30)
         first=shot('gallery',lambda p:len(set(crop(p,200,150,70,70)[i:i+3] for i in range(0,70*70*3,3)))>3)
