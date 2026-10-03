@@ -1,0 +1,2 @@
+    Checking arena-kernel v0.1.0 (/workspace/scratch/phase10-static-11a45c34/kernel/kernel)
+    Finished `release` profile [optimized] target(s) in 1.09s

@@ -1,6 +1,7 @@
 # Application contracts
 
-Status: implemented contracts; final engineering qualification is pending.
+Status: implemented contracts exercised by the qualified 97/97 engineering
+suite and exact-image 100/100 graphical gate. Opus design remains pending.
 
 Every application is an ordinary userspace ELF launched through capability-gated
 SYS_SPAWN. Presentation never authorizes an operation. The launch broker retains
@@ -66,7 +67,7 @@ required to create SharedRegions; READ grants no allocation, physical address,
 Power, Process destruction or filesystem operation. Existing admin resource
 snapshot semantics remain unchanged. Native startup audits and QMP Monitor tests exercise positive counts, wrong
 capability kinds, reserved arguments, invalid output pointers and allocation
-refusal. Complete historical/exact-image qualification is still pending.
+refusal. Complete historical/exact-image engineering gates passed: 97/97 and 100/100.
 
 ## Exact client slots and bounds
 

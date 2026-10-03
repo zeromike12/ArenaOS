@@ -1,0 +1,779 @@
+    Checking arena-kernel v0.1.0 (/workspace/scratch/phase10-static-11a45c34/kernel/kernel)
+warning: unnecessary `>= y + 1` or `x - 1 >=`
+    --> kernel/src/arch/x86_64/syscall.rs:2160:12
+     |
+2160 |         if probes >= crate::shared::MAX_MAPS + crate::sched::USER_REGIONS_MAX + 1 {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change it to: `probes > crate::shared::MAX_MAPS + crate::sched::USER_REGIONS_MAX`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#int_plus_one
+     = note: `#[warn(clippy::int_plus_one)]` on by default
+
+warning: operator precedence might not be obvious
+   --> kernel/src/m3.rs:325:17
+    |
+325 |         model = 4 * k as u64 ^ model;
+    |                 ^^^^^^^^^^^^^^^^^^^^ help: consider parenthesizing your expression: `(4 * k as u64) ^ model`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#precedence
+    = note: `#[warn(clippy::precedence)]` on by default
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/arch/x86_64/idt.rs:543:5
+    |
+543 | /     if cs & 3 == 3 && !matches!(vector, 2 | 8 | 18) {
+544 | |         if let Some(pid) = crate::sched::current_proc_id() {
+545 | |             crate::log::write_marker(format_args!(
+546 | |                 "[arena user fault] pid={pid} vector={vector:#04x} ({}) rip={rip:#x} cr2={cr2:#x}",
+...   |
+551 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+    = note: `#[warn(clippy::collapsible_if)]` on by default
+help: collapse nested if block
+    |
+543 ~     if cs & 3 == 3 && !matches!(vector, 2 | 8 | 18)
+544 ~         && let Some(pid) = crate::sched::current_proc_id() {
+545 |             crate::log::write_marker(format_args!(
+...
+549 |             super::syscall::exit_on_user_fault(vector);
+550 ~         }
+    |
+
+warning: manual implementation of `.is_multiple_of()`
+   --> kernel/src/arch/x86_64/paging.rs:392:8
+    |
+392 |     if va % PAGE != 0 || phys % PAGE != 0 {
+    |        ^^^^^^^^^^^^^^ help: replace with: `!va.is_multiple_of(PAGE)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+    = note: `#[warn(clippy::manual_is_multiple_of)]` on by default
+
+warning: manual implementation of `.is_multiple_of()`
+   --> kernel/src/arch/x86_64/paging.rs:392:26
+    |
+392 |     if va % PAGE != 0 || phys % PAGE != 0 {
+    |                          ^^^^^^^^^^^^^^^^ help: replace with: `!phys.is_multiple_of(PAGE)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/arch/x86_64/syscall.rs:780:5
+    |
+780 | /     if let Some(pid) = crate::sched::current_proc_id() {
+781 | |         if crate::sched::proc_live_threads(pid) == 1 {
+782 | |             crate::image_registry::manager_death_check(pid);
+783 | |         }
+784 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+780 ~     if let Some(pid) = crate::sched::current_proc_id()
+781 ~         && crate::sched::proc_live_threads(pid) == 1 {
+782 |             crate::image_registry::manager_death_check(pid);
+783 ~         }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/arch/x86_64/syscall.rs:794:5
+    |
+794 | /     if let Some(pid) = crate::sched::current_proc_id() {
+795 | |         if crate::sched::proc_live_threads(pid) == 1 {
+796 | |             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
+797 | |                 if let Err(e) = crate::ipc::notify(nid, badge) {
+...   |
+802 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+794 ~     if let Some(pid) = crate::sched::current_proc_id()
+795 ~         && crate::sched::proc_live_threads(pid) == 1 {
+796 |             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
+...
+800 |             }
+801 ~         }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/arch/x86_64/syscall.rs:795:9
+    |
+795 | /         if crate::sched::proc_live_threads(pid) == 1 {
+796 | |             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
+797 | |                 if let Err(e) = crate::ipc::notify(nid, badge) {
+798 | |                     error!("syscall", "exit notification failed for pid {pid}: {e}");
+...   |
+801 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+795 ~         if crate::sched::proc_live_threads(pid) == 1
+796 ~             && let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
+797 |                 if let Err(e) = crate::ipc::notify(nid, badge) {
+798 |                     error!("syscall", "exit notification failed for pid {pid}: {e}");
+799 |                 }
+800 ~             }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/arch/x86_64/syscall.rs:796:13
+    |
+796 | /             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid) {
+797 | |                 if let Err(e) = crate::ipc::notify(nid, badge) {
+798 | |                     error!("syscall", "exit notification failed for pid {pid}: {e}");
+799 | |                 }
+800 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+796 ~             if let Some((nid, badge)) = crate::proc::exit_notif_of(pid)
+797 ~                 && let Err(e) = crate::ipc::notify(nid, badge) {
+798 |                     error!("syscall", "exit notification failed for pid {pid}: {e}");
+799 ~                 }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/arch/x86_64/syscall.rs:817:5
+    |
+817 | /     if let Some(pid) = crate::sched::current_proc_id() {
+818 | |         if crate::sched::proc_live_threads(pid) == 1 && crate::supervise::is_supervised(pid) {
+819 | |             crate::supervise::note_death(pid);
+820 | |         }
+821 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+817 ~     if let Some(pid) = crate::sched::current_proc_id()
+818 ~         && crate::sched::proc_live_threads(pid) == 1 && crate::supervise::is_supervised(pid) {
+819 |             crate::supervise::note_death(pid);
+820 ~         }
+    |
+
+warning: the loop variable `i` is used to index `spec`
+    --> kernel/src/arch/x86_64/syscall.rs:1286:22
+     |
+1286 |             for i in 0..n {
+     |                      ^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_range_loop
+     = note: `#[warn(clippy::needless_range_loop)]` on by default
+help: consider using an iterator and enumerate()
+     |
+1286 -             for i in 0..n {
+1286 +             for (i, <item>) in spec.iter_mut().enumerate().take(n) {
+     |
+
+warning: the loop variable `i` is used to index `pairs`
+    --> kernel/src/arch/x86_64/syscall.rs:1373:18
+     |
+1373 |         for i in 0..n {
+     |                  ^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+     |
+1373 -         for i in 0..n {
+1373 +         for (i, <item>) in pairs.iter().enumerate().take(n) {
+     |
+
+warning: manual implementation of `.is_multiple_of()`
+    --> kernel/src/arch/x86_64/syscall.rs:2208:8
+     |
+2208 |     if va % 4096 != 0 || reserved != [0; 5] {
+     |        ^^^^^^^^^^^^^^ help: replace with: `!va.is_multiple_of(4096)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+warning: unsafe function's docs are missing a `# Safety` section
+   --> kernel/src/arch/x86_64.rs:299:1
+    |
+299 | pub unsafe fn stac() {
+    | ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#missing_safety_doc
+    = note: `#[warn(clippy::missing_safety_doc)]` on by default
+
+warning: unsafe function's docs are missing a `# Safety` section
+   --> kernel/src/arch/x86_64.rs:308:1
+    |
+308 | pub unsafe fn clac() {
+    | ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#missing_safety_doc
+
+warning: you should consider adding a `Default` implementation for `CapSpace`
+   --> kernel/src/cap.rs:166:5
+    |
+166 | /     pub const fn new() -> Self {
+167 | |         CapSpace {
+168 | |             slots: [Cap::EMPTY; CAP_SLOTS],
+169 | |             ipc_landed: [false; CAP_SLOTS],
+170 | |         }
+171 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#new_without_default
+    = note: `#[warn(clippy::new_without_default)]` on by default
+help: try adding this
+    |
+164 + impl Default for CapSpace {
+165 +     fn default() -> Self {
+166 +         Self::new()
+167 +     }
+168 + }
+    |
+
+warning: manual implementation of `.is_multiple_of()`
+   --> kernel/src/cap.rs:519:12
+    |
+519 |         if va % paging::PAGE != 0 || phys % paging::PAGE != 0 {
+    |            ^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `!va.is_multiple_of(paging::PAGE)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+warning: manual implementation of `.is_multiple_of()`
+   --> kernel/src/elf.rs:413:12
+    |
+413 |         if vaddr % paging::PAGE != 0 {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `!vaddr.is_multiple_of(paging::PAGE)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+warning: using `map_err` over `inspect_err`
+   --> kernel/src/elf.rs:507:79
+    |
+507 |                     paging::map_user_page_4k(root, va, frame, writable, exec).map_err(|e| {
+    |                                                                               ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_inspect
+    = note: `#[warn(clippy::manual_inspect)]` on by default
+help: try
+    |
+507 ~                     paging::map_user_page_4k(root, va, frame, writable, exec).inspect_err(|e| {
+508 |                         // The frame never became the space's: free it so
+509 |                         // a mapping refusal does not leak.
+510 ~                         let _ = frames::free(frame);
+    |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> kernel/src/entry.rs:267:17
+    |
+267 |     let checks: [(&str, fn(&BootInfo) -> Result<(), &'static str>); 4] = [
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+    = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/entry.rs:590:9
+    |
+590 | /         if let Some(wanted) = expected_stack_caps {
+591 | |             if let Some(ManagerChild::Probe(pid, mode)) =
+592 | |                 audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+593 | |                     .unwrap_or_else(|e| crate::halt::halt_machine(e))
+...   |
+610 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+590 ~         if let Some(wanted) = expected_stack_caps
+591 ~             && let Some(ManagerChild::Probe(pid, mode)) =
+592 |                 audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+...
+608 |                 }
+609 ~             }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/entry.rs:591:13
+    |
+591 | /             if let Some(ManagerChild::Probe(pid, mode)) =
+592 | |                 audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+593 | |                     .unwrap_or_else(|e| crate::halt::halt_machine(e))
+...   |
+609 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+593 ~                     .unwrap_or_else(|e| crate::halt::halt_machine(e))
+594 ~                 && last_audited_probe != Some(pid) {
+595 |                     if mode == 0 {
+...
+606 |                     last_audited_probe = Some(pid);
+607 ~                 }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/entry.rs:672:9
+    |
+672 | /         if let Some(wanted) = expected_stack_caps {
+673 | |             if let Some(ManagerChild::Probe(pid, mode)) =
+674 | |                 audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+675 | |                     .unwrap_or_else(|e| crate::halt::halt_machine(e))
+...   |
+692 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+672 ~         if let Some(wanted) = expected_stack_caps
+673 ~             && let Some(ManagerChild::Probe(pid, mode)) =
+674 |                 audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+...
+690 |                 }
+691 ~             }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/entry.rs:673:13
+    |
+673 | /             if let Some(ManagerChild::Probe(pid, mode)) =
+674 | |                 audit_manager_child(manager_pid, &wanted, manager_restart_nid)
+675 | |                     .unwrap_or_else(|e| crate::halt::halt_machine(e))
+...   |
+691 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+675 ~                     .unwrap_or_else(|e| crate::halt::halt_machine(e))
+676 ~                 && last_audited_probe != Some(pid) {
+677 |                     if mode == 0 {
+...
+688 |                     last_audited_probe = Some(pid);
+689 ~                 }
+    |
+
+warning: this `if` can be collapsed into the outer `match`
+    --> kernel/src/entry.rs:1045:21
+     |
+1045 | / ...   if last_audited_child != Some(child) {
+1046 | | ...       info!(
+1047 | | ...           "m8",
+1048 | | ...           "manager-owned netstackd pid {child}: five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R),...
+...    |
+1078 | | ...       last_audited_child = Some(child);
+1079 | | ...   }
+     | |_______^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_match
+     = note: `#[warn(clippy::collapsible_match)]` on by default
+help: collapse nested if block
+     |
+1044 ~                 Some(ManagerChild::Production(child))
+1045 ~                     if last_audited_child != Some(child) => {
+1046 |                         info!(
+ ...
+1078 |                         last_audited_child = Some(child);
+1079 ~                     }
+     |
+
+warning: this `if` statement can be collapsed
+    --> kernel/src/entry.rs:1131:5
+     |
+1131 | /     if let Some(mode) = gop {
+1132 | |         if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
+1133 | |             crate::halt::halt_machine("displayd: invalid GOP handoff bounds");
+1134 | |         }
+1135 | |     }
+     | |_____^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1131 ~     if let Some(mode) = gop
+1132 ~         && (mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024) {
+1133 |             crate::halt::halt_machine("displayd: invalid GOP handoff bounds");
+1134 ~         }
+     |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+    --> kernel/src/entry.rs:1566:6
+     |
+1566 |   ) -> Result<
+     |  ______^
+1567 | |     (
+1568 | |         u64,
+1569 | |         Option<[crate::cap::Cap; 5]>,
+...    |
+1573 | |     &'static str,
+1574 | | > {
+     | |_^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+warning: this function has too many arguments (9/7)
+    --> kernel/src/entry.rs:1556:1
+     |
+1556 | / fn spawn_servicemgr(
+1557 | |     fs_eid: u32,
+1558 | |     manager_nid: u32,
+1559 | |     rng_ready_nid: u32,
+...    |
+1573 | |     &'static str,
+1574 | | > {
+     | |_^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#too_many_arguments
+     = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: this `if` statement can be collapsed
+    --> kernel/src/entry.rs:1780:9
+     |
+1780 | /         if let Ok(c) = crate::cap::read(manager_pid, slot) {
+1781 | |             if let CapObj::Process { pid } = c.obj {
+1782 | |                 if c.rights & RIGHTS_DESTROY == 0 {
+1783 | |                     return Err("servicemgr: child Process cap lacks DESTROY");
+...    |
+1796 | |         }
+     | |_________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1780 ~         if let Ok(c) = crate::cap::read(manager_pid, slot)
+1781 ~             && let CapObj::Process { pid } = c.obj {
+1782 |                 if c.rights & RIGHTS_DESTROY == 0 {
+ ...
+1794 |                 }
+1795 ~             }
+     |
+
+warning: unsafe function's docs are missing a `# Safety` section
+   --> kernel/src/image_registry.rs:113:1
+    |
+113 | pub unsafe fn copy_from_user(idx: usize, ptr: *const u8, len: usize) {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#missing_safety_doc
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/ipc.rs:710:17
+    |
+710 | /                 if checked {
+711 | |                     if let Some(cancelled) =
+712 | |                         ep.q.iter_mut()
+713 | |                             .find(|s| s.state == SlotState::Cancelled && s.server == tid)
+...   |
+718 | |                 }
+    | |_________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+710 ~                 if checked
+711 ~                     && let Some(cancelled) =
+712 |                         ep.q.iter_mut()
+...
+716 |                         return Err(crate::arch::x86_64::syscall::STATUS_CALLER_GONE);
+717 ~                     }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/ipc.rs:762:5
+    |
+762 | /     if waiter != NO_TID {
+763 | |         if let Err(e) = sched::wake(waiter) {
+764 | |             error!("ipc", "notify: wake(waiter {waiter}) failed: {e}");
+765 | |             crate::halt::halt_machine("ipc: notify could not wake its waiter");
+766 | |         }
+767 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+762 ~     if waiter != NO_TID
+763 ~         && let Err(e) = sched::wake(waiter) {
+764 |             error!("ipc", "notify: wake(waiter {waiter}) failed: {e}");
+765 |             crate::halt::halt_machine("ipc: notify could not wake its waiter");
+766 ~         }
+    |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> kernel/src/m3.rs:30:17
+   |
+30 |     let checks: [(&str, fn() -> Result<(), &'static str>); 13] = [
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+warning: manual implementation of an assign operation
+   --> kernel/src/m3.rs:325:9
+    |
+325 |         model = 4 * k as u64 ^ model;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace it with: `model ^= 4 * k as u64`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#assign_op_pattern
+    = note: `#[warn(clippy::assign_op_pattern)]` on by default
+
+warning: using `contains()` instead of `iter().any()` is more efficient
+   --> kernel/src/m3.rs:496:8
+    |
+496 |     if c.iter().any(|x| *x == 0) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `c.contains(&0)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_contains
+    = note: `#[warn(clippy::manual_contains)]` on by default
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> kernel/src/m4.rs:50:17
+   |
+50 |     let checks: [(&str, fn() -> Result<(), &'static str>); 9] = [
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+warning: the loop variable `i` is only used to index `holes`
+    --> kernel/src/m4.rs:1296:14
+     |
+1296 |     for i in 0..nh {
+     |              ^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_range_loop
+help: consider using an iterator
+     |
+1296 -     for i in 0..nh {
+1296 +     for <item> in holes.iter().take(nh) {
+     |
+
+warning: the loop variable `i` is only used to index `holes`
+    --> kernel/src/m4.rs:1347:14
+     |
+1347 |     for i in 0..nh {
+     |              ^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_range_loop
+help: consider using an iterator
+     |
+1347 -     for i in 0..nh {
+1347 +     for <item> in holes.iter().take(nh) {
+     |
+
+warning: casting to the same type is unnecessary (`usize` -> `usize`)
+    --> kernel/src/m4.rs:1564:31
+     |
+1564 |     let kept = cap::read(cli, c_mem as usize)
+     |                               ^^^^^^^^^^^^^^ help: try: `c_mem`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_cast
+     = note: `#[warn(clippy::unnecessary_cast)]` on by default
+
+warning: the loop variable `i` is only used to index `holes`
+    --> kernel/src/m4.rs:1688:14
+     |
+1688 |     for i in 0..nh {
+     |              ^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_range_loop
+help: consider using an iterator
+     |
+1688 -     for i in 0..nh {
+1688 +     for <item> in holes.iter().take(nh) {
+     |
+
+warning: casting to the same type is unnecessary (`u64` -> `u64`)
+    --> kernel/src/m4.rs:1714:19
+     |
+1714 |     let msg_len = le64_at(elf::TEST_IMAGE, mo + 48) as u64;
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `le64_at(elf::TEST_IMAGE, mo + 48)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_cast
+
+warning: the variable `n` is used as a loop counter
+    --> kernel/src/m4.rs:1788:9
+     |
+1788 |         for r in recs.iter().flatten() {
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using: `for (n, r) in recs.iter().flatten().enumerate()`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#explicit_counter_loop
+     = note: `#[warn(clippy::explicit_counter_loop)]` on by default
+
+warning: casting to the same type is unnecessary (`usize` -> `usize`)
+    --> kernel/src/m4.rs:1821:23
+     |
+1821 |     if cap::read(sup, s_mem as usize).is_err() {
+     |                       ^^^^^^^^^^^^^^ help: try: `{ s_mem }`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_cast
+
+warning: needlessly taken reference of left operand
+    --> kernel/src/m4.rs:1962:12
+     |
+1962 |         if &kbuf[..n] != *want {
+     |            ----------^^^^^^^^^
+     |            |
+     |            help: use the left value directly: `kbuf[..n]`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#op_ref
+     = note: `#[warn(clippy::op_ref)]` on by default
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> kernel/src/m5.rs:75:17
+   |
+75 |     let checks: [(&str, fn() -> Result<(), &'static str>); 6] = [
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> kernel/src/m6.rs:50:17
+   |
+50 |     let checks: [(&str, fn() -> Outcome); 6] = [
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> kernel/src/m7.rs:60:17
+   |
+60 |     let checks: [(&str, fn() -> Res); 2] = [
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+warning: this block may be rewritten with the `?` operator
+   --> kernel/src/m7.rs:291:5
+    |
+291 | /     if let Err(reason) = await_badge(nid_sync, 1 << 16) {
+292 | |         return Err(reason);
+293 | |     }
+    | |_____^ help: replace it with: `await_badge(nid_sync, 1 << 16)?;`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#question_mark
+    = note: `#[warn(clippy::question_mark)]` on by default
+
+warning: this block may be rewritten with the `?` operator
+   --> kernel/src/m7.rs:323:5
+    |
+323 | /     if let Err(reason) = await_timer_armed(timers_before) {
+324 | |         return Err(reason);
+325 | |     }
+    | |_____^ help: replace it with: `await_timer_armed(timers_before)?;`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#question_mark
+
+warning: manual implementation of `.is_multiple_of()`
+   --> kernel/src/sched/mod.rs:261:25
+    |
+261 |     if cr3_phys == 0 || cr3_phys % crate::arch::x86_64::paging::PAGE != 0 {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `!cr3_phys.is_multiple_of(crate::arch::x86_64::paging::PAGE)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+warning: doc list item without indentation
+   --> kernel/src/spawn.rs:271:5
+    |
+271 | /// thread need. Both entry points build one, finish it their own way,
+    |     ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_continuation
+    = note: `#[warn(clippy::doc_lazy_continuation)]` on by default
+help: indent this line
+    |
+271 | ///   thread need. Both entry points build one, finish it their own way,
+    |     ++
+
+warning: doc list item without indentation
+   --> kernel/src/spawn.rs:272:5
+    |
+272 | /// and roll it back on any refusal.
+    |     ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_continuation
+help: indent this line
+    |
+272 | ///   and roll it back on any refusal.
+    |     ++
+
+warning: this `let...else` may be rewritten with the `?` operator
+   --> kernel/src/spawn.rs:376:9
+    |
+376 | /         let Some(i) = recs.iter().position(|r| !r.live) else {
+377 | |             return None;
+378 | |         };
+    | |__________^ help: replace it with: `let i = recs.iter().position(|r| !r.live)?;`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#question_mark
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/spawn.rs:440:5
+    |
+440 | /     if let Some((nid, badge)) = notif {
+441 | |         if proc::set_exit_notif(p.pid, nid, badge).is_err() {
+442 | |             p.rollback();
+443 | |             return Err(STATUS_BAD_ARG);
+444 | |         }
+445 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+440 ~     if let Some((nid, badge)) = notif
+441 ~         && proc::set_exit_notif(p.pid, nid, badge).is_err() {
+442 |             p.rollback();
+443 |             return Err(STATUS_BAD_ARG);
+444 ~         }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/spawn.rs:566:17
+    |
+566 | /                 if let Ok(c) = cap::read(pid, slot) {
+567 | |                     if let CapObj::Endpoint { eid } = c.obj {
+568 | |                         if c.rights & cap::RIGHTS_READ != 0 {
+569 | |                             crate::ipc::reopen_after_server_spawn(eid);
+...   |
+572 | |                 }
+    | |_________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+566 ~                 if let Ok(c) = cap::read(pid, slot)
+567 ~                     && let CapObj::Endpoint { eid } = c.obj {
+568 |                         if c.rights & cap::RIGHTS_READ != 0 {
+569 |                             crate::ipc::reopen_after_server_spawn(eid);
+570 |                         }
+571 ~                     }
+    |
+
+warning: this `if` statement can be collapsed
+   --> kernel/src/spawn.rs:567:21
+    |
+567 | /                     if let CapObj::Endpoint { eid } = c.obj {
+568 | |                         if c.rights & cap::RIGHTS_READ != 0 {
+569 | |                             crate::ipc::reopen_after_server_spawn(eid);
+570 | |                         }
+571 | |                     }
+    | |_____________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+567 ~                     if let CapObj::Endpoint { eid } = c.obj
+568 ~                         && c.rights & cap::RIGHTS_READ != 0 {
+569 |                             crate::ipc::reopen_after_server_spawn(eid);
+570 ~                         }
+    |
+
+warning: `arena-kernel` (lib) generated 56 warnings (run `cargo clippy --fix --lib -p arena-kernel -- ` to apply 35 suggestions)
+    Finished `release` profile [optimized] target(s) in 1.49s

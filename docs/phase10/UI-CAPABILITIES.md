@@ -1,6 +1,7 @@
 # UI capabilities
 
-Status: implemented inventory; qualification and measured display matrix pending.
+Status: Sol engineering inventory; 97/97 suite and exact-image 100/100 gates
+passed. GOP800, GPU800 and GPU640 six-app matrix passed.
 
 | Area | Implemented capability |
 |---|---|
@@ -33,8 +34,7 @@ region, 32 mappings and 32 cap slots per process. The desktop reserves six
 127-page app backings and holds each exact original Process cap. Six private published snapshots additionally reserve 756 broker pages. Standard
 800x600 GOP requires 469 scanout pages. Six apps use 1231 shared pages, 14 maps
 and 28 steady broker caps; transient broker cap high-water is 29. Guest display tests pass GOP800x600 and
-actual virtio-gpu800x600/640x480 with all six apps. Final exact-image qualification
-remains pending. The dynamic child limit is four system-wide, independently of six
+actual virtio-gpu800x600/640x480 with all six apps. Exact-image engineering stability passed 100/100. The dynamic child limit is four system-wide, independently of six
 desktop sessions. Built-ins are actual static userspace BootImage processes.
 
 `python3 tools/test_m10_ui.py` checks host components/motion/policy, formatting,

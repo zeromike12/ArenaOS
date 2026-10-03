@@ -1,9 +1,16 @@
 # Sol → Opus design handoff
 
-Status: implemented functional desktop; final qualification pending. Opus starts
-only from the recorded qualified source, after full suite/100/archive proof.
-Exact source SHA, EFI, archive, suite and screenshot receipts will be inserted
-at the Design Handoff Checkpoint. This file describes the implemented contract.
+Sol engineering/reference skin. Qualified executable/test/tool source:
+`11a45c34deae9a7a539a99fd7d3d6ea196ea6025`. Engineering branch: `arena/phase10-sol-engineering`.
+Full suite **97/97**; fresh exact-image graphical gate **100/100**.
+EFI SHA-256: `18357914fbfca7c7af87bd846c0f12f645e7f9a78d4816395d688b295ba90c7f`.
+The published preservation checkpoint adds only handoff docs and evidence to
+this qualified source; executable/test/tool changes invalidate those receipts.
+Archive checksum, independent extracted-boot receipt, resource measurements and
+screenshots are in `releases/checkpoints/phase10-engineering-baseline/`.
+Opus branches from the published preservation checkpoint with this exact
+executable/test/tool tree. This is the design handoff, not final Phase-10 visual
+qualification. Sol must review and requalify the post-Opus image.
 
 ## Architecture
 
@@ -157,3 +164,17 @@ Host gallery PPMs are supplementary fixtures, not guest proof.
 After Opus finishes, Sol reviews architecture/resource/performance and performs
 all historical tests, a new exact-EFI 100/100 and a new final deployable archive.
 The engineering baseline does not replace that post-design qualification.
+
+## Captured application references
+
+- [Terminal](../../releases/checkpoints/phase10-engineering-baseline/screenshots/terminal.png)
+- [Files](../../releases/checkpoints/phase10-engineering-baseline/screenshots/files.png)
+- [Text Editor](../../releases/checkpoints/phase10-engineering-baseline/screenshots/editor.png)
+- [Settings](../../releases/checkpoints/phase10-engineering-baseline/screenshots/settings.png)
+- [System Monitor](../../releases/checkpoints/phase10-engineering-baseline/screenshots/monitor.png)
+- [UI Gallery](../../releases/checkpoints/phase10-engineering-baseline/screenshots/gallery.png)
+- [Full six-app desktop](../../releases/checkpoints/phase10-engineering-baseline/screenshots/desktop-six-apps.png)
+- [Deterministic gallery, light](../../releases/checkpoints/phase10-engineering-baseline/screenshots/gallery-owned-light.png)
+- [Deterministic gallery, dark](../../releases/checkpoints/phase10-engineering-baseline/screenshots/gallery-owned-dark.png)
+
+Every PNG checksum is in [SCREENSHOT-MANIFEST.md](SCREENSHOT-MANIFEST.md).

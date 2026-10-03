@@ -1,7 +1,8 @@
 # Phase 10 engineering record
 
-Status: functional implementation and focused proofs complete; final historical,
-exact-image 100/100 and independently extracted archive qualification pending.
+Status: functional Sol engineering/reference desktop; complete historical and
+Phase-10 suite 97/97, exact-image graphical stability 100/100. Archive checksum
+and independently extracted graphical receipt are published with the checkpoint.
 Sol supplies the reference skin; Opus owns the subsequent visual design branch.
 No intermediate receipt is the engineering baseline.
 
@@ -156,3 +157,37 @@ in DESIGN-HANDOFF.md and the checkpoint QUALIFICATION.json.
 Michael's MANUAL-SMOKE.md steps are supplementary; no human session is claimed
 by automated results. UI-CAPABILITIES.md and DESIGN-REQUESTS.md expose limits
 and the review path for missing presentation primitives.
+
+## Frozen engineering qualification receipts
+
+Qualified executable/test/tool source: `11a45c34deae9a7a539a99fd7d3d6ea196ea6025` (tree
+`9ee2f00b0fb63a9598ae3ecdb9e58338f6ee4f97`). Later preservation commits
+may add only handoff documentation and checkpoint evidence.
+
+Full historical + Phase-10 suite: **97/97** with clean, unchanged source.
+Exact shipping EFI SHA-256: `18357914fbfca7c7af87bd846c0f12f645e7f9a78d4816395d688b295ba90c7f`.
+Fresh graphical stability: **100/100**, zero failures/retries.
+The exact supplied ESP was captured without rebuilding; all 12 PNG references
+are source/EFI-bound and owned light/dark gallery rasters match across boots.
+
+- [m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline=(113706, 14, 14, 1, 469, 2, 16) peak=(112764, 20, 20, 7, 1231, 14, 28) transient-broker-caps=29
+- [m10-display] m10-display-default 800x600: real pixels/input/drag, six-app peak=(112764, 20, 20, 7, 1231, 14, 28), exact teardown PASS
+- [m10-display] m10-display-gpu 800x600: real pixels/input/drag, six-app peak=(112315, 20, 20, 8, 1233, 15, 28), exact teardown PASS
+- [m10-display] m10-display-gpu640 640x480: real pixels/input/drag, six-app peak=(112666, 20, 20, 8, 1064, 15, 28), exact teardown PASS
+
+Two complete warmed six-app cycles plus relaunch preserve exact native
+accounting; only six pre-existing intermediate page tables remain resident.
+100 individual native/input/drag/relaunch receipts are preserved in
+`100-graphical-receipts.json`. All production RED/GREEN controls and the three
+invalid discovery-run archives are retained.
+
+Static checks passed for all 44 changed Rust files, 121 Python files, eight Bash
+scripts and changed-source whitespace. UI/desktop strict Clippy and no_std
+builds passed. Kernel bare-metal check and non-strict Clippy passed (56 style
+warnings); a strict repository-wide kernel Clippy pass is not claimed. Whole
+legacy crate formatting outside changed files is not a qualified gate.
+
+Receipts, screenshots, archive checksum and independent-extraction proof live
+in `releases/checkpoints/phase10-engineering-baseline/`. Michael's documented
+manual smoke test has not been performed by these automated checks. Opus owns
+the next visual pass; Sol must qualify the resulting exact image again.
