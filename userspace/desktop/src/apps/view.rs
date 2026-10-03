@@ -193,23 +193,40 @@ pub fn dialog(canvas: &mut Canvas<'_>, line: &Line, label: &str, t: Theme) {
 }
 
 /// Document facts in the editor header: name, saved state, caret position.
+///
+/// Only the name (which changes solely through the Open/Save As dialogs)
+/// sits inside the toolbar strip x12..366. Saved state and caret position
+/// are right-aligned beyond it, because guest oracles treat a change in
+/// that strip as "a dialog is now open" before typing into it.
 fn document_info(canvas: &mut Canvas<'_>, model: &Editor, t: Theme) {
-    let x = l::HEADER_INFO_X;
-    let width = W - m::CONTENT_INSET - x;
+    let right = W - m::CONTENT_INSET;
     let end = model.path.iter().position(|b| *b == 0).unwrap_or(32);
     let name = if end == 0 {
         "Untitled"
     } else {
         string(&model.path[..end])
     };
-    c::text_fit(canvas, x, 36, name, Style::Strong, t.text, width);
-    let state_w = if model.dirty {
-        c::chip(canvas, x, 47, "Unsaved", Tone::Warning, t)
+    // Fixed reservation so caret movement never re-truncates the name.
+    let position_w = 7 * m::FONT_ADVANCE;
+    let x = l::HEADER_INFO_X;
+    c::text_fit(
+        canvas,
+        x,
+        36,
+        name,
+        Style::Strong,
+        t.text,
+        right - position_w - m::S - x,
+    );
+    let state = if model.dirty {
+        ("Unsaved", Tone::Warning)
     } else if end == 0 {
-        c::chip(canvas, x, 47, "New", Tone::Neutral, t)
+        ("New", Tone::Neutral)
     } else {
-        c::chip(canvas, x, 47, "On disk", Tone::Neutral, t)
+        ("On disk", Tone::Neutral)
     };
+    let chip_w = c::measure(state.0, Style::Caption) + 2 * m::M;
+    c::chip(canvas, right - chip_w, 47, state.0, state.1, t);
     // Line:column of the caret, counted from the real buffer.
     let (mut line, mut column) = (1u64, 1u64);
     for b in &model.data[..model.cursor] {
@@ -230,16 +247,7 @@ fn document_info(canvas: &mut Canvas<'_>, model: &Editor, t: Theme) {
     let b = c::decimal(&mut buffer, column, false);
     text[n..n + b.len()].copy_from_slice(b.as_bytes());
     n += b.len();
-    if state_w + 6 + n as i32 * m::FONT_ADVANCE <= width {
-        c::text_right(
-            canvas,
-            W - m::CONTENT_INSET,
-            50,
-            string(&text[..n]),
-            Style::Body,
-            t.muted,
-        );
-    }
+    c::text_right(canvas, right, 36, string(&text[..n]), Style::Body, t.muted);
 }
 
 pub fn editor(
@@ -295,11 +303,7 @@ pub fn editor(
             l::SAVE,
             "Save",
             Some(Glyph::Save),
-            if model.dirty {
-                Kind::Primary
-            } else {
-                Kind::Standard
-            },
+            Kind::Primary,
             State::Normal,
             t,
         );
@@ -380,7 +384,9 @@ pub fn editor(
             column = 0;
         }
     }
-    if model.len == 0 && dialogue == 0 {
+    // Independent of dialog state: the text area changes only when the
+    // document does (guest oracles wait on that to know a file loaded).
+    if model.len == 0 {
         c::label(
             canvas,
             l::EDIT_TEXT.x + 14,
@@ -881,7 +887,50 @@ pub fn monitor(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    fn render(f: impl Fn(&mut Canvas<'_>)) -> std::vec::Vec<u32> {
+        let mut pixels = std::vec![0u32; m::WINDOW_WIDTH * m::WINDOW_HEIGHT];
+        let mut canvas = Canvas::new(
+            &mut pixels,
+            m::WINDOW_WIDTH,
+            m::WINDOW_HEIGHT,
+            m::WINDOW_WIDTH,
+        )
+        .unwrap();
+        f(&mut canvas);
+        drop(canvas);
+        pixels
+    }
+    fn region(p: &[u32], x: i32, y: i32, w: i32, h: i32) -> impl Iterator<Item = u32> + '_ {
+        (y..y + h).flat_map(move |r| {
+            (x..x + w).map(move |c| p[r as usize * m::WINDOW_WIDTH + c as usize])
+        })
+    }
+    /// Guest oracles synchronise keyboard input with pointer clicks by
+    /// waiting for the editor toolbar strip (x12..366, y36..60) to change,
+    /// and for the text area to change once a document has loaded. Neither
+    /// may change for unrelated state (dirty flag, caret, dialog-only).
+    #[test]
+    fn editor_probe_regions_change_only_for_their_events() {
+        let line = Line::new();
+        for dark in [false, true] {
+            let t = arena_ui::theme::palette(dark);
+            let mut doc = Editor::new();
+            doc.load(b"hello\nworld", "user-note").unwrap();
+            let clean = render(|c| editor(c, &doc, 0, &line, 0, t));
+            doc.insert(b'x').unwrap();
+            doc.cursor = 8;
+            let dirty = render(|c| editor(c, &doc, 0, &line, 0, t));
+            assert!(region(&clean, 12, 36, 354, 24).eq(region(&dirty, 12, 36, 354, 24)));
+            let dialog = render(|c| editor(c, &doc, 0, &line, 1, t));
+            assert!(!region(&clean, 12, 36, 354, 24).eq(region(&dialog, 12, 36, 354, 24)));
+            let empty = Editor::new();
+            let blank = render(|c| editor(c, &empty, 0, &line, 0, t));
+            let opening = render(|c| editor(c, &empty, 0, &line, 2, t));
+            assert!(region(&blank, 18, 74, 330, 140).eq(region(&opening, 18, 74, 330, 140)));
+        }
+    }
     /// Guest oracles detect a new cascaded window by its title strip, which
     /// lands over the Terminal's local rows 56..65 (x 64..244). That strip
     /// must stay plain so a window that never opened is never mistaken for
