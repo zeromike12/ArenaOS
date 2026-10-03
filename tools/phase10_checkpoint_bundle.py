@@ -17,7 +17,7 @@ from pyfatfs.PyFatFS import PyFatFS
 
 ROOT=arena_env.REPO_ROOT; BUILD=arena_env.build_dir()
 NAME='phase10-engineering-baseline'
-SCRIPTS=('phase10_archive_boot.py','check_phase10_pixels.py','qmp.py','network_fixture.py','tcp_fixture.py','udp_dns_fixture.py')
+SCRIPTS=('phase10_archive_boot.py','check_phase10_pixels.py','qmp.py','network_fixture.py','tcp_fixture.py','udp_dns_fixture.py','vcon.py')
 DOCS=('ENGINEERING.md','UI-CAPABILITIES.md','APP-CONTRACTS.md','DESIGN-HANDOFF.md','DESIGN-REQUESTS.md','SCREENSHOT-MANIFEST.md','MANUAL-SMOKE.md')
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -33,8 +33,11 @@ def main():
     assert all(p.startswith(('docs/phase10/','releases/checkpoints/'+NAME+'/')) for p in changed),'production/test/tools differ from qualified source'
     log=args.suite_log.read_text();count=len(list((ROOT/'tools').glob('test_m*.py')))+11
     required=(f'ALL TESTS PASSED ({count} test suites)',f'QUALIFICATION SOURCE COMMIT: {commit}','QUALIFICATION SOURCE CLEAN: yes',f'QUALIFICATION SOURCE END: {commit}',
-              '[m10-boundaries-red] 10 real production RED controls;',
+              '[m10-boundaries-red] 12 real production RED controls;',
               '[m10-multi-red] exact source/artifact restoration;',
+              '[m10-clock] early-return and persistent-upper-bound production RED;',
+              '[m10-select-cleanup] bad receipt native cleanup RED/GREEN;',
+              '[m10-archive-preflight] independently staged standard-library tools, firmware, full shipping console/tablet/network, real two-spawn/retire graphical workflow PASS;',
               '[m10-put-red] byte-exact source/EFI restoration and complete guest GREEN',
               '[m10-client-death] actual unexpected ordinary client exit',
               '[m10-service-death] real compositor death answers in-flight input CALL',
@@ -67,6 +70,9 @@ def main():
         afs1.mkfs(stage/'scratch-template.img',8*1024*1024//afs1.SECTOR)
         shutil.copyfile(args.suite_log,stage/'full-suite.log')
         shutil.copyfile(args.stability_log,stage/'100-boot.log')
+        discovery=ROOT/'releases/checkpoints/phase10-discovery-1'
+        for filename in ('first-full-b1422bfd-failures.tar.gz','first-full-b1422bfd-failures.tar.gz.sha256'):
+            shutil.copyfile(discovery/filename,stage/filename)
         shutil.copyfile(BUILD/'phase10-screenshots/manifest.json',stage/'screenshot-manifest.json')
         for entry in manifest['entries']:shutil.copyfile(BUILD/'phase10-screenshots'/entry['path'],stage/entry['path'])
         for proof in sorted(BUILD.glob('m10-*-red.log')):shutil.copyfile(proof,stage/('evidence-'+proof.name))

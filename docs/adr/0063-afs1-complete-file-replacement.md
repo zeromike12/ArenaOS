@@ -1,6 +1,7 @@
 # ADR-0063 — AFS1 complete named file replacement
 
-Status: implemented prototype; crash and refusal qualification in progress.
+Status: implemented; actual ordered-prefix crashes, no-space refusal and
+production in-place-write RED/restored GREEN proven; full qualification pending.
 
 AFS1's existing WRITE changes existing data sectors in place. Desktop editor
 saves need one atomic complete-document operation. Add `FS_OP_PUT=9` to the

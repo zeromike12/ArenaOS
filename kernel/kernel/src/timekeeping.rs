@@ -161,8 +161,9 @@ pub fn now_us() -> u64 {
 
 /// Spin (with PAUSE) for at least `us` microseconds of monotonic time.
 /// Used by tests; production code will get proper sleeping in M3 with the
-/// scheduler. Bounded by 4× the request as an anti-hang net: returns false
-/// if the clock never reached the target (should be impossible post-init).
+/// scheduler. A finite iteration guard returns false if the clock never
+/// reaches the target (should be impossible post-init). Host descheduling
+/// can extend elapsed time; this routine never promises an upper duration.
 pub fn busy_wait_us(us: u64) -> bool {
     let start = now_us();
     let mut guard = 0u64;

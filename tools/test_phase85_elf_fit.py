@@ -24,14 +24,15 @@ def run(*cmd,**kwargs):
     return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
                           env=kwargs.get('env'),capture_output=True,text=True)
 
-def main():
+def main(existing_userspace=False):
     env=os.environ.copy()
     rust=Path('/opt/rust/prefix/bin')
     if rust.is_dir():env['PATH']=str(rust)+os.pathsep+env['PATH']
     assert shutil.which('cargo',path=env['PATH']) and shutil.which('rustc',path=env['PATH']), 'install Rust 1.97 + bare-metal target'
     # Compile unmodified production elf.rs in validate.rs. Its embedded
     # include_bytes entries need the normal existing userspace build.
-    run('bash','tools/build.sh','--image',env=env)
+    if not existing_userspace:
+        run('bash','tools/build.sh','--image',env=env)
     run('cargo','build','--offline','--locked','--release','--target','x86_64-unknown-none',cwd=FIX,env=env)
     name='arena-phase85-elf-probe'
     image=(FIX/'target/x86_64-unknown-none/release'/name).read_bytes()
@@ -60,4 +61,6 @@ def main():
           f'full_file_sha256={hashlib.sha256(signed).hexdigest()}')
     print('fresh offline build byte-identical; host-only measurement PASS; dynamic guest execution NOT proven')
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    assert sys.argv[1:] in ([],['--existing-userspace'])
+    main(existing_userspace=bool(sys.argv[1:]))

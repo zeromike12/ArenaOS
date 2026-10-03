@@ -25,6 +25,7 @@ The unchanged Phase-9 source plus unlinked UI foundations passed 80/80 suites
 | 0065 | Explicit function scopes/launch targets, six reusable private clocks, Pool/READ diagnostics |
 | 0066 | Generic signed Image bearer launch, mutation-free spawn preflight, explicit production profile |
 | 0067 | Private complete owned-frame snapshots; unpublished staging remains invisible |
+| 0068 | Bounded clock measurement sampling and unconditional diagnostic Process cleanup |
 
 The broker binds each fresh backing to its original Process before serving
 requests. Backing generation, function rights, trusted resource scope and held
@@ -67,10 +68,17 @@ states and shared motion samples. APP-CONTRACTS.md records exact grants/bounds.
 
 Production mutations cover function scope, Files launch targets, pointer hit,
 actual SYS_SPAWN, Process retirement, diagnostic attenuation, owner/stale
-surfaces, generation reuse, frame publication and capacity preflight. Separate
+surfaces, generation reuse, frame publication, capacity preflight, dock-safe
+title movement and live appearance delivery to all six clients. Separate
 native controls break the dynamic quota, checked-reply cancellation and data
 CoW. Mutants must compile and fail real guest oracles. Exact source/EFI/ESP
 restoration precedes GREEN. The full suite reruns and preserves this evidence.
+Native controls also reject early busy-wait return and persistent overshoot,
+and prove that a bad signed-child receipt still returns Process/frame/record
+counts to baseline. The first discovery run's 90/94 receipt remains preserved;
+it is a failed attempt, not qualification evidence.
+The checksummed `releases/checkpoints/phase10-discovery-1/` archive preserves
+that complete run and its failed receipts and is included in the final bundle.
 
 Unexpected client death retires its Process/backing/caps/maps while sibling
 pixels/input survive. A live full-queue client can be force-closed by repeating
@@ -110,12 +118,20 @@ from application allocation leaks.
   independently of event delivery.
 - QMP can sample a GOP copy in progress; settled owned captures prevent a mixed
   scanout from masquerading as submitted content. No vsync is claimed.
+- A small title could slide behind the dock; creation and drag now retain it
+  above the dock, with exact signed-app chrome/close proof at the bottom edge.
+- A diagnostic child receipt short-circuited FINISH on failure; the original
+  Process witness is now retired before checking the combined result.
+- Clock upper-bound measurement could include host descheduling; bounded
+  three-window sampling retains strict early-return and persistent-stall gates.
 
 ## Qualification and handoff
 
 Freeze/push source, run `tools/run_tests.sh`, build shipping Desktop with
-`tools/build.sh --image`, then run `tools/stability_loop.sh 100` against that
-exact EFI. Every boot checks real app spawn, keyboard pixels, tablet drag,
+`tools/build.sh --image`, capture the handoff fixture with that supplied ESP
+(no rebuild), then run `tools/stability_loop.sh 100` against that exact EFI.
+The linker embeds a real PE timestamp; rebuilding afterward changes the EFI
+hash even with identical source. Every boot checks real app spawn, keyboard pixels, tablet drag,
 Process/resource retirement, relaunch and serial shutdown, alongside historical
 boot/device/network verdicts. Any failure restarts the attempt at zero.
 

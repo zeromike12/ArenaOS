@@ -22,7 +22,7 @@ import qmp
 ROOT = Path(__file__).resolve().parent
 
 
-def verified_inputs() -> str:
+def verified_inputs(qualified: bool = True) -> str:
     manifest = (ROOT / 'sha256sums.txt').read_text().splitlines()
     for line in manifest:
         digest, name = line.split(maxsplit=1)
@@ -30,7 +30,7 @@ def verified_inputs() -> str:
         if path.resolve().parent != ROOT or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError(f'extracted archive entry hash mismatch: {name}')
     efi_sha = hashlib.sha256((ROOT / 'arena-boot.efi').read_bytes()).hexdigest()
-    if (ROOT / 'stability-receipt.txt').read_text().split() != [efi_sha, '100/100']:
+    if qualified and (ROOT / 'stability-receipt.txt').read_text().split() != [efi_sha, '100/100']:
         raise ValueError('qualified 100/100 receipt does not name extracted EFI')
     return efi_sha
 
@@ -69,8 +69,8 @@ def type_historical_input_fixture(sock: Path, serial: Path) -> None:
         conn.close()
 
 
-def boot() -> None:
-    sha = verified_inputs()
+def boot(qualified: bool = True) -> None:
+    sha = verified_inputs(qualified)
     with tempfile.TemporaryDirectory(prefix='arena-phase10-extracted-') as tmp:
         work = Path(tmp)
         vars_image, scratch = work / 'vars.img', work / 'scratch.img'
@@ -80,6 +80,10 @@ def boot() -> None:
         sock = work / 'qmp.sock'
         image, receipt = work / 'screen.ppm', work / 'pixels.txt'
         tcp_log, dns_log = work / 'tcp.log', work / 'dns.log'
+        console_log, console_sock = work / 'console.log', work / 'console.sock'
+        console = subprocess.Popen([sys.executable, '-u', str(ROOT / 'vcon.py'),
+                                    str(console_sock), 'contest: hello from ArenaOS',
+                                    'host-says-hello\n', '60', str(console_log)], cwd=ROOT)
         actor = subprocess.Popen([sys.executable, '-u', str(ROOT / 'network_fixture.py'),
                                   str(tcp_log), str(dns_log)], cwd=ROOT,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -99,6 +103,9 @@ def boot() -> None:
                     '-netdev', 'user,id=net0', '-device', 'virtio-net-pci,netdev=net0',
                     '-device', 'virtio-rng-pci', '-device', 'virtio-keyboard-pci',
                     '-device', 'virtio-tablet-pci',
+                    '-device', 'virtio-serial-pci,max_ports=1',
+                    '-chardev', f'socket,id=vc0,path={console_sock},server=on,wait=on',
+                    '-device', 'virtconsole,chardev=vc0',
                     '-qmp', f'unix:{sock},server=on,wait=off', '-display', 'none',
                     '-chardev', 'stdio,id=con0,signal=off', '-serial', 'chardev:con0',
                     '-no-reboot',
@@ -116,6 +123,10 @@ def boot() -> None:
             text = serial.read_text(errors='replace')
             if (rc != 0 or '[arena ERROR halt]' in text or 'PANIC' in text
                     or 'm7: RESULT PASS (2/2)' not in text
+                    or 'm6: RESULT PASS (6/6)' not in text
+                    or 'contest: PASS — the port carried bytes BOTH ways:' not in text
+                    or 'contest: hello from ArenaOS' not in console_log.read_text(errors='replace')
+                    or 'servicemgr: full fixture notification budget 25/25; twenty-sixth refused' not in text
                     or text.count('[desktop] real application spawned;') != 2
                     or text.count('[desktop] application retired:') != 2
                     or 'halting via UEFI ResetSystem(shutdown)' not in text
@@ -126,14 +137,21 @@ def boot() -> None:
             evidence = os.environ.get('ARENA_EXTRACTED_EVIDENCE')
             if evidence:
                 target = Path(evidence).resolve(); target.mkdir(parents=True, exist_ok=True)
-                for p in (serial, image, receipt, tcp_log, dns_log):
+                for p in (serial, image, receipt, tcp_log, dns_log, console_log):
                     shutil.copyfile(p, target / p.name)
-            print(f'EXTRACTED PHASE10 PIXELS PASS: EFI SHA-256 {sha}; {receipt.read_text().strip()}')
+            prefix='EXTRACTED PHASE10 PIXELS PASS' if qualified else 'UNQUALIFIED EXTRACTED PHASE10 PREFLIGHT PASS'
+            print(f'{prefix}: EFI SHA-256 {sha}; {receipt.read_text().strip()}')
         finally:
             if guest is not None and guest.poll() is None:
                 guest.kill()
                 guest.wait()
             actor.terminate()
+            console.terminate()
+            try:
+                console.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                console.kill()
+                console.wait()
             try:
                 actor.wait(timeout=3)
             except subprocess.TimeoutExpired:
@@ -143,6 +161,8 @@ def boot() -> None:
 
 if __name__ == '__main__':
     try:
-        boot()
+        if sys.argv[1:] not in ([], ['--unqualified-smoke']):
+            raise ValueError('usage: phase10_archive_boot.py [--unqualified-smoke]')
+        boot(qualified=not sys.argv[1:])
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
         sys.exit(f'EXTRACTED PHASE10 BOOT FAILED: {exc}')

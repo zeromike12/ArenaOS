@@ -105,7 +105,12 @@ def main(esp=None):
             for index in (5,4):
                 d.close(index)
                 d.wait(lambda:d.serial().count('[desktop] application retired:')>=6-index,'mixed builtin not reaped')
-            d.click(414,142+100) # top child now at x348,y232; close x414,y242.
+            # A small signed window must remain reachable above the dock.
+            # Compare its exact owned chrome after a real bottom-edge drag.
+            before_bottom=d.settled('bottom-drag-start',(353,237,60,18))
+            d.point(354,242,True);d.point(330,590);d.point(330,590,False);d.point(780,500)
+            d.shot('safe-title-above-dock',lambda p:crop(p,329,521,60,18)==crop(before_bottom,353,237,60,18))
+            d.click(390,526) # exact child now at x324,y516; reachable close.
             d.wait(lambda:d.serial().count('[desktop] application retired:')>=3,'signed child close not reaped')
             for i in (2,1,0):
                 d.click(136+i*26,70+i*24)
@@ -123,5 +128,5 @@ def main(esp=None):
     assert 'GRAPHICALTEST refused' not in s
     assert stage.contents(disk)[stage.STAGE1]==signed and all(stage.contents(disk)[k]==v for k,v in original.items())
     assert not __import__('afs1').audit(disk)
-    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus two ordinary builtins, mixed capacity refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, Process close and revoke-with-live-copied-pages PASS')
+    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus two ordinary builtins, mixed capacity refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS')
 if __name__=='__main__':main()

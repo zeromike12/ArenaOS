@@ -110,6 +110,11 @@ pub static ARENA_CAP_LAYOUT: [usize; 14] = [
         width = re.search(r"const MSG_BYTES: usize = (\d+);", ipc)
         if depth is None or width is None:
             raise ValueError("IPC queue/message bounds missing from source")
+        if depth[1] != '8' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 12;',ipc):
+            raise ValueError('production IPC bounds differ from reviewed Phase-10 8/64/12')
+        # Keep the historical four-entry projection as well as measuring the
+        # actual eight-entry production layout from the same source fields.
+        ipc_decls[2] = ipc_decls[2].replace('struct Endpoint {','struct Endpoint<const N: usize> {').replace('QUEUE_DEPTH','N')
         ipc_source = ("#![no_std]\n#![allow(dead_code)]\n"
                       f"const QUEUE_DEPTH: usize = {depth[1]};\n"
                       f"const MSG_BYTES: usize = {width[1]};\n"
@@ -117,9 +122,10 @@ pub static ARENA_CAP_LAYOUT: [usize; 14] = [
                       + "\n".join((obj, item, *ipc_decls)) + """
 #[used]
 #[unsafe(no_mangle)]
-pub static ARENA_IPC_LAYOUT: [usize; 5] = [
- size_of::<CallSlot>(),size_of::<Endpoint>(),size_of::<Notif>(),
- 8*size_of::<Endpoint>(),9*size_of::<Endpoint>()
+pub static ARENA_IPC_LAYOUT: [usize; 8] = [
+ size_of::<CallSlot>(),size_of::<Endpoint<4>>(),size_of::<Endpoint<QUEUE_DEPTH>>(),size_of::<Notif>(),
+ 8*size_of::<Endpoint<QUEUE_DEPTH>>(),9*size_of::<Endpoint<QUEUE_DEPTH>>(),
+ 12*size_of::<Endpoint<QUEUE_DEPTH>>(),25*size_of::<Notif>()
 ];
 """)
         ipc_target = Path(work) / "ipc.rs"
@@ -128,7 +134,7 @@ pub static ARENA_IPC_LAYOUT: [usize; 5] = [
         subprocess.run(["rustc", "--crate-type=lib", "--edition=2024", "-O",
                         "--target=x86_64-unknown-none", "--emit=llvm-ir",
                         str(ipc_target), "-o", str(ipc_ir)], check=True)
-        match = re.search(r'@ARENA_IPC_LAYOUT = constant \[40 x i8\] c"([^"]+)"',
+        match = re.search(r'@ARENA_IPC_LAYOUT = constant \[64 x i8\] c"([^"]+)"',
                           ipc_ir.read_text())
         if match is None:
             raise ValueError("guest IPC layout constant missing from LLVM IR")
@@ -142,18 +148,18 @@ pub static ARENA_IPC_LAYOUT: [usize; 5] = [
             else:
                 data.append(ord(encoded[i]))
                 i += 1
-        ipc_sizes = struct.unpack("<5Q", data)
-        if ipc_sizes != (240, 976, 24, 7808, 8784):
+        ipc_sizes = struct.unpack("<8Q", data)
+        if ipc_sizes != (240, 976, 1936, 24, 15488, 17424, 23232, 600):
             raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
-        print("x86_64-unknown-none IPC: CallSlot=240 Endpoint=976 Notif=24; "
-              "8->9 endpoints +976 B, 14->15 notifications +24 B PASS")
+        print("x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=976; "
+              "production Endpoint<8>=1936 Notif=24; 12 endpoints=23232 B, 25 notifications=600 B PASS")
         # ADR-0051: an *additional* distinct production-fsd marker,
         # on top of ADR-0048's projection; one Notification is 24 B.
         actual = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
-        if not re.search(r"pub const MAX_NOTIFS: usize = 18\s*;", actual):
-            raise ValueError("production notification bound not exactly 18")
+        if not re.search(r"pub const MAX_NOTIFS: usize = 25\s*;", actual):
+            raise ValueError("production notification bound not exactly 25")
         print("ADR-0051/0053 FS and package diagnostics: 15->17 notifications +48 B; "
-              "ADR-0055 lifecycle marker: 17->18 +24 B PASS")
+              "ADR-0055 lifecycle marker: 17->18 +24 B; ADR-0062/0065 desktop clocks: 18->25 +168 B PASS")
 
 
 if __name__ == "__main__":

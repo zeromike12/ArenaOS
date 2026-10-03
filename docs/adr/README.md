@@ -86,6 +86,7 @@ Rules:
 | [0065](0065-desktop-function-grants-and-observation.md) | Scoped function grants, private clocks and read-only observations | Implemented; native/QMP proof, qualification pending |
 | [0066](0066-generic-image-graphical-launch.md) | Generic Image-cap graphics and mutation-free spawn preflight | Implemented; signed guest/pixel proof, qualification pending |
 | [0067](0067-desktop-owned-frame-publication.md) | Complete owned frame publication into private broker snapshots | Implemented; final mutation/qualification pending |
+| [0068](0068-desktop-qualification-measurements.md) | Bounded native clock sampling and unconditional signed-child diagnostic cleanup | Implemented; native mutation proof; qualification pending |
 
 
 ## Template

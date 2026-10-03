@@ -79,6 +79,9 @@ pub struct State {
     pub dropped: u64,
 }
 impl State {
+    fn max_title_y(&self) -> i32 {
+        (self.screen.1 - m::DOCK_HEIGHT - m::TITLE_HEIGHT).max(m::SYSTEM_BAR_HEIGHT)
+    }
     pub const fn new(width: u16, height: u16) -> Result<Self, Error> {
         if width < 320 || height < 240 || width > 1024 || height > 768 {
             return Err(Error::Invalid);
@@ -157,8 +160,9 @@ impl State {
         self.windows[i] = Some(Window {
             handle,
             backing,
-            x: 70 + (i as i32) * 26,
-            y: 60 + (i as i32) * 24,
+            x: m::WINDOW_START_X + (i as i32) * m::CASCADE_X,
+            y: (m::WINDOW_START_Y + (i as i32) * m::CASCADE_Y)
+                .clamp(m::SYSTEM_BAR_HEIGHT, self.max_title_y()),
             width,
             height,
             z: self.z,
@@ -272,10 +276,14 @@ impl State {
             self.drag = None;
         }
         if let Some((handle, dx, dy)) = self.drag {
+            let max_y = self.max_title_y();
             if let Ok(i) = self.slot(handle) {
                 let w = self.windows[i].as_mut().expect("checked slot");
-                w.x = (x - dx).clamp(36 - w.width as i32, self.screen.0 - 36);
-                w.y = (y - dy).clamp(m::SYSTEM_BAR_HEIGHT, self.screen.1 - m::TITLE_HEIGHT);
+                w.x = (x - dx).clamp(
+                    m::VISIBLE_TITLE_WIDTH - w.width as i32,
+                    self.screen.0 - m::VISIBLE_TITLE_WIDTH,
+                );
+                w.y = (y - dy).clamp(m::SYSTEM_BAR_HEIGHT, max_y);
                 return Action::Changed;
             }
             self.drag = None;
@@ -455,6 +463,27 @@ mod tests {
         assert!(w.x < 800 && w.y < 600);
         s.pointer(i32::MIN, i32::MIN, 1);
         let w = s.find(h).unwrap();
-        assert!(w.x + w.width as i32 >= 36 && w.y >= m::SYSTEM_BAR_HEIGHT);
+        assert!(w.x + w.width as i32 >= m::VISIBLE_TITLE_WIDTH && w.y >= m::SYSTEM_BAR_HEIGHT);
+    }
+    #[test]
+    fn small_window_title_and_close_remain_above_dock() {
+        for (width, height) in [(320, 240), (640, 480), (800, 600)] {
+            let mut s = State::new(width, height).unwrap();
+            let h = s.create(1, 80, 60).unwrap();
+            let w = *s.find(h).unwrap();
+            s.pointer(w.x + 6, w.y + 10, 1);
+            s.pointer(i32::from(width) / 2, i32::MAX, 1);
+            s.pointer(i32::from(width) / 2, i32::MAX, 0);
+            let w = *s.find(h).unwrap();
+            assert!(w.y + m::TITLE_HEIGHT <= i32::from(height) - m::DOCK_HEIGHT);
+            let close_x =
+                (w.x + i32::from(w.width) - m::CLOSE_WIDTH + 14).clamp(0, i32::from(width) - 1);
+            assert_eq!(s.pointer(close_x, w.y + 10, 1), Action::Close(h));
+        }
+        let mut s = State::new(320, 240).unwrap();
+        for i in 0..MAX_WINDOWS {
+            let h = s.create(i as u64 + 1, 80, 60).unwrap();
+            assert!(s.find(h).unwrap().y + m::TITLE_HEIGHT <= 240 - m::DOCK_HEIGHT);
+        }
     }
 }

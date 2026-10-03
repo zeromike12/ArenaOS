@@ -104,6 +104,21 @@ def workflow(label,disk):
         d.close();dark_empty=d.shot('dark-empty',lambda p:crop(p,100,110,10,10)==crop(p,600,200,10,10))
         # Fill every bounded desktop session with actual ordinary processes.
         for kind in range(6):d.launch(kind,f'full-app-{kind}',kind)
+        d.click(153,142) # Activate Settings through its exposed title strip.
+        regions=((75,150,5,30),(101,170,5,30),(127,190,5,30),
+                 (154,220,5,30),(180,430,10,10),(600,250,30,80))
+        names=('terminal','files','editor','settings','monitor','gallery')
+        owned_dark=d.settled('six-dark',(600,250,30,80))
+        d.click(348,232)
+        d.wait(lambda:(file_bytes(disk,b'ui10-prefs') or b'')[:7]==b'UI10\x01\x00\x00','live light preference not persisted')
+        for name,region in zip(names,regions):
+            old=crop(owned_dark,*region)
+            d.shot('live-theme-'+name,lambda p,region=region,old=old:sum(
+                crop(p,*region)[i:i+3]!=old[i:i+3] for i in range(0,len(old),3))>len(old)/3*.8)
+        d.click(348,232)
+        d.wait(lambda:(file_bytes(disk,b'ui10-prefs') or b'')[:7]==b'UI10\x01\x01\x00','live dark preference not persisted')
+        for name,region in zip(names,regions):
+            d.shot('live-theme-restored-'+name,lambda p,region=region:crop(p,*region)==crop(owned_dark,*region))
         full=d.shot('full-desktop')
         before=d.serial().count('[desktop] real application spawned;')
         d.click(255,570)

@@ -17,6 +17,9 @@ const PROBE_IMAGE: u8 = 9;
 const EVENTS: u8 = 1;
 const PRIVATE: u8 = 7;
 const TIMEOUT_US: u64 = 2_000_000;
+// Diagnostic SELECT executes concurrent signed FS clients on a full
+// 32-object platter. The production readiness/restart budget is unchanged.
+const SELECT_CHILD_TIMEOUT_US: u64 = 15_000_000;
 const K_IMAGE: Key = Key(26);
 const K_FS: Key = Key(27);
 const K_ENDPOINT: Key = Key(28);
@@ -1646,11 +1649,7 @@ impl State {
                 SYS_TIMER_ARM,
                 PRIVATE as u64,
                 MGR_BADGE_PKG_PROBE_DEADLINE,
-                if self.test_maximal {
-                    15_000_000
-                } else {
-                    TIMEOUT_US
-                },
+                SELECT_CHILD_TIMEOUT_US,
             )
         };
         if timer < 0 {
@@ -1670,7 +1669,15 @@ impl State {
         if timer >= 0 {
             let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
         }
-        if seen != MGR_BADGE_PKG_PROBE_EXIT || alive(child) != Ok(false) {
+        let child_alive = alive(child);
+        if seen != MGR_BADGE_PKG_PROBE_EXIT || child_alive != Ok(false) {
+            log_line(|o| {
+                o.str("servicemgr: select first receipt bits=");
+                o.u64(seen);
+                o.str(" dead=");
+                o.u64(u64::from(child_alive == Ok(false)));
+                o.crlf();
+            });
             bad = true;
         }
         if !bad && capacity_refuses(steady).is_err() {
@@ -1702,11 +1709,7 @@ impl State {
                         SYS_TIMER_ARM,
                         PRIVATE as u64,
                         MGR_BADGE_PKG_PROBE_DEADLINE,
-                        if self.test_maximal {
-                            15_000_000
-                        } else {
-                            TIMEOUT_US
-                        },
+                        SELECT_CHILD_TIMEOUT_US,
                     )
                 };
                 let mut bits = 0u64;
@@ -1720,11 +1723,24 @@ impl State {
                     }
                     let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
                 }
+                // The original Process witness must be retired even when
+                // the diagnostic receipt is bad. Never short-circuit FINISH.
+                let later_alive = alive(later);
+                let later_finished = finish(later);
                 if timer < 0
                     || bits != MGR_BADGE_PKG_PROBE_EXIT
-                    || alive(later) != Ok(false)
-                    || finish(later).is_err()
+                    || later_alive != Ok(false)
+                    || later_finished.is_err()
                 {
+                    log_line(|o| {
+                        o.str("servicemgr: select later receipt bits=");
+                        o.u64(bits);
+                        o.str(" dead=");
+                        o.u64(u64::from(later_alive == Ok(false)));
+                        o.str(" finished=");
+                        o.u64(u64::from(later_finished.is_ok()));
+                        o.crlf();
+                    });
                     bad = true;
                 }
             }

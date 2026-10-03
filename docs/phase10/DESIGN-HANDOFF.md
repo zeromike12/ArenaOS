@@ -55,7 +55,7 @@ Changing typography beyond the existing primitive needs an engineering request.
 
 Six sessions each own one window, max 448x288, min 80x60, and a 127-page backing.
 Titles are at most 32 bytes. Highest-z hit testing, click focus/to-front, title
-bar drag, clipping and a retained visible title support screen edges. Close
+bar drag, clipping and a retained visible title above the dock support screen edges. Close
 queues an owned event; dirty Editor offers save/discard/cancel. Repeated Close
 force-stops an unresponsive exact child. Death reaps its original Process and
 backing. No minimize, maximize, resize or live compositor restart is offered.

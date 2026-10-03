@@ -13,12 +13,15 @@ import mtest
 import test_m10_boundaries as bounded
 import test_m10_dynamic as dynamic
 import test_m10_files as files
+import test_m10_apps as apps
 ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir()
 MODEL=ROOT/'userspace/desktop/src/model.rs'
 DESKTOP=ROOT/'userspace/desktop/src/bin/desktop.rs'
 SCOPE=ROOT/'userspace/desktop/src/scope.rs'
 KERNEL=ROOT/'kernel/kernel/src/arch/x86_64/syscall.rs'
 CONTROLS=[
+    (MODEL,b'(self.screen.1 - m::DOCK_HEIGHT - m::TITLE_HEIGHT)',b'(self.screen.1 - m::TITLE_HEIGHT)','dock-safe-title',dynamic,'safe-title-above-dock'),
+    (DESKTOP,b'result = u64::from(unsafe { PREFS.dark })',b'result = u64::from(unsafe { PREFS.dark } && s.kind != 0)','live-theme-delivery',apps,'live-theme-terminal'),
     (SCOPE,b'scope & resource != 0 && rights & needed == needed',b'(scope & resource != 0 && rights & needed == needed) || rights != 0','function-scope',bounded,'terminal'),
     (SCOPE,b'kind < 6 && targets & (1 << kind) != 0',b'kind < 6 && (targets & (1 << kind) != 0 || targets != 0)','launch-target-scope',files,'files'),
     (MODEL,b'.filter(|w| w.contains(x, y))',b'.filter(|w| w.contains(x, y) && false)','pointer-hit',bounded,('pointer-focus','terminal-key','exact-drag')),
