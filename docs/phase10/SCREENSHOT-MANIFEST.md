@@ -1,5 +1,45 @@
 # Screenshot manifest
 
+Current references: **Opus design pass**. The Sol engineering-baseline
+inventory below is retained unchanged as history.
+
+## Opus design capture
+
+Design source: `cf311719e08d07cf765d7799524bce7067bd8419` (branch `arena/phase10-opus-design`).
+Capture EFI (development build of that source, not a qualified image):
+`d2b6068c8d4e6a48cc482e54cde30664e18fbd0a15f53e2614f6c0dfe0a8eed4`. Captured by `python3 tools/test_m10_handoff.py`
+with the unchanged fixture: user-note text; canonical light/motion-disabled UI10 preference; fresh AFS1; cursor parked at 780,500. QMP screendump, settled owned raster; lossless RGB PNG.
+The owned 448x288 gallery crops at 70,60 matched byte-for-byte across an
+independent boot of the same seeded platter, in both palettes. PNGs and the
+source-bound `screenshot-manifest.json` are preserved in
+`releases/checkpoints/phase10-opus-design/`. Pixels changed intentionally:
+this pass replaces the Sol reference skin; semantic suites were not
+weakened (see OPUS-DESIGN-RETURN.md). Sol requalifies the post-design image.
+
+| Capture | Size | Deterministic owned golden | SHA-256 |
+|---|---|---|---|
+| [desktop-light.png](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-light.png) | 800x600 | no; live values | `45a0cb8eaf89e862d2f1c28af4a0ff64cd31ad2276e2dbe634db9a08838251a9` |
+| [terminal.png](../../releases/checkpoints/phase10-opus-design/screenshots/terminal.png) | 800x600 | no; live values | `2bab4f05ef0414ede6b1921adb190dfb986ce39e77dc137b130a206b4de597f0` |
+| [files.png](../../releases/checkpoints/phase10-opus-design/screenshots/files.png) | 800x600 | no; live values | `645fcd4bbaed4079996257b9aaaae5a34a75189e41b9bd36679bd3acffb76285` |
+| [editor.png](../../releases/checkpoints/phase10-opus-design/screenshots/editor.png) | 800x600 | no; live values | `8451b921efaa1c707ecc9dcde71fba6136dda428152e69b5989b3d7ad2207998` |
+| [settings.png](../../releases/checkpoints/phase10-opus-design/screenshots/settings.png) | 800x600 | no; live values | `bafc754ebd17e6634a81e3c7674121aebffd026e06fec0bfb1ce36ced6d6d25e` |
+| [monitor.png](../../releases/checkpoints/phase10-opus-design/screenshots/monitor.png) | 800x600 | no; live values | `f680611323f42a7b44af9fba62ca5fb057a40855c69099946a19bad1bf6611bf` |
+| [gallery.png](../../releases/checkpoints/phase10-opus-design/screenshots/gallery.png) | 800x600 | no; live values | `1772a84883fb1fd73055a90fb219ea7e1263010f8ea028bc2b62bf8d99a402be` |
+| [gallery-owned-light.png](../../releases/checkpoints/phase10-opus-design/screenshots/gallery-owned-light.png) | 448x288 | yes | `1343a8eca755711e0d32ee57efb0c19d882339870ff26b34c7f7f7eaa948ba10` |
+| [gallery-owned-dark.png](../../releases/checkpoints/phase10-opus-design/screenshots/gallery-owned-dark.png) | 448x288 | yes | `7e2cb2d8587c56152274c0925a031a461f37ab29e26b9299ec6d476dcccee549` |
+| [desktop-six-apps.png](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-six-apps.png) | 800x600 | no; live values | `e0fed21376e28922c2de58a48a175b4e9120f7765b5792dd4bd8beaf499cf227` |
+| [settings-dark.png](../../releases/checkpoints/phase10-opus-design/screenshots/settings-dark.png) | 800x600 | no; live values | `ba654fee642a6aa0a7421151800fec0b038832c4e54acc0bc3acdf6a8e08e697` |
+| [desktop-dark.png](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-dark.png) | 800x600 | no; live values | `c071d9cb49ae9186e4c09d806faceb8b54ade9cffbb696c441a707b78532ac0d` |
+
+The gallery now shows: focused/resting chrome swatches, button kinds and
+states (normal, primary, focused, destructive, disabled, refused), focused/
+resting/refused fields, sidebar rows (normal, selected, disabled, refused),
+console sample, switches, progress and meter, status chips, the real Smooth
+curve over OPEN_US, and the six application tiles. Menus and scrollbars
+remain absent primitives.
+
+# Sol engineering baseline (historical)
+
 Qualified guest capture source: `11a45c34deae9a7a539a99fd7d3d6ea196ea6025`.
 Exact EFI: `18357914fbfca7c7af87bd846c0f12f645e7f9a78d4816395d688b295ba90c7f`.
 All 12 guest PNGs and the source-bound `screenshot-manifest.json` are preserved

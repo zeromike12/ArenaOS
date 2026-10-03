@@ -185,3 +185,64 @@ The engineering baseline does not replace that post-design qualification.
 - [Deterministic gallery, dark](../../releases/checkpoints/phase10-engineering-baseline/screenshots/gallery-owned-dark.png)
 
 Every PNG checksum is in [SCREENSHOT-MANIFEST.md](SCREENSHOT-MANIFEST.md).
+
+## Opus design pass (O → S/M/C)
+
+Branch `arena/phase10-opus-design`, parent
+`9095b0f380bb5c2293b85b7e49e3ca3388d248b8`, design source
+`cf311719e08d07cf765d7799524bce7067bd8419`. Full return:
+[OPUS-DESIGN-RETURN.md](OPUS-DESIGN-RETURN.md). Requests:
+[DESIGN-REQUESTS.md](DESIGN-REQUESTS.md) DR-01..DR-14. New guest references:
+`releases/checkpoints/phase10-opus-design/` (see SCREENSHOT-MANIFEST.md).
+This is not qualification; Sol requalifies the post-design image.
+
+The Sol reference skin is replaced by the ArenaOS visual system, still
+confined to the safe presentation sources listed above:
+
+* `theme.rs` — semantic **Paper** (light) and **Ink** (dark) palettes with
+  one teal Signal accent, strong/soft state tones, console, editor, pointer
+  and six application identity tiles; a host test enforces contrast for
+  every text role in both palettes. `elevated` and `palette()` keep their
+  compositor-facing meaning.
+* `metrics.rs` — 2px grid, spacing steps, control/row/line heights, radii,
+  window anatomy (`HEADER_BOTTOM`, `FOOTER_Y`), shell presentation sizes.
+  Window-policy geometry is unchanged.
+* `motion.rs` — documented motion language; focus 100ms (was 80ms), open
+  120ms and close 90ms unchanged, `Smooth` curve unchanged.
+* `components/` — split into `text` (Body/Strong/Caption/Display styles on
+  the 5x7 face), `shapes` (opaque rounded/stadium primitives that leave
+  corners unpainted), `controls` (button kinds, field, row, switch, meter,
+  chip, status band, focus ring, caret), `icons` (original one-bit app and
+  interface glyphs, emblem, pointer, focus lamp), `chrome` (single window
+  chrome used by both compositor and clients) and `gallery`.
+* `desktop_view.rs` — plain field with the Arena emblem and real key hints,
+  wordmark system bar with focused app, real window count and labelled
+  uptime, error toast, floating dock with identity tiles, names, hover,
+  focused/running indicators and capacity dimming, new pointer.
+* `apps/view.rs`, `apps/layout.rs` — shared window anatomy (title, header
+  band, content, status band) for all six applications; every tested
+  interaction point and the editor text origin are preserved and asserted
+  by `layout::tests`.
+
+Guest semantic suites pass unchanged on the design source; the only oracle
+edit is the three host-gallery pixel pairs in `test_m10_ui.py`, moved to the
+same semantic features in the new gallery layout. Two guest runs exposed
+oracle regions the design had touched (the cascade title probe over the
+Terminal header in `test_m10_boundaries_red`, and the editor's
+dialog/document synchronisation regions in `test_m10_files`); both were fixed
+in presentation and pinned by host unit tests (see OPUS-DESIGN-RETURN.md,
+oracle-sensitivity findings).
+
+Opus guest references (design source, hashes in SCREENSHOT-MANIFEST.md):
+[desktop light](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-light.png),
+[desktop dark](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-dark.png),
+[Terminal](../../releases/checkpoints/phase10-opus-design/screenshots/terminal.png),
+[Files](../../releases/checkpoints/phase10-opus-design/screenshots/files.png),
+[Text Editor](../../releases/checkpoints/phase10-opus-design/screenshots/editor.png),
+[Settings](../../releases/checkpoints/phase10-opus-design/screenshots/settings.png),
+[Settings dark](../../releases/checkpoints/phase10-opus-design/screenshots/settings-dark.png),
+[System Monitor](../../releases/checkpoints/phase10-opus-design/screenshots/monitor.png),
+[UI Gallery](../../releases/checkpoints/phase10-opus-design/screenshots/gallery.png),
+[six-app desktop](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-six-apps.png),
+[owned gallery light](../../releases/checkpoints/phase10-opus-design/screenshots/gallery-owned-light.png),
+[owned gallery dark](../../releases/checkpoints/phase10-opus-design/screenshots/gallery-owned-dark.png).

@@ -1,0 +1,93 @@
+{
+  "source_commit": "cf311719e08d07cf765d7799524bce7067bd8419",
+  "efi_sha256": "d2b6068c8d4e6a48cc482e54cde30664e18fbd0a15f53e2614f6c0dfe0a8eed4",
+  "resolution": "800x600 GOP",
+  "fixture": "user-note text; canonical light/motion-disabled UI10 preference; fresh AFS1; cursor parked at 780,500",
+  "capture": "QMP screendump, settled owned raster; lossless RGB PNG",
+  "entries": [
+    {
+      "path": "desktop-light.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "45a0cb8eaf89e862d2f1c28af4a0ff64cd31ad2276e2dbe634db9a08838251a9",
+      "deterministic": false
+    },
+    {
+      "path": "terminal.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "2bab4f05ef0414ede6b1921adb190dfb986ce39e77dc137b130a206b4de597f0",
+      "deterministic": false
+    },
+    {
+      "path": "files.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "645fcd4bbaed4079996257b9aaaae5a34a75189e41b9bd36679bd3acffb76285",
+      "deterministic": false
+    },
+    {
+      "path": "editor.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "8451b921efaa1c707ecc9dcde71fba6136dda428152e69b5989b3d7ad2207998",
+      "deterministic": false
+    },
+    {
+      "path": "settings.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "bafc754ebd17e6634a81e3c7674121aebffd026e06fec0bfb1ce36ced6d6d25e",
+      "deterministic": false
+    },
+    {
+      "path": "monitor.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "f680611323f42a7b44af9fba62ca5fb057a40855c69099946a19bad1bf6611bf",
+      "deterministic": false
+    },
+    {
+      "path": "gallery.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "1772a84883fb1fd73055a90fb219ea7e1263010f8ea028bc2b62bf8d99a402be",
+      "deterministic": false
+    },
+    {
+      "path": "gallery-owned-light.png",
+      "width": 448,
+      "height": 288,
+      "sha256": "1343a8eca755711e0d32ee57efb0c19d882339870ff26b34c7f7f7eaa948ba10",
+      "deterministic": true
+    },
+    {
+      "path": "gallery-owned-dark.png",
+      "width": 448,
+      "height": 288,
+      "sha256": "7e2cb2d8587c56152274c0925a031a461f37ab29e26b9299ec6d476dcccee549",
+      "deterministic": true
+    },
+    {
+      "path": "desktop-six-apps.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "e0fed21376e28922c2de58a48a175b4e9120f7765b5792dd4bd8beaf499cf227",
+      "deterministic": false
+    },
+    {
+      "path": "settings-dark.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "ba654fee642a6aa0a7421151800fec0b038832c4e54acc0bc3acdf6a8e08e697",
+      "deterministic": false
+    },
+    {
+      "path": "desktop-dark.png",
+      "width": 800,
+      "height": 600,
+      "sha256": "c071d9cb49ae9186e4c09d806faceb8b54ade9cffbb696c441a707b78532ac0d",
+      "deterministic": false
+    }
+  ]
+}

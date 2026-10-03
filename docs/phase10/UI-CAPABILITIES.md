@@ -6,14 +6,14 @@ passed. GOP800, GPU800 and GPU640 six-app matrix passed.
 | Area | Implemented capability |
 |---|---|
 | Pixels | Opaque 32-bit XRGB8888, clipped rectangles, borders and blits; no alpha blending |
-| Text | Arena-owned 5x7 ASCII bitmap glyphs, distinct lowercase, integer scale 1..3; body scale 1 and title scale 2 |
+| Text | Arena-owned 5x7 ASCII bitmap glyphs, distinct lowercase, integer scale 1..3; Opus styles: Body (scale 1), Strong (double-struck, advance 7), Caption (upper-case, advance 7), Display (scale 2) |
 | Icons | Small geometric pixel icons assembled from rectangles; raw owned rasters may be blitted |
 | Windows | Six owned surfaces, pointer activation/click-to-front, title drag with retained visible title, close, exact clipping, keyboard focus |
 | Pointer | Actual QEMU virtio tablet absolute motion and left/right/middle button state; clients receive bounded local events, press/release capture |
 | Keyboard | US ASCII with Shift, backspace, Enter, tab, Escape, arrows, Home/End/Delete; F1..F6 launch, F7 cycle focus, F8 close |
 | Motion | Monotonic integer linear/smooth interpolation, current/target retargeting, open/close reveal, focus chrome color transition, 20ms frame pacing |
 | Appearance | Shared light/dark tokens, durable theme and motion preference, live client repaint |
-| Components | Chrome, labels/headings, buttons, field/cursor, rows/selection, sidebar, toolbar, geometric icons, progress, status/refusal and terminal raster |
+| Components | Shared window chrome, text styles, buttons (standard/primary/destructive x normal/focused/selected/disabled/refused), field/I-beam caret, rows/selection, sidebar, switch, progress/meter, chips, status band, original app/interface icon masks, emblem, pointer and terminal raster |
 
 Presentation files: `userspace/ui/src/theme.rs`, `metrics.rs`, `motion.rs`,
 `components/mod.rs`; `userspace/desktop/src/desktop_view.rs`; application
