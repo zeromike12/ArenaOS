@@ -48,10 +48,12 @@ def main():
         # Semantic structure: selected row differs from plain row, focused
         # control has its own border, terminal is distinct from surrounding
         # panel. No specific temporary RGB palette is an invariant.
+        # Coordinates follow the Opus gallery layout (sidebar rows at x300,
+        # button grid at x12, console sample at y186..256).
         pixel=lambda x,y:pixels[(y*448+x)*3:(y*448+x)*3+3]
-        assert pixel(119,132)!=pixel(119,160)
-        assert pixel(118,58)!=pixel(224,58)
-        assert pixel(332,132)!=pixel(322,132)
+        assert pixel(310,86)!=pixel(310,106)
+        assert pixel(30,112)!=pixel(30,84)
+        assert pixel(140,250)!=pixel(140,260)
         path=arena_env.build_dir()/f'phase10-host-gallery-{name}.ppm'; path.write_bytes(data)
         captures.append(data)
         print(f'host fixture {path.name} sha256={hashlib.sha256(data).hexdigest()}')

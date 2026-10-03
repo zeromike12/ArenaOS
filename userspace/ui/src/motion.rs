@@ -1,9 +1,21 @@
 //! Integer interpolation driven by a caller's monotonic microsecond clock.
 //! The caller owns frame scheduling. Sampling never sleeps or spins.
+//!
+//! ArenaOS motion language: motion only explains a change of state.
+//! Entrances are the longest step, exits are shorter than entrances, and
+//! state colour (focus) sits between, so a window arrives, settles and
+//! leaves without ever blocking input. All production motion uses the
+//! `Smooth` curve, and every token collapses to zero when the persisted
+//! motion preference is off.
+/// Enter: a window frame appears at once and its content unrolls.
 pub const OPEN_US: u64 = 120_000;
+/// Exit: content rolls up into the title bar, then the frame is removed.
 pub const CLOSE_US: u64 = 90_000;
-pub const FOCUS_US: u64 = 80_000;
+/// Focus: chrome colour, rail and lamp cross-fade between windows.
+pub const FOCUS_US: u64 = 100_000;
+/// Reserved for dock state motion (see DESIGN-REQUESTS.md); unused today.
 pub const DOCK_US: u64 = 140_000;
+/// Compositor frame pacing while any motion is active.
 pub const FRAME_US: u64 = 20_000;
 const UNIT: u64 = 65_536;
 /// Opaque channel interpolation; this does not promise compositor alpha.

@@ -1,75 +1,247 @@
 //! Presentation-only application views. No service calls or capabilities.
+//!
+//! Every application shares one anatomy (see layout.rs): compositor title
+//! bar, a header band for tools or page identity, content, and a status
+//! band. Colours come only from the theme; geometry only from layout.rs.
 use super::{
     layout as l,
     model::{Editor, Line, Terminal},
 };
 use arena_gfxkit::{Canvas, Rect};
-use arena_ui::{components as c, metrics as m, theme::Theme};
+use arena_ui::{
+    components::{self as c, Glyph, Kind, State, Style, Tone},
+    metrics as m,
+    theme::Theme,
+};
 pub fn string(bytes: &[u8]) -> &str {
     core::str::from_utf8(bytes).unwrap_or("Unsupported text")
 }
+
+const W: i32 = m::WINDOW_WIDTH as i32;
+
+/// Presentation tone of a controller status line. The controllers own the
+/// words; this only chooses how loudly to say them (glyph + colour).
+pub fn tone(status: &str) -> Tone {
+    const ERROR: [&str; 6] = [
+        "REFUSED",
+        "FILE NOT FOUND",
+        "FILE ALREADY EXISTS",
+        "FILESYSTEM ERROR",
+        "SERVICE ",
+        "Unsupported",
+    ];
+    const WARNING: [&str; 4] = ["MODIFIED", "UNSAVED", "SAVE FIRST", "Unknown command"];
+    const SUCCESS: [&str; 7] = [
+        "SAVED",
+        "CREATED",
+        "DELETED",
+        "APPEARANCE COMMITTED",
+        "MOTION PREFERENCE COMMITTED",
+        "OPENED",
+        "REFRESHED",
+    ];
+    if ERROR.iter().any(|p| status.starts_with(p)) {
+        Tone::Error
+    } else if WARNING.iter().any(|p| status.starts_with(p)) {
+        Tone::Warning
+    } else if SUCCESS.iter().any(|p| status.starts_with(p)) {
+        Tone::Success
+    } else {
+        Tone::Neutral
+    }
+}
+
 pub fn frame(canvas: &mut Canvas<'_>, title: &str, status: &str, t: Theme) {
     canvas.clear(t.elevated);
-    c::chrome(canvas, title, true, t);
-    c::label(canvas, m::CONTENT_INSET, l::STATUS_Y, status, t.secondary);
-}
-pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Theme) {
     c::rect(
         canvas,
-        m::CONTENT_INSET,
-        l::CONTENT_Y,
-        424,
-        l::STATUS_Y - l::CONTENT_Y - 6,
-        t.terminal,
+        1,
+        m::TITLE_HEIGHT,
+        W - 2,
+        l::HEADER_BOTTOM - m::TITLE_HEIGHT,
+        t.header,
     );
+    c::hline(canvas, 1, l::HEADER_BOTTOM, W - 2, t.divider);
+    c::status_band(canvas, l::STATUS_Y, status, tone(status), t);
+    c::chrome(canvas, title, true, t);
+}
+
+/// Page header used by applications without a toolbar.
+fn page_header(canvas: &mut Canvas<'_>, title: &str, detail: &str, t: Theme) {
+    c::text(canvas, m::CONTENT_INSET, 36, title, Style::Strong, t.text);
+    c::text_fit(
+        canvas,
+        m::CONTENT_INSET,
+        50,
+        detail,
+        Style::Body,
+        t.secondary,
+        300,
+    );
+}
+
+pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Theme) {
+    page_header(
+        canvas,
+        "Arena session",
+        "help ls cat ps put rm launch clear echo",
+        t,
+    );
+    // Scrollback position: real line count, capacity and history offset.
+    let mut n = [0u8; 32];
+    let count = c::decimal(&mut n, model.count as u64, false);
+    let right = W - m::CONTENT_INSET;
+    let x = right - c::measure("/32 LINES", Style::Caption);
+    c::text(canvas, x, 36, "/32 LINES", Style::Caption, t.muted);
+    c::text_right(canvas, x, 36, count, Style::Caption, t.secondary);
+    if older > 0 {
+        let mut b = [0u8; 32];
+        let back = c::decimal(&mut b, older as u64, false);
+        let w = c::measure(back, Style::Caption) + c::measure("BACK ", Style::Caption) + 2 * m::M;
+        let x = c::chip(canvas, right - w, 48, "BACK ", Tone::Accent, t);
+        c::text(
+            canvas,
+            right - w + x - m::M,
+            51,
+            back,
+            Style::Caption,
+            t.accent,
+        );
+    }
+    // Console fills the content area edge to edge.
+    let top = l::HEADER_BOTTOM + 1;
+    c::rect(canvas, 1, top, W - 2, l::STATUS_Y - top, t.terminal);
     let visible = l::TERMINAL_ROWS;
     let start = model.count.saturating_sub(visible).saturating_sub(older);
     for (row, index) in (start..model.count).take(visible).enumerate() {
-        c::label(
+        let text = string(&model.lines[index][..model.sizes[index]]);
+        let ink = match tone(text) {
+            Tone::Error => t.error,
+            Tone::Warning => t.warning,
+            _ => t.terminal_text,
+        };
+        c::text(
             canvas,
             m::CONTENT_INSET + 6,
             l::CONTENT_Y + 6 + row as i32 * m::LINE_HEIGHT,
-            string(&model.lines[index][..model.sizes[index]]),
-            t.terminal_text,
+            text,
+            Style::Body,
+            ink,
         );
     }
-    c::label(
+    // Input line: hairline, Signal chevron prompt, block caret.
+    c::hline(canvas, 1, l::INPUT_Y, W - 2, t.terminal_edge);
+    let y = l::INPUT_Y + (l::STATUS_Y - l::INPUT_Y - m::FONT_HEIGHT) / 2;
+    c::glyph(
         canvas,
         m::CONTENT_INSET,
-        l::TOOL_Y + 8,
-        "ARENAOS SESSION / HELP",
-        t.secondary,
+        y - 1,
+        Glyph::Chevron,
+        t.terminal_prompt,
     );
-    let y = l::STATUS_Y - 20;
-    c::label(canvas, m::CONTENT_INSET + 6, y, ">", t.terminal_text);
-    c::label(
+    let x = m::CONTENT_INSET + 14;
+    c::text(
         canvas,
-        m::CONTENT_INSET + 18,
+        x,
         y,
         string(&model.input[..model.len]),
+        Style::Body,
         t.terminal_text,
     );
+    let cx = x + model.cursor as i32 * m::FONT_ADVANCE - 1;
     c::rect(
         canvas,
-        m::CONTENT_INSET + 18 + model.cursor as i32 * m::FONT_ADVANCE,
-        y - 1,
-        1,
-        m::FONT_HEIGHT + 2,
-        t.terminal_text,
+        cx,
+        y - 2,
+        m::FONT_ADVANCE + 1,
+        m::FONT_HEIGHT + 4,
+        t.terminal_prompt,
     );
+    if model.cursor < model.len {
+        let glyph = [model.input[model.cursor]];
+        c::text(canvas, cx + 1, y, string(&glyph), Style::Body, t.terminal);
+    }
 }
+
 pub fn dialog(canvas: &mut Canvas<'_>, line: &Line, label: &str, t: Theme) {
     c::field(
         canvas,
         l::NAME_FIELD,
         string(&line.bytes[..line.len]),
         Some(line.cursor),
-        c::State::Focused,
+        State::Focused,
         t,
     );
-    c::button(canvas, l::PRIMARY, label, c::State::Normal, t);
-    c::button(canvas, l::SECONDARY, "CANCEL", c::State::Normal, t);
+    c::button(
+        canvas,
+        l::PRIMARY,
+        label,
+        None,
+        Kind::Primary,
+        State::Normal,
+        t,
+    );
+    c::button(
+        canvas,
+        l::SECONDARY,
+        "Cancel",
+        None,
+        Kind::Standard,
+        State::Normal,
+        t,
+    );
 }
+
+/// Document facts in the editor header: name, saved state, caret position.
+fn document_info(canvas: &mut Canvas<'_>, model: &Editor, t: Theme) {
+    let x = l::HEADER_INFO_X;
+    let width = W - m::CONTENT_INSET - x;
+    let end = model.path.iter().position(|b| *b == 0).unwrap_or(32);
+    let name = if end == 0 {
+        "Untitled"
+    } else {
+        string(&model.path[..end])
+    };
+    c::text_fit(canvas, x, 36, name, Style::Strong, t.text, width);
+    let state_w = if model.dirty {
+        c::chip(canvas, x, 47, "Unsaved", Tone::Warning, t)
+    } else if end == 0 {
+        c::chip(canvas, x, 47, "New", Tone::Neutral, t)
+    } else {
+        c::chip(canvas, x, 47, "On disk", Tone::Neutral, t)
+    };
+    // Line:column of the caret, counted from the real buffer.
+    let (mut line, mut column) = (1u64, 1u64);
+    for b in &model.data[..model.cursor] {
+        if *b == b'\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    let mut buffer = [0u8; 32];
+    let mut text = [0u8; 32];
+    let a = c::decimal(&mut buffer, line, false);
+    let mut n = a.len();
+    text[..n].copy_from_slice(a.as_bytes());
+    text[n] = b':';
+    n += 1;
+    let b = c::decimal(&mut buffer, column, false);
+    text[n..n + b.len()].copy_from_slice(b.as_bytes());
+    n += b.len();
+    if state_w + 6 + n as i32 * m::FONT_ADVANCE <= width {
+        c::text_right(
+            canvas,
+            W - m::CONTENT_INSET,
+            50,
+            string(&text[..n]),
+            Style::Body,
+            t.muted,
+        );
+    }
+}
+
 pub fn editor(
     canvas: &mut Canvas<'_>,
     model: &Editor,
@@ -79,30 +251,108 @@ pub fn editor(
     t: Theme,
 ) {
     if dialogue == 4 {
-        c::button(canvas, l::NAME_FIELD, "SAVE", c::State::Normal, t);
-        c::button(canvas, l::PRIMARY, "DISCARD", c::State::Normal, t);
-        c::button(canvas, l::SECONDARY, "CANCEL", c::State::Normal, t);
+        c::button(
+            canvas,
+            l::NAME_FIELD,
+            "Save changes",
+            Some(Glyph::Save),
+            Kind::Primary,
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::PRIMARY,
+            "Discard",
+            Some(Glyph::Delete),
+            Kind::Destructive,
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::SECONDARY,
+            "Cancel",
+            None,
+            Kind::Standard,
+            State::Normal,
+            t,
+        );
     } else if dialogue != 0 {
-        dialog(canvas, line, "SAVE", t);
+        dialog(canvas, line, if dialogue == 2 { "Open" } else { "Save" }, t);
     } else {
-        c::button(canvas, l::NEW, "NEW", c::State::Normal, t);
-        c::button(canvas, l::SAVE, "SAVE", c::State::Normal, t);
-        c::button(canvas, l::SAVE_AS, "SAVE AS", c::State::Normal, t);
-        c::button(canvas, l::OPEN, "OPEN", c::State::Normal, t);
+        c::button(
+            canvas,
+            l::NEW,
+            "New",
+            Some(Glyph::Plus),
+            Kind::Standard,
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::SAVE,
+            "Save",
+            Some(Glyph::Save),
+            if model.dirty {
+                Kind::Primary
+            } else {
+                Kind::Standard
+            },
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::SAVE_AS,
+            "Save As",
+            Some(Glyph::Rename),
+            Kind::Standard,
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::OPEN,
+            "Open",
+            Some(Glyph::Open),
+            Kind::Standard,
+            State::Normal,
+            t,
+        );
+        document_info(canvas, model, t);
     }
-    c::border(canvas, l::EDIT_TEXT, t.border);
+    // Full-bleed text canvas with the caret's line softly highlighted.
+    let caret_row = l::visual_row(model);
+    if caret_row >= top && caret_row < top + l::EDIT_ROWS {
+        c::rect(
+            canvas,
+            1,
+            l::EDIT_TEXT.y + 3 + (caret_row - top) as i32 * m::LINE_HEIGHT,
+            W - 2,
+            m::LINE_HEIGHT,
+            t.editor_line,
+        );
+        c::rect(
+            canvas,
+            1,
+            l::EDIT_TEXT.y + 3 + (caret_row - top) as i32 * m::LINE_HEIGHT,
+            2,
+            m::LINE_HEIGHT,
+            t.editor_caret,
+        );
+    }
     let columns = l::EDIT_COLUMNS;
     let mut row = 0usize;
     let mut column = 0usize;
     for i in 0..=model.len {
         if i == model.cursor && row >= top && row < top + l::EDIT_ROWS {
-            c::rect(
+            c::caret(
                 canvas,
                 l::EDIT_TEXT.x + 6 + column as i32 * m::FONT_ADVANCE,
-                l::EDIT_TEXT.y + 6 + (row - top) as i32 * m::LINE_HEIGHT - 1,
-                1,
-                m::FONT_HEIGHT + 2,
-                t.accent,
+                l::EDIT_TEXT.y + 6 + (row - top) as i32 * m::LINE_HEIGHT,
+                t.editor_caret,
             );
         }
         if i == model.len {
@@ -130,84 +380,133 @@ pub fn editor(
             column = 0;
         }
     }
+    if model.len == 0 && dialogue == 0 {
+        c::label(
+            canvas,
+            l::EDIT_TEXT.x + 14,
+            l::EDIT_TEXT.y + 6,
+            "Empty document / ASCII text up to 4096 bytes",
+            t.muted,
+        );
+    }
 }
-pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16, u16), t: Theme) {
-    c::rect(canvas, m::CONTENT_INSET, l::CONTENT_Y, 104, 182, t.panel);
-    c::label(
+
+/// One Settings preference row: title, live description, switch.
+fn preference(canvas: &mut Canvas<'_>, r: Rect, title: &str, detail: &str, on: bool, t: Theme) {
+    c::text(canvas, r.x + m::L, r.y + 8, title, Style::Strong, t.text);
+    c::text(
         canvas,
-        m::CONTENT_INSET + 8,
-        l::CONTENT_Y + 12,
-        "APPEARANCE",
+        r.x + m::L,
+        r.y + 21,
+        detail,
+        Style::Body,
+        t.secondary,
+    );
+    let sx = r.x + r.width as i32 - m::L - m::SWITCH_WIDTH;
+    let sy = r.y + (r.height as i32 - m::SWITCH_HEIGHT) / 2;
+    c::switch(canvas, sx, sy, on, State::Normal, t);
+    c::text_right(
+        canvas,
+        sx - m::M,
+        sy + 5,
+        if on { "On" } else { "Off" },
+        Style::Body,
+        t.secondary,
+    );
+}
+
+fn fact(canvas: &mut Canvas<'_>, y: i32, name: &str, value: &str, t: Theme) {
+    c::text(
+        canvas,
+        m::CONTENT_INSET + m::L,
+        y,
+        name,
+        Style::Body,
+        t.secondary,
+    );
+    c::text_right(
+        canvas,
+        W - m::CONTENT_INSET - m::L,
+        y,
+        value,
+        Style::Body,
         t.text,
     );
-    c::label(
+}
+
+pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16, u16), t: Theme) {
+    page_header(
         canvas,
-        128,
-        l::CONTENT_Y + 4,
-        "DURABLE DESKTOP THEME",
-        t.secondary,
+        "Appearance",
+        "Stored on disk first, then applied to every window",
+        t,
     );
-    c::button(
+    c::section(canvas, m::CONTENT_INSET, 72, "Theme and motion", None, t);
+    let group = Rect {
+        x: m::CONTENT_INSET,
+        y: l::APPEARANCE.y,
+        width: l::APPEARANCE.width,
+        height: (l::MOTION.y + l::MOTION.height as i32 - l::APPEARANCE.y) as u32,
+    };
+    c::outlined(canvas, group, t.field, t.control_edge, m::RADIUS_PANEL);
+    c::hline(
+        canvas,
+        group.x + m::L,
+        l::MOTION.y,
+        group.width as i32 - 2 * m::L,
+        t.divider,
+    );
+    preference(
         canvas,
         l::APPEARANCE,
+        "Dark appearance",
         if dark {
-            "USE LIGHT THEME"
+            "Ink palette on every window"
         } else {
-            "USE DARK THEME"
+            "Paper palette on every window"
         },
-        c::State::Normal,
+        dark,
         t,
     );
-    c::button(
+    preference(
         canvas,
         l::MOTION,
+        "Interface motion",
         if motion {
-            "DISABLE MOTION"
+            "Windows open, close and focus smoothly"
         } else {
-            "ENABLE MOTION"
+            "Changes apply instantly"
         },
-        c::State::Normal,
+        motion,
         t,
     );
-    c::label(
-        canvas,
-        128,
-        l::CONTENT_Y + 78,
-        "DISPLAY / XRGB8888",
-        t.secondary,
-    );
+    c::section(canvas, m::CONTENT_INSET, 164, "Display", None, t);
     let mut text = [0u8; 32];
     let mut n = 0;
     for v in [display.0, display.1] {
         if n != 0 {
-            text[n] = b'X';
-            n += 1;
+            text[n..n + 3].copy_from_slice(b" x ");
+            n += 3;
         }
-        let mut digits = [0; 5];
-        let mut len = 0;
-        let mut v = v;
-        loop {
-            digits[len] = b'0' + (v % 10) as u8;
-            len += 1;
-            v /= 10;
-            if v == 0 {
-                break;
-            }
-        }
-        for b in digits[..len].iter().rev() {
-            text[n] = *b;
-            n += 1;
-        }
+        let mut digits = [0u8; 32];
+        let d = c::decimal(&mut digits, u64::from(v), false);
+        text[n..n + d.len()].copy_from_slice(d.as_bytes());
+        n += d.len();
     }
-    c::label(canvas, 128, l::CONTENT_Y + 100, string(&text[..n]), t.text);
-    c::label(
-        canvas,
-        128,
-        l::CONTENT_Y + 130,
-        "BITMAP FONT 5X7 / OPAQUE PIXELS",
-        t.secondary,
-    );
+    let group = Rect {
+        x: m::CONTENT_INSET,
+        y: 174,
+        width: 424,
+        height: 66,
+    };
+    c::outlined(canvas, group, t.elevated, t.divider, m::RADIUS_PANEL);
+    fact(canvas, 182, "Resolution", string(&text[..n]), t);
+    c::hline(canvas, group.x + m::L, 196, 424 - 2 * m::L, t.divider);
+    fact(canvas, 204, "Pixel format", "XRGB8888, opaque", t);
+    c::hline(canvas, group.x + m::L, 218, 424 - 2 * m::L, t.divider);
+    fact(canvas, 226, "Type", "ArenaOS 5x7 bitmap", t);
 }
+
 pub fn file_row(canvas: &mut Canvas<'_>, row: usize, name: &[u8], selected: bool, t: Theme) {
     c::row(
         canvas,
@@ -218,26 +517,85 @@ pub fn file_row(canvas: &mut Canvas<'_>, row: usize, name: &[u8], selected: bool
             height: l::ROW_H as u32,
         },
         string(name),
+        Some(Glyph::Document),
         if selected {
-            c::State::Selected
+            State::Selected
         } else {
-            c::State::Normal
+            State::Normal
         },
         t,
     );
 }
-pub fn preview(canvas: &mut Canvas<'_>, bytes: &[u8], t: Theme) {
-    c::border(canvas, l::PREVIEW, t.border);
+
+pub fn preview(canvas: &mut Canvas<'_>, name: Option<&[u8]>, bytes: &[u8], t: Theme) {
+    let p = l::PREVIEW;
+    c::outlined(canvas, p, t.field, t.control_edge, m::RADIUS_PANEL);
+    let x = p.x + m::M + 2;
+    let right = p.x + p.width as i32 - m::M - 2;
+    c::glyph(canvas, x, p.y + 8, Glyph::Document, t.accent);
+    let Some(name) = name else {
+        c::text(
+            canvas,
+            x + 15,
+            p.y + 9,
+            "Nothing selected",
+            Style::Strong,
+            t.secondary,
+        );
+        c::hline(canvas, p.x + 1, p.y + 22, p.width as i32 - 2, t.divider);
+        return;
+    };
+    c::text_fit(
+        canvas,
+        x + 15,
+        p.y + 9,
+        string(name),
+        Style::Strong,
+        t.text,
+        120,
+    );
+    let mut digits = [0u8; 32];
+    let mut size = [0u8; 32];
+    let d = c::decimal(&mut digits, bytes.len() as u64, true);
+    size[..d.len()].copy_from_slice(d.as_bytes());
+    size[d.len()..d.len() + 2].copy_from_slice(b" B");
+    c::text_right(
+        canvas,
+        right,
+        p.y + 9,
+        string(&size[..d.len() + 2]),
+        Style::Body,
+        t.muted,
+    );
+    c::hline(canvas, p.x + 1, p.y + 22, p.width as i32 - 2, t.divider);
+    if bytes.is_empty() {
+        c::text(
+            canvas,
+            x,
+            l::PREVIEW_TEXT_Y,
+            "No previewable text",
+            Style::Body,
+            t.muted,
+        );
+        return;
+    }
     for (row, line) in bytes
         .split(|b| *b == b'\n')
         .take(l::PREVIEW_ROWS)
         .enumerate()
     {
-        c::label(
+        // Tabs have no glyph; show them as single spaces in the preview.
+        let mut shown = [0u8; 64];
+        let n = line.len().min(l::PREVIEW_COLUMNS).min(64);
+        for (i, b) in line[..n].iter().enumerate() {
+            shown[i] = if *b == b'\t' { b' ' } else { *b };
+        }
+        c::text(
             canvas,
-            l::PREVIEW.x + 6,
-            l::PREVIEW.y + 6 + row as i32 * m::LINE_HEIGHT,
-            string(&line[..line.len().min(l::PREVIEW_COLUMNS)]),
+            x,
+            l::PREVIEW_TEXT_Y + row as i32 * m::LINE_HEIGHT,
+            string(&shown[..n]),
+            Style::Body,
             t.text,
         );
     }
@@ -261,22 +619,106 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         line,
         dialogue,
     } = model;
-    if dialogue {
-        dialog(canvas, line, "CREATE", t);
+    let none = if names.is_empty() {
+        State::Disabled
     } else {
-        c::button(canvas, l::NEW, "NEW", c::State::Normal, t);
-        c::button(canvas, l::SAVE, "REFRESH", c::State::Normal, t);
-        c::button(canvas, l::OPEN, "OPEN", c::State::Normal, t);
+        State::Normal
+    };
+    if dialogue {
+        dialog(canvas, line, "Create", t);
+    } else {
+        c::button(
+            canvas,
+            l::NEW,
+            "New",
+            Some(Glyph::Plus),
+            Kind::Standard,
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::SAVE,
+            "Refresh",
+            Some(Glyph::Refresh),
+            Kind::Standard,
+            State::Normal,
+            t,
+        );
+        c::button(
+            canvas,
+            l::OPEN,
+            "Open",
+            Some(Glyph::Open),
+            Kind::Standard,
+            none,
+            t,
+        );
         c::button(
             canvas,
             l::DELETE,
-            "DELETE",
-            if names.is_empty() {
-                c::State::Disabled
-            } else {
-                c::State::Normal
-            },
+            "Delete",
+            Some(Glyph::Delete),
+            Kind::Destructive,
+            none,
             t,
+        );
+        // Flat namespace: a count, never a path or folder breadcrumb.
+        let mut digits = [0u8; 32];
+        let n = c::decimal(&mut digits, names.len() as u64, false);
+        c::text_right(canvas, W - m::CONTENT_INSET, 37, n, Style::Strong, t.text);
+        c::text_right(
+            canvas,
+            W - m::CONTENT_INSET,
+            50,
+            "FILES",
+            Style::Caption,
+            t.muted,
+        );
+    }
+    // List pane on the sidebar material.
+    let pane_h = l::STATUS_Y - l::HEADER_BOTTOM - 1;
+    c::rect(
+        canvas,
+        1,
+        l::HEADER_BOTTOM + 1,
+        l::FILE_LIST.x + l::FILE_LIST.width as i32 + 3,
+        pane_h,
+        t.sidebar,
+    );
+    c::vline(
+        canvas,
+        l::FILE_LIST.x + l::FILE_LIST.width as i32 + 4,
+        l::HEADER_BOTTOM + 1,
+        pane_h,
+        t.divider,
+    );
+    if names.is_empty() {
+        let x = l::FILE_LIST.x + m::M;
+        c::glyph(canvas, x, l::CONTENT_Y + 10, Glyph::Document, t.muted);
+        c::text(
+            canvas,
+            x + 15,
+            l::CONTENT_Y + 11,
+            "No user files",
+            Style::Strong,
+            t.text,
+        );
+        c::text(
+            canvas,
+            x,
+            l::CONTENT_Y + 30,
+            "New creates an empty",
+            Style::Body,
+            t.secondary,
+        );
+        c::text(
+            canvas,
+            x,
+            l::CONTENT_Y + 44,
+            "user-* file on AFS1.",
+            Style::Body,
+            t.secondary,
         );
     }
     for (row, (i, name)) in names
@@ -289,8 +731,25 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         let end = name.iter().position(|b| *b == 0).unwrap_or(32);
         file_row(canvas, row, &name[..end], i == selected, t);
     }
-    preview(canvas, bytes, t);
+    let name = names
+        .get(selected)
+        .map(|n| &n[..n.iter().position(|b| *b == 0).unwrap_or(32)]);
+    preview(canvas, name, bytes, t);
 }
+
+fn stat(canvas: &mut Canvas<'_>, x: i32, y: i32, name: &str, value: u64, t: Theme) {
+    let mut digits = [0u8; 32];
+    c::text(canvas, x, y, name, Style::Caption, t.muted);
+    c::text(
+        canvas,
+        x,
+        y + 11,
+        c::decimal(&mut digits, value, true),
+        Style::Strong,
+        t.text,
+    );
+}
+
 pub fn monitor(
     canvas: &mut Canvas<'_>,
     counts: &[u64; 9],
@@ -298,65 +757,124 @@ pub fn monitor(
     top: usize,
     t: Theme,
 ) {
-    for (row, (label, value)) in [
-        (b"FREE FRAMES ".as_slice(), counts[0]),
-        (b"TOTAL FRAMES ", counts[1]),
-        (b"PROCESSES ", counts[3]),
-        (b"SPAWN RECORDS ", counts[2]),
-        (b"SHARED REGIONS ", counts[4]),
-        (b"SHARED PAGES ", counts[5]),
-        (b"SHARED MAPS ", counts[6]),
-        (b"OWN CAPS ", counts[7]),
-        (b"UPTIME SECONDS ", counts[8] / 1_000_000),
+    page_header(
+        canvas,
+        "Live system counters",
+        "Kernel observations, sampled twice a second",
+        t,
+    );
+    let mut digits = [0u8; 32];
+    let seconds = c::decimal(&mut digits, counts[8] / 1_000_000, true);
+    let right = W - m::CONTENT_INSET;
+    c::text_right(canvas, right, 37, "s", Style::Body, t.secondary);
+    c::text_right(canvas, right - 9, 37, seconds, Style::Strong, t.text);
+    c::text_right(canvas, right, 50, "UPTIME", Style::Caption, t.muted);
+    // Memory: used frames derived from the real free/total counters.
+    let left = m::CONTENT_INSET;
+    let col_w = 224;
+    c::section(
+        canvas,
+        left,
+        72,
+        "Memory frames in use",
+        Some(left + col_w),
+        t,
+    );
+    let (free, total) = (counts[0], counts[1]);
+    let used = total.saturating_sub(free);
+    let end = c::text(
+        canvas,
+        left,
+        84,
+        c::decimal(&mut digits, used, true),
+        Style::Display,
+        t.text,
+    );
+    let mut whole = [0u8; 32];
+    let of = c::decimal(&mut whole, total, true);
+    let x = c::text(canvas, end + m::S, 91, "of ", Style::Body, t.secondary);
+    c::text(canvas, x, 91, of, Style::Body, t.secondary);
+    c::meter(
+        canvas,
+        Rect {
+            x: left,
+            y: 104,
+            width: col_w as u32,
+            height: 6,
+        },
+        used,
+        total,
+        t.accent,
+        t,
+    );
+    c::section(canvas, left, 120, "Kernel objects", Some(left + col_w), t);
+    for (i, (name, value)) in [
+        ("Processes", counts[3]),
+        ("Spawn records", counts[2]),
+        ("Shared regions", counts[4]),
+        ("Shared pages", counts[5]),
+        ("Shared maps", counts[6]),
+        ("Monitor caps", counts[7]),
     ]
     .into_iter()
     .enumerate()
     {
-        let mut b = [0; 64];
-        let mut n = 0;
-        append(&mut b, &mut n, label);
-        number(&mut b, &mut n, value);
-        c::label(
-            canvas,
-            12,
-            l::CONTENT_Y + row as i32 * m::LINE_HEIGHT,
-            string(&b[..n]),
-            t.text,
-        );
+        let x = left + (i as i32 % 2) * (col_w / 2 + 4);
+        let y = 132 + (i as i32 / 2) * 30;
+        stat(canvas, x, y, name, value, t);
     }
-    c::label(canvas, 230, l::CONTENT_Y, "PID / THREADS", t.secondary);
+    // Process list: real PIDs and thread counts; labels are descriptive.
+    let lx = 252;
+    let lw = W - m::CONTENT_INSET - lx;
+    c::section(canvas, lx, 72, "Processes", None, t);
+    let mut total = [0u8; 32];
+    let total = c::decimal(&mut total, processes.len() as u64, false);
+    c::text_right(canvas, lx + lw, 72, total, Style::Caption, t.secondary);
+    c::text(canvas, lx + m::S, 84, "PID", Style::Caption, t.muted);
+    c::text_right(
+        canvas,
+        lx + lw - m::S,
+        84,
+        "THREADS",
+        Style::Caption,
+        t.muted,
+    );
+    c::hline(canvas, lx, 93, lw, t.divider);
     for (row, (pid, threads)) in processes.iter().skip(top).take(l::MONITOR_ROWS).enumerate() {
-        let mut b = [0; 64];
-        let mut n = 0;
-        number(&mut b, &mut n, *pid);
-        append(&mut b, &mut n, b" / ");
-        number(&mut b, &mut n, *threads);
-        c::label(
+        let y = l::MONITOR_ROW_Y + row as i32 * m::LINE_HEIGHT;
+        if (row + top) % 2 == 1 {
+            c::rect(canvas, lx, y - 3, lw, m::LINE_HEIGHT, t.header);
+        }
+        c::text(
             canvas,
-            230,
-            l::CONTENT_Y + 16 + row as i32 * m::LINE_HEIGHT,
-            string(&b[..n]),
+            lx + m::S,
+            y,
+            c::decimal(&mut digits, *pid, false),
+            Style::Body,
             t.text,
         );
+        c::text_right(
+            canvas,
+            lx + lw - m::S,
+            y,
+            c::decimal(&mut digits, *threads, false),
+            Style::Body,
+            t.secondary,
+        );
     }
-}
-fn append(b: &mut [u8; 64], n: &mut usize, s: &[u8]) {
-    let count = s.len().min(64 - *n);
-    b[*n..*n + count].copy_from_slice(&s[..count]);
-    *n += count;
-}
-fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
-    let mut d = [0; 20];
-    let mut len = 0;
-    loop {
-        d[len] = b'0' + (v % 10) as u8;
-        len += 1;
-        v /= 10;
-        if v == 0 {
-            break;
-        }
-    }
-    for digit in d[..len].iter().rev() {
-        append(b, n, core::slice::from_ref(digit));
+    // Scroll position when the real list exceeds the viewport.
+    if processes.len() > l::MONITOR_ROWS {
+        let shown_end = (top + l::MONITOR_ROWS).min(processes.len());
+        let mut a = [0u8; 32];
+        let mut b = [0u8; 32];
+        let mut text = [0u8; 32];
+        let first = c::decimal(&mut a, top as u64 + 1, false);
+        let last = c::decimal(&mut b, shown_end as u64, false);
+        let n = first.len() + 1 + last.len();
+        text[..first.len()].copy_from_slice(first.as_bytes());
+        text[first.len()] = b'-';
+        text[first.len() + 1..n].copy_from_slice(last.as_bytes());
+        let x = lx + c::measure("PROCESSES", Style::Caption) + m::M;
+        c::text(canvas, x, 72, string(&text[..n]), Style::Caption, t.accent);
     }
 }

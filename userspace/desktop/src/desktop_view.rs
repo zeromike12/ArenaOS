@@ -1,62 +1,88 @@
 //! Designer-editable desktop layout: no IPC, lifecycle or device authority.
-use arena_desktop::model::{State, Window};
+//!
+//! Draw order is fixed by the compositor: background, then each window
+//! (owned raster + `chrome`), then `system` (bar, notice, dock, pointer).
+//! Shell surfaces drawn by `system` leave their rounded corners unpainted,
+//! so windows or the desktop show through them honestly.
+use arena_desktop::{
+    apps::{DOCK, TITLES},
+    model::{MAX_WINDOWS, State, Window},
+};
 use arena_gfxkit::{Canvas, Rect};
-use arena_ui::{components as c, metrics as m, theme::Theme};
+use arena_ui::{
+    components::{self as c, Glyph, Style},
+    metrics as m,
+    theme::Theme,
+};
+
+/// Empty desktop: a plain field with the Arena emblem and the real
+/// keyboard bindings. Nothing here is decorative hardware state.
 pub fn background(canvas: &mut Canvas<'_>, t: Theme) {
-    canvas.clear(t.background);
+    canvas.clear(t.desktop);
     let (w, h) = canvas.size();
-    c::label(
+    let (w, h) = (w as i32, h as i32);
+    let cx = w / 2;
+    let cy = (m::SYSTEM_BAR_HEIGHT + h - m::DOCK_HEIGHT) / 2 - 12;
+    let ew = (w * 3 / 10).min(240);
+    let eh = ew * 11 / 20;
+    c::emblem(
         canvas,
-        (w as i32 - 18 * m::FONT_ADVANCE) / 2,
-        (h as i32) / 2,
-        "ARENAOS DESKTOP",
-        t.secondary,
+        Rect {
+            x: cx - ew / 2,
+            y: cy - eh / 2,
+            width: ew as u32,
+            height: eh as u32,
+        },
+        t.desktop_mark,
+        t.desktop,
+    );
+    let hint = "F1-F6 open  /  F7 next window  /  F8 close";
+    c::text_centered(
+        canvas,
+        0,
+        w,
+        cy + eh / 2 + 20,
+        hint,
+        Style::Caption,
+        t.desktop_text,
     );
 }
+
 pub fn chrome(
     canvas: &mut Canvas<'_>,
     window: &Window,
     title: &str,
-    focused: bool,
+    _focused: bool,
     amount: i32,
     t: Theme,
 ) {
-    c::rect(
+    c::window_chrome(
         canvas,
         window.x,
         window.y,
         window.width as i32,
-        m::TITLE_HEIGHT,
-        arena_ui::motion::color(t.chrome_inactive, t.chrome_active, amount),
-    );
-    c::heading(
-        canvas,
-        window.x + m::CONTENT_INSET,
-        window.y + (m::TITLE_HEIGHT - m::TITLE_FONT_HEIGHT) / 2,
-        &title[..title.len().min(
-            ((window.width as i32 - m::CONTENT_INSET - m::CLOSE_WIDTH).max(0)
-                / m::TITLE_FONT_ADVANCE) as usize,
-        )],
-        t.text,
-    );
-    c::label(
-        canvas,
-        window.x + window.width as i32 - m::CLOSE_WIDTH + 10,
-        window.y + 10,
-        "X",
-        t.secondary,
-    );
-    c::border(
-        canvas,
-        Rect {
-            x: window.x,
-            y: window.y,
-            width: window.width as u32,
-            height: window.height as u32,
-        },
-        if focused { t.accent } else { t.border },
+        window.height as i32,
+        title,
+        amount,
+        t,
     );
 }
+
+/// Formats monotonic seconds as H:MM:SS (an uptime counter, not a clock).
+fn uptime_text(out: &mut [u8; 32], seconds: u64) -> &str {
+    let mut digits = [0u8; 32];
+    let hours = c::decimal(&mut digits, seconds / 3600, false);
+    let mut n = hours.len();
+    out[..n].copy_from_slice(hours.as_bytes());
+    for part in [(seconds / 60) % 60, seconds % 60] {
+        out[n] = b':';
+        out[n + 1] = b'0' + (part / 10) as u8;
+        out[n + 2] = b'0' + (part % 10) as u8;
+        n += 3;
+    }
+    core::str::from_utf8(&out[..n]).unwrap_or("?")
+}
+
 pub fn system(
     canvas: &mut Canvas<'_>,
     state: &State,
@@ -67,90 +93,175 @@ pub fn system(
     t: Theme,
 ) {
     let (w, h) = canvas.size();
-    c::rect(canvas, 0, 0, w as i32, m::SYSTEM_BAR_HEIGHT, t.panel);
-    c::label(canvas, m::CONTENT_INSET, 10, "ARENAOS", t.text);
-    c::label(
+    let (w, h) = (w as i32, h as i32);
+    let bar = m::SYSTEM_BAR_HEIGHT;
+    let ty = (bar - 1 - m::FONT_HEIGHT) / 2;
+    // System bar: identity, active application, real session/uptime facts.
+    c::rect(canvas, 0, 0, w, bar - 1, t.bar);
+    c::hline(canvas, 0, bar - 1, w, t.bar_edge);
+    c::emblem(
         canvas,
-        100,
-        10,
-        active
-            .map(|kind| arena_desktop::apps::TITLES[kind as usize])
-            .or_else(|| state.focused().map(|_| "APPLICATION"))
-            .unwrap_or("DESKTOP"),
-        t.secondary,
+        Rect {
+            x: m::L,
+            y: ty - 1,
+            width: 16,
+            height: 9,
+        },
+        t.accent,
+        t.bar,
     );
-    // Actual monotonic uptime supplied by the service; no wall-clock claim.
-    let mut digits = [0u8; 20];
-    let mut n = 0;
-    let mut value = uptime;
-    loop {
-        digits[n] = b'0' + (value % 10) as u8;
-        n += 1;
-        value /= 10;
-        if value == 0 {
-            break;
-        }
-    }
-    let mut label = [0u8; 24];
-    label[..3].copy_from_slice(b"UP ");
-    for (i, digit) in digits[..n].iter().rev().enumerate() {
-        label[i + 3] = *digit;
-    }
-    label[n + 3] = b'S';
-    c::label(
-        canvas,
-        w as i32 - (n as i32 + 4) * m::FONT_ADVANCE - m::CONTENT_INSET,
-        10,
-        core::str::from_utf8(&label[..n + 4]).unwrap_or("UP"),
-        t.secondary,
-    );
-    let width = m::DOCK_ITEM_WIDTH * 6;
-    let dx = (w as i32 - width) / 2;
-    c::rect(
-        canvas,
-        dx,
-        h as i32 - m::DOCK_HEIGHT,
-        width,
-        m::DOCK_HEIGHT,
-        t.elevated,
-    );
-    for (i, label) in arena_desktop::apps::DOCK.iter().enumerate() {
-        let x = dx + i as i32 * m::DOCK_ITEM_WIDTH;
-        c::icon(canvas, x + 20, h as i32 - m::DOCK_HEIGHT + 8, i as u8, t);
-        c::label(canvas, x + 8, h as i32 - 16, label, t.text);
-        if running[i] > 0 {
-            c::rect(
+    let x = c::text(canvas, m::L + 22, ty, "ArenaOS", Style::Strong, t.bar_text);
+    c::vline(canvas, x + m::M, 7, bar - 14, t.bar_edge);
+    let x = x + m::M + 1 + m::M + 1;
+    match active {
+        Some(kind) => {
+            c::app_tile(canvas, x, ty - 2, 11, kind, false, t.bar, t);
+            c::text(
                 canvas,
-                x + 24,
-                h as i32 - 6,
-                10,
-                2,
-                if active == Some(i as u8) {
-                    t.accent
-                } else {
-                    t.secondary
-                },
+                x + 17,
+                ty,
+                TITLES[kind as usize],
+                Style::Body,
+                t.bar_text,
             );
         }
+        None if state.focused().is_some() => {
+            c::glyph(canvas, x + 1, ty - 1, Glyph::Idle, t.bar_muted);
+            c::text(canvas, x + 17, ty, "Application", Style::Body, t.bar_text);
+        }
+        None => {
+            c::text(canvas, x, ty, "Desktop", Style::Body, t.bar_muted);
+        }
     }
+    let mut buffer = [0u8; 32];
+    let value = uptime_text(&mut buffer, uptime);
+    let right = w - m::L;
+    c::text_right(canvas, right, ty, value, Style::Body, t.bar_text);
+    let x = right - c::measure(value, Style::Body) - m::S - 2;
+    c::text_right(canvas, x, ty, "UPTIME", Style::Caption, t.bar_muted);
+    let x = x - c::measure("UPTIME", Style::Caption) - m::L;
+    c::vline(canvas, x, 7, bar - 14, t.bar_edge);
+    let open = state.windows().count();
+    let mut count = [0u8; 32];
+    let n = c::decimal(&mut count, open as u64, false).len();
+    count[n] = b'/';
+    count[n + 1] = b'0' + MAX_WINDOWS as u8;
+    let count = core::str::from_utf8(&count[..n + 2]).unwrap_or("?");
+    let x = x - m::L;
+    c::text_right(
+        canvas,
+        x,
+        ty,
+        count,
+        Style::Body,
+        if open >= MAX_WINDOWS {
+            t.warning
+        } else {
+            t.bar_text
+        },
+    );
+    let x = x - c::measure(count, Style::Body) - m::S - 2;
+    c::text_right(canvas, x, ty, "WINDOWS", Style::Caption, t.bar_muted);
+
+    // Transient shell notice (e.g. capacity refusal): an error toast.
     if let Some(text) = notice {
-        c::rect(
+        let width = c::measure(text, Style::Caption) + m::GLYPH_SMALL + 3 * m::M + 2;
+        let r = Rect {
+            x: m::M,
+            y: bar + 4,
+            width: width as u32,
+            height: 22,
+        };
+        c::rect(canvas, r.x + 2, r.y + 22, width, 2, t.shadow);
+        c::outlined(canvas, r, t.error_soft, t.error, m::RADIUS_PANEL);
+        c::glyph(canvas, r.x + m::M + 1, r.y + 6, Glyph::Error, t.error);
+        c::text(
             canvas,
-            0,
-            m::SYSTEM_BAR_HEIGHT,
-            w as i32,
-            m::CONTROL_HEIGHT,
-            t.elevated,
-        );
-        c::label(
-            canvas,
-            m::CONTENT_INSET,
-            m::SYSTEM_BAR_HEIGHT + 8,
+            r.x + m::M + m::GLYPH_SMALL + 7,
+            r.y + 8,
             text,
+            Style::Caption,
             t.error,
         );
     }
-    let (x, y) = state.pointer;
-    c::rect(canvas, x, y, 2, 12, t.text);
-    c::rect(canvas, x, y, 8, 2, t.text);
+
+    // Dock: a floating panel inside the (unchanged) dock hit strip.
+    let items = DOCK.len() as i32;
+    let strip = m::DOCK_ITEM_WIDTH * items;
+    let dock_x = (w - strip) / 2;
+    let panel = Rect {
+        x: dock_x - 6,
+        y: h - m::DOCK_PANEL_BOTTOM - m::DOCK_PANEL_HEIGHT,
+        width: (strip + 12) as u32,
+        height: m::DOCK_PANEL_HEIGHT as u32,
+    };
+    c::rect(
+        canvas,
+        panel.x + 3,
+        panel.y + panel.height as i32,
+        panel.width as i32 - 3,
+        2,
+        t.shadow,
+    );
+    c::outlined(canvas, panel, t.dock, t.dock_edge, m::RADIUS_PANEL);
+    let full = state.windows().count() >= MAX_WINDOWS;
+    let (px, py) = state.pointer;
+    for (i, name) in DOCK.iter().enumerate() {
+        let x = dock_x + i as i32 * m::DOCK_ITEM_WIDTH;
+        let cx = x + m::DOCK_ITEM_WIDTH / 2;
+        let hovered = py >= h - m::DOCK_HEIGHT && px >= x && px < x + m::DOCK_ITEM_WIDTH;
+        let is_active = active == Some(i as u8);
+        if hovered {
+            c::well(
+                canvas,
+                Rect {
+                    x: x + 2,
+                    y: panel.y + 3,
+                    width: (m::DOCK_ITEM_WIDTH - 4) as u32,
+                    height: (m::DOCK_PANEL_HEIGHT - 6) as u32,
+                },
+                t.dock_well,
+                None,
+            );
+        }
+        let under = if hovered { t.dock_well } else { t.dock };
+        c::app_tile(
+            canvas,
+            cx - m::TILE_SIZE / 2,
+            panel.y + 4,
+            m::TILE_SIZE,
+            i as u8,
+            full,
+            under,
+            t,
+        );
+        let (style, ink) = if is_active {
+            (Style::Strong, t.bar_text)
+        } else if running[i] > 0 || hovered {
+            (Style::Body, t.bar_text)
+        } else {
+            (Style::Body, t.bar_muted)
+        };
+        c::text_centered(
+            canvas,
+            x,
+            m::DOCK_ITEM_WIDTH,
+            panel.y + 34,
+            name,
+            style,
+            ink,
+        );
+        // Running instances: one dot each; the focused app gets a Signal bar.
+        let iy = panel.y + 44;
+        if is_active {
+            c::rect(canvas, cx - 7, iy, 14, 2, t.accent);
+        } else if running[i] > 0 {
+            let n = i32::from(running[i].min(4));
+            let start = cx - (n * 4 - 2) / 2;
+            for k in 0..n {
+                c::rect(canvas, start + k * 4, iy, 2, 2, t.bar_muted);
+            }
+        }
+    }
+    c::pointer(canvas, px, py, t);
 }
