@@ -66,13 +66,16 @@ pub fn frame(canvas: &mut Canvas<'_>, title: &str, status: &str, t: Theme) {
     c::chrome(canvas, title, true, t);
 }
 
-/// Page header used by applications without a toolbar.
+/// Page header used by applications without a toolbar. Its two lines end
+/// at y54 and the band stays plain down to the divider: window-local rows
+/// 56..65 are where a cascaded window's title strip lands, and the guest
+/// oracles read a plain strip there as "no new window".
 fn page_header(canvas: &mut Canvas<'_>, title: &str, detail: &str, t: Theme) {
-    c::text(canvas, m::CONTENT_INSET, 36, title, Style::Strong, t.text);
+    c::text(canvas, m::CONTENT_INSET, 35, title, Style::Strong, t.text);
     c::text_fit(
         canvas,
         m::CONTENT_INSET,
-        50,
+        48,
         detail,
         Style::Body,
         t.secondary,
@@ -92,8 +95,8 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
     let count = c::decimal(&mut n, model.count as u64, false);
     let right = W - m::CONTENT_INSET;
     let x = right - c::measure("/32 LINES", Style::Caption);
-    c::text(canvas, x, 36, "/32 LINES", Style::Caption, t.muted);
-    c::text_right(canvas, x, 36, count, Style::Caption, t.secondary);
+    c::text(canvas, x, 35, "/32 LINES", Style::Caption, t.muted);
+    c::text_right(canvas, x, 35, count, Style::Caption, t.secondary);
     if older > 0 {
         // History view: how many lines above the live tail are shown.
         let mut b = [0u8; 32];
@@ -103,7 +106,7 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
         label[5..5 + back.len()].copy_from_slice(back.as_bytes());
         let label = string(&label[..5 + back.len()]);
         let w = c::measure(label, Style::Caption) + 2 * m::M;
-        c::chip(canvas, right - w, 48, label, Tone::Accent, t);
+        c::chip(canvas, right - w, 46, label, Tone::Accent, t);
     }
     // Console fills the content area edge to edge.
     let top = l::HEADER_BOTTOM + 1;
@@ -763,9 +766,9 @@ pub fn monitor(
     let mut digits = [0u8; 32];
     let seconds = c::decimal(&mut digits, counts[8] / 1_000_000, true);
     let right = W - m::CONTENT_INSET;
-    c::text_right(canvas, right, 37, "s", Style::Body, t.secondary);
-    c::text_right(canvas, right - 9, 37, seconds, Style::Strong, t.text);
-    c::text_right(canvas, right, 50, "UPTIME", Style::Caption, t.muted);
+    c::text_right(canvas, right, 35, "s", Style::Body, t.secondary);
+    c::text_right(canvas, right - 9, 35, seconds, Style::Strong, t.text);
+    c::text_right(canvas, right, 48, "UPTIME", Style::Caption, t.muted);
     // Memory: used frames derived from the real free/total counters.
     let left = m::CONTENT_INSET;
     let col_w = 224;
@@ -873,5 +876,39 @@ pub fn monitor(
         text[first.len() + 1..n].copy_from_slice(last.as_bytes());
         let x = lx + c::measure("PROCESSES", Style::Caption) + m::M;
         c::text(canvas, x, 72, string(&text[..n]), Style::Caption, t.accent);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// Guest oracles detect a new cascaded window by its title strip, which
+    /// lands over the Terminal's local rows 56..65 (x 64..244). That strip
+    /// must stay plain so a window that never opened is never mistaken for
+    /// one that did (test_m10_boundaries_red readonly-diagnostic-grant).
+    #[test]
+    fn terminal_header_keeps_cascade_probe_strip_plain() {
+        let mut model = Terminal::new();
+        model.write(b"ArenaOS ordinary command session\nType help.");
+        for dark in [false, true] {
+            let mut pixels = [0u32; m::WINDOW_WIDTH * m::WINDOW_HEIGHT];
+            let mut canvas = Canvas::new(
+                &mut pixels,
+                m::WINDOW_WIDTH,
+                m::WINDOW_HEIGHT,
+                m::WINDOW_WIDTH,
+            )
+            .unwrap();
+            let t = arena_ui::theme::palette(dark);
+            frame(&mut canvas, "Terminal", "READY", t);
+            terminal(&mut canvas, &model, 3, t);
+            drop(canvas);
+            let probe = pixels[56 * m::WINDOW_WIDTH + 64];
+            for y in 56..66 {
+                for x in 64..244 {
+                    assert_eq!(pixels[y * m::WINDOW_WIDTH + x], probe, "({x},{y})");
+                }
+            }
+        }
     }
 }

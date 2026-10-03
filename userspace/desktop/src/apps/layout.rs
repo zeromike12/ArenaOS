@@ -2,9 +2,9 @@
 //!
 //! Window anatomy (local pixels, 448x288):
 //!   0..28    title bar (compositor chrome)
-//!   28..64   header band: toolbar controls or a page header
-//!   64       header divider
-//!   65..264  content
+//!   28..66   header band: toolbar controls or a page header
+//!   66       header divider
+//!   67..264  content
 //!   264..288 status band
 //! The editor's text origin stays at EDIT_TEXT + 6 because the controller's
 //! pointer-to-caret mapping uses that inset.
@@ -13,7 +13,7 @@ use arena_ui::metrics as m;
 pub const TOOL_Y: i32 = m::TITLE_HEIGHT + 6;
 pub const TOOL_H: i32 = m::CONTROL_HEIGHT;
 pub const HEADER_BOTTOM: i32 = m::HEADER_BOTTOM;
-pub const CONTENT_Y: i32 = HEADER_BOTTOM + m::S;
+pub const CONTENT_Y: i32 = HEADER_BOTTOM + m::XS;
 pub const ROW_H: i32 = m::ROW_HEIGHT;
 pub const STATUS_Y: i32 = m::FOOTER_Y;
 /// Right-hand header area used for document / page facts.

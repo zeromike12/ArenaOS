@@ -43,11 +43,11 @@ pub fn gallery(c: &mut Canvas<'_>, t: Theme) {
         t.header,
     );
     hline(c, 0, m::HEADER_BOTTOM, w, t.divider);
-    text(c, 12, 36, "Design system", Style::Strong, t.text);
+    text(c, 12, 35, "Design system", Style::Strong, t.text);
     text(
         c,
         12,
-        50,
+        48,
         if dark {
             "Ink palette / 5x7 type / 2px grid"
         } else {

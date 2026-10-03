@@ -54,7 +54,7 @@ pub const FOCUS_RAIL: i32 = 2;
 
 // Window anatomy: title bar, header band (toolbar or page header), content,
 // status band. Header and status share the `header` material.
-pub const HEADER_BOTTOM: i32 = 64;
+pub const HEADER_BOTTOM: i32 = 66;
 pub const FOOTER_Y: i32 = WINDOW_HEIGHT as i32 - 24;
 
 // Controls.
