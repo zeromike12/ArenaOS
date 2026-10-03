@@ -219,6 +219,11 @@ gallery structural pixel pairs now point at the new gallery's plain/selected
 row, normal/focused button edge and console/panel boundary. Same semantics,
 no weakening.
 
+Interactive launcher (added at M's request, new file only; no existing
+tool changed): `tools/run-desktop.sh` boots the checksummed prebuilt image in
+`releases/checkpoints/phase10-opus-design/prebuilt/` (QEMU + Python only) or,
+with `--build`, a fresh build of the checkout.
+
 Docs/evidence: `docs/phase10/{DESIGN-HANDOFF,DESIGN-REQUESTS,SCREENSHOT-MANIFEST,OPUS-DESIGN-RETURN}.md`,
 `releases/checkpoints/phase10-opus-design/`.
 

@@ -246,3 +246,10 @@ Opus guest references (design source, hashes in SCREENSHOT-MANIFEST.md):
 [six-app desktop](../../releases/checkpoints/phase10-opus-design/screenshots/desktop-six-apps.png),
 [owned gallery light](../../releases/checkpoints/phase10-opus-design/screenshots/gallery-owned-light.png),
 [owned gallery dark](../../releases/checkpoints/phase10-opus-design/screenshots/gallery-owned-dark.png).
+
+To look at the design interactively: `bash tools/run-desktop.sh` from the
+repository root boots the checksummed prebuilt development image
+(`releases/checkpoints/phase10-opus-design/prebuilt/`, QEMU + Python 3 only)
+in a QEMU window, or VNC on localhost:5901 when the QEMU build has no window
+backend. `--build` rebuilds from the checkout first; `--fresh` starts with a
+new disk. Not a qualified image.
