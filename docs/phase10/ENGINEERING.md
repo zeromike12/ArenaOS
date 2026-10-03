@@ -79,6 +79,12 @@ counts to baseline. The first discovery run's 90/94 receipt remains preserved;
 it is a failed attempt, not qualification evidence.
 The checksummed `releases/checkpoints/phase10-discovery-1/` archive preserves
 that complete run and its failed receipts and is included in the final bundle.
+The second run reproduced the native/graphical controls and the previously
+failing historical configuration-read gate, but exposed a signed-app snapshot
+timing error and was interrupted before completing every historical suite.
+`releases/checkpoints/phase10-discovery-2/` preserves that invalid attempt.
+The corrected test waits for an actual fresh exact teardown sample before
+shutdown, retaining the native leak oracle. Production cleanup is unchanged.
 
 Unexpected client death retires its Process/backing/caps/maps while sibling
 pixels/input survive. A live full-queue client can be force-closed by repeating

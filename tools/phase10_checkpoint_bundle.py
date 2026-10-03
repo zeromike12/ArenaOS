@@ -73,6 +73,9 @@ def main():
         discovery=ROOT/'releases/checkpoints/phase10-discovery-1'
         for filename in ('first-full-b1422bfd-failures.tar.gz','first-full-b1422bfd-failures.tar.gz.sha256'):
             shutil.copyfile(discovery/filename,stage/filename)
+        second=ROOT/'releases/checkpoints/phase10-discovery-2'
+        for filename in ('interrupted-full-eeb7808e-failures.tar.gz','interrupted-full-eeb7808e-failures.tar.gz.sha256'):
+            shutil.copyfile(second/filename,stage/filename)
         shutil.copyfile(BUILD/'phase10-screenshots/manifest.json',stage/'screenshot-manifest.json')
         for entry in manifest['entries']:shutil.copyfile(BUILD/'phase10-screenshots'/entry['path'],stage/entry['path'])
         for proof in sorted(BUILD.glob('m10-*-red.log')):shutil.copyfile(proof,stage/('evidence-'+proof.name))

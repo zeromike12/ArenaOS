@@ -115,6 +115,11 @@ def main(esp=None):
             for i in (2,1,0):
                 d.click(136+i*26,70+i*24)
                 d.wait(lambda:d.serial().count('[desktop] application retired:')>=6-i,'remaining signed child not reaped')
+            # Retirement and periodic native observation are independent.
+            # Require a fresh exact teardown sample before the serial shell
+            # can halt the machine; an old one-child sample is not a leak.
+            d.wait(lambda:samples(d)[-1][1:]==samples(d)[0][1:],
+                   'signed teardown resources did not return exactly')
             d.shot('signed-all-closed')
             return b'shutdown\r'
         finally:d.dispose()
