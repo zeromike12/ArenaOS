@@ -120,6 +120,18 @@ pub fn audit(kind: u8) -> Result<(), i64> {
     if exchange(Frame::Read { name: private }, FUNCTION).is_ok() {
         return Err(-2);
     }
+    if kind != 0
+        && exchange(
+            Frame::Launch {
+                kind: 3,
+                path: [0; 32],
+            },
+            FUNCTION,
+        )
+        .is_ok()
+    {
+        return Err(-2);
+    }
     let mut out = [0u64; 9];
     if unsafe { syscall6(SYS_OBSERVE, 1, out.as_mut_ptr() as u64, 0, 0, 0, 0) } >= 0 {
         return Err(-2);

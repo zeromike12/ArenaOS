@@ -206,7 +206,11 @@ pub fn gallery(c: &mut Canvas<'_>, t: Theme) {
         width: w,
         height: m::CONTROL_HEIGHT as u32,
     };
-    label(c, 12, 40, "Reusable controls / reference skin", t.text);
+    label(c, 12, 40, "Component gallery", t.text);
+    rect(c, 246, 34, 84, 18, t.chrome_active);
+    label(c, 254, 40, "Focused", t.text);
+    rect(c, 342, 34, 88, 18, t.chrome_inactive);
+    label(c, 350, 40, "Unfocused", t.secondary);
     for (i, (text, state)) in [
         ("Button", State::Normal),
         ("Focused", State::Focused),
@@ -268,11 +272,27 @@ pub fn gallery(c: &mut Canvas<'_>, t: Theme) {
         65,
         t,
     );
-    label(
-        c,
-        12,
-        252,
-        "Toolbar | status | motion: 0 / 50 / 100%",
-        t.secondary,
+    label(c, 12, 252, "Motion", t.secondary);
+    let mut motion = crate::motion::Motion::fixed(0);
+    motion.retarget(
+        100,
+        0,
+        crate::motion::OPEN_US,
+        crate::motion::Easing::Smooth,
     );
+    for (i, text) in ["0%", "50%", "100%"].iter().enumerate() {
+        let x = 84 + i as i32 * 116;
+        label(c, x, 252, text, t.secondary);
+        progress(
+            c,
+            Rect {
+                x: x + 32,
+                y: 252,
+                width: 64,
+                height: 8,
+            },
+            motion.sample(crate::motion::OPEN_US * i as u64 / 2) as u8,
+            t,
+        );
+    }
 }

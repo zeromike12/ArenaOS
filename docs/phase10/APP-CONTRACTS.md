@@ -73,8 +73,9 @@ refusal. Complete historical/exact-image qualification is still pending.
 Every built-in client receives slot 0 Endpoint/WRITE, slot 1 its fresh
 SharedRegion/READ|WRITE|COPY, slot 2 an attenuated function reference to that
 same region, and slot 3 its private Notification/READ|WRITE. Terminal's scope
-is file read/write plus built-in launch. Files' launch scope permits the same
-bounded built-in launcher, used for Editor. Editor receives file read/write.
+is file read/write plus the six built-in launch targets. Files' trusted launch
+target mask permits only Editor. Receiver enforcement checks the target mask
+as well as the function rights and launch scope. Editor receives file read/write.
 Settings receives preferences scope. Monitor and Gallery receive no function
 scope. Slot 2 rights are 15 for file/launch roles, 14 for Settings and 5 for
 Monitor/Gallery; Monitor alone receives MemoryPool/READ in slot 4. All other

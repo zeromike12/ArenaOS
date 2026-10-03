@@ -90,13 +90,19 @@ def build(label: str, desktop: bool = False) -> Path:
     env=os.environ.copy()
     if desktop:env.pop('ARENA_GRAPHICS_FIXTURE',None)
     else:env['ARENA_GRAPHICS_FIXTURE']='phase9'
-    subprocess.run(
-        ["bash", str(arena_env.REPO_ROOT / "tools/build.sh"), "--image"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    try:
+        subprocess.run(
+            ["bash", str(arena_env.REPO_ROOT / "tools/build.sh"), "--image"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    except subprocess.CalledProcessError as error:
+        log = arena_env.build_dir() / f"{label}-build.log"
+        log.write_text((error.stdout or "") + (error.stderr or ""))
+        print(f"[{label}] build failed; diagnostics: {log}", file=sys.stderr)
+        raise
     esp = arena_env.REPO_ROOT / "build/arena-esp.img"
     assert esp.exists(), "build.sh did not produce the ESP image"
     return esp
@@ -430,8 +436,9 @@ def boot(label: str, esp: Path,
             *(["-device", "virtio-tablet-pci"] if pointer else []),
             *arena_env.console_args(vcon_sock),
             *arena_env.qmp_args(qmp_sock),
-            *(["-vga", "none"] if video in ("none", "gpu", "gpu-big") else []),
+            *(["-vga", "none"] if video in ("none", "gpu", "gpu640", "gpu-big") else []),
             *(["-device", "virtio-gpu-pci,xres=800,yres=600"] if video in ("gpu", "gpu+std") else []),
+            *(["-device", "virtio-gpu-pci,xres=640,yres=480"] if video == "gpu640" else []),
             *(["-device", "virtio-gpu-pci"] if video == "gpu-big" else []),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",

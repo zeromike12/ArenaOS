@@ -40,6 +40,10 @@ def workflow():
         opened=shot('gallery',lambda p:len(set(crop(p,200,150,70,70)[i:i+3] for i in range(0,70*70*3,3)))>3)
         c.key('t')
         changed=shot('keyboard',lambda p:crop(p,100,100,100,100)!=crop(opened,100,100,100,100))
+        previous=None;equal=0
+        while equal<3:
+            changed=shot('keyboard-settled');body=crop(changed,100,110,300,180)
+            equal=equal+1 if body==previous else 0;previous=body;time.sleep(.05)
         # Title drag translates the exact owned application raster.
         point(90,70,True);point(290,170);point(290,170,False);point(780,500)
         content=crop(changed,100,110,300,180)

@@ -80,6 +80,13 @@ Rules:
 
 | [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Implemented; real guest death/RED and final exact-EFI artifact qualification proved |
 | [0061](0061-phase9-graphics-fail-closed-boot-root.md) | Fail-stop service death and explicit client-death proof without claiming restart | Implemented; real guest death/RED and final exact-EFI artifact qualification proved |
+| [0062](0062-phase10-desktop-foundations.md) | Capability-safe desktop foundations and presentation boundary | Implemented; qualification pending |
+| [0063](0063-afs1-complete-file-replacement.md) | AFS1 complete-file CoW PUT | Implemented; crash/bytes/RED controls proved |
+| [0064](0064-bounded-multiple-dynamic-children.md) | Four unretired dynamic children and checked reply cancellation | Implemented; quota/refcounts/RED controls proved |
+| [0065](0065-desktop-function-grants-and-observation.md) | Scoped function grants, private clocks and read-only observations | Implemented; native/QMP proof, qualification pending |
+| [0066](0066-generic-image-graphical-launch.md) | Generic Image-cap graphics and mutation-free spawn preflight | Implemented; signed guest/pixel proof, qualification pending |
+| [0067](0067-desktop-owned-frame-publication.md) | Complete owned frame publication into private broker snapshots | Implemented; final mutation/qualification pending |
+
 
 ## Template
 

@@ -1,6 +1,6 @@
 # ADR-0065: Desktop function grants, pacing and read-only observation
 
-Status: implemented prototype; six-app guest gate green, adversarial qualification pending.
+Status: implemented; native scopes, lifecycle faults and six-app gates green; full qualification pending.
 
 Ordinary graphical programs receive no raw filesystem, display, input, Power,
 registrar or unrelated Process capability. The userspace desktop broker owns
@@ -22,7 +22,9 @@ operations even while a delegated stale reference remains held elsewhere.
 The trusted builtin launch descriptor chooses an executable and explicit
 grants together. A common static ELF selects its application model using
 descriptive bootstrap metadata. Terminal and Files receive file read/write
-and mediated builtin launch; Editor receives file read/write; Settings receives
+and mediated builtin launch; Files' trusted target mask permits only Editor,
+while Terminal may launch the six builtins. Receiver enforcement requires that
+target mask independently of startup metadata. Editor receives file read/write; Settings receives
 preferences; Gallery receives neither; Monitor receives a MemoryPool/READ cap.
 The file resource scope is the flat `user-*` namespace. Private preferences,
 package, permission and trust records are unreachable through that scope.
@@ -64,5 +66,6 @@ real scanout; the current 8-region/2048-page/32-map registry bounds remain.
 The six-app gate proves actual pointer-driven spawn/refusal, ordinary terminal
 file operations, file creation, exact editor save bytes, close/cancel/discard,
 Settings effects and reboot persistence, monitor pixels, and complete lifecycle
-accounting. It does not yet qualify arbitrary dynamic graphical Images,
-adversarial function grants, historical regressions or the final exact image.
+accounting. ADR-0066 supplies arbitrary dynamic graphical Images and native scope
+mutations exercise actual refusal. Full historical/exact-image qualification
+remains a separate final gate.

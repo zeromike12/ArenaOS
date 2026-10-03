@@ -1,24 +1,32 @@
 # Screenshot manifest
 
-Status: no Phase-10 captures yet; gallery and application capture implementation
-pending. Reference screenshots are presentation evidence, separate from semantic
-pixel-region tests. Never use temporary theme RGB values as security or lifecycle
-proof.
+Actual guest capture is implemented and independently repeatable. Final frozen
+source/EFI hashes and PNG inventory are preserved in the qualified checkpoint
+`screenshot-manifest.json`; prequalification captures are not baseline receipts.
 
-At qualification record: source commit, EFI SHA-256, guest resolution, fixture
-seed/data, input sequence, QMP capture command, screenshot path and SHA-256 for
-desktop, every app, gallery and significant interactive states.
+Run `python3 tools/test_m10_handoff.py` in the pinned development environment.
+It emits `build/phase10-screenshots/` containing desktop-light/dark, all six apps,
+settings-dark, desktop-six-apps and gallery-owned-light/dark PNGs plus manifest.
+PNG encoding is lossless RGB using standard-library zlib; pixels come from real
+QMP screendump. No serial string stands in for graphical evidence.
 
-## Host reference fixture, before guest integration
+Fixture: 800x600 GOP, fresh AFS1, canonical light/motion-disabled UI10 record,
+`user-note` containing two known ASCII lines, actual dock launches, cursor parked
+at 780,500. Terminal receives real echo/help keys; Files selects the real text;
+Editor opens its actual bytes; Settings changes the real persisted theme.
+Every app is closed through its held Process lifecycle. The full working set
+capture has six independent actual processes.
 
-`python3 tools/test_m10_ui.py` renders each fixture twice and requires identical
-bytes. Source is `userspace/ui/src/components/mod.rs`, with owned raster output
-from `userspace/ui/examples/gallery.rs`. These are **host raster fixtures**,
-not screenshots of a guest application and not the required QMP handoff proof.
+Owned gallery captures crop 448x288 at 70,60 after the raster settles. A second
+independent boot of the same seeded platter must produce identical light and
+local-dark gallery bytes. These are deterministic reference goldens. Fullscreen
+references include real uptime/monitor values and are checksummed evidence,
+not a promise of identical entire-frame bytes on every boot. Functional tests
+compare semantic regions/process/resources independently of the Sol palette.
 
-| Fixture | Dimensions | SHA-256 |
-|---|---|---|
-| `build/phase10-host-gallery-light.ppm` | 448x288 | `dd27df16eae40c64bbe2509de71c1a16ba14620a96d358ee3685697d8ed97886` |
-| `build/phase10-host-gallery-dark.ppm` | 448x288 | `6ab7b468ddab86a2d7fe4a8ecec4132ee4a371d01a7437a3df5660626c1d5b99` |
+The gallery displays chrome, title, labels, buttons, fields, rows/selection,
+sidebar, toolbar/icon controls, focus/unfocus, disabled/refused, progress/status,
+terminal and shared motion samples. Menus and scrollbars are absent primitives.
 
-Structural checks compare component relationships, not particular RGB tokens.
+Host fixture command: `python3 tools/test_m10_ui.py`. Host PPMs under build are
+supplementary component proofs and never replace the guest screenshot inventory.

@@ -1,6 +1,6 @@
 # ADR-0062 — Phase-10 desktop foundations
 
-Status: proposed; implementation and guest qualification pending.
+Status: implemented engineering decision; full historical/exact-image qualification pending.
 
 ## Authority and ownership
 
@@ -26,27 +26,19 @@ that exact child, releases mappings, backing caps, focus, drag capture and queue
 input before reusing a slot. Stale Process and window generations never revive.
 Death of display/compositor remains fail-stop; live service restart is excluded.
 
-## Concurrency decision still to measure
+## Bounded concurrency
 
-The existing one-unretired-dynamic-child rule must be replaced by a finite scan
+ADR-0064 replaces the existing one-unretired-dynamic-child rule with a finite scan
 of structurally tagged spawn records under IF=0. Exited, unreaped children still
 count. Only successful Process-cap FINISH releases an occupied record. Image
 revocation affects future spawns, not already copied child pages. No change to
 Image reference/pin hooks, storage-slot generations or registrar trust is needed.
 
-The useful desktop working set is five applications (terminal, files, editor,
-settings, monitor) and a gallery fixture. The final bound must be selected from
-actual full-fixture resource measurements, including transitional cap pressure
-and service readiness workers, rather than deleting the guard or guessing a
-large limit. Current Phase-9 guest measurements in this workspace:
-
-- manager baseline 25 caps; old child 27; two live image IDs 28;
-- after retirement 26 caps; four serial STOP/FINISH cycles return to 26;
-- live old child costs exactly 14 frames and one process/spawn record;
-- baseline 16 processes and 16 spawn records, 114443 free frames;
-- packaged measured cap high-water 7; notification table 18/18.
-
-These are Phase-9 observations, not Phase-10 capacity qualification.
+The working set is five applications and the gallery. Six desktop sessions and
+four unretired dynamic children are separately enforced. Six real apps use 762
+backing pages plus scanout, 28 steady broker caps and 29 transient caps. Eight
+SharedRegions, 2048 pages and 32 mappings remain unchanged. GOP800 and GPU800/640
+full-working-set measurements are recorded in ENGINEERING.md.
 
 Historical second-child refusal tests must be explicitly superseded by tests
 that fill the new bound, refuse without changing frames/caps/records/processes,
@@ -74,11 +66,11 @@ if their production behavior and cleanup are tested.
 `userspace/ui` contains palettes, geometry, components and integer monotonic
 motion. App models/service adapters do not embed literal colors or durations.
 `userspace/desktop/src/model.rs` implements authority-free window policy; the
-future service adapter must supply held-cap verification. A pure host model is
+production service adapter supplies held-cap verification. A pure host model is
 not proof of IPC authority, process retirement or graphical guest behavior.
 
-Deterministic host gallery fixtures establish reusable presentation structure;
-QMP gallery and app captures remain mandatory for the design handoff. Structural
+Host fixtures and independent-boot byte-identical QMP gallery captures establish
+reusable presentation structure. test_m10_handoff produces app references. Structural
 functional tests do not pin the Sol palette. Unsupported primitives remain
 explicit in UI-CAPABILITIES.md and DESIGN-REQUESTS.md.
 
@@ -90,15 +82,17 @@ children without changing that signed wire contract. General installation of
 larger graphical applications requires a separately reviewed persistent-format
 proposal; it cannot be smuggled into a desktop image or an unsigned package path.
 
-AFS1 WRITE currently modifies existing sectors in place. An editor must not
+AFS1 WRITE modifies existing sectors in place. An editor must not
 advertise transactional replacement using that operation. Any replacement
 extension needs data CoW, bounded preflight, metadata commit, rollback, reference
 retention for recoverable older commits and actual crash/byte-level tests. Its
 on-disk representation and invariants must be reviewed before implementation.
+ADR-0063 implements complete CoW PUT without changing AFS1's disk format;
+the editor uses PUT and actual crash/byte-level tests prove its boundary.
 
-## Implemented prototype refinements
+## Implemented service refinements
 
-The first linked gallery path demonstrates this topology in ring 3. The broker
+The ordinary app and signed dynamic paths demonstrate this topology in ring 3. The broker
 receives an explicit BootImage/READ reference, Pool/WRITE, client Endpoint/READ,
 delegable client Endpoint/WRITE|COPY, display Endpoint/WRITE, input comparator
 and a private frame Notification/READ|WRITE. The ordinary launched gallery
@@ -107,7 +101,8 @@ retirement consumes the lifecycle handle; input/window policy remains userspace.
 
 Additive TRY_RECV uses the existing receiver delivery and cancellation path;
 empty work returns BUSY without publishing a kernel waiter. A private timer
-notification drives idle cleanup and future animations. Six pending app callers
-plus the producer justify eight queued calls. One explicit clock justifies a
-nineteenth notification; the historical full-table refusal is retained at the
-new capacity. General multi-dynamic-child qualification remains outstanding.
+notification drives idle cleanup and shared animations. Six pending app callers
+plus the producer justify eight queued calls. The desktop and six reusable app
+clocks justify 25 notifications; historical full-table tests fill 25 and refuse
+the 26th without mutation. Native multi-child production mutations and dynamic
+graphical ownership are exercised by Phase-10 guest gates.

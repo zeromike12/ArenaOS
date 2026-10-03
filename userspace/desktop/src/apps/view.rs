@@ -22,7 +22,7 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
         l::STATUS_Y - l::CONTENT_Y - 6,
         t.terminal,
     );
-    let visible = 12;
+    let visible = l::TERMINAL_ROWS;
     let start = model.count.saturating_sub(visible).saturating_sub(older);
     for (row, index) in (start..model.count).take(visible).enumerate() {
         c::label(
@@ -91,11 +91,11 @@ pub fn editor(
         c::button(canvas, l::OPEN, "OPEN", c::State::Normal, t);
     }
     c::border(canvas, l::EDIT_TEXT, t.border);
-    let columns = 68usize;
+    let columns = l::EDIT_COLUMNS;
     let mut row = 0usize;
     let mut column = 0usize;
     for i in 0..=model.len {
-        if i == model.cursor && row >= top && row < top + 13 {
+        if i == model.cursor && row >= top && row < top + l::EDIT_ROWS {
             c::rect(
                 canvas,
                 l::EDIT_TEXT.x + 6 + column as i32 * m::FONT_ADVANCE,
@@ -114,7 +114,7 @@ pub fn editor(
             column = 0;
             continue;
         }
-        if row >= top && row < top + 13 && b != b'\t' {
+        if row >= top && row < top + l::EDIT_ROWS && b != b'\t' {
             let glyph = [b];
             c::label(
                 canvas,
@@ -228,12 +228,16 @@ pub fn file_row(canvas: &mut Canvas<'_>, row: usize, name: &[u8], selected: bool
 }
 pub fn preview(canvas: &mut Canvas<'_>, bytes: &[u8], t: Theme) {
     c::border(canvas, l::PREVIEW, t.border);
-    for (row, line) in bytes.split(|b| *b == b'\n').take(12).enumerate() {
+    for (row, line) in bytes
+        .split(|b| *b == b'\n')
+        .take(l::PREVIEW_ROWS)
+        .enumerate()
+    {
         c::label(
             canvas,
             l::PREVIEW.x + 6,
             l::PREVIEW.y + 6 + row as i32 * m::LINE_HEIGHT,
-            string(&line[..line.len().min(33)]),
+            string(&line[..line.len().min(l::PREVIEW_COLUMNS)]),
             t.text,
         );
     }
@@ -275,7 +279,13 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
             t,
         );
     }
-    for (row, (i, name)) in names.iter().enumerate().skip(top).take(10).enumerate() {
+    for (row, (i, name)) in names
+        .iter()
+        .enumerate()
+        .skip(top)
+        .take(l::FILE_ROWS)
+        .enumerate()
+    {
         let end = name.iter().position(|b| *b == 0).unwrap_or(32);
         file_row(canvas, row, &name[..end], i == selected, t);
     }
@@ -291,7 +301,8 @@ pub fn monitor(
     for (row, (label, value)) in [
         (b"FREE FRAMES ".as_slice(), counts[0]),
         (b"TOTAL FRAMES ", counts[1]),
-        (b"LIVE PROCESSES ", counts[3]),
+        (b"PROCESSES ", counts[3]),
+        (b"SPAWN RECORDS ", counts[2]),
         (b"SHARED REGIONS ", counts[4]),
         (b"SHARED PAGES ", counts[5]),
         (b"SHARED MAPS ", counts[6]),
@@ -314,7 +325,7 @@ pub fn monitor(
         );
     }
     c::label(canvas, 230, l::CONTENT_Y, "PID / THREADS", t.secondary);
-    for (row, (pid, threads)) in processes.iter().skip(top).take(12).enumerate() {
+    for (row, (pid, threads)) in processes.iter().skip(top).take(l::MONITOR_ROWS).enumerate() {
         let mut b = [0; 64];
         let mut n = 0;
         number(&mut b, &mut n, *pid);

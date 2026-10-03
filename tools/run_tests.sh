@@ -11,6 +11,14 @@ if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
 fi
 failures=0
 ran=0
+source_commit=$(git -C "$REPO_ROOT" rev-parse HEAD)
+source_status=$(git -C "$REPO_ROOT" status --porcelain)
+echo "QUALIFICATION SOURCE COMMIT: $source_commit"
+if [[ -z "$source_status" ]]; then
+    echo "QUALIFICATION SOURCE CLEAN: yes"
+else
+    echo "QUALIFICATION SOURCE CLEAN: no (development run)"
+fi
 
 # Host-side unit tests (ROADMAP 2.5+): pure-logic crates run natively.
 for pkg in arena-heap arena-sync; do
@@ -164,6 +172,12 @@ for t in "$REPO_ROOT"/tools/test_m*.py; do
 done
 
 echo "======================================================================"
+if [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" != "$source_commit" || \
+      "$(git -C "$REPO_ROOT" status --porcelain)" != "$source_status" ]]; then
+    failures=$((failures+1))
+    echo "!! source changed during full suite"
+fi
+echo "QUALIFICATION SOURCE END: $(git -C "$REPO_ROOT" rev-parse HEAD)"
 if [[ $failures -eq 0 ]]; then
     echo "ALL TESTS PASSED ($ran test suites)"
     exit 0

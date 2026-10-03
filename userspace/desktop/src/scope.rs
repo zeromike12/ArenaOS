@@ -29,6 +29,10 @@ pub fn permits(scope: u8, rights: u64, operation: Operation) -> bool {
     };
     scope & resource != 0 && rights & needed == needed
 }
+/// Trusted per-session launch targets; descriptive bootstrap kind grants none.
+pub fn can_launch(targets: u8, kind: u8) -> bool {
+    kind < 6 && targets & (1 << kind) != 0
+}
 pub fn public_name(name: &[u8; 32]) -> bool {
     let n = name.iter().position(|b| *b == 0).unwrap_or(32);
     n > 5
@@ -91,6 +95,14 @@ mod tests {
             let mut name = [0; 32];
             name[..text.len()].copy_from_slice(text.as_bytes());
             assert!(!public_name(&name));
+        }
+    }
+    #[test]
+    fn launch_targets_are_explicit_and_bounded() {
+        for kind in 0..=255 {
+            assert!(!can_launch(0, kind));
+            assert_eq!(can_launch(0x3f, kind), kind < 6);
+            assert_eq!(can_launch(1 << 2, kind), kind == 2);
         }
     }
 }

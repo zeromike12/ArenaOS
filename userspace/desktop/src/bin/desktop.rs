@@ -32,8 +32,10 @@ struct Session {
     process: u64,
     handle: u64,
     title: [u8; 32],
+    published: bool,
     kind: u8,
     scope: u8,
+    launch_targets: u8,
     path: [u8; 32],
     close_pending: bool,
     ending: bool,
@@ -49,8 +51,10 @@ const EMPTY: Session = Session {
     process: CAP_NONE,
     handle: 0,
     title: [0; 32],
+    published: false,
     kind: 5,
     scope: 0,
+    launch_targets: 0,
     path: [0; 32],
     close_pending: false,
     ending: false,
@@ -65,7 +69,13 @@ static mut PREFS: arena_desktop::preferences::Preferences =
         motion: true,
     };
 static mut FILES: Option<arena_desktop::fs_backend::Fs> = None;
+static mut UPTIME_SECOND: u64 = 0;
+static mut CAP_HIGH_WATER: u64 = 0;
 static mut NOTICE: Option<(&'static str, u64)> = None;
+// Private broker memory: clients never map or receive these complete frames.
+// Only an authenticated Damage request publishes an owned snapshot.
+const FRAME_PIXELS: usize = arena_ui::metrics::WINDOW_WIDTH * arena_ui::metrics::WINDOW_HEIGHT;
+static mut PUBLISHED: [[u32; FRAME_PIXELS]; LIMIT] = [[0; FRAME_PIXELS]; LIMIT];
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
 static mut WM: State = match State::new(800, 600) {
     Ok(s) => s,
@@ -100,6 +110,19 @@ fn log_number(mut value: u64) {
     }
     for digit in digits[..n].iter().rev() {
         log(core::slice::from_ref(digit));
+    }
+}
+/// Sample native occupancy while request references are still landed.
+fn transient_caps() {
+    let mut counts = [0u64; 9];
+    if unsafe { syscall6(SYS_OBSERVE, POOL, counts.as_mut_ptr() as u64, 0, 0, 0, 0) } != 0 {
+        die(77)
+    }
+    if counts[7] > unsafe { CAP_HIGH_WATER } {
+        unsafe { CAP_HIGH_WATER = counts[7] };
+        log(b"[desktop] measured broker cap high-water=");
+        log_number(counts[7]);
+        log(b"\n");
     }
 }
 fn snapshot() {
@@ -171,7 +194,20 @@ fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
         ),
         _ => (0, RIGHTS_READ | RIGHTS_COPY),
     };
-    launch_image(APPLICATION, kind, scope, function_rights, path, kind == 4)
+    let launch_targets = match kind {
+        0 => 0x3f,
+        1 => 1 << 2,
+        _ => 0,
+    };
+    launch_image(
+        APPLICATION,
+        kind,
+        scope,
+        function_rights,
+        path,
+        kind == 4,
+        launch_targets,
+    )
 }
 fn launch_image(
     image: u64,
@@ -180,6 +216,7 @@ fn launch_image(
     function_rights: u64,
     path: [u8; 32],
     diagnostics: bool,
+    launch_targets: u8,
 ) -> Result<(), i64> {
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
     if ready != 0 {
@@ -254,9 +291,11 @@ fn launch_image(
         process,
         kind,
         scope,
+        launch_targets,
         path,
         ..EMPTY
     };
+    transient_caps();
     log(b"[desktop] real application spawned; held Process and own region bound\n");
     Ok(())
 }
@@ -313,6 +352,10 @@ fn animate() -> bool {
     let now = arena_desktop::app_client::now();
     let state = unsafe { &*(&raw const WM) };
     let mut changed = false;
+    if now / 1_000_000 != unsafe { UPTIME_SECOND } {
+        unsafe { UPTIME_SECOND = now / 1_000_000 };
+        changed = true;
+    }
     if unsafe { NOTICE }.is_some_and(|(_, until)| until <= now) {
         unsafe { NOTICE = None };
         changed = true;
@@ -376,10 +419,7 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
         let s = unsafe { SESSIONS[*index] };
         let window = state.find(s.handle).unwrap_or_else(|| die(88));
         let source = unsafe {
-            core::slice::from_raw_parts(
-                (s.va as usize + PIXEL_OFFSET) as *const u32,
-                window.width as usize * window.height as usize,
-            )
+            &(&*(&raw const PUBLISHED))[*index][..window.width as usize * window.height as usize]
         };
         let reveal = s
             .reveal
@@ -388,15 +428,27 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
         if reveal == 0 {
             continue;
         }
-        c.blit(
-            source,
-            window.width as usize,
-            reveal,
-            window.width as usize,
-            window.x,
-            window.y,
-        )
-        .unwrap_or_else(|_| die(89));
+        if s.published {
+            c.blit(
+                source,
+                window.width as usize,
+                reveal,
+                window.width as usize,
+                window.x,
+                window.y,
+            )
+            .unwrap_or_else(|_| die(89));
+        } else {
+            c.fill_rect(
+                arena_gfxkit::Rect {
+                    x: window.x,
+                    y: window.y,
+                    width: u32::from(window.width),
+                    height: reveal as u32,
+                },
+                arena_ui::theme::palette(unsafe { PREFS.dark }).elevated,
+            );
+        }
         let end = s.title.iter().position(|b| *b == 0).unwrap_or(32);
         let title = core::str::from_utf8(&s.title[..end]).unwrap_or("Application");
         view::chrome(
@@ -430,6 +482,7 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
         &running,
         active,
         notice,
+        arena_desktop::app_client::now() / 1_000_000,
         arena_ui::theme::palette(unsafe { PREFS.dark }),
     );
     let frame = arena_compositor_model::wire::Frame::Present {
@@ -525,23 +578,30 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             }
             Ok(0)
         }
-        S::Launch { kind, path } => launch(kind, path).map(|_| 0),
+        S::Launch { kind, path } => {
+            if !scope::can_launch(session.launch_targets, kind) {
+                return Err(-2);
+            }
+            launch(kind, path).map(|_| 0)
+        }
         _ => Err(-2),
     }
 }
 
 fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
-    if unsafe {
+    let rc = unsafe {
         syscall5(
-            SYS_IPC_REPLY,
+            SYS_IPC_REPLY_CHECKED,
             SERVER,
             status,
             result,
             CAP_NONE,
             bytes.as_ptr() as u64,
         )
-    } != 0
-    {
+    };
+    // A cancelled application call is ordinary liveness, not compositor death.
+    // The checked operation consumes the exact abandoned-call tombstone.
+    if rc != 0 && rc != STATUS_CALLER_GONE {
         die(91)
     }
 }
@@ -627,6 +687,7 @@ pub extern "C" fn _start() -> ! {
         }
         let landed = request[2];
         let description = describe(landed);
+        transient_caps();
         let mut status = 2;
         let mut result = 0;
         if request[0] == 0 && request[1] == 0 {
@@ -672,12 +733,12 @@ pub extern "C" fn _start() -> ! {
                                 if unsafe { SESSIONS[i].close_pending } {
                                     retire(i, true)
                                 } else {
-                                    let delivered = unsafe {
+                                    let _ = unsafe {
                                         (&mut *(&raw mut WM))
                                             .send(handle, arena_desktop::model::Event::Close)
                                     };
                                     unsafe {
-                                        SESSIONS[i].close_pending = delivered;
+                                        SESSIONS[i].close_pending = true;
                                     }
                                 }
                             }
@@ -692,7 +753,7 @@ pub extern "C" fn _start() -> ! {
                 && arena_desktop::service_wire::Frame::decode(&bytes)
                     == Ok(arena_desktop::service_wire::Frame::LaunchImage)
             {
-                match launch_image(landed, 255, 0, RIGHTS_READ | RIGHTS_COPY, [0; 32], false) {
+                match launch_image(landed, 255, 0, RIGHTS_READ | RIGHTS_COPY, [0; 32], false, 0) {
                     Ok(()) => {
                         status = 0;
                         dirty = true;
@@ -774,6 +835,19 @@ pub extern "C" fn _start() -> ! {
                                     dirty = true;
                                 }
                                 Frame::Damage { handle } if state.owned(id, handle) => {
+                                    let window = state.find(handle).unwrap_or_else(|| die(88));
+                                    let pixels = window.width as usize * window.height as usize;
+                                    let input = (s.va as usize + PIXEL_OFFSET) as *const u32;
+                                    // Sender is blocked in CALL on this single-core launch
+                                    // topology. Read volatile shared data into private memory;
+                                    // later writes cannot change movement/focus frames.
+                                    for pixel in 0..pixels {
+                                        unsafe {
+                                            (*(&raw mut PUBLISHED))[i][pixel] =
+                                                core::ptr::read_volatile(input.add(pixel));
+                                        }
+                                    }
+                                    s.published = true;
                                     status = 0;
                                     dirty = true;
                                 }

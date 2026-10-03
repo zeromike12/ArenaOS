@@ -90,3 +90,56 @@ pub fn hit(r: Rect, x: i32, y: i32) -> bool {
         && (x as i64) < i64::from(r.x) + i64::from(r.width)
         && (y as i64) < i64::from(r.y) + i64::from(r.height)
 }
+
+// Viewport dimensions are shared by painting, scrolling and pointer-to-caret
+// conversion, so font/spacing changes do not require application IPC edits.
+pub const EDIT_COLUMNS: usize = ((EDIT_TEXT.width as i32 - m::SPACE[3]) / m::FONT_ADVANCE) as usize;
+pub const EDIT_ROWS: usize = ((EDIT_TEXT.height as i32 - m::SPACE[3]) / m::LINE_HEIGHT) as usize;
+pub const FILE_ROWS: usize = FILE_LIST.height as usize / ROW_H as usize;
+pub const PREVIEW_ROWS: usize = ((PREVIEW.height as i32 - m::SPACE[4]) / m::LINE_HEIGHT) as usize;
+pub const PREVIEW_COLUMNS: usize =
+    ((PREVIEW.width as i32 - m::SPACE[4]) / m::FONT_ADVANCE) as usize;
+pub const TERMINAL_ROWS: usize = ((STATUS_Y - 20 - (CONTENT_Y + 6)) / m::LINE_HEIGHT) as usize;
+pub const MONITOR_ROWS: usize =
+    ((STATUS_Y - CONTENT_Y - m::SPACE[4] - m::SPACE[3]) / m::LINE_HEIGHT) as usize;
+pub fn visual_cursor(e: &super::model::Editor, target_row: usize, target_column: usize) -> usize {
+    let mut row = 0;
+    let mut column = 0;
+    for i in 0..=e.len {
+        if row > target_row || (row == target_row && column >= target_column) || i == e.len {
+            return i;
+        }
+        let b = e.data[i];
+        if b == b'\n' {
+            if row == target_row {
+                return i;
+            }
+            row += 1;
+            column = 0;
+        } else {
+            column += if b == b'\t' { 4 - column % 4 } else { 1 };
+            if column >= EDIT_COLUMNS {
+                row += 1;
+                column = 0;
+            }
+        }
+    }
+    e.len
+}
+pub fn visual_row(e: &super::model::Editor) -> usize {
+    let mut row = 0;
+    let mut col = 0;
+    for b in &e.data[..e.cursor] {
+        if *b == b'\n' {
+            row += 1;
+            col = 0;
+        } else {
+            col += if *b == b'\t' { 4 - col % 4 } else { 1 };
+            if col >= EDIT_COLUMNS {
+                row += 1;
+                col = 0;
+            }
+        }
+    }
+    row
+}

@@ -34,7 +34,11 @@ def main(esp=None):
         try:
             i=d.serial().count('servicemgr: real signed Image delegated for broker-owned graphical spawn')-1
             x=70+i*26;y=60+i*24
-            d.shot(f'signed-{i}',lambda p:len(set(crop(p,x+5,y+32,60,24)[j:j+3] for j in range(0,60*24*3,3)))==2)
+            def checker(p):
+                pixel=lambda a,b:p[(b*800+a)*3:(b*800+a)*3+3]
+                a=pixel(x+5,y+35);b=pixel(x+15,y+35)
+                return a!=b and all(pixel(x+5+k*10,y+35+r*10)==(a if (k+r)%2==0 else b) for r in range(2) for k in range(6))
+            d.shot(f'signed-{i}',checker)
             if i==3:
                 d.wait(lambda:samples(d)[-1][5]==10,'four signed children not fully mapped')
                 pre_refusal.append((samples(d)[-1],len(samples(d))))
@@ -43,17 +47,40 @@ def main(esp=None):
     def exercised():
         d=Desktop(LABEL)
         try:
+            __import__('time').sleep(.16) # settle the bounded open/focus transition
             full=d.shot('four-live')
             d.wait(lambda:len(samples(d))>pre_refusal[0][1],'refusal snapshot missing')
             assert samples(d)[-1]==pre_refusal[0][0],('fifth refusal mutated resources',pre_refusal[0][0],samples(d)[-1])
             # A fifth dynamic app was refused even though two desktop slots
             # remain. Its temporary backing must have rolled back completely.
             assert d.serial().count('[desktop] real application spawned;')==4
-            d.click(155,177);d.q.key('a')
+            d.click(155,177)
+            d.shot('signed-focus-settled',lambda p:crop(p,153,164,45,20)==crop(full,153,164,45,20))
+            d.q.key('f')
+            # Pointer redraws must use the last complete published snapshot,
+            # while the client has already changed its writable staging bytes.
+            for step in range(6):
+                # Repeated identical absolute coordinates can be coalesced by
+                # QEMU. Alternate real positions and await the drawn cursor:
+                # this proves a compositor redraw happened after the key.
+                x=700+20*(step%2);y=420+20*(step%2)
+                d.point(x,y)
+                def cursor_drawn(p):
+                    pixel=lambda a,b:p[(b*800+a)*3:(b*800+a)*3+3]
+                    return any(pixel(a,b)==pixel(a,b+6)!=pixel(a+6,b+6)
+                               for a in range(x-1,x+2) for b in range(y-1,y+2))
+                staged=d.shot('unpublished-staged',cursor_drawn)
+                assert crop(staged,153,164,45,20)==crop(full,153,164,45,20),'unpublished backing became visible'
+                __import__('time').sleep(.04)
+            d.q.key('p')
+            published=d.shot('published-staged',lambda p:sum(a!=b for a,b in zip(crop(p,153,164,45,20),crop(full,153,164,45,20)))>45*20*3*.95)
+            full=published
+            d.q.key('a')
             def raster_changed(p,x,y,old):
                 current=crop(p,x,y,45,20)
                 return sum(current[i:i+3]!=old[i:i+3] for i in range(0,len(current),3))>45*20*.95
             changed=d.shot('key-owned',lambda p:raster_changed(p,153,164,crop(full,153,164,45,20)))
+            changed=d.settled('key-owned',(153,164,45,20))
             # Drag exact raster of the top signed child.
             d.point(154,142,True);d.point(354,242);d.point(354,242,False);d.point(780,500)
             d.shot('signed-dragged',lambda p:crop(p,353,264,45,20)==crop(changed,153,164,45,20))
@@ -65,11 +92,24 @@ def main(esp=None):
             before=d.shot('revoked-still-live')
             d.q.key('b')
             d.shot('revoked-child-input',lambda p:sum(a!=b for a,b in zip(crop(p,353,264,45,20),crop(before,353,264,45,20)))>45*20*3*.95)
+            # Dynamic and BootImage children share the general six-session
+            # ownership model, while the native dynamic quota stays four.
+            d.launch(0,'mixed-terminal',4);d.launch(3,'mixed-settings',5)
+            d.wait(lambda:samples(d)[-1][3:6]==(7,1231,14),'mixed working set not fully mapped')
+            mixed=samples(d)[-1]
+            assert mixed[1:3]==(20,20) and mixed[6]==28,('mixed working-set counters',mixed)
+            full_mixed=d.shot('mixed-full')
+            d.click(255+5*58,570)
+            d.shot('mixed-capacity-refused',lambda p:crop(p,10,28,250,20)!=crop(full_mixed,10,28,250,20))
+            assert d.serial().count('[desktop] real application spawned;')==6,'seventh mixed application spawned'
+            for index in (5,4):
+                d.close(index)
+                d.wait(lambda:d.serial().count('[desktop] application retired:')>=6-index,'mixed builtin not reaped')
             d.click(414,142+100) # top child now at x348,y232; close x414,y242.
-            d.wait(lambda:d.serial().count('[desktop] application retired:')>=1,'signed child close not reaped')
+            d.wait(lambda:d.serial().count('[desktop] application retired:')>=3,'signed child close not reaped')
             for i in (2,1,0):
                 d.click(136+i*26,70+i*24)
-                d.wait(lambda:d.serial().count('[desktop] application retired:')>=4-i,'remaining signed child not reaped')
+                d.wait(lambda:d.serial().count('[desktop] application retired:')>=6-i,'remaining signed child not reaped')
             d.shot('signed-all-closed')
             return b'shutdown\r'
         finally:d.dispose()
@@ -77,9 +117,11 @@ def main(esp=None):
     for n in range(1,5):feed.append((b'servicemgr: real signed Image delegated for broker-owned graphical spawn',n,visible))
     feed.extend([(b'servicemgr: graphical Image launch bounded refusal',1,exercised),(b'servicemgr: revoked graphical Image cannot spawn again PASS',1,revoked)])
     rc,s,_=mtest.boot(LABEL,esp,feed,disk,pointer=True,timeout_s=120)
-    assert rc==0 and s.count('[desktop] real application spawned;')==4 and s.count('[desktop] application retired:')==4
+    assert rc==0 and s.count('[desktop] real application spawned;')==6 and s.count('[desktop] application retired:')==6
+    rows=[tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',s)]
+    assert rows[-1][1:]==rows[0][1:],('mixed teardown resources',rows[0],rows[-1])
     assert 'GRAPHICALTEST refused' not in s
     assert stage.contents(disk)[stage.STAGE1]==signed and all(stage.contents(disk)[k]==v for k,v in original.items())
     assert not __import__('afs1').audit(disk)
-    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes, fifth refusal, owned key pixels, Process close and revoke-with-live-copied-pages PASS')
+    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus two ordinary builtins, mixed capacity refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, Process close and revoke-with-live-copied-pages PASS')
 if __name__=='__main__':main()

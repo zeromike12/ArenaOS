@@ -19,6 +19,7 @@
 set -euo pipefail
 
 N="${1:-100}"
+[[ "$N" =~ ^[1-9][0-9]*$ ]] || { echo "error: positive boot count required" >&2; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
     # shellcheck disable=SC1091
@@ -52,7 +53,7 @@ VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
 QMP_SOCK="$REPO_ROOT/build/qmp-stability.sock"
 VCON_SOCK="$REPO_ROOT/build/vcon-stability.sock"
-BOOT_TIMEOUT=60          # healthy TCG boot is <10s; hang = failure
+BOOT_TIMEOUT=90          # healthy TCG boot is <10s; hang = failure
 # The suite verdicts are DERIVED, not written down here.
 #
 # This file used to carry a hardcoded line per suite — m2 21/21, m3
@@ -84,6 +85,20 @@ VCON_REPLY='host-says-hello
 '
 HALT_LINE='halting via UEFI ResetSystem(shutdown)'
 
+if [[ ! -f "$REPO_ROOT/build/graphics-profile.txt" ]] || [[ "$(cat "$REPO_ROOT/build/graphics-profile.txt")" != desktop ]]; then
+    echo "error: Phase-10 stability requires the explicit production desktop profile" >&2
+    exit 1
+fi
+( cd "$REPO_ROOT" && python3 - <<'PYIMAGE'
+from pathlib import Path
+from pyfatfs.PyFatFS import PyFatFS
+fs = PyFatFS('build/arena-esp.img', read_only=True)
+try:
+    assert fs.getbytes('/EFI/BOOT/BOOTX64.EFI') == Path('build/arena-boot.efi').read_bytes(), 'ESP and exact EFI differ'
+finally: fs.close()
+PYIMAGE
+)
+EFI_START_SHA="$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)"
 pass=0
 fail=0
 t_start=$(date +%s)
@@ -127,15 +142,14 @@ for i in $(seq 1 "$N"); do
     python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
         "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
     typist_pid=$!
-    # Phase-9 per-boot independent before/after QMP captures. The actor
-    # waits for both real windows, injects a virtio key, verifies the
-    # focused client's newly painted pixel, and checks preserved base.
+    # Phase-10 actual dock spawn, owned key pixels, exact tablet drag,
+    # Process close/relaunch and native resource conservation on every boot.
     # The serial feeder waits for its receipt before running stacktest.
     PIXEL_RECEIPT="$REPO_ROOT/build/stability-pixels-boot-$i.txt"
     PIXEL_IMAGE="$REPO_ROOT/build/stability-display-boot-$i.ppm"
     PIXEL_ERROR="$PIXEL_RECEIPT.error"
     rm -f "$PIXEL_RECEIPT" "$PIXEL_IMAGE" "$PIXEL_ERROR"
-    python3 "$REPO_ROOT/tools/check_phase9_pixels.py" "$QMP_SOCK" "$SERIAL" \
+    python3 "$REPO_ROOT/tools/check_phase10_pixels.py" "$QMP_SOCK" "$SERIAL" \
         "$PIXEL_IMAGE" "$PIXEL_RECEIPT" "$BOOT_TIMEOUT" \
         >"$REPO_ROOT/build/stability-pixel-actor.log" 2>&1 &
     pixel_pid=$!
@@ -155,14 +169,13 @@ for i in $(seq 1 "$N"); do
               ! grep -aqF 'servicemgr: production netstackd READY pid' "$SERIAL" 2>/dev/null; do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
-        # Keyboard 'q' was injected by the pixel actor. It is ALSO a
-        # console byte, so erase it in the shared shell line discipline
-        # before issuing stacktest; do not race the input image receipt.
+        # Graphical keyboard is routed independently of serial; wait for
+        # pixel and native lifecycle proof before the historical restart.
         n=0
         while [[ ! -s "$PIXEL_RECEIPT" && ! -s "$PIXEL_ERROR" ]]; do
             sleep 0.2; n=$((n + 1)); if (( n >= FEED_ITERS )); then exit 0; fi
         done
-        printf '\bstacktest\r'
+        printf 'stacktest\r'
         n=0
         while ! grep -aqF 'm8: stacktest PASS (same endpoint; old bearer revoked; fresh ARP request on real wire)' "$SERIAL" 2>/dev/null || \
               (( $(grep -ac 'arena>' "$SERIAL" 2>/dev/null || true) < 2 )); do
@@ -182,7 +195,7 @@ for i in $(seq 1 "$N"); do
         "${SCRATCH[@]}" \
         "${NET[@]}" \
         "${RNG[@]}" \
-        "${KBD[@]}" \
+        "${KBD[@]}" -device virtio-tablet-pci \
         "${VCON[@]}" \
         -qmp unix:"$QMP_SOCK",server=on,wait=off \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
@@ -213,8 +226,11 @@ for i in $(seq 1 "$N"); do
     elif (( pixel_actor_rc != 0 )) || [[ ! -s "$PIXEL_RECEIPT" ]]; then
         why="QMP graphical pixels were not independently verified ($(cat "$PIXEL_ERROR" 2>/dev/null || cat "$REPO_ROOT/build/stability-pixel-actor.log" 2>/dev/null || true))"
     elif ! grep -Eq '^800x600 [0-9a-f]{64}$' "$PIXEL_RECEIPT" || \
-         ! grep -Eq '^INPUT [0-9a-f]{64} [0-9a-f]{64}$' "$PIXEL_RECEIPT"; then
-        why="QMP owned compositor / injected-key pixel receipt malformed"
+         ! grep -Eq '^INPUT [0-9a-f]{64} [0-9a-f]{64}$' "$PIXEL_RECEIPT" || \
+         ! grep -Eq '^DRAG [0-9a-f]{64}$' "$PIXEL_RECEIPT" || \
+         ! grep -Eq '^RELAUNCH [0-9a-f]{64}$' "$PIXEL_RECEIPT" || \
+         ! grep -q '^LIFECYCLE 2 2$' "$PIXEL_RECEIPT"; then
+        why="QMP desktop input/process/lifecycle receipt malformed"
     elif [[ ! -f "$SERIAL" ]]; then
         why="no serial output"
     elif grep -aq 'PANIC' "$SERIAL"; then
@@ -239,7 +255,7 @@ for i in $(seq 1 "$N"); do
     # Destructive fault/stall negatives live in the historical host suite.
     elif ! grep -aqF 'audited 22 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 18/18; nineteenth refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 25/25; twenty-sixth refused' "$SERIAL"; then
         why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
@@ -370,6 +386,8 @@ for i in $(seq 1 "$N"); do
         cp "$REPO_ROOT/build/vcon-dbg.txt" \
            "$REPO_ROOT/build/stability-fail-$i-actor.txt" 2>/dev/null || true
         echo "boot $i: FAIL — $why (serial saved to ${saved#"$REPO_ROOT"/})"
+        echo "STABILITY: FAIL; attempt invalidated, restart from zero after fixing"
+        exit 1
     fi
 
     if (( i % 10 == 0 )); then
@@ -396,6 +414,7 @@ fi
 # second of being written. arena-boot.efi is what actually determines
 # how the machine behaves, and it only changes when the kernel is
 # genuinely relinked.
+[[ "$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)" == "$EFI_START_SHA" ]] || { echo 'error: EFI changed during stability'; exit 1; }
 printf '%s %s/%s\n' \
     "$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)" "$pass" "$N" \
     > "$REPO_ROOT/build/stability-receipt.txt"

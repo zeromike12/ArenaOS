@@ -16,6 +16,9 @@ def main():
             ['cargo','clippy','--offline','--locked','--manifest-path',manifest,'--lib','--target','x86_64-unknown-linux-gnu','--','-D','warnings'],
             ['cargo','build','--offline','--locked','--manifest-path',manifest,'--lib','--release','--target','x86_64-unknown-none'],
         ):subprocess.run(cmd,cwd=ROOT,env=env,check=True)
+    subprocess.run(['cargo','clippy','--offline','--locked','--release','--bins',
+                    '--target','x86_64-unknown-none','--','-D','warnings'],
+                   cwd=ROOT/'userspace/desktop',env=env,check=True)
     for source in ('userspace/inputd/src/pointer.rs','userspace/fsd/src/replace.rs','userspace/desktop/src/apps/model.rs'):
         output=arena_env.build_dir()/(Path(source).stem+'-m10-tests')
         subprocess.run(['rustc','--test','--edition','2024',source,'-o',str(output)],cwd=ROOT,env=env,check=True)
@@ -39,6 +42,6 @@ def main():
         captures.append(data)
         print(f'host fixture {path.name} sha256={hashlib.sha256(data).hexdigest()}')
     assert captures[0]!=captures[1],'theme has no visible effect'
-    print('[m10-ui] host components/motion/window-policy + deterministic palette-independent raster checks PASS; guest proof pending')
+    print('[m10-ui] host components/motion/window-policy, no_std binaries/static checks and deterministic palette-independent raster checks PASS; guest proof is separate')
 
 if __name__=='__main__':main()

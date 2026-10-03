@@ -1,210 +1,131 @@
 # Phase 10 engineering record
 
-Status: implementation in progress; no Phase-10 qualification claimed.
+Status: functional implementation and focused proofs complete; final historical,
+exact-image 100/100 and independently extracted archive qualification pending.
+Sol supplies the reference skin; Opus owns the subsequent visual design branch.
+No intermediate receipt is the engineering baseline.
 
-## Generic graphical Image and production boot checkpoint
+## Provenance
 
-ADR-0066 records the implemented generic Image-cap graphical launch path,
-read-only spawn preflight, explicit production/historical graphics profiles,
-and the late explicit manager endpoint grant. Workspace receipts:
-`/workspace/scratch/arena-dynamic-preflight.log` and
-`/workspace/scratch/arena-apps-audit.log`.
+Branch: `arena/phase10-sol-engineering`. Fetched starting main:
+`491944da750888aa157070b2c580102d6a6dd9fc`, containing qualified Phase-9 parent
+`832867e7511c5ba09051eb752c623fe87dd2d96c`. Both have tree
+`764863b343a3297796a49b951e5826bfc6c2682b`; ancestry/tree equality were verified
+before creating the engineering branch. Main receives no Phase-10 changes.
+The unchanged Phase-9 source plus unlinked UI foundations passed 80/80 suites
+(`/workspace/scratch/arena-phase9-full.log`), before production changes.
 
-Four independently spawned signed dynamic graphical instances pass actual
-QMP owned-raster input/drag/close, capacity refusal with identical real resource
-counters, and full-ID revocation with surviving copied code. The signed ELF is
-1384 bytes, SHA-256
-`5b2cec1f1178c7cb83c86dbb9e8e6eaa5550ed439fc3a06a9ab7478adb21e0a4`.
-The ordinary six-app gate is also green after native grant/refusal startup
-checks; Monitor proves its read-only diagnostics cannot allocate a region.
+## Implemented decisions
 
-This remains an intermediate checkpoint. UI-only source separation, keyboard
-desktop shortcuts, more file/editor workflows, adversarial lifecycle controls,
-additional display configurations, full historical/static gates and the final
-exact-EFI 100/100 archive/handoff have not been completed.
+| ADR | Mechanism |
+|---|---|
+| 0062 | Ordinary graphical spawn, held-cap ownership, userspace pointer/window policy, shared presentation |
+| 0063 | Complete AFS1 CoW PUT with unchanged disk format and ordered-prefix crash proof |
+| 0064 | Four unretired dynamic children, exact Process ownership, checked canceled-call reply |
+| 0065 | Explicit function scopes/launch targets, six reusable private clocks, Pool/READ diagnostics |
+| 0066 | Generic signed Image bearer launch, mutation-free spawn preflight, explicit production profile |
+| 0067 | Private complete owned-frame snapshots; unpublished staging remains invisible |
 
-## Ordinary application checkpoint
+The broker binds each fresh backing to its original Process before serving
+requests. Backing generation, function rights, trusted resource scope and held
+Process liveness authorize operations. Names, startup view kind, PIDs, titles
+and surface IDs are descriptive. A static multicall ELF selects six ordinary
+application models; trusted launch descriptors independently provision grants.
+Generic signed dynamic apps receive graphics and pacing only. APKG's 4096-byte
+payload and the accepted Image ledger remain intact.
 
-ADR-0065 documents scoped function references, six private client pacing clocks
-and MemoryPool/READ diagnostics. `tools/test_m10_apps.py` passes six actual
-ordinary processes, pointer-driven launch/close, capacity refusal, terminal
-command/file operations, Files create, Editor exact complete-file save and
-unsaved-close cancel/discard, Settings durable theme/motion and a fresh reboot
-whose pixels reflect the preference. Two additional full six-app cycles and
-a gallery relaunch return to identical warmed frames/records/processes/shared
-regions/pages/maps/caps. Cold-to-warm overhead is precisely six retained
-intermediate page tables under the existing ADR-0056 unmap policy.
+The native dynamic roster scans under IF=0, counts exited-unreaped children and
+releases records only after authorized FINISH. Image liveness precedes quota;
+loader pins, revocation and stale generations retain their accepted semantics.
+Four signed graphical processes and fifth refusal use actual package/Image/
+process/IPC execution. Six desktop sessions are a separate bound.
 
-Workspace receipt: `/workspace/scratch/arena-apps-gate.log`. The observed cold
-baseline in that build is `(115241,14,14,1,469,2,16)`; six sessions require 1231
-shared pages including the 469-page GOP scanout, 14 maps and 28 steady broker
-caps. Actual transient peaks and additional display modes remain to qualify.
+Inputd owns the existing virtio keyboard and QEMU tablet queues. A root-issued
+producer witness authenticates events; clients get bounded local key/button
+state. Userspace supplies highest-z hit testing, focus, title drag, close,
+clipped screen edges and pointer capture. F1..F6 launch, F7 cycles focus, F8
+closes. The independent serial shell retains its existing authority.
 
-The four-dynamic-child quota and checked-reply cancellation production mutants
-both go RED. Restored exact EFI runs the full guest resource gate GREEN:
-`e6ff0fe9439c57ed45d5015e31f98331b4f97f37ad02f1ead90aec19ed95516a`.
-Receipts: `/workspace/scratch/arena-multi-red.log` and
-`/workspace/scratch/arena-multi-exact-green.log`. Notification capacity now
-includes six app clocks (25); those earlier receipts predate this addition.
+The persistent desktop has an Arena-drawn background, active-app top bar, real
+monotonic uptime, centered dock, actual launch/refusal state and bounded open/
+close/focus motion. Shared tokens/components, pure views/layout and monotonic
+motion separate presentation from IPC, lifecycle and filesystem mechanisms.
 
-This checkpoint is not the engineering baseline. Generic dynamic graphical
-launch, adversarial/new-boundary controls, production boot integration,
-additional UI workflows, historical/full gates, screenshots/handoff and
-exact-EFI stability/archive proof remain outstanding.
+## Ordinary applications
 
-Engineering branch: `arena/phase10-sol-engineering`.
+Terminal has real help/echo/ls/cat/ps/put/rm/launch/clear, 64-byte line editing
+and 32x64 scrollback. Files lists actual flat user-files, selects/reads, creates
+without overwrite, deletes and launches an ordinary Editor. Editor supports
+4096-byte ASCII documents, insertion/deletion/navigation, Open/New/Save/Save As
+and save/discard/cancel on dirty close. Complete CoW PUT supplies durable save.
+Settings persists light/dark/motion using a checksummed 16-byte application-data
+record before live application. Monitor displays real process/thread rows and
+native counters with read-only diagnostics. Gallery exposes supported controls,
+states and shared motion samples. APP-CONTRACTS.md records exact grants/bounds.
 
-Exact starting main: `491944da750888aa157070b2c580102d6a6dd9fc`.
-Qualified Phase-9 parent: `832867e7511c5ba09051eb752c623fe87dd2d96c`.
-Both commits have tree `764863b343a3297796a49b951e5826bfc6c2682b`.
-Verified with `git fetch origin main`, `git merge-base --is-ancestor` and
-`git show -s --format='%H %T %P %s'`. Main is a merge of the qualified parent.
-The engineering branch was created locally and through the connected GitHub API.
+## Focused proof and resources
 
-## Source audit
+Production mutations cover function scope, Files launch targets, pointer hit,
+actual SYS_SPAWN, Process retirement, diagnostic attenuation, owner/stale
+surfaces, generation reuse, frame publication and capacity preflight. Separate
+native controls break the dynamic quota, checked-reply cancellation and data
+CoW. Mutants must compile and fail real guest oracles. Exact source/EFI/ESP
+restoration precedes GREEN. The full suite reruns and preserves this evidence.
 
-- Production graphics service is `phase9-work/compositord-main.rs`; the crate
-  under `userspace/compositord` supplies its policy, wire and rendering code.
-- `kernel/kernel/src/spawn.rs` tags dynamic spawn records and refuses a second
-  unretired dynamic child before record/process/frame reservation.
-- Dynamic images retain two registry slots, 4096-byte ELF storage, a 16-page
-  loadable-image budget, monotonic IDs, loader pins and exact reference hooks.
-- SYS_SPAWN produces a held Process/READ|DESTROY capability. SYS_PROC_FINISH
-  consumes it only after successful lifecycle retirement. No PID grants this.
-- SharedRegion creation requires MemoryPool/WRITE; mapping and IPC reference
-  ownership already have exact hooks. Eight regions, 2048 aggregate pages,
-  512 pages/region and 32 mappings are the current kernel bounds.
-- Graphics clients currently require root-installed matching Process/region
-  comparator caps. Arbitrary spawned clients are deliberately refused.
-- Inputd currently decodes US-ASCII keyboard input, feeds the serial shell's
-  existing line discipline, and forwards printable keys with a ProofToken.
-- fsd is flat AFS1: 32 objects, bounded names, append-only sector writes and
-  transactional metadata/unlink. Safe existing-file replacement is absent.
-- Configd uses eight immutable generations of up to 32 payload bytes. Its
-  write endpoint requires a distinct receiving-service approval capability.
-- Process listing is read-only and currently available without Power; resource
-  snapshots require Power and cannot be granted to graphical apps as-is.
+Unexpected client death retires its Process/backing/caps/maps while sibling
+pixels/input survive. A live full-queue client can be force-closed by repeating
+Close. Actual compositor death answers blocked input then root fail-stops;
+there is no service-restart claim.
 
-## Work order and evidence discipline
+Six GOP800 clients use 20 processes/records, seven regions, 1231 shared pages,
+14 mappings and 28 steady broker caps; incoming/spawn high-water is 29.
+GPU800 uses eight regions, 1233 pages and 15 maps; GPU640 uses eight regions,
+1064 pages and 15 maps. Full-suite receipts record frozen-source frame minima.
+Client backings cost 762 pages; scanout costs 469 at 800x600 or 300 at 640x480.
+GPU adds two SharedDma pages and a private pixel DMA buffer. Private complete
+snapshots reserve another 756 broker pages. Kernel limits remain eight regions,
+2048 pages, 512 pages/region, 32 maps and 32 cap slots/process. Spawn records are
+24, processes 32 and notifications 25.
 
-1. Establish reproducible host/guest build and rerun the Phase-9 graphics gate.
-2. ADR and production/guest proofs for bounded multi-child ownership and
-   general broker-provisioned graphical children; keep image ledger unchanged.
-3. Real virtio pointer input, hit testing and userspace window policy.
-4. Shared presentation toolkit, deterministic gallery, desktop and launch UI.
-5. Ordinary terminal/files/editor/settings/monitor clients with documented
-   least grants and real data; filesystem extensions need crash tests.
-6. Historical suite, mutation controls, resource/capacity/lifecycle evidence,
-   deterministic captures, exact-EFI 100 graphical boots, archive extraction.
+SharedUnmap retains empty intermediate page tables until address-space teardown
+(ADR-0056). Warming the six fixed slots retains exactly six frames. Two further
+complete working-set cycles and relaunch return identical warmed frames,
+records/processes/regions/pages/maps/caps. This resident VM overhead is distinct
+from application allocation leaks.
 
-No intermediate checkpoint is the qualified engineering baseline. The baseline
-must include all requested applications and proof, then presentation work stops
-for the Opus branch. See DESIGN-HANDOFF.md for the checkpoint contract.
+## Bugs caught by actual execution
 
-## Environment
+- A late manager grant hit an occupied worker cap slot; reserved slot 31 fixes
+  the refusal without broadening package authority.
+- Canceled nested FS calls could fail-stop packaged; checked reply consumes the
+  tombstone and disposes an unsent provisional Image.
+- Files New used replacement; CREATE now refuses duplicates and actual bytes
+  prove the existing document survives.
+- Six-device discovery missed the GPU in the seven-device shipping topology;
+  bounded discovery includes all seven and actual GPU matrix tests pass.
+- Direct client staging reads exposed unpublished drawing; private publication
+  fixes it. The RED oracle also proves visible cursor redraws because identical
+  QEMU pointer coordinates can coalesce.
+- Full-queue Close lost force-close intent; pending lifecycle state now survives
+  independently of event delivery.
+- QMP can sample a GOP copy in progress; settled owned captures prevent a mixed
+  scanout from masquerading as submitted content. No vsync is claimed.
 
-This workspace has no sudo or preinstalled Rust/QEMU. The pinned repository
-bootstrap is being reproduced under `/workspace/scratch/arena-tools` rather than
-changing host system directories. Git HTTPS clone/fetch works; HTTPS push lacks
-credentials. Connected GitHub Git-data APIs are available for preservation.
+## Qualification and handoff
 
-## Initial reproduced evidence
+Freeze/push source, run `tools/run_tests.sh`, build shipping Desktop with
+`tools/build.sh --image`, then run `tools/stability_loop.sh 100` against that
+exact EFI. Every boot checks real app spawn, keyboard pixels, tablet drag,
+Process/resource retirement, relaunch and serial shutdown, alongside historical
+boot/device/network verdicts. Any failure restarts the attempt at zero.
 
-With unchanged Phase-9 production source and the pinned toolchain:
+`tools/test_m10_handoff.py` captures all apps and proves byte-identical owned
+light/dark gallery rasters across independent boots. The bundle tool requires
+clean source-bound suite evidence, matching EFI/ESP/100 receipt and screenshot
+metadata, then independently extracts and graphically boots using bundled
+firmware/tools and standard-library Python. Final hashes and receipt values go
+in DESIGN-HANDOFF.md and the checkpoint QUALIFICATION.json.
 
-- `tools/test_m9_compositor_input.py`: PASS, distinct owned guest surfaces and
-  real QMP-injected key changed actual pixels.
-- `tools/test_m85_resources.py`: PASS, baseline/live/retired resources
-  `(114443,16,16) / (114429,17,17) / (114443,16,16)` for free frames,
-  spawn records and process slots. Manager caps 25 baseline, 27 with old child,
-  28 at two-image transition, 26 after finish and before/after four cycles.
-- Existing Python FAT dependency needs `setuptools<81` for `pkg_resources` in
-  this Python 3.12 workspace; fixed in workspace tooling, not guest code.
-- The complete historical suite is being rerun before kernel mutation.
-
-New source foundations (not running guest services): `userspace/ui` reference
-palettes/metrics/components/motion and `userspace/desktop/src/model.rs` bounded
-window policy. `tools/test_m10_ui.py` builds host and no_std targets, checks
-fmt/clippy, exercises policy/motion and deterministic palette-independent
-component structure. Host gallery fixtures are explicitly separate from QMP
-handoff screenshots. ADR-0062 is proposed, not accepted production evidence.
-
-## First linked desktop foundation (2026-10-03)
-
-The original production source plus unlinked presentation tests completed the
-entire historical gate: **80/80 suites**, including all prior mutation controls.
-Receipt: `/workspace/scratch/arena-phase9-full.log` in the engineering workspace.
-This predates the production changes below and is not Phase-10 qualification.
-
-The linked Phase-10 broker now launches a real gallery via ordinary SYS_SPAWN,
-allocates a distinct 127-page backing, retains the returned Process/READ|DESTROY
-cap, checks backing generation plus held original-child liveness on every
-request, and reaps/stops the child before releasing its region/mapping. App
-capabilities are Endpoint/WRITE and SharedRegion/READ|WRITE|COPY. No raw input,
-display, pool, Power, registrar or Process authority enters this child.
-
-The prototype boot selects this path when two virtio-input functions are
-present (keyboard and QEMU tablet). Single-keyboard historical fixtures retain
-the original Phase-9 path. This is a temporary integration boundary, not a
-claim of a complete production desktop. Production launch/bundle selection is
-still pending. Both graphics services retain boot-root fail-stop supervision.
-
-`SYS_IPC_TRY_RECV=42` is an additive, Endpoint/READ-gated operation. It shares
-blocking receive's cap-delivery/cancellation code and returns BUSY on an empty
-queue without parking. Explicit zero reserved arguments are required. The
-broker combines it with an explicitly delegated private timer notification.
-Queues are now eight deep (six application callers, one input producer, spare).
-The notification budget is nineteen including this clock; full-fixture tests
-now check actual 19/19 occupancy and mutation-free twentieth refusal. Spawn
-records are provisionally 24, allowing the useful six-window working set plus
-service-readiness transitions; the dynamic-child bound has not changed yet.
-
-The one inputd process owns both actual MMIO caps and split queues. Discovery
-matches the exact held BAR, both IRQs reach its existing notification, and
-EV_ABS/button updates publish on SYN_REPORT. Desktop keystrokes bypass the
-kernel console feeder; serial retains its original shell authority. The
-producer token is root-issued and distinct from graphical client backings.
-
-`python3 tools/test_m10_desktop.py` passes actual QMP dock spawn, owned client
-pixels, keyboard palette change, exact content translation during title drag,
-close to original desktop pixels and relaunch. Captures live under
-`build/m10-desktop-*.ppm`. The initial framebuffer/type-width and syscall
-reserved-argument bugs were caught by guest failure, fixed, and rerun GREEN.
-This gate does not yet prove six-app capacity, dynamic Images or leak cycles.
-
-## Complete-file replacement and dynamic-child concurrency
-
-ADR-0063 adds named complete CoW PUT using the existing AFS1 format. Guest tests
-cover create, replace, empty replacement, four crash checkpoints, exact file
-bytes after remount, both valid commit generations and full-bitmap refusal with
-the entire disk unchanged. A production mutant deliberately reused the old
-first data sector: crash observation returned `new replacement with di` under
-the old 23-byte metadata and went RED. Exact source and saved EFI/ESP were
-restored, then the full guest gate ran GREEN against that exact EFI:
-`30a5b713214296991d09d8dd4342b4fd6cd16d5f061e71387dcaae2ccea21523`.
-This is an intermediate mutation receipt, not baseline qualification.
-
-ADR-0064 sets four unretired dynamic children, preserving the two Image storage
-slots, full-ID revocation checks, loader pins and Process-cap-only retirement.
-Historical single-child BUSY probes now fill the additional three records,
-allow actual ring-3 execution, refuse the fifth without changing held caps or
-process/thread rows, and retire the extras. They run with live and exited but
-unreaped original children and through repeated cutover cycles.
-
-The first stress run found packaged fail-stopping on a reply to a canceled
-caller during nested FS IPC. Additive checked reply distinguishes CALLER_GONE
-from invalid reply usage and credits no response references on cancellation.
-Packaged revokes/disposes an unsent provisional Image and continues receiving.
-Legacy REPLY's cancellation contract remains unchanged.
-
-The updated real cutover/resource gate passes: baseline/live/retired
-`(114412,16,16) / (114398,17,17) / (114412,16,16)` for free frames, spawn records
-and processes. Manager reported caps 25 baseline, 27 with original child,
-28 with two Images, 26 after retirement and 26 before/after repeated cycles;
-packaged actual descriptor-count peak is 8. The new LENT-frame descriptor
-includes a previously unreported held buffer in these counts. Further
-multi-child mutation and cross-parent dynamic graphical tests are still needed.
-
-Pure terminal/editor models are present but unlinked. Host tests cover insertion,
-deletion, navigation, capacity refusal, terminal line editing and bounded
-scrollback. No guest terminal/editor functionality is claimed yet.
+Michael's MANUAL-SMOKE.md steps are supplementary; no human session is claimed
+by automated results. UI-CAPABILITIES.md and DESIGN-REQUESTS.md expose limits
+and the review path for missing presentation primitives.

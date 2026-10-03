@@ -63,6 +63,7 @@ pub fn system(
     running: &[u8; 6],
     active: Option<u8>,
     notice: Option<&str>,
+    uptime: u64,
     t: Theme,
 ) {
     let (w, h) = canvas.size();
@@ -76,6 +77,31 @@ pub fn system(
             .map(|kind| arena_desktop::apps::TITLES[kind as usize])
             .or_else(|| state.focused().map(|_| "APPLICATION"))
             .unwrap_or("DESKTOP"),
+        t.secondary,
+    );
+    // Actual monotonic uptime supplied by the service; no wall-clock claim.
+    let mut digits = [0u8; 20];
+    let mut n = 0;
+    let mut value = uptime;
+    loop {
+        digits[n] = b'0' + (value % 10) as u8;
+        n += 1;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    let mut label = [0u8; 24];
+    label[..3].copy_from_slice(b"UP ");
+    for (i, digit) in digits[..n].iter().rev().enumerate() {
+        label[i + 3] = *digit;
+    }
+    label[n + 3] = b'S';
+    c::label(
+        canvas,
+        w as i32 - (n as i32 + 4) * m::FONT_ADVANCE - m::CONTENT_INSET,
+        10,
+        core::str::from_utf8(&label[..n + 4]).unwrap_or("UP"),
         t.secondary,
     );
     let width = m::DOCK_ITEM_WIDTH * 6;

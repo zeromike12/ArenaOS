@@ -131,9 +131,14 @@ pub extern "C" fn _start() -> ! {
             match event[28] {
                 3 => done(42),
                 1 => {
-                    flip = !flip;
-                    paint(va as u64 + 4096, flip);
-                    if call(&mut frame(2, handle), 1)[0] != 0 {
+                    let key = event[24];
+                    if key != b'p' {
+                        flip = !flip;
+                        paint(va as u64 + 4096, flip);
+                    }
+                    // f deliberately stages an unpublished drawing. p publishes
+                    // those exact prior bytes without painting anything new.
+                    if key != b'f' && call(&mut frame(2, handle), 1)[0] != 0 {
                         done(90)
                     }
                 }

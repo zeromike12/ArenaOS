@@ -30,10 +30,11 @@ wall clock or battery/network state.
 
 The kernel retains eight SharedRegions, 2048 aggregate pages, 512 pages per
 region, 32 mappings and 32 cap slots per process. The desktop reserves six
-127-page app backings and holds each exact original Process cap. Standard
+127-page app backings and holds each exact original Process cap. Six private published snapshots additionally reserve 756 broker pages. Standard
 800x600 GOP requires 469 scanout pages. Six apps use 1231 shared pages, 14 maps
-and 28 steady broker caps; additional display paths and transient peaks remain
-to qualify. The dynamic child limit is four system-wide, independently of six
+and 28 steady broker caps; transient broker cap high-water is 29. Guest display tests pass GOP800x600 and
+actual virtio-gpu800x600/640x480 with all six apps. Final exact-image qualification
+remains pending. The dynamic child limit is four system-wide, independently of six
 desktop sessions. Built-ins are actual static userspace BootImage processes.
 
 `python3 tools/test_m10_ui.py` checks host components/motion/policy, formatting,
@@ -43,3 +44,11 @@ Clippy, no_std library compilation and deterministic host gallery rasters.
 actual guest processes, native audits, QMP pointer/keyboard and owned pixels.
 Host gallery rasters are reference fixtures; guest screenshots are the handoff
 proof. Final capture commands and hashes belong in SCREENSHOT-MANIFEST.md.
+
+Only authenticated Damage publishes a complete owned snapshot. Pointer/focus
+redraws use private published pixels; unsubmitted client staging writes remain
+invisible. GOP hardware publication uses a synchronous framebuffer copy, with
+no vsync/page-flip guarantee. Deterministic captures wait for settled owned
+rasters so QMP does not mistake a scanout copy in progress for submitted content.
+Viewport rows/columns and pointer-to-caret mapping live in `apps/layout.rs`,
+shared with app scrolling; typography and spacing changes use those tokens.

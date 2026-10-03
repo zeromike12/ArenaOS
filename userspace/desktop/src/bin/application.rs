@@ -263,7 +263,8 @@ impl App {
         match self.kind {
             apps::TERMINAL => {
                 if key == 258 {
-                    self.top = (self.top + 1).min(self.terminal.count.saturating_sub(12));
+                    self.top =
+                        (self.top + 1).min(self.terminal.count.saturating_sub(l::TERMINAL_ROWS));
                     return Ok(());
                 }
                 if key == 259 {
@@ -290,12 +291,12 @@ impl App {
                     32..=126 => self.editor.insert(key as u8).map_err(|_| -2001)?,
                     _ => {}
                 }
-                let row = visual_row(&self.editor);
+                let row = l::visual_row(&self.editor);
                 if row < self.top {
                     self.top = row;
                 }
-                if row >= self.top + 13 {
-                    self.top = row - 12;
+                if row >= self.top + l::EDIT_ROWS {
+                    self.top = row.saturating_sub(l::EDIT_ROWS - 1);
                 }
                 self.status = if self.editor.dirty {
                     "MODIFIED / SAVE COMMITS COMPLETE FILE"
@@ -313,8 +314,8 @@ impl App {
                 if self.selected < self.top {
                     self.top = self.selected;
                 }
-                if self.selected >= self.top + 10 {
-                    self.top = self.selected - 9;
+                if self.selected >= self.top + l::FILE_ROWS {
+                    self.top = self.selected.saturating_sub(l::FILE_ROWS - 1);
                 }
                 self.select(client)?;
             }
@@ -329,7 +330,8 @@ impl App {
                 if key == 258 {
                     self.top = self.top.saturating_sub(1)
                 } else if key == 259 {
-                    self.top = (self.top + 1).min(self.process_count.saturating_sub(12))
+                    self.top =
+                        (self.top + 1).min(self.process_count.saturating_sub(l::MONITOR_ROWS))
                 }
             }
             _ => {}
@@ -394,7 +396,7 @@ impl App {
                         self.editor_dialog(2)
                     }
                 } else if l::hit(l::EDIT_TEXT, x, y) {
-                    self.editor.cursor = visual_cursor(
+                    self.editor.cursor = l::visual_cursor(
                         &self.editor,
                         self.top + ((y - l::EDIT_TEXT.y - 6).max(0) / m::LINE_HEIGHT) as usize,
                         ((x - l::EDIT_TEXT.x - 6).max(0) / m::FONT_ADVANCE) as usize,
@@ -512,47 +514,6 @@ fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
     for digit in d[..len].iter().rev() {
         append(b, n, core::slice::from_ref(digit));
     }
-}
-fn visual_cursor(e: &Editor, target_row: usize, target_column: usize) -> usize {
-    let mut row = 0;
-    let mut column = 0;
-    for i in 0..=e.len {
-        if row > target_row || (row == target_row && column >= target_column) || i == e.len {
-            return i;
-        }
-        let b = e.data[i];
-        if b == b'\n' {
-            if row == target_row {
-                return i;
-            }
-            row += 1;
-            column = 0;
-        } else {
-            column += if b == b'\t' { 4 - column % 4 } else { 1 };
-            if column >= 68 {
-                row += 1;
-                column = 0;
-            }
-        }
-    }
-    e.len
-}
-fn visual_row(e: &Editor) -> usize {
-    let mut row = 0;
-    let mut col = 0;
-    for b in &e.data[..e.cursor] {
-        if *b == b'\n' {
-            row += 1;
-            col = 0;
-        } else {
-            col += if *b == b'\t' { 4 - col % 4 } else { 1 };
-            if col >= 68 {
-                row += 1;
-                col = 0;
-            }
-        }
-    }
-    row
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {

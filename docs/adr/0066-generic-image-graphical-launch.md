@@ -1,6 +1,6 @@
 # ADR-0066: Generic graphical launch by held executable capability
 
-Status: implemented; signed dynamic guest workflow green; mutation and full qualification pending.
+Status: implemented; signed dynamic guest and production ownership/capacity mutations green; full qualification pending.
 
 The desktop endpoint accepts a canonical LaunchImage request carrying an actual
 live Image/READ capability. Possession of that executable is the execution
@@ -45,7 +45,7 @@ broker. `pkg graphicsrevoke` exercises existing registrar revocation while
 copied child code is live. These opt-in diagnostics are not ambient application
 package permissions or authorization through an application name.
 
-`tools/test_m10_dynamic.py` signs a real 1384-byte static ET_EXEC (inside the
+`tools/test_m10_dynamic.py` signs a real 1472-byte static ET_EXEC (inside the
 unchanged 4096-byte payload ceiling), validates it with the production ELF
 validator, stages public signed bytes on AFS1, and executes four instances via
 the real package receiver/manager/broker. Each creates and paints its own
