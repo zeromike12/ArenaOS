@@ -57,3 +57,24 @@ This workspace has no sudo or preinstalled Rust/QEMU. The pinned repository
 bootstrap is being reproduced under `/workspace/scratch/arena-tools` rather than
 changing host system directories. Git HTTPS clone/fetch works; HTTPS push lacks
 credentials. Connected GitHub Git-data APIs are available for preservation.
+
+## Initial reproduced evidence
+
+With unchanged Phase-9 production source and the pinned toolchain:
+
+- `tools/test_m9_compositor_input.py`: PASS, distinct owned guest surfaces and
+  real QMP-injected key changed actual pixels.
+- `tools/test_m85_resources.py`: PASS, baseline/live/retired resources
+  `(114443,16,16) / (114429,17,17) / (114443,16,16)` for free frames,
+  spawn records and process slots. Manager caps 25 baseline, 27 with old child,
+  28 at two-image transition, 26 after finish and before/after four cycles.
+- Existing Python FAT dependency needs `setuptools<81` for `pkg_resources` in
+  this Python 3.12 workspace; fixed in workspace tooling, not guest code.
+- The complete historical suite is being rerun before kernel mutation.
+
+New source foundations (not running guest services): `userspace/ui` reference
+palettes/metrics/components/motion and `userspace/desktop/src/model.rs` bounded
+window policy. `tools/test_m10_ui.py` builds host and no_std targets, checks
+fmt/clippy, exercises policy/motion and deterministic palette-independent
+component structure. Host gallery fixtures are explicitly separate from QMP
+handoff screenshots. ADR-0062 is proposed, not accepted production evidence.
