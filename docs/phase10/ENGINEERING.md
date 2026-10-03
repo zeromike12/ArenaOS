@@ -191,3 +191,12 @@ Receipts, screenshots, archive checksum and independent-extraction proof live
 in `releases/checkpoints/phase10-engineering-baseline/`. Michael's documented
 manual smoke test has not been performed by these automated checks. Opus owns
 the next visual pass; Sol must qualify the resulting exact image again.
+
+Independent strict extracted graphical boot **passed**, using only bundled
+files and isolated standard-library Python. Archive SHA-256:
+`86c4853269b8e3475b205191ff6a80c20f096afe3609ee9dd049042b628592f8`.
+The host bundle helper initially left its extraction-directory argument in the
+standalone script's argv and refused before boot. The corrected independent
+invocation passed; `PACKAGING.md` and `VERIFY-EXTRACT.py` preserve the exact
+command and failure discovery. Source-frozen `tools/` stays unchanged; fold the
+one-line host launcher correction into Sol's next complete source qualification.

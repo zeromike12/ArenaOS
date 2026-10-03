@@ -10,6 +10,10 @@ verify its sibling `.sha256` file. The bundled standalone script boots only
 extracted files and validates real dock/process/input/drag/close/relaunch/native
 accounting, historical devices/wire behavior and serial shutdown. Its strict
 independent extracted-boot receipt is preserved beside the archive.
+Independent strict extracted graphical boot passed. Archive SHA-256:
+`86c4853269b8e3475b205191ff6a80c20f096afe3609ee9dd049042b628592f8`.
+Use `python3 VERIFY-EXTRACT.py` for a fresh independent check. `PACKAGING.md`
+documents the corrected host invocation and the frozen bundle-helper limitation.
 
 `SOURCE-AND-IMAGE.json`, full-suite/100-boot/static receipts,
 `100-graphical-receipts.json`, `screenshot-manifest.json` and `screenshots/`

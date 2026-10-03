@@ -8,9 +8,16 @@ The published preservation checkpoint adds only handoff docs and evidence to
 this qualified source; executable/test/tool changes invalidate those receipts.
 Archive checksum, independent extracted-boot receipt, resource measurements and
 screenshots are in `releases/checkpoints/phase10-engineering-baseline/`.
+Independent extracted graphical boot passed. Archive SHA-256:
+`86c4853269b8e3475b205191ff6a80c20f096afe3609ee9dd049042b628592f8`.
 Opus branches from the published preservation checkpoint with this exact
 executable/test/tool tree. This is the design handoff, not final Phase-10 visual
 qualification. Sol must review and requalify the post-Opus image.
+
+The frozen host bundle helper has an argv-handling limitation documented in
+checkpoint `PACKAGING.md`. Use its tested `VERIFY-EXTRACT.py`, or run the
+standalone script directly inside an extracted archive. Opus leaves tools and
+qualification mechanisms to Sol; the packaged script and guest are qualified.
 
 ## Architecture
 
