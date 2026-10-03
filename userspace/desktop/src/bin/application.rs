@@ -553,9 +553,27 @@ pub extern "C" fn _start() -> ! {
     }
     let mut dirty = true;
     let mut appearance = client.appearance.get();
+    // Opt-in latency probes (ARENA_PERF builds only; folded away otherwise):
+    // [paint, damage IPC, first event -> damage published, poll IPC].
+    let mut perf_stats = [arena_desktop::perf::Stat::ZERO; 4];
+    let mut perf_last = 0u64;
+    let mut first_event = 0u64;
     loop {
         for _ in 0..32 {
-            match client.poll().unwrap_or_else(|_| client::exit(72)) {
+            let polled = if arena_desktop::perf::ENABLED {
+                service::now()
+            } else {
+                0
+            };
+            let event = client.poll().unwrap_or_else(|_| client::exit(72));
+            if arena_desktop::perf::ENABLED {
+                let now = service::now();
+                perf_stats[3].add(now - polled);
+                if event.is_some() && first_event == 0 {
+                    first_event = now;
+                }
+            }
+            match event {
                 Some(Event::Close) => {
                     if kind == apps::EDITOR && app.editor.dirty {
                         app.closing = true;
@@ -597,14 +615,49 @@ pub extern "C" fn _start() -> ! {
             dirty = true;
         }
         if dirty {
+            let painted = if arena_desktop::perf::ENABLED {
+                service::now()
+            } else {
+                0
+            };
             let pixels = unsafe {
                 core::slice::from_raw_parts_mut(client.pixels, client.width * client.height)
             };
             let mut canvas = Canvas::new(pixels, client.width, client.height, client.width)
                 .unwrap_or_else(|_| client::exit(73));
             app.paint(&mut canvas, appearance);
+            let damaged = if arena_desktop::perf::ENABLED {
+                service::now()
+            } else {
+                0
+            };
             client.damage().unwrap_or_else(|_| client::exit(74));
+            if arena_desktop::perf::ENABLED {
+                let now = service::now();
+                perf_stats[0].add(damaged - painted);
+                perf_stats[1].add(now - damaged);
+                if first_event != 0 {
+                    perf_stats[2].add(now - first_event);
+                    first_event = 0;
+                }
+            }
             dirty = false;
+        }
+        if arena_desktop::perf::ENABLED && service::now().saturating_sub(perf_last) >= 1_000_000 {
+            perf_last = service::now();
+            if perf_stats[0].count + perf_stats[2].count > 0 {
+                let mut line = arena_desktop::perf::Line::new();
+                line.push(b"[perf app");
+                line.number(u64::from(kind));
+                line.push(b"]");
+                line.stat(b"paint", perf_stats[0]);
+                line.stat(b"damage", perf_stats[1]);
+                line.stat(b"event2damage", perf_stats[2]);
+                line.stat(b"poll", perf_stats[3]);
+                line.push(b"\n");
+                client::log(line.as_bytes());
+            }
+            perf_stats = [arena_desktop::perf::Stat::ZERO; 4];
         }
         service::idle().unwrap_or_else(|_| client::exit(75));
     }

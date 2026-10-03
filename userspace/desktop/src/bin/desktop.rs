@@ -3,6 +3,10 @@
 #![no_main]
 #![allow(clippy::deref_addrof, clippy::collapsible_if)]
 use arena_desktop::{
+    compose::{self, Damage, Scene, WindowScene},
+    shell::Shell,
+};
+use arena_desktop::{
     input_wire,
     model::{Action, State},
     wire::Frame,
@@ -12,8 +16,6 @@ use core::panic::PanicInfo;
 #[path = "../../../abi.rs"]
 mod abi;
 use abi::*;
-#[path = "../desktop_view.rs"]
-mod view;
 const DISPLAY: u64 = 0;
 const SERVER: u64 = 1;
 const INPUT: u64 = 2;
@@ -43,6 +45,8 @@ struct Session {
     focus: arena_ui::motion::Motion,
     reveal_last: i32,
     focus_last: i32,
+    /// Advances on every authenticated Damage (published raster changed).
+    content: u64,
 }
 const EMPTY: Session = Session {
     region: CAP_NONE,
@@ -62,6 +66,7 @@ const EMPTY: Session = Session {
     focus: arena_ui::motion::Motion::fixed(0),
     reveal_last: arena_ui::metrics::TITLE_HEIGHT,
     focus_last: 0,
+    content: 0,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -72,6 +77,92 @@ static mut FILES: Option<arena_desktop::fs_backend::Fs> = None;
 static mut UPTIME_SECOND: u64 = 0;
 static mut CAP_HIGH_WATER: u64 = 0;
 static mut NOTICE: Option<(&'static str, u64)> = None;
+/// A built-in client's private clock was signalled for queued events and
+/// it has not polled since (avoids re-signalling on every request).
+static mut WOKEN: [bool; LIMIT] = [false; LIMIT];
+/// Appearance changed: every built-in client should repaint now.
+static mut WAKE_ALL: bool = false;
+/// Until endpoints can wake a notification wait (DESIGN: Phase-11 bound
+/// notifications), the compositor polls its endpoint on every scheduler
+/// tick: arm the shortest timer, which fires at the next 10 ms tick.
+const POLL_TICK_US: u64 = 1;
+/// Signal built-in clients that have queued events (or must repaint) on
+/// the private clock the broker already holds for them. Their `idle()`
+/// cancels the then-redundant timer. Third-party signed applications are
+/// not signalled: they are not known to cancel timers, and early wakes
+/// could otherwise accumulate armed timers in the kernel's bounded table.
+fn wake_clients() {
+    let state = unsafe { &*(&raw const WM) };
+    let all = unsafe { core::mem::replace(&mut *(&raw mut WAKE_ALL), false) };
+    for (i, s) in unsafe { &*(&raw const SESSIONS) }.iter().enumerate() {
+        if s.handle == 0 || s.kind >= 6 || unsafe { WOKEN[i] } {
+            continue;
+        }
+        if (all || state.pending(s.handle)) && unsafe { syscall2(SYS_NOTIFY, 7 + i as u64, 1) } == 0
+        {
+            unsafe { WOKEN[i] = true };
+        }
+    }
+}
+// Opt-in latency probes (ARENA_PERF builds only; folded away otherwise).
+use arena_desktop::perf::{self, Stat};
+const P_RENDER: usize = 0;
+const P_COMPOSE: usize = 1;
+const P_RECTS: usize = 2;
+const P_SKIPPED: usize = 3;
+const P_PRESENT: usize = 4;
+const P_DAMAGE: usize = 5;
+const P_INPUT: usize = 6;
+const P_SLEEP: usize = 7;
+const P_REQUEST: usize = 8;
+const P_KPIXELS: usize = 9;
+static mut PERF: [Stat; 10] = [Stat::ZERO; 10];
+static mut PERF_LAST: u64 = 0;
+fn probe(index: usize, since: u64) {
+    if perf::ENABLED {
+        let now = arena_desktop::app_client::now();
+        unsafe { (*(&raw mut PERF))[index].add(now.saturating_sub(since)) };
+    }
+}
+fn perf_now() -> u64 {
+    if perf::ENABLED {
+        arena_desktop::app_client::now()
+    } else {
+        0
+    }
+}
+fn perf_report() {
+    if !perf::ENABLED {
+        return;
+    }
+    let now = arena_desktop::app_client::now();
+    if now.saturating_sub(unsafe { PERF_LAST }) < 1_000_000 {
+        return;
+    }
+    let stats = unsafe { *(&raw const PERF) };
+    unsafe {
+        PERF_LAST = now;
+        PERF = [Stat::ZERO; 10];
+    }
+    let mut line = perf::Line::new();
+    line.push(b"[perf desktop]");
+    for (name, i) in [
+        (&b"render"[..], P_RENDER),
+        (b"compose", P_COMPOSE),
+        (b"rects", P_RECTS),
+        (b"nodamage", P_SKIPPED),
+        (b"present", P_PRESENT),
+        (b"damage", P_DAMAGE),
+        (b"input2frame", P_INPUT),
+        (b"sleep", P_SLEEP),
+        (b"request", P_REQUEST),
+        (b"kpx", P_KPIXELS),
+    ] {
+        line.stat(name, stats[i]);
+    }
+    line.push(b"\n");
+    log(line.as_bytes());
+}
 // Private broker memory: clients never map or receive these complete frames.
 // Only an authenticated Damage request publishes an owned snapshot.
 const FRAME_PIXELS: usize = arena_ui::metrics::WINDOW_WIDTH * arena_ui::metrics::WINDOW_HEIGHT;
@@ -317,6 +408,7 @@ fn retire(index: usize, force: bool) {
     let _ = unsafe { syscall1(SYS_TRY_WAIT, 7 + index as u64) };
     unsafe {
         SESSIONS[index] = EMPTY;
+        WOKEN[index] = false;
     }
     log(b"[desktop] application retired: Process consumed; mapping and region released\n");
 }
@@ -396,76 +488,42 @@ fn animate() -> bool {
     }
     changed
 }
-fn render(ram: u64, w: usize, h: usize, scanout: u64) {
-    let pixels = unsafe { core::slice::from_raw_parts_mut(ram as *mut u32, w * h) };
-    let mut c = Canvas::new(pixels, w, h, w).unwrap_or_else(|_| die(87));
+static mut LAST_SCENE: Option<Scene> = None;
+/// Descriptive snapshot of everything the compositor draws (see compose.rs).
+fn scene(now: u64) -> Scene {
     let state = unsafe { &*(&raw const WM) };
-    view::background(&mut c, arena_ui::theme::palette(unsafe { PREFS.dark }));
+    let sessions = unsafe { &*(&raw const SESSIONS) };
     let mut order = [0usize; LIMIT];
     let mut n = 0;
-    for (i, s) in unsafe { &*(&raw const SESSIONS) }.iter().enumerate() {
+    for (i, s) in sessions.iter().enumerate() {
         if s.handle != 0 {
             order[n] = i;
             n += 1
         }
     }
-    order[..n].sort_unstable_by_key(|i| {
-        state
-            .find(unsafe { SESSIONS[*i].handle })
-            .map(|w| w.z)
-            .unwrap_or(0)
-    });
-    for index in &order[..n] {
-        let s = unsafe { SESSIONS[*index] };
+    order[..n].sort_unstable_by_key(|i| state.find(sessions[*i].handle).map(|w| w.z).unwrap_or(0));
+    let mut scene = Scene::EMPTY;
+    for (k, index) in order[..n].iter().enumerate() {
+        let s = sessions[*index];
         let window = state.find(s.handle).unwrap_or_else(|| die(88));
-        let source = unsafe {
-            &(&*(&raw const PUBLISHED))[*index][..window.width as usize * window.height as usize]
-        };
-        let reveal = s
-            .reveal
-            .sample(arena_desktop::app_client::now())
-            .clamp(0, window.height as i32) as usize;
-        if reveal == 0 {
-            continue;
-        }
-        if s.published {
-            c.blit(
-                source,
-                window.width as usize,
-                reveal,
-                window.width as usize,
-                window.x,
-                window.y,
-            )
-            .unwrap_or_else(|_| die(89));
-        } else {
-            c.fill_rect(
-                arena_gfxkit::Rect {
-                    x: window.x,
-                    y: window.y,
-                    width: u32::from(window.width),
-                    height: reveal as u32,
-                },
-                arena_ui::theme::palette(unsafe { PREFS.dark }).elevated,
-            );
-        }
-        let end = s.title.iter().position(|b| *b == 0).unwrap_or(32);
-        let title = core::str::from_utf8(&s.title[..end]).unwrap_or("Application");
-        view::chrome(
-            &mut c,
-            window,
-            title,
-            state.focused() == Some(s.handle),
-            s.focus.sample(arena_desktop::app_client::now()),
-            arena_ui::theme::palette(unsafe { PREFS.dark }),
-        );
+        scene.windows[k] = Some(WindowScene {
+            slot: *index,
+            handle: s.handle,
+            x: window.x,
+            y: window.y,
+            width: window.width,
+            height: window.height,
+            reveal: s.reveal.sample(now).clamp(0, i32::from(window.height)),
+            focus: s.focus.sample(now),
+            content: s.content,
+            published: s.published,
+            title: s.title,
+        });
     }
+    scene.count = n;
     let mut running = [0u8; 6];
     let mut active = None;
-    for s in unsafe { &*(&raw const SESSIONS) }
-        .iter()
-        .filter(|s| s.id != 0)
-    {
+    for s in sessions.iter().filter(|s| s.id != 0) {
         if s.kind < 6 {
             running[s.kind as usize] += 1;
             if Some(s.handle) == state.focused() {
@@ -473,27 +531,65 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
             }
         }
     }
-    let notice = unsafe { NOTICE }
-        .filter(|(_, until)| *until > arena_desktop::app_client::now())
-        .map(|(text, _)| text);
-    view::system(
-        &mut c,
-        state,
-        &running,
+    scene.shell = Shell {
+        pointer: state.pointer,
+        open: state.windows().count(),
+        focused_any: state.focused().is_some(),
+        running,
         active,
-        notice,
-        arena_desktop::app_client::now() / 1_000_000,
-        arena_ui::theme::palette(unsafe { PREFS.dark }),
-    );
-    let frame = arena_compositor_model::wire::Frame::Present {
-        x: 0,
-        y: 0,
-        w: w as u16,
-        h: h as u16,
+        notice: unsafe { NOTICE }
+            .filter(|(_, until)| *until > now)
+            .map(|(text, _)| text),
+        uptime: now / 1_000_000,
     };
-    let (out, b) = display(frame, scanout);
-    if out != [0, 0, CAP_NONE] || arena_compositor_model::wire::Frame::decode(&b) != Ok(frame) {
-        die(90)
+    scene.dark = unsafe { PREFS.dark };
+    scene
+}
+/// Recompose and present only the rectangles whose pixels changed since
+/// the last presented scene. The scanout backing retains every other pixel.
+fn render(ram: u64, w: usize, h: usize, scanout: u64) {
+    let started = perf_now();
+    let next = scene(arena_desktop::app_client::now());
+    let mut damage = Damage::new(w, h);
+    match unsafe { LAST_SCENE } {
+        Some(prev) => compose::damage(&prev, &next, &mut damage),
+        None => damage.full(),
+    }
+    if damage.is_empty() {
+        unsafe { LAST_SCENE = Some(next) };
+        probe(P_SKIPPED, started);
+        return;
+    }
+    let pixels = unsafe { core::slice::from_raw_parts_mut(ram as *mut u32, w * h) };
+    let mut c = Canvas::new(pixels, w, h, w).unwrap_or_else(|_| die(87));
+    let published = unsafe { &*(&raw const PUBLISHED) };
+    let theme = arena_ui::theme::palette(next.dark);
+    for rect in damage.rects() {
+        c.set_clip(*rect);
+        compose::compose(&mut c, &next, |slot| &published[slot][..], theme);
+    }
+    probe(P_COMPOSE, started);
+    let phase = perf_now();
+    for rect in damage.rects() {
+        let frame = arena_compositor_model::wire::Frame::Present {
+            x: rect.x,
+            y: rect.y,
+            w: rect.width as u16,
+            h: rect.height as u16,
+        };
+        let (out, b) = display(frame, scanout);
+        if out != [0, 0, CAP_NONE] || arena_compositor_model::wire::Frame::decode(&b) != Ok(frame) {
+            die(90)
+        }
+    }
+    unsafe { LAST_SCENE = Some(next) };
+    probe(P_PRESENT, phase);
+    probe(P_RENDER, started);
+    if perf::ENABLED {
+        unsafe {
+            (*(&raw mut PERF))[P_KPIXELS].add(damage.pixels() / 1000);
+            (*(&raw mut PERF))[P_RECTS].add(damage.rects().len() as u64);
+        }
     }
 }
 /// Function policy is based on held object/rights and provisioned scope.
@@ -575,6 +671,7 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             unsafe { fs.put(name, record.as_ptr(), record.len()) }?;
             unsafe {
                 PREFS = p;
+                WAKE_ALL = true;
             }
             Ok(0)
         }
@@ -675,16 +772,21 @@ pub extern "C" fn _start() -> ! {
                 render(ram as u64, w, h, scanout);
                 snapshot();
             }
-            if unsafe { syscall3(SYS_TIMER_ARM, CLOCK, 1, arena_ui::motion::FRAME_US) } < 0
+            perf_report();
+            let slept = perf_now();
+            if unsafe { syscall3(SYS_TIMER_ARM, CLOCK, 1, POLL_TICK_US) } < 0
                 || unsafe { syscall1(SYS_WAIT, CLOCK) } < 0
             {
                 die(96)
             }
+            probe(P_SLEEP, slept);
             continue;
         }
         if rc != 0 {
             die(97)
         }
+        let received = perf_now();
+        let mut input_request = false;
         let landed = request[2];
         let description = describe(landed);
         transient_caps();
@@ -695,6 +797,7 @@ pub extern "C" fn _start() -> ! {
                 .is_some_and(|d| d[0] == 10 && d[1] == expected[1] && d[2] & RIGHTS_READ != 0)
             {
                 if let Ok(f) = input_wire::Frame::decode(&bytes) {
+                    input_request = true;
                     // End the mutable policy borrow before lifecycle actions
                     // take their own access to the same static state.
                     let action = {
@@ -835,6 +938,7 @@ pub extern "C" fn _start() -> ! {
                                     dirty = true;
                                 }
                                 Frame::Damage { handle } if state.owned(id, handle) => {
+                                    let copy_started = perf_now();
                                     let window = state.find(handle).unwrap_or_else(|| die(88));
                                     let pixels = window.width as usize * window.height as usize;
                                     let input = (s.va as usize + PIXEL_OFFSET) as *const u32;
@@ -848,10 +952,13 @@ pub extern "C" fn _start() -> ! {
                                         }
                                     }
                                     s.published = true;
+                                    s.content = s.content.wrapping_add(1);
+                                    probe(P_DAMAGE, copy_started);
                                     status = 0;
                                     dirty = true;
                                 }
                                 Frame::Poll { handle } if state.owned(id, handle) => {
+                                    unsafe { WOKEN[i] = false };
                                     if let Ok(event) = state.poll(handle) {
                                         result = u64::from(unsafe { PREFS.dark })
                                             | (u64::from(unsafe { PREFS.motion }) << 1);
@@ -876,8 +983,13 @@ pub extern "C" fn _start() -> ! {
         }
         destroy(landed);
         reply(status, result, &bytes);
+        wake_clients();
+        probe(P_REQUEST, received);
         if dirty {
             render(ram as u64, w, h, scanout)
+        }
+        if input_request {
+            probe(P_INPUT, received);
         }
         if (dirty && (bytes[5] == 1 || description.is_some_and(|d| d[0] == 10)))
             || (bytes[5] == 10 && description.is_some_and(|d| d[0] == 1))

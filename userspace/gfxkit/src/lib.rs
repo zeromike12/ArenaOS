@@ -33,6 +33,10 @@ pub struct Canvas<'a> {
     width: usize,
     height: usize,
     stride: usize,
+    /// Half-open pixel clip `[x0, x1) x [y0, y1)`, always inside the canvas.
+    /// Every drawing operation is intersected with it; it defaults to the
+    /// whole canvas, so callers that never set it see unchanged behaviour.
+    clip: (usize, usize, usize, usize),
 }
 
 impl<'a> Canvas<'a> {
@@ -59,19 +63,44 @@ impl<'a> Canvas<'a> {
             width,
             height,
             stride,
+            clip: (0, 0, width, height),
         })
+    }
+
+    /// Restrict all later drawing to `rect` intersected with the canvas.
+    /// Damage-driven compositors use this to recompose only changed areas.
+    pub fn set_clip(&mut self, rect: Rect) {
+        let x0 = i64::from(rect.x).clamp(0, self.width as i64) as usize;
+        let y0 = i64::from(rect.y).clamp(0, self.height as i64) as usize;
+        let x1 = (i64::from(rect.x) + i64::from(rect.width)).clamp(0, self.width as i64) as usize;
+        let y1 = (i64::from(rect.y) + i64::from(rect.height)).clamp(0, self.height as i64) as usize;
+        self.clip = (x0, y0, x1.max(x0), y1.max(y0));
+    }
+
+    pub fn reset_clip(&mut self) {
+        self.clip = (0, 0, self.width, self.height);
+    }
+
+    pub fn clip(&self) -> Rect {
+        let (x0, y0, x1, y1) = self.clip;
+        Rect {
+            x: x0 as i32,
+            y: y0 as i32,
+            width: (x1 - x0) as u32,
+            height: (y1 - y0) as u32,
+        }
     }
 
     pub fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
+    /// Fill the current clip (the whole canvas unless a clip is set).
     pub fn clear(&mut self, color: u32) {
+        let (x0, y0, x1, y1) = self.clip;
         let color = color & 0x00ff_ffff;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                self.pixels[y * self.stride + x] = color;
-            }
+        for y in y0..y1 {
+            self.pixels[y * self.stride + x0..y * self.stride + x1].fill(color);
         }
     }
 
@@ -79,15 +108,14 @@ impl<'a> Canvas<'a> {
     /// for being partly offscreen. i64 math cannot overflow on i32+u32.
     /// Return the number of pixels actually touched for structural tests.
     pub fn fill_rect(&mut self, rect: Rect, color: u32) -> usize {
-        let x0 = i64::from(rect.x).clamp(0, self.width as i64) as usize;
-        let y0 = i64::from(rect.y).clamp(0, self.height as i64) as usize;
-        let x1 = (i64::from(rect.x) + i64::from(rect.width)).clamp(0, self.width as i64) as usize;
-        let y1 = (i64::from(rect.y) + i64::from(rect.height)).clamp(0, self.height as i64) as usize;
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        let x0 = i64::from(rect.x).clamp(cx0 as i64, cx1 as i64) as usize;
+        let y0 = i64::from(rect.y).clamp(cy0 as i64, cy1 as i64) as usize;
+        let x1 = (i64::from(rect.x) + i64::from(rect.width)).clamp(x0 as i64, cx1 as i64) as usize;
+        let y1 = (i64::from(rect.y) + i64::from(rect.height)).clamp(y0 as i64, cy1 as i64) as usize;
         let color = color & 0x00ff_ffff;
         for y in y0..y1 {
-            for x in x0..x1 {
-                self.pixels[y * self.stride + x] = color;
-            }
+            self.pixels[y * self.stride + x0..y * self.stride + x1].fill(color);
         }
         (x1 - x0) * (y1 - y0)
     }
@@ -117,18 +145,28 @@ impl<'a> Canvas<'a> {
         }
         let mut touched = 0usize;
         let color = color & 0x00ff_ffff;
+        let (cx0, cy0, cx1, cy1) = (
+            self.clip.0 as i64,
+            self.clip.1 as i64,
+            self.clip.2 as i64,
+            self.clip.3 as i64,
+        );
         for (i, c) in text.bytes().enumerate() {
             let gx = i64::from(x) + (i as i64) * 6 * i64::from(scale);
+            // Whole glyph cells outside the clip cost nothing.
+            if gx >= cx1 || gx + 5 * i64::from(scale) <= cx0 {
+                continue;
+            }
             let bitmap = font::glyph(c);
             for (row, bits) in bitmap.iter().enumerate() {
                 let py = i64::from(y) + row as i64 * i64::from(scale);
-                if py + i64::from(scale) <= 0 || py >= self.height as i64 {
+                if py + i64::from(scale) <= cy0 || py >= cy1 {
                     continue;
                 }
                 for column in 0..5 {
                     let px = gx + column * i64::from(scale);
-                    if px + i64::from(scale) <= 0
-                        || px >= self.width as i64
+                    if px + i64::from(scale) <= cx0
+                        || px >= cx1
                         || (bits & (1 << (4 - column))) == 0
                     {
                         continue;
@@ -136,11 +174,7 @@ impl<'a> Canvas<'a> {
                     for dy in 0..i64::from(scale) {
                         for dx in 0..i64::from(scale) {
                             let (xx, yy) = (px + dx, py + dy);
-                            if xx >= 0
-                                && yy >= 0
-                                && xx < self.width as i64
-                                && yy < self.height as i64
-                            {
+                            if xx >= cx0 && yy >= cy0 && xx < cx1 && yy < cy1 {
                                 self.pixels[yy as usize * self.stride + xx as usize] = color;
                                 touched += 1;
                             }
@@ -176,15 +210,18 @@ impl<'a> Canvas<'a> {
         {
             return Err(DrawError::InvalidGeometry);
         }
-        let x0 = i64::from(x).clamp(0, self.width as i64) as usize;
-        let y0 = i64::from(y).clamp(0, self.height as i64) as usize;
-        let x1 = (i64::from(x) + src_width as i64).clamp(0, self.width as i64) as usize;
-        let y1 = (i64::from(y) + src_height as i64).clamp(0, self.height as i64) as usize;
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        let x0 = i64::from(x).clamp(cx0 as i64, cx1 as i64) as usize;
+        let y0 = i64::from(y).clamp(cy0 as i64, cy1 as i64) as usize;
+        let x1 = (i64::from(x) + src_width as i64).clamp(x0 as i64, cx1 as i64) as usize;
+        let y1 = (i64::from(y) + src_height as i64).clamp(y0 as i64, cy1 as i64) as usize;
+        let sx0 = (x0 as i64 - i64::from(x)) as usize;
         for dy in y0..y1 {
             let sy = (dy as i64 - i64::from(y)) as usize;
-            for dx in x0..x1 {
-                let sx = (dx as i64 - i64::from(x)) as usize;
-                self.pixels[dy * self.stride + dx] = source[sy * src_stride + sx] & 0x00ff_ffff;
+            let src = &source[sy * src_stride + sx0..sy * src_stride + sx0 + (x1 - x0)];
+            let dst = &mut self.pixels[dy * self.stride + x0..dy * self.stride + x1];
+            for (d, s) in dst.iter_mut().zip(src) {
+                *d = *s & 0x00ff_ffff;
             }
         }
         Ok((x1 - x0) * (y1 - y0))
@@ -382,5 +419,95 @@ mod tests {
         );
         assert_eq!(c.blit(&src, 3, 3, 3, i32::MAX, i32::MAX), Ok(0));
         assert_eq!(c.pixels[24], 0x123);
+    }
+
+    #[test]
+    fn clip_restricts_every_operation_exactly() {
+        // Drawing the same scene clipped must equal the unclipped scene
+        // inside the clip and leave every pixel outside it untouched.
+        fn scene(c: &mut Canvas<'_>) {
+            c.clear(0x0011_2233);
+            c.fill_rect(
+                Rect {
+                    x: 3,
+                    y: 2,
+                    width: 20,
+                    height: 9,
+                },
+                0x00ff_0000,
+            );
+            let src = [0x00aa_bbccu32; 6 * 4];
+            c.blit(&src, 6, 4, 6, 10, 5).unwrap();
+            c.text_scaled(1, 8, "Ab9", 0x0000_ff00, 2).unwrap();
+        }
+        let (w, h) = (32usize, 24usize);
+        let mut full = [0u32; 32 * 24];
+        scene(&mut Canvas::new(&mut full, w, h, w).unwrap());
+        let clip = Rect {
+            x: 7,
+            y: 4,
+            width: 11,
+            height: 13,
+        };
+        let mut part = [0xdead_beefu32; 32 * 24];
+        let mut c = Canvas::new(&mut part, w, h, w).unwrap();
+        c.set_clip(clip);
+        assert_eq!(c.clip(), clip);
+        scene(&mut c);
+        for y in 0..h {
+            for x in 0..w {
+                let inside = (7..18).contains(&x) && (4..17).contains(&y);
+                let expect = if inside { full[y * w + x] } else { 0xdead_beef };
+                assert_eq!(part[y * w + x], expect, "({x},{y})");
+            }
+        }
+        // Clip is intersected with the canvas; reset restores everything.
+        let mut c = Canvas::new(&mut part, w, h, w).unwrap();
+        c.set_clip(Rect {
+            x: -5,
+            y: 20,
+            width: 100,
+            height: 100,
+        });
+        assert_eq!(
+            c.clip(),
+            Rect {
+                x: 0,
+                y: 20,
+                width: 32,
+                height: 4
+            }
+        );
+        c.set_clip(Rect {
+            x: 40,
+            y: 40,
+            width: 4,
+            height: 4,
+        });
+        assert_eq!(
+            c.fill_rect(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 32,
+                    height: 24
+                },
+                1
+            ),
+            0
+        );
+        c.reset_clip();
+        assert_eq!(
+            c.fill_rect(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 32,
+                    height: 24
+                },
+                1
+            ),
+            32 * 24
+        );
     }
 }

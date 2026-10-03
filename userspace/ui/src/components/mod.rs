@@ -15,7 +15,9 @@ pub use controls::{
     switch,
 };
 pub use gallery::gallery;
-pub use icons::{Glyph, app_tile, draw_mask, emblem, glyph, lamp, pointer, well};
+pub use icons::{
+    Glyph, POINTER_HEIGHT, POINTER_WIDTH, app_tile, draw_mask, emblem, glyph, lamp, pointer, well,
+};
 pub use shapes::{
     border, disc, dotted, fill, hline, inset, isqrt, outlined, rect, rounded, stadium,
     stadium_ring, vline,

@@ -136,6 +136,11 @@ impl Client {
         }
     }
 }
+/// Debug-log line (used only by opt-in `perf` probes).
+pub fn log(bytes: &[u8]) {
+    // SAFETY: the kernel copies at most `len` bytes from this live slice.
+    let _ = unsafe { syscall2(SYS_DEBUG_WRITE, bytes.as_ptr() as u64, bytes.len() as u64) };
+}
 pub fn exit(code: u64) -> ! {
     // SAFETY: terminating only this application thread.
     let _ = unsafe { syscall1(SYS_THREAD_EXIT, code) };

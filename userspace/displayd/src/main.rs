@@ -419,12 +419,26 @@ pub extern "C" fn _start() -> ! {
                         }
                         let src = ram as *const u32;
                         for row in y as usize..(y as usize + rh as usize) {
-                            for col in x as usize..(x as usize + rw as usize) {
-                                let at = row * pitch as usize + col;
-                                // SAFETY: validated rectangle and scanout
-                                // byte span, pinned RAM and mapped GOP MMIO.
-                                // Raw volatile reads tolerate other process
-                                // mappings without creating a Rust alias.
+                            let start = row * pitch as usize + x as usize;
+                            if fmt != 0 {
+                                // Identity format: one row copy. SAFETY: the
+                                // validated rectangle lies in both the pinned
+                                // scanout RAM and the mapped GOP framebuffer;
+                                // raw pointers create no Rust alias, and the
+                                // only writer (the compositor) is blocked in
+                                // this synchronous PRESENT call.
+                                unsafe {
+                                    core::ptr::copy_nonoverlapping(
+                                        src.add(start),
+                                        gop_fb.add(start),
+                                        rw as usize,
+                                    )
+                                }
+                                continue;
+                            }
+                            for at in start..start + rw as usize {
+                                // SAFETY: as above; swizzled formats need a
+                                // per-pixel encode.
                                 unsafe {
                                     let color = core::ptr::read_volatile(src.add(at));
                                     core::ptr::write_volatile(gop_fb.add(at), encode(color, fmt));

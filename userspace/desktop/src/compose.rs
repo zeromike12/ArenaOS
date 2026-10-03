@@ -1,0 +1,537 @@
+//! Retained-scene damage composition.
+//!
+//! The compositor describes everything it draws as a [`Scene`]: windows in
+//! stacking order (geometry, reveal, focus amount, title and a content
+//! generation that advances on every authenticated Damage), the shell facts
+//! and the theme. [`damage`] compares the previously presented scene with
+//! the next one and lists the screen rectangles whose pixels can differ;
+//! [`compose`] redraws a scene under the canvas clip, so composing only the
+//! damaged rectangles produces exactly the pixels of a full redraw.
+//!
+//! Presentation only: the scene carries descriptive values copied from the
+//! window policy and session table. Nothing here grants or checks authority.
+use crate::shell::{self, Shell};
+use arena_gfxkit::{Canvas, Rect};
+use arena_ui::{components as c, metrics as m, theme::Theme};
+
+pub const MAX_WINDOWS: usize = crate::model::MAX_WINDOWS;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowScene {
+    /// Session slot whose published raster backs this window.
+    pub slot: usize,
+    pub handle: u64,
+    pub x: i32,
+    pub y: i32,
+    pub width: u16,
+    pub height: u16,
+    /// Rows of content revealed by the open/close motion (0..=height).
+    pub reveal: i32,
+    /// Shared focus motion amount (0 resting ..= 65536 focused).
+    pub focus: i32,
+    /// Advances whenever the published raster changes.
+    pub content: u64,
+    pub published: bool,
+    pub title: [u8; 32],
+}
+
+impl WindowScene {
+    /// Every pixel this window can draw: frame plus the deepest drop ledge.
+    pub fn bounds(&self) -> Rect {
+        Rect {
+            x: self.x,
+            y: self.y,
+            width: u32::from(self.width) + m::SHADOW_FOCUSED as u32,
+            height: u32::from(self.height) + m::SHADOW_FOCUSED as u32,
+        }
+    }
+    fn title(&self) -> &str {
+        let end = self.title.iter().position(|b| *b == 0).unwrap_or(32);
+        core::str::from_utf8(&self.title[..end]).unwrap_or("Application")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Scene {
+    /// Windows bottom-to-top; only the first `count` entries are used.
+    pub windows: [Option<WindowScene>; MAX_WINDOWS],
+    pub count: usize,
+    pub shell: Shell,
+    pub dark: bool,
+}
+
+impl Scene {
+    pub const EMPTY: Scene = Scene {
+        windows: [None; MAX_WINDOWS],
+        count: 0,
+        shell: Shell::EMPTY,
+        dark: false,
+    };
+    fn by_slot(&self, slot: usize) -> Option<&WindowScene> {
+        self.windows[..self.count]
+            .iter()
+            .flatten()
+            .find(|w| w.slot == slot)
+    }
+}
+
+/// Up to `CAP` disjoint-ish rectangles; overlapping or touching additions
+/// merge, and overflow collapses into one bounding box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Damage {
+    rects: [Rect; Damage::CAP],
+    len: usize,
+    screen: Rect,
+}
+
+fn union(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.min(b.x);
+    let y0 = a.y.min(b.y);
+    let x1 = (a.x + a.width as i32).max(b.x + b.width as i32);
+    let y1 = (a.y + a.height as i32).max(b.y + b.height as i32);
+    Rect {
+        x: x0,
+        y: y0,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+    }
+}
+
+fn touches(a: Rect, b: Rect) -> bool {
+    a.x <= b.x + b.width as i32
+        && b.x <= a.x + a.width as i32
+        && a.y <= b.y + b.height as i32
+        && b.y <= a.y + a.height as i32
+}
+
+fn intersect(a: Rect, b: Rect) -> Option<Rect> {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = (a.x + a.width as i32).min(b.x + b.width as i32);
+    let y1 = (a.y + a.height as i32).min(b.y + b.height as i32);
+    (x1 > x0 && y1 > y0).then_some(Rect {
+        x: x0,
+        y: y0,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+    })
+}
+
+impl Damage {
+    pub const CAP: usize = 8;
+    pub fn new(width: usize, height: usize) -> Self {
+        Self {
+            rects: [Rect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            }; Damage::CAP],
+            len: 0,
+            screen: Rect {
+                x: 0,
+                y: 0,
+                width: width as u32,
+                height: height as u32,
+            },
+        }
+    }
+    pub fn full(&mut self) {
+        self.rects[0] = self.screen;
+        self.len = 1;
+    }
+    pub fn add(&mut self, r: Rect) {
+        let Some(mut r) = intersect(r, self.screen) else {
+            return;
+        };
+        // Absorb every rectangle the new one touches, repeatedly.
+        let mut i = 0;
+        while i < self.len {
+            if touches(self.rects[i], r) {
+                r = union(self.rects[i], r);
+                self.len -= 1;
+                self.rects[i] = self.rects[self.len];
+                i = 0;
+            } else {
+                i += 1;
+            }
+        }
+        if self.len == Damage::CAP {
+            let mut all = r;
+            for q in &self.rects[..self.len] {
+                all = union(all, *q);
+            }
+            self.rects[0] = all;
+            self.len = 1;
+        } else {
+            self.rects[self.len] = r;
+            self.len += 1;
+        }
+    }
+    pub fn rects(&self) -> &[Rect] {
+        &self.rects[..self.len]
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    pub fn pixels(&self) -> u64 {
+        self.rects()
+            .iter()
+            .map(|r| u64::from(r.width) * u64::from(r.height))
+            .sum()
+    }
+}
+
+/// Rectangles whose pixels may differ between `prev` and `next`.
+pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
+    let (w, h) = (out.screen.width as i32, out.screen.height as i32);
+    if prev.dark != next.dark {
+        out.full();
+        return;
+    }
+    for slot in 0..MAX_WINDOWS {
+        match (prev.by_slot(slot), next.by_slot(slot)) {
+            (None, None) => {}
+            (Some(a), Some(b)) if a == b => {}
+            (a, b) => {
+                if let Some(a) = a {
+                    out.add(a.bounds());
+                }
+                if let Some(b) = b {
+                    out.add(b.bounds());
+                }
+            }
+        }
+    }
+    // Stacking order changes without geometry changes (raise) are covered
+    // because each window's z rank is implied by its position: compare it.
+    for i in 0..prev.count.max(next.count) {
+        let a = prev.windows.get(i).copied().flatten().map(|w| w.slot);
+        let b = next.windows.get(i).copied().flatten().map(|w| w.slot);
+        if a != b {
+            for s in [a, b].into_iter().flatten() {
+                for scene in [prev, next] {
+                    if let Some(win) = scene.by_slot(s) {
+                        out.add(win.bounds());
+                    }
+                }
+            }
+        }
+    }
+    let (p, n) = (&prev.shell, &next.shell);
+    if (p.active, p.focused_any, p.open, p.uptime) != (n.active, n.focused_any, n.open, n.uptime) {
+        out.add(shell::bar_region(w));
+    }
+    if p.notice != n.notice {
+        out.add(shell::notice_region(w));
+    }
+    let full = |s: &Shell| s.open >= crate::model::MAX_WINDOWS;
+    if (
+        p.running,
+        p.active,
+        full(p),
+        shell::hover_item(w, h, p.pointer),
+    ) != (
+        n.running,
+        n.active,
+        full(n),
+        shell::hover_item(w, h, n.pointer),
+    ) {
+        out.add(shell::dock_region(w, h));
+    }
+    if p.pointer != n.pointer {
+        out.add(shell::pointer_region(p.pointer.0, p.pointer.1));
+        out.add(shell::pointer_region(n.pointer.0, n.pointer.1));
+    }
+}
+
+/// Draw `scene` within the canvas clip. `contents(slot)` is the published
+/// raster of a session slot (at least width*height pixels).
+pub fn compose<'c>(
+    canvas: &mut Canvas<'_>,
+    scene: &Scene,
+    contents: impl Fn(usize) -> &'c [u32],
+    t: Theme,
+) {
+    shell::background(canvas, t);
+    let clip = canvas.clip();
+    for win in scene.windows[..scene.count].iter().flatten() {
+        if intersect(win.bounds(), clip).is_none() {
+            continue;
+        }
+        let reveal = win.reveal.clamp(0, i32::from(win.height)) as usize;
+        if reveal == 0 {
+            continue;
+        }
+        let width = usize::from(win.width);
+        if win.published {
+            let _ = canvas.blit(contents(win.slot), width, reveal, width, win.x, win.y);
+        } else {
+            c::rect(
+                canvas,
+                win.x,
+                win.y,
+                width as i32,
+                reveal as i32,
+                t.elevated,
+            );
+        }
+        c::window_chrome(
+            canvas,
+            win.x,
+            win.y,
+            width as i32,
+            i32::from(win.height),
+            win.title(),
+            win.focus,
+            t,
+        );
+    }
+    shell::system(canvas, &scene.shell, t);
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::*;
+    use std::vec::Vec;
+
+    const W: usize = 640;
+    const H: usize = 480;
+    const WW: usize = 96;
+    const WH: usize = 64;
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn contents(generations: &[u64; MAX_WINDOWS]) -> Vec<Vec<u32>> {
+        (0..MAX_WINDOWS)
+            .map(|slot| {
+                (0..WW * WH)
+                    .map(|i| {
+                        (i as u32).wrapping_mul(2654435761)
+                            ^ (generations[slot] as u32)
+                            ^ slot as u32
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn full(scene: &Scene, generations: &[u64; MAX_WINDOWS]) -> Vec<u32> {
+        let mut px = std::vec![0u32; W * H];
+        let data = contents(generations);
+        let mut canvas = Canvas::new(&mut px, W, H, W).unwrap();
+        compose(
+            &mut canvas,
+            scene,
+            |s| &data[s],
+            arena_ui::theme::palette(scene.dark),
+        );
+        px
+    }
+
+    /// Incremental damage composition must equal a full redraw, pixel for
+    /// pixel, across random window, focus, content, pointer and shell
+    /// changes, including open/close, raise, theme and notice changes.
+    #[test]
+    fn damage_composition_matches_full_redraw() {
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        let mut generations = [0u64; MAX_WINDOWS];
+        let mut scene = Scene::EMPTY;
+        scene.shell.pointer = (300, 200);
+        let mut screen = full(&scene, &generations);
+        let mut damaged_total = 0u64;
+        for step in 0..160 {
+            let mut next = scene;
+            match rng.below(11) {
+                0 if next.count < MAX_WINDOWS => {
+                    // Open a window in a free slot on top.
+                    let used: Vec<usize> = next.windows[..next.count]
+                        .iter()
+                        .flatten()
+                        .map(|w| w.slot)
+                        .collect();
+                    let slot = (0..MAX_WINDOWS).find(|s| !used.contains(s)).unwrap();
+                    let mut title = [0u8; 32];
+                    title[..4].copy_from_slice(b"Win0");
+                    title[3] = b'0' + slot as u8;
+                    next.windows[next.count] = Some(WindowScene {
+                        slot,
+                        handle: step + 1,
+                        x: rng.below(W as u64) as i32 - 40,
+                        y: rng.below(H as u64) as i32 - 20,
+                        width: WW as u16,
+                        height: WH as u16,
+                        reveal: rng.below(WH as u64 + 1) as i32,
+                        focus: 0,
+                        content: generations[slot],
+                        published: rng.below(2) == 0,
+                        title,
+                    });
+                    next.count += 1;
+                    next.shell.open = next.count;
+                }
+                1 if next.count > 0 => {
+                    // Close a window (remove from the stack).
+                    let i = rng.below(next.count as u64) as usize;
+                    for j in i..next.count - 1 {
+                        next.windows[j] = next.windows[j + 1];
+                    }
+                    next.count -= 1;
+                    next.windows[next.count] = None;
+                    next.shell.open = next.count;
+                }
+                2 if next.count > 0 => {
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    w.x += rng.below(61) as i32 - 30;
+                    w.y += rng.below(41) as i32 - 20;
+                }
+                3 if next.count > 1 => {
+                    // Raise: move one window to the top.
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i];
+                    for j in i..next.count - 1 {
+                        next.windows[j] = next.windows[j + 1];
+                    }
+                    next.windows[next.count - 1] = w;
+                }
+                4 if next.count > 0 => {
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    generations[w.slot] += 1;
+                    w.content = generations[w.slot];
+                    w.published = true;
+                }
+                5 if next.count > 0 => {
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    w.focus = rng.below(65_537) as i32;
+                    w.reveal = rng.below(WH as u64 + 1) as i32;
+                }
+                6 => {
+                    // Pointer, sometimes across the dock strip.
+                    next.shell.pointer = (rng.below(W as u64) as i32, rng.below(H as u64) as i32);
+                }
+                7 => {
+                    next.shell.uptime += 1;
+                    next.shell.running[rng.below(6) as usize] = rng.below(3) as u8;
+                    next.shell.active = [None, Some(rng.below(6) as u8)][rng.below(2) as usize];
+                    next.shell.focused_any = rng.below(2) == 0;
+                }
+                8 => {
+                    next.shell.notice =
+                        [None, Some("LAUNCH REFUSED / DESKTOP CAPACITY")][rng.below(2) as usize];
+                }
+                9 if rng.below(8) == 0 => next.dark = !next.dark,
+                _ => {}
+            }
+            let mut d = Damage::new(W, H);
+            damage(&scene, &next, &mut d);
+            damaged_total += d.pixels();
+            let data = contents(&generations);
+            let mut canvas = Canvas::new(&mut screen, W, H, W).unwrap();
+            for r in d.rects() {
+                canvas.set_clip(*r);
+                compose(
+                    &mut canvas,
+                    &next,
+                    |s| &data[s],
+                    arena_ui::theme::palette(next.dark),
+                );
+            }
+            drop(canvas);
+            let expected = full(&next, &generations);
+            if let Some(i) = (0..W * H).find(|&i| screen[i] != expected[i]) {
+                panic!(
+                    "step {step}: stale pixel at ({},{}) damage {:?}",
+                    i % W,
+                    i / W,
+                    d.rects()
+                );
+            }
+            scene = next;
+        }
+        // Damage must be a real saving, not a disguised full redraw.
+        assert!(damaged_total < 160 * (W * H) as u64 / 3, "{damaged_total}");
+    }
+
+    #[test]
+    fn pointer_motion_damages_only_two_small_rects() {
+        let mut a = Scene::EMPTY;
+        a.shell.pointer = (100, 100);
+        let mut b = a;
+        b.shell.pointer = (300, 250);
+        let mut d = Damage::new(800, 600);
+        damage(&a, &b, &mut d);
+        assert_eq!(d.rects().len(), 2);
+        assert_eq!(
+            d.pixels(),
+            2 * (c::POINTER_WIDTH * c::POINTER_HEIGHT) as u64
+        );
+        let mut same = Damage::new(800, 600);
+        damage(&b, &b, &mut same);
+        assert!(same.is_empty());
+    }
+
+    #[test]
+    fn damage_list_merges_and_bounds() {
+        let mut d = Damage::new(100, 100);
+        d.add(Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        });
+        d.add(Rect {
+            x: 10,
+            y: 0,
+            width: 10,
+            height: 10,
+        });
+        assert_eq!(
+            d.rects(),
+            &[Rect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 10
+            }]
+        );
+        d.add(Rect {
+            x: -50,
+            y: 90,
+            width: 500,
+            height: 50,
+        });
+        assert_eq!(
+            d.rects()[1],
+            Rect {
+                x: 0,
+                y: 90,
+                width: 100,
+                height: 10
+            }
+        );
+        for i in 0..20 {
+            d.add(Rect {
+                x: i * 4 + 1,
+                y: 30 + (i % 2) * 20,
+                width: 1,
+                height: 1,
+            });
+        }
+        assert!(d.rects().len() <= Damage::CAP);
+    }
+}

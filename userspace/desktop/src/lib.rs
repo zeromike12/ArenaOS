@@ -2,6 +2,11 @@
 #![no_std]
 pub mod model;
 
+pub mod perf;
+
+pub mod compose;
+pub mod shell;
+
 pub mod wire;
 
 pub mod client;

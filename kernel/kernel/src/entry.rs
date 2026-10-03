@@ -1097,10 +1097,22 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             );
         }
         crate::sched::yield_now();
-        // SAFETY: ring 0; `sti; hlt` is the canonical idle pair — any
-        // pending or arriving interrupt resumes the loop right here,
-        // and the interrupt gate masks IF again for the handler.
-        unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+        // Halt only when nothing is runnable. A thread made ready by a
+        // wake (an IPC server woken by a caller that then blocked, a
+        // caller woken by a reply) must run now, not after the next PIT
+        // tick: halting with a non-empty ready ring cost every IPC hop up
+        // to a full 10 ms tick. The check runs with IF=0 so an
+        // interrupt-driven wake cannot slip in between check and halt.
+        x86_64::cli();
+        if crate::sched::ready_pending() {
+            x86_64::sti();
+        } else {
+            // SAFETY: ring 0; `sti; hlt` is the canonical idle pair —
+            // `sti` takes effect after `hlt` begins, so any pending or
+            // arriving interrupt resumes the loop right here, and the
+            // interrupt gate masks IF again for the handler.
+            unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+        }
     }
 }
 

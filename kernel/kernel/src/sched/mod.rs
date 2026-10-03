@@ -440,6 +440,15 @@ pub fn block_current() {
     }
 }
 
+/// True when this CPU's ready ring holds any entry. Entries of threads
+/// killed while Ready count until a later `plan_switch` pops and discards
+/// them, so a stale entry costs one extra idle iteration, never a hang.
+/// The idle loop uses this to halt only when nothing is runnable.
+pub fn ready_pending() -> bool {
+    // SAFETY: single reader under IF=0; the read completes here.
+    without_interrupts(|| unsafe { (*CPUS.get())[this_cpu()].ready.len != 0 })
+}
+
 /// Re-enqueue a [`State::Blocked`] thread on this CPU's ready ring. The
 /// waker does NOT switch — the woken thread runs when the scheduler next
 /// picks it (round-robin). Refuses anything that is not blocked: waking

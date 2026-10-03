@@ -522,9 +522,13 @@ const POINTER_FILL: [u16; 13] = mask(
     b'#',
 );
 
+/// Pointer raster size; the hot spot is the top-left pixel.
+pub const POINTER_WIDTH: i32 = 10;
+pub const POINTER_HEIGHT: i32 = 13;
+
 pub fn pointer(c: &mut Canvas<'_>, x: i32, y: i32, t: Theme) {
-    draw_mask(c, x, y, &POINTER_INK, 10, t.pointer_ink);
-    draw_mask(c, x, y, &POINTER_FILL, 10, t.pointer_fill);
+    draw_mask(c, x, y, &POINTER_INK, POINTER_WIDTH, t.pointer_ink);
+    draw_mask(c, x, y, &POINTER_FILL, POINTER_WIDTH, t.pointer_fill);
 }
 
 /// Window focus lamp: filled Signal disc when focused, hollow ring at rest,

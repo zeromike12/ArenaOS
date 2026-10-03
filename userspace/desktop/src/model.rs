@@ -226,6 +226,11 @@ impl State {
         }
         false
     }
+    /// Events are queued for `handle` and not yet polled. A wake hint for
+    /// the broker only; it grants nothing.
+    pub fn pending(&self, handle: u64) -> bool {
+        self.find(handle).is_some_and(|w| w.len > 0)
+    }
     pub fn poll(&mut self, handle: u64) -> Result<Option<Event>, Error> {
         let i = self.slot(handle)?;
         Ok(self.windows[i].as_mut().ok_or(Error::Stale)?.pop())
