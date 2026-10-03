@@ -22,7 +22,7 @@ MUTANT = b'    // RED ONLY: leave the mapping pin after clearing the PTE.\n    l
 
 def build(path):
     with path.open('w') as output:
-        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,
+        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
                        stdout=output, stderr=subprocess.STDOUT, check=True)
 
 

@@ -313,6 +313,10 @@ fn animate() -> bool {
     let now = arena_desktop::app_client::now();
     let state = unsafe { &*(&raw const WM) };
     let mut changed = false;
+    if unsafe { NOTICE }.is_some_and(|(_, until)| until <= now) {
+        unsafe { NOTICE = None };
+        changed = true;
+    }
     for s in unsafe { &mut *(&raw mut SESSIONS) }
         .iter_mut()
         .filter(|s| s.handle != 0)
@@ -451,7 +455,7 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
     let operation = match request {
         S::List { .. } => O::List,
         S::Read { .. } => O::Read,
-        S::Put { .. } => O::Put,
+        S::Put { .. } | S::Create { .. } => O::Put,
         S::Delete { .. } => O::Delete,
         S::Configure { .. } => O::Configure,
         S::Launch { .. } => O::Launch,
@@ -494,6 +498,12 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             }
             unsafe { fs.put(name, session.va as *const u8, length as usize) }
                 .map(|_| u64::from(length))
+        }
+        S::Create { name } => {
+            if !scope::public_name(&name) {
+                return Err(-2);
+            }
+            fs.create(name).map(|_| 0)
         }
         S::Delete { name } => {
             if !scope::public_name(&name) {
@@ -624,49 +634,57 @@ pub extern "C" fn _start() -> ! {
                 .is_some_and(|d| d[0] == 10 && d[1] == expected[1] && d[2] & RIGHTS_READ != 0)
             {
                 if let Ok(f) = input_wire::Frame::decode(&bytes) {
-                    let state = unsafe { &mut *(&raw mut WM) };
-                    match f {
-                        input_wire::Frame::Key {
-                            code,
-                            pressed: true,
-                        } => {
-                            state.key(code);
-                        }
-                        input_wire::Frame::Key { .. } => {}
-                        input_wire::Frame::Pointer { x, y, buttons } => {
-                            match state.pointer(
+                    // End the mutable policy borrow before lifecycle actions
+                    // take their own access to the same static state.
+                    let action = {
+                        let state = unsafe { &mut *(&raw mut WM) };
+                        match f {
+                            input_wire::Frame::Key {
+                                code,
+                                pressed: true,
+                            } => state.keyboard_action(code),
+                            input_wire::Frame::Key { .. } => Action::None,
+                            input_wire::Frame::Pointer { x, y, buttons } => state.pointer(
                                 (u32::from(x) * (w as u32 - 1) / 32767) as i32,
                                 (u32::from(y) * (h as u32 - 1) / 32767) as i32,
                                 buttons,
-                            ) {
-                                Action::Launch(kind) => {
-                                    if launch(kind as u8, [0; 32]).is_err() {
-                                        unsafe {
-                                            NOTICE = Some((
-                                                "LAUNCH REFUSED / DESKTOP CAPACITY",
-                                                arena_desktop::app_client::now() + 3_000_000,
-                                            ));
-                                        }
-                                        log(b"[desktop] launch refused at bounded capacity\n");
-                                    }
+                            ),
+                        }
+                    };
+                    match action {
+                        Action::Launch(kind) => {
+                            if launch(kind as u8, [0; 32]).is_err() {
+                                unsafe {
+                                    NOTICE = Some((
+                                        "LAUNCH REFUSED / DESKTOP CAPACITY",
+                                        arena_desktop::app_client::now() + 3_000_000,
+                                    ));
                                 }
-                                Action::Close(handle) => {
-                                    if let Some(i) = unsafe { &*(&raw const SESSIONS) }
-                                        .iter()
-                                        .position(|s| s.handle == handle)
-                                    {
-                                        if unsafe { SESSIONS[i].close_pending } {
-                                            retire(i, true)
-                                        } else {
-                                            unsafe { SESSIONS[i].close_pending = true };
-                                            state.send(handle, arena_desktop::model::Event::Close);
-                                        }
-                                    }
-                                }
-                                _ => {}
+                                log(b"[desktop] launch refused at bounded capacity\n");
                             }
                             dirty = true;
                         }
+                        Action::Close(handle) => {
+                            if let Some(i) = unsafe { &*(&raw const SESSIONS) }
+                                .iter()
+                                .position(|s| s.handle == handle)
+                            {
+                                if unsafe { SESSIONS[i].close_pending } {
+                                    retire(i, true)
+                                } else {
+                                    let delivered = unsafe {
+                                        (&mut *(&raw mut WM))
+                                            .send(handle, arena_desktop::model::Event::Close)
+                                    };
+                                    unsafe {
+                                        SESSIONS[i].close_pending = delivered;
+                                    }
+                                }
+                            }
+                            dirty = true;
+                        }
+                        Action::Changed => dirty = true,
+                        Action::None => {}
                     }
                     status = 0;
                 }

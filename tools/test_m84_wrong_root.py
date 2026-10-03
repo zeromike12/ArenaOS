@@ -22,7 +22,7 @@ ESP=ROOT/'build/arena-esp.img'
 BIN=ROOT/'userspace/packaged/target/x86_64-unknown-none/release/arena-packaged'
 
 def build():
-    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
                    capture_output=True,text=True)
 
 def boot(tag,disk):

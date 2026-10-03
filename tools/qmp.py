@@ -37,7 +37,7 @@ QCODE = {
     "5": "5", "6": "6", "7": "7", "8": "8", "9": "9",
     " ": "spc", "\r": "ret", "\n": "ret", "-": "minus", "=": "equal",
     ".": "dot", ",": "comma", "/": "slash", ";": "semicolon",
-    "\x08": "backspace", "\t": "tab",
+    "\x08": "backspace", "\t": "tab", "\x1b": "esc",
 }
 
 # Characters that need a shift key held. Typing these exercises the

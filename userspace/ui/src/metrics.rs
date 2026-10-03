@@ -1,8 +1,12 @@
 //! All common geometry is presentation policy, expressed in pixels.
 pub const SPACE: [i32; 6] = [2, 4, 8, 12, 16, 24];
-pub const FONT_WIDTH: i32 = 5;
-pub const FONT_HEIGHT: i32 = 7;
-pub const FONT_ADVANCE: i32 = 6;
+pub const FONT_SCALE: u8 = 1;
+pub const TITLE_SCALE: u8 = 2;
+pub const FONT_WIDTH: i32 = 5 * FONT_SCALE as i32;
+pub const FONT_HEIGHT: i32 = 7 * FONT_SCALE as i32;
+pub const FONT_ADVANCE: i32 = 6 * FONT_SCALE as i32;
+pub const TITLE_FONT_HEIGHT: i32 = 7 * TITLE_SCALE as i32;
+pub const TITLE_FONT_ADVANCE: i32 = 6 * TITLE_SCALE as i32;
 pub const LINE_HEIGHT: i32 = 14;
 pub const TITLE_HEIGHT: i32 = 28;
 pub const SYSTEM_BAR_HEIGHT: i32 = 26;

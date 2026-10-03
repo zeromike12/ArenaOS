@@ -41,7 +41,14 @@ class Desktop:
         raise AssertionError(description)
     def opened(self,name,index=0):
         x=70+index*26;y=60+index*24
-        return self.shot(name,lambda p:len(set(crop(p,x+12,y+68,300,180)[i:i+3] for i in range(0,300*180*3,3)))>=2)
+        self.shot(name,lambda p:len(set(crop(p,x+12,y+8,180,10)[i:i+3] for i in range(0,180*10*3,3)))>=2 and len(set(crop(p,x+12,y+68,300,180)[i:i+3] for i in range(0,300*180*3,3)))>=2)
+        previous=None;equal=0;end=time.monotonic()+10
+        while time.monotonic()<end:
+            data=self.shot(name);region=crop(data,x+12,y+68,300,180)
+            equal=equal+1 if region==previous else 0;previous=region
+            if equal>=3:return data
+            time.sleep(.05)
+        raise AssertionError(f'window did not settle {name}')
     def launch(self,kind,name,index=0):
         self.click(255+kind*58,570)
         return self.opened(name,index)
@@ -135,7 +142,7 @@ def main(esp=None):
     assert samples[0][0]-samples[-1][0]==6,'unexpected retained frames beyond the six existing intermediate PTs'
     empty=[row for row in samples if row[1:]==samples[0][1:]]
     assert len(empty)>=5 and all(row==samples[-1] for row in empty[-4:]),empty
-    peak=max(samples,key=lambda row:row[3]);assert peak[1:4]==(samples[0][1]+6,samples[0][2]+6,samples[0][3]+6),peak
+    peak=min(samples,key=lambda row:row[0]);assert peak[1:4]==(samples[0][1]+6,samples[0][2]+6,samples[0][3]+6),peak
     assert peak[4]==samples[0][4]+6*127 and peak[5]<=32 and peak[6]<=32,peak
     print(f'[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline={samples[0]} peak={peak}',flush=True)
     # Durable appearance must affect actual desktop pixels on a fresh boot.

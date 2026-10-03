@@ -33,7 +33,7 @@ def run_fixture(log):
 def main():
     original=SOURCE.read_bytes()
     assert original.count(NEEDLE)==1 and MUTANT not in original
-    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
         stdout=(arena_env.build_dir()/'m85-ref-hook-build.log').open('w'))
     originals={p:p.read_bytes() for p in (EFI,ESP)}
     source_hash=hashlib.sha256(original).digest()
@@ -48,7 +48,7 @@ def main():
         # Build the unmodified production hook before restoring the exact
         # source-bound image, even when the red test did not behave as hoped.
         try:
-            subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,
+            subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
                 stdout=(arena_env.build_dir()/'m85-ref-hook-restored-build.log').open('w'))
         finally:
             for path, data in originals.items(): path.write_bytes(data)

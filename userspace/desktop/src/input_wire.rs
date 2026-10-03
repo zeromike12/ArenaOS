@@ -2,6 +2,11 @@
 //! The decoder checks syntax only; the service must compare the landed
 //! producer ProofToken to its held boot-root witness before acting.
 pub const BYTES: usize = 64;
+pub const LAUNCH_FIRST: u16 = 263;
+pub const LAUNCH_LAST: u16 = 268;
+pub const FOCUS_NEXT: u16 = 269;
+pub const CLOSE_FOCUSED: u16 = 270;
+pub const MAX_KEY: u16 = CLOSE_FOCUSED;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Frame {
     Key { code: u16, pressed: bool },
@@ -18,7 +23,7 @@ impl Frame {
         b[4] = 1;
         match self {
             Self::Key { code, pressed } => {
-                if code > 262 {
+                if code > MAX_KEY {
                     return Err(Error::Invalid);
                 }
                 b[5] = 1;
@@ -104,7 +109,7 @@ mod tests {
         );
         assert!(
             Frame::Key {
-                code: 263,
+                code: MAX_KEY + 1,
                 pressed: true
             }
             .encode()

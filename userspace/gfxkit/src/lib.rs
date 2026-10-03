@@ -97,26 +97,55 @@ impl<'a> Canvas<'a> {
     /// unsupported printable glyph renders '?'; non-ASCII or oversized
     /// input is a typed refusal *before* any pixel is changed.
     pub fn text(&mut self, x: i32, y: i32, text: &str, color: u32) -> Result<usize, DrawError> {
-        if text.len() > MAX_TEXT_BYTES || !text.bytes().all(|c| c.is_ascii_graphic() || c == b' ') {
+        self.text_scaled(x, y, text, color, 1)
+    }
+    /// Owned bitmap glyphs at bounded integer scale, preserving case.
+    /// Invalid scale or text refuses before changing any destination pixel.
+    pub fn text_scaled(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        color: u32,
+        scale: u8,
+    ) -> Result<usize, DrawError> {
+        if !(1..=3).contains(&scale)
+            || text.len() > MAX_TEXT_BYTES
+            || !text.bytes().all(|c| c.is_ascii_graphic() || c == b' ')
+        {
             return Err(DrawError::InvalidText);
         }
         let mut touched = 0usize;
         let color = color & 0x00ff_ffff;
         for (i, c) in text.bytes().enumerate() {
-            let gx = i64::from(x) + (i as i64) * 6;
+            let gx = i64::from(x) + (i as i64) * 6 * i64::from(scale);
             let bitmap = font::glyph(c);
             for (row, bits) in bitmap.iter().enumerate() {
-                let py = i64::from(y) + row as i64;
-                if py < 0 || py >= self.height as i64 {
+                let py = i64::from(y) + row as i64 * i64::from(scale);
+                if py + i64::from(scale) <= 0 || py >= self.height as i64 {
                     continue;
                 }
                 for column in 0..5 {
-                    let px = gx + column;
-                    if px < 0 || px >= self.width as i64 || (bits & (1 << (4 - column))) == 0 {
+                    let px = gx + column * i64::from(scale);
+                    if px + i64::from(scale) <= 0
+                        || px >= self.width as i64
+                        || (bits & (1 << (4 - column))) == 0
+                    {
                         continue;
                     }
-                    self.pixels[py as usize * self.stride + px as usize] = color;
-                    touched += 1;
+                    for dy in 0..i64::from(scale) {
+                        for dx in 0..i64::from(scale) {
+                            let (xx, yy) = (px + dx, py + dy);
+                            if xx >= 0
+                                && yy >= 0
+                                && xx < self.width as i64
+                                && yy < self.height as i64
+                            {
+                                self.pixels[yy as usize * self.stride + xx as usize] = color;
+                                touched += 1;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -166,6 +195,38 @@ impl<'a> Canvas<'a> {
 /// graphics server policy or host font library is linked into ring 3.
 mod font {
     pub fn glyph(c: u8) -> [u8; 7] {
+        let lower = match c {
+            b'a' => Some([0, 0, 14, 1, 15, 17, 15]),
+            b'b' => Some([16, 16, 30, 17, 17, 17, 30]),
+            b'c' => Some([0, 0, 14, 17, 16, 17, 14]),
+            b'd' => Some([1, 1, 15, 17, 17, 17, 15]),
+            b'e' => Some([0, 0, 14, 17, 31, 16, 14]),
+            b'f' => Some([6, 8, 8, 28, 8, 8, 8]),
+            b'g' => Some([0, 0, 15, 17, 15, 1, 14]),
+            b'h' => Some([16, 16, 30, 17, 17, 17, 17]),
+            b'i' => Some([4, 0, 12, 4, 4, 4, 14]),
+            b'j' => Some([2, 0, 6, 2, 2, 18, 12]),
+            b'k' => Some([16, 16, 18, 20, 24, 20, 18]),
+            b'l' => Some([12, 4, 4, 4, 4, 4, 14]),
+            b'm' => Some([0, 0, 26, 21, 21, 21, 21]),
+            b'n' => Some([0, 0, 30, 17, 17, 17, 17]),
+            b'o' => Some([0, 0, 14, 17, 17, 17, 14]),
+            b'p' => Some([0, 0, 30, 17, 30, 16, 16]),
+            b'q' => Some([0, 0, 15, 17, 15, 1, 1]),
+            b'r' => Some([0, 0, 22, 25, 16, 16, 16]),
+            b's' => Some([0, 0, 15, 16, 14, 1, 30]),
+            b't' => Some([8, 8, 28, 8, 8, 9, 6]),
+            b'u' => Some([0, 0, 17, 17, 17, 19, 13]),
+            b'v' => Some([0, 0, 17, 17, 17, 10, 4]),
+            b'w' => Some([0, 0, 17, 17, 21, 21, 10]),
+            b'x' => Some([0, 0, 17, 10, 4, 10, 17]),
+            b'y' => Some([0, 0, 17, 17, 15, 1, 14]),
+            b'z' => Some([0, 0, 31, 2, 4, 8, 31]),
+            _ => None,
+        };
+        if let Some(rows) = lower {
+            return rows;
+        }
         match c.to_ascii_uppercase() {
             b'A' => [14, 17, 17, 31, 17, 17, 17],
             b'B' => [30, 17, 17, 30, 17, 17, 30],
@@ -293,7 +354,14 @@ mod tests {
             Err(DrawError::InvalidText)
         );
         assert_eq!(c.pixels, before);
-        assert_eq!(font::glyph(b'a'), font::glyph(b'A'));
+        assert_eq!(c.text_scaled(0, 0, "A", 1, 0), Err(DrawError::InvalidText));
+        assert_eq!(c.text_scaled(0, 0, "A", 1, 4), Err(DrawError::InvalidText));
+        assert_eq!(c.pixels, before);
+        assert!(c.text_scaled(-3, -2, "a", 1, 2).unwrap() > 20);
+        assert_ne!(font::glyph(b'a'), font::glyph(b'A'));
+        for c in b'a'..=b'z' {
+            assert_ne!(font::glyph(c), font::glyph(c.to_ascii_uppercase()));
+        }
         assert_ne!(font::glyph(b'A'), font::glyph(b'B'));
     }
 

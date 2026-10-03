@@ -229,6 +229,33 @@ impl State {
     pub fn key(&mut self, key: u16) -> bool {
         self.focused.is_some_and(|h| self.send(h, Event::Key(key)))
     }
+    pub fn keyboard_action(&mut self, key: u16) -> Action {
+        use crate::input_wire as input;
+        match key {
+            input::LAUNCH_FIRST..=input::LAUNCH_LAST => {
+                Action::Launch((key - input::LAUNCH_FIRST) as usize)
+            }
+            input::CLOSE_FOCUSED => self.focused.map(Action::Close).unwrap_or(Action::None),
+            input::FOCUS_NEXT => {
+                let mut order = [(0u64, 0u64); MAX_WINDOWS];
+                let mut count = 0;
+                for w in self.windows() {
+                    order[count] = (w.z, w.handle);
+                    count += 1;
+                }
+                order[..count].sort_unstable();
+                if count > 0 && self.activate(order[0].1).is_ok() {
+                    Action::Changed
+                } else {
+                    Action::None
+                }
+            }
+            _ => {
+                self.key(key);
+                Action::None
+            }
+        }
+    }
     pub fn hit(&self, x: i32, y: i32) -> Option<u64> {
         self.windows()
             .filter(|w| w.contains(x, y))
@@ -305,6 +332,33 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desktop_keyboard_launch_cycle_close_preserves_ordinary_key_focus() {
+        let mut s = State::new(800, 600).unwrap();
+        assert_eq!(
+            s.keyboard_action(crate::input_wire::LAUNCH_FIRST),
+            Action::Launch(0)
+        );
+        let a = s.create(1, 100, 100).unwrap();
+        let b = s.create(2, 100, 100).unwrap();
+        assert_eq!(s.focused(), Some(b));
+        assert_eq!(
+            s.keyboard_action(crate::input_wire::FOCUS_NEXT),
+            Action::Changed
+        );
+        assert_eq!(s.focused(), Some(a));
+        assert_eq!(
+            s.keyboard_action(crate::input_wire::CLOSE_FOCUSED),
+            Action::Close(a)
+        );
+        assert_eq!(s.keyboard_action(116), Action::None);
+        while let Some(e) = s.poll(a).unwrap() {
+            if e == Event::Key(116) {
+                return;
+            }
+        }
+        panic!("ordinary key did not reach focused owner");
+    }
     #[test]
     fn body_button_release_is_captured_and_retirement_discards_capture() {
         let mut s = State::new(800, 600).unwrap();

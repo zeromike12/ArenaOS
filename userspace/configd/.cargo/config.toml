@@ -1,6 +1,0 @@
-# Static ring-3 ELF, exactly the ADR-0016 loader's bounded subset.
-[build]
-target = "x86_64-unknown-none"
-
-[target.x86_64-unknown-none]
-rustflags = ["-C", "link-arg=-Tconfigd.ld", "-C", "link-arg=-no-pie", "-C", "relocation-model=static"]

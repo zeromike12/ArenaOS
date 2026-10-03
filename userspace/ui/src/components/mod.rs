@@ -26,9 +26,18 @@ pub fn label(c: &mut Canvas<'_>, x: i32, y: i32, s: &str, color: u32) {
     // Split long strings without weakening gfxkit's bounded input contract.
     for (i, chunk) in s.as_bytes().chunks(96).enumerate() {
         if let Ok(text) = core::str::from_utf8(chunk) {
-            let _ = c.text(x + (i * 96) as i32 * m::FONT_ADVANCE, y, text, color);
+            let _ = c.text_scaled(
+                x + (i * 96) as i32 * m::FONT_ADVANCE,
+                y,
+                text,
+                color,
+                m::FONT_SCALE,
+            );
         }
     }
+}
+pub fn heading(c: &mut Canvas<'_>, x: i32, y: i32, s: &str, color: u32) {
+    let _ = c.text_scaled(x, y, s, color, m::TITLE_SCALE);
 }
 pub fn border(c: &mut Canvas<'_>, r: Rect, color: u32) {
     let (w, h) = (r.width as i32, r.height as i32);
@@ -145,10 +154,10 @@ pub fn chrome(c: &mut Canvas<'_>, title: &str, focused: bool, t: Theme) {
             t.chrome_inactive
         },
     );
-    label(
+    heading(
         c,
         m::CONTENT_INSET,
-        m::SPACE[3] - 2,
+        (m::TITLE_HEIGHT - m::TITLE_FONT_HEIGHT) / 2,
         title,
         if focused { t.text } else { t.secondary },
     );

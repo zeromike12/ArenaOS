@@ -26,7 +26,7 @@ LABEL = 'm9-client-death-red'
 
 def build(log: Path) -> None:
     with log.open('w') as f:
-        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,
+        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
                        stdout=f, stderr=subprocess.STDOUT, check=True)
 
 

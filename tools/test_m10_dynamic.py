@@ -12,7 +12,7 @@ from test_m10_apps import Desktop
 from test_m10_desktop import crop
 
 ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir();LABEL='m10-dynamic'
-def main():
+def main(esp=None):
     crate=ROOT/'tools/phase10-graphical-probe'
     subprocess.run(['cargo','build','--offline','--locked','--release'],cwd=crate,env=arena_env.rust_env(),check=True)
     elf=(crate/'target/x86_64-unknown-none/release/arena-phase10-graphical-probe').read_bytes()
@@ -22,7 +22,8 @@ def main():
     subprocess.run([str(validator),str(crate/'target/x86_64-unknown-none/release/arena-phase10-graphical-probe')],check=True)
     unsigned=rec.signed_package(stage.ID,7,elf,rec.ROOT)
     signed=unsigned+openssl_sign(RFC_SEED,rec.PKG_DOMAIN+unsigned)
-    esp=mtest.build(LABEL,desktop=True);disk=arena_env.make_scratch_disk()
+    if esp is None:esp=mtest.build(LABEL,desktop=True)
+    disk=arena_env.make_scratch_disk()
     rc,s,_=mtest.boot(LABEL+'-seed',esp,[(b'arena>',1,b'shutdown\r')],disk,pointer=True);assert rc==0
     stage.host_seed(disk,{stage.STAGE1:signed,stage.POLICY1:stage.POLICY})
     original=stage.contents(disk)

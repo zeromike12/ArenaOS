@@ -29,13 +29,13 @@ pub fn chrome(
         m::TITLE_HEIGHT,
         arena_ui::motion::color(t.chrome_inactive, t.chrome_active, amount),
     );
-    c::label(
+    c::heading(
         canvas,
         window.x + m::CONTENT_INSET,
-        window.y + 10,
+        window.y + (m::TITLE_HEIGHT - m::TITLE_FONT_HEIGHT) / 2,
         &title[..title.len().min(
-            ((window.width as i32 - m::CONTENT_INSET - m::CLOSE_WIDTH).max(0) / m::FONT_ADVANCE)
-                as usize,
+            ((window.width as i32 - m::CONTENT_INSET - m::CLOSE_WIDTH).max(0)
+                / m::TITLE_FONT_ADVANCE) as usize,
         )],
         t.text,
     );

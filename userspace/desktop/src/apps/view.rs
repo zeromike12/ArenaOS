@@ -238,3 +238,114 @@ pub fn preview(canvas: &mut Canvas<'_>, bytes: &[u8], t: Theme) {
         );
     }
 }
+
+/// File list and controls share geometry with the application's hit testing.
+pub struct FilesView<'a> {
+    pub names: &'a [[u8; 32]],
+    pub top: usize,
+    pub selected: usize,
+    pub bytes: &'a [u8],
+    pub line: &'a Line,
+    pub dialogue: bool,
+}
+pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
+    let FilesView {
+        names,
+        top,
+        selected,
+        bytes,
+        line,
+        dialogue,
+    } = model;
+    if dialogue {
+        dialog(canvas, line, "CREATE", t);
+    } else {
+        c::button(canvas, l::NEW, "NEW", c::State::Normal, t);
+        c::button(canvas, l::SAVE, "REFRESH", c::State::Normal, t);
+        c::button(canvas, l::OPEN, "OPEN", c::State::Normal, t);
+        c::button(
+            canvas,
+            l::DELETE,
+            "DELETE",
+            if names.is_empty() {
+                c::State::Disabled
+            } else {
+                c::State::Normal
+            },
+            t,
+        );
+    }
+    for (row, (i, name)) in names.iter().enumerate().skip(top).take(10).enumerate() {
+        let end = name.iter().position(|b| *b == 0).unwrap_or(32);
+        file_row(canvas, row, &name[..end], i == selected, t);
+    }
+    preview(canvas, bytes, t);
+}
+pub fn monitor(
+    canvas: &mut Canvas<'_>,
+    counts: &[u64; 9],
+    processes: &[(u64, u64)],
+    top: usize,
+    t: Theme,
+) {
+    for (row, (label, value)) in [
+        (b"FREE FRAMES ".as_slice(), counts[0]),
+        (b"TOTAL FRAMES ", counts[1]),
+        (b"LIVE PROCESSES ", counts[3]),
+        (b"SHARED REGIONS ", counts[4]),
+        (b"SHARED PAGES ", counts[5]),
+        (b"SHARED MAPS ", counts[6]),
+        (b"OWN CAPS ", counts[7]),
+        (b"UPTIME SECONDS ", counts[8] / 1_000_000),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut b = [0; 64];
+        let mut n = 0;
+        append(&mut b, &mut n, label);
+        number(&mut b, &mut n, value);
+        c::label(
+            canvas,
+            12,
+            l::CONTENT_Y + row as i32 * m::LINE_HEIGHT,
+            string(&b[..n]),
+            t.text,
+        );
+    }
+    c::label(canvas, 230, l::CONTENT_Y, "PID / THREADS", t.secondary);
+    for (row, (pid, threads)) in processes.iter().skip(top).take(12).enumerate() {
+        let mut b = [0; 64];
+        let mut n = 0;
+        number(&mut b, &mut n, *pid);
+        append(&mut b, &mut n, b" / ");
+        number(&mut b, &mut n, *threads);
+        c::label(
+            canvas,
+            230,
+            l::CONTENT_Y + 16 + row as i32 * m::LINE_HEIGHT,
+            string(&b[..n]),
+            t.text,
+        );
+    }
+}
+fn append(b: &mut [u8; 64], n: &mut usize, s: &[u8]) {
+    let count = s.len().min(64 - *n);
+    b[*n..*n + count].copy_from_slice(&s[..count]);
+    *n += count;
+}
+fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
+    let mut d = [0; 20];
+    let mut len = 0;
+    loop {
+        d[len] = b'0' + (v % 10) as u8;
+        len += 1;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    for digit in d[..len].iter().rev() {
+        append(b, n, core::slice::from_ref(digit));
+    }
+}

@@ -169,6 +169,11 @@ impl Fs {
         }
         Ok(())
     }
+    pub fn create(&mut self, name: [u8; 32]) -> Result<(), i64> {
+        let mut b = [0; 64];
+        b[..32].copy_from_slice(&name);
+        call(self.endpoint, FS_OP_CREATE, 0, CAP_NONE, &mut b).map(|_| ())
+    }
     pub fn delete(&mut self, name: [u8; 32]) -> Result<(), i64> {
         let mut b = [0; 64];
         b[..32].copy_from_slice(&name);

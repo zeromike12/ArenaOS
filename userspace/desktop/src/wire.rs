@@ -48,7 +48,7 @@ impl Frame {
             Self::Event { handle, event } => {
                 match event {
                     Event::Key(key) => {
-                        if key > 262 {
+                        if key > crate::input_wire::MAX_KEY {
                             return Err(Error::Invalid);
                         }
                         b[28] = 1;
@@ -182,7 +182,7 @@ mod tests {
         assert!(
             Frame::Event {
                 handle: 9,
-                event: Event::Key(263)
+                event: Event::Key(crate::input_wire::MAX_KEY + 1)
             }
             .encode()
             .is_err()

@@ -83,6 +83,7 @@ fn length(n: &[u8; 32]) -> usize {
 }
 fn error(rc: i64) -> &'static str {
     match rc {
+        -2001 => "REFUSED: DOCUMENT FULL (4096 BYTES)",
         -1001 => "FILE NOT FOUND",
         -1002 => "FILE ALREADY EXISTS",
         -1004 => "REFUSED: FILE TABLE FULL",
@@ -206,7 +207,7 @@ impl App {
             1 => self.save(client, path)?,
             2 => self.open(client, path)?,
             3 => {
-                put(client, path, b"")?;
+                call(Frame::Create { name: path })?;
                 self.refresh()?;
                 self.select(client)?;
                 self.status = "CREATED EMPTY FILE";
@@ -225,7 +226,7 @@ impl App {
         let args = if split < n { &text[split + 1..] } else { b"" };
         match cmd {
             b"" => {},
-            b"help" => self.terminal.write(b"help echo ls cat ps put rm launch clear\nFiles: user-* / text up to 4096 bytes\nlaunch term|files|edit|settings|monitor|gallery\nOrdinary session: no Power or kernel console"),
+            b"help" => self.terminal.write(b"help echo ls cat ps put rm launch clear\nFiles: user-* / text up to 4096 bytes\nlaunch term|files|edit|settings|monitor|gallery"),
             b"echo" => self.terminal.write(args),
             b"ls" => {self.refresh()?; for i in 0..self.count {self.terminal.write(&self.names[i][..length(&self.names[i])]);}},
             b"cat" => {let data=read(client,name(args)?)?; if !data.is_ascii() {return Err(-2)} self.terminal.write(data);},
@@ -277,7 +278,7 @@ impl App {
             apps::EDITOR => {
                 match key {
                     8 => self.editor.backspace(),
-                    13 => self.editor.insert(b'\n').map_err(|_| -5)?,
+                    13 => self.editor.insert(b'\n').map_err(|_| -2001)?,
                     256 => self.editor.left(),
                     257 => self.editor.right(),
                     258 => self.editor.vertical(false),
@@ -285,8 +286,8 @@ impl App {
                     260 => self.editor.home(),
                     261 => self.editor.end(),
                     262 => self.editor.delete(),
-                    9 => self.editor.insert(b'\t').map_err(|_| -5)?,
-                    32..=126 => self.editor.insert(key as u8).map_err(|_| -5)?,
+                    9 => self.editor.insert(b'\t').map_err(|_| -2001)?,
+                    32..=126 => self.editor.insert(key as u8).map_err(|_| -2001)?,
                     _ => {}
                 }
                 let row = visual_row(&self.editor);
@@ -461,38 +462,26 @@ impl App {
             apps::EDITOR => {
                 view::editor(canvas, &self.editor, self.top, &self.line, self.dialog, t)
             }
-            apps::FILES => {
-                if self.dialog != 0 {
-                    view::dialog(canvas, &self.line, "CREATE", t)
-                } else {
-                    c::button(canvas, l::NEW, "NEW", c::State::Normal, t);
-                    c::button(canvas, l::SAVE, "REFRESH", c::State::Normal, t);
-                    c::button(canvas, l::OPEN, "OPEN", c::State::Normal, t);
-                    c::button(
-                        canvas,
-                        l::DELETE,
-                        "DELETE",
-                        if self.count > 0 {
-                            c::State::Normal
-                        } else {
-                            c::State::Disabled
-                        },
-                        t,
-                    );
-                }
-                for (row, i) in (self.top..self.count).take(10).enumerate() {
-                    view::file_row(
-                        canvas,
-                        row,
-                        &self.names[i][..length(&self.names[i])],
-                        i == self.selected,
-                        t,
-                    );
-                }
-                view::preview(canvas, &self.preview[..self.preview_len], t);
-            }
+            apps::FILES => view::files(
+                canvas,
+                view::FilesView {
+                    names: &self.names[..self.count],
+                    top: self.top,
+                    selected: self.selected,
+                    bytes: &self.preview[..self.preview_len],
+                    line: &self.line,
+                    dialogue: self.dialog != 0,
+                },
+                t,
+            ),
             apps::SETTINGS => view::settings(canvas, dark, appearance & 2 != 0, self.display, t),
-            apps::MONITOR => self.monitor(canvas, t),
+            apps::MONITOR => view::monitor(
+                canvas,
+                &self.counts,
+                &self.processes[..self.process_count],
+                self.top,
+                t,
+            ),
             _ => c::gallery(
                 canvas,
                 if self.gallery_theme < 2 {
@@ -501,53 +490,6 @@ impl App {
                     t
                 },
             ),
-        }
-    }
-    fn monitor(&self, canvas: &mut Canvas<'_>, t: theme::Theme) {
-        for (row, (label, value)) in [
-            (b"FREE FRAMES ".as_slice(), self.counts[0]),
-            (b"TOTAL FRAMES ", self.counts[1]),
-            (b"LIVE PROCESSES ", self.counts[3]),
-            (b"SHARED REGIONS ", self.counts[4]),
-            (b"SHARED PAGES ", self.counts[5]),
-            (b"SHARED MAPS ", self.counts[6]),
-            (b"OWN CAPS ", self.counts[7]),
-            (b"UPTIME SECONDS ", self.counts[8] / 1_000_000),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut b = [0; 64];
-            let mut n = 0;
-            append(&mut b, &mut n, label);
-            number(&mut b, &mut n, value);
-            c::label(
-                canvas,
-                12,
-                l::CONTENT_Y + row as i32 * m::LINE_HEIGHT,
-                view::string(&b[..n]),
-                t.text,
-            );
-        }
-        c::label(canvas, 230, l::CONTENT_Y, "PID / THREADS", t.secondary);
-        for (row, (pid, threads)) in self.processes[..self.process_count]
-            .iter()
-            .skip(self.top)
-            .take(12)
-            .enumerate()
-        {
-            let mut b = [0; 64];
-            let mut n = 0;
-            number(&mut b, &mut n, *pid);
-            append(&mut b, &mut n, b" / ");
-            number(&mut b, &mut n, *threads);
-            c::label(
-                canvas,
-                230,
-                l::CONTENT_Y + 16 + row as i32 * m::LINE_HEIGHT,
-                view::string(&b[..n]),
-                t.text,
-            );
         }
     }
 }

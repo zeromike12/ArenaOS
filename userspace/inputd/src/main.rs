@@ -296,6 +296,8 @@ impl Drv {
             return; // releases produce no byte
         }
         let navigation = match code {
+            1 if desktop_mode() => 27,
+            59..=66 if desktop_mode() => input_wire::LAUNCH_FIRST + code - 59,
             105 => 256,
             106 => 257,
             103 => 258,

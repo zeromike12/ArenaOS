@@ -38,6 +38,9 @@ pub enum Frame {
     },
     LaunchImage,
     Display,
+    Create {
+        name: [u8; 32],
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -85,15 +88,17 @@ impl Frame {
                 b[32..].copy_from_slice(&name);
                 4
             }
-            Self::Read { name } | Self::Delete { name } => {
+            Self::Read { name } | Self::Delete { name } | Self::Create { name } => {
                 if !name_valid(&name, false) {
                     return Err(Error::Invalid);
                 }
                 b[32..].copy_from_slice(&name);
                 if matches!(self, Self::Read { .. }) {
                     5
-                } else {
+                } else if matches!(self, Self::Delete { .. }) {
                     7
+                } else {
+                    12
                 }
             }
             Self::Put { name, length } => {
@@ -161,6 +166,7 @@ impl Frame {
             },
             10 => Self::LaunchImage,
             11 => Self::Display,
+            12 => Self::Create { name },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -193,6 +199,7 @@ mod tests {
             Frame::Read { name },
             Frame::Put { name, length: 4096 },
             Frame::Delete { name },
+            Frame::Create { name },
             Frame::Configure {
                 theme: 0,
                 motion: true,

@@ -34,7 +34,7 @@ pub fn destroy_test_manager_pid() -> u64 {
 '''
 def build(label):
     with (arena_env.build_dir()/f'{TAG}-{label}-build.log').open('w') as f:
-        subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,stdout=f,stderr=subprocess.STDOUT)
+        subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,stdout=f,stderr=subprocess.STDOUT)
 def main():
     original={p:p.read_bytes() for p in (SYSCALL,REG)}
     assert original[SYSCALL].count(NEEDLE)==1 and original[REG].count(ANCHOR)==1
