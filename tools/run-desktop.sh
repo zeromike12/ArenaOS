@@ -95,11 +95,18 @@ EOF
 
 # 3. Host peers for the boot-time network self-tests (10.0.2.2:54321 TCP,
 #    :1053 UDP); they only answer the guest's own test traffic.
-rm -f "$W/peers.out" "$W/qmp.sock" "$W/serial.log"
+rm -f "$W/peers.out" "$W/serial.log"
+# UNIX socket paths are limited to ~104-108 bytes, so keep QMP's socket in a
+# short temporary directory rather than under a possibly deep checkout.
+SOCK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/arena.XXXXXX")"
+QMP_SOCK="$SOCK_DIR/qmp.sock"
 (cd tools && exec python3 -u network_fixture.py "$W/tcp.log" "$W/dns.log" >"$W/peers.out") &
 peers_pid=$!
 typist_pid=""
-cleanup() { kill "$peers_pid" ${typist_pid:+"$typist_pid"} 2>/dev/null || true; }
+cleanup() {
+    kill "$peers_pid" ${typist_pid:+"$typist_pid"} 2>/dev/null || true
+    rm -rf "$SOCK_DIR"
+}
 trap cleanup EXIT
 for _ in $(seq 1 50); do
     grep -q READY "$W/peers.out" 2>/dev/null && break
@@ -111,7 +118,7 @@ grep -q READY "$W/peers.out" 2>/dev/null ||
 
 # 4. The historical boot sequence waits for the word "arena" on the virtual
 #    keyboard once inputd is ready; type it automatically through QMP.
-python3 - "$W" <<'EOF' &
+python3 - "$W" "$QMP_SOCK" <<'EOF' &
 import sys, time
 from pathlib import Path
 sys.path.insert(0, 'tools')
@@ -124,7 +131,7 @@ while time.monotonic() < end:
     time.sleep(0.1)
 else:
     sys.exit('[run-desktop] keyboard never became ready; type "arena" in the QEMU window yourself')
-c = qmp.Qmp(str(w / 'qmp.sock'), connect_timeout_s=5)
+c = qmp.Qmp(sys.argv[2], connect_timeout_s=5)
 for ch in 'arena':
     c.key(ch)
 c.close()
@@ -164,7 +171,7 @@ esac
     -device virtio-keyboard-pci \
     -device virtio-tablet-pci \
     ${VIDEO_ARGS[@]+"${VIDEO_ARGS[@]}"} \
-    -qmp unix:"$W/qmp.sock",server=on,wait=off \
+    -qmp unix:"$QMP_SOCK",server=on,wait=off \
     "${DISPLAY_ARGS[@]}" \
     -chardev stdio,id=con0,signal=off,mux=on,logfile="$W/serial.log" \
     -serial chardev:con0 -mon chardev=con0,mode=readline \
