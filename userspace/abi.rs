@@ -42,6 +42,10 @@ pub const SYS_SHARED_UNMAP: u64 = 40;
 pub const SYS_PROC_LIVE: u64 = 41;
 /// READ endpoint authority; empty queue returns BUSY without parking.
 pub const SYS_IPC_TRY_RECV: u64 = 42;
+/// Same endpoint authority and buffers as REPLY; consumes cancelled-request
+/// tombstone and returns CALLER_GONE without staging reply references.
+pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
+pub const STATUS_CALLER_GONE: i64 = -6;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;
@@ -346,6 +350,9 @@ pub const FS_OP_CLOSE: u64 = 5;
 pub const FS_OP_LS: u64 = 6;
 pub const FS_OP_SHUTDOWN: u64 = 7;
 pub const FS_OP_UNLINK: u64 = 8;
+/// Complete named CoW create/replace, len 0..4096 in word1, padded name
+/// in msg64, LENT Untyped/READ frame when len!=0. No open handle result.
+pub const FS_OP_PUT: u64 = 9;
 
 pub const FS_OK: u64 = 0;
 pub const FS_ERR_NOT_FOUND: u64 = (-1i64) as u64;

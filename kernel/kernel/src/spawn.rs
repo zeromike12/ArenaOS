@@ -185,6 +185,16 @@ static LOADER_OWNER: SyncCell<Option<u32>> = SyncCell::new(None);
 pub fn loader_pin_count(id: u32) -> u32 {
     without_interrupts(|| unsafe { u32::from(*LOADER_OWNER.get() == Some(id)) })
 }
+pub const MAX_DYNAMIC_CHILDREN: usize = 4;
+pub fn dynamic_children_full() -> bool {
+    without_interrupts(|| unsafe {
+        (*RECORDS.get())
+            .iter()
+            .filter(|r| r.live && r.dynamic_img_id.is_some())
+            .count()
+            >= MAX_DYNAMIC_CHILDREN
+    })
+}
 pub fn unretired_dynamic_child() -> bool {
     without_interrupts(|| unsafe {
         (*RECORDS.get())
@@ -345,12 +355,18 @@ fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
     // SAFETY: single writer under IF=0.
     let idx = without_interrupts(|| unsafe {
         let recs = &mut *RECORDS.get();
-        // ADR-0055: one UNRETIRED dynamic child system-wide. Even a child
-        // whose last thread has exited retains its record and blocks a new
+        // ADR-0064: four UNRETIRED dynamic children system-wide. Even a child
+        // whose last thread has exited retains its record and counts toward a new
         // dynamic spawn until the Process-cap finish path calls `forget`.
         // This IF=0 scan happens BEFORE record, process, frame or Process
         // cap reservation; boot/embedded spawns do not consume the bound.
-        if dynamic && recs.iter().any(|r| r.live && r.dynamic_img_id.is_some()) {
+        if dynamic
+            && recs
+                .iter()
+                .filter(|r| r.live && r.dynamic_img_id.is_some())
+                .count()
+                >= MAX_DYNAMIC_CHILDREN
+        {
             return None;
         }
         let Some(i) = recs.iter().position(|r| !r.live) else {

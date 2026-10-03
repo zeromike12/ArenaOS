@@ -97,7 +97,7 @@ fn log(s: &str) {
 fn observed_caps(label: &str) {
     let mut count = 0u64;
     for slot in 0..32u64 {
-        let mut d = [0; 3];
+        let mut d = [0u64; 3];
         if unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0 {
             count += 1;
         }
@@ -110,6 +110,113 @@ fn observed_caps(label: &str) {
         o.crlf();
     });
 }
+/// Stronger Phase-10 replacement for the old single-child BUSY probe. The
+/// caller already holds one unretired child; fill the other three entries,
+/// let their real userspace run, then refuse the fifth without mutation.
+fn capacity_refuses(image: u64) -> Result<(), ()> {
+    const EXTRA: usize = 3;
+    const BADGE: u64 = 1 << 60;
+    fn caps() -> usize {
+        (0..32)
+            .filter(|s| {
+                let mut d = [0u64; 3];
+                (unsafe { syscall2(SYS_CAP_DESCRIBE, *s, d.as_mut_ptr() as u64) }) == 0
+            })
+            .count()
+    }
+    fn processes() -> Result<([(u64, u64); 32], usize), ()> {
+        let mut rows = [(0u64, 0u64); 32];
+        let count = unsafe { syscall2(SYS_PROC_LIST, rows.as_mut_ptr() as u64, 32) };
+        if count < 0 {
+            return Err(());
+        }
+        Ok((rows, count as usize))
+    }
+    let initial_caps = caps();
+    let mut children = [None; EXTRA];
+    let mut failed = false;
+    let grants = [(ENDPOINT as u64, RIGHTS_WRITE)];
+    for child in &mut children {
+        let pid = unsafe { syscall5(SYS_SPAWN, image, grants.as_ptr() as u64, 1, CAP_NONE, 0) };
+        if pid <= 0 {
+            failed = true;
+            break;
+        }
+        let slot = inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?;
+        *child = Some(Child {
+            pid: pid as u64,
+            slot,
+        });
+    }
+    let mut pending = 0u64;
+    if !failed {
+        let timer = unsafe { syscall3(SYS_TIMER_ARM, PRIVATE as u64, BADGE, 20_000) };
+        if timer < 0 {
+            failed = true;
+        } else {
+            loop {
+                let bits = unsafe { syscall1(SYS_WAIT, PRIVATE as u64) };
+                if bits < 0 {
+                    failed = true;
+                    break;
+                }
+                pending |= bits as u64 & !BADGE;
+                if bits as u64 & BADGE != 0 {
+                    break;
+                }
+            }
+            let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
+        }
+    }
+    if !failed {
+        let resident_caps = caps();
+        if resident_caps >= 32 {
+            failed = true;
+        } // refusal must have a free Process-cap slot
+        let before = processes()?;
+        let extra = unsafe { syscall5(SYS_SPAWN, image, grants.as_ptr() as u64, 1, CAP_NONE, 0) };
+        if extra != STATUS_BUSY {
+            failed = true;
+            if extra > 0 {
+                let slot = inventory::child_handle(extra as u64, &SyscallProbe).map_err(|_| ())?;
+                let _ = finish(Child {
+                    pid: extra as u64,
+                    slot,
+                });
+            }
+        }
+        if caps() != resident_caps || processes()? != before {
+            failed = true
+        }
+        let mut live = 0u64;
+        for child in children.iter().flatten() {
+            if alive(*child) == Ok(true) {
+                live += 1
+            }
+        }
+        log_line(|o| {
+            o.str("servicemgr: multi-child capacity real extra children alive=");
+            o.u64(live);
+            o.str("; resident caps=");
+            o.u64(resident_caps as u64);
+            o.str("; four unretired, fifth refused; caps/processes unchanged");
+            o.crlf();
+        });
+    }
+    for child in children.into_iter().flatten() {
+        if finish(child).is_err() {
+            failed = true
+        }
+    }
+    if caps() != initial_caps {
+        failed = true
+    }
+    if pending != 0 && unsafe { syscall2(SYS_NOTIFY, PRIVATE as u64, pending) } != 0 {
+        failed = true
+    }
+    if failed { Err(()) } else { Ok(()) }
+}
+
 #[derive(Clone, Copy)]
 struct Child {
     pid: u64,
@@ -805,16 +912,7 @@ impl State {
             if let Some(child) = self.test_old_child {
                 let grants = [(ENDPOINT as u64, RIGHTS_WRITE)];
                 if alive(child) != Ok(true)
-                    || unsafe {
-                        syscall5(
-                            SYS_SPAWN,
-                            old_slot,
-                            grants.as_ptr() as u64,
-                            1,
-                            PRIVATE as u64,
-                            MGR_BADGE_PKG_PROBE_EXIT,
-                        )
-                    } != STATUS_BUSY
+                    || capacity_refuses(old_slot).is_err()
                     || finish(child).is_err()
                 {
                     return Err(());
@@ -846,24 +944,13 @@ impl State {
                         pid: pid as u64,
                         slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
                     };
-                    if unsafe {
-                        syscall5(
-                            SYS_SPAWN,
-                            old_slot,
-                            grants.as_ptr() as u64,
-                            1,
-                            PRIVATE as u64,
-                            MGR_BADGE_PKG_PROBE_EXIT,
-                        )
-                    } != STATUS_BUSY
-                        || finish(next).is_err()
-                    {
+                    if capacity_refuses(old_slot).is_err() || finish(next).is_err() {
                         return Err(());
                     }
                 }
                 observed_caps("cycle-post");
                 log(
-                    "servicemgr: four repeated signed-child STOP/FINISH cycles and BUSY refusals PASS\r\n",
+                    "servicemgr: four repeated signed-child STOP/FINISH cycles and four-child capacity refusals PASS\r\n",
                 );
             }
             let mut desc = [0; 3];
@@ -1406,16 +1493,7 @@ impl State {
             pid: pid as u64,
             slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
         };
-        let mut bad = unsafe {
-            syscall5(
-                SYS_SPAWN,
-                steady,
-                grants.as_ptr() as u64,
-                1,
-                PRIVATE as u64,
-                MGR_BADGE_PKG_PROBE_EXIT,
-            )
-        } != STATUS_BUSY;
+        let mut bad = capacity_refuses(steady).is_err();
         let timer = unsafe {
             syscall3(
                 SYS_TIMER_ARM,
@@ -1448,18 +1526,7 @@ impl State {
         if seen != MGR_BADGE_PKG_PROBE_EXIT || alive(child) != Ok(false) {
             bad = true;
         }
-        if !bad
-            && unsafe {
-                syscall5(
-                    SYS_SPAWN,
-                    steady,
-                    grants.as_ptr() as u64,
-                    1,
-                    PRIVATE as u64,
-                    MGR_BADGE_PKG_PROBE_EXIT,
-                )
-            } != STATUS_BUSY
-        {
+        if !bad && capacity_refuses(steady).is_err() {
             bad = true;
         }
         if finish(child).is_err() {
@@ -1517,7 +1584,7 @@ impl State {
         }
         if !bad {
             log(
-                "servicemgr: second dynamic child BUSY while live and exited-unreaped; FINISH permits next spawn PASS\r\n",
+                "servicemgr: four dynamic children bounded while live and exited-unreaped; FINISH permits next spawn PASS\r\n",
             );
         }
         if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, next_id, 0, 0, 0, 0) } != 0

@@ -165,6 +165,7 @@ pub const SYS_SHARED_UNMAP: u64 = 40;
 /// ADR-0060: only a held Process/READ witness may inspect thread liveness.
 pub const SYS_PROC_LIVE: u64 = 41;
 pub const SYS_IPC_TRY_RECV: u64 = 42;
+pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -205,6 +206,7 @@ pub const STATUS_BUSY: Status = -4;
 /// as "did not happen" — the ADR is explicit that the kernel cannot
 /// know, and a status that pretended otherwise would be a lie.
 pub const STATUS_SERVICE_GONE: Status = -5;
+pub const STATUS_CALLER_GONE: Status = -6;
 
 /// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
 /// so the m4 suite computes its expectation with the very function the
@@ -648,6 +650,7 @@ extern "C" fn syscall_dispatch(
             sys_ipc_receive(a0, a1, a2, false) as u64
         }
         SYS_IPC_REPLY => sys_ipc_reply(a0, a1, a2, a3, a4) as u64,
+        SYS_IPC_REPLY_CHECKED => sys_ipc_reply_policy(a0, a1, a2, a3, a4, true) as u64,
         SYS_NOTIFY => sys_notify(a0, a1) as u64,
         SYS_WAIT => sys_wait(a0) as u64,
         SYS_SPAWN => sys_spawn(a0, a1, a2, a3, a4) as u64,
@@ -1014,6 +1017,9 @@ fn sys_ipc_receive(a0: u64, a1: u64, a2: u64, blocking: bool) -> Status {
 /// inline reply message is snapshotted from `msg buf` in the SERVER's
 /// context now (NULL = none; IPC v1.1). Needs READ.
 fn sys_ipc_reply(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
+    sys_ipc_reply_policy(a0, a1, a2, a3, a4, false)
+}
+fn sys_ipc_reply_policy(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, checked: bool) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG;
     };
@@ -1035,7 +1041,7 @@ fn sys_ipc_reply(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     } else {
         [0u8; crate::ipc::MSG_BYTES]
     };
-    match crate::ipc::reply(eid, [a1, a2], send_cap, msg) {
+    match crate::ipc::reply_policy(eid, [a1, a2], send_cap, msg, checked) {
         Ok(()) => STATUS_OK,
         Err(e) => e,
     }
@@ -1200,12 +1206,12 @@ fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     let source = match img_cap.obj {
         crate::cap::CapObj::Image { img_id } => {
             // Full-ID liveness wins over BUSY for stale copies. A second
-            // dynamic child refuses before any loader/resource reservation.
+            // over-capacity child refuses before any loader/resource reservation.
             if img_id >= crate::image_registry::FIRST {
                 if !crate::image_registry::live(img_id) {
                     return STATUS_BAD_ARG;
                 }
-                if crate::spawn::unretired_dynamic_child() {
+                if crate::spawn::dynamic_children_full() {
                     return STATUS_BUSY;
                 }
             }
@@ -2361,6 +2367,8 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         crate::cap::CapObj::SharedRegion { id } if crate::shared::backing(id).is_some() => {
             (7, u64::from(id))
         }
+        // Held one-frame LENT type/geometry; no physical address is exposed.
+        crate::cap::CapObj::Untyped { owned: false, .. } => (11, 1),
         crate::cap::CapObj::MemoryPool => (8, 0),
         crate::cap::CapObj::SharedDma => (9, 0),
         crate::cap::CapObj::ProofToken { id } if id != 0 => (10, id),

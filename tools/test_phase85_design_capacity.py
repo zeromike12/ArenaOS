@@ -110,12 +110,12 @@ def cap_projection() -> None:
     # ADR-0056 adds exactly two disjoint graphics endpoints without
     # disturbing the ten Phase-8.5 endpoint slots or raising CAP_SLOTS.
     assert 'pub const MAX_ENDPOINTS: usize = 12;' in ipc
-    assert 'pub const MAX_NOTIFS: usize = 18;' in ipc  # accepted marker is actually allocated.
+    assert 'pub const MAX_NOTIFS: usize = 19;' in ipc  # accepted marker is actually allocated.
     # Source-anchored upper schedule: actual manager 22 literal boot caps,
     # including registrar and lifecycle-admin marker. Conservatively
     # include four other resident Process handles (stack/broker/app/package).
     boot=22; resident=4
-    # Serialized one dynamic child + Image; at most one readiness worker,
+    # This historical serialized schedule uses one dynamic child + Image; at most one readiness worker,
     # but no worker overlaps SELECT/COMMIT. No Image is transferred until
     # OLD child and its held Process cap have been finished.
     active=boot+resident+1+1
@@ -124,6 +124,10 @@ def cap_projection() -> None:
     commit=after_reap+2  # landed transitional Image + attenuated READ|DESTROY
     worker_peak=active+1
     assert max(prepared,commit,worker_peak) == 29 < 32
+    spawn=(ROOT/'kernel/kernel/src/spawn.rs').read_text()
+    assert 'pub const MAX_DYNAMIC_CHILDREN: usize = 4;' in spawn
+    multi_child=boot+resident+1+4
+    assert multi_child==31 < 32
     # Packaged holds 5 inherited, an owned LENT buffer at slot8, one
     # landed marker and one provisional Image: 8. Slot7 is consumed by map.
     packaged_peak=5+1+1+1
@@ -131,7 +135,7 @@ def cap_projection() -> None:
     print(f'host cap schedule projection (NOT guest high-water): manager '
           f'boot={boot}, resident={boot+resident}, old-child/PREPARE={prepared}, '
           f'COMMIT={commit}, worker-separated bound={worker_peak}/32; '
-          f'packaged <= {packaged_peak}/32; one dynamic child maximum')
+          f'packaged <= {packaged_peak}/32; four-child steady schedule <= {multi_child}/32 (guest capacity proof separate)')
 
 if __name__ == '__main__':
     disk_measure()

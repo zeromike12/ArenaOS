@@ -1072,6 +1072,47 @@ fn do_write(o: &mut Out, rest: &[u8]) {
     o.str("'\r\n");
 }
 
+/// `put NAME TEXT` — complete CoW replacement, including empty content.
+fn do_put(o: &mut Out, rest: &[u8]) {
+    let (name, tail) = split_word(rest);
+    let text = if tail.first() == Some(&b' ') {
+        &tail[1..]
+    } else {
+        tail
+    };
+    if name.is_empty() || name.len() >= FS_NAME_MAX {
+        o.str("usage: put NAME TEXT\r\n");
+        return;
+    }
+    let va = file_va(o);
+    if va == 0 {
+        return;
+    }
+    unsafe {
+        core::ptr::write_bytes(va as *mut u8, 0, 4096);
+        core::ptr::copy_nonoverlapping(text.as_ptr(), va as *mut u8, text.len());
+    }
+    let mut msg = [0u8; MSG_BYTES];
+    msg[..name.len()].copy_from_slice(name);
+    let (r, st, n) = fs_call(
+        FS_OP_PUT,
+        text.len() as u64,
+        if text.is_empty() {
+            CAP_NONE
+        } else {
+            SLOT_FILE_LENT
+        },
+        &mut msg,
+    );
+    if r < 0 || st != FS_OK || n != text.len() as u64 {
+        fs_error(o, "put", r, st);
+        return;
+    }
+    o.str("  put committed ");
+    o.u64(n);
+    o.str(" bytes\r\n");
+}
+
 /// `rm NAME` — UNLINK (M5.4): one transaction removes the name and
 /// queues every sector of the file's extent chain for reclamation two
 /// generations later (ADR-0023). An open file is refused honestly —
@@ -1581,6 +1622,8 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_ls(&mut o);
             } else if let Some(rest) = strip_prefix(line, b"cat ") {
                 do_cat(&mut o, rest);
+            } else if let Some(rest) = strip_prefix(line, b"put ") {
+                do_put(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"write ") {
                 do_write(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"rm ") {

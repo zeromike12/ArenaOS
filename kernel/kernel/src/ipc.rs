@@ -681,6 +681,18 @@ pub fn reply(
     send_cap: Option<Cap>,
     msg: [u8; MSG_BYTES],
 ) -> Result<(), Status> {
+    reply_policy(eid, words, send_cap, msg, false)
+}
+
+/// Additive checked reply distinguishes a cancelled delivered request from
+/// programmer errors, and consumes its tombstone without staging new refs.
+pub fn reply_policy(
+    eid: u32,
+    words: [u64; 2],
+    send_cap: Option<Cap>,
+    msg: [u8; MSG_BYTES],
+    checked: bool,
+) -> Result<(), Status> {
     // Phase 1 — find our Delivered slot, stage the reply (borrow ends).
     // SAFETY: single writer under IF=0.
     let caller = without_interrupts(|| -> Result<u64, Status> {
@@ -695,6 +707,15 @@ pub fn reply(
                 ep.q.iter_mut()
                     .find(|s| s.state == SlotState::Delivered && s.server == tid)
             else {
+                if checked {
+                    if let Some(cancelled) =
+                        ep.q.iter_mut()
+                            .find(|s| s.state == SlotState::Cancelled && s.server == tid)
+                    {
+                        *cancelled = EMPTY_SLOT;
+                        return Err(crate::arch::x86_64::syscall::STATUS_CALLER_GONE);
+                    }
+                }
                 return Err(STATUS_BAD_ARG);
             };
             slot.reply_words = words;

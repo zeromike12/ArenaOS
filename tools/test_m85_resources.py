@@ -24,6 +24,6 @@ def main():
     peaks=[int(n) for n in re.findall(r'packaged: observed cap high-water (\d+)',s)]
     assert initial and peaks and max(peaks)>initial[0] and max(peaks)<=32
     assert 'servicemgr: full fixture notification budget 19/19; twentieth refused' in s
-    assert 'servicemgr: second dynamic child BUSY while live and exited-unreaped; FINISH permits next spawn PASS' in s
+    assert 'servicemgr: four dynamic children bounded while live and exited-unreaped; FINISH permits next spawn PASS' in s
     print(f'[m85-resources] guest Power snapshots baseline/live/retired={samples}; manager measured caps={caps}; packaged measured initial={initial[0]} peak={max(peaks)}; Notification=19/19 and twentieth refused PASS',flush=True)
 if __name__=='__main__':main()

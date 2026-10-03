@@ -16,6 +16,10 @@ def main():
             ['cargo','clippy','--offline','--locked','--manifest-path',manifest,'--lib','--target','x86_64-unknown-linux-gnu','--','-D','warnings'],
             ['cargo','build','--offline','--locked','--manifest-path',manifest,'--lib','--release','--target','x86_64-unknown-none'],
         ):subprocess.run(cmd,cwd=ROOT,env=env,check=True)
+    for source in ('userspace/inputd/src/pointer.rs','userspace/fsd/src/replace.rs','userspace/desktop/src/apps/model.rs'):
+        output=arena_env.build_dir()/(Path(source).stem+'-m10-tests')
+        subprocess.run(['rustc','--test','--edition','2024',source,'-o',str(output)],cwd=ROOT,env=env,check=True)
+        subprocess.run([str(output)],check=True)
     captures=[]
     for name,args in (('light',[]),('dark',['--dark'])):
         command=['cargo','run','--quiet','--offline','--locked','--manifest-path',str(ROOT/'userspace/ui/Cargo.toml'),

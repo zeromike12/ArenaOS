@@ -60,6 +60,7 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
+mod replace;
 
 // ---- the grant layout (kernel-literal: entry.rs / m5.rs) --------------------
 
@@ -618,6 +619,12 @@ unsafe fn commit(fs: &mut Fs, why: &str) -> Result<(), ()> {
         // a full disk mid-commit is already the degraded path.
         return Err(());
     };
+    unsafe { commit_reserved(fs, why, new_ot, new_bm) }
+}
+
+/// Preallocated metadata runs: caller has completed a whole-operation
+/// reservation; no ordinary allocation refusal remains after data writes.
+unsafe fn commit_reserved(fs: &mut Fs, why: &str, new_ot: u32, new_bm: u32) -> Result<(), ()> {
     // SAFETY: copy the RAM generations out through scratch.
     unsafe {
         let p = fs.scratch_ptr();
@@ -676,6 +683,145 @@ unsafe fn commit(fs: &mut Fs, why: &str) -> Result<(), ()> {
         o.u64(u64::from(new_bm));
     });
     Ok(())
+}
+
+/// Complete replacement. Old data/extent and both current metadata runs
+/// remain allocated through commit and the existing two-generation retention.
+unsafe fn put(fs: &mut Fs, len: u64, landed: u64, msg: &[u8; MSG_BYTES]) -> (u64, u64) {
+    unsafe {
+        let Some(n) = parse_name(msg) else {
+            return (FS_ERR_BAD_NAME, 0);
+        };
+        if msg[n..].iter().any(|b| *b != 0) {
+            return (FS_ERR_BAD_NAME, 0);
+        }
+        if len > replace::MAX_BYTES || fs.seq == u64::MAX {
+            return (FS_ERR_RANGE, 0);
+        }
+        if len == 0 {
+            if landed != CAP_NONE {
+                return (FS_ERR_RANGE, 0);
+            }
+        } else {
+            let mut descriptor = [0u64; 3];
+            if syscall2(SYS_CAP_DESCRIBE, landed, descriptor.as_mut_ptr() as u64) != 0
+                || descriptor[0] != 11
+                || descriptor[1] != 1
+                || descriptor[2] & RIGHTS_READ == 0
+            {
+                return (FS_ERR_RANGE, 0);
+            }
+        }
+        let found = obj_find_name(&msg[..n]);
+        let Some(object) = found.or_else(|| obj_find_free()) else {
+            return (FS_ERR_TABLE_FULL, 0);
+        };
+        if fs.open.contains(&((object + 1) as u16)) {
+            return (FS_ERR_BUSY, 0);
+        }
+        let mut old = [0u32; 9];
+        let mut old_count = 0usize;
+        if found.is_some() {
+            let size = obj_size(object);
+            let head = obj_ehead(object);
+            if size > replace::MAX_BYTES || (size != 0 && head == 0) {
+                return (FS_ERR_RANGE, 0);
+            }
+            if head != 0 {
+                if head >= fs.total_sectors || head < 3 || !bit_get(head) {
+                    return (FS_ERR_IO, 0);
+                }
+                disk_read(fs, head);
+                let p = fs.scratch_ptr();
+                let count = rd32(p, EXT_COUNT);
+                if rd32(p, EXT_NEXT) != 0 || count == 0 || count > 8 {
+                    return (FS_ERR_IO, 0);
+                }
+                old[0] = head;
+                old_count = 1;
+                for k in 0..count {
+                    let start = rd32(p, EXT_ENTRIES + k as usize * 8);
+                    let count = rd32(p, EXT_ENTRIES + k as usize * 8 + 4);
+                    if count == 0
+                        || count > 8
+                        || start
+                            .checked_add(count)
+                            .is_none_or(|e| e > fs.total_sectors)
+                    {
+                        return (FS_ERR_IO, 0);
+                    }
+                    for s in start..start + count {
+                        if old_count == old.len()
+                            || s < 3
+                            || old[..old_count].contains(&s)
+                            || !bit_get(s)
+                        {
+                            return (FS_ERR_IO, 0);
+                        }
+                        old[old_count] = s;
+                        old_count += 1;
+                    }
+                }
+                if old_count - 1 != size.div_ceil(512) as usize {
+                    return (FS_ERR_IO, 0);
+                }
+            }
+        }
+        // Do not reclaim dead sectors to make a rejected request appear to fit.
+        // Complete reservation and dead-list capacity precede all mutation.
+        if old_count + fs.dead_next_n > DEAD_MAX {
+            return (FS_ERR_NO_SPACE, 0);
+        }
+        for s in &old[..old_count] {
+            if (fs.cur_ot..fs.cur_ot + 4).contains(s)
+                || (fs.cur_bm..fs.cur_bm + 4).contains(s)
+                || fs.dead_now[..fs.dead_now_n].contains(s)
+                || fs.dead_next[..fs.dead_next_n].contains(s)
+            {
+                return (FS_ERR_IO, 0);
+            }
+        }
+        let bitmap = core::slice::from_raw_parts(core::ptr::addr_of!(BITMAP).cast::<u8>(), 2048);
+        let Some(plan) = replace::reserve(bitmap, fs.total_sectors, len) else {
+            return (FS_ERR_NO_SPACE, 0);
+        };
+        begin_tx(fs);
+        for s in plan.sectors() {
+            bit_set(s, true)
+        }
+        for (k, sector) in plan.data[..plan.count].iter().enumerate() {
+            match block_call(fs, OP_WRITE, u64::from(*sector), (k * 512) as u64, landed) {
+                Ok(VIRTIO_BLK_S_OK) => {}
+                _ => fail(EXIT_DISK, "replacement data write lost block service"),
+            }
+            log_line(|o| {
+                o.str("fsd: PUT data written ");
+                o.u64(k as u64 + 1);
+            });
+        }
+        if plan.extent != 0 {
+            let p = fs.scratch_ptr();
+            core::ptr::write_bytes(p, 0, SECTOR_BYTES);
+            wr32(p, EXT_COUNT, plan.count as u32);
+            for (k, s) in plan.data[..plan.count].iter().enumerate() {
+                wr32(p, EXT_ENTRIES + k * 8, *s);
+                wr32(p, EXT_ENTRIES + k * 8 + 4, 1);
+            }
+            disk_write(fs, plan.extent);
+        }
+        obj_create_free(object);
+        obj_create(object, &msg[..n]);
+        obj_set_size(object, len);
+        obj_set_ehead(object, plan.extent);
+        commit_reserved(fs, "put", plan.objects, plan.bitmap)
+            .unwrap_or_else(|_| fail(EXIT_DISK, "preallocated replacement commit failed"));
+        // Same lifetime as the superseded object table: retain these sectors
+        // until its ping-pong record has been replaced by a later commit.
+        for s in &old[..old_count] {
+            push_dead(fs, *s);
+        }
+        (FS_OK, len)
+    }
 }
 
 // ---- mount ---------------------------------------------------------------------------
@@ -915,6 +1061,7 @@ unsafe fn serve(
     // checked helpers.
     unsafe {
         match op {
+            FS_OP_PUT => put(fs, w1, landed, imsg),
             FS_OP_CREATE | FS_OP_OPEN => {
                 let Some(n) = parse_name(imsg) else {
                     return (FS_ERR_BAD_NAME, 0);
@@ -1260,7 +1407,9 @@ pub unsafe extern "C" fn _start() -> ! {
             let authorized = op != FS_OP_SHUTDOWN || take_diagnostic(landed, SLOT_DIAG);
             let (rw0, rw1) = if authorized {
                 serve(&mut fs, op, w1, landed, &imsg, &mut omsg)
-            } else { (FS_ERR_BAD_OP, 0) };
+            } else {
+                (FS_ERR_BAD_OP, 0)
+            };
             // The forwarded client cap is done with: discard fsd's
             // reference (frees nothing — the client keeps its window).
             if landed != CAP_NONE && op != FS_OP_SHUTDOWN {

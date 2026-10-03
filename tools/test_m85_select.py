@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Narrow guest PREPARE/ABORT/COMMIT/LAUNCH and signed ELF child fixture.
 
-Manager revokes old ID, checks one-child refusal, reaps the dynamic child and
+Manager revokes old ID, checks the four-child capacity refusal, reaps the dynamic child and
 revokes the LAUNCH ID. Not the full Phase-8.5 qualification.
 """
 import hashlib

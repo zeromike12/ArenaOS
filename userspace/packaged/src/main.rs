@@ -1563,17 +1563,17 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 fail("post-dispatch cap occupancy leaked");
             }
         }
-        if unsafe {
+        let reply_status = unsafe {
             syscall5(
-                SYS_IPC_REPLY,
+                SYS_IPC_REPLY_CHECKED,
                 SERVER,
                 status,
                 value,
                 reply_cap,
                 reply.as_ptr() as u64,
             )
-        } < 0
-        {
+        };
+        if reply_status < 0 {
             if reply_cap == PROVISIONAL {
                 let mut described = [0u64; 3];
                 if unsafe { syscall2(SYS_CAP_DESCRIBE, PROVISIONAL, described.as_mut_ptr() as u64) }
@@ -1583,6 +1583,9 @@ pub extern "C" fn start_on_private_stack() -> ! {
                         unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR, described[1], 0, 0, 0, 0) };
                     let _ = unsafe { syscall1(SYS_CAP_DESTROY, PROVISIONAL) };
                 }
+            }
+            if reply_status == STATUS_CALLER_GONE {
+                continue;
             }
             fail("reply refused");
         }

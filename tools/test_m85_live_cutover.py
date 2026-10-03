@@ -52,7 +52,7 @@ def main():
         (b'pkg: observed frames=',3,b'shutdown\r')])
     assert s.count('phase85-hold: first signed v7 launch exited normally')>=1
     assert s.count('phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP')>=1
-    assert 'servicemgr: four repeated signed-child STOP/FINISH cycles and BUSY refusals PASS' in s
+    assert 'servicemgr: four repeated signed-child STOP/FINISH cycles and four-child capacity refusals PASS' in s
     assert 'servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT' in s
     assert 'servicemgr: distinct signed v7/v8 registry slots live together at PREPARE; old copied ID revoked before COMMIT' in s
     assert 'phase85-v2: version-eight image queried signed stage via inherited endpoint' in s
@@ -74,5 +74,5 @@ def main():
     acts=[('v8-'+t.PREFIX+f'-{i:02}').encode() for i in range(1,5)]
     assert all(k in now for k in (n1,n2,*acts)) and now[acts[3]][80:112]==H(s2)
     assert not afs1.audit(disk)
-    print(f'[{LABEL}] old signed v7 child ALIVE at v8 PREPARE; second child BUSY; held Process-cap STOP/reap and full-ID revoke before durable AACT4; distinct signed v8 ELF ran PASS',flush=True)
+    print(f'[{LABEL}] old signed v7 child ALIVE at v8 PREPARE; four-child capacity refusal; held Process-cap STOP/reap and full-ID revoke before durable AACT4; distinct signed v8 ELF ran PASS',flush=True)
 if __name__=='__main__':main()

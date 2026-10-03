@@ -121,3 +121,40 @@ close to original desktop pixels and relaunch. Captures live under
 `build/m10-desktop-*.ppm`. The initial framebuffer/type-width and syscall
 reserved-argument bugs were caught by guest failure, fixed, and rerun GREEN.
 This gate does not yet prove six-app capacity, dynamic Images or leak cycles.
+
+## Complete-file replacement and dynamic-child concurrency
+
+ADR-0063 adds named complete CoW PUT using the existing AFS1 format. Guest tests
+cover create, replace, empty replacement, four crash checkpoints, exact file
+bytes after remount, both valid commit generations and full-bitmap refusal with
+the entire disk unchanged. A production mutant deliberately reused the old
+first data sector: crash observation returned `new replacement with di` under
+the old 23-byte metadata and went RED. Exact source and saved EFI/ESP were
+restored, then the full guest gate ran GREEN against that exact EFI:
+`30a5b713214296991d09d8dd4342b4fd6cd16d5f061e71387dcaae2ccea21523`.
+This is an intermediate mutation receipt, not baseline qualification.
+
+ADR-0064 sets four unretired dynamic children, preserving the two Image storage
+slots, full-ID revocation checks, loader pins and Process-cap-only retirement.
+Historical single-child BUSY probes now fill the additional three records,
+allow actual ring-3 execution, refuse the fifth without changing held caps or
+process/thread rows, and retire the extras. They run with live and exited but
+unreaped original children and through repeated cutover cycles.
+
+The first stress run found packaged fail-stopping on a reply to a canceled
+caller during nested FS IPC. Additive checked reply distinguishes CALLER_GONE
+from invalid reply usage and credits no response references on cancellation.
+Packaged revokes/disposes an unsent provisional Image and continues receiving.
+Legacy REPLY's cancellation contract remains unchanged.
+
+The updated real cutover/resource gate passes: baseline/live/retired
+`(114412,16,16) / (114398,17,17) / (114412,16,16)` for free frames, spawn records
+and processes. Manager reported caps 25 baseline, 27 with original child,
+28 with two Images, 26 after retirement and 26 before/after repeated cycles;
+packaged actual descriptor-count peak is 8. The new LENT-frame descriptor
+includes a previously unreported held buffer in these counts. Further
+multi-child mutation and cross-parent dynamic graphical tests are still needed.
+
+Pure terminal/editor models are present but unlinked. Host tests cover insertion,
+deletion, navigation, capacity refusal, terminal line editing and bounded
+scrollback. No guest terminal/editor functionality is claimed yet.
