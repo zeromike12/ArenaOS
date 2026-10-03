@@ -59,6 +59,14 @@ def main(esp=None):
             d.q.key('f')
             # Pointer redraws must use the last complete published snapshot,
             # while the client has already changed its writable staging bytes.
+            # Composition is damage-driven (ADR-0070): only rectangles the
+            # arrow covers or uncovers are recomposed. Sweep it across the
+            # signed raster itself so those window pixels are recomposed from
+            # whatever the compositor treats as the window's content.
+            for step,x in enumerate((156,171,186)):
+                y=167
+                d.point(x,y)
+                d.shot(f'unpublished-sweep-{step}',lambda p:crop(p,x,y,10,13)!=crop(full,x,y,10,13))
             for step in range(6):
                 # Repeated identical absolute coordinates can be coalesced by
                 # QEMU. Alternate real positions and await the drawn cursor:

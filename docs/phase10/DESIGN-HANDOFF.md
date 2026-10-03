@@ -115,7 +115,10 @@ repeated full cycles return exact warmed accounting.
 - `userspace/ui/src/metrics.rs`: typography, spacing, chrome/dock dimensions.
 - `userspace/ui/src/motion.rs`: shared interpolation/duration tokens.
 - `userspace/ui/src/components/mod.rs`: reusable controls, icons and gallery.
-- `userspace/desktop/src/desktop_view.rs`: background, top bar, dock and chrome.
+- `userspace/desktop/src/shell.rs` (was `desktop_view.rs`; moved into the
+  library by the maturity pass, ADR-0070): background, top bar, dock.
+- `userspace/desktop/src/compose.rs`: retained scene, damage and composition
+  order (engineering-owned; presentation changes must keep its region rules).
 - `userspace/desktop/src/apps/view.rs`: pure application raster views.
 - `userspace/desktop/src/apps/layout.rs`: shared layout/hit rectangles, viewport
   dimensions, caret position and visual rows.
@@ -215,7 +218,7 @@ confined to the safe presentation sources listed above:
   chip, status band, focus ring, caret), `icons` (original one-bit app and
   interface glyphs, emblem, pointer, focus lamp), `chrome` (single window
   chrome used by both compositor and clients) and `gallery`.
-* `desktop_view.rs` — plain field with the Arena emblem and real key hints,
+* `desktop_view.rs` (now `shell.rs`) — plain field with the Arena emblem and real key hints,
   wordmark system bar with focused app, real window count and labelled
   uptime, error toast, floating dock with identity tiles, names, hover,
   focused/running indicators and capacity dimming, new pointer.

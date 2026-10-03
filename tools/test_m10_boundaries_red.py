@@ -30,7 +30,9 @@ CONTROLS=[
     (DESKTOP,b'(POOL, RIGHTS_READ),',b'(POOL, RIGHTS_READ | RIGHTS_WRITE),','readonly-diagnostic-grant',bounded,'monitor'),
     (MODEL,b'self.find(handle).is_some_and(|w| w.backing == backing)',b'self.find(handle).is_some_and(|w| w.backing == backing || backing != 0)','owned-stale-surface',dynamic,'signed-'),
     (MODEL,b'let next = self.next.checked_add(1).ok_or(Error::Exhausted)?;',b'let next = self.next;','surface-generation-reuse',dynamic,'signed-'),
-    (DESKTOP,b'&(&*(&raw const PUBLISHED))[*index][..window.width as usize * window.height as usize]',b'core::slice::from_raw_parts((s.va as usize + PIXEL_OFFSET) as *const u32, window.width as usize * window.height as usize)','frame-publication',dynamic,'unpublished backing became visible'),
+    # Damage composition reads each window's content through one closure;
+    # the mutant serves the client's writable staging bytes instead.
+    (DESKTOP,b'|slot| &published[slot][..]',b'|slot| { let s = unsafe { SESSIONS[slot] }; let w = unsafe { (&*(&raw const WM)).find(s.handle) }.unwrap_or_else(|| die(88)); unsafe { core::slice::from_raw_parts((s.va as usize + PIXEL_OFFSET) as *const u32, w.width as usize * w.height as usize) } }','frame-publication',dynamic,'unpublished backing became visible'),
     (DESKTOP,b'    if ready != 0 {',b'    if ready != 0 && false {','capacity-preflight',dynamic,'fifth refusal mutated resources'),
 ]
 def main():
