@@ -767,7 +767,12 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // This avoids a one-frame startup race across historical reboot tests.
     let desktop_frame_nid = crate::ipc::create_notification()
         .unwrap_or_else(|_| crate::halt::halt_machine("desktop: frame notification bound"));
-    let mut graphics = start_boot_display(_input_pid, desktop_frame_nid);
+    let mut app_clock_nids = [0u32; 6];
+    for nid in &mut app_clock_nids {
+        *nid = crate::ipc::create_notification()
+            .unwrap_or_else(|_| crate::halt::halt_machine("desktop: app clock capacity"));
+    }
+    let mut graphics = start_boot_display(_input_pid, desktop_frame_nid, &app_clock_nids, fs_eid);
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     if expected_stack_caps.is_some() {
@@ -904,12 +909,12 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             || crate::ipc::notification_snapshot() != before
         {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed mutation-free twentieth refusal",
+                "servicemgr: notification bound failed mutation-free twenty-sixth refusal",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 19/19; twentieth refused"
+            "servicemgr: full fixture notification budget 25/25; twenty-sixth refused"
         );
     }
 
@@ -1100,7 +1105,12 @@ struct GraphicsRuntime {
 /// virtio GPU. A capability BAR, not the PCI numeric address, is delegated.
 /// The endpoint is parked before boot continues; graphical readiness is a
 /// separate service concern, never inferred from the mere presence of a BAR.
-fn start_boot_display(input_pid: Option<u64>, frame_nid: u32) -> Option<GraphicsRuntime> {
+fn start_boot_display(
+    input_pid: Option<u64>,
+    frame_nid: u32,
+    app_clocks: &[u32; 6],
+    fs_eid: u32,
+) -> Option<GraphicsRuntime> {
     let gop = crate::handoff::display();
     if let Some(mode) = gop {
         if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
@@ -1289,7 +1299,14 @@ fn start_boot_display(input_pid: Option<u64>, frame_nid: u32) -> Option<Graphics
         .count()
         >= 2;
     if pointer_present {
-        Some(start_boot_desktop(display_pid, eid, input_pid, frame_nid))
+        Some(start_boot_desktop(
+            display_pid,
+            eid,
+            input_pid,
+            frame_nid,
+            app_clocks,
+            fs_eid,
+        ))
     } else {
         Some(start_boot_compositor(display_pid, eid, input_pid))
     }
@@ -2388,6 +2405,8 @@ fn start_boot_desktop(
     display_eid: u32,
     input_pid: Option<u64>,
     frame_nid: u32,
+    app_clocks: &[u32; 6],
+    fs_eid: u32,
 ) -> GraphicsRuntime {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let eid = crate::ipc::create_endpoint().unwrap_or_else(|e| crate::halt::halt_machine(e));
@@ -2422,11 +2441,41 @@ fn start_boot_desktop(
                 rights: W | C,
             },
             Cap {
-                obj: CapObj::BootImage { index: 7 },
+                obj: CapObj::BootImage { index: 8 },
                 rights: R,
             },
         ],
         None,
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    for (i, nid) in app_clocks.iter().enumerate() {
+        crate::cap::issue(
+            comp,
+            7 + i,
+            Cap {
+                obj: CapObj::Notification { nid: *nid },
+                rights: R | W | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    crate::cap::issue(
+        comp,
+        13,
+        Cap {
+            obj: CapObj::Endpoint { eid: fs_eid },
+            rights: W,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::cap::consume(comp, 3).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::cap::issue(
+        comp,
+        3,
+        Cap {
+            obj: CapObj::MemoryPool,
+            rights: R | W | C,
+        },
     )
     .unwrap_or_else(|e| crate::halt::halt_machine(e));
     if let Some(pid) = input_pid {

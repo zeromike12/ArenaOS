@@ -266,3 +266,61 @@ mod tests {
         assert_eq!(&t.lines[31][..t.sizes[31]], b"line");
     }
 }
+
+/// Reusable bounded single-line input used by file/save dialogs.
+pub struct Line {
+    pub bytes: [u8; 32],
+    pub len: usize,
+    pub cursor: usize,
+}
+impl Default for Line {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl Line {
+    pub const fn new() -> Self {
+        Self {
+            bytes: [0; 32],
+            len: 0,
+            cursor: 0,
+        }
+    }
+    pub fn set(&mut self, value: &[u8]) {
+        self.bytes.fill(0);
+        self.len = value.len().min(31);
+        self.bytes[..self.len].copy_from_slice(&value[..self.len]);
+        self.cursor = self.len;
+    }
+    pub fn key(&mut self, key: u16) -> bool {
+        match key {
+            13 => return true,
+            8 if self.cursor > 0 => {
+                self.cursor -= 1;
+                self.bytes
+                    .copy_within(self.cursor + 1..self.len, self.cursor);
+                self.len -= 1;
+                self.bytes[self.len] = 0;
+            }
+            256 => self.cursor = self.cursor.saturating_sub(1),
+            257 => self.cursor = (self.cursor + 1).min(self.len),
+            260 => self.cursor = 0,
+            261 => self.cursor = self.len,
+            262 if self.cursor < self.len => {
+                self.bytes
+                    .copy_within(self.cursor + 1..self.len, self.cursor);
+                self.len -= 1;
+                self.bytes[self.len] = 0;
+            }
+            32..=126 if self.len < 31 => {
+                self.bytes
+                    .copy_within(self.cursor..self.len, self.cursor + 1);
+                self.bytes[self.cursor] = key as u8;
+                self.len += 1;
+                self.cursor += 1;
+            }
+            _ => {}
+        }
+        false
+    }
+}

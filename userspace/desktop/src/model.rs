@@ -71,6 +71,7 @@ pub struct State {
     z: u64,
     focused: Option<u64>,
     drag: Option<(u64, i32, i32)>,
+    capture: Option<u64>,
     buttons: u8,
     pub pointer: (i32, i32),
     screen: (i32, i32),
@@ -88,6 +89,7 @@ impl State {
             z: 1,
             focused: None,
             drag: None,
+            capture: None,
             buttons: 0,
             pointer: (0, 0),
             screen: (width as i32, height as i32),
@@ -176,6 +178,9 @@ impl State {
         if self.drag.is_some_and(|d| d.0 == handle) {
             self.drag = None;
         }
+        if self.capture == Some(handle) {
+            self.capture = None;
+        }
         if self.focused == Some(handle) {
             self.focused = None;
             let next = self
@@ -248,6 +253,22 @@ impl State {
             }
             self.drag = None;
         }
+        if let Some(h) = self.capture {
+            if let Some(w) = self.find(h).copied() {
+                self.send(
+                    h,
+                    Event::Pointer {
+                        x: (x - w.x).clamp(-(w.width as i32), w.width as i32),
+                        y: (y - w.y).clamp(-(w.height as i32), w.height as i32),
+                        buttons: buttons & 7,
+                    },
+                );
+            }
+            if released {
+                self.capture = None;
+            }
+            return Action::Changed;
+        }
         let dock_w = self.dock_items as i32 * m::DOCK_ITEM_WIDTH;
         let dock_x = (self.screen.0 - dock_w) / 2;
         if pressed && y >= self.screen.1 - m::DOCK_HEIGHT && x >= dock_x && x < dock_x + dock_w {
@@ -266,6 +287,7 @@ impl State {
                     self.drag = Some((h, x - w.x, y - w.y));
                     return Action::Changed;
                 }
+                self.capture = Some(h);
             }
             let w = *self.find(h).expect("hit window");
             self.send(
@@ -283,6 +305,29 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn body_button_release_is_captured_and_retirement_discards_capture() {
+        let mut s = State::new(800, 600).unwrap();
+        let h = s.create(1, 448, 288).unwrap();
+        s.poll(h).unwrap();
+        s.pointer(90, 110, 1);
+        while s.poll(h).unwrap().is_some() {}
+        s.pointer(799, 599, 0);
+        assert_eq!(
+            s.poll(h).unwrap(),
+            Some(Event::Pointer {
+                x: 448,
+                y: 288,
+                buttons: 0
+            })
+        );
+        s.pointer(90, 110, 1);
+        s.retire(h).unwrap();
+        let new = s.create(2, 448, 288).unwrap();
+        s.poll(new).unwrap();
+        s.pointer(799, 599, 0);
+        assert_eq!(s.poll(new).unwrap(), None);
+    }
     #[test]
     fn hit_focus_drag_release_and_close_exact_content() {
         let mut s = State::new(800, 600).unwrap();

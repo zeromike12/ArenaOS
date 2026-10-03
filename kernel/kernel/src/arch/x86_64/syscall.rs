@@ -166,6 +166,7 @@ pub const SYS_SHARED_UNMAP: u64 = 40;
 pub const SYS_PROC_LIVE: u64 = 41;
 pub const SYS_IPC_TRY_RECV: u64 = 42;
 pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
+pub const SYS_OBSERVE: u64 = 44;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -673,6 +674,7 @@ extern "C" fn syscall_dispatch(
         SYS_CAP_DESCRIBE => sys_cap_describe(a0, a1) as u64,
         SYS_PROC_FINISH => sys_proc_finish(a0, a1) as u64,
         SYS_RESOURCE_SNAPSHOT => sys_resource_snapshot(a0, a1) as u64,
+        SYS_OBSERVE if [a2, a3, a4, a5] == [0; 4] => sys_observe(a0, a1) as u64,
         SYS_TRY_WAIT => sys_try_wait(a0) as u64,
         SYS_IMAGE_REGISTER => sys_image_register(a0, a1, a2, a3, a4, a5) as u64,
         SYS_IMAGE_REVOKE => sys_image_revoke(a0, a1, a2, a3, a4, a5) as u64,
@@ -2476,6 +2478,45 @@ fn sys_resource_snapshot(a0: u64, a1: u64) -> Status {
         let out = a1 as *mut u64;
         for (i, &value) in counts.iter().enumerate() {
             core::ptr::write_volatile(out.add(i), value);
+        }
+        super::clac();
+    }
+    STATUS_OK
+}
+
+/// Read-only pool diagnostics through a held MemoryPool/READ reference.
+/// No physical addresses, handles or destructive authority are disclosed.
+fn sys_observe(slot: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.obj != crate::cap::CapObj::MemoryPool || cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(out, 9 * 8) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let (regions, pages, maps) = crate::shared::usage_snapshot();
+    let counts = [
+        crate::frames::free_frames(),
+        crate::frames::total_frames(),
+        crate::spawn::records_snapshot().iter().flatten().count() as u64,
+        crate::proc::live_count() as u64,
+        regions as u64,
+        pages as u64,
+        maps as u64,
+        crate::cap::occupancy(pid)
+            .map(|(used, _)| u64::from(used))
+            .unwrap_or(0),
+        crate::timekeeping::now_us(),
+    ];
+    unsafe {
+        super::stac();
+        for (i, value) in counts.into_iter().enumerate() {
+            core::ptr::write_unaligned((out as *mut u64).add(i), value);
         }
         super::clac();
     }

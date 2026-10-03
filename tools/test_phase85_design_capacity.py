@@ -110,7 +110,7 @@ def cap_projection() -> None:
     # ADR-0056 adds exactly two disjoint graphics endpoints without
     # disturbing the ten Phase-8.5 endpoint slots or raising CAP_SLOTS.
     assert 'pub const MAX_ENDPOINTS: usize = 12;' in ipc
-    assert 'pub const MAX_NOTIFS: usize = 19;' in ipc  # accepted marker is actually allocated.
+    assert 'pub const MAX_NOTIFS: usize = 25;' in ipc  # accepted marker is actually allocated.
     # Source-anchored upper schedule: actual manager 22 literal boot caps,
     # including registrar and lifecycle-admin marker. Conservatively
     # include four other resident Process handles (stack/broker/app/package).

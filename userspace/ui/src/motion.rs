@@ -6,6 +6,17 @@ pub const FOCUS_US: u64 = 80_000;
 pub const DOCK_US: u64 = 140_000;
 pub const FRAME_US: u64 = 20_000;
 const UNIT: u64 = 65_536;
+/// Opaque channel interpolation; this does not promise compositor alpha.
+pub fn color(from: u32, to: u32, amount: i32) -> u32 {
+    let amount = i64::from(amount.clamp(0, UNIT as i32));
+    let mut result = 0xff00_0000;
+    for shift in [0, 8, 16] {
+        let a = i64::from((from >> shift) & 255);
+        let b = i64::from((to >> shift) & 255);
+        result |= ((a + (b - a) * amount / UNIT as i64) as u32) << shift;
+    }
+    result
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Easing {
     Linear,
@@ -20,6 +31,9 @@ pub struct Motion {
     easing: Easing,
 }
 impl Motion {
+    pub fn target(self) -> i32 {
+        self.target
+    }
     pub const fn fixed(value: i32) -> Self {
         Self {
             from: value,

@@ -2,6 +2,35 @@
 
 Status: implementation in progress; no Phase-10 qualification claimed.
 
+## Ordinary application checkpoint
+
+ADR-0065 documents scoped function references, six private client pacing clocks
+and MemoryPool/READ diagnostics. `tools/test_m10_apps.py` passes six actual
+ordinary processes, pointer-driven launch/close, capacity refusal, terminal
+command/file operations, Files create, Editor exact complete-file save and
+unsaved-close cancel/discard, Settings durable theme/motion and a fresh reboot
+whose pixels reflect the preference. Two additional full six-app cycles and
+a gallery relaunch return to identical warmed frames/records/processes/shared
+regions/pages/maps/caps. Cold-to-warm overhead is precisely six retained
+intermediate page tables under the existing ADR-0056 unmap policy.
+
+Workspace receipt: `/workspace/scratch/arena-apps-gate.log`. The observed cold
+baseline in that build is `(115241,14,14,1,469,2,16)`; six sessions require 1231
+shared pages including the 469-page GOP scanout, 14 maps and 28 steady broker
+caps. Actual transient peaks and additional display modes remain to qualify.
+
+The four-dynamic-child quota and checked-reply cancellation production mutants
+both go RED. Restored exact EFI runs the full guest resource gate GREEN:
+`e6ff0fe9439c57ed45d5015e31f98331b4f97f37ad02f1ead90aec19ed95516a`.
+Receipts: `/workspace/scratch/arena-multi-red.log` and
+`/workspace/scratch/arena-multi-exact-green.log`. Notification capacity now
+includes six app clocks (25); those earlier receipts predate this addition.
+
+This checkpoint is not the engineering baseline. Generic dynamic graphical
+launch, adversarial/new-boundary controls, production boot integration,
+additional UI workflows, historical/full gates, screenshots/handoff and
+exact-EFI stability/archive proof remain outstanding.
+
 Engineering branch: `arena/phase10-sol-engineering`.
 
 Exact starting main: `491944da750888aa157070b2c580102d6a6dd9fc`.

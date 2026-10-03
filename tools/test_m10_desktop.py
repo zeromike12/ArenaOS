@@ -34,7 +34,7 @@ def workflow():
         c.command('input-send-event',events=events)
     try:
         empty=shot('empty')
-        point(400,570,True);point(400,570,False)
+        point(545,570,True);point(545,570,False)
         opened=shot('gallery',lambda p:crop(p,100,100,100,80)!=crop(empty,100,100,100,80))
         # Wait for actual client drawing: nonuniform list/control/body region.
         opened=shot('gallery',lambda p:len(set(crop(p,200,150,70,70)[i:i+3] for i in range(0,70*70*3,3)))>3)
@@ -49,7 +49,7 @@ def workflow():
         closed=shot('closed',lambda p:crop(p,300,210,300,180)==crop(empty,300,210,300,180))
         assert crop(closed,100,110,100,100)==crop(empty,100,110,100,100)
         # Relaunch uses a new Process/region and produces an ordinary client.
-        point(400,570,True);point(400,570,False);point(780,500)
+        point(545,570,True);point(545,570,False);point(780,500)
         shot('relaunched',lambda p:len(set(crop(p,200,150,70,70)[i:i+3] for i in range(0,70*70*3,3)))>3)
     finally:c.close()
     return b'shutdown\r'

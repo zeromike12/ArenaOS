@@ -11,6 +11,7 @@ pub enum Frame {
     Create { width: u16, height: u16 },
     Damage { handle: u64 },
     Poll { handle: u64 },
+    CancelClose { handle: u64 },
     Title { handle: u64, text: [u8; 32] },
     Event { handle: u64, event: Event },
 }
@@ -30,6 +31,7 @@ impl Frame {
             }
             Self::Damage { handle } => (2, handle),
             Self::Poll { handle } => (3, handle),
+            Self::CancelClose { handle } => (6, handle),
             Self::Title { handle, text } => {
                 let end = text.iter().position(|&x| x == 0).unwrap_or(32);
                 if end == 0
@@ -92,6 +94,7 @@ impl Frame {
             1 => Self::Create { width, height },
             2 => Self::Damage { handle },
             3 => Self::Poll { handle },
+            6 => Self::CancelClose { handle },
             4 => Self::Title {
                 handle,
                 text: b[32..].try_into().map_err(|_| Error::Invalid)?,
@@ -132,6 +135,7 @@ mod tests {
             },
             Frame::Damage { handle: 9 },
             Frame::Poll { handle: u64::MAX },
+            Frame::CancelClose { handle: 9 },
             Frame::Title {
                 handle: 9,
                 text: title,

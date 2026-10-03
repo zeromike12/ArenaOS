@@ -437,6 +437,7 @@ def boot(label: str, esp: Path,
     )
     t0 = time.monotonic()
     killed = False
+    feeder_errors: list[Exception] = []
     # QEMU's stderr is KEPT, not discarded. When the emulator refuses to
     # start — a bad device argument, a socket already bound, a missing
     # file — it says so on stderr and exits in a tenth of a second with
@@ -486,6 +487,10 @@ def boot(label: str, esp: Path,
                         proc.stdin.write(payload() if callable(payload) else payload)
                         proc.stdin.flush()
                     except (BrokenPipeError, OSError):
+                        return
+                    except Exception as error:
+                        feeder_errors.append(error)
+                        proc.terminate()
                         return
                     sent += 1
                     if sent == len(feed):
@@ -541,6 +546,8 @@ def boot(label: str, esp: Path,
     peer_thread.join(timeout=2)
     dns_stop.set()
     dns_thread.join(timeout=2)
+    if feeder_errors:
+        raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
     if killed:
         rc = None
     dt = time.monotonic() - t0

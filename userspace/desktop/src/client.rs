@@ -1,8 +1,6 @@
 //! Small ordinary userspace graphical client adapter. No raw display/input.
+use crate::abi::*;
 use crate::{model::Event, wire::Frame};
-#[path = "../../abi.rs"]
-mod abi;
-use abi::*;
 pub const ENDPOINT: u64 = 0;
 pub const BACKING: u64 = 1;
 /// First page is reserved for explicit service I/O; pixels follow it.
@@ -11,6 +9,8 @@ pub const PIXEL_OFFSET: usize = 4096;
 pub struct Client {
     pub handle: u64,
     pub pixels: *mut u32,
+    pub io: *mut u8,
+    pub appearance: core::cell::Cell<u8>,
     pub width: usize,
     pub height: usize,
 }
@@ -43,6 +43,15 @@ fn exchange(frame: Frame) -> Result<([u64; 3], Frame), i64> {
     Ok((out, Frame::decode(&bytes).map_err(|_| -2)?))
 }
 impl Client {
+    pub fn cancel_close(&self) -> Result<(), i64> {
+        let f = Frame::CancelClose {
+            handle: self.handle,
+        };
+        if exchange(f)?.1 != f {
+            return Err(-2);
+        }
+        Ok(())
+    }
     pub fn connect(width: usize, height: usize, title: &str) -> Result<Self, i64> {
         if width < 80
             || height < 60
@@ -96,6 +105,8 @@ impl Client {
         Ok(Self {
             handle: reply[1],
             pixels: (va as usize + PIXEL_OFFSET) as *mut u32,
+            io: va as *mut u8,
+            appearance: core::cell::Cell::new(2),
             width,
             height,
         })
@@ -113,7 +124,11 @@ impl Client {
         let f = Frame::Poll {
             handle: self.handle,
         };
-        let (_, reply) = exchange(f)?;
+        let (out, reply) = exchange(f)?;
+        if out[1] > 3 {
+            return Err(-2);
+        }
+        self.appearance.set(out[1] as u8);
         match reply {
             Frame::Poll { handle } if handle == self.handle => Ok(None),
             Frame::Event { handle, event } if handle == self.handle => Ok(Some(event)),

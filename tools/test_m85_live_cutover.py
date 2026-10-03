@@ -61,7 +61,7 @@ def main():
     samples=[tuple(map(int,x)) for x in re.findall(r'pkg: observed frames=(\d+) records=(\d+) processes=(\d+)',s)]
     assert len(samples)==3 and samples[0]==samples[2] and samples[1][0]<samples[0][0]
     assert samples[1][1:]==(samples[0][1]+1,samples[0][2]+1),samples
-    assert 'servicemgr: full fixture notification budget 19/19; twentieth refused' in s
+    assert 'servicemgr: full fixture notification budget 25/25; twenty-sixth refused' in s
     mgr={name:int(n) for name,n in re.findall(r'servicemgr: observed cap occupancy ([\w-]+)=(\d+)',s)}
     assert all(0<mgr[k]<=32 for k in ('baseline','two-live-images','unretired-child','after-finish')),mgr
     assert mgr['two-live-images']>mgr['unretired-child']>=mgr['baseline'] and mgr['after-finish']<mgr['two-live-images'],mgr

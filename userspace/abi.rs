@@ -45,6 +45,8 @@ pub const SYS_IPC_TRY_RECV: u64 = 42;
 /// Same endpoint authority and buffers as REPLY; consumes cancelled-request
 /// tombstone and returns CALLER_GONE without staging reply references.
 pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
+/// MemoryPool/READ-gated nine scalar resource counts; reserved args zero.
+pub const SYS_OBSERVE: u64 = 44;
 pub const STATUS_CALLER_GONE: i64 = -6;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
