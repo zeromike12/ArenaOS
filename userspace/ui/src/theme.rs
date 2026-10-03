@@ -135,7 +135,7 @@ pub const LIGHT: Theme = Theme {
 /// "Ink": deep blue-black field with low-glare graphite material.
 pub const DARK: Theme = Theme {
     desktop: 0x0b1015,
-    desktop_mark: 0x141c24,
+    desktop_mark: 0x172029,
     desktop_text: 0x66778a,
     bar: 0x131a21,
     bar_edge: 0x232d38,

@@ -95,18 +95,15 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
     c::text(canvas, x, 36, "/32 LINES", Style::Caption, t.muted);
     c::text_right(canvas, x, 36, count, Style::Caption, t.secondary);
     if older > 0 {
+        // History view: how many lines above the live tail are shown.
         let mut b = [0u8; 32];
+        let mut label = [0u8; 32];
         let back = c::decimal(&mut b, older as u64, false);
-        let w = c::measure(back, Style::Caption) + c::measure("BACK ", Style::Caption) + 2 * m::M;
-        let x = c::chip(canvas, right - w, 48, "BACK ", Tone::Accent, t);
-        c::text(
-            canvas,
-            right - w + x - m::M,
-            51,
-            back,
-            Style::Caption,
-            t.accent,
-        );
+        label[..5].copy_from_slice(b"BACK ");
+        label[5..5 + back.len()].copy_from_slice(back.as_bytes());
+        let label = string(&label[..5 + back.len()]);
+        let w = c::measure(label, Style::Caption) + 2 * m::M;
+        c::chip(canvas, right - w, 48, label, Tone::Accent, t);
     }
     // Console fills the content area edge to edge.
     let top = l::HEADER_BOTTOM + 1;

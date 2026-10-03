@@ -99,18 +99,10 @@ pub fn system(
     // System bar: identity, active application, real session/uptime facts.
     c::rect(canvas, 0, 0, w, bar - 1, t.bar);
     c::hline(canvas, 0, bar - 1, w, t.bar_edge);
-    c::emblem(
-        canvas,
-        Rect {
-            x: m::L,
-            y: ty - 1,
-            width: 16,
-            height: 9,
-        },
-        t.accent,
-        t.bar,
-    );
-    let x = c::text(canvas, m::L + 22, ty, "ArenaOS", Style::Strong, t.bar_text);
+    // Wordmark only: a small capsule mark here could be misread as a
+    // battery or toggle indicator, which ArenaOS does not have.
+    let x = c::text(canvas, m::L, ty, "Arena", Style::Strong, t.bar_text);
+    let x = c::text(canvas, x, ty, "OS", Style::Strong, t.accent);
     c::vline(canvas, x + m::M, 7, bar - 14, t.bar_edge);
     let x = x + m::M + 1 + m::M + 1;
     match active {
