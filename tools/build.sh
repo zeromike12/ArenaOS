@@ -255,6 +255,7 @@ done
 
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
+( cd "$REPO_ROOT/userspace/desktop" && cargo build --offline --locked --release )
 cargo build $PROFILE_FLAG
 
 EFI_SRC="$REPO_ROOT/kernel/target/x86_64-unknown-uefi/$PROFILE_DIR/arena-boot.efi"

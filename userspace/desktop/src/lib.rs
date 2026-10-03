@@ -5,3 +5,5 @@ pub mod model;
 pub mod wire;
 
 pub mod client;
+
+pub mod input_wire;

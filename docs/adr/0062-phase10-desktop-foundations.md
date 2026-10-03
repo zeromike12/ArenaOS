@@ -95,3 +95,19 @@ advertise transactional replacement using that operation. Any replacement
 extension needs data CoW, bounded preflight, metadata commit, rollback, reference
 retention for recoverable older commits and actual crash/byte-level tests. Its
 on-disk representation and invariants must be reviewed before implementation.
+
+## Implemented prototype refinements
+
+The first linked gallery path demonstrates this topology in ring 3. The broker
+receives an explicit BootImage/READ reference, Pool/WRITE, client Endpoint/READ,
+delegable client Endpoint/WRITE|COPY, display Endpoint/WRITE, input comparator
+and a private frame Notification/READ|WRITE. The ordinary launched gallery
+receives only its endpoint caller and its own backing. Owned Process capability
+retirement consumes the lifecycle handle; input/window policy remains userspace.
+
+Additive TRY_RECV uses the existing receiver delivery and cancellation path;
+empty work returns BUSY without publishing a kernel waiter. A private timer
+notification drives idle cleanup and future animations. Six pending app callers
+plus the producer justify eight queued calls. One explicit clock justifies a
+nineteenth notification; the historical full-table refusal is retained at the
+new capacity. General multi-dynamic-child qualification remains outstanding.

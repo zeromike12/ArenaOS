@@ -765,7 +765,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // A real, parked ring-3 server has already painted and finished its
     // bounded allocation before shell/manager resource commands can run.
     // This avoids a one-frame startup race across historical reboot tests.
-    let mut graphics = start_boot_display(_input_pid);
+    let desktop_frame_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("desktop: frame notification bound"));
+    let mut graphics = start_boot_display(_input_pid, desktop_frame_nid);
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     if expected_stack_caps.is_some() {
@@ -897,17 +899,17 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // optional-device boots do not claim to fill that table.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         let before = crate::ipc::notification_snapshot();
-        if crate::ipc::notification_occupancy() != 18
+        if crate::ipc::notification_occupancy() != crate::ipc::MAX_NOTIFS
             || crate::ipc::create_notification().is_ok()
             || crate::ipc::notification_snapshot() != before
         {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed mutation-free nineteenth refusal",
+                "servicemgr: notification bound failed mutation-free twentieth refusal",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 18/18; nineteenth refused"
+            "servicemgr: full fixture notification budget 19/19; twentieth refused"
         );
     }
 
@@ -935,6 +937,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
                 }
             }
             for i in 0..2 {
+                if g.clients[i] == 0 {
+                    continue;
+                }
                 if !g.exited[i] && crate::sched::proc_live_threads(g.clients[i]) == 0 {
                     // Real original-child retirement (not a dropped cap).
                     // IPC cancellation is swept by proc::destroy as usual.
@@ -1095,7 +1100,7 @@ struct GraphicsRuntime {
 /// virtio GPU. A capability BAR, not the PCI numeric address, is delegated.
 /// The endpoint is parked before boot continues; graphical readiness is a
 /// separate service concern, never inferred from the mere presence of a BAR.
-fn start_boot_display(input_pid: Option<u64>) -> Option<GraphicsRuntime> {
+fn start_boot_display(input_pid: Option<u64>, frame_nid: u32) -> Option<GraphicsRuntime> {
     let gop = crate::handoff::display();
     if let Some(mode) = gop {
         if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
@@ -1278,7 +1283,16 @@ fn start_boot_display(input_pid: Option<u64>) -> Option<GraphicsRuntime> {
         "m9",
         "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
     );
-    Some(start_boot_compositor(display_pid, eid, input_pid))
+    let pointer_present = (0..crate::drivers::pci::virtio_count())
+        .filter_map(crate::drivers::pci::virtio_device)
+        .filter(|v| v.virtio_type == crate::drivers::pci::VIRTIO_TYPE_INPUT)
+        .count()
+        >= 2;
+    if pointer_present {
+        Some(start_boot_desktop(display_pid, eid, input_pid, frame_nid))
+    } else {
+        Some(start_boot_compositor(display_pid, eid, input_pid))
+    }
 }
 
 /// Root provides *exactly two* disjoint original-child Process/READ and
@@ -2092,6 +2106,32 @@ fn spawn_inputd() -> Result<Option<u64>, &'static str> {
         },
     ];
     let pid = crate::spawn::spawn_init(10, &grants, None)?;
+    // A single input service owns both queues and consumes their common
+    // IRQ notification. The second MMIO cap never reaches applications.
+    if let Some(second) = (0..crate::drivers::pci::virtio_count())
+        .filter_map(crate::drivers::pci::virtio_device)
+        .find(|d| {
+            d.virtio_type == crate::drivers::pci::VIRTIO_TYPE_INPUT && d.pci_index != v.pci_index
+        })
+    {
+        let sf = crate::drivers::pci::pci_function(second.pci_index)
+            .ok_or("inputd: second function vanished")?;
+        let sb = second.common.bar as usize;
+        if sb > 5 || sf.bar_is_io[sb] || sf.bar_base[sb] == 0 || sf.bar_size[sb] < 4096 {
+            return Err("inputd: second BAR invalid");
+        }
+        crate::cap::issue(
+            pid,
+            5,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Mmio {
+                    phys: sf.bar_base[sb],
+                    pages: (sf.bar_size[sb] / 4096) as u32,
+                },
+                rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+            },
+        )?;
+    }
     info!(
         "kernel",
         "inputd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=ConsoleInput/W) — the keyboard is live; keystrokes feed the shell's line discipline beside the serial port",
@@ -2339,4 +2379,93 @@ fn test_kernel_irq_live(_info: &BootInfo) -> Result<(), &'static str> {
         "kernel_irq_live: {ticks} ticks through the relocated IDT + kernel-alias LAPIC EOI"
     );
     Ok(())
+}
+
+/// Ordinary userspace broker/compositor: kernel policy delegates explicit
+/// image, pool, endpoint and clock authorities; window policy remains ring 3.
+fn start_boot_desktop(
+    display: u64,
+    display_eid: u32,
+    input_pid: Option<u64>,
+    frame_nid: u32,
+) -> GraphicsRuntime {
+    use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let eid = crate::ipc::create_endpoint().unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let token = CapObj::ProofToken {
+        id: 0x4152_454e_5031_3049,
+    };
+    let comp = crate::spawn::spawn_init_boot(
+        6,
+        &[
+            Cap {
+                obj: CapObj::Endpoint { eid: display_eid },
+                rights: W,
+            },
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: R,
+            },
+            Cap {
+                obj: token,
+                rights: R,
+            },
+            Cap {
+                obj: CapObj::MemoryPool,
+                rights: W,
+            },
+            Cap {
+                obj: CapObj::Notification { nid: frame_nid },
+                rights: R | W,
+            },
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W | C,
+            },
+            Cap {
+                obj: CapObj::BootImage { index: 7 },
+                rights: R,
+            },
+        ],
+        None,
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    if let Some(pid) = input_pid {
+        let old = crate::cap::read(pid, 1).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        let CapObj::Endpoint { eid: old_eid } = old.obj else {
+            crate::halt::halt_machine("desktop input endpoint invalid")
+        };
+        crate::cap::consume(pid, 1).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::ipc::destroy_endpoint(old_eid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            pid,
+            1,
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            pid,
+            4,
+            Cap {
+                obj: token,
+                rights: R | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    info!(
+        "m10",
+        "desktop broker spawned with explicit delegated grants; application Process/region ownership remains userspace"
+    );
+    GraphicsRuntime {
+        display,
+        compositor: comp,
+        clients: [0; 2],
+        regions: [0; 2],
+        exited: [false; 2],
+        retired: [false; 2],
+        deadline: [0; 2],
+    }
 }

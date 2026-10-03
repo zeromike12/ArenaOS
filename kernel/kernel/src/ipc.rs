@@ -41,7 +41,7 @@ pub const MAX_ENDPOINTS: usize = 12; // ADR-0056: two disjoint userspace graphic
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 18; // ADR-0055 distinct Phase 8.5 lifecycle marker
+pub const MAX_NOTIFS: usize = 19; // Phase 10 private compositor frame clock
 #[path = "ipc_adr50_test.rs"]
 mod adr50_test;
 /// In-guest internal-only M4 fixture; no userspace syscall or authority.
@@ -50,7 +50,7 @@ pub(crate) use adr50_test::{
 };
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
-const QUEUE_DEPTH: usize = 4;
+const QUEUE_DEPTH: usize = 8; // six clients, input producer, one spare
 
 /// The "no capability" marker in message buffers (ADR-0018): a cap word
 /// holds either a landing slot index (< `CAP_SLOTS`) or this.
@@ -559,6 +559,20 @@ pub(crate) fn reopen_after_server_spawn(eid: u32) {
 /// Errors: `STATUS_BAD_ARG` (dead eid), `STATUS_BUSY` (a second server
 /// on one endpoint — v1 is single-server, ADR-0018).
 pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
+    recv_with_policy(pid, eid, true)
+}
+
+/// Take queued work without registering a waiter. Empty queues return BUSY;
+/// delivery, transferred references and cancellation use the blocking path.
+pub fn try_recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
+    recv_with_policy(pid, eid, false)
+}
+
+fn recv_with_policy(
+    pid: u64,
+    eid: u32,
+    blocking: bool,
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // The caller can die after waking us but before we resume here. Its
     // Delivered slot becomes a one-shot cancellation tombstone; consume it
     // and retry the same recv, rather than falsely fail-stop or lose a wake.
@@ -591,7 +605,7 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Stat
                 if let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Waiting) {
                     return Ok(Some(qi));
                 }
-                if ep.server != NO_TID {
+                if ep.server != NO_TID || !blocking {
                     return Err(STATUS_BUSY);
                 }
                 ep.server = sched::current_thread_id();

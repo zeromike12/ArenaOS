@@ -40,6 +40,8 @@ pub const SYS_SHARED_INFO: u64 = 39;
 pub const SYS_SHARED_UNMAP: u64 = 40;
 /// ADR-0060: query liveness only through a held Process/READ cap.
 pub const SYS_PROC_LIVE: u64 = 41;
+/// READ endpoint authority; empty queue returns BUSY without parking.
+pub const SYS_IPC_TRY_RECV: u64 = 42;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;

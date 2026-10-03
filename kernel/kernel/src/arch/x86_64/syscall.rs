@@ -164,6 +164,7 @@ pub const SYS_SHARED_INFO: u64 = 39;
 pub const SYS_SHARED_UNMAP: u64 = 40;
 /// ADR-0060: only a held Process/READ witness may inspect thread liveness.
 pub const SYS_PROC_LIVE: u64 = 41;
+pub const SYS_IPC_TRY_RECV: u64 = 42;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -643,6 +644,9 @@ extern "C" fn syscall_dispatch(
         }
         SYS_IPC_CALL => sys_ipc_call(a0, a1, a2, a3, a4, a5) as u64,
         SYS_IPC_RECV => sys_ipc_recv(a0, a1, a2) as u64,
+        SYS_IPC_TRY_RECV if a3 == 0 && a4 == 0 && a5 == 0 => {
+            sys_ipc_receive(a0, a1, a2, false) as u64
+        }
         SYS_IPC_REPLY => sys_ipc_reply(a0, a1, a2, a3, a4) as u64,
         SYS_NOTIFY => sys_notify(a0, a1) as u64,
         SYS_WAIT => sys_wait(a0) as u64,
@@ -966,6 +970,10 @@ fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> Status 
 /// `[w0, w1, landed-cap-slot]` and the request's inline message lands
 /// in `msg buf` (NULL = not wanted; IPC v1.1). Needs READ.
 fn sys_ipc_recv(a0: u64, a1: u64, a2: u64) -> Status {
+    sys_ipc_receive(a0, a1, a2, true)
+}
+
+fn sys_ipc_receive(a0: u64, a1: u64, a2: u64, blocking: bool) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG;
     };
@@ -981,7 +989,12 @@ fn sys_ipc_recv(a0: u64, a1: u64, a2: u64) -> Status {
     if has_msg && !user_range_ok(a2, crate::ipc::MSG_BYTES as u64) {
         return STATUS_BAD_ADDRESS;
     }
-    match crate::ipc::recv(pid, eid) {
+    let result = if blocking {
+        crate::ipc::recv(pid, eid)
+    } else {
+        crate::ipc::try_recv(pid, eid)
+    };
+    match result {
         Ok((words, landed, msg)) => {
             // SAFETY: as in sys_ipc_call — own context, validated range.
             unsafe {

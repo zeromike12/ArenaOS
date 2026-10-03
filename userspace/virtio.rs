@@ -139,12 +139,27 @@ pub unsafe fn discover(
     id_transitional: u64,
     min_msix: u16,
 ) -> Result<DevInfo, VErr> {
+    unsafe { discover_at(prefix, kind, id_modern, id_transitional, min_msix, None) }
+}
+
+/// Resolve a particular held MMIO window when one driver owns multiple
+/// devices. The kernel still gates DEV_INFO through the actual MMIO cap.
+/// # Safety
+/// Same context and buffer ownership requirements as `discover`.
+pub unsafe fn discover_at(
+    prefix: &str,
+    kind: &str,
+    id_modern: u64,
+    id_transitional: u64,
+    min_msix: u16,
+    bar_phys: Option<u64>,
+) -> Result<DevInfo, VErr> {
     let mut dev_idx = u64::MAX;
     let mut info = [0u64; INFO_WORDS];
     for idx in 0..DEV_IDX_PROBES {
         // SAFETY: wrapper contract; `info` is this image's own buffer.
         let r = unsafe { syscall2(SYS_DEV_INFO, idx, info.as_mut_ptr() as u64) };
-        if r == INFO_WORDS as i64 {
+        if r == INFO_WORDS as i64 && bar_phys.is_none_or(|bar| info[1] == bar) {
             dev_idx = idx;
             break;
         }

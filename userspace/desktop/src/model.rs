@@ -74,10 +74,11 @@ pub struct State {
     buttons: u8,
     pub pointer: (i32, i32),
     screen: (i32, i32),
+    dock_items: usize,
     pub dropped: u64,
 }
 impl State {
-    pub fn new(width: u16, height: u16) -> Result<Self, Error> {
+    pub const fn new(width: u16, height: u16) -> Result<Self, Error> {
         if width < 320 || height < 240 || width > 1024 || height > 768 {
             return Err(Error::Invalid);
         }
@@ -91,7 +92,27 @@ impl State {
             pointer: (0, 0),
             screen: (width as i32, height as i32),
             dropped: 0,
+            dock_items: MAX_WINDOWS,
         })
+    }
+    pub fn configure_screen(
+        &mut self,
+        width: u16,
+        height: u16,
+        dock_items: usize,
+    ) -> Result<(), Error> {
+        if width < 320
+            || height < 240
+            || width > 1024
+            || height > 768
+            || dock_items == 0
+            || dock_items > 8
+        {
+            return Err(Error::Invalid);
+        }
+        self.screen = (width as i32, height as i32);
+        self.dock_items = dock_items;
+        Ok(())
     }
     pub fn windows(&self) -> impl Iterator<Item = &Window> {
         self.windows.iter().flatten()
@@ -227,7 +248,7 @@ impl State {
             }
             self.drag = None;
         }
-        let dock_w = MAX_WINDOWS as i32 * m::DOCK_ITEM_WIDTH;
+        let dock_w = self.dock_items as i32 * m::DOCK_ITEM_WIDTH;
         let dock_x = (self.screen.0 - dock_w) / 2;
         if pressed && y >= self.screen.1 - m::DOCK_HEIGHT && x >= dock_x && x < dock_x + dock_w {
             return Action::Launch(((x - dock_x) / m::DOCK_ITEM_WIDTH) as usize);
