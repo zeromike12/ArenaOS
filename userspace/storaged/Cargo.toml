@@ -1,0 +1,28 @@
+[package]
+name = "arena-storaged"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS block service (M5.2, ADR-0022) — the userspace virtio-blk driver. Two images from one crate: `arena-storaged` (spawn-registry image 2, the resident driver: virtio 1.0 handshake on a kernel-granted Mmio window, one split virtqueue over three owned frames, zero-copy DMA through LENT buffer caps, MSI-X completions relayed into SYS_WAIT) and `blktest` (image 3, the service-boundary client the m5 suite spawns: allocates a buffer frame, lends it through IPC, drives a write/read-back/verify cycle, then poisons the driver into a clean exit)."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+# The driver (registry image 2), spawned at boot as the block service.
+[[bin]]
+name = "arena-storaged"
+path = "src/main.rs"
+
+# The block-service test client (registry image 3), spawned only by the
+# m5 suite's block_service test. Shares src/abi.rs with the driver via
+# #[path] — one ABI surface, two programs.
+[[bin]]
+name = "blktest"
+path = "src/blktest.rs"

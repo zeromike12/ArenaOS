@@ -1,0 +1,30 @@
+[package]
+name = "arena-inputd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS input service (M6.3, ADR-0026) — the userspace virtio-input keyboard driver on the shared virtio core. Two images from one crate: `arena-inputd` (spawn-registry image 10, the resident driver: virtio 1.0 handshake on a kernel-granted Mmio window, ONE packed eventq with 32 device-writable event buffers posted, evdev keycodes decoded to ASCII, and — with the ConsoleInput capability — bytes pushed into the kernel's console line discipline so a keyboard drives the shell) and `inputtest` (image 11, the m6 suite's client: reads decoded keys through the service boundary and verifies the harness's injected sequence byte-for-byte)."
+
+# Standalone project — deliberately NOT a member of the kernel workspace
+# (different target, different profile rules). The empty table stops
+# cargo from walking up into any parent workspace.
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+# The keyboard driver (registry image 10), spawned at boot when the
+# virtio-input fixture is attached.
+[[bin]]
+name = "arena-inputd"
+path = "src/main.rs"
+
+# The input-service test client (registry image 11), spawned only by
+# the m6 suite's input_service test. Shares the userspace ABI surface
+# (userspace/abi.rs) with every other image via #[path] — one wire
+# contract, all programs.
+[[bin]]
+name = "inputtest"
+path = "src/inputtest.rs"

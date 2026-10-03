@@ -1,0 +1,45 @@
+arena-phase84-crypto-audit v0.1.0 (/home/user/ArenaOS/audit/phase84-crypto)
+├── ed25519-dalek v2.2.0
+│   ├── ed25519 v2.2.3
+│   │   └── signature v2.2.0
+│   ├── sha2 v0.10.9
+│   │   ├── cfg-if feature "default"
+│   │   │   └── cfg-if v1.0.5
+│   │   ├── cpufeatures feature "default"
+│   │   │   └── cpufeatures v0.2.17
+│   │   └── digest feature "default"
+│   │       ├── digest v0.10.7
+│   │       │   ├── block-buffer feature "default"
+│   │       │   │   └── block-buffer v0.10.4
+│   │       │   │       └── generic-array feature "default"
+│   │       │   │           └── generic-array v0.14.7
+│   │       │   │               └── typenum feature "default"
+│   │       │   │                   └── typenum v1.20.1
+│   │       │   │               [build-dependencies]
+│   │       │   │               └── version_check feature "default"
+│   │       │   │                   └── version_check v0.9.5
+│   │       │   └── crypto-common feature "default"
+│   │       │       └── crypto-common v0.1.7
+│   │       │           ├── generic-array feature "default" (*)
+│   │       │           ├── generic-array feature "more_lengths"
+│   │       │           │   └── generic-array v0.14.7 (*)
+│   │       │           └── typenum feature "default" (*)
+│   │       └── digest feature "core-api"
+│   │           ├── digest v0.10.7 (*)
+│   │           └── digest feature "block-buffer"
+│   │               └── digest v0.10.7 (*)
+│   ├── subtle v2.6.1
+│   └── curve25519-dalek feature "digest"
+│       └── curve25519-dalek v4.1.3
+│           ├── digest v0.10.7 (*)
+│           ├── subtle v2.6.1
+│           ├── cfg-if feature "default" (*)
+│           └── cpufeatures feature "default" (*)
+│           [build-dependencies]
+│           └── rustc_version feature "default"
+│               └── rustc_version v0.4.1
+│                   └── semver feature "default"
+│                       ├── semver v1.0.28
+│                       └── semver feature "std"
+│                           └── semver v1.0.28
+└── sha2 v0.10.9 (*)

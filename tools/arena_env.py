@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""ArenaOS dev-environment resolution (docs/DEV-ENV.md).
+
+Locates the Rust toolchain, QEMU, and UEFI firmware (OVMF/EDK2) across the
+two supported environments:
+
+1. The offline sandbox: toolchain under /opt/rust/prefix, QEMU under /opt/qemu
+   (static musl build, launched through /opt/musl/lib/libc.so as its dynamic
+   loader because the host lacks ld-musl and its glibc is too old for the
+   glibc build), firmware under /opt/qemu/share/qemu.
+2. A normal workstation: rustup toolchain on PATH, qemu-system-x86_64 on
+   PATH, distro OVMF (/usr/share/OVMF, /usr/share/edk2, ...).
+
+Environment overrides (highest priority):
+  ARENA_RUST_BIN    directory containing rustc/cargo
+  ARENA_QEMU        full command prefix for qemu-system-x86_64 (space-split)
+  ARENA_OVMF_CODE   path to OVMF/edk2 code flash (x86_64)
+  ARENA_OVMF_VARS   path to OVMF/edk2 vars flash template
+"""
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+SANDBOX_RUST = Path("/opt/rust/prefix/bin")
+SANDBOX_QEMU_BIN = Path("/opt/qemu/bin/qemu-system-x86_64")
+SANDBOX_QEMU_LIB = Path("/opt/qemu/lib")
+SANDBOX_QEMU_SHARE = Path("/opt/qemu/share/qemu")
+SANDBOX_MUSL_LOADER = Path("/opt/musl/lib/libc.so")
+
+OVMF_SEARCH_DIRS = [
+    SANDBOX_QEMU_SHARE,
+    Path("/usr/share/OVMF"),
+    Path("/usr/share/edk2/ovmf-x64"),
+    Path("/usr/share/OVMF/x64"),
+    Path("/usr/share/qemu"),
+]
+OVMF_CODE_NAMES = ["edk2-x86_64-code.fd", "OVMF_CODE.fd", "OVMF_CODE-pure-efi.fd", "ovmf_code_x64.bin"]
+OVMF_VARS_NAMES = ["edk2-i386-vars.fd", "OVMF_VARS.fd", "OVMF_VARS-pure-efi.fd", "ovmf_vars_x64.bin"]
+
+
+def rust_bin() -> Path:
+    env = os.environ.get("ARENA_RUST_BIN")
+    if env:
+        return Path(env)
+    if (SANDBOX_RUST / "cargo").exists():
+        return SANDBOX_RUST
+    if shutil.which("cargo"):
+        return Path(shutil.which("cargo")).parent
+    sys.exit("error: no Rust toolchain found (see tools/dev-env/bootstrap.sh)")
+
+
+def rust_env() -> dict:
+    """Environment with the resolved toolchain on PATH."""
+    env = dict(os.environ)
+    env["PATH"] = f"{rust_bin()}:{env['PATH']}"
+    return env
+
+
+def qemu_cmd() -> list[str]:
+    """Full command prefix that launches qemu-system-x86_64."""
+    env = os.environ.get("ARENA_QEMU")
+    if env:
+        return env.split()
+    if SANDBOX_QEMU_BIN.exists() and SANDBOX_MUSL_LOADER.exists():
+        # Static musl QEMU: launch through musl's libc.so, which doubles as
+        # the dynamic loader; vendored libs come from /opt/qemu/lib.
+        loader_env = f"LD_LIBRARY_PATH={SANDBOX_QEMU_LIB}"
+        return ["env", loader_env, str(SANDBOX_MUSL_LOADER), str(SANDBOX_QEMU_BIN)]
+    if shutil.which("qemu-system-x86_64"):
+        return [shutil.which("qemu-system-x86_64")]
+    sys.exit("error: no qemu-system-x86_64 found (see tools/dev-env/bootstrap.sh)")
+
+
+def qemu_data_args() -> list[str]:
+    """Extra args QEMU needs to find its ROMs (sandbox layout only)."""
+    if SANDBOX_QEMU_SHARE.exists() and str(SANDBOX_QEMU_BIN) in " ".join(qemu_cmd()):
+        return ["-L", str(SANDBOX_QEMU_SHARE)]
+    return []
+
+
+def _find_firmware(names: list[str]) -> Path | None:
+    env_code = os.environ.get("ARENA_OVMF_CODE")
+    env_vars = os.environ.get("ARENA_OVMF_VARS")
+    envval = env_code if names is OVMF_CODE_NAMES else env_vars
+    if envval:
+        return Path(envval)
+    for d in OVMF_SEARCH_DIRS:
+        for n in names:
+            p = d / n
+            if p.exists():
+                return p
+    return None
+
+
+def ovmf_code() -> Path:
+    p = _find_firmware(OVMF_CODE_NAMES)
+    if p is None:
+        sys.exit("error: no OVMF/EDK2 code flash found (set ARENA_OVMF_CODE)")
+    return p
+
+
+def ovmf_vars_template() -> Path:
+    p = _find_firmware(OVMF_VARS_NAMES)
+    if p is None:
+        sys.exit("error: no OVMF/EDK2 vars flash found (set ARENA_OVMF_VARS)")
+    return p
+
+
+def build_dir() -> Path:
+    d = REPO_ROOT / "build"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+# ---- the Milestone-5 scratch disk (ADR-0021/0022/0023) -----------------------
+#
+# The harness fixture every boot attaches as virtio-blk-pci: the kernel's
+# PCI scan must find it (m5 pci_scan), the userspace storage driver
+# reads/writes it (M5.2), and — since M5.3 — it is FORMATTED as AFS1 by
+# tools/afs1.py so fsd mounts a real superblock + first commit every
+# boot. Fresh-per-run (re-formatted, never inherited): until step 5.4
+# makes persistence an explicit two-boot test, no run may inherit another
+# run's disk contents. The ESP stays the BOOT medium — this disk is
+# never bootable.
+
+SCRATCH_MIB = 8
+
+
+def make_scratch_disk() -> Path:
+    """Create (or re-create) the scratch disk, FORMATTED as AFS1.
+
+    M5.2 handed QEMU a zero-filled image; M5.3 (ADR-0023) formats it
+    host-side (tools/afs1.py — the layout's single source of truth) so
+    fsd mounts a real superblock + first commit every boot. Fresh per
+    run — the DEFAULT discipline. Since M5.4 the explicit multi-boot
+    scripts (test_m5_persist.py, test_m5_crash.py) own their disk's
+    lifecycle across paired boots via mtest.boot().
+    """
+    import afs1
+
+    p = build_dir() / "scratch.img"
+    with open(p, "wb") as f:
+        f.truncate(SCRATCH_MIB * 1024 * 1024)
+    afs1.mkfs(p, SCRATCH_MIB * 1024 * 1024 // afs1.SECTOR)
+    return p
+
+
+def scratch_disk_args() -> list[str]:
+    """QEMU args attaching the fresh scratch disk as virtio-blk-pci."""
+    p = make_scratch_disk()
+    return [
+        "-drive", f"file={p},format=raw,if=none,id=scr0",
+        "-device", "virtio-blk-pci,drive=scr0",
+    ]
+
+
+# ---- the Milestone-6 network fixture (ADR-0024) ------------------------------
+#
+# QEMU's user-mode netdev (slirp): no host privileges, deterministic, and it
+# answers ARP for its built-in gateway 10.0.2.2 — the peer for netd's link
+# proof. The device is NEW in v0.6.0: boots WITHOUT it stay green (the m6
+# suite reports an honest SKIP), boots with it attach exactly these args.
+
+SLIRP_GATEWAY = "10.0.2.2"
+SLIRP_GUEST = "10.0.2.15"
+
+
+def net_args() -> list[str]:
+    """QEMU args attaching the slirp NIC as virtio-net-pci (M6 fixture)."""
+    return [
+        "-netdev", "user,id=net0",
+        "-device", "virtio-net-pci,netdev=net0",
+    ]
+
+
+# ---- the Milestone-6.2 entropy fixture (ADR-0025) ----------------------------
+#
+# Bare `-device virtio-rng-pci`: QEMU auto-creates its `rng-builtin` default
+# backend (the platform CSPRNG via qemu_guest_getrandom) when no -object is
+# given — the default since QEMU 4.1, and portable across host OSes with no
+# host files and no privileges. rngd drives it; rngtest proves real variance.
+
+
+def rng_args() -> list[str]:
+    """QEMU args attaching the entropy source as virtio-rng-pci (M6.2)."""
+    return ["-device", "virtio-rng-pci"]
+
+
+# ---- the Milestone-6.3 keyboard fixture (ADR-0026) --------------------------
+#
+# `virtio-keyboard-pci`: QEMU forces MODERN virtio on the input class, so the
+# guest sees PCI id 0x1052 (0x1040 + type 18) with no transitional alias. The
+# device speaks 8-byte evdev events on a device-writable event queue, and the
+# harness types on it through QMP (tools/qmp.py) — the same path a user's
+# keystrokes in a QEMU window take. NEW in v0.8.0: boots without it stay green
+# (the m6 suite reports an honest SKIP and the serial console is unaffected).
+
+
+def input_args() -> list[str]:
+    """QEMU args attaching the virtual keyboard (M6.3 fixture)."""
+    return ["-device", "virtio-keyboard-pci"]
+
+
+# ---- the Milestone-6.4 console fixture (ADR-0027) ---------------------------
+#
+# `virtio-serial-pci` + a `virtconsole` port on a unix-socket chardev: a
+# SECOND console channel, independent of the serial port. The socket is the
+# host end — tests connect to it to read what the guest printed and to type
+# into the guest, exactly as a user would with `nc -U`.
+#
+# `wait=on` for the HARNESS, deliberately: QEMU discards everything a
+# console port sends while no client is attached (hw/char/virtio-console.c,
+# `flush_buf` — a console is never throttled, its output just goes to the
+# floor). With `wait=off` the guest could therefore transmit its fixture
+# into a socket nobody had reached yet, and the test would report an honest
+# but useless SKIP about one boot in five. Blocking QEMU's startup until the
+# actor is attached removes the race instead of papering over it with a
+# sleep. Users get `wait=off` in docs/RUNNING.md — their machine must boot
+# whether or not anyone connects, and that configuration is itself tested
+# (the console_service SKIP path).
+#
+# max_ports=1 is deliberate: with only one port QEMU does NOT offer
+# VIRTIO_CONSOLE_F_MULTIPORT, and a non-multiport port 0 is marked
+# guest-connected at DRIVER_OK (hw/char/virtio-serial-bus.c set_status), so
+# both directions work with two queues and no control protocol.
+
+
+def console_args(sock: Path) -> list[str]:
+    """QEMU args attaching the virtio-console port (M6.4 fixture)."""
+    sock.unlink(missing_ok=True)
+    return [
+        "-chardev", f"socket,id=vcon0,path={sock},server=on,wait=on",
+        "-device", "virtio-serial-pci,max_ports=1",
+        "-device", "virtconsole,chardev=vcon0",
+    ]
+
+
+def qmp_args(sock: Path) -> list[str]:
+    """QEMU args exposing the QMP control socket the typist uses.
+
+    Test-only: nothing inside ArenaOS is aware of it. `wait=off` keeps
+    the boot from blocking on a client that may never connect.
+    """
+    if sock.exists():
+        sock.unlink()
+    return ["-qmp", f"unix:{sock},server=on,wait=off"]
+
+
+if __name__ == "__main__":
+    print("repo root :", REPO_ROOT)
+    print("rust bin  :", rust_bin())
+    print("qemu cmd  :", " ".join(qemu_cmd()))
+    print("qemu data :", qemu_data_args())
+    print("ovmf code :", ovmf_code())
+    print("ovmf vars :", ovmf_vars_template())

@@ -1,0 +1,24 @@
+[package]
+name = "arena-netstackd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS network stack service (M7.1, ADR-0030) — protocol state, kept OUT of the NIC driver. Two images: `arena-netstackd` (spawn-registry image 17, the resident stack: ARP resolution and its cache, built on netd's L2 frame boundary) and `arptest` (image 18, the client proving resolution on the wire and a cache hit that touches no wire at all)."
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[[bin]]
+name = "arena-netstackd"
+path = "src/main.rs"
+
+[[bin]]
+name = "arptest"
+path = "src/arptest.rs"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }
