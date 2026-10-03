@@ -83,9 +83,15 @@ fn length(n: &[u8; 32]) -> usize {
 }
 fn error(rc: i64) -> &'static str {
     match rc {
-        -3 => "REFUSED: CAPACITY OR FILE BUSY",
-        -4 => "FILE NOT FOUND",
-        -5 => "REFUSED: FILE SIZE OR SPACE",
+        -1001 => "FILE NOT FOUND",
+        -1002 => "FILE ALREADY EXISTS",
+        -1004 => "REFUSED: FILE TABLE FULL",
+        -1006 => "REFUSED: DISK SPACE",
+        -1009 => "REFUSED: FILE SIZE OR RANGE",
+        -1011 => "REFUSED: FILE IS OPEN / BUSY",
+        -1005 | -1008 => "FILESYSTEM ERROR",
+        -4 => "REFUSED: APPLICATION CAPACITY",
+        -5 => "SERVICE UNAVAILABLE",
         -6 => "SERVICE CALL CANCELLED",
         _ => "REFUSED: CHECK NAME, RIGHTS AND FILE FORMAT",
     }
@@ -443,7 +449,7 @@ impl App {
         self.counts = service::observe()?;
         self.process_count = service::processes(&mut self.processes)?;
         self.next_sample = service::now() + 500_000;
-        self.status = "REAL COUNTERS / NO CPU UTILIZATION CLAIM";
+        self.status = "LIVE COUNTERS / ARROW KEYS SCROLL PROCESSES";
         Ok(())
     }
     fn paint(&self, canvas: &mut Canvas<'_>, appearance: u8) {
@@ -502,7 +508,7 @@ impl App {
             (b"FREE FRAMES ".as_slice(), self.counts[0]),
             (b"TOTAL FRAMES ", self.counts[1]),
             (b"LIVE PROCESSES ", self.counts[3]),
-            (b"REGIONS / PAGES ", self.counts[4]),
+            (b"SHARED REGIONS ", self.counts[4]),
             (b"SHARED PAGES ", self.counts[5]),
             (b"SHARED MAPS ", self.counts[6]),
             (b"OWN CAPS ", self.counts[7]),
@@ -609,6 +615,7 @@ fn visual_row(e: &Editor) -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     let (kind, dark, motion, path) = service::startup().unwrap_or_else(|_| client::exit(70));
+    service::audit(kind).unwrap_or_else(|_| client::exit(76));
     let client = Client::connect(
         m::WINDOW_WIDTH,
         m::WINDOW_HEIGHT,

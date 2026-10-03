@@ -436,6 +436,153 @@ pub fn start() -> Result<State, ()> {
     })
 }
 impl State {
+    /// Trusted serial diagnostic selects a real signed Image through the
+    /// unchanged package transaction, then delegates that held executable to
+    /// the ordinary desktop broker. It grants no application function scope.
+    pub fn test_graphical(&mut self, revoke: bool) {
+        let result = (|| -> Result<(), ()> {
+            let mut ep = [0; 3];
+            if !self.online
+                || alive(self.receiver) != Ok(true)
+                || unsafe { syscall2(SYS_CAP_DESCRIBE, 31, ep.as_mut_ptr() as u64) } != 0
+                || ep[0] != 2
+                || ep[2] != RIGHTS_WRITE | RIGHTS_COPY
+            {
+                return Err(());
+            }
+            if self.test_old_image.is_none() {
+                if revoke {
+                    return Err(());
+                }
+                fn package(
+                    op: u64,
+                    arg: u64,
+                    digest: &[u8; 32],
+                ) -> Result<([u64; 3], [u8; 64]), ()> {
+                    let mut msg = [0u8; 64];
+                    msg[..8].copy_from_slice(b"app.test");
+                    msg[32..].copy_from_slice(digest);
+                    let mut out = [0, 0, CAP_NONE];
+                    if unsafe {
+                        syscall6(
+                            SYS_IPC_CALL,
+                            ENDPOINT as u64,
+                            op,
+                            arg,
+                            if op == PKG_OP_QUERY {
+                                CAP_NONE
+                            } else {
+                                LIFECYCLE as u64
+                            },
+                            out.as_mut_ptr() as u64,
+                            msg.as_mut_ptr() as u64,
+                        )
+                    } != 0
+                    {
+                        return Err(());
+                    }
+                    Ok((out, msg))
+                }
+                fn no_cap(out: [u64; 3]) -> Result<(), ()> {
+                    if out[2] == CAP_NONE {
+                        Ok(())
+                    } else {
+                        let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+                        Err(())
+                    }
+                }
+                let (out, msg) = package(PKG_OP_QUERY, 0, &[0; 32])?;
+                no_cap(out)?;
+                if out[0] != PKG_ELIGIBLE || out[1] == 0 || msg[..32] == [0; 32] {
+                    return Err(());
+                }
+                let digest: [u8; 32] = msg[..32].try_into().map_err(|_| ())?;
+                let (out, msg) = package(PKG_OP_INSTALL, 1, &digest)?;
+                no_cap(out)?;
+                if out[0] != PKG_INSTALLED
+                    || out[1] != 1
+                    || msg[..32] != digest
+                    || msg[32..] == [0; 32]
+                {
+                    return Err(());
+                }
+                let install: [u8; 32] = msg[32..].try_into().map_err(|_| ())?;
+                let (out, msg) = package(PKG_OP_SELECT_PREPARE, 1, &install)?;
+                no_cap(out)?;
+                if out[0] != PKG_PREPARED
+                    || out[1] & 255 != 1
+                    || msg[..32] != digest
+                    || msg[32..] != install
+                {
+                    return Err(());
+                }
+                let token = out[1];
+                let (out, msg) = package(PKG_OP_SELECT_COMMIT, token, &install)?;
+                if out[2] == CAP_NONE {
+                    return Err(());
+                }
+                let mut image = [0; 3];
+                if unsafe { syscall2(SYS_CAP_DESCRIBE, out[2], image.as_mut_ptr() as u64) } != 0
+                    || image[0] != 1
+                    || image[1] < 27
+                    || image[2] != RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
+                    || out[0] != PKG_ACTIVE
+                    || out[1] >> 8 != image[1]
+                    || out[1] & 255 != 1
+                    || msg[..32] != digest
+                    || msg[32..] == [0; 32]
+                {
+                    let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+                    return Err(());
+                }
+                self.test_old_image = Some((image[1], out[2]));
+                self.test_last_active = Some(msg[32..].try_into().map_err(|_| ())?);
+            }
+            let (id, image) = self.test_old_image.ok_or(())?;
+            if revoke {
+                if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, id, 0, 0, 0, 0) } != 0 {
+                    return Err(());
+                }
+                log(
+                    "servicemgr: graphical dynamic Image full-ID revoked; existing child copied pages retained\r\n",
+                );
+            }
+            let mut msg = [0u8; 64];
+            msg[..4].copy_from_slice(b"ASVC");
+            msg[4] = 1;
+            msg[5] = 10;
+            let mut out = [0, 0, CAP_NONE];
+            let rc = unsafe {
+                syscall6(
+                    SYS_IPC_CALL,
+                    31,
+                    0,
+                    0,
+                    image,
+                    out.as_mut_ptr() as u64,
+                    msg.as_mut_ptr() as u64,
+                )
+            };
+            if out[2] != CAP_NONE {
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+                return Err(());
+            }
+            if revoke {
+                if rc >= 0 && out[0] == 0 {
+                    return Err(());
+                }
+                log("servicemgr: revoked graphical Image cannot spawn again PASS\r\n");
+            } else if rc != 0 || out[0] != 0 {
+                log("servicemgr: graphical Image launch bounded refusal\r\n");
+            } else {
+                log("servicemgr: real signed Image delegated for broker-owned graphical spawn\r\n");
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            log("servicemgr: GRAPHICALTEST refused\r\n");
+        }
+    }
     /// Test fixture only: Power-shell private manager request, single public
     /// app.test namespace, exact signed QUERY digest then receiver-verified
     /// lifecycle-marker INSTALL. This is not a generic package picker or a

@@ -261,6 +261,7 @@ cargo build $PROFILE_FLAG
 EFI_SRC="$REPO_ROOT/kernel/target/x86_64-unknown-uefi/$PROFILE_DIR/arena-boot.efi"
 mkdir -p "$REPO_ROOT/build"
 cp "$EFI_SRC" "$REPO_ROOT/build/arena-boot.efi"
+printf '%s\n' "${ARENA_GRAPHICS_FIXTURE:-desktop}" > "$REPO_ROOT/build/graphics-profile.txt"
 echo "kernel image: build/arena-boot.efi ($(stat -c%s "$REPO_ROOT/build/arena-boot.efi") bytes)"
 
 # ADR-0012 invariant: the kernel image contains NO FPU/SSE/MMX

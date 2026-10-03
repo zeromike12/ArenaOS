@@ -33,7 +33,10 @@ pub fn chrome(
         canvas,
         window.x + m::CONTENT_INSET,
         window.y + 10,
-        title,
+        &title[..title.len().min(
+            ((window.width as i32 - m::CONTENT_INSET - m::CLOSE_WIDTH).max(0) / m::FONT_ADVANCE)
+                as usize,
+        )],
         t.text,
     );
     c::label(
@@ -71,6 +74,7 @@ pub fn system(
         10,
         active
             .map(|kind| arena_desktop::apps::TITLES[kind as usize])
+            .or_else(|| state.focused().map(|_| "APPLICATION"))
             .unwrap_or("DESKTOP"),
         t.secondary,
     );

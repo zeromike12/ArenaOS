@@ -34,7 +34,7 @@ fn call(endpoint: u64, op: u64, arg: u64, cap: u64, bytes: &mut [u8; 64]) -> Res
         return Err(rc);
     }
     if out[0] != FS_OK {
-        return Err(out[0] as i64);
+        return Err(-1000 + out[0] as i64);
     }
     Ok(out[1])
 }
@@ -102,9 +102,9 @@ impl Fs {
             }
             cursor = e.next;
         }
-        let length = size.ok_or(FS_ERR_NOT_FOUND as i64)? as usize;
+        let length = size.ok_or(-1000 + FS_ERR_NOT_FOUND as i64)? as usize;
         if length > capacity || length > 4096 {
-            return Err(FS_ERR_RANGE as i64);
+            return Err(-1000 + FS_ERR_RANGE as i64);
         }
         let mut b = [0; 64];
         b[..32].copy_from_slice(&name);
@@ -149,7 +149,7 @@ impl Fs {
         length: usize,
     ) -> Result<(), i64> {
         if length > 4096 {
-            return Err(FS_ERR_RANGE as i64);
+            return Err(-1000 + FS_ERR_RANGE as i64);
         }
         unsafe {
             core::ptr::write_bytes(self.va as *mut u8, 0, 4096);

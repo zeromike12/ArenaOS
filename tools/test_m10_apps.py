@@ -116,11 +116,16 @@ def workflow(label,disk):
         # Reopen without any generation/cap/resource growth.
         d.launch(5,'gallery-reopened');d.q.key('t');d.shot('gallery-local-theme');d.close()
         d.shot('reopened-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
+        d.wait(lambda:d.serial().count('[desktop] application retired:')>=23,'last application not reaped before shutdown')
+        def clean_snapshot():
+            samples=re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())
+            return len(samples)>1 and samples[-1][1:]==samples[0][1:]
+        d.wait(clean_snapshot,'final measured teardown not complete before shutdown')
         return b'shutdown\r'
     finally:d.dispose()
 
 def main(esp=None):
-    if esp is None:esp=mtest.build('m10-apps')
+    if esp is None:esp=mtest.build('m10-apps',desktop=True)
     disk=arena_env.make_scratch_disk();label='m10-apps'
     rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>'),1,lambda:workflow(label,disk))],disk,pointer=True)
     assert rc==0

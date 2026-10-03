@@ -47,6 +47,8 @@ pub const SYS_IPC_TRY_RECV: u64 = 42;
 pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
 /// MemoryPool/READ-gated nine scalar resource counts; reserved args zero.
 pub const SYS_OBSERVE: u64 = 44;
+/// Read-only executable/capacity preflight; not a reservation or a spawn.
+pub const SYS_SPAWN_CHECK: u64 = 45;
 pub const STATUS_CALLER_GONE: i64 = -6;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
@@ -105,6 +107,8 @@ pub const MGR_BADGE_ADMIN_PKG_DEATHFAULT: u64 = 1 << 18;
 pub const MGR_BADGE_ADMIN_PKG_MAXIMAL_SELECT: u64 = 1 << 14;
 pub const MGR_BADGE_ADMIN_PKG_INSTALL_TWO: u64 = 1 << 16;
 pub const MGR_BADGE_ADMIN_PKG_FOURTH: u64 = 1 << 17;
+pub const MGR_BADGE_ADMIN_PKG_GRAPHICS: u64 = 1 << 20;
+pub const MGR_BADGE_ADMIN_PKG_GRAPHICS_REVOKE: u64 = 1 << 21;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.

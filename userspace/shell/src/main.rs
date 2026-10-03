@@ -1286,6 +1286,8 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         || eq(rest, b"installtwo")
         || eq(rest, b"fourthtest")
         || eq(rest, b"maximalselect")
+        || eq(rest, b"graphics")
+        || eq(rest, b"graphicsrevoke")
     {
         let installtest = eq(rest, b"installtest");
         let selecttest = eq(rest, b"selecttest");
@@ -1298,6 +1300,8 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         let installtwo = eq(rest, b"installtwo");
         let fourthtest = eq(rest, b"fourthtest");
         let maximalselect = eq(rest, b"maximalselect");
+        let graphics = eq(rest, b"graphics");
+        let graphicsrevoke = eq(rest, b"graphicsrevoke");
         if resources {
             if let Some([frames, records, processes]) = resource_snapshot() {
                 o.str("pkg: observed frames=");
@@ -1336,7 +1340,11 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             o.str("pkg: private restart authority unavailable\r\n");
             return;
         }
-        let badge = if installtest {
+        let badge = if graphics {
+            MGR_BADGE_ADMIN_PKG_GRAPHICS
+        } else if graphicsrevoke {
+            MGR_BADGE_ADMIN_PKG_GRAPHICS_REVOKE
+        } else if installtest {
             MGR_BADGE_ADMIN_PKG_INSTALLTEST
         } else if selecttest {
             MGR_BADGE_ADMIN_PKG_SELECTTEST

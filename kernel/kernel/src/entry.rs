@@ -775,6 +775,21 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     let mut graphics = start_boot_display(_input_pid, desktop_frame_nid, &app_clock_nids, fs_eid);
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    if let Some(eid) = graphics.as_ref().and_then(|g| g.launch_endpoint) {
+        crate::cap::issue(
+            manager_pid,
+            31,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Endpoint { eid },
+                rights: crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_COPY,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        info!(
+            "m10",
+            "late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image"
+        );
+    }
     if expected_stack_caps.is_some() {
         crate::cap::issue(
             shell_pid,
@@ -1099,6 +1114,7 @@ struct GraphicsRuntime {
     exited: [bool; 2],
     retired: [bool; 2],
     deadline: [u64; 2],
+    launch_endpoint: Option<u32>,
 }
 
 /// One boot-root graphics service: explicit optional GOP and/or modern 2D
@@ -1293,12 +1309,9 @@ fn start_boot_display(
         "m9",
         "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
     );
-    let pointer_present = (0..crate::drivers::pci::virtio_count())
-        .filter_map(crate::drivers::pci::virtio_device)
-        .filter(|v| v.virtio_type == crate::drivers::pci::VIRTIO_TYPE_INPUT)
-        .count()
-        >= 2;
-    if pointer_present {
+    // Explicit historical graphics fixture, independent of device names/counts.
+    // Shipping builds start the desktop with either keyboard alone or tablet.
+    if option_env!("ARENA_GRAPHICS_FIXTURE") != Some("phase9") {
         Some(start_boot_desktop(
             display_pid,
             eid,
@@ -1451,6 +1464,7 @@ fn start_boot_compositor(
         exited: [false; 2],
         retired: [false; 2],
         deadline: [0; 2],
+        launch_endpoint: None,
     }
 }
 
@@ -2516,5 +2530,6 @@ fn start_boot_desktop(
         exited: [false; 2],
         retired: [false; 2],
         deadline: [0; 2],
+        launch_endpoint: Some(eid),
     }
 }

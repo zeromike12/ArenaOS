@@ -79,3 +79,88 @@ pub fn processes(out: &mut [(u64, u64); 32]) -> Result<usize, i64> {
 pub fn now() -> u64 {
     unsafe { syscall0(SYS_CLOCK_NOW) }.max(0) as u64
 }
+/// Exercise the actual delegated boundary before showing an application.
+/// These checks use native calls/IPC, not names or assertions about source.
+pub fn audit(kind: u8) -> Result<(), i64> {
+    let mut own = [0u64; 3];
+    let mut function = [0u64; 3];
+    let mut clock = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, 1, own.as_mut_ptr() as u64) } != 0
+        || own[0] != 7
+        || own[2] != 7
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, FUNCTION, function.as_mut_ptr() as u64) } != 0
+        || function[0] != 7
+        || function[1] != own[1]
+        || function[2]
+            != match kind {
+                0..=2 => 15,
+                3 => 14,
+                _ => 5,
+            }
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, CLOCK, clock.as_mut_ptr() as u64) } != 0
+        || clock[0] != 3
+        || clock[2] != 3
+    {
+        return Err(-2);
+    }
+    if kind != 3
+        && exchange(
+            Frame::Configure {
+                theme: 1,
+                motion: false,
+            },
+            FUNCTION,
+        )
+        .is_ok()
+    {
+        return Err(-2);
+    }
+    let mut private = [0u8; 32];
+    private[..10].copy_from_slice(b"ui10-prefs");
+    if exchange(Frame::Read { name: private }, FUNCTION).is_ok() {
+        return Err(-2);
+    }
+    let mut out = [0u64; 9];
+    if unsafe { syscall6(SYS_OBSERVE, 1, out.as_mut_ptr() as u64, 0, 0, 0, 0) } >= 0 {
+        return Err(-2);
+    }
+    if kind == 4 {
+        let counts = observe()?;
+        if counts[0] == 0
+            || counts[0] >= counts[1]
+            || counts[3] == 0
+            || counts[4] < 2
+            || counts[5] < 127
+            || counts[7] != 5
+        {
+            return Err(-2);
+        }
+        if unsafe {
+            syscall6(
+                SYS_OBSERVE,
+                DIAGNOSTICS,
+                out.as_mut_ptr() as u64,
+                1,
+                0,
+                0,
+                0,
+            )
+        } >= 0
+            || unsafe { syscall6(SYS_OBSERVE, DIAGNOSTICS, 0, 0, 0, 0, 0) } >= 0
+            || unsafe {
+                syscall6(
+                    SYS_SHARED_CREATE,
+                    DIAGNOSTICS,
+                    1,
+                    out.as_mut_ptr() as u64,
+                    0,
+                    0,
+                    0,
+                )
+            } >= 0
+        {
+            return Err(-2);
+        }
+    }
+    Ok(())
+}

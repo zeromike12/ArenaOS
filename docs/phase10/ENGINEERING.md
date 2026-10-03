@@ -2,6 +2,27 @@
 
 Status: implementation in progress; no Phase-10 qualification claimed.
 
+## Generic graphical Image and production boot checkpoint
+
+ADR-0066 records the implemented generic Image-cap graphical launch path,
+read-only spawn preflight, explicit production/historical graphics profiles,
+and the late explicit manager endpoint grant. Workspace receipts:
+`/workspace/scratch/arena-dynamic-preflight.log` and
+`/workspace/scratch/arena-apps-audit.log`.
+
+Four independently spawned signed dynamic graphical instances pass actual
+QMP owned-raster input/drag/close, capacity refusal with identical real resource
+counters, and full-ID revocation with surviving copied code. The signed ELF is
+1384 bytes, SHA-256
+`5b2cec1f1178c7cb83c86dbb9e8e6eaa5550ed439fc3a06a9ab7478adb21e0a4`.
+The ordinary six-app gate is also green after native grant/refusal startup
+checks; Monitor proves its read-only diagnostics cannot allocate a region.
+
+This remains an intermediate checkpoint. UI-only source separation, keyboard
+desktop shortcuts, more file/editor workflows, adversarial lifecycle controls,
+additional display configurations, full historical/static gates and the final
+exact-EFI 100/100 archive/handoff have not been completed.
+
 ## Ordinary application checkpoint
 
 ADR-0065 documents scoped function references, six private client pacing clocks

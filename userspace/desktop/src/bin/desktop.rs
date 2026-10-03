@@ -156,6 +156,35 @@ fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
     if kind > 5 || (path[0] != 0 && !scope::public_name(&path)) {
         return Err(-2);
     }
+    let (scope, function_rights) = match kind {
+        0 | 1 => (
+            scope::FILE_READ | scope::FILE_WRITE | scope::LAUNCH,
+            RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
+        ),
+        2 => (
+            scope::FILE_READ | scope::FILE_WRITE,
+            RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
+        ),
+        3 => (
+            scope::PREFERENCES,
+            RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
+        ),
+        _ => (0, RIGHTS_READ | RIGHTS_COPY),
+    };
+    launch_image(APPLICATION, kind, scope, function_rights, path, kind == 4)
+}
+fn launch_image(
+    image: u64,
+    kind: u8,
+    scope: u8,
+    function_rights: u64,
+    path: [u8; 32],
+    diagnostics: bool,
+) -> Result<(), i64> {
+    let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
+    if ready != 0 {
+        return Err(ready);
+    }
     // The session table reserves original lifecycle owners, including children
     // that have not yet requested their window. No numerical caller identity.
     let sessions = unsafe { &mut *(&raw mut SESSIONS) };
@@ -186,21 +215,6 @@ fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
         destroy(region);
         return Err(va);
     }
-    let (scope, function_rights) = match kind {
-        0 | 1 => (
-            scope::FILE_READ | scope::FILE_WRITE | scope::LAUNCH,
-            RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
-        ),
-        2 => (
-            scope::FILE_READ | scope::FILE_WRITE,
-            RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
-        ),
-        3 => (
-            scope::PREFERENCES,
-            RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
-        ),
-        _ => (0, RIGHTS_READ | RIGHTS_COPY),
-    };
     // Distinct inherited function reference to the exact fresh region. Its
     // marker rights do not enlarge the session's provisioned function scope.
     let spec = [
@@ -213,9 +227,9 @@ fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
     let pid = unsafe {
         syscall5(
             SYS_SPAWN,
-            APPLICATION,
+            image,
             spec.as_ptr() as u64,
-            if kind == 4 { 5 } else { 4 },
+            if diagnostics { 5 } else { 4 },
             CAP_NONE,
             0,
         )
@@ -656,6 +670,17 @@ pub extern "C" fn _start() -> ! {
                     }
                     status = 0;
                 }
+            } else if description.is_some_and(|d| d[0] == 1 && d[2] & RIGHTS_READ != 0)
+                && arena_desktop::service_wire::Frame::decode(&bytes)
+                    == Ok(arena_desktop::service_wire::Frame::LaunchImage)
+            {
+                match launch_image(landed, 255, 0, RIGHTS_READ | RIGHTS_COPY, [0; 32], false) {
+                    Ok(()) => {
+                        status = 0;
+                        dirty = true;
+                    }
+                    Err(e) => status = e as u64,
+                }
             } else if let Some([7, id, rights]) = description {
                 if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                     .iter()
@@ -685,15 +710,17 @@ pub extern "C" fn _start() -> ! {
                         {
                             let s = unsafe { SESSIONS[i] };
                             let p = unsafe { PREFS };
-                            bytes = arena_desktop::service_wire::Frame::Started {
-                                kind: s.kind,
-                                theme: u8::from(p.dark),
-                                motion: p.motion,
-                                path: s.path,
+                            if s.kind < 6 {
+                                bytes = arena_desktop::service_wire::Frame::Started {
+                                    kind: s.kind,
+                                    theme: u8::from(p.dark),
+                                    motion: p.motion,
+                                    path: s.path,
+                                }
+                                .encode()
+                                .unwrap_or_else(|_| die(78));
+                                status = 0;
                             }
-                            .encode()
-                            .unwrap_or_else(|_| die(78));
-                            status = 0;
                         }
                         if arena_desktop::service_wire::Frame::decode(&bytes)
                             == Ok(arena_desktop::service_wire::Frame::Display)
@@ -760,7 +787,9 @@ pub extern "C" fn _start() -> ! {
         if dirty {
             render(ram as u64, w, h, scanout)
         }
-        if dirty && (bytes[5] == 1 || description.is_some_and(|d| d[0] == 10)) {
+        if (dirty && (bytes[5] == 1 || description.is_some_and(|d| d[0] == 10)))
+            || (bytes[5] == 10 && description.is_some_and(|d| d[0] == 1))
+        {
             snapshot();
         }
     }

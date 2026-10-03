@@ -55,7 +55,7 @@ def workflow():
     return b'shutdown\r'
 
 def main():
-    esp=mtest.build(LABEL)
+    esp=mtest.build(LABEL,desktop=True)
     rc,s,_=mtest.boot(LABEL,esp,[(b'[desktop] real desktop frame presented',1,workflow)],arena_env.make_scratch_disk(),pointer=True)
     assert rc==0
     assert s.count('[desktop] real application spawned;')==2

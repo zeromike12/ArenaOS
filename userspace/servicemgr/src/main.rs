@@ -566,6 +566,12 @@ fn monitor(
                 if let Some(state) = pkg.as_mut() {
                     state.test_select_fixture();
                 }
+            } else if request as u64 == MGR_BADGE_ADMIN_PKG_GRAPHICS
+                || request as u64 == MGR_BADGE_ADMIN_PKG_GRAPHICS_REVOKE
+            {
+                if let Some(state) = pkg.as_mut() {
+                    state.test_graphical(request as u64 == MGR_BADGE_ADMIN_PKG_GRAPHICS_REVOKE);
+                }
             } else if request as u64 == MGR_BADGE_ADMIN_PKG_SELECTLITE {
                 if let Some(state) = pkg.as_mut() {
                     state.test_select_lite();

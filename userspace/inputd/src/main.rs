@@ -623,6 +623,18 @@ unsafe fn console_loop(drv: &mut Drv) -> ! {
                 Ok(_) => {}
                 Err(()) => fail(EXIT_WAIT, "the relay wait or harvest failed"),
             }
+            if desktop_mode() {
+                while drv.len != 0 {
+                    let code = drv.keys[drv.head];
+                    drv.head = (drv.head + 1) % KEY_RING;
+                    drv.len -= 1;
+                    forward_desktop(input_wire::Frame::Key {
+                        code,
+                        pressed: true,
+                    });
+                }
+                continue;
+            }
             loop {
                 let n = drv.take(&mut buf);
                 if n == 0 {

@@ -85,13 +85,17 @@ def semantic_exit_rc(rc: int | None, serial: str, label: str) -> int | None:
     return rc
 
 
-def build(label: str) -> Path:
+def build(label: str, desktop: bool = False) -> Path:
     print(f"[{label}] building kernel image + ESP ...")
+    env=os.environ.copy()
+    if desktop:env.pop('ARENA_GRAPHICS_FIXTURE',None)
+    else:env['ARENA_GRAPHICS_FIXTURE']='phase9'
     subprocess.run(
         ["bash", str(arena_env.REPO_ROOT / "tools/build.sh"), "--image"],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     esp = arena_env.REPO_ROOT / "build/arena-esp.img"
     assert esp.exists(), "build.sh did not produce the ESP image"

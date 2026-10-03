@@ -167,6 +167,7 @@ pub const SYS_PROC_LIVE: u64 = 41;
 pub const SYS_IPC_TRY_RECV: u64 = 42;
 pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
 pub const SYS_OBSERVE: u64 = 44;
+pub const SYS_SPAWN_CHECK: u64 = 45;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -675,6 +676,7 @@ extern "C" fn syscall_dispatch(
         SYS_PROC_FINISH => sys_proc_finish(a0, a1) as u64,
         SYS_RESOURCE_SNAPSHOT => sys_resource_snapshot(a0, a1) as u64,
         SYS_OBSERVE if [a2, a3, a4, a5] == [0; 4] => sys_observe(a0, a1) as u64,
+        SYS_SPAWN_CHECK if [a1, a2, a3, a4, a5] == [0; 5] => sys_spawn_check(a0) as u64,
         SYS_TRY_WAIT => sys_try_wait(a0) as u64,
         SYS_IMAGE_REGISTER => sys_image_register(a0, a1, a2, a3, a4, a5) as u64,
         SYS_IMAGE_REVOKE => sys_image_revoke(a0, a1, a2, a3, a4, a5) as u64,
@@ -1191,6 +1193,47 @@ fn sys_image_revoke(reg: u64, id: u64, rdx: u64, r10: u64, r8: u64, r9: u64) -> 
     STATUS_OK
 }
 
+/// Descriptive preflight before an ordinary broker allocates auxiliary
+/// resources. The actual spawn repeats all checks and retains rollback;
+/// this read-only observation is never a reservation or extra authority.
+fn sys_spawn_check(slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    match cap.obj {
+        crate::cap::CapObj::Image { img_id } if img_id < crate::image_registry::FIRST => {
+            if crate::spawn::image_bytes(img_id).is_none() {
+                return STATUS_BAD_ARG;
+            }
+        }
+        crate::cap::CapObj::Image { img_id } => {
+            if !crate::image_registry::live(img_id) {
+                return STATUS_BAD_ARG;
+            }
+            if crate::spawn::dynamic_children_full() {
+                return STATUS_BUSY;
+            }
+        }
+        crate::cap::CapObj::BootImage { index } if crate::spawn::boot_image_live(index) => {}
+        _ => return STATUS_BAD_ARG,
+    }
+    if crate::spawn::records_snapshot().iter().flatten().count() >= crate::spawn::MAX_SPAWN_RECS
+        || crate::proc::live_count() >= crate::proc::MAX_PROCESSES
+        || !crate::cap::occupancy(pid).is_some_and(|(used, total)| used < total)
+    {
+        return STATUS_BUSY;
+    }
+    STATUS_OK
+}
 fn sys_spawn(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG; // kernel threads have no cap space
