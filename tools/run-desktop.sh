@@ -21,7 +21,7 @@
 #
 # The serial shell stays in this terminal (type `shutdown` at `arena>` for a
 # clean stop; Ctrl-A then X force-quits QEMU). This is a development image of
-# the Opus design branch, not a qualified Phase-10 release.
+# the desktop-maturity branch, not a qualified Phase-10 release.
 set -euo pipefail
 
 BUILD=0
@@ -37,7 +37,7 @@ done
 
 ROOT="$(pwd)"
 [[ -f tools/arena_env.py ]] || { echo "run this from the ArenaOS repository root" >&2; exit 1; }
-PREBUILT="$ROOT/releases/checkpoints/phase10-opus-design/prebuilt"
+PREBUILT="$ROOT/releases/checkpoints/phase10-desktop-maturity/prebuilt"
 W="$ROOT/build/interactive"
 mkdir -p "$W"
 

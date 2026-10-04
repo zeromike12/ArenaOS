@@ -222,6 +222,8 @@ documentation, then `tools/stability_loop.sh 100`: **100/100** boots
 fully green in 810 s, zero failures; EFI SHA-256
 `b2d429ab53d8156e96312c1a3fa361804a22de00a31e310d57ca30122137192a`,
 ESP SHA-256 `3ae99a487041081c1c4b2aa3abe5c76b4e8b6378ba25b817b5decf19e51b3108`.
+This exact image is published as the launcher's prebuilt in
+`releases/checkpoints/phase10-desktop-maturity/prebuilt/`.
 
 Targeted reruns after run 1: `test_m10_boundaries_red` 12/12 RED + GREEN,
 `test_m5_crash` 5/5 rounds, `test_m6` PASS.
