@@ -60,18 +60,22 @@ def main(esp=None):
             # Pointer redraws must use the last complete published snapshot,
             # while the client has already changed its writable staging bytes.
             # Composition is damage-driven (ADR-0070): only rectangles the
-            # arrow covers or uncovers are recomposed. Sweep it across the
-            # signed raster itself so those window pixels are recomposed from
-            # whatever the compositor treats as the window's content.
-            for step,x in enumerate((156,171,186)):
-                y=167
+            # arrow covers or uncovers are recomposed. Each cycle therefore
+            # moves the arrow onto the signed raster (recomposing those window
+            # pixels from whatever the compositor treats as the window's
+            # content), then away, and compares the uncovered raster. The
+            # child sees 'f' on its own pacing timer, so cycles continue for
+            # at least one second after the key: comparisons keep running
+            # after the staging bytes have certainly changed.
+            key_sent=__import__('time').monotonic();cycle=0
+            while cycle<6 or __import__('time').monotonic()-key_sent<1.0:
+                x=156+15*(cycle%3);y=167
                 d.point(x,y)
-                d.shot(f'unpublished-sweep-{step}',lambda p:crop(p,x,y,10,13)!=crop(full,x,y,10,13))
-            for step in range(6):
+                d.shot('unpublished-sweep',lambda p:crop(p,x,y,10,13)!=crop(full,x,y,10,13))
                 # Repeated identical absolute coordinates can be coalesced by
                 # QEMU. Alternate real positions and await the drawn cursor:
                 # this proves a compositor redraw happened after the key.
-                x=700+20*(step%2);y=420+20*(step%2)
+                x=700+20*(cycle%2);y=420+20*(cycle%2)
                 d.point(x,y)
                 def cursor_drawn(p):
                     pixel=lambda a,b:p[(b*800+a)*3:(b*800+a)*3+3]
@@ -79,7 +83,7 @@ def main(esp=None):
                                for a in range(x-1,x+2) for b in range(y-1,y+2))
                 staged=d.shot('unpublished-staged',cursor_drawn)
                 assert crop(staged,153,164,45,20)==crop(full,153,164,45,20),'unpublished backing became visible'
-                __import__('time').sleep(.04)
+                cycle+=1
             d.q.key('p')
             published=d.shot('published-staged',lambda p:sum(a!=b for a,b in zip(crop(p,153,164,45,20),crop(full,153,164,45,20)))>45*20*3*.95)
             full=published

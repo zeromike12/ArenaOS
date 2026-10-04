@@ -107,9 +107,12 @@ present nothing). Both are addressed by Phase-11 workstreams K and C.
   pointer after the client stages a drawing. Under full-frame rendering
   any pointer move recomposed every window; under damage composition a
   move far from the window recomposes nothing of it, so the old check
-  would pass vacuously. The oracle now first sweeps the arrow across the
-  signed raster (forcing those window pixels to be recomposed) and then
-  makes the unchanged exact comparison. The `frame-publication` control in
+  would pass vacuously. The oracle now runs cycles that move the arrow
+  onto the signed raster (forcing those window pixels to be recomposed)
+  and away again, making the unchanged exact comparison after every cycle;
+  cycles continue for at least one second after the key, because the
+  signed child notices it only on its own pacing timer (a single early
+  sweep let the mutant pass once in a full run). The `frame-publication` control in
   `test_m10_boundaries_red` now mutates the single place composition reads
   window content (the `compose` closure in `render`) to serve the staging
   bytes, and the real guest oracle rejects it.
