@@ -22,8 +22,8 @@ CONTROLS = [
      b'', 'old-caret', 'editor_partial_repaint_equals_full_redraw'),
     # Newly exposed region: transcript row keys ignore the scrollback
     # offset, so lines scrolled into view are never repainted.
-    (SCENE, b'let start = t.count.saturating_sub(l::TERMINAL_ROWS).saturating_sub(self.top);',
-     b'let start = t.count.saturating_sub(l::TERMINAL_ROWS);',
+    (SCENE, b'                    .saturating_sub(l::TERMINAL_ROWS)\n                    .saturating_sub(self.top);',
+     b'                    .saturating_sub(l::TERMINAL_ROWS);',
      'exposed-rows', 'terminal_partial_repaint_equals_full_redraw'),
     # Incomplete client merge: joining two dirty runs keeps only the first.
     (SCENE, b'        runs[best - 1].1 = runs[best].1;',

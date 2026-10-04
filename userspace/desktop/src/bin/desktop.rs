@@ -822,7 +822,12 @@ pub extern "C" fn _start() -> ! {
                 -1
             } else {
                 let t = unsafe {
-                    syscall3(SYS_TIMER_ARM, CLOCK, BADGE_TIMER, due.saturating_sub(now).max(1))
+                    syscall3(
+                        SYS_TIMER_ARM,
+                        CLOCK,
+                        BADGE_TIMER,
+                        due.saturating_sub(now).max(1),
+                    )
                 };
                 if t < 0 {
                     die(96)
@@ -1003,12 +1008,17 @@ pub extern "C" fn _start() -> ! {
                                     // window's own surface; otherwise nothing is
                                     // published at all.
                                     let inside = rects.rects().iter().all(|&[x, y, w, h]| {
-                                        x as usize + w as usize <= ww && y as usize + h as usize <= wh
+                                        x as usize + w as usize <= ww
+                                            && y as usize + h as usize <= wh
                                     });
                                     if inside {
                                         let input = (s.va as usize + PIXEL_OFFSET) as *const u32;
                                         let full = [[0, 0, ww as u16, wh as u16]];
-                                        let list = if rects.n == 0 { &full[..] } else { rects.rects() };
+                                        let list = if rects.n == 0 {
+                                            &full[..]
+                                        } else {
+                                            rects.rects()
+                                        };
                                         // Sender is blocked in CALL on this single-core
                                         // launch topology. Read volatile shared data into
                                         // private memory, exactly the declared pixels:
@@ -1019,7 +1029,9 @@ pub extern "C" fn _start() -> ! {
                                                     let pixel = row * ww + col;
                                                     unsafe {
                                                         (*(&raw mut PUBLISHED))[i][pixel] =
-                                                            core::ptr::read_volatile(input.add(pixel));
+                                                            core::ptr::read_volatile(
+                                                                input.add(pixel),
+                                                            );
                                                     }
                                                 }
                                             }

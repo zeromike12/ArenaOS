@@ -15,7 +15,7 @@ use arena_desktop::{
     service_wire::Frame,
 };
 use arena_gfxkit::Canvas;
-use arena_ui::{components as c, metrics as m, theme};
+use arena_ui::metrics as m;
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
     client::exit(99)

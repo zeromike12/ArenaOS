@@ -225,7 +225,12 @@ pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u64, ArmEr
 pub fn held_by(owner: u64) -> usize {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
-        unsafe { (*TIMERS.get()).iter().filter(|t| t.live && t.owner == owner).count() }
+        unsafe {
+            (*TIMERS.get())
+                .iter()
+                .filter(|t| t.live && t.owner == owner)
+                .count()
+        }
     })
 }
 

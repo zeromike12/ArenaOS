@@ -595,7 +595,10 @@ mod tests {
         }
         // Damage must be a real saving, not a disguised full redraw.
         assert!(damaged_total < 240 * (W * H) as u64 / 3, "{damaged_total}");
-        assert!(partial_updates > 10, "too few partial publications exercised");
+        assert!(
+            partial_updates > 10,
+            "too few partial publications exercised"
+        );
     }
 
     #[test]

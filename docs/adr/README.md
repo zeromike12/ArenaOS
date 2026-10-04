@@ -122,3 +122,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0072](0072-direct-ipc-handoff.md) | Direct handoff to a server woken by a blocking caller | Accepted |
 | [0073](0073-keyed-partial-repaint-and-regional-publication.md) | Keyed partial client repaint and regional Damage publication | Accepted |
 | [0074](0074-badged-endpoint-capabilities.md) | Badged endpoint capabilities (server-minted, generation-safe object handles) | Accepted |
+| [0076](0076-afs2-hierarchical-filesystem.md) | AFS2: hierarchical copy-on-write filesystem (crash-prefix proven, fail-closed) | Accepted |

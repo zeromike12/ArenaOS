@@ -100,10 +100,14 @@ impl View<'_> {
                 let t = self.terminal;
                 head.u64(t.count as u64).u64(self.top as u64);
                 out.push(0, header, head.0);
-                let start = t.count.saturating_sub(l::TERMINAL_ROWS).saturating_sub(self.top);
+                let start = t
+                    .count
+                    .saturating_sub(l::TERMINAL_ROWS)
+                    .saturating_sub(self.top);
                 let mut y = header;
                 for row in 0..l::TERMINAL_ROWS {
-                    let end = (l::CONTENT_Y + 3 + (row as i32 + 1) * m::LINE_HEIGHT).min(l::INPUT_Y);
+                    let end =
+                        (l::CONTENT_Y + 3 + (row as i32 + 1) * m::LINE_HEIGHT).min(l::INPUT_Y);
                     let mut k = base;
                     k.u64(row as u64);
                     let index = start + row;
@@ -125,7 +129,9 @@ impl View<'_> {
             }
             super::EDITOR => {
                 let e = self.editor;
-                head.u64(u64::from(self.dialog)).bytes(&e.path).u64(u64::from(e.dirty));
+                head.u64(u64::from(self.dialog))
+                    .bytes(&e.path)
+                    .u64(u64::from(e.dirty));
                 // The header shows line:column of the caret.
                 head.bytes(&e.data[..e.cursor]);
                 if self.dialog != 0 {
@@ -430,7 +436,12 @@ mod tests {
     /// (previous frame + repaint under the dirty rectangles) must equal a
     /// full paint, and must have repainted strictly less than the window
     /// for ordinary edits.
-    fn check(kind: u8, seed: u64, steps: usize, edit: fn(&mut Fixture, &mut Rng)) -> (usize, usize) {
+    fn check(
+        kind: u8,
+        seed: u64,
+        steps: usize,
+        edit: fn(&mut Fixture, &mut Rng),
+    ) -> (usize, usize) {
         let mut rng = Rng(seed);
         let mut fx = Fixture::new(kind);
         let mut shown = full(&fx.view());
@@ -447,7 +458,10 @@ mod tests {
                 let mut c = Canvas::new(&mut shown, W as usize, H as usize, W as usize).unwrap();
                 repaint(&mut c, &fx.view(), &d);
             }
-            assert!(shown == full(&fx.view()), "kind {kind} step {step}: partial != full");
+            assert!(
+                shown == full(&fx.view()),
+                "kind {kind} step {step}: partial != full"
+            );
             total += 1;
             if !d.is_full() {
                 partial += 1;
@@ -499,7 +513,10 @@ mod tests {
     fn terminal_partial_repaint_equals_full_redraw() {
         for seed in [1, 7, 0x5eed] {
             let (partial, total) = check(TERMINAL, seed, 120, terminal_edit);
-            assert!(partial * 2 > total, "too few partial repaints {partial}/{total}");
+            assert!(
+                partial * 2 > total,
+                "too few partial repaints {partial}/{total}"
+            );
         }
     }
 
@@ -507,7 +524,10 @@ mod tests {
     fn editor_partial_repaint_equals_full_redraw() {
         for seed in [3, 11, 0xed17] {
             let (partial, total) = check(EDITOR, seed, 160, editor_edit);
-            assert!(partial * 2 > total, "too few partial repaints {partial}/{total}");
+            assert!(
+                partial * 2 > total,
+                "too few partial repaints {partial}/{total}"
+            );
         }
     }
 
@@ -539,7 +559,10 @@ mod tests {
         let d = dirty(&a, &b);
         let rows: u32 = d.rects().iter().map(|r| r.height).sum();
         // Header (caret line:column) + two text rows, nothing else.
-        assert!(rows <= (l::HEADER_BOTTOM + 1) as u32 + 2 * m::LINE_HEIGHT as u32, "{d:?}");
+        assert!(
+            rows <= (l::HEADER_BOTTOM + 1) as u32 + 2 * m::LINE_HEIGHT as u32,
+            "{d:?}"
+        );
         assert!(d.rects().iter().any(|r| r.y > l::HEADER_BOTTOM));
     }
 
@@ -556,12 +579,20 @@ mod tests {
         // Every changed band is still covered.
         for i in (0..20).step_by(2) {
             let y = i * 10;
-            assert!(d.rects().iter().any(|r| r.y <= y && y + 10 <= r.y + r.height as i32));
+            assert!(
+                d.rects()
+                    .iter()
+                    .any(|r| r.y <= y && y + 10 <= r.y + r.height as i32)
+            );
         }
         // Adjacent changed bands collapse into one rectangle.
         let mut c = Bands::EMPTY;
         for i in 0..20 {
-            c.push(i * 10, i * 10 + 10, if (3..9).contains(&i) { 77 } else { i as u64 });
+            c.push(
+                i * 10,
+                i * 10 + 10,
+                if (3..9).contains(&i) { 77 } else { i as u64 },
+            );
         }
         let d = dirty(&a, &c);
         assert_eq!(d.n, 1);

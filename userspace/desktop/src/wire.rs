@@ -30,7 +30,10 @@ impl DamageRects {
         (self.n as usize) <= Self::MAX
             && self.r[self.n as usize..].iter().all(|r| *r == [0; 4])
             && self.rects().iter().all(|&[x, y, w, h]| {
-                w > 0 && h > 0 && u32::from(x) + u32::from(w) <= 448 && u32::from(y) + u32::from(h) <= 288
+                w > 0
+                    && h > 0
+                    && u32::from(x) + u32::from(w) <= 448
+                    && u32::from(y) + u32::from(h) <= 288
             })
     }
 }
@@ -266,7 +269,14 @@ mod tests {
                 rects: DamageRects::FULL
             })
         );
-        let refuse = |r: DamageRects| Frame::Damage { handle: 7, rects: r }.encode().is_err();
+        let refuse = |r: DamageRects| {
+            Frame::Damage {
+                handle: 7,
+                rects: r,
+            }
+            .encode()
+            .is_err()
+        };
         let mut over = DamageRects::FULL;
         over.n = 6;
         assert!(refuse(over));

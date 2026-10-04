@@ -227,6 +227,11 @@ pub const OP_WRITE: u64 = 1;
 /// parked threads must never be destroyed out from under them).
 pub const OP_SHUTDOWN: u64 = 2;
 pub const SECTOR_BYTES: usize = 512;
+/// Phase 11.5 (ADR-0076): one request moves a whole 4 KiB frame (8 sectors
+/// starting at `sector`); the buffer offset must be 0. Additive: sector ops
+/// and their log lines are unchanged.
+pub const OP_READ_BLOCK: u64 = 3;
+pub const OP_WRITE_BLOCK: u64 = 4;
 /// Every lent buffer frame is one 4 KiB page (Untyped cap granularity).
 pub const BLOCK_FRAME_BYTES: u64 = 4096;
 

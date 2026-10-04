@@ -377,8 +377,22 @@ fn test_badged_endpoint() -> Res {
     let eid = ipc::create_endpoint()?;
     let server = crate::proc::create("m11-badge-server")?;
     let client = crate::proc::create("m11-badge-client")?;
-    cap::issue(server, 0, Cap { obj: CapObj::Endpoint { eid }, rights: R | W | C })?;
-    cap::issue(client, 0, Cap { obj: CapObj::Endpoint { eid }, rights: W | C })?;
+    cap::issue(
+        server,
+        0,
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: R | W | C,
+        },
+    )?;
+    cap::issue(
+        client,
+        0,
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: W | C,
+        },
+    )?;
     // Minting authority: serve side only; badge 0 reserved; never READ.
     if cap::mint_badged(client, 0, 7, W).is_ok()
         || cap::mint_badged(server, 0, 0, W).is_ok()
@@ -393,7 +407,9 @@ fn test_badged_endpoint() -> Res {
     // Attenuated copy keeps the badge; amplification and re-delegation
     // without COPY are refused.
     cap::copy(client, landed, client, 20, W)?;
-    if cap::copy(client, 20, client, 21, W).is_ok() || cap::copy(client, landed, client, 22, W | R).is_ok() {
+    if cap::copy(client, 20, client, 21, W).is_ok()
+        || cap::copy(client, landed, client, 22, W | R).is_ok()
+    {
         return Err("badged cap delegated without COPY or amplified");
     }
     if cap::call_target(client, 0) != Ok((eid, 0))

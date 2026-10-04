@@ -2533,9 +2533,9 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         crate::cap::CapObj::ProofToken { id } if id != 0 => (10, id),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
         // ADR-0074: kind 12; the badge is the server's business, not shown.
-        crate::cap::CapObj::BadgedEndpoint { eid, generation, .. }
-            if crate::ipc::endpoint_generation(u32::from(eid)) == Some(generation) =>
-        {
+        crate::cap::CapObj::BadgedEndpoint {
+            eid, generation, ..
+        } if crate::ipc::endpoint_generation(u32::from(eid)) == Some(generation) => {
             (12, u64::from(eid))
         }
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
