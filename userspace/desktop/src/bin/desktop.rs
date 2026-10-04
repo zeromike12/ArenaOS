@@ -1,4 +1,4 @@
-//! Authority/lifecycle service. Presentation belongs in desktop_view.rs.
+//! Authority/lifecycle service. Presentation belongs in shell.rs and compose.rs.
 #![no_std]
 #![no_main]
 #![allow(clippy::deref_addrof, clippy::collapsible_if)]

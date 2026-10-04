@@ -53,6 +53,7 @@ often waited for the next 10 ms tick (ADR-0069).
 | Broker signals a built-in client's own clock when events are queued; `idle()` cancels its timer | `bin/desktop.rs`, `app_client.rs`, `model::State::pending` | 0070 |
 | Compositor polls its endpoint each scheduler tick | `bin/desktop.rs` (`POLL_TICK_US`) | 0070 |
 | Opt-in probes and host profiler | `perf.rs`, `tools/profile_desktop.py` | — |
+| Shell `cat` writes the file's last bytes and its line end in one console write | `userspace/shell/src/main.rs` | — (see §8) |
 
 ## 4. Results (same harness, same host)
 
@@ -191,6 +192,8 @@ Kernel: `kernel/kernel/src/entry.rs`, `kernel/kernel/src/sched/mod.rs`.
 Userspace: `userspace/gfxkit/src/lib.rs`, `userspace/displayd/src/main.rs`,
 `userspace/desktop/src/{compose,perf,shell,lib,model,app_client,client}.rs`,
 `userspace/desktop/src/bin/{desktop,application}.rs`,
-`userspace/ui/src/components/{icons,mod}.rs` (pointer size constants only).
-Tools: `tools/profile_desktop.py` (new). Docs: ADR-0069, ADR-0070, this
-file, `docs/phase11/PLAN.md`.
+`userspace/ui/src/components/{icons,mod}.rs` (pointer size constants only),
+`userspace/shell/src/main.rs` (`cat` line atomicity).
+Tools: `tools/profile_desktop.py` (new); `tools/test_m10_dynamic.py` and
+`tools/test_m10_boundaries_red.py` (publication oracle and control, §5).
+Docs: ADR-0069, ADR-0070, this file, `docs/phase11/PLAN.md`.

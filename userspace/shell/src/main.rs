@@ -988,6 +988,7 @@ fn do_cat(o: &mut Out, name: &[u8]) {
         unsafe { core::ptr::write_unaligned(msg.as_mut_ptr() as *mut u64, FS_XFER_MAX) };
         let (r, st, n) = fs_call(FS_OP_READ, fs_rw_w1(fh, off), SLOT_FILE_LENT, &mut msg);
         if r < 0 || st != FS_OK {
+            o.flush();
             fs_error(o, "cat: read", r, st);
             break;
         }
@@ -997,11 +998,19 @@ fn do_cat(o: &mut Out, name: &[u8]) {
         // SAFETY: the device DMA'd `n` bytes into the shell's own
         // mapped frame; n <= FS_XFER_MAX < 4096.
         let chunk: &[u8] = unsafe { core::slice::from_raw_parts(va as *const u8, n as usize) };
-        write_all(chunk);
+        // Release the tail held from the previous chunk, then hold this
+        // chunk's tail in `o` until a read reports EOF: the file's last
+        // bytes and its line end leave in ONE console write (atomic in the
+        // kernel), so another process's log line cannot split them.
+        o.flush();
+        let held = chunk.len() - chunk.len().min(WRITE_MAX - 2);
+        write_all(&chunk[..held]);
+        o.bytes(&chunk[held..]);
         total += n;
         off += n;
     }
     o.crlf();
+    o.flush();
     let (r, st, _) = fs_call(FS_OP_CLOSE, fh, CAP_NONE, &mut msg);
     if r < 0 || st != FS_OK {
         fs_error(o, "cat: close", r, st);
