@@ -111,9 +111,31 @@ impl Client {
             height,
         })
     }
+    /// Publish the whole surface.
     pub fn damage(&self) -> Result<(), i64> {
+        self.publish(crate::wire::DamageRects::FULL)
+    }
+    /// Publish only these surface rectangles (Phase 11.1): the broker copies
+    /// exactly them into the visible snapshot; every other published pixel
+    /// keeps its previous value, whatever the staging bytes now hold.
+    pub fn damage_rects(&self, rects: &[arena_gfxkit::Rect]) -> Result<(), i64> {
+        if rects.is_empty() {
+            return Ok(());
+        }
+        let mut d = crate::wire::DamageRects::FULL;
+        if rects.len() > crate::wire::DamageRects::MAX {
+            return self.publish(d);
+        }
+        for (slot, r) in d.r.iter_mut().zip(rects) {
+            *slot = [r.x as u16, r.y as u16, r.width as u16, r.height as u16];
+        }
+        d.n = rects.len() as u8;
+        self.publish(d)
+    }
+    fn publish(&self, rects: crate::wire::DamageRects) -> Result<(), i64> {
         let f = Frame::Damage {
             handle: self.handle,
+            rects,
         };
         if exchange(f)?.1 != f {
             return Err(-2);

@@ -86,7 +86,11 @@ pub static ARENA_CAP_LAYOUT: [usize; 14] = [
         data = bytearray()
         i = 0
         while i < len(encoded):
-            if encoded[i] == "\\":
+            if encoded[i] == "\\" and encoded[i + 1] == "\\":
+                # LLVM prints byte 0x5C itself as an escaped backslash.
+                data.append(0x5C)
+                i += 2
+            elif encoded[i] == "\\":
                 data.append(int(encoded[i + 1:i + 3], 16))
                 i += 3
             else:
@@ -105,6 +109,8 @@ pub static ARENA_CAP_LAYOUT: [usize; 14] = [
             "#[derive(Clone, Copy)]\nstruct CallSlot",
             "#[derive(Clone, Copy)]\nstruct Endpoint",
             "#[derive(Clone, Copy)]\nstruct Notif",
+            # ADR-0071: the endpoint's single bound-notification record.
+            "#[derive(Clone, Copy, PartialEq, Eq)]\nstruct Binding",
         )]
         depth = re.search(r"const QUEUE_DEPTH: usize = (\d+);", ipc)
         width = re.search(r"const MSG_BYTES: usize = (\d+);", ipc)
@@ -142,17 +148,25 @@ pub static ARENA_IPC_LAYOUT: [usize; 8] = [
         data = bytearray()
         i = 0
         while i < len(encoded):
-            if encoded[i] == "\\":
+            if encoded[i] == "\\" and encoded[i + 1] == "\\":
+                # LLVM prints byte 0x5C itself as an escaped backslash.
+                data.append(0x5C)
+                i += 2
+            elif encoded[i] == "\\":
                 data.append(int(encoded[i + 1:i + 3], 16))
                 i += 3
             else:
                 data.append(ord(encoded[i]))
                 i += 1
         ipc_sizes = struct.unpack("<8Q", data)
-        if ipc_sizes != (240, 976, 1936, 24, 15488, 17424, 23232, 600):
+        # ADR-0071 (Phase 11.0): each endpoint carries one optional bound
+        # notification (+32 B) and each notification a generation (+8 B):
+        # 12 endpoints 23232 -> 23616 B, 25 notifications 600 -> 800 B.
+        if ipc_sizes != (240, 1008, 1968, 32, 15744, 17712, 23616, 800):
             raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
-        print("x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=976; "
-              "production Endpoint<8>=1936 Notif=24; 12 endpoints=23232 B, 25 notifications=600 B PASS")
+        print("x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=1008; "
+              "production Endpoint<8>=1968 Notif=32; 12 endpoints=23616 B, 25 notifications=800 B "
+              "(ADR-0071 binding +384 B, generations +200 B) PASS")
         # ADR-0051: an *additional* distinct production-fsd marker,
         # on top of ADR-0048's projection; one Notification is 24 B.
         actual = (ROOT / "kernel/kernel/src/ipc.rs").read_text()

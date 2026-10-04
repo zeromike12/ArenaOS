@@ -1,5 +1,6 @@
 pub mod layout;
 pub mod model;
+pub mod scene;
 pub mod view;
 pub const TERMINAL: u8 = 0;
 pub const FILES: u8 = 1;

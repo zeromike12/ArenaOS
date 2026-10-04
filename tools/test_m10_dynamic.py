@@ -93,6 +93,21 @@ def main(esp=None):
                 return sum(current[i:i+3]!=old[i:i+3] for i in range(0,len(current),3))>45*20*.95
             changed=d.shot('key-owned',lambda p:raster_changed(p,153,164,crop(full,153,164,45,20)))
             changed=d.settled('key-owned',(153,164,45,20))
+            # Phase 11.1: the child repaints its whole staging raster but
+            # declares one 10x10 Damage rectangle. Exactly that rectangle may
+            # change on screen; every other staged byte stays unpublished.
+            region=(120,140,160,110)
+            def box(p):
+                a,b=crop(p,*region),crop(changed,*region)
+                xs=[(i//3)%region[2] for i in range(0,len(a),3) if a[i:i+3]!=b[i:i+3]]
+                ys=[(i//3)//region[2] for i in range(0,len(a),3) if a[i:i+3]!=b[i:i+3]]
+                return (min(xs),min(ys),max(xs)-min(xs)+1,max(ys)-min(ys)+1,len(xs)) if xs else None
+            d.q.key('r')
+            partial=d.shot('partial-publish',lambda p:box(p) is not None)
+            partial=d.settled('partial-publish',region)
+            x0,y0,bw,bh,n=box(partial)
+            assert bw<=10 and bh<=10 and n>=90,('partial Damage published outside its rectangle',x0,y0,bw,bh,n)
+            changed=partial
             # Drag exact raster of the top signed child.
             d.point(154,142,True);d.point(354,242);d.point(354,242,False);d.point(780,500)
             d.shot('signed-dragged',lambda p:crop(p,353,264,45,20)==crop(changed,153,164,45,20))

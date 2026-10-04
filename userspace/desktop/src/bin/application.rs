@@ -8,7 +8,7 @@ use arena_desktop::{
     apps::{
         self, layout as l,
         model::{Editor, Line, Terminal},
-        view,
+        scene, view,
     },
     client::{self, Client},
     model::Event,
@@ -455,43 +455,25 @@ impl App {
         self.status = "LIVE COUNTERS / ARROW KEYS SCROLL PROCESSES";
         Ok(())
     }
-    fn paint(&self, canvas: &mut Canvas<'_>, appearance: u8) {
-        let dark = appearance & 1 != 0;
-        let t = theme::palette(dark);
-        view::frame(canvas, apps::TITLES[self.kind as usize], self.status, t);
-        match self.kind {
-            apps::TERMINAL => view::terminal(canvas, &self.terminal, self.top, t),
-            apps::EDITOR => {
-                view::editor(canvas, &self.editor, self.top, &self.line, self.dialog, t)
-            }
-            apps::FILES => view::files(
-                canvas,
-                view::FilesView {
-                    names: &self.names[..self.count],
-                    top: self.top,
-                    selected: self.selected,
-                    bytes: &self.preview[..self.preview_len],
-                    line: &self.line,
-                    dialogue: self.dialog != 0,
-                },
-                t,
-            ),
-            apps::SETTINGS => view::settings(canvas, dark, appearance & 2 != 0, self.display, t),
-            apps::MONITOR => view::monitor(
-                canvas,
-                &self.counts,
-                &self.processes[..self.process_count],
-                self.top,
-                t,
-            ),
-            _ => c::gallery(
-                canvas,
-                if self.gallery_theme < 2 {
-                    theme::palette(self.gallery_theme == 1)
-                } else {
-                    t
-                },
-            ),
+    /// Everything this window paints, borrowed from the model (Phase 11.1
+    /// keyed bands decide which parts are repainted and published).
+    fn view(&self, appearance: u8) -> scene::View<'_> {
+        scene::View {
+            kind: self.kind,
+            appearance,
+            status: self.status,
+            terminal: &self.terminal,
+            editor: &self.editor,
+            line: &self.line,
+            top: self.top,
+            dialog: self.dialog,
+            names: &self.names[..self.count],
+            selected: self.selected,
+            preview: &self.preview[..self.preview_len],
+            display: self.display,
+            counts: &self.counts,
+            processes: &self.processes[..self.process_count],
+            gallery_theme: self.gallery_theme,
         }
     }
 }
@@ -553,6 +535,9 @@ pub extern "C" fn _start() -> ! {
     }
     let mut dirty = true;
     let mut appearance = client.appearance.get();
+    // Bands of the frame the backing currently holds (Phase 11.1).
+    let mut shown = scene::Bands::EMPTY;
+    let mut shown_once = false;
     // Opt-in latency probes (ARENA_PERF builds only; folded away otherwise):
     // [paint, damage IPC, first event -> damage published, poll IPC,
     // notification wake (time asleep)].
@@ -626,13 +611,31 @@ pub extern "C" fn _start() -> ! {
             };
             let mut canvas = Canvas::new(pixels, client.width, client.height, client.width)
                 .unwrap_or_else(|_| client::exit(73));
-            app.paint(&mut canvas, appearance);
+            // Repaint only the bands whose keys changed since the frame the
+            // backing already holds, and publish exactly those rectangles.
+            let next = app.view(appearance);
+            let mut bands = scene::Bands::EMPTY;
+            next.bands(&mut bands);
+            let damage = if shown_once {
+                scene::dirty(&shown, &bands)
+            } else {
+                scene::Dirty::full()
+            };
+            scene::repaint(&mut canvas, &next, &damage);
             let damaged = if arena_desktop::perf::ENABLED {
                 service::now()
             } else {
                 0
             };
-            client.damage().unwrap_or_else(|_| client::exit(74));
+            if damage.is_full() {
+                client.damage().unwrap_or_else(|_| client::exit(74));
+            } else {
+                client
+                    .damage_rects(damage.rects())
+                    .unwrap_or_else(|_| client::exit(74));
+            }
+            shown = bands;
+            shown_once = true;
             if arena_desktop::perf::ENABLED {
                 let now = service::now();
                 perf_stats[0].add(damaged - painted);

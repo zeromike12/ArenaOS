@@ -41,7 +41,7 @@ polishing today's fixed 448x288 layouts.
    the existing preemption tick; no priority inversion beyond today's RR.
 3. **Timer quotas.** Per-process timer budget (e.g. 4) inside the 32-entry
    table (or grow the table), so no notification holder can exhaust timers.
-4. **Badged endpoint capabilities** (ADR-0073). Minted endpoint copies carry
+4. **Badged endpoint capabilities** (ADR-0074). Minted endpoint copies carry
    an unforgeable badge delivered to the server with each request. This is
    the mechanism for userspace object capabilities (file handles, directory
    handles, surfaces) required by workstreams F and N.
@@ -93,7 +93,7 @@ for each; full historical suite.
 
 ### F — Filesystem: AFS2 and fsd v2
 
-On-disk format AFS2 (ADR-0074), keeping AFS1's proven crash discipline
+On-disk format AFS2 (ADR-0076), keeping AFS1's proven crash discipline
 (CoW metadata, single-sector ping-pong commit written last,
 two-generation-delayed freeing, data written before the commit that makes
 it reachable):

@@ -138,7 +138,15 @@ pub extern "C" fn _start() -> ! {
                     }
                     // f deliberately stages an unpublished drawing. p publishes
                     // those exact prior bytes without painting anything new.
-                    if key != b'f' && call(&mut frame(2, handle), 1)[0] != 0 {
+                    // r repaints everything but publishes ONE 10x10 rectangle
+                    // (Phase 11.1 Damage regions): the rest must stay hidden.
+                    let mut damage = frame(2, handle);
+                    if key == b'r' {
+                        damage[16] = 1;
+                        damage[28] = 10;
+                        damage[30] = 10;
+                    }
+                    if key != b'f' && call(&mut damage, 1)[0] != 0 {
                         done(90)
                     }
                 }

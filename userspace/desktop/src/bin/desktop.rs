@@ -47,6 +47,8 @@ struct Session {
     focus_last: i32,
     /// Advances on every authenticated Damage (published raster changed).
     content: u64,
+    /// Published regions since the last presented frame (Phase 11.1).
+    regions: compose::Regions,
 }
 const EMPTY: Session = Session {
     region: CAP_NONE,
@@ -67,6 +69,7 @@ const EMPTY: Session = Session {
     reveal_last: arena_ui::metrics::TITLE_HEIGHT,
     focus_last: 0,
     content: 0,
+    regions: compose::Regions::NONE,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -514,6 +517,12 @@ fn animate() -> bool {
     changed
 }
 static mut LAST_SCENE: Option<Scene> = None;
+/// The presented scene now includes every published region.
+fn clear_regions() {
+    for s in unsafe { &mut *(&raw mut SESSIONS) } {
+        s.regions = compose::Regions::NONE;
+    }
+}
 /// Descriptive snapshot of everything the compositor draws (see compose.rs).
 fn scene(now: u64) -> Scene {
     let state = unsafe { &*(&raw const WM) };
@@ -541,6 +550,7 @@ fn scene(now: u64) -> Scene {
             reveal: s.reveal.sample(now).clamp(0, i32::from(window.height)),
             focus: s.focus.sample(now),
             content: s.content,
+            regions: s.regions,
             published: s.published,
             title: s.title,
         });
@@ -582,6 +592,7 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
     }
     if damage.is_empty() {
         unsafe { LAST_SCENE = Some(next) };
+        clear_regions();
         probe(P_SKIPPED, started);
         return;
     }
@@ -608,6 +619,7 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
         }
     }
     unsafe { LAST_SCENE = Some(next) };
+    clear_regions();
     probe(P_PRESENT, phase);
     probe(P_RENDER, started);
     if perf::ENABLED {
@@ -983,25 +995,48 @@ pub extern "C" fn _start() -> ! {
                                     status = 0;
                                     dirty = true;
                                 }
-                                Frame::Damage { handle } if state.owned(id, handle) => {
+                                Frame::Damage { handle, rects } if state.owned(id, handle) => {
                                     let copy_started = perf_now();
                                     let window = state.find(handle).unwrap_or_else(|| die(88));
-                                    let pixels = window.width as usize * window.height as usize;
-                                    let input = (s.va as usize + PIXEL_OFFSET) as *const u32;
-                                    // Sender is blocked in CALL on this single-core launch
-                                    // topology. Read volatile shared data into private memory;
-                                    // later writes cannot change movement/focus frames.
-                                    for pixel in 0..pixels {
-                                        unsafe {
-                                            (*(&raw mut PUBLISHED))[i][pixel] =
-                                                core::ptr::read_volatile(input.add(pixel));
+                                    let (ww, wh) = (window.width as usize, window.height as usize);
+                                    // Every declared rectangle must lie inside this
+                                    // window's own surface; otherwise nothing is
+                                    // published at all.
+                                    let inside = rects.rects().iter().all(|&[x, y, w, h]| {
+                                        x as usize + w as usize <= ww && y as usize + h as usize <= wh
+                                    });
+                                    if inside {
+                                        let input = (s.va as usize + PIXEL_OFFSET) as *const u32;
+                                        let full = [[0, 0, ww as u16, wh as u16]];
+                                        let list = if rects.n == 0 { &full[..] } else { rects.rects() };
+                                        // Sender is blocked in CALL on this single-core
+                                        // launch topology. Read volatile shared data into
+                                        // private memory, exactly the declared pixels:
+                                        // staging bytes outside them never become visible.
+                                        for &[x, y, w, h] in list {
+                                            for row in y as usize..y as usize + h as usize {
+                                                for col in x as usize..x as usize + w as usize {
+                                                    let pixel = row * ww + col;
+                                                    unsafe {
+                                                        (*(&raw mut PUBLISHED))[i][pixel] =
+                                                            core::ptr::read_volatile(input.add(pixel));
+                                                    }
+                                                }
+                                            }
                                         }
+                                        if rects.n == 0 || !s.published {
+                                            s.regions.mark_full();
+                                        } else {
+                                            for r in rects.rects() {
+                                                s.regions.add(*r);
+                                            }
+                                        }
+                                        s.published = true;
+                                        s.content = s.content.wrapping_add(1);
+                                        probe(P_DAMAGE, copy_started);
+                                        status = 0;
+                                        dirty = true;
                                     }
-                                    s.published = true;
-                                    s.content = s.content.wrapping_add(1);
-                                    probe(P_DAMAGE, copy_started);
-                                    status = 0;
-                                    dirty = true;
                                 }
                                 Frame::Poll { handle } if state.owned(id, handle) => {
                                     unsafe { WOKEN[i] = false };

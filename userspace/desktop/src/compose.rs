@@ -15,6 +15,77 @@ use arena_gfxkit::{Canvas, Rect};
 use arena_ui::{components as c, metrics as m, theme::Theme};
 
 pub const MAX_WINDOWS: usize = crate::model::MAX_WINDOWS;
+/// Published regions remembered per window between two presented frames.
+pub const REGIONS_MAX: usize = 8;
+
+/// Window-local rectangles `[x, y, width, height]` whose published pixels
+/// changed since the last presented frame (Phase 11.1). Bounded: an
+/// overflowing list, or a publication of unknown extent, becomes `full`,
+/// which damages the whole window exactly as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Regions {
+    pub r: [[u16; 4]; REGIONS_MAX],
+    pub n: u8,
+    pub full: bool,
+}
+
+impl Regions {
+    pub const NONE: Self = Self {
+        r: [[0; 4]; REGIONS_MAX],
+        n: 0,
+        full: false,
+    };
+    pub fn rects(&self) -> &[[u16; 4]] {
+        &self.r[..self.n as usize]
+    }
+    pub fn mark_full(&mut self) {
+        *self = Self::NONE;
+        self.full = true;
+    }
+    /// Add one rectangle, merging it into any rectangle it overlaps or
+    /// touches (bounding box); overflow degrades to `full`, never drops.
+    pub fn add(&mut self, rect: [u16; 4]) {
+        if self.full || rect[2] == 0 || rect[3] == 0 {
+            return;
+        }
+        let mut cur = rect;
+        loop {
+            let hit = self.rects().iter().position(|o| region_touches(*o, cur));
+            match hit {
+                Some(i) => {
+                    cur = region_union(self.r[i], cur);
+                    let last = self.n as usize - 1;
+                    self.r[i] = self.r[last];
+                    self.r[last] = [0; 4];
+                    self.n -= 1;
+                }
+                None => break,
+            }
+        }
+        if self.n as usize == REGIONS_MAX {
+            self.mark_full();
+            return;
+        }
+        self.r[self.n as usize] = cur;
+        self.n += 1;
+    }
+}
+
+fn region_touches(a: [u16; 4], b: [u16; 4]) -> bool {
+    let (a0, a1) = (u32::from(a[0]), u32::from(a[0]) + u32::from(a[2]));
+    let (b0, b1) = (u32::from(b[0]), u32::from(b[0]) + u32::from(b[2]));
+    let (c0, c1) = (u32::from(a[1]), u32::from(a[1]) + u32::from(a[3]));
+    let (d0, d1) = (u32::from(b[1]), u32::from(b[1]) + u32::from(b[3]));
+    a0 <= b1 && b0 <= a1 && c0 <= d1 && d0 <= c1
+}
+
+fn region_union(a: [u16; 4], b: [u16; 4]) -> [u16; 4] {
+    let x0 = a[0].min(b[0]);
+    let y0 = a[1].min(b[1]);
+    let x1 = (a[0] + a[2]).max(b[0] + b[2]);
+    let y1 = (a[1] + a[3]).max(b[1] + b[3]);
+    [x0, y0, x1 - x0, y1 - y0]
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowScene {
@@ -31,6 +102,8 @@ pub struct WindowScene {
     pub focus: i32,
     /// Advances whenever the published raster changes.
     pub content: u64,
+    /// Where it changed since the last presented frame (window-local).
+    pub regions: Regions,
     pub published: bool,
     pub title: [u8; 32],
 }
@@ -182,6 +255,20 @@ impl Damage {
     }
 }
 
+/// `a` and `b` differ only in published content whose changed regions are
+/// known (both published before and after; nothing else moved).
+fn content_only(a: &WindowScene, b: &WindowScene) -> bool {
+    a.published
+        && b.published
+        && !b.regions.full
+        && b.regions.n > 0
+        && WindowScene {
+            content: b.content,
+            regions: b.regions,
+            ..*a
+        } == *b
+}
+
 /// Rectangles whose pixels may differ between `prev` and `next`.
 pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
     let (w, h) = (out.screen.width as i32, out.screen.height as i32);
@@ -193,6 +280,18 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
         match (prev.by_slot(slot), next.by_slot(slot)) {
             (None, None) => {}
             (Some(a), Some(b)) if a == b => {}
+            // Only the published raster changed, and exactly where is known:
+            // damage those rectangles instead of the whole window.
+            (Some(a), Some(b)) if content_only(a, b) => {
+                for r in b.regions.rects() {
+                    out.add(Rect {
+                        x: b.x + i32::from(r[0]),
+                        y: b.y + i32::from(r[1]),
+                        width: u32::from(r[2]),
+                        height: u32::from(r[3]),
+                    });
+                }
+            }
             (a, b) => {
                 if let Some(a) = a {
                     out.add(a.bounds());
@@ -316,21 +415,18 @@ mod tests {
 
     fn contents(generations: &[u64; MAX_WINDOWS]) -> Vec<Vec<u32>> {
         (0..MAX_WINDOWS)
-            .map(|slot| {
-                (0..WW * WH)
-                    .map(|i| {
-                        (i as u32).wrapping_mul(2654435761)
-                            ^ (generations[slot] as u32)
-                            ^ slot as u32
-                    })
-                    .collect()
-            })
+            .map(|slot| raster(slot, generations[slot]))
             .collect()
     }
 
-    fn full(scene: &Scene, generations: &[u64; MAX_WINDOWS]) -> Vec<u32> {
+    fn raster(slot: usize, generation: u64) -> Vec<u32> {
+        (0..WW * WH)
+            .map(|i| (i as u32).wrapping_mul(2654435761) ^ (generation as u32) ^ slot as u32)
+            .collect()
+    }
+
+    fn full(scene: &Scene, data: &[Vec<u32>]) -> Vec<u32> {
         let mut px = std::vec![0u32; W * H];
-        let data = contents(generations);
         let mut canvas = Canvas::new(&mut px, W, H, W).unwrap();
         compose(
             &mut canvas,
@@ -348,13 +444,19 @@ mod tests {
     fn damage_composition_matches_full_redraw() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
         let mut generations = [0u64; MAX_WINDOWS];
+        let mut rasters = contents(&generations);
         let mut scene = Scene::EMPTY;
         scene.shell.pointer = (300, 200);
-        let mut screen = full(&scene, &generations);
+        let mut screen = full(&scene, &rasters);
         let mut damaged_total = 0u64;
-        for step in 0..160 {
+        let mut partial_updates = 0;
+        for step in 0..240 {
             let mut next = scene;
-            match rng.below(11) {
+            // Regions describe changes since the last presented frame only.
+            for w in next.windows.iter_mut().flatten() {
+                w.regions = Regions::NONE;
+            }
+            match rng.below(12) {
                 0 if next.count < MAX_WINDOWS => {
                     // Open a window in a free slot on top.
                     let used: Vec<usize> = next.windows[..next.count]
@@ -376,6 +478,7 @@ mod tests {
                         reveal: rng.below(WH as u64 + 1) as i32,
                         focus: 0,
                         content: generations[slot],
+                        regions: Regions::NONE,
                         published: rng.below(2) == 0,
                         title,
                     });
@@ -408,11 +511,38 @@ mod tests {
                     next.windows[next.count - 1] = w;
                 }
                 4 if next.count > 0 => {
+                    // Whole-raster publication (unknown extent).
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    generations[w.slot] += 1;
+                    rasters[w.slot] = raster(w.slot, generations[w.slot]);
+                    w.content = generations[w.slot];
+                    w.published = true;
+                }
+                10 | 11 if next.count > 0 => {
+                    // Partial publication: only declared rectangles change.
                     let i = rng.below(next.count as u64) as usize;
                     let w = next.windows[i].as_mut().unwrap();
                     generations[w.slot] += 1;
                     w.content = generations[w.slot];
-                    w.published = true;
+                    if !w.published {
+                        w.published = true;
+                        w.regions.mark_full();
+                    }
+                    for _ in 0..=rng.below(3) {
+                        let x = rng.below(WW as u64) as u16;
+                        let y = rng.below(WH as u64) as u16;
+                        let rw = 1 + rng.below(WW as u64 - u64::from(x)) as u16;
+                        let rh = 1 + rng.below(WH as u64 - u64::from(y)) as u16;
+                        let ink = rng.next() as u32;
+                        for row in y..y + rh {
+                            for col in x..x + rw {
+                                rasters[w.slot][row as usize * WW + col as usize] = ink;
+                            }
+                        }
+                        w.regions.add([x, y, rw, rh]);
+                    }
+                    partial_updates += 1;
                 }
                 5 if next.count > 0 => {
                     let i = rng.below(next.count as u64) as usize;
@@ -440,7 +570,7 @@ mod tests {
             let mut d = Damage::new(W, H);
             damage(&scene, &next, &mut d);
             damaged_total += d.pixels();
-            let data = contents(&generations);
+            let data = &rasters;
             let mut canvas = Canvas::new(&mut screen, W, H, W).unwrap();
             for r in d.rects() {
                 canvas.set_clip(*r);
@@ -452,7 +582,7 @@ mod tests {
                 );
             }
             drop(canvas);
-            let expected = full(&next, &generations);
+            let expected = full(&next, &rasters);
             if let Some(i) = (0..W * H).find(|&i| screen[i] != expected[i]) {
                 panic!(
                     "step {step}: stale pixel at ({},{}) damage {:?}",
@@ -464,7 +594,8 @@ mod tests {
             scene = next;
         }
         // Damage must be a real saving, not a disguised full redraw.
-        assert!(damaged_total < 160 * (W * H) as u64 / 3, "{damaged_total}");
+        assert!(damaged_total < 240 * (W * H) as u64 / 3, "{damaged_total}");
+        assert!(partial_updates > 10, "too few partial publications exercised");
     }
 
     #[test]

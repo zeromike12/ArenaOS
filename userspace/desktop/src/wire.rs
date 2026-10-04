@@ -6,10 +6,38 @@ const MAGIC: &[u8; 4] = b"ADSK";
 pub enum Error {
     Invalid,
 }
+/// Published regions of one Damage request (Phase 11.1). `n == 0` means
+/// the whole surface — byte-identical to the Phase-10 Damage frame, so
+/// existing clients and the signed fixture keep working unchanged.
+/// Rectangles are `[x, y, width, height]` in surface pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageRects {
+    pub n: u8,
+    pub r: [[u16; 4]; DamageRects::MAX],
+}
+impl DamageRects {
+    pub const MAX: usize = 5;
+    pub const FULL: Self = Self {
+        n: 0,
+        r: [[0; 4]; Self::MAX],
+    };
+    pub fn rects(&self) -> &[[u16; 4]] {
+        &self.r[..self.n as usize]
+    }
+    /// Canonical form: unused slots zero; every used rectangle nonempty and
+    /// inside the largest surface the wire admits.
+    fn valid(&self) -> bool {
+        (self.n as usize) <= Self::MAX
+            && self.r[self.n as usize..].iter().all(|r| *r == [0; 4])
+            && self.rects().iter().all(|&[x, y, w, h]| {
+                w > 0 && h > 0 && u32::from(x) + u32::from(w) <= 448 && u32::from(y) + u32::from(h) <= 288
+            })
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Frame {
     Create { width: u16, height: u16 },
-    Damage { handle: u64 },
+    Damage { handle: u64, rects: DamageRects },
     Poll { handle: u64 },
     CancelClose { handle: u64 },
     Title { handle: u64, text: [u8; 32] },
@@ -29,7 +57,19 @@ impl Frame {
                 b[26..28].copy_from_slice(&height.to_le_bytes());
                 (1, 0)
             }
-            Self::Damage { handle } => (2, handle),
+            Self::Damage { handle, rects } => {
+                if !rects.valid() {
+                    return Err(Error::Invalid);
+                }
+                b[16] = rects.n;
+                for (i, r) in rects.r.iter().enumerate() {
+                    for (j, v) in r.iter().enumerate() {
+                        let at = 24 + i * 8 + j * 2;
+                        b[at..at + 2].copy_from_slice(&v.to_le_bytes());
+                    }
+                }
+                (2, handle)
+            }
             Self::Poll { handle } => (3, handle),
             Self::CancelClose { handle } => (6, handle),
             Self::Title { handle, text } => {
@@ -92,7 +132,20 @@ impl Frame {
         let y = i32::from_le_bytes(b[20..24].try_into().map_err(|_| Error::Invalid)?);
         let f = match b[5] {
             1 => Self::Create { width, height },
-            2 => Self::Damage { handle },
+            2 => {
+                let mut rects = DamageRects::FULL;
+                rects.n = b[16];
+                if rects.n as usize > DamageRects::MAX {
+                    return Err(Error::Invalid);
+                }
+                for (i, r) in rects.r.iter_mut().enumerate() {
+                    for (j, v) in r.iter_mut().enumerate() {
+                        let at = 24 + i * 8 + j * 2;
+                        *v = u16::from_le_bytes([b[at], b[at + 1]]);
+                    }
+                }
+                Self::Damage { handle, rects }
+            }
             3 => Self::Poll { handle },
             6 => Self::CancelClose { handle },
             4 => Self::Title {
@@ -133,7 +186,10 @@ mod tests {
                 width: 448,
                 height: 288,
             },
-            Frame::Damage { handle: 9 },
+            Frame::Damage {
+                handle: 9,
+                rects: DamageRects::FULL,
+            },
             Frame::Poll { handle: u64::MAX },
             Frame::CancelClose { handle: 9 },
             Frame::Title {
@@ -187,5 +243,45 @@ mod tests {
             .encode()
             .is_err()
         );
+    }
+    #[test]
+    fn damage_rectangles_are_bounded_and_canonical() {
+        let mut rects = DamageRects::FULL;
+        rects.n = 2;
+        rects.r[0] = [0, 240, 448, 24];
+        rects.r[1] = [10, 70, 5, 14];
+        let f = Frame::Damage { handle: 7, rects };
+        let b = f.encode().unwrap();
+        assert_eq!(Frame::decode(&b), Ok(f));
+        // The Phase-10 byte layout (header + handle only) is full damage.
+        let mut old = [0u8; BYTES];
+        old[..4].copy_from_slice(MAGIC);
+        old[4] = 1;
+        old[5] = 2;
+        old[8] = 7;
+        assert_eq!(
+            Frame::decode(&old),
+            Ok(Frame::Damage {
+                handle: 7,
+                rects: DamageRects::FULL
+            })
+        );
+        let refuse = |r: DamageRects| Frame::Damage { handle: 7, rects: r }.encode().is_err();
+        let mut over = DamageRects::FULL;
+        over.n = 6;
+        assert!(refuse(over));
+        let mut empty = rects;
+        empty.r[1] = [10, 70, 0, 14];
+        assert!(refuse(empty));
+        let mut outside = rects;
+        outside.r[0] = [1, 240, 448, 24];
+        assert!(refuse(outside));
+        let mut stray = rects;
+        stray.r[3] = [1, 1, 1, 1];
+        assert!(refuse(stray));
+        // A count above the bound on the wire is refused at decode.
+        let mut wire = b;
+        wire[16] = 9;
+        assert_eq!(Frame::decode(&wire), Err(Error::Invalid));
     }
 }
