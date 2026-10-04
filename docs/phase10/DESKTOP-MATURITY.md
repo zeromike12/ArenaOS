@@ -216,6 +216,13 @@ All guest runs are QEMU TCG on this branch. "Clean" means
 | 5 | `896947b`, clean | stopped | `test_m2`: the same pre-kernel firmware stall → harness boot-order hardening below. |
 | 6 | `1231e5a`, clean | **97/97** | none; zero timeouts (`ALL TESTS PASSED (97 test suites)`, `QUALIFICATION SOURCE CLEAN: yes`, start and end commit `1231e5a846a3f7d70349ebe931ba1e21b69ddbe1`). |
 
+Exact-image stability: `tools/build.sh --image` (production `desktop`
+profile) from `c0ba2db`, whose source differs from `1231e5a` only in
+documentation, then `tools/stability_loop.sh 100`: **100/100** boots
+fully green in 810 s, zero failures; EFI SHA-256
+`b2d429ab53d8156e96312c1a3fa361804a22de00a31e310d57ca30122137192a`,
+ESP SHA-256 `3ae99a487041081c1c4b2aa3abe5c76b4e8b6378ba25b817b5decf19e51b3108`.
+
 Targeted reruns after run 1: `test_m10_boundaries_red` 12/12 RED + GREEN,
 `test_m5_crash` 5/5 rounds, `test_m6` PASS.
 
