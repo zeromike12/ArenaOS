@@ -240,7 +240,21 @@ before BDS processes its first boot option — and firmware RIP
 
 No ArenaOS code has run at that point; the kernel, loader and ESP
 contents of this branch cannot be its cause. The harness does not retry
-(by design), so such a boot fails its suite.
+(by design), so such a boot fails its suite. A fourth occurrence
+(`test_m2`, complete run 5) followed.
+
+* Every stall sits exactly where BDS starts its first boot option. The
+  harness passed `-boot order=c`, which OVMF ignores (only `bootindex`
+  reaches its BootOrder), so that first option was always the raw
+  AFS1-formatted scratch virtio disk (`Boot0001 "UEFI Misc Device"`,
+  failing with Not Found), not the ESP. In isolation the stall appeared
+  once in about 2,000 boots with an AFS1 scratch image and in none of 600
+  with a zero-filled one.
+* Hardening (not a proven root cause): `tools/mtest.py`,
+  `tools/stability_loop.sh` and `tools/run-desktop.sh` now attach the ESP
+  as `ide-hd` with `bootindex=0` (same `Sata(0x0,…)` device path), so BDS
+  boots the ESP first and never attempts the scratch disk. Its effect is
+  measured by the complete runs that follow, not assumed.
 
 The `test_m5_crash` kill boot that stalled was accepted as a crash: by
 design `mtest.boot` SIGKILLs at the timeout and treats that as a

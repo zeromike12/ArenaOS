@@ -243,12 +243,14 @@ def run_qemu(label: str, esp: Path,
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
             "-cpu", "qemu64,+nx,+smep,+smap",
-            # Prefer the ESP boot drive to the raw scratch virtio device on
-            # each freshly seeded OVMF NVRAM boot.
-            "-boot", "order=c",
+            # Boot the ESP first. OVMF ignores "-boot order"; only bootindex
+            # reaches its BootOrder, and without it BDS first tries the raw
+            # scratch virtio disk, the point where every pre-kernel firmware
+            # stall was observed (docs/phase10/DESKTOP-MATURITY.md §8).
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
-            "-drive", f"format=raw,file={esp}",
+            "-drive", f"if=none,id=esp0,format=raw,file={esp}",
+            "-device", "ide-hd,drive=esp0,bus=ide.0,bootindex=0",
         ]
         # Milestone-5 fixture (ADR-0021): fresh scratch disk attached as
         # virtio-blk-pci — the kernel's bus-0 scan must find it.
@@ -419,12 +421,14 @@ def boot(label: str, esp: Path,
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
             "-cpu", "qemu64,+nx,+smep,+smap",
-            # Prefer the ESP boot drive to the raw scratch virtio device on
-            # each freshly seeded OVMF NVRAM boot.
-            "-boot", "order=c",
+            # Boot the ESP first. OVMF ignores "-boot order"; only bootindex
+            # reaches its BootOrder, and without it BDS first tries the raw
+            # scratch virtio disk, the point where every pre-kernel firmware
+            # stall was observed (docs/phase10/DESKTOP-MATURITY.md §8).
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
-            "-drive", f"format=raw,file={esp}",
+            "-drive", f"if=none,id=esp0,format=raw,file={esp}",
+            "-device", "ide-hd,drive=esp0,bus=ide.0,bootindex=0",
             "-drive", f"file={scratch},format=raw,if=none,id=scr0",
             "-device", "virtio-blk-pci,drive=scr0",
             # M6 fixtures (ADR-0024/0025): the slirp NIC and the entropy

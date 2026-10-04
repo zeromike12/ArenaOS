@@ -160,10 +160,11 @@ esac
 
 # 6. Boot.
 "${QEMU[@]}" \
-    -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap -boot order=c \
+    -M q35 -m 512M -cpu qemu64,+nx,+smep,+smap \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$W/vars.img" \
-    -drive format=raw,file="$ESP" \
+    -drive if=none,id=esp0,format=raw,file="$ESP" \
+    -device ide-hd,drive=esp0,bus=ide.0,bootindex=0 \
     -drive file="$W/disk.img",format=raw,if=none,id=scr0 \
     -device virtio-blk-pci,drive=scr0 \
     -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
