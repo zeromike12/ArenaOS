@@ -191,7 +191,8 @@ process.
 
 ## 7. Files touched by this pass
 
-Kernel: `kernel/kernel/src/entry.rs`, `kernel/kernel/src/sched/mod.rs`.
+Kernel: `kernel/kernel/src/entry.rs`, `kernel/kernel/src/sched/mod.rs`;
+`kernel/libs/sync/src/lib.rs` (a racy host unit test only, §8).
 Userspace: `userspace/gfxkit/src/lib.rs`, `userspace/displayd/src/main.rs`,
 `userspace/desktop/src/{compose,perf,shell,lib,model,app_client,client}.rs`,
 `userspace/desktop/src/bin/{desktop,application}.rs`,
