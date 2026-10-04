@@ -43,17 +43,29 @@ pub fn startup() -> Result<(u8, bool, bool, [u8; 32]), i64> {
         _ => Err(-2),
     }
 }
-/// Sleep until the pacing timer fires or the broker signals queued events
-/// on this client's private clock (same badge). An early wake cancels the
-/// still-armed timer so pending timers never accumulate in the bounded
-/// kernel timer table; cancelling an already-fired timer is a no-op.
-pub fn idle() -> Result<(), i64> {
-    let id = unsafe { syscall3(SYS_TIMER_ARM, CLOCK, 1, arena_ui::motion::FRAME_US) };
-    if id < 0 {
-        return Err(id);
-    }
+/// Sleep until the broker signals queued events on this client's private
+/// clock, or until `deadline` (monotonic microseconds) when the client has
+/// time-driven work (Monitor sampling). A client with nothing scheduled
+/// arms no timer at all and costs zero wakes while idle (ADR-0071). An
+/// early wake cancels the still-armed timer so armed timers never
+/// accumulate against the per-process quota; cancelling an already-fired
+/// timer is a harmless refusal.
+pub fn idle(deadline: Option<u64>) -> Result<(), i64> {
+    let id = match deadline {
+        Some(at) => {
+            let delay = at.saturating_sub(now()).max(1);
+            let id = unsafe { syscall3(SYS_TIMER_ARM, CLOCK, 1, delay) };
+            if id < 0 {
+                return Err(id);
+            }
+            Some(id)
+        }
+        None => None,
+    };
     let badge = unsafe { syscall1(SYS_WAIT, CLOCK) };
-    let _ = unsafe { syscall1(SYS_TIMER_CANCEL, id as u64) };
+    if let Some(id) = id {
+        let _ = unsafe { syscall1(SYS_TIMER_CANCEL, id as u64) };
+    }
     if badge < 0 {
         return Err(badge);
     }

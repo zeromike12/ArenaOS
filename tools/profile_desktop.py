@@ -38,6 +38,14 @@ def parse(text):
     return out
 
 
+def stats(samples):
+    """p50/p95/max of host latency samples in milliseconds."""
+    samples = sorted(samples)
+    pick = lambda q: samples[min(len(samples) - 1, int(q * len(samples)))]
+    return {'median': round(pick(0.5), 1), 'p95': round(pick(0.95), 1),
+            'max': round(samples[-1], 1), 'n': len(samples)}
+
+
 def workflow(label, results):
     d = Desktop(label)
     serial = BUILD / f'serial-{label}.log'
@@ -87,10 +95,7 @@ def workflow(label, results):
         for _ in range(trials):
             pixels()
         dump_ms = (time.monotonic() - t0) * 1000 / trials
-        samples.sort()
-        return {'motion_to_photon_ms': {'median': round(samples[len(samples) // 2], 1),
-                                        'max': round(samples[-1], 1),
-                                        'screendump_ms': round(dump_ms, 1)}}
+        return {'motion_to_photon_ms': {**stats(samples), 'screendump_ms': round(dump_ms, 1)}}
     def typing_latency(trials):
         # Host key-to-photon in the focused Terminal: type one character
         # and dump until the input line's raster changes.
@@ -111,21 +116,19 @@ def workflow(label, results):
                     raise AssertionError('typed glyph never drawn')
             samples.append((time.monotonic() - t0) * 1000)
             time.sleep(0.05)
-        samples.sort()
-        return {'key_to_photon_ms': {'median': round(samples[len(samples) // 2], 1),
-                                     'max': round(samples[-1], 1)}}
+        return {'key_to_photon_ms': stats(samples)}
     try:
-        phase('idle-empty', lambda: time.sleep(3))
-        phase('cursor-latency', lambda: cursor_latency(15))
+        phase('idle-empty', lambda: time.sleep(10))
+        phase('cursor-latency', lambda: cursor_latency(30))
         phase('pointer-empty', lambda: sweep(150, 60, 520))
         phase('launch-terminal', lambda: (d.launch(0, 'p-terminal'), {})[1])
         phase('typing-terminal', lambda: (d.q.type_text('echo the quick brown fox jumps\r', gap_s=.03), {'events': 31})[1])
-        phase('key-latency', lambda: typing_latency(15))
+        phase('key-latency', lambda: typing_latency(30))
         def launch_rest():
             for kind in range(1, 6):
                 d.launch(kind, f'p-app-{kind}', kind)
         phase('launch-five-more', launch_rest)
-        phase('idle-six-apps', lambda: time.sleep(3))
+        phase('idle-six-apps', lambda: time.sleep(10))
         phase('pointer-six-apps', lambda: sweep(150, 60, 520))
         def drag():
             # Gallery (top, index 5) title strip at (200+20, 180+10).
@@ -175,8 +178,16 @@ def main():
               + (f" k2p={r['key_to_photon_ms']}" if 'key_to_photon_ms' in r else ''))
         apps = {k: v for k, v in g.items() if k.startswith('app')}
         for k in sorted(apps):
-            if k.endswith(('paint', 'event2damage')):
+            if k.endswith(('paint', 'event2damage', 'wake')):
                 print(f"{'':18}   {k}={apps[k]['count']}x{apps[k]['mean_us']}us(max{apps[k]['max_us']})")
+        if name.startswith('idle'):
+            # The reporting window spans the phase plus the trailing flush.
+            seconds = r['host_s'] + 1.3
+            r['wakes_per_s'] = {
+                'compositor': round(pick('desktop.sleep').get('count', 0) / seconds, 2),
+                **{k.split('.')[0]: round(v['count'] / seconds, 2)
+                   for k, v in apps.items() if k.endswith('.wake')}}
+            print(f"{'':18}   wakes/s {r['wakes_per_s']}")
     print('[profile] PASS (measurement only; not a qualification gate)')
 
 

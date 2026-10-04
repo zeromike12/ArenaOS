@@ -82,10 +82,35 @@ static mut NOTICE: Option<(&'static str, u64)> = None;
 static mut WOKEN: [bool; LIMIT] = [false; LIMIT];
 /// Appearance changed: every built-in client should repaint now.
 static mut WAKE_ALL: bool = false;
-/// Until endpoints can wake a notification wait (DESIGN: Phase-11 bound
-/// notifications), the compositor polls its endpoint on every scheduler
-/// tick: arm the shortest timer, which fires at the next 10 ms tick.
-const POLL_TICK_US: u64 = 1;
+/// Badges on the compositor's own notification (ADR-0071). One wait
+/// covers every event source; the merged badge needs no dispatch because
+/// each wake re-runs sweep/animate/drain.
+const BADGE_TIMER: u64 = 1;
+/// A client or input request was queued while the compositor was not
+/// parked in RECV (endpoint-bound notification).
+const BADGE_REQUEST: u64 = 2;
+/// A child application process exited (spawn exit notification).
+const BADGE_EXIT: u64 = 4;
+/// Nothing time-driven is due: sleep until an event.
+const NO_DEADLINE: u64 = u64::MAX;
+/// Next instant time-driven presentation work is due: a running motion
+/// (frame pacing), the next uptime second shown in the bar, or a notice
+/// expiry. Everything else (requests, input, child exit) wakes the
+/// compositor through its notification instead of a poll.
+fn next_deadline(now: u64) -> u64 {
+    let mut due = (now / 1_000_000 + 1) * 1_000_000;
+    if let Some((_, until)) = unsafe { NOTICE } {
+        due = due.min(until);
+    }
+    let sessions = unsafe { &*(&raw const SESSIONS) };
+    if sessions
+        .iter()
+        .any(|s| s.id != 0 && (s.reveal.active(now) || s.focus.active(now) || s.ending))
+    {
+        due = due.min(now + arena_ui::motion::FRAME_US);
+    }
+    due
+}
 /// Signal built-in clients that have queued events (or must repaint) on
 /// the private clock the broker already holds for them. Their `idle()`
 /// cancels the then-redundant timer. Third-party signed applications are
@@ -358,8 +383,8 @@ fn launch_image(
             image,
             spec.as_ptr() as u64,
             if diagnostics { 5 } else { 4 },
-            CAP_NONE,
-            0,
+            CLOCK,
+            BADGE_EXIT,
         )
     };
     if pid <= 0 {
@@ -749,6 +774,11 @@ pub extern "C" fn _start() -> ! {
         FILES = Some(fs);
     }
 
+    // Requests and input arrive on SERVER; queue them onto CLOCK when the
+    // compositor is not parked in RECV, so it never polls (ADR-0071).
+    if unsafe { syscall6(SYS_ENDPOINT_BIND, SERVER, CLOCK, BADGE_REQUEST, 0, 0, 0) } != 0 {
+        die(98)
+    }
     render(ram as u64, w, h, scanout);
     log(b"[desktop] real desktop frame presented; gallery launcher available\n");
     snapshot();
@@ -774,10 +804,26 @@ pub extern "C" fn _start() -> ! {
             }
             perf_report();
             let slept = perf_now();
-            if unsafe { syscall3(SYS_TIMER_ARM, CLOCK, 1, POLL_TICK_US) } < 0
-                || unsafe { syscall1(SYS_WAIT, CLOCK) } < 0
-            {
+            let now = arena_desktop::app_client::now();
+            let due = next_deadline(now);
+            let timer = if due == NO_DEADLINE {
+                -1
+            } else {
+                let t = unsafe {
+                    syscall3(SYS_TIMER_ARM, CLOCK, BADGE_TIMER, due.saturating_sub(now).max(1))
+                };
+                if t < 0 {
+                    die(96)
+                }
+                t
+            };
+            if unsafe { syscall1(SYS_WAIT, CLOCK) } < 0 {
                 die(96)
+            }
+            // An event (not the timer) woke us: retire the still-armed
+            // timer so wakes never accumulate in the bounded table.
+            if timer >= 0 {
+                let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
             }
             probe(P_SLEEP, slept);
             continue;

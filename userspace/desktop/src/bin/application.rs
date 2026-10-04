@@ -554,8 +554,9 @@ pub extern "C" fn _start() -> ! {
     let mut dirty = true;
     let mut appearance = client.appearance.get();
     // Opt-in latency probes (ARENA_PERF builds only; folded away otherwise):
-    // [paint, damage IPC, first event -> damage published, poll IPC].
-    let mut perf_stats = [arena_desktop::perf::Stat::ZERO; 4];
+    // [paint, damage IPC, first event -> damage published, poll IPC,
+    // notification wake (time asleep)].
+    let mut perf_stats = [arena_desktop::perf::Stat::ZERO; 5];
     let mut perf_last = 0u64;
     let mut first_event = 0u64;
     loop {
@@ -645,7 +646,7 @@ pub extern "C" fn _start() -> ! {
         }
         if arena_desktop::perf::ENABLED && service::now().saturating_sub(perf_last) >= 1_000_000 {
             perf_last = service::now();
-            if perf_stats[0].count + perf_stats[2].count > 0 {
+            if perf_stats[0].count + perf_stats[2].count + perf_stats[4].count > 0 {
                 let mut line = arena_desktop::perf::Line::new();
                 line.push(b"[perf app");
                 line.number(u64::from(kind));
@@ -654,11 +655,23 @@ pub extern "C" fn _start() -> ! {
                 line.stat(b"damage", perf_stats[1]);
                 line.stat(b"event2damage", perf_stats[2]);
                 line.stat(b"poll", perf_stats[3]);
+                line.stat(b"wake", perf_stats[4]);
                 line.push(b"\n");
                 client::log(line.as_bytes());
             }
-            perf_stats = [arena_desktop::perf::Stat::ZERO; 4];
+            perf_stats = [arena_desktop::perf::Stat::ZERO; 5];
         }
-        service::idle().unwrap_or_else(|_| client::exit(75));
+        // Only Monitor has time-driven work; every other built-in client
+        // sleeps until the broker signals an event for it.
+        let deadline = (kind == apps::MONITOR).then_some(app.next_sample);
+        let slept = if arena_desktop::perf::ENABLED {
+            service::now()
+        } else {
+            0
+        };
+        service::idle(deadline).unwrap_or_else(|_| client::exit(75));
+        if arena_desktop::perf::ENABLED {
+            perf_stats[4].add(service::now() - slept);
+        }
     }
 }

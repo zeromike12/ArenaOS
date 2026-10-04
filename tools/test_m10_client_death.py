@@ -11,7 +11,7 @@ import test_m10_boundaries as green
 ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir();LABEL='m10-client-death'
 SOURCE=ROOT/'userspace/desktop/src/bin/application.rs'
 NEEDLE=b'    fn key(&mut self, key: u16, client: &Client) -> Result<(), i64> {\n'
-MUTANT=NEEDLE+b'        if self.kind == apps::GALLERY && key == 103 { client::exit(77) }\n        if self.kind == apps::GALLERY && key == 104 { loop { let _ = service::idle(); } }\n'
+MUTANT=NEEDLE+b'        if self.kind == apps::GALLERY && key == 103 { client::exit(77) }\n        if self.kind == apps::GALLERY && key == 104 { loop { let _ = service::idle(None); } }\n'
 def samples(d):return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())]
 def workflow():
     d=Desktop(LABEL)

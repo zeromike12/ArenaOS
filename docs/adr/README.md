@@ -118,3 +118,5 @@ What this costs us.
 ## Future implications
 What this constrains or enables later; what would trigger revisiting.
 ```
+| [0071](0071-endpoint-bound-notifications-and-timer-quota.md) | Endpoint-bound notifications (one wait for IPC, timers and events) and a per-process timer quota | Accepted |
+| [0072](0072-direct-ipc-handoff.md) | Direct handoff to a server woken by a blocking caller | Accepted |

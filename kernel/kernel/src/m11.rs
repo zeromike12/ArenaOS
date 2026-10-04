@@ -12,10 +12,14 @@
 //!    is never signalled by the old binding (generation pinned).
 //! 3. `endpoint_destroy_unbinds` — a destroyed endpoint's binding dies
 //!    with it; an endpoint re-minted at the same index starts unbound.
-//! 4. `timer_quota` — `MAX_TIMERS_PER_PROCESS` arms succeed per owner,
+//! 4. `orphan_unbinds` — when the process holding the endpoint's serve
+//!    side is destroyed the endpoint is orphaned and its binding removed;
+//!    a later server taking the endpoint over is not signalled through
+//!    the dead server's notification.
+//! 5. `timer_quota` — `MAX_TIMERS_PER_PROCESS` arms succeed per owner,
 //!    the next one is refused as `Quota` while another owner still arms,
 //!    and releasing the owner restores exactly its capacity.
-//! 5. `handoff_order` — a handoff wake runs before an earlier ordinary
+//! 6. `handoff_order` — a handoff wake runs before an earlier ordinary
 //!    wake (front of the ready ring), without disturbing FIFO otherwise.
 //!
 //! Markers: `m11:test:<name>`, `m11: RESULT`.
@@ -30,10 +34,11 @@ use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 type Res = Result<(), &'static str>;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Res); 5] = [
+    let checks: [(&str, fn() -> Res); 6] = [
         ("bound_signal", test_bound_signal),
         ("notif_destroy_unbinds", test_notif_destroy_unbinds),
         ("endpoint_destroy_unbinds", test_endpoint_destroy_unbinds),
+        ("orphan_unbinds", test_orphan_unbinds),
         ("timer_quota", test_timer_quota),
         ("handoff_order", test_handoff_order),
     ];
@@ -215,7 +220,54 @@ fn test_endpoint_destroy_unbinds() -> Res {
     Ok(())
 }
 
-// ---- 4. timer_quota ------------------------------------------------------------
+// ---- 4. orphan_unbinds -------------------------------------------------------
+
+fn test_orphan_unbinds() -> Res {
+    let frames_before = crate::frames::free_frames();
+    let eid = ipc::create_endpoint()?;
+    let nid = ipc::create_notification()?;
+    // A real (thread-less) process holding the serve side by capability:
+    // `fail_calls_for_server` discovers served endpoints from caps alone.
+    let pid = crate::proc::create("m11-server")?;
+    crate::cap::issue(
+        pid,
+        0,
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Endpoint { eid },
+            rights: crate::cap::RIGHTS_READ,
+        },
+    )?;
+    ipc::bind(eid, nid, 0x200).map_err(|_| "bind refused")?;
+    crate::proc::destroy(pid)?;
+    let left = ipc::binding_of(eid);
+    // Takeover: the boot thread takes up the serve side (its first
+    // receive clears the orphan state; nothing is queued yet). A call
+    // queued afterwards must not reach the dead server's notification.
+    if ipc::try_recv(0, eid).map(|_| ()) != Err(crate::arch::x86_64::syscall::STATUS_BUSY) {
+        return Err("takeover receive did not find an empty, re-opened endpoint");
+    }
+    queue_call(eid)?;
+    let stray = ipc::poll_pending(nid);
+    serve_one(eid)?;
+    ipc::destroy_endpoint(eid)?;
+    ipc::destroy_notification(nid)?;
+    if left.is_some() {
+        return Err("orphaning the endpoint left the dead server's binding");
+    }
+    if stray != 0 {
+        return Err("a call after takeover signalled the dead server's notification");
+    }
+    if crate::frames::free_frames() != frames_before {
+        return Err("the server process did not tear down frame-exactly");
+    }
+    info!(
+        "m11",
+        "orphan_unbinds: server pid {pid} destroyed; binding removed; takeover not signalled"
+    );
+    Ok(())
+}
+
+// ---- 5. timer_quota ------------------------------------------------------------
 
 /// Owner ids that no process can have (pids are small and monotonic).
 const OWNER_A: u64 = u64::MAX - 0x11;
@@ -266,7 +318,7 @@ fn test_timer_quota() -> Res {
     Ok(())
 }
 
-// ---- 5. handoff_order -----------------------------------------------------------
+// ---- 6. handoff_order -----------------------------------------------------------
 
 static ORDER: SyncCell<[u64; 4]> = SyncCell::new([0; 4]);
 static ORDER_LEN: AtomicUsize = AtomicUsize::new(0);

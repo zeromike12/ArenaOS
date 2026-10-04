@@ -633,7 +633,7 @@ pub fn call(
             crate::halt::halt_machine("ipc: server without a process");
         }
         // Direct handoff (ADR-0072): the caller blocks next, so the
-        // server it just fed runs immediately on the donated quantum.
+        // server it just fed runs immediately, ahead of the ready ring.
         bump!(handoffs);
         if let Err(e) = sched::wake_handoff(parked) {
             error!("ipc", "call: wake(server {parked}) failed: {e}");
