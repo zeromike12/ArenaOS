@@ -19,8 +19,10 @@
 //! 5. `timer_quota` — `MAX_TIMERS_PER_PROCESS` arms succeed per owner,
 //!    the next one is refused as `Quota` while another owner still arms,
 //!    and releasing the owner restores exactly its capacity.
-//! 6. `handoff_order` — a handoff wake runs before an earlier ordinary
-//!    wake (front of the ready ring), without disturbing FIFO otherwise.
+//! 6. `handoff_order` — a handoff wake runs before threads other code made
+//!    ready earlier (front of the ready ring), but never before a thread
+//!    the calling thread itself woke earlier in its current run (causal
+//!    order: a STOP notified before a CALL is handled first).
 //! 7. `badged_endpoint` (ADR-0074) — only the serve side mints; badges are
 //!    preserved by transfer and attenuated copy, never amplified; a call
 //!    through a badged cap delivers its badge; badged caps never serve; a
@@ -340,31 +342,62 @@ fn sleeper_entry(tag: usize) {
     }
 }
 
-fn test_handoff_order() -> Res {
+fn waker_entry(tid: usize) {
+    let _ = sched::wake(tid as u64);
+}
+
+/// Spawn two sleepers (tags 1 and 2) and wait until both are blocked.
+fn sleepers() -> Result<(u64, u64), &'static str> {
     ORDER_LEN.store(0, Ordering::Relaxed);
     let a = sched::spawn("m11-wake", sleeper_entry, 1)?;
     let b = sched::spawn("m11-handoff", sleeper_entry, 2)?;
     for _ in 0..16 {
         if sched::thread_blocked(a) && sched::thread_blocked(b) {
+            return Ok((a, b));
+        }
+        sched::yield_now();
+    }
+    Err("sleepers never blocked")
+}
+
+fn ran() -> (usize, [u64; 4]) {
+    // SAFETY: the writers are gone; single reader.
+    (ORDER_LEN.load(Ordering::Relaxed), unsafe { *ORDER.get() })
+}
+
+fn test_handoff_order() -> Res {
+    // Front of the ring: A was made ready by another thread before this
+    // one was switched in; the handoff-woken B still runs first.
+    let (a, b) = sleepers()?;
+    sched::spawn("m11-waker", waker_entry, a as usize)?;
+    for _ in 0..16 {
+        if !sched::thread_blocked(a) {
             break;
         }
         sched::yield_now();
     }
-    if !(sched::thread_blocked(a) && sched::thread_blocked(b)) {
-        return Err("sleepers never blocked");
+    if sched::thread_blocked(a) {
+        return Err("helper never woke the first sleeper");
     }
-    // A is woken first, the ordinary way; B second, as an IPC handoff.
+    sched::wake_handoff(b)?;
+    drain(16)?;
+    let (n, order) = ran();
+    if n != 2 || order[..2] != [2, 1] {
+        return Err("the handoff wake did not run before an earlier wake by another thread");
+    }
+    // Causal order: this thread wakes A itself, then hands off to B in
+    // the same run. A was caused first and must run first.
+    let (a, b) = sleepers()?;
     sched::wake(a)?;
     sched::wake_handoff(b)?;
     drain(16)?;
-    // SAFETY: both writers are gone; single reader.
-    let order = unsafe { *ORDER.get() };
-    if ORDER_LEN.load(Ordering::Relaxed) != 2 || order[..2] != [2, 1] {
-        return Err("the handoff wake did not run before the earlier ordinary wake");
+    let (n, order) = ran();
+    if n != 2 || order[..2] != [1, 2] {
+        return Err("a handoff overtook the caller's own earlier wake");
     }
     info!(
         "m11",
-        "handoff_order: handoff-woken thread ran first; ordinary wake followed"
+        "handoff_order: handoff ran ahead of another thread's earlier wake; never ahead of the caller's own earlier wake"
     );
     Ok(())
 }

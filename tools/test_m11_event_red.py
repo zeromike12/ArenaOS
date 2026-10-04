@@ -6,7 +6,7 @@ builds the real image, boots it, and requires that the matching m11 boot
 check (and only a real guest observation) reports FAIL. A build error can
 never count as RED. Source and the shipped EFI/ESP are restored byte-exactly
 in `finally`; a final GREEN boot of the restored bytes must report
-`m11: RESULT PASS (6/6)` and reach the shell.
+`m11: RESULT PASS (7/7)` and reach the shell.
 """
 import hashlib
 from pathlib import Path
@@ -53,6 +53,11 @@ CONTROLS = [
     # A handoff wake is an ordinary back-of-ring wake.
     (SCHED, b'    wake_with(tid, true)\n', b'    wake_with(tid, false)\n',
      'handoff', 'm11:test:handoff_order: FAIL'),
+    # A handoff overtakes the caller's own earlier wakes (the causal-order
+    # rule found by the historical stackstop proof).
+    (SCHED, b'            let front = handoff && !cpu.woke_others;',
+     b'            let front = handoff;',
+     'handoff-causal', 'm11:test:handoff_order: FAIL'),
 ]
 
 

@@ -47,3 +47,29 @@ Two variants were tried and rejected on evidence:
   wake; the RED control that turns `wake_handoff` back into an ordinary wake
   fails it. The historical suites (phase-9 polling fixture included) are the
   regression guard against the livelocking variant.
+
+## Amendment (Phase 11.3): causal order
+
+The complete historical suite on the first 11.0 commit failed
+`test_m8_dependencies` (restart scenario): the shell notifies the service
+manager to STOP the network stack and then CALLs the stack's endpoint,
+expecting the old bearer to be refused. With unconditional handoff the
+CALL put the still-parked old stack server at the front of the ready
+ring, ahead of the manager the shell had woken a moment earlier, so the
+old server accepted the old bearer (`m8: stackstop FAIL (old bearer
+accepted or wrong transport)`). Before handoff, FIFO order ran the
+manager first.
+
+Rule: a handoff never overtakes a wake the calling thread itself caused
+earlier in its current run. The scheduler keeps one per-CPU flag,
+`woke_others`, set by every ordinary wake (including wakes raised from
+interrupt context during the run — conservative) and cleared when a
+thread is switched in. A handoff goes to the front only while the flag is
+clear; otherwise it is an ordinary back-of-ring wake, exactly the pre-11.0
+order. The desktop's hot paths (client → compositor CALL, inputd →
+compositor CALL) wake nobody before calling, so they keep the handoff.
+
+Proof: `m11:test:handoff_order` checks both halves (a handoff runs ahead
+of a thread another thread woke; it never runs ahead of the caller's own
+earlier wake), and `test_m11_event_red.py` carries the `handoff-causal`
+RED control that removes the flag check.

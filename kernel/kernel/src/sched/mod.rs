@@ -173,6 +173,10 @@ pub(super) struct CpuSched {
     slice: u32,
     /// Ticks left for `current`.
     remaining: u32,
+    /// `current` has made another thread ready since it was switched in
+    /// (or something did on its behalf, e.g. an interrupt). A later
+    /// handoff must not overtake those earlier wakes (ADR-0072).
+    woke_others: bool,
 }
 
 impl CpuSched {
@@ -182,6 +186,7 @@ impl CpuSched {
             ready: Ring::new(),
             slice: 0,
             remaining: 0,
+            woke_others: false,
         }
     }
 }
@@ -488,7 +493,10 @@ pub fn thread_blocked(tid: u64) -> bool {
 /// or a bound signal raised by a caller about to park), so the woken
 /// thread is simply the very next to run: nothing ever accumulates at the
 /// front, FIFO order of every other ready thread is untouched and no
-/// priority is stored. (Donating the waker's remaining quantum was
+/// priority is stored. If the caller already woke another thread during
+/// its current run, the server goes to the back instead: a handoff never
+/// overtakes the caller's own earlier wakes (a STOP request notified
+/// before a CALL is processed before that CALL, as with plain FIFO). (Donating the waker's remaining quantum was
 /// measured: no latency gain, and the server was preempted mid-copy.)
 /// Using it where the waker keeps running (a REPLY) lets busy groups
 /// re-enter ahead of the whole ring forever — that variant livelocked.
@@ -513,11 +521,19 @@ fn wake_with(tid: u64, handoff: bool) -> Result<(), &'static str> {
             }
             t.state = State::Ready;
             let cpu = &mut (*CPUS.get())[this_cpu()];
-            let pushed = if handoff {
+            // Causal order: a thread the running thread already woke runs
+            // before the server of its later call, exactly as without
+            // handoff. Handoff only skips the queue when nothing the
+            // caller did earlier is waiting in it.
+            let front = handoff && !cpu.woke_others;
+            let pushed = if front {
                 cpu.ready.push_front(idx)
             } else {
                 cpu.ready.push(idx)
             };
+            if !front {
+                cpu.woke_others = true;
+            }
             if !pushed {
                 return Err("wake: ready ring overflow");
             }
@@ -726,6 +742,7 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
         }
         threads[next].as_mut().expect("ready slot vanished").state = State::Running;
         cpu.current = next;
+        cpu.woke_others = false;
         // Fresh quantum for the incoming thread (strict RR; also resets
         // the countdown when a yield found the ring empty and no switch
         // happens — the current thread simply gets a new slice).
