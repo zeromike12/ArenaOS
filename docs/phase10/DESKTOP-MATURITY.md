@@ -116,8 +116,8 @@ present nothing). Both are addressed by Phase-11 workstreams K and C.
   `test_m10_boundaries_red` now mutates the single place composition reads
   window content (the `compose` closure in `render`) to serve the staging
   bytes, and the real guest oracle rejects it.
-* Guest: the Phase-10 suites and the complete historical suite are rerun on
-  this source (receipts in §8).
+* Guest: the complete historical suite, Phase-10 suites included, passes
+  97/97 on clean source `1231e5a` (receipts in §8).
 
 ## 6. Audit: what prevents a real file explorer and desktop filesystem
 
@@ -213,6 +213,8 @@ All guest runs are QEMU TCG on this branch. "Clean" means
 | 2 | `aa1c74c`, clean | stopped | `test_m10_boundaries_red`: the `frame-publication` mutant passed once — the signed child notices `f` on its own timer, after the single sweep → oracle repeats sweep/compare cycles for ≥ 1 s (mutant rejected 3/3 for the expected reason, unmutated GREEN 2/2). |
 | 3 | `aa1c74c`, clean | stopped | host `arena-sync` unit test `owner_token_tracks_acquirer_across_threads`: reads the owner token after `held` is set but before the token is stored (5/400 locally) → test waits for the token; same assertion (0/1000). |
 | 4 | `81d6be7`, clean | 96/97 | `test_m9_shared_ref_hook`: RED half PASS; the GREEN boot hit the pre-kernel firmware stall below. |
+| 5 | `896947b`, clean | stopped | `test_m2`: the same pre-kernel firmware stall → harness boot-order hardening below. |
+| 6 | `1231e5a`, clean | **97/97** | none; zero timeouts (`ALL TESTS PASSED (97 test suites)`, `QUALIFICATION SOURCE CLEAN: yes`, start and end commit `1231e5a846a3f7d70349ebe931ba1e21b69ddbe1`). |
 
 Targeted reruns after run 1: `test_m10_boundaries_red` 12/12 RED + GREEN,
 `test_m5_crash` 5/5 rounds, `test_m6` PASS.

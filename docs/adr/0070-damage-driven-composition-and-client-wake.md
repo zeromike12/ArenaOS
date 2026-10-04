@@ -1,7 +1,8 @@
 # ADR-0070 — Damage-driven composition and broker client wake
 
 Status: implemented on `arena/phase10-desktop-maturity`; complete historical
-suite rerun required before qualification (see DESKTOP-MATURITY.md).
+suite 97/97 on clean source `1231e5a` (receipts in
+docs/phase10/DESKTOP-MATURITY.md §8). Not a Phase-10 qualification claim.
 
 ## Problem
 
