@@ -224,7 +224,10 @@ mod tests {
             *g
         });
         // Wait until the other thread is inside, then verify diagnostics.
-        while !LOCK.is_locked() {
+        // `lock` sets `held` before it stores the owner token, so wait for
+        // the token too; the assertion below still requires it to name the
+        // holder (9), not this observer.
+        while !LOCK.is_locked() || LOCK.owner_token().is_none() {
             thread::yield_now();
         }
         set_cpu(3);
