@@ -108,6 +108,9 @@ struct CallSlot {
     /// Staged by `reply`, installed into the caller's space when the
     /// caller resumes (owner-context discipline).
     reply_cap: Cap,
+    /// ADR-0074: badge of the capability the caller invoked (0 = plain
+    /// endpoint cap). Delivered to the server; never interpreted here.
+    badge: u32,
 }
 
 const EMPTY_SLOT: CallSlot = CallSlot {
@@ -121,6 +124,7 @@ const EMPTY_SLOT: CallSlot = CallSlot {
     reply_words: [0; 2],
     reply_msg: [0; MSG_BYTES],
     reply_cap: Cap::EMPTY,
+    badge: 0,
 };
 
 #[derive(Clone, Copy)]
@@ -147,6 +151,9 @@ struct Endpoint {
     /// parked in `recv`. The generation pins the exact notification
     /// object: a destroyed and re-minted index never matches.
     bound: Option<Binding>,
+    /// ADR-0074: advanced on every mint and destroy of this index; badged
+    /// endpoint caps carry it and are refused once it moves on.
+    generation: u16,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -162,6 +169,7 @@ const EMPTY_EP: Endpoint = Endpoint {
     q: [EMPTY_SLOT; QUEUE_DEPTH],
     server: NO_TID,
     bound: None,
+    generation: 0,
 };
 
 #[derive(Clone, Copy)]
@@ -249,6 +257,16 @@ pub fn parked_server(eid: u32, pid: u64) -> bool {
 /// server dying must not take its endpoint with it — the clients'
 /// capabilities name the endpoint, not the process, which is what
 /// lets a restarted service pick the serve side back up.)
+/// Generation of a LIVE endpoint (ADR-0074), `None` when dead.
+pub fn endpoint_generation(eid: u32) -> Option<u16> {
+    without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())
+            .get(eid as usize)
+            .filter(|e| e.live)
+            .map(|e| e.generation)
+    })
+}
+
 pub fn endpoint_live(eid: u32) -> bool {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
@@ -286,12 +304,14 @@ pub fn create_endpoint() -> Result<u32, &'static str> {
             let Some(i) = eps.iter().position(|e| !e.live) else {
                 return Err("endpoint table full (MAX_ENDPOINTS)");
             };
+            let generation = eps[i].generation.wrapping_add(1);
             eps[i] = Endpoint {
                 live: true,
                 orphaned: false,
                 q: [EMPTY_SLOT; QUEUE_DEPTH],
                 server: NO_TID,
                 bound: None,
+                generation,
             };
             Ok(i as u32)
         }
@@ -313,6 +333,7 @@ pub fn destroy_endpoint(eid: u32) -> Result<(), &'static str> {
                 return Err("destroy_endpoint: busy (server parked or requests outstanding)");
             }
             ep.live = false;
+            ep.generation = ep.generation.wrapping_add(1);
             if ep.bound.take().is_some() {
                 (*STATS.get()).unbinds += 1;
             }
@@ -571,6 +592,18 @@ pub fn call(
     send_cap: Option<Cap>,
     msg: [u8; MSG_BYTES],
 ) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
+    call_badged(pid, eid, 0, words, send_cap, msg)
+}
+
+/// [`call`] through a capability carrying `badge` (ADR-0074; 0 = plain).
+pub fn call_badged(
+    pid: u64,
+    eid: u32,
+    badge: u32,
+    words: [u64; 2],
+    send_cap: Option<Cap>,
+    msg: [u8; MSG_BYTES],
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // Phase 1 — enqueue; note a parked server (borrow ends here).
     // SAFETY: single writer under IF=0.
     let (eidx, qi, parked, signal) = without_interrupts(
@@ -602,6 +635,7 @@ pub fn call(
                 words,
                 msg,
                 send_cap: staged,
+                badge,
                 ..EMPTY_SLOT
             };
             let parked = ep.server;
@@ -724,6 +758,26 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Stat
 /// delivery, transferred references and cancellation use the blocking path.
 pub fn try_recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     recv_with_policy(pid, eid, false)
+}
+
+/// [`recv`]/[`try_recv`] that also returns the badge of the capability the
+/// caller invoked (ADR-0074; 0 = a plain endpoint cap).
+pub fn recv_badged(
+    pid: u64,
+    eid: u32,
+    blocking: bool,
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES], u32), Status> {
+    let (words, landed, msg) = recv_with_policy(pid, eid, blocking)?;
+    let tid = sched::current_thread_id();
+    // The request stays Delivered to this thread until it replies.
+    let badge = without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())[eid as usize]
+            .q
+            .iter()
+            .find(|s| s.state == SlotState::Delivered && s.server == tid)
+            .map_or(0, |s| s.badge)
+    });
+    Ok((words, landed, msg, badge))
 }
 
 fn recv_with_policy(

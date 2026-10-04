@@ -121,3 +121,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0071](0071-endpoint-bound-notifications-and-timer-quota.md) | Endpoint-bound notifications (one wait for IPC, timers and events) and a per-process timer quota | Accepted |
 | [0072](0072-direct-ipc-handoff.md) | Direct handoff to a server woken by a blocking caller | Accepted |
 | [0073](0073-keyed-partial-repaint-and-regional-publication.md) | Keyed partial client repaint and regional Damage publication | Accepted |
+| [0074](0074-badged-endpoint-capabilities.md) | Badged endpoint capabilities (server-minted, generation-safe object handles) | Accepted |

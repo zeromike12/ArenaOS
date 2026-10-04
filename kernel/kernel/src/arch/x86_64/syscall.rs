@@ -171,6 +171,10 @@ pub const SYS_SPAWN_CHECK: u64 = 45;
 /// Phase 11.0 (ADR-0071): bind a notification to an endpoint's serve side.
 pub const SYS_ENDPOINT_BIND: u64 = 46;
 pub const SYS_ENDPOINT_UNBIND: u64 = 47;
+/// Phase 11.2 (ADR-0074): mint a badged client endpoint cap (serve side).
+pub const SYS_ENDPOINT_MINT: u64 = 48;
+/// Phase 11.2 (ADR-0074): receive (blocking or not) returning the badge.
+pub const SYS_IPC_RECV_BADGED: u64 = 49;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -695,6 +699,8 @@ extern "C" fn syscall_dispatch(
         SYS_PROC_LIVE => sys_proc_live(a0) as u64,
         SYS_ENDPOINT_BIND if [a3, a4, a5] == [0; 3] => sys_endpoint_bind(a0, a1, a2) as u64,
         SYS_ENDPOINT_UNBIND if [a1, a2, a3, a4, a5] == [0; 5] => sys_endpoint_unbind(a0) as u64,
+        SYS_ENDPOINT_MINT if [a3, a4, a5] == [0; 3] => sys_endpoint_mint(a0, a1, a2) as u64,
+        SYS_IPC_RECV_BADGED if a5 == 0 => sys_ipc_recv_badged(a0, a1, a2, a3, a4) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -881,6 +887,60 @@ fn sys_endpoint_bind(a0: u64, a1: u64, a2: u64) -> Status {
     }
 }
 
+/// SYS_ENDPOINT_MINT(endpoint slot, badge, rights) — ADR-0074. The slot
+/// must hold a plain endpoint cap with READ (the serve side); returns the
+/// slot of the new badged cap (rights ⊆ WRITE|COPY, WRITE required).
+fn sys_endpoint_mint(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a0 >= crate::cap::CAP_SLOTS as u64 || a1 > u64::from(u32::MAX) || a2 > u64::from(u32::MAX) {
+        return STATUS_BAD_ARG;
+    }
+    match crate::cap::mint_badged(pid, a0 as usize, a1 as u32, a2 as u32) {
+        Ok(slot) => slot as Status,
+        Err(_) => STATUS_BAD_ARG,
+    }
+}
+
+/// SYS_IPC_RECV_BADGED(endpoint slot, out 32 B, msg buf, blocking, 0) —
+/// ADR-0074: as RECV (blocking = 1) or TRY_RECV (0), with `out` receiving
+/// `[w0, w1, landed-cap-slot, badge]`.
+fn sys_ipc_recv_badged(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if a3 > 1 || a4 != 0 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_ok(a1, 32) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let has_msg = a2 != 0;
+    if has_msg && !user_range_ok(a2, crate::ipc::MSG_BYTES as u64) {
+        return STATUS_BAD_ADDRESS;
+    }
+    match crate::ipc::recv_badged(pid, eid, a3 == 1) {
+        Ok((words, landed, msg, badge)) => {
+            // SAFETY: as in sys_ipc_call — own context, validated range.
+            unsafe {
+                write_user_words(a1, [words[0], words[1], landed]);
+                super::stac();
+                core::ptr::write_volatile((a1 as *mut u64).add(3), u64::from(badge));
+                super::clac();
+                if has_msg {
+                    write_user_msg(a2, &msg);
+                }
+            }
+            STATUS_OK
+        }
+        Err(e) => e,
+    }
+}
+
 /// SYS_ENDPOINT_UNBIND(endpoint slot) — READ on the endpoint (ADR-0071).
 fn sys_endpoint_unbind(a0: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
@@ -982,7 +1042,11 @@ fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> Status 
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG; // kernel threads have no cap space
     };
-    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_WRITE) else {
+    // A plain endpoint cap (badge 0) or a live badged one (ADR-0074).
+    if a0 >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok((eid, badge)) = crate::cap::call_target(pid, a0 as usize) else {
         return STATUS_BAD_ARG;
     };
     let Ok(send_cap) = send_cap_of(pid, a3) else {
@@ -1004,7 +1068,7 @@ fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> Status 
     } else {
         [0u8; crate::ipc::MSG_BYTES]
     };
-    match crate::ipc::call(pid, eid, [a1, a2], send_cap, msg) {
+    match crate::ipc::call_badged(pid, eid, badge, [a1, a2], send_cap, msg) {
         Ok((words, landed, reply_msg)) => {
             // SAFETY: validated above; `ipc::call` resumes in THIS
             // thread's own context and address space (ADR-0018: user
@@ -2468,6 +2532,12 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         crate::cap::CapObj::SharedDma => (9, 0),
         crate::cap::CapObj::ProofToken { id } if id != 0 => (10, id),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
+        // ADR-0074: kind 12; the badge is the server's business, not shown.
+        crate::cap::CapObj::BadgedEndpoint { eid, generation, .. }
+            if crate::ipc::endpoint_generation(u32::from(eid)) == Some(generation) =>
+        {
+            (12, u64::from(eid))
+        }
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {
             (4, target)

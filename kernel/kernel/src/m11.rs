@@ -21,6 +21,11 @@
 //!    and releasing the owner restores exactly its capacity.
 //! 6. `handoff_order` — a handoff wake runs before an earlier ordinary
 //!    wake (front of the ready ring), without disturbing FIFO otherwise.
+//! 7. `badged_endpoint` (ADR-0074) — only the serve side mints; badges are
+//!    preserved by transfer and attenuated copy, never amplified; a call
+//!    through a badged cap delivers its badge; badged caps never serve; a
+//!    destroyed and re-minted endpoint refuses earlier badged caps; process
+//!    teardown is frame-exact.
 //!
 //! Markers: `m11:test:<name>`, `m11: RESULT`.
 
@@ -34,13 +39,14 @@ use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 type Res = Result<(), &'static str>;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Res); 6] = [
+    let checks: [(&str, fn() -> Res); 7] = [
         ("bound_signal", test_bound_signal),
         ("notif_destroy_unbinds", test_notif_destroy_unbinds),
         ("endpoint_destroy_unbinds", test_endpoint_destroy_unbinds),
         ("orphan_unbinds", test_orphan_unbinds),
         ("timer_quota", test_timer_quota),
         ("handoff_order", test_handoff_order),
+        ("badged_endpoint", test_badged_endpoint),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -84,12 +90,14 @@ fn drain(max_yields: usize) -> Res {
 
 static CALL_EID: AtomicUsize = AtomicUsize::new(0);
 static CALL_REPLY: AtomicU64 = AtomicU64::new(0);
+static CALL_BADGE: AtomicU64 = AtomicU64::new(0);
 const REQUEST: [u64; 2] = [0x11A0_0001, 0x11A0_0002];
 
 /// Kernel-thread client: one CALL on `CALL_EID`, records reply word 0.
 fn caller_entry(_: usize) {
     let eid = CALL_EID.load(Ordering::Relaxed) as u32;
-    let reply = match ipc::call(0, eid, REQUEST, None, [0; ipc::MSG_BYTES]) {
+    let badge = CALL_BADGE.load(Ordering::Relaxed) as u32;
+    let reply = match ipc::call_badged(0, eid, badge, REQUEST, None, [0; ipc::MSG_BYTES]) {
         Ok((words, _, _)) => words[0],
         Err(_) => u64::MAX,
     };
@@ -357,6 +365,80 @@ fn test_handoff_order() -> Res {
     info!(
         "m11",
         "handoff_order: handoff-woken thread ran first; ordinary wake followed"
+    );
+    Ok(())
+}
+
+// ---- 7. badged_endpoint (ADR-0074) --------------------------------------------
+
+fn test_badged_endpoint() -> Res {
+    use crate::cap::{self, Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let frames_before = crate::frames::free_frames();
+    let eid = ipc::create_endpoint()?;
+    let server = crate::proc::create("m11-badge-server")?;
+    let client = crate::proc::create("m11-badge-client")?;
+    cap::issue(server, 0, Cap { obj: CapObj::Endpoint { eid }, rights: R | W | C })?;
+    cap::issue(client, 0, Cap { obj: CapObj::Endpoint { eid }, rights: W | C })?;
+    // Minting authority: serve side only; badge 0 reserved; never READ.
+    if cap::mint_badged(client, 0, 7, W).is_ok()
+        || cap::mint_badged(server, 0, 0, W).is_ok()
+        || cap::mint_badged(server, 0, 7, W | R).is_ok()
+        || cap::mint_badged(server, 0, 7, C).is_ok()
+    {
+        return Err("a badged cap was minted without serve-side authority or with bad rights");
+    }
+    let minted = cap::mint_badged(server, 0, 0x0B0B, W | C)?;
+    // Transfer into the client exactly as IPC landing installs caps.
+    let landed = cap::grant(client, cap::read(server, minted)?)?;
+    // Attenuated copy keeps the badge; amplification and re-delegation
+    // without COPY are refused.
+    cap::copy(client, landed, client, 20, W)?;
+    if cap::copy(client, 20, client, 21, W).is_ok() || cap::copy(client, landed, client, 22, W | R).is_ok() {
+        return Err("badged cap delegated without COPY or amplified");
+    }
+    if cap::call_target(client, 0) != Ok((eid, 0))
+        || cap::call_target(client, landed) != Ok((eid, 0x0B0B))
+        || cap::call_target(client, 20) != Ok((eid, 0x0B0B))
+    {
+        return Err("call targets do not carry exactly the minted badge");
+    }
+    // A badged cap is never the serve side, even in the server's own space.
+    let server_badged = cap::mint_badged(server, 0, 0x0C0C, W)?;
+    if cap::read(server, server_badged)?.rights & R != 0 {
+        return Err("a badged cap carries READ");
+    }
+    if cap::serves_endpoint(client, eid) {
+        return Err("a client holding only badged/WRITE caps counts as a server");
+    }
+    // Delivery: the server receives the badge of the invoked capability.
+    CALL_BADGE.store(0x0B0B, Ordering::Relaxed);
+    queue_call(eid)?;
+    let (words, _, _, badge) = ipc::recv_badged(0, eid, true).map_err(|_| "recv refused")?;
+    ipc::reply(eid, [words[0] + 1, 0], None, [0; ipc::MSG_BYTES]).map_err(|_| "reply refused")?;
+    drain(16)?;
+    CALL_BADGE.store(0, Ordering::Relaxed);
+    if badge != 0x0B0B || CALL_REPLY.load(Ordering::Relaxed) != REQUEST[0] + 1 {
+        return Err("the server did not receive the caller's badge");
+    }
+    // Stale object reuse: destroy and re-mint the endpoint index.
+    ipc::destroy_endpoint(eid)?;
+    let again = ipc::create_endpoint()?;
+    let stale = cap::call_target(client, landed).is_ok() || cap::call_target(client, 20).is_ok();
+    crate::proc::destroy(server)?;
+    crate::proc::destroy(client)?;
+    ipc::destroy_endpoint(again)?;
+    if again != eid {
+        return Err("the endpoint index was not reused (test precondition)");
+    }
+    if stale {
+        return Err("a badged cap reached a re-minted endpoint at the same index");
+    }
+    if crate::frames::free_frames() != frames_before {
+        return Err("badged-endpoint processes did not tear down frame-exactly");
+    }
+    info!(
+        "m11",
+        "badged_endpoint: serve-side mint only; badge 0x0B0B delivered; copy/transfer kept it; stale after re-mint"
     );
     Ok(())
 }

@@ -68,6 +68,18 @@ pub enum CapObj {
     /// (recv/reply). The object lives in `ipc::ENDPOINTS`; the cap
     /// references it by index — destroying the cap frees nothing.
     Endpoint { eid: u32 },
+    /// ADR-0074: a client-side endpoint reference minted by the endpoint's
+    /// server (READ holder) with an unforgeable `badge`. Calling through it
+    /// delivers the badge to the server with the request; the server alone
+    /// decides what the badge names (typically an object index plus its
+    /// own generation). Never carries READ, so it can never serve, mint or
+    /// bind. `generation` pins the exact endpoint object: a destroyed and
+    /// re-minted endpoint index refuses every earlier badged cap.
+    BadgedEndpoint {
+        eid: u16,
+        generation: u16,
+        badge: u32,
+    },
     /// Physical frame (ADR-0021/0022) — the driver-substrate primitive.
     /// `owned` marks the ONE cap that owns the frame: `destroy` returns
     /// it to the allocator and `map_memory` TRANSFERS ownership into the
@@ -351,6 +363,63 @@ pub fn move_cap(
 /// slots. This is the only public write path that does not move or
 /// attenuate an existing cap (`SYS_ALLOC_FRAME` mints Untyped caps
 /// through it).
+/// ADR-0074: mint a badged client reference from the plain endpoint cap in
+/// `pid`'s `slot`, which must carry READ (the serve side). The new cap has
+/// `rights` ⊆ WRITE|COPY (WRITE required) and lands in the first free slot
+/// of the same space. Badge 0 is reserved for unbadged calls.
+pub fn mint_badged(pid: u64, slot: usize, badge: u32, rights: u32) -> Result<usize, &'static str> {
+    if badge == 0 {
+        return Err("mint: badge 0 is reserved for unbadged endpoints");
+    }
+    if rights & RIGHTS_WRITE == 0 || rights & !(RIGHTS_WRITE | RIGHTS_COPY) != 0 {
+        return Err("mint: badged rights must be WRITE with optional COPY");
+    }
+    let src = read(pid, slot)?;
+    let CapObj::Endpoint { eid } = src.obj else {
+        return Err("mint: not a plain endpoint capability");
+    };
+    if src.rights & RIGHTS_READ == 0 {
+        return Err("mint: only the serve side (READ) may mint");
+    }
+    let generation = crate::ipc::endpoint_generation(eid).ok_or("mint: endpoint is not live")?;
+    let eid = u16::try_from(eid).map_err(|_| "mint: endpoint index out of range")?;
+    grant(
+        pid,
+        Cap {
+            obj: CapObj::BadgedEndpoint {
+                eid,
+                generation,
+                badge,
+            },
+            rights,
+        },
+    )
+}
+
+/// The endpoint and badge a CALL through `pid`'s `slot` reaches: a plain
+/// endpoint cap with WRITE (badge 0) or a badged cap with WRITE whose
+/// generation still matches the live endpoint (ADR-0074).
+pub fn call_target(pid: u64, slot: usize) -> Result<(u32, u32), &'static str> {
+    let c = read(pid, slot)?;
+    if c.rights & RIGHTS_WRITE == 0 {
+        return Err("call: no WRITE right");
+    }
+    match c.obj {
+        CapObj::Endpoint { eid } => Ok((eid, 0)),
+        CapObj::BadgedEndpoint {
+            eid,
+            generation,
+            badge,
+        } => {
+            if crate::ipc::endpoint_generation(u32::from(eid)) != Some(generation) {
+                return Err("call: stale badged endpoint (object was destroyed)");
+            }
+            Ok((u32::from(eid), badge))
+        }
+        _ => Err("call: not an endpoint capability"),
+    }
+}
+
 pub fn issue(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
     without_interrupts(|| {
         if read(pid, slot).is_ok() {

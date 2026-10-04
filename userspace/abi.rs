@@ -53,6 +53,10 @@ pub const SYS_SPAWN_CHECK: u64 = 45;
 /// no server is parked in RECV ORs `badge` into the bound notification.
 pub const SYS_ENDPOINT_BIND: u64 = 46;
 pub const SYS_ENDPOINT_UNBIND: u64 = 47;
+/// ADR-0074: (endpoint READ slot, badge != 0, rights ⊆ WRITE|COPY) → new slot.
+pub const SYS_ENDPOINT_MINT: u64 = 48;
+/// ADR-0074: (endpoint READ slot, out[4]: w0 w1 landed badge, msg, blocking, 0).
+pub const SYS_IPC_RECV_BADGED: u64 = 49;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;

@@ -17,6 +17,7 @@ ROOT = arena_env.REPO_ROOT
 BUILD = arena_env.build_dir()
 IPC = ROOT / 'kernel/kernel/src/ipc.rs'
 TIMER = ROOT / 'kernel/kernel/src/timer.rs'
+CAP = ROOT / 'kernel/kernel/src/cap.rs'
 SCHED = ROOT / 'kernel/kernel/src/sched/mod.rs'
 CONTROLS = [
     # A queued call never raises the bound notification.
@@ -41,6 +42,14 @@ CONTROLS = [
      # m7's ring-3 timertest (earlier in boot) observes it first.
      'timer-quota', ('m11:test:timer_quota: FAIL',
                      'the fifth timer was not refused with STATUS_QUOTA (70)')),
+    # ADR-0074: a badged cap ignores the endpoint generation (stale reuse).
+    (CAP, b'            if crate::ipc::endpoint_generation(u32::from(eid)) != Some(generation) {',
+     b'            if crate::ipc::endpoint_generation(u32::from(eid)).is_none() && generation == 0 {',
+     'badge-generation', 'm11:test:badged_endpoint: FAIL'),
+    # ADR-0074: anyone holding the endpoint may mint (serve-side check gone).
+    (CAP, b'    if src.rights & RIGHTS_READ == 0 {\n        return Err("mint: only the serve side (READ) may mint");',
+     b'    if false {\n        return Err("mint: only the serve side (READ) may mint");',
+     'badge-mint-authority', 'm11:test:badged_endpoint: FAIL'),
     # A handoff wake is an ordinary back-of-ring wake.
     (SCHED, b'    wake_with(tid, true)\n', b'    wake_with(tid, false)\n',
      'handoff', 'm11:test:handoff_order: FAIL'),
@@ -86,10 +95,10 @@ def main():
     assert all(p.read_bytes() == d for p, d in sources.items()), 'source not restored'
     assert all(p.read_bytes() == d for p, d in artifacts.items()), 'artifacts not restored'
     rc, serial, _ = boot('m11-green', esp, green=True)
-    assert rc == 0 and 'm11: RESULT PASS (6/6)' in serial, 'restored source is not GREEN'
+    assert rc == 0 and 'm11: RESULT PASS (7/7)' in serial, 'restored source is not GREEN'
     digest = hashlib.sha256(artifacts[BUILD / 'arena-boot.efi']).hexdigest()
     print(f'[m11-red] {len(reds)} production RED controls ({", ".join(reds)}); '
-          f'byte-exact restore; GREEN m11 6/6 sha256={digest}', flush=True)
+          f'byte-exact restore; GREEN m11 7/7 sha256={digest}', flush=True)
 
 
 if __name__ == '__main__':
