@@ -274,6 +274,13 @@ pub fn log(bytes: &[u8]) {
     let _ = unsafe { syscall2(SYS_DEBUG_WRITE, bytes.as_ptr() as u64, bytes.len() as u64) };
 }
 pub fn exit(code: u64) -> ! {
+    // An abnormal exit names its stage (42 is the ordinary close).
+    if code != 42 {
+        let digits = [b'0' + ((code / 10) % 10) as u8, b'0' + (code % 10) as u8];
+        log(b"[app] abnormal exit stage ");
+        log(&digits);
+        log(b"\n");
+    }
     // SAFETY: terminating only this application thread.
     let _ = unsafe { syscall1(SYS_THREAD_EXIT, code) };
     loop {

@@ -50,7 +50,9 @@ pub(crate) use adr50_test::{
 };
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
-const QUEUE_DEPTH: usize = 8; // six clients, input producer, one spare
+/// ADR-0075: twelve desktop clients, the input producer and spares (a
+/// focus change makes every client repaint, so all may call at once).
+const QUEUE_DEPTH: usize = 16;
 
 /// The "no capability" marker in message buffers (ADR-0018): a cap word
 /// holds either a landing slot index (< `CAP_SLOTS`) or this.

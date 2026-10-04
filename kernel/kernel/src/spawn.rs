@@ -41,8 +41,9 @@ pub const MAX_IMAGES: usize = 24;
 /// excess is a typed refusal).
 pub const MAX_INHERIT: usize = 5;
 /// Spawn-record table bound (one record per spawned child until it is
-/// explicitly forgotten).
-pub const MAX_SPAWN_RECS: usize = 24;
+/// explicitly forgotten). ADR-0075: 14 boot processes plus twelve desktop
+/// sessions need 26; one per possible process (`MAX_PROCESSES`).
+pub const MAX_SPAWN_RECS: usize = 32;
 /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
 pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
 /// Separate from ALL Image IDs, including future dynamic u32 values.

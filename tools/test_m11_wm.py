@@ -117,8 +117,10 @@ def workflow(label):
 
         # --- context menu: real transient surface, dismissal, action.
         d.q.type_text('help\r', gap_s=.04)
-        busy = d.stable('transcript', (90, 110, 300, 100))
-        assert distinct(busy, 90, 110, 300, 60) >= 2
+        # Transcript rows of the window at (70, 60): y 135..235 (the header
+        # band above y 126 keeps its text).
+        busy = d.stable('transcript', (90, 135, 300, 100))
+        assert distinct(busy, 90, 135, 300, 60) >= 2
         d.right_click(300, 160)
         menu = d.stable('menu', (300, 160, 184, 104),
                         lambda p: crop(p, 300, 160, 184, 104) != crop(busy, 300, 160, 184, 104))
@@ -131,8 +133,8 @@ def workflow(label):
         d.stable('menu-again', (300, 160, 184, 104),
                  lambda p: crop(p, 300, 160, 184, 104) == crop(menu, 300, 160, 184, 104))
         d.click(300 + 40, 160 + 4 + 12)  # "Clear"
-        cleared = d.stable('cleared', (90, 110, 300, 60),
-                           lambda p: distinct(p, 90, 110, 300, 60) <= 2)
+        cleared = d.stable('cleared', (90, 135, 300, 60),
+                           lambda p: distinct(p, 90, 135, 300, 60) == 1)
         assert crop(cleared, 300, 160, 184, 104) != crop(menu, 300, 160, 184, 104)
 
         # --- key repeat: one press held for 1.2 s, one release.
@@ -149,10 +151,10 @@ def workflow(label):
         d.keys(('ctrl', True), ('l', True), ('l', False), ('ctrl', False))  # Ctrl+L clears (chord)
         for _ in range(3):
             d.q.type_text('help\r', gap_s=.03)
-        scrolled = d.stable('long-transcript', (90, 110, 300, 100))
+        scrolled = d.stable('long-transcript', (90, 135, 300, 100))
         d.wheel(300, 200, True, 3)
-        d.stable('wheel-scrolled', (90, 110, 300, 100),
-                 lambda p: crop(p, 90, 110, 300, 100) != crop(scrolled, 90, 110, 300, 100))
+        d.stable('wheel-scrolled', (90, 135, 300, 100),
+                 lambda p: crop(p, 90, 135, 300, 100) != crop(scrolled, 90, 135, 300, 100))
 
         # --- minimize, dock restore without a new process.
         spawned = d.serial().count('[desktop] real application spawned;')
@@ -171,9 +173,11 @@ def workflow(label):
         d.keys(('alt', False))
         d.stable('switched', (220, 230, 360, 100),
                  lambda p: crop(p, 220, 250, 360, 60) != crop(overlay, 220, 250, 360, 60))
-        d.close(1)
-        d.close(0)
-        d.wait(lambda: d.serial().count('[desktop] application retired:') >= 2, 'not retired')
+        # The terminal was resized, so its close well moved: close the
+        # focused window twice with F8 instead of clicking.
+        for n in (1, 2):
+            d.keys(('f8', True), ('f8', False))
+            d.wait(lambda: d.serial().count('[desktop] application retired:') >= n, 'not retired')
 
         # --- twelve sessions, exact receipts, thirteenth refused.
         d.wait(lambda: samples(d)[-1][1:] == base[1:], 'not back to base before capacity')

@@ -90,6 +90,8 @@ surface is visible before its first Damage.
 | `sched::USER_REGIONS_MAX` | 16 | 40 | broker maps scanout + 24 session regions |
 | `cap::CAP_SLOTS` | 32 | 64 | broker: 22 fixed + 2 per session (region, Process); 32-process table +25,600 B |
 | `ipc::MAX_NOTIFS` | 25 | 31 | twelve client clocks; still exactly full at boot |
+| `ipc::QUEUE_DEPTH` | 8 | 16 | callers queued per endpoint: a focus change makes all twelve clients plus the input producer call the broker at once (found by the guest proof: the eleventh client's first CALL was refused BUSY); 12 endpoints 23,616 -> 46,656 B |
+| `spawn::MAX_SPAWN_RECS` | 24 | 32 | 14 boot processes + 12 sessions = 26 (found by the guest proof: the eleventh session was refused); one per possible process |
 | desktop `LIMIT` / `MAX_WINDOWS` | 6 | 12 | |
 
 `SYS_SHARED_MAP` reserves page-table frames per 2 MiB spanned (a region

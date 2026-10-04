@@ -122,8 +122,9 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
         width = re.search(r"const MSG_BYTES: usize = (\d+);", ipc)
         if depth is None or width is None:
             raise ValueError("IPC queue/message bounds missing from source")
-        if depth[1] != '8' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 12;',ipc):
-            raise ValueError('production IPC bounds differ from reviewed Phase-10 8/64/12')
+        # ADR-0075: caller queue depth 8 -> 16 for twelve desktop clients.
+        if depth[1] != '16' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 12;',ipc):
+            raise ValueError('production IPC bounds differ from reviewed Phase-11 16/64/12')
         # Keep the historical four-entry projection as well as measuring the
         # actual eight-entry production layout from the same source fields.
         ipc_decls[2] = ipc_decls[2].replace('struct Endpoint {','struct Endpoint<const N: usize> {').replace('QUEUE_DEPTH','N')
@@ -169,12 +170,13 @@ pub static ARENA_IPC_LAYOUT: [usize; 8] = [
         # notification (+32 B) and each notification a generation (+8 B):
         # 12 endpoints 23232 -> 23616 B, 25 notifications 600 -> 800 B.
         # ADR-0075 (Phase 11.3): twelve desktop clocks, 25 -> 31
-        # notifications: 800 -> 992 B.
-        if ipc_sizes != (240, 1008, 1968, 32, 15744, 17712, 23616, 992):
+        # notifications: 800 -> 992 B; caller queue 8 -> 16 per endpoint:
+        # Endpoint 1968 -> 3888 B, 12 endpoints 23616 -> 46656 B.
+        if ipc_sizes != (240, 1008, 3888, 32, 31104, 34992, 46656, 992):
             raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
         print("x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=1008; "
-              "production Endpoint<8>=1968 Notif=32; 12 endpoints=23616 B, 31 notifications=992 B "
-              "(ADR-0071 binding +384 B; ADR-0075 six more clocks +192 B) PASS")
+              "production Endpoint<16>=3888 Notif=32; 12 endpoints=46656 B, 31 notifications=992 B "
+              "(ADR-0071 binding +384 B; ADR-0075 queue depth 16 +23040 B, six more clocks +192 B) PASS")
         # ADR-0051: an *additional* distinct production-fsd marker,
         # on top of ADR-0048's projection; one Notification is 24 B.
         actual = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
