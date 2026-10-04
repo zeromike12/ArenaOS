@@ -105,3 +105,26 @@ pub fn chrome(c: &mut Canvas<'_>, title: &str, focused: bool, t: Theme) {
         t,
     );
 }
+
+/// Depth of the opaque drop ledge under a transient surface (menu, tooltip,
+/// dialog). Part of the surface's damage bounds.
+pub const POPUP_SHADOW: i32 = 2;
+
+/// Frame of a transient surface drawn by the compositor around the
+/// client's published pixels: a hairline border inside the surface edge
+/// and an opaque drop ledge outside it, so it reads as floating above its
+/// owner window.
+pub fn popup_frame(c: &mut Canvas<'_>, x: i32, y: i32, w: i32, h: i32, t: Theme) {
+    rect(c, x + POPUP_SHADOW, y + h, w, POPUP_SHADOW, t.shadow);
+    rect(c, x + w, y + POPUP_SHADOW, POPUP_SHADOW, h, t.shadow);
+    border(
+        c,
+        Rect {
+            x,
+            y,
+            width: w as u32,
+            height: h as u32,
+        },
+        t.frame_focus,
+    );
+}

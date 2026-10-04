@@ -6,12 +6,13 @@
 use arena_desktop::{
     app_client as service,
     apps::{
-        self, layout as l,
+        self,
+        layout::{self, Layout},
         model::{Editor, Line, Terminal},
         scene, view,
     },
-    client::{self, Client},
-    model::Event,
+    client::{self, Client, Transient},
+    model::{Event, PopupKind},
     service_wire::Frame,
 };
 use arena_gfxkit::Canvas;
@@ -42,6 +43,32 @@ struct App {
     next_sample: u64,
     closing: bool,
     gallery_theme: u8,
+    /// Surface size the application is laid out for (Phase 11.3).
+    size: (u16, u16),
+    /// A size the window policy configured and the next frame adopts.
+    pending: Option<(u16, u16)>,
+    /// The open context menu (a real transient surface), if any.
+    menu: Option<Menu>,
+}
+/// Context menu state: its transient surface, hovered item and whether it
+/// must be repainted and republished.
+struct Menu {
+    surface: Transient,
+    hover: Option<usize>,
+    buttons: u8,
+    dirty: bool,
+}
+/// Context menu entries per application; each runs the same operation as
+/// the equivalent toolbar control or command.
+fn menu_items(kind: u8) -> &'static [&'static str] {
+    match kind {
+        apps::TERMINAL => &["Clear", "Help", "List Files"],
+        apps::EDITOR => &["New", "Open...", "Save", "Save As..."],
+        apps::FILES => &["Open in Editor", "New File...", "Delete", "Refresh"],
+        apps::SETTINGS => &["Toggle Appearance", "Toggle Motion"],
+        apps::MONITOR => &["Sample Now"],
+        _ => &["Toggle Theme"],
+    }
 }
 static mut APP: App = App {
     editor: Editor::new(),
@@ -65,6 +92,9 @@ static mut APP: App = App {
     next_sample: 0,
     closing: false,
     gallery_theme: 2,
+    size: (m::WINDOW_WIDTH as u16, m::WINDOW_HEIGHT as u16),
+    pending: None,
+    menu: None,
 };
 fn name(bytes: &[u8]) -> Result<[u8; 32], i64> {
     let mut n = [0; 32];
@@ -239,7 +269,14 @@ impl App {
         }
         Ok(())
     }
+    fn layout(&self) -> Layout {
+        Layout::new(self.size.0, self.size.1)
+    }
     fn key(&mut self, key: u16, client: &Client) -> Result<(), i64> {
+        let l = self.layout();
+        if self.menu.is_some() {
+            return self.menu_key(key, client);
+        }
         if self.dialog != 0 {
             if self.dialog == 4 {
                 if key == 27 {
@@ -264,7 +301,7 @@ impl App {
             apps::TERMINAL => {
                 if key == 258 {
                     self.top =
-                        (self.top + 1).min(self.terminal.count.saturating_sub(l::TERMINAL_ROWS));
+                        (self.top + 1).min(self.terminal.count.saturating_sub(l.TERMINAL_ROWS));
                     return Ok(());
                 }
                 if key == 259 {
@@ -291,12 +328,12 @@ impl App {
                     32..=126 => self.editor.insert(key as u8).map_err(|_| -2001)?,
                     _ => {}
                 }
-                let row = l::visual_row(&self.editor);
+                let row = l.visual_row(&self.editor);
                 if row < self.top {
                     self.top = row;
                 }
-                if row >= self.top + l::EDIT_ROWS {
-                    self.top = row.saturating_sub(l::EDIT_ROWS - 1);
+                if row >= self.top + l.EDIT_ROWS {
+                    self.top = row.saturating_sub(l.EDIT_ROWS - 1);
                 }
                 self.status = if self.editor.dirty {
                     "MODIFIED / SAVE COMMITS COMPLETE FILE"
@@ -314,8 +351,8 @@ impl App {
                 if self.selected < self.top {
                     self.top = self.selected;
                 }
-                if self.selected >= self.top + l::FILE_ROWS {
-                    self.top = self.selected.saturating_sub(l::FILE_ROWS - 1);
+                if self.selected >= self.top + l.FILE_ROWS {
+                    self.top = self.selected.saturating_sub(l.FILE_ROWS - 1);
                 }
                 self.select(client)?;
             }
@@ -330,8 +367,7 @@ impl App {
                 if key == 258 {
                     self.top = self.top.saturating_sub(1)
                 } else if key == 259 {
-                    self.top =
-                        (self.top + 1).min(self.process_count.saturating_sub(l::MONITOR_ROWS))
+                    self.top = (self.top + 1).min(self.process_count.saturating_sub(l.MONITOR_ROWS))
                 }
             }
             _ => {}
@@ -339,31 +375,36 @@ impl App {
         Ok(())
     }
     fn pointer(&mut self, x: i32, y: i32, buttons: u8, client: &Client) -> Result<(), i64> {
+        let l = self.layout();
         let pressed = buttons & 1 != 0 && self.buttons & 1 == 0;
+        let context = buttons & 2 != 0 && self.buttons & 2 == 0;
         self.buttons = buttons;
+        if context && self.dialog == 0 && y >= m::TITLE_HEIGHT {
+            return self.open_menu(x, y, client);
+        }
         if !pressed {
             return Ok(());
         }
         if self.dialog != 0 {
             if self.dialog == 4 {
-                if l::hit(l::NAME_FIELD, x, y) {
+                if layout::hit(l.NAME_FIELD, x, y) {
                     if self.editor.path[0] == 0 {
                         self.editor_dialog(1)
                     } else {
                         self.save(client, self.editor.path)?;
                     }
-                } else if l::hit(l::PRIMARY, x, y) {
+                } else if layout::hit(l.PRIMARY, x, y) {
                     client::exit(42)
-                } else if l::hit(l::SECONDARY, x, y) {
+                } else if layout::hit(l.SECONDARY, x, y) {
                     self.dialog = 0;
                     self.closing = false;
                     client.cancel_close()?;
                 }
                 return Ok(());
             }
-            if l::hit(l::PRIMARY, x, y) {
+            if layout::hit(l.PRIMARY, x, y) {
                 self.accept(client)?;
-            } else if l::hit(l::SECONDARY, x, y) {
+            } else if layout::hit(l.SECONDARY, x, y) {
                 self.dialog = 0;
                 if self.closing {
                     self.closing = false;
@@ -374,54 +415,54 @@ impl App {
         }
         match self.kind {
             apps::EDITOR => {
-                if l::hit(l::NEW, x, y) {
+                if layout::hit(l.NEW, x, y) {
                     if self.editor.dirty {
                         self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
                     } else {
                         self.editor.load(b"", "").map_err(|_| -2)?;
                         self.top = 0;
                     }
-                } else if l::hit(l::SAVE, x, y) {
+                } else if layout::hit(l.SAVE, x, y) {
                     if self.editor.path[0] == 0 {
                         self.editor_dialog(1)
                     } else {
                         self.save(client, self.editor.path)?;
                     }
-                } else if l::hit(l::SAVE_AS, x, y) {
+                } else if layout::hit(l.SAVE_AS, x, y) {
                     self.editor_dialog(1)
-                } else if l::hit(l::OPEN, x, y) {
+                } else if layout::hit(l.OPEN, x, y) {
                     if self.editor.dirty {
                         self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
                     } else {
                         self.editor_dialog(2)
                     }
-                } else if l::hit(l::EDIT_TEXT, x, y) {
-                    self.editor.cursor = l::visual_cursor(
+                } else if layout::hit(l.EDIT_TEXT, x, y) {
+                    self.editor.cursor = l.visual_cursor(
                         &self.editor,
-                        self.top + ((y - l::EDIT_TEXT.y - 6).max(0) / m::LINE_HEIGHT) as usize,
-                        ((x - l::EDIT_TEXT.x - 6).max(0) / m::FONT_ADVANCE) as usize,
+                        self.top + ((y - l.EDIT_TEXT.y - 6).max(0) / m::LINE_HEIGHT) as usize,
+                        ((x - l.EDIT_TEXT.x - 6).max(0) / m::FONT_ADVANCE) as usize,
                     );
                 }
             }
             apps::FILES => {
-                if l::hit(l::NEW, x, y) {
+                if layout::hit(l.NEW, x, y) {
                     self.line.set(b"user-new");
                     self.dialog = 3;
-                } else if l::hit(l::SAVE, x, y) {
+                } else if layout::hit(l.SAVE, x, y) {
                     self.refresh()?;
                     self.select(client)?;
                     self.status = "REFRESHED";
-                } else if l::hit(l::OPEN, x, y) && self.count > 0 {
+                } else if layout::hit(l.OPEN, x, y) && self.count > 0 {
                     launch(apps::EDITOR, self.names[self.selected])?;
-                } else if l::hit(l::DELETE, x, y) && self.count > 0 {
+                } else if layout::hit(l.DELETE, x, y) && self.count > 0 {
                     call(Frame::Delete {
                         name: self.names[self.selected],
                     })?;
                     self.refresh()?;
                     self.select(client)?;
                     self.status = "DELETED";
-                } else if l::hit(l::FILE_LIST, x, y) {
-                    let row = ((y - l::FILE_LIST.y) / l::ROW_H) as usize + self.top;
+                } else if layout::hit(l.FILE_LIST, x, y) {
+                    let row = ((y - l.FILE_LIST.y) / l.ROW_H) as usize + self.top;
                     if row < self.count {
                         self.selected = row;
                         self.select(client)?;
@@ -429,7 +470,7 @@ impl App {
                     }
                 }
             }
-            apps::SETTINGS if l::hit(l::APPEARANCE, x, y) => {
+            apps::SETTINGS if layout::hit(l.APPEARANCE, x, y) => {
                 let dark = client.appearance.get() & 1 == 0;
                 call(Frame::Configure {
                     theme: u8::from(dark),
@@ -437,7 +478,7 @@ impl App {
                 })?;
                 self.status = "APPEARANCE COMMITTED TO AFS1";
             }
-            apps::SETTINGS if l::hit(l::MOTION, x, y) => {
+            apps::SETTINGS if layout::hit(l.MOTION, x, y) => {
                 call(Frame::Configure {
                     theme: client.appearance.get() & 1,
                     motion: client.appearance.get() & 2 == 0,
@@ -447,6 +488,181 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+    /// Open the context menu at window-local (`x`, `y`).
+    fn open_menu(&mut self, x: i32, y: i32, client: &Client) -> Result<(), i64> {
+        let items = menu_items(self.kind);
+        let surface = client.open_transient(
+            PopupKind::Menu,
+            x,
+            y,
+            view::MENU_WIDTH,
+            view::menu_height(items.len()),
+        )?;
+        // Opening replaced any previous menu surface (its handle is stale).
+        self.menu = Some(Menu {
+            surface,
+            hover: None,
+            buttons: 0,
+            dirty: true,
+        });
+        Ok(())
+    }
+    fn close_menu(&mut self, client: &Client) -> Result<(), i64> {
+        if let Some(menu) = self.menu.take() {
+            client.close_transient(&menu.surface)?;
+        }
+        Ok(())
+    }
+    fn menu_pointer(&mut self, x: i32, y: i32, buttons: u8, client: &Client) -> Result<(), i64> {
+        let n = menu_items(self.kind).len();
+        let Some(menu) = self.menu.as_mut() else {
+            return Ok(());
+        };
+        let hover = view::menu_item(n, x, y);
+        let pressed = buttons & 1 != 0 && menu.buttons & 1 == 0;
+        menu.buttons = buttons;
+        if hover != menu.hover {
+            menu.hover = hover;
+            menu.dirty = true;
+        }
+        if pressed && let Some(item) = hover {
+            self.close_menu(client)?;
+            return self.act(item, client);
+        }
+        Ok(())
+    }
+    fn menu_key(&mut self, key: u16, client: &Client) -> Result<(), i64> {
+        let n = menu_items(self.kind).len();
+        let Some(menu) = self.menu.as_mut() else {
+            return Ok(());
+        };
+        match key {
+            27 => return self.close_menu(client),
+            13 => {
+                if let Some(item) = menu.hover {
+                    self.close_menu(client)?;
+                    return self.act(item, client);
+                }
+            }
+            258 => {
+                menu.hover = Some(menu.hover.map_or(n - 1, |h| (h + n - 1) % n));
+                menu.dirty = true;
+            }
+            259 => {
+                menu.hover = Some(menu.hover.map_or(0, |h| (h + 1) % n));
+                menu.dirty = true;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    /// Run context menu entry `item` (see `menu_items`).
+    fn act(&mut self, item: usize, client: &Client) -> Result<(), i64> {
+        match (self.kind, item) {
+            (apps::TERMINAL, 0) => {
+                self.terminal.count = 0;
+                self.top = 0;
+            }
+            (apps::TERMINAL, 1 | 2) => {
+                let command: &[u8] = if item == 1 { b"help" } else { b"ls" };
+                for b in command {
+                    self.terminal.key(u16::from(*b));
+                }
+                self.top = 0;
+                self.command(client)?;
+            }
+            (apps::EDITOR, 0) => {
+                if self.editor.dirty {
+                    self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
+                } else {
+                    self.editor.load(b"", "").map_err(|_| -2)?;
+                    self.top = 0;
+                }
+            }
+            (apps::EDITOR, 1) => {
+                if self.editor.dirty {
+                    self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
+                } else {
+                    self.editor_dialog(2)
+                }
+            }
+            (apps::EDITOR, 2) if self.editor.path[0] != 0 => self.save(client, self.editor.path)?,
+            (apps::EDITOR, 2 | 3) => self.editor_dialog(1),
+            (apps::FILES, 0) if self.count > 0 => launch(apps::EDITOR, self.names[self.selected])?,
+            (apps::FILES, 1) => {
+                self.line.set(b"user-new");
+                self.dialog = 3;
+            }
+            (apps::FILES, 2) if self.count > 0 => {
+                call(Frame::Delete {
+                    name: self.names[self.selected],
+                })?;
+                self.refresh()?;
+                self.select(client)?;
+                self.status = "DELETED";
+            }
+            (apps::FILES, 3) => {
+                self.refresh()?;
+                self.select(client)?;
+                self.status = "REFRESHED";
+            }
+            (apps::SETTINGS, 0 | 1) => {
+                let a = client.appearance.get();
+                let (dark, motion) = if item == 0 {
+                    (a & 1 == 0, a & 2 != 0)
+                } else {
+                    (a & 1 != 0, a & 2 == 0)
+                };
+                call(Frame::Configure {
+                    theme: u8::from(dark),
+                    motion,
+                })?;
+                self.status = "PREFERENCE COMMITTED TO AFS1";
+            }
+            (apps::MONITOR, _) => self.sample()?,
+            (apps::GALLERY, _) => {
+                self.gallery_theme = if self.gallery_theme == 2 {
+                    u8::from(client.appearance.get() & 1 == 0)
+                } else {
+                    1 - self.gallery_theme
+                };
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    /// Keep scroll positions valid for the current layout (after a resize).
+    fn fit(&mut self) {
+        let l = self.layout();
+        match self.kind {
+            apps::TERMINAL => {
+                self.top = self
+                    .top
+                    .min(self.terminal.count.saturating_sub(l.TERMINAL_ROWS));
+            }
+            apps::EDITOR => {
+                let row = l.visual_row(&self.editor);
+                if row < self.top {
+                    self.top = row;
+                }
+                if row >= self.top + l.EDIT_ROWS {
+                    self.top = row.saturating_sub(l.EDIT_ROWS - 1);
+                }
+            }
+            apps::FILES => {
+                if self.selected >= self.top + l.FILE_ROWS {
+                    self.top = self.selected.saturating_sub(l.FILE_ROWS - 1);
+                }
+                self.top = self.top.min(self.count.saturating_sub(l.FILE_ROWS));
+            }
+            apps::MONITOR => {
+                self.top = self
+                    .top
+                    .min(self.process_count.saturating_sub(l.MONITOR_ROWS));
+            }
+            _ => {}
+        }
     }
     fn sample(&mut self) -> Result<(), i64> {
         self.counts = service::observe()?;
@@ -474,6 +690,7 @@ impl App {
             counts: &self.counts,
             processes: &self.processes[..self.process_count],
             gallery_theme: self.gallery_theme,
+            size: self.size,
         }
     }
 }
@@ -501,12 +718,20 @@ fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
 pub extern "C" fn _start() -> ! {
     let (kind, dark, motion, path) = service::startup().unwrap_or_else(|_| client::exit(70));
     service::audit(kind).unwrap_or_else(|_| client::exit(76));
-    let client = Client::connect(
+    let mut client = Client::connect(
         m::WINDOW_WIDTH,
         m::WINDOW_HEIGHT,
         apps::TITLES[kind as usize],
     )
     .unwrap_or_else(|_| client::exit(71));
+    // Every built-in application re-lays out to any size from its minimum
+    // to the work area; the Gallery specimen sheet keeps its fixed size.
+    if kind != apps::GALLERY {
+        let (min_w, min_h) = layout::min_size(kind);
+        client
+            .set_resizable(min_w, min_h)
+            .unwrap_or_else(|_| client::exit(71));
+    }
     client
         .appearance
         .set(u8::from(dark) | (u8::from(motion) << 1));
@@ -586,6 +811,25 @@ pub extern "C" fn _start() -> ! {
                     dirty = true;
                 }
                 Some(Event::Focus(_)) => dirty = true,
+                Some(Event::Configure { width, height }) => {
+                    app.pending = Some((width, height));
+                    dirty = true;
+                }
+                Some(Event::PopupPointer { x, y, buttons }) => {
+                    if let Err(rc) = app.menu_pointer(x, y, buttons, &client) {
+                        app.status = error(rc);
+                    }
+                    dirty = true;
+                }
+                Some(Event::Dismissed(handle)) => {
+                    if app
+                        .menu
+                        .as_ref()
+                        .is_some_and(|m| m.surface.handle == handle)
+                    {
+                        app.menu = None;
+                    }
+                }
                 None => break,
             }
         }
@@ -598,6 +842,20 @@ pub extern "C" fn _start() -> ! {
                 app.status = error(rc);
                 app.next_sample = service::now() + 500_000;
             }
+            dirty = true;
+        }
+        // Adopt a configured size: the next frame is painted and published
+        // whole at exactly that size.
+        let mut resized = false;
+        if let Some((width, height)) = app.pending.take()
+            && (width, height) != app.size
+            && client
+                .adopt(usize::from(width), usize::from(height))
+                .is_ok()
+        {
+            app.size = (width, height);
+            app.fit();
+            resized = true;
             dirty = true;
         }
         if dirty {
@@ -616,10 +874,10 @@ pub extern "C" fn _start() -> ! {
             let next = app.view(appearance);
             let mut bands = scene::Bands::EMPTY;
             next.bands(&mut bands);
-            let damage = if shown_once {
+            let damage = if shown_once && !resized {
                 scene::dirty(&shown, &bands)
             } else {
-                scene::Dirty::full()
+                scene::Dirty::full(client.width as i32, client.height as i32)
             };
             scene::repaint(&mut canvas, &next, &damage);
             let damaged = if arena_desktop::perf::ENABLED {
@@ -627,7 +885,9 @@ pub extern "C" fn _start() -> ! {
             } else {
                 0
             };
-            if damage.is_full() {
+            if resized {
+                client.commit().unwrap_or_else(|_| client::exit(74));
+            } else if damage.is_full() {
                 client.damage().unwrap_or_else(|_| client::exit(74));
             } else {
                 client
@@ -646,6 +906,23 @@ pub extern "C" fn _start() -> ! {
                 }
             }
             dirty = false;
+        }
+        if let Some(menu) = app.menu.as_mut().filter(|m| m.dirty) {
+            let t = menu.surface;
+            let pixels = unsafe { core::slice::from_raw_parts_mut(t.pixels, t.width * t.height) };
+            let mut canvas = Canvas::new(pixels, t.width, t.height, t.width)
+                .unwrap_or_else(|_| client::exit(73));
+            view::menu(
+                &mut canvas,
+                menu_items(kind),
+                menu.hover,
+                arena_ui::theme::palette(appearance & 1 != 0),
+            );
+            menu.dirty = false;
+            // A refused publication means the policy already dismissed it.
+            if client.publish_transient(&t).is_err() {
+                app.menu = None;
+            }
         }
         if arena_desktop::perf::ENABLED && service::now().saturating_sub(perf_last) >= 1_000_000 {
             perf_last = service::now();

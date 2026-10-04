@@ -61,7 +61,10 @@ const STACK_CANARY: u64 = 0x4152_454E_4153_544B;
 /// ADR-0021: a VirtIO driver maps one window per queue frame plus
 /// descriptor buffers. The cost is a few hundred bytes per (already
 /// static) thread slot.
-pub const USER_REGIONS_MAX: usize = 16;
+/// Registered user windows per thread (ELF segments, stack, shared maps).
+/// ADR-0075: the desktop broker maps the scanout plus a surface and a
+/// private snapshot for each of twelve sessions.
+pub const USER_REGIONS_MAX: usize = 40;
 
 /// M3.1 stacks come from the direct map's first 2 GiB (ADR-0008); a frame
 /// beyond that has no kernel-view alias yet, so `spawn` refuses it rather

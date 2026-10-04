@@ -98,7 +98,11 @@ def cap_projection() -> None:
     entry=(ROOT/'kernel/kernel/src/entry.rs').read_text()
     literal=entry.split('let all = [',1)[1].split('];',1)[0]
     assert literal.count('Cap {') == 20 and 'let root = [' in entry  # root[0..2] + 20 = 22
-    assert 'pub const CAP_SLOTS: usize = 32;' in (ROOT/'kernel/kernel/src/cap.rs').read_text()
+    # ADR-0075 raised the kernel table to 64 slots for twelve desktop
+    # sessions; the manager keeps its own 32-cap policy bound (manifest
+    # MAX_CAPS), so every schedule below must still fit 32 <= 64.
+    assert 'pub const CAP_SLOTS: usize = 64;' in (ROOT/'kernel/kernel/src/cap.rs').read_text()
+    assert 'pub const MAX_CAPS: usize = 32;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
     assert 'pub const MAX_INHERIT: usize = 5;' in (ROOT/'kernel/kernel/src/spawn.rs').read_text()
     assert 'pub const MAX_GRANTS: usize = 5;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
     package=(ROOT/'userspace/servicemgr/src/package.rs').read_text()
@@ -110,7 +114,9 @@ def cap_projection() -> None:
     # ADR-0056 adds exactly two disjoint graphics endpoints without
     # disturbing the ten Phase-8.5 endpoint slots or raising CAP_SLOTS.
     assert 'pub const MAX_ENDPOINTS: usize = 12;' in ipc
-    assert 'pub const MAX_NOTIFS: usize = 25;' in ipc  # accepted marker is actually allocated.
+    # Twelve desktop client clocks (ADR-0075): the table is still exactly
+    # full at boot, so the accepted marker is actually allocated.
+    assert 'pub const MAX_NOTIFS: usize = 31;' in ipc
     # Source-anchored upper schedule: actual manager 22 literal boot caps,
     # including registrar and lifecycle-admin marker. Conservatively
     # include four other resident Process handles (stack/broker/app/package).

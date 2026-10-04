@@ -11,18 +11,19 @@
 //! misses a dependency (the old caret row, a newly exposed scrolled line)
 //! shows up as a pixel difference, never as a silent stale raster.
 use super::{
-    layout as l,
+    layout::Layout,
     model::{Editor, Line, Terminal},
     view,
 };
 use arena_gfxkit::{Canvas, Rect};
 use arena_ui::{components as c, metrics as m, theme};
 
-const W: i32 = m::WINDOW_WIDTH as i32;
-const H: i32 = m::WINDOW_HEIGHT as i32;
 /// Upper bound on bands in any layout (terminal: header, rows, filler,
-/// input, status; editor: header, top, rows, tail, status).
-pub const MAX_BANDS: usize = 32;
+/// input, status; editor: header, top, rows, tail, status) at the tallest
+/// surface (768 px: at most 48 text rows).
+pub const MAX_BANDS: usize = 56;
+/// Editor rows at the tallest surface.
+const MAX_EDIT_ROWS: usize = 50;
 /// Rectangles a client publishes per Damage request (wire bound).
 pub const MAX_DIRTY: usize = 5;
 
@@ -45,6 +46,8 @@ pub struct View<'a> {
     pub counts: &'a [u64; 9],
     pub processes: &'a [(u64, u64)],
     pub gallery_theme: u8,
+    /// Surface size the view is laid out for (Phase 11.3).
+    pub size: (u16, u16),
 }
 
 impl View<'_> {
@@ -85,13 +88,16 @@ impl View<'_> {
 
     /// Keyed bands covering the window exactly once, top to bottom.
     pub fn bands(&self, out: &mut Bands) {
+        let l = Layout::new(self.size.0, self.size.1);
         out.n = 0;
+        out.w = l.W;
+        out.h = l.H;
         let base = {
             let mut h = Fnv::new();
             h.u64(u64::from(self.kind)).u64(u64::from(self.appearance));
             h
         };
-        let header = l::HEADER_BOTTOM + 1;
+        let header = l.HEADER_BOTTOM + 1;
         let mut head = base;
         let mut status = base;
         status.bytes(self.status.as_bytes());
@@ -102,12 +108,11 @@ impl View<'_> {
                 out.push(0, header, head.0);
                 let start = t
                     .count
-                    .saturating_sub(l::TERMINAL_ROWS)
+                    .saturating_sub(l.TERMINAL_ROWS)
                     .saturating_sub(self.top);
                 let mut y = header;
-                for row in 0..l::TERMINAL_ROWS {
-                    let end =
-                        (l::CONTENT_Y + 3 + (row as i32 + 1) * m::LINE_HEIGHT).min(l::INPUT_Y);
+                for row in 0..l.TERMINAL_ROWS {
+                    let end = (l.CONTENT_Y + 3 + (row as i32 + 1) * m::LINE_HEIGHT).min(l.INPUT_Y);
                     let mut k = base;
                     k.u64(row as u64);
                     let index = start + row;
@@ -117,15 +122,15 @@ impl View<'_> {
                     out.push(y, end, k.0);
                     y = end;
                 }
-                if y < l::INPUT_Y {
-                    out.push(y, l::INPUT_Y, base.0 ^ 0x51);
+                if y < l.INPUT_Y {
+                    out.push(y, l.INPUT_Y, base.0 ^ 0x51);
                 }
                 let mut input = base;
                 input
                     .bytes(&t.input[..t.len])
                     .u64(t.len as u64)
                     .u64(t.cursor as u64);
-                out.push(l::INPUT_Y, l::STATUS_Y, input.0);
+                out.push(l.INPUT_Y, l.STATUS_Y, input.0);
             }
             super::EDITOR => {
                 let e = self.editor;
@@ -139,20 +144,21 @@ impl View<'_> {
                         .u64(self.line.cursor as u64);
                 }
                 out.push(0, header, head.0);
-                let first = l::EDIT_TEXT.y + 3;
+                let first = l.EDIT_TEXT.y + 3;
                 out.push(header, first, base.0 ^ 0xE0);
-                let mut rows = [base; l::EDIT_ROWS];
+                let mut all_rows = [base; MAX_EDIT_ROWS];
+                let rows = &mut all_rows[..l.EDIT_ROWS.min(MAX_EDIT_ROWS)];
                 for (r, k) in rows.iter_mut().enumerate() {
                     k.u64(r as u64);
                 }
-                let caret_row = l::visual_row(e);
-                if caret_row >= self.top && caret_row < self.top + l::EDIT_ROWS {
+                let caret_row = l.visual_row(e);
+                if caret_row >= self.top && caret_row < self.top + l.EDIT_ROWS {
                     rows[caret_row - self.top].u64(0xCA);
                 }
                 // Walk the buffer exactly as the painter does.
                 let (mut row, mut column) = (0usize, 0usize);
                 for i in 0..=e.len {
-                    if i == e.cursor && row >= self.top && row < self.top + l::EDIT_ROWS {
+                    if i == e.cursor && row >= self.top && row < self.top + l.EDIT_ROWS {
                         rows[row - self.top].u64(0xC0).u64(column as u64);
                     }
                     if i == e.len {
@@ -164,11 +170,11 @@ impl View<'_> {
                         column = 0;
                         continue;
                     }
-                    if row >= self.top && row < self.top + l::EDIT_ROWS && b != b'\t' {
+                    if row >= self.top && row < self.top + l.EDIT_ROWS && b != b'\t' {
                         rows[row - self.top].u64(column as u64).bytes(&[b]);
                     }
                     column += if b == b'\t' { 4 - column % 4 } else { 1 };
-                    if column >= l::EDIT_COLUMNS {
+                    if column >= l.EDIT_COLUMNS {
                         row += 1;
                         column = 0;
                     }
@@ -180,9 +186,9 @@ impl View<'_> {
                     let y = first + r as i32 * m::LINE_HEIGHT;
                     out.push(y, y + m::LINE_HEIGHT, k.0);
                 }
-                let tail = first + l::EDIT_ROWS as i32 * m::LINE_HEIGHT;
-                if tail < l::STATUS_Y {
-                    out.push(tail, l::STATUS_Y, base.0 ^ 0xE1);
+                let tail = first + l.EDIT_ROWS as i32 * m::LINE_HEIGHT;
+                if tail < l.STATUS_Y {
+                    out.push(tail, l.STATUS_Y, base.0 ^ 0xE1);
                 }
             }
             _ => {
@@ -209,10 +215,10 @@ impl View<'_> {
                     all.u64(*a).u64(*b);
                 }
                 out.push(0, header, all.0);
-                out.push(header, l::STATUS_Y, all.0 ^ 0xC7);
+                out.push(header, l.STATUS_Y, all.0 ^ 0xC7);
             }
         }
-        out.push(l::STATUS_Y, H, status.0);
+        out.push(l.STATUS_Y, l.H, status.0);
     }
 }
 
@@ -246,12 +252,17 @@ pub struct Bands {
     pub y: [(i32, i32); MAX_BANDS],
     pub keys: [u64; MAX_BANDS],
     pub n: usize,
+    /// Surface size the bands cover.
+    pub w: i32,
+    pub h: i32,
 }
 impl Bands {
     pub const EMPTY: Self = Self {
         y: [(0, 0); MAX_BANDS],
         keys: [0; MAX_BANDS],
         n: 0,
+        w: 0,
+        h: 0,
     };
     fn push(&mut self, y0: i32, y1: i32, key: u64) {
         if y1 > y0 && self.n < MAX_BANDS {
@@ -267,6 +278,7 @@ impl Bands {
 pub struct Dirty {
     pub rects: [Rect; MAX_DIRTY],
     pub n: usize,
+    full: bool,
 }
 impl Dirty {
     pub const NONE: Self = Self {
@@ -277,23 +289,27 @@ impl Dirty {
             height: 0,
         }; MAX_DIRTY],
         n: 0,
+        full: false,
     };
-    pub const fn full() -> Self {
+    /// The whole `w` x `h` surface.
+    pub const fn full(w: i32, h: i32) -> Self {
         let mut d = Self::NONE;
         d.rects[0] = Rect {
             x: 0,
             y: 0,
-            width: W as u32,
-            height: H as u32,
+            width: w as u32,
+            height: h as u32,
         };
         d.n = 1;
+        d.full = true;
         d
     }
     pub fn rects(&self) -> &[Rect] {
         &self.rects[..self.n]
     }
+    /// One rectangle covering the whole surface.
     pub fn is_full(&self) -> bool {
-        self.n == 1 && self.rects[0].height == H as u32 && self.rects[0].y == 0
+        self.full
     }
 }
 
@@ -303,8 +319,11 @@ impl Dirty {
 /// repainted too, which is always correct), until the list fits. A layout
 /// change (different band boundaries) repaints everything.
 pub fn dirty(prev: &Bands, next: &Bands) -> Dirty {
-    if prev.n != next.n || prev.y[..prev.n] != next.y[..next.n] {
-        return Dirty::full();
+    if (prev.w, prev.h) != (next.w, next.h)
+        || prev.n != next.n
+        || prev.y[..prev.n] != next.y[..next.n]
+    {
+        return Dirty::full(next.w, next.h);
     }
     let mut runs = [(0i32, 0i32); MAX_BANDS];
     let mut count = 0;
@@ -338,11 +357,14 @@ pub fn dirty(prev: &Bands, next: &Bands) -> Dirty {
         d.rects[i] = Rect {
             x: 0,
             y: *y0,
-            width: W as u32,
+            width: next.w as u32,
             height: (y1 - y0) as u32,
         };
     }
     d.n = count;
+    // Every band dirty is one rectangle covering the surface: publish it
+    // as a whole-surface Damage.
+    d.full = count == 1 && d.rects[0].y == 0 && d.rects[0].height as i32 == next.h;
     d
 }
 
@@ -388,7 +410,9 @@ mod tests {
         top: usize,
         appearance: u8,
         kind: u8,
+        size: (u16, u16),
     }
+    const DEFAULT: (u16, u16) = (448, 288);
     impl Fixture {
         fn new(kind: u8) -> Self {
             Self {
@@ -402,6 +426,7 @@ mod tests {
                 top: 0,
                 appearance: 0,
                 kind,
+                size: DEFAULT,
             }
         }
         fn view(&self) -> View<'_> {
@@ -421,13 +446,15 @@ mod tests {
                 counts: &self.counts,
                 processes: &self.processes,
                 gallery_theme: 2,
+                size: self.size,
             }
         }
     }
 
     fn full(v: &View<'_>) -> Vec<u32> {
-        let mut px = vec![0u32; (W * H) as usize];
-        let mut c = Canvas::new(&mut px, W as usize, H as usize, W as usize).unwrap();
+        let (w, h) = (usize::from(v.size.0), usize::from(v.size.1));
+        let mut px = vec![0u32; w * h];
+        let mut c = Canvas::new(&mut px, w, h, w).unwrap();
         v.paint(&mut c);
         px
     }
@@ -442,8 +469,20 @@ mod tests {
         steps: usize,
         edit: fn(&mut Fixture, &mut Rng),
     ) -> (usize, usize) {
+        check_at(kind, seed, steps, edit, DEFAULT)
+    }
+
+    fn check_at(
+        kind: u8,
+        seed: u64,
+        steps: usize,
+        edit: fn(&mut Fixture, &mut Rng),
+        size: (u16, u16),
+    ) -> (usize, usize) {
+        let (w, h) = (usize::from(size.0), usize::from(size.1));
         let mut rng = Rng(seed);
         let mut fx = Fixture::new(kind);
+        fx.size = size;
         let mut shown = full(&fx.view());
         let mut bands = Bands::EMPTY;
         fx.view().bands(&mut bands);
@@ -455,7 +494,7 @@ mod tests {
             let d = dirty(&bands, &next);
             assert!(d.n <= MAX_DIRTY);
             {
-                let mut c = Canvas::new(&mut shown, W as usize, H as usize, W as usize).unwrap();
+                let mut c = Canvas::new(&mut shown, w, h, w).unwrap();
                 repaint(&mut c, &fx.view(), &d);
             }
             assert!(
@@ -531,6 +570,27 @@ mod tests {
         }
     }
 
+    /// The same equivalence at other surface sizes (resized windows),
+    /// and a size change always repaints and publishes the whole surface.
+    #[test]
+    fn partial_repaint_equals_full_redraw_at_every_size() {
+        for size in [(400, 200), (712, 470), (1024, 768)] {
+            let (p, t) = check_at(TERMINAL, 99, 60, terminal_edit, size);
+            assert!(p * 2 > t, "{size:?} {p}/{t}");
+            let (p, t) = check_at(EDITOR, 98, 60, editor_edit, size);
+            assert!(p * 2 > t, "{size:?} {p}/{t}");
+        }
+        let mut fx = Fixture::new(EDITOR);
+        let mut a = Bands::EMPTY;
+        fx.view().bands(&mut a);
+        fx.size = (600, 400);
+        let mut b = Bands::EMPTY;
+        fx.view().bands(&mut b);
+        let d = dirty(&a, &b);
+        assert!(d.is_full());
+        assert_eq!((d.rects[0].width, d.rects[0].height), (600, 400));
+    }
+
     #[test]
     fn terminal_typing_repaints_only_the_input_line() {
         let mut fx = Fixture::new(TERMINAL);
@@ -541,8 +601,9 @@ mod tests {
         fx.view().bands(&mut b);
         let d = dirty(&a, &b);
         assert_eq!(d.n, 1);
-        assert_eq!(d.rects[0].y, l::INPUT_Y);
-        assert_eq!(d.rects[0].height as i32, l::STATUS_Y - l::INPUT_Y);
+        let l = Layout::DEFAULT;
+        assert_eq!(d.rects[0].y, l.INPUT_Y);
+        assert_eq!(d.rects[0].height as i32, l.STATUS_Y - l.INPUT_Y);
     }
 
     #[test]
@@ -559,11 +620,12 @@ mod tests {
         let d = dirty(&a, &b);
         let rows: u32 = d.rects().iter().map(|r| r.height).sum();
         // Header (caret line:column) + two text rows, nothing else.
+        let l = Layout::DEFAULT;
         assert!(
-            rows <= (l::HEADER_BOTTOM + 1) as u32 + 2 * m::LINE_HEIGHT as u32,
+            rows <= (l.HEADER_BOTTOM + 1) as u32 + 2 * m::LINE_HEIGHT as u32,
             "{d:?}"
         );
-        assert!(d.rects().iter().any(|r| r.y > l::HEADER_BOTTOM));
+        assert!(d.rects().iter().any(|r| r.y > l.HEADER_BOTTOM));
     }
 
     #[test]

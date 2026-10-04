@@ -37,8 +37,8 @@ use arena_lib::ipc::{self, Transport as _};
 /// Test-only request handled by the isolated faultd fixture, never a
 /// production service or public kernel ABI operation.
 const OP_UNEXPECTED_CAP: u64 = 3;
-const CAP_SLOTS: u64 = 32;
-const CAP_TRIALS: u64 = 40; // more than the entire fixed cap table
+const CAP_SLOTS: u64 = 64; // kernel table (ADR-0075)
+const CAP_TRIALS: u64 = 72; // more than the entire fixed cap table
 const EXIT_CAP_LEAK: u64 = 70;
 
 fn describable(slot: u64) -> bool {
@@ -132,16 +132,16 @@ fn verify_returned_cap(alive: u64, msg: &mut [u8; MSG_BYTES]) -> bool {
         }
     }
     // Same linked production transport, ordinary reply without a cap:
-    // service status and word are unchanged even after 40 refusals.
+    // service status and word are unchanged even after 72 refusals.
     if client.exchange(SLOT_EP, 0, FAULT_OP_PING, CAP_NONE, msg)
         != Ok(ipc::Reply { status: FAULT_S_OK, value: alive + 1 }) {
         log("m83: returncap FAIL (normal no-cap PING changed)");
         return false;
     }
     log_line(|o| {
-        o.str("m83: returncap PASS (40 real reply caps rejected and discarded; slot 2 empty, occupancy ");
+        o.str("m83: returncap PASS (72 real reply caps rejected and discarded; slot 2 empty, occupancy ");
         o.u64(baseline);
-        o.str("/32 exact; ordinary no-cap PING unchanged)");
+        o.str("/64 exact; ordinary no-cap PING unchanged)");
     });
     true
 }

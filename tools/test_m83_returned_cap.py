@@ -14,8 +14,8 @@ import arena_env  # noqa: E402
 import mtest  # noqa: E402
 
 LABEL = 'm83-returned-cap'
-PASS = ('m83: returncap PASS (40 real reply caps rejected and discarded; '
-        'slot 2 empty, occupancy 2/32 exact; ordinary no-cap PING unchanged)')
+PASS = ('m83: returncap PASS (72 real reply caps rejected and discarded; '
+        'slot 2 empty, occupancy 2/64 exact; ordinary no-cap PING unchanged)')
 
 
 def main():

@@ -9,7 +9,7 @@ mod icons;
 mod shapes;
 mod text;
 
-pub use chrome::{chrome, window_chrome};
+pub use chrome::{POPUP_SHADOW, chrome, popup_frame, window_chrome};
 pub use controls::{
     Kind, Tone, button, caret, chip, field, focus_ring, meter, progress, row, section, status_band,
     switch,

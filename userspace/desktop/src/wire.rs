@@ -1,5 +1,8 @@
 //! Neutral desktop client wire. A parsed handle never grants authority.
-use crate::model::Event;
+use crate::model::{
+    Event, MIN_HEIGHT, MIN_WIDTH, PopupKind, SURFACE_MAX_HEIGHT as MAX_H,
+    SURFACE_MAX_WIDTH as MAX_W, TRANSIENT_MAX_HEIGHT, TRANSIENT_MAX_WIDTH, TRANSIENT_MIN,
+};
 pub const BYTES: usize = 64;
 const MAGIC: &[u8; 4] = b"ADSK";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,19 +35,64 @@ impl DamageRects {
             && self.rects().iter().all(|&[x, y, w, h]| {
                 w > 0
                     && h > 0
-                    && u32::from(x) + u32::from(w) <= 448
-                    && u32::from(y) + u32::from(h) <= 288
+                    && u32::from(x) + u32::from(w) <= u32::from(MAX_W)
+                    && u32::from(y) + u32::from(h) <= u32::from(MAX_H)
             })
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Frame {
-    Create { width: u16, height: u16 },
-    Damage { handle: u64, rects: DamageRects },
-    Poll { handle: u64 },
-    CancelClose { handle: u64 },
-    Title { handle: u64, text: [u8; 32] },
-    Event { handle: u64, event: Event },
+    Create {
+        width: u16,
+        height: u16,
+    },
+    Damage {
+        handle: u64,
+        rects: DamageRects,
+    },
+    Poll {
+        handle: u64,
+    },
+    CancelClose {
+        handle: u64,
+    },
+    Title {
+        handle: u64,
+        text: [u8; 32],
+    },
+    Event {
+        handle: u64,
+        event: Event,
+    },
+    /// The client publishes its whole surface at this new size (Phase
+    /// 11.3): the broker copies width*height pixels, nothing else.
+    Resize {
+        handle: u64,
+        width: u16,
+        height: u16,
+    },
+    /// The client re-lays out to any size of at least this.
+    Resizable {
+        handle: u64,
+        min_width: u16,
+        min_height: u16,
+    },
+    /// Open the window's transient surface at window-local (x, y).
+    Popup {
+        handle: u64,
+        kind: PopupKind,
+        x: i32,
+        y: i32,
+        width: u16,
+        height: u16,
+    },
+    /// Close the client's own transient surface `handle`.
+    Dismiss {
+        handle: u64,
+    },
+}
+fn surface_size(width: u16, height: u16) -> bool {
+    (MIN_WIDTH..=MAX_W).contains(&width) && (MIN_HEIGHT..=MAX_H).contains(&height)
 }
 impl Frame {
     pub fn encode(self) -> Result<[u8; BYTES], Error> {
@@ -53,7 +101,7 @@ impl Frame {
         b[4] = 1;
         let (op, handle) = match self {
             Self::Create { width, height } => {
-                if width < 80 || height < 60 || width > 448 || height > 288 {
+                if !surface_size(width, height) {
                     return Err(Error::Invalid);
                 }
                 b[24..26].copy_from_slice(&width.to_le_bytes());
@@ -97,14 +145,36 @@ impl Frame {
                         b[28] = 1;
                         b[24..26].copy_from_slice(&key.to_le_bytes());
                     }
-                    Event::Pointer { x, y, buttons } => {
-                        if !(-448..=448).contains(&x) || !(-288..=288).contains(&y) || buttons > 7 {
+                    Event::Pointer { x, y, buttons } | Event::PopupPointer { x, y, buttons } => {
+                        if !(-i32::from(MAX_W)..=i32::from(MAX_W)).contains(&x)
+                            || !(-i32::from(MAX_H)..=i32::from(MAX_H)).contains(&y)
+                            || buttons > 7
+                        {
                             return Err(Error::Invalid);
                         }
-                        b[28] = 2;
+                        b[28] = if matches!(event, Event::Pointer { .. }) {
+                            2
+                        } else {
+                            6
+                        };
                         b[29] = buttons;
                         b[16..20].copy_from_slice(&x.to_le_bytes());
                         b[20..24].copy_from_slice(&y.to_le_bytes());
+                    }
+                    Event::Configure { width, height } => {
+                        if !surface_size(width, height) {
+                            return Err(Error::Invalid);
+                        }
+                        b[28] = 5;
+                        b[24..26].copy_from_slice(&width.to_le_bytes());
+                        b[26..28].copy_from_slice(&height.to_le_bytes());
+                    }
+                    Event::Dismissed(popup) => {
+                        if popup == 0 {
+                            return Err(Error::Invalid);
+                        }
+                        b[28] = 7;
+                        b[16..24].copy_from_slice(&popup.to_le_bytes());
                     }
                     Event::Close => {
                         b[28] = 3;
@@ -116,6 +186,53 @@ impl Frame {
                 }
                 (5, handle)
             }
+            Self::Resize {
+                handle,
+                width,
+                height,
+            } => {
+                if !surface_size(width, height) {
+                    return Err(Error::Invalid);
+                }
+                b[24..26].copy_from_slice(&width.to_le_bytes());
+                b[26..28].copy_from_slice(&height.to_le_bytes());
+                (7, handle)
+            }
+            Self::Resizable {
+                handle,
+                min_width,
+                min_height,
+            } => {
+                if !surface_size(min_width, min_height) {
+                    return Err(Error::Invalid);
+                }
+                b[24..26].copy_from_slice(&min_width.to_le_bytes());
+                b[26..28].copy_from_slice(&min_height.to_le_bytes());
+                (8, handle)
+            }
+            Self::Popup {
+                handle,
+                kind,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                if !(TRANSIENT_MIN..=TRANSIENT_MAX_WIDTH).contains(&width)
+                    || !(TRANSIENT_MIN..=TRANSIENT_MAX_HEIGHT).contains(&height)
+                    || !(-i32::from(MAX_W)..=i32::from(MAX_W)).contains(&x)
+                    || !(-i32::from(MAX_H)..=i32::from(MAX_H)).contains(&y)
+                {
+                    return Err(Error::Invalid);
+                }
+                b[16..20].copy_from_slice(&x.to_le_bytes());
+                b[20..24].copy_from_slice(&y.to_le_bytes());
+                b[24..26].copy_from_slice(&width.to_le_bytes());
+                b[26..28].copy_from_slice(&height.to_le_bytes());
+                b[28] = kind as u8;
+                (9, handle)
+            }
+            Self::Dismiss { handle } => (10, handle),
         };
         if op != 1 && handle == 0 {
             return Err(Error::Invalid);
@@ -166,9 +283,37 @@ impl Frame {
                     },
                     3 => Event::Close,
                     4 if b[29] <= 1 => Event::Focus(b[29] == 1),
+                    5 => Event::Configure { width, height },
+                    6 => Event::PopupPointer {
+                        x,
+                        y,
+                        buttons: b[29],
+                    },
+                    7 => Event::Dismissed(u64::from_le_bytes(
+                        b[16..24].try_into().map_err(|_| Error::Invalid)?,
+                    )),
                     _ => return Err(Error::Invalid),
                 },
             },
+            7 => Self::Resize {
+                handle,
+                width,
+                height,
+            },
+            8 => Self::Resizable {
+                handle,
+                min_width: width,
+                min_height: height,
+            },
+            9 => Self::Popup {
+                handle,
+                kind: PopupKind::from_u8(b[28]).ok_or(Error::Invalid)?,
+                x,
+                y,
+                width,
+                height,
+            },
+            10 => Self::Dismiss { handle },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -219,6 +364,44 @@ mod tests {
                 handle: 9,
                 event: Event::Focus(false),
             },
+            Frame::Event {
+                handle: 9,
+                event: Event::Configure {
+                    width: 800,
+                    height: 518,
+                },
+            },
+            Frame::Event {
+                handle: 9,
+                event: Event::PopupPointer {
+                    x: 3,
+                    y: -4,
+                    buttons: 1,
+                },
+            },
+            Frame::Event {
+                handle: 9,
+                event: Event::Dismissed(77),
+            },
+            Frame::Resize {
+                handle: 9,
+                width: 1024,
+                height: 768,
+            },
+            Frame::Resizable {
+                handle: 9,
+                min_width: 80,
+                min_height: 60,
+            },
+            Frame::Popup {
+                handle: 9,
+                kind: PopupKind::Menu,
+                x: -20,
+                y: 300,
+                width: 160,
+                height: 200,
+            },
+            Frame::Dismiss { handle: 12 },
         ] {
             let b = f.encode().unwrap();
             assert_eq!(Frame::decode(&b), Ok(f));
@@ -232,7 +415,7 @@ mod tests {
         assert!(Frame::Poll { handle: 0 }.encode().is_err());
         assert!(
             Frame::Create {
-                width: 449,
+                width: 1025,
                 height: 288
             }
             .encode()
@@ -284,7 +467,7 @@ mod tests {
         empty.r[1] = [10, 70, 0, 14];
         assert!(refuse(empty));
         let mut outside = rects;
-        outside.r[0] = [1, 240, 448, 24];
+        outside.r[0] = [1, 240, 1024, 24];
         assert!(refuse(outside));
         let mut stray = rects;
         stray.r[3] = [1, 1, 1, 1];
@@ -293,5 +476,65 @@ mod tests {
         let mut wire = b;
         wire[16] = 9;
         assert_eq!(Frame::decode(&wire), Err(Error::Invalid));
+    }
+    #[test]
+    fn surface_and_transient_bounds_refuse() {
+        for (w, h) in [(79, 60), (80, 59), (1025, 60), (80, 769)] {
+            assert!(
+                Frame::Resize {
+                    handle: 1,
+                    width: w,
+                    height: h
+                }
+                .encode()
+                .is_err()
+            );
+            assert!(
+                Frame::Event {
+                    handle: 1,
+                    event: Event::Configure {
+                        width: w,
+                        height: h
+                    }
+                }
+                .encode()
+                .is_err()
+            );
+        }
+        for (w, h) in [(7, 8), (8, 7), (513, 8), (8, 385)] {
+            assert!(
+                Frame::Popup {
+                    handle: 1,
+                    kind: PopupKind::Dialog,
+                    x: 0,
+                    y: 0,
+                    width: w,
+                    height: h
+                }
+                .encode()
+                .is_err()
+            );
+        }
+        let mut b = Frame::Popup {
+            handle: 1,
+            kind: PopupKind::Tooltip,
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 8,
+        }
+        .encode()
+        .unwrap();
+        b[28] = 4;
+        assert_eq!(Frame::decode(&b), Err(Error::Invalid));
+        assert!(Frame::Dismiss { handle: 0 }.encode().is_err());
+        assert!(
+            Frame::Event {
+                handle: 1,
+                event: Event::Dismissed(0)
+            }
+            .encode()
+            .is_err()
+        );
     }
 }

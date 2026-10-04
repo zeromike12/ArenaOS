@@ -32,7 +32,7 @@ use crate::sync::without_interrupts;
 /// bounded mature-userspace headroom, not authority. Source COPY and
 /// destination occupancy/rights are still checked on every delegation;
 /// a full table refuses rather than growing or replacing a cap.
-pub const CAP_SLOTS: usize = 32;
+pub const CAP_SLOTS: usize = 64; // ADR-0075: twelve desktop sessions
 
 /// Inspect what the cap references (and, for process caps, obtain the
 /// target's PML4 root through [`process_root`]).

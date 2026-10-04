@@ -776,7 +776,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // This avoids a one-frame startup race across historical reboot tests.
     let desktop_frame_nid = crate::ipc::create_notification()
         .unwrap_or_else(|_| crate::halt::halt_machine("desktop: frame notification bound"));
-    let mut app_clock_nids = [0u32; 6];
+    let mut app_clock_nids = [0u32; 12];
     for nid in &mut app_clock_nids {
         *nid = crate::ipc::create_notification()
             .unwrap_or_else(|_| crate::halt::halt_machine("desktop: app clock capacity"));
@@ -933,12 +933,12 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             || crate::ipc::notification_snapshot() != before
         {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed mutation-free twenty-sixth refusal",
+                "servicemgr: notification bound failed mutation-free thirty-second refusal",
             );
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 25/25; twenty-sixth refused"
+            "servicemgr: full fixture notification budget 31/31; thirty-second refused"
         );
     }
 
@@ -1145,7 +1145,7 @@ struct GraphicsRuntime {
 fn start_boot_display(
     input_pid: Option<u64>,
     frame_nid: u32,
-    app_clocks: &[u32; 6],
+    app_clocks: &[u32; 12],
     fs_eid: u32,
 ) -> Option<GraphicsRuntime> {
     let gop = crate::handoff::display();
@@ -2440,7 +2440,7 @@ fn start_boot_desktop(
     display_eid: u32,
     input_pid: Option<u64>,
     frame_nid: u32,
-    app_clocks: &[u32; 6],
+    app_clocks: &[u32; 12],
     fs_eid: u32,
 ) -> GraphicsRuntime {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
@@ -2483,10 +2483,12 @@ fn start_boot_desktop(
         None,
     )
     .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // Client clocks occupy slots 7..=12 and 14..=19 (slot 13 is the
+    // filesystem endpoint, unchanged since Phase 10).
     for (i, nid) in app_clocks.iter().enumerate() {
         crate::cap::issue(
             comp,
-            7 + i,
+            if i < 6 { 7 + i } else { 8 + i },
             Cap {
                 obj: CapObj::Notification { nid: *nid },
                 rights: R | W | C,

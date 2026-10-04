@@ -3,7 +3,8 @@
 #![no_main]
 #![allow(clippy::deref_addrof, clippy::collapsible_if)]
 use arena_desktop::{
-    compose::{self, Damage, Scene, WindowScene},
+    compose::{self, Damage, PopupScene, Scene, WindowScene},
+    model as wm,
     shell::Shell,
 };
 use arena_desktop::{
@@ -24,8 +25,49 @@ const CLOCK: u64 = 4;
 const CALL_SIDE: u64 = 5;
 const APPLICATION: u64 = 6;
 const PIXEL_OFFSET: usize = 4096;
-const PAGES: u64 = 127;
-const LIMIT: usize = 6;
+const LIMIT: usize = wm::MAX_WINDOWS;
+/// Capability slots in the kernel table (ADR-0075).
+const CAP_SLOTS: u64 = 64;
+/// Pages of one bounded transient surface (ADR-0075); the final pages of a
+/// session's shared reservation and of its private snapshot.
+const TRANSIENT_PAGES: u64 = (wm::TRANSIENT_MAX_PIXELS * 4 / 4096) as u64;
+/// Per-session memory, fixed for the screen at startup (ADR-0075): every
+/// session can take any size up to the work area (maximize) without
+/// reallocation, so a resize never changes which memory backs a session.
+#[derive(Clone, Copy)]
+struct Reserve {
+    /// Main surface pages (work area, rounded up).
+    surface_pages: u64,
+    /// Shared region: I/O page + main surface + transient surface.
+    shared_pages: u64,
+    /// Private snapshot region: main surface + transient surface.
+    snapshot_pages: u64,
+}
+static mut RESERVE: Reserve = Reserve {
+    surface_pages: 0,
+    shared_pages: 0,
+    snapshot_pages: 0,
+};
+/// Private client clock of session `i`: slots 7..=12, then 14..=19 (13
+/// is the filesystem endpoint).
+fn clock(i: usize) -> u64 {
+    if i < 6 { 7 + i as u64 } else { 8 + i as u64 }
+}
+/// Presentation state of a session's transient surface, valid only while
+/// the window policy still holds a popup with this handle.
+#[derive(Clone, Copy)]
+struct PopupState {
+    handle: u64,
+    published: bool,
+    content: u64,
+    regions: compose::Regions,
+}
+const NO_POPUP: PopupState = PopupState {
+    handle: 0,
+    published: false,
+    content: 0,
+    regions: compose::Regions::NONE,
+};
 #[derive(Clone, Copy)]
 struct Session {
     region: u64,
@@ -49,6 +91,11 @@ struct Session {
     content: u64,
     /// Published regions since the last presented frame (Phase 11.1).
     regions: compose::Regions,
+    /// Private snapshot mapping (held by its mapping pin only, no cap).
+    snapshot: u64,
+    /// Size of the published main raster (Phase 11.3).
+    surface: (u16, u16),
+    popup: PopupState,
 }
 const EMPTY: Session = Session {
     region: CAP_NONE,
@@ -70,6 +117,9 @@ const EMPTY: Session = Session {
     focus_last: 0,
     content: 0,
     regions: compose::Regions::NONE,
+    snapshot: 0,
+    surface: (0, 0),
+    popup: NO_POPUP,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -126,8 +176,7 @@ fn wake_clients() {
         if s.handle == 0 || s.kind >= 6 || unsafe { WOKEN[i] } {
             continue;
         }
-        if (all || state.pending(s.handle)) && unsafe { syscall2(SYS_NOTIFY, 7 + i as u64, 1) } == 0
-        {
+        if (all || state.pending(s.handle)) && unsafe { syscall2(SYS_NOTIFY, clock(i), 1) } == 0 {
             unsafe { WOKEN[i] = true };
         }
     }
@@ -191,10 +240,44 @@ fn perf_report() {
     line.push(b"\n");
     log(line.as_bytes());
 }
-// Private broker memory: clients never map or receive these complete frames.
-// Only an authenticated Damage request publishes an owned snapshot.
-const FRAME_PIXELS: usize = arena_ui::metrics::WINDOW_WIDTH * arena_ui::metrics::WINDOW_HEIGHT;
-static mut PUBLISHED: [[u32; FRAME_PIXELS]; LIMIT] = [[0; FRAME_PIXELS]; LIMIT];
+// Private broker memory: each session's snapshot region is mapped only by
+// the broker; clients never map or receive it. Only an authenticated Damage
+// or Resize request publishes into it.
+fn snapshot_of(s: &Session) -> (&'static [u32], &'static [u32]) {
+    let r = unsafe { RESERVE };
+    if s.snapshot == 0 {
+        return (&[], &[]);
+    }
+    let main = (r.surface_pages * 1024) as usize;
+    unsafe {
+        (
+            core::slice::from_raw_parts(s.snapshot as *const u32, main),
+            core::slice::from_raw_parts(
+                (s.snapshot + r.surface_pages * 4096) as *const u32,
+                (TRANSIENT_PAGES * 1024) as usize,
+            ),
+        )
+    }
+}
+/// Copy exactly the declared rectangles of a `stride`-wide raster from the
+/// client's shared staging memory into the private snapshot. The sender is
+/// blocked in CALL on this single-core topology; staging bytes outside the
+/// rectangles never become visible.
+fn publish_rects(src: u64, dst: u64, stride: usize, rects: &[[u16; 4]]) {
+    for &[x, y, w, h] in rects {
+        for row in y as usize..y as usize + h as usize {
+            for col in x as usize..x as usize + w as usize {
+                let pixel = row * stride + col;
+                unsafe {
+                    core::ptr::write_volatile(
+                        (dst as *mut u32).add(pixel),
+                        core::ptr::read_volatile((src as *const u32).add(pixel)),
+                    );
+                }
+            }
+        }
+    }
+}
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
 static mut WM: State = match State::new(800, 600) {
     Ok(s) => s,
@@ -345,16 +428,18 @@ fn launch_image(
     // that have not yet requested their window. No numerical caller identity.
     let sessions = unsafe { &mut *(&raw mut SESSIONS) };
     let i = sessions.iter().position(|s| s.id == 0).ok_or(STATUS_BUSY)?;
-    let free = (0..32).filter(|s| describe(*s).is_none()).count();
-    if free < 3 {
+    // Region, snapshot (transiently), Process and a landed request cap.
+    let free = (0..CAP_SLOTS).filter(|s| describe(*s).is_none()).count();
+    if free < 4 {
         return Err(STATUS_BUSY);
     }
+    let reserve = unsafe { RESERVE };
     let mut out = [0; 3];
     let rc = unsafe {
         syscall6(
             SYS_SHARED_CREATE,
             POOL,
-            PAGES,
+            reserve.shared_pages,
             out.as_mut_ptr() as u64,
             0,
             0,
@@ -371,13 +456,42 @@ fn launch_image(
         destroy(region);
         return Err(va);
     }
+    // The private snapshot lives as long as the broker's mapping of it: the
+    // capability is dropped at once, so no other process can ever be given
+    // it and it costs no capability slot.
+    let mut snap = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            reserve.snapshot_pages,
+            snap.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    let snapshot = if rc == 0 {
+        let mapped = unsafe { syscall2(SYS_SHARED_MAP, snap[0], 1) };
+        destroy(snap[0]);
+        mapped
+    } else {
+        rc
+    };
+    if snapshot <= 0 {
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(snapshot);
+    }
     // Distinct inherited function reference to the exact fresh region. Its
     // marker rights do not enlarge the session's provisioned function scope.
     let spec = [
         (CALL_SIDE, RIGHTS_WRITE),
         (region, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY),
         (region, function_rights),
-        (7 + i as u64, RIGHTS_READ | RIGHTS_WRITE),
+        (clock(i), RIGHTS_READ | RIGHTS_WRITE),
         (POOL, RIGHTS_READ),
     ];
     let pid = unsafe {
@@ -393,11 +507,12 @@ fn launch_image(
     if pid <= 0 {
         unsafe {
             syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
         }
         destroy(region);
         return Err(pid);
     }
-    let process = (0..32)
+    let process = (0..CAP_SLOTS)
         .find(|s| {
             describe(*s)
                 .is_some_and(|d| d[0] == 4 && d[1] == pid as u64 && d[2] & RIGHTS_DESTROY != 0)
@@ -412,6 +527,7 @@ fn launch_image(
         scope,
         launch_targets,
         path,
+        snapshot: snapshot as u64,
         ..EMPTY
     };
     transient_caps();
@@ -429,11 +545,13 @@ fn retire(index: usize, force: bool) {
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
     }
-    if unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0 {
+    if unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0
+        || unsafe { syscall6(SYS_SHARED_UNMAP, s.snapshot, 0, 0, 0, 0, 0) } != 0
+    {
         die(86)
     }
     destroy(s.region);
-    let _ = unsafe { syscall1(SYS_TRY_WAIT, 7 + index as u64) };
+    let _ = unsafe { syscall1(SYS_TRY_WAIT, clock(index)) };
     unsafe {
         SESSIONS[index] = EMPTY;
         WOKEN[index] = false;
@@ -521,6 +639,7 @@ static mut LAST_SCENE: Option<Scene> = None;
 fn clear_regions() {
     for s in unsafe { &mut *(&raw mut SESSIONS) } {
         s.regions = compose::Regions::NONE;
+        s.popup.regions = compose::Regions::NONE;
     }
 }
 /// Descriptive snapshot of everything the compositor draws (see compose.rs).
@@ -553,6 +672,24 @@ fn scene(now: u64) -> Scene {
             regions: s.regions,
             published: s.published,
             title: s.title,
+            surface: s.surface,
+            popup: window.popup.map(|p| {
+                let live = s.popup.handle == p.handle;
+                PopupScene {
+                    handle: p.handle,
+                    x: p.x,
+                    y: p.y,
+                    width: p.width,
+                    height: p.height,
+                    content: if live { s.popup.content } else { 0 },
+                    regions: if live {
+                        s.popup.regions
+                    } else {
+                        compose::Regions::NONE
+                    },
+                    published: live && s.popup.published,
+                }
+            }),
         });
     }
     scene.count = n;
@@ -598,11 +735,11 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
     }
     let pixels = unsafe { core::slice::from_raw_parts_mut(ram as *mut u32, w * h) };
     let mut c = Canvas::new(pixels, w, h, w).unwrap_or_else(|_| die(87));
-    let published = unsafe { &*(&raw const PUBLISHED) };
+    let sessions = unsafe { &*(&raw const SESSIONS) };
     let theme = arena_ui::theme::palette(next.dark);
     for rect in damage.rects() {
         c.set_clip(*rect);
-        compose::compose(&mut c, &next, |slot| &published[slot][..], theme);
+        compose::compose(&mut c, &next, |slot| snapshot_of(&sessions[slot]), theme);
     }
     probe(P_COMPOSE, started);
     let phase = perf_now();
@@ -766,6 +903,20 @@ pub extern "C" fn _start() -> ! {
     }
     unsafe { (&mut *(&raw mut WM)).configure_screen(w as u16, h as u16, 6) }
         .unwrap_or_else(|_| die(93));
+    let (max_w, max_h) = unsafe { (*(&raw const WM)).max_surface() };
+    let surface_pages = (u64::from(max_w) * u64::from(max_h) * 4).div_ceil(4096);
+    unsafe {
+        RESERVE = Reserve {
+            surface_pages,
+            shared_pages: 1 + surface_pages + TRANSIENT_PAGES,
+            snapshot_pages: surface_pages + TRANSIENT_PAGES,
+        };
+    }
+    log(b"[desktop] session reservation shared/snapshot pages=");
+    log_number(unsafe { RESERVE.shared_pages });
+    log(b"/");
+    log_number(unsafe { RESERVE.snapshot_pages });
+    log(b"\n");
     let ram = unsafe { syscall2(SYS_SHARED_MAP, scanout, 1) };
     if ram <= 0 {
         die(94)
@@ -977,9 +1128,14 @@ pub extern "C" fn _start() -> ! {
                             let state = unsafe { &mut *(&raw mut WM) };
                             let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(i) };
                             match f {
-                                Frame::Create { width, height } if s.handle == 0 => {
+                                Frame::Create { width, height }
+                                    if s.handle == 0
+                                        && u64::from(width) * u64::from(height)
+                                            <= unsafe { RESERVE.surface_pages } * 1024 =>
+                                {
                                     if let Ok(handle) = state.create(id, width, height) {
                                         s.handle = handle;
+                                        s.surface = (width, height);
                                         s.reveal.retarget(
                                             height as i32,
                                             arena_desktop::app_client::now(),
@@ -1002,40 +1158,28 @@ pub extern "C" fn _start() -> ! {
                                 }
                                 Frame::Damage { handle, rects } if state.owned(id, handle) => {
                                     let copy_started = perf_now();
-                                    let window = state.find(handle).unwrap_or_else(|| die(88));
-                                    let (ww, wh) = (window.width as usize, window.height as usize);
+                                    let (ww, wh) =
+                                        (usize::from(s.surface.0), usize::from(s.surface.1));
                                     // Every declared rectangle must lie inside this
-                                    // window's own surface; otherwise nothing is
-                                    // published at all.
+                                    // session's published surface; otherwise nothing
+                                    // is published at all.
                                     let inside = rects.rects().iter().all(|&[x, y, w, h]| {
                                         x as usize + w as usize <= ww
                                             && y as usize + h as usize <= wh
                                     });
                                     if inside {
-                                        let input = (s.va as usize + PIXEL_OFFSET) as *const u32;
                                         let full = [[0, 0, ww as u16, wh as u16]];
                                         let list = if rects.n == 0 {
                                             &full[..]
                                         } else {
                                             rects.rects()
                                         };
-                                        // Sender is blocked in CALL on this single-core
-                                        // launch topology. Read volatile shared data into
-                                        // private memory, exactly the declared pixels:
-                                        // staging bytes outside them never become visible.
-                                        for &[x, y, w, h] in list {
-                                            for row in y as usize..y as usize + h as usize {
-                                                for col in x as usize..x as usize + w as usize {
-                                                    let pixel = row * ww + col;
-                                                    unsafe {
-                                                        (*(&raw mut PUBLISHED))[i][pixel] =
-                                                            core::ptr::read_volatile(
-                                                                input.add(pixel),
-                                                            );
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        publish_rects(
+                                            s.va + PIXEL_OFFSET as u64,
+                                            s.snapshot,
+                                            ww,
+                                            list,
+                                        );
                                         if rects.n == 0 || !s.published {
                                             s.regions.mark_full();
                                         } else {
@@ -1046,6 +1190,104 @@ pub extern "C" fn _start() -> ! {
                                         s.published = true;
                                         s.content = s.content.wrapping_add(1);
                                         probe(P_DAMAGE, copy_started);
+                                        status = 0;
+                                        dirty = true;
+                                    }
+                                }
+                                // Publication of the session's own transient surface.
+                                Frame::Damage { handle, rects }
+                                    if state.popup_owned(id, handle)
+                                        && s.popup.handle == handle =>
+                                {
+                                    let (_, p) =
+                                        state.find_popup(handle).unwrap_or_else(|| die(88));
+                                    let (pw, ph) = (usize::from(p.width), usize::from(p.height));
+                                    let inside = rects.rects().iter().all(|&[x, y, w, h]| {
+                                        x as usize + w as usize <= pw
+                                            && y as usize + h as usize <= ph
+                                    });
+                                    if inside {
+                                        let reserve = unsafe { RESERVE };
+                                        let full = [[0, 0, pw as u16, ph as u16]];
+                                        let list = if rects.n == 0 {
+                                            &full[..]
+                                        } else {
+                                            rects.rects()
+                                        };
+                                        publish_rects(
+                                            s.va + (reserve.shared_pages - TRANSIENT_PAGES) * 4096,
+                                            s.snapshot + reserve.surface_pages * 4096,
+                                            pw,
+                                            list,
+                                        );
+                                        if rects.n == 0 || !s.popup.published {
+                                            s.popup.regions.mark_full();
+                                        } else {
+                                            for r in rects.rects() {
+                                                s.popup.regions.add(*r);
+                                            }
+                                        }
+                                        s.popup.published = true;
+                                        s.popup.content = s.popup.content.wrapping_add(1);
+                                        status = 0;
+                                        dirty = true;
+                                    }
+                                }
+                                // The client publishes its whole surface at exactly
+                                // the size the window policy configured.
+                                Frame::Resize {
+                                    handle,
+                                    width,
+                                    height,
+                                } if state.owned(id, handle) => {
+                                    let window = state.find(handle).unwrap_or_else(|| die(88));
+                                    if (width, height) == (window.width, window.height) {
+                                        publish_rects(
+                                            s.va + PIXEL_OFFSET as u64,
+                                            s.snapshot,
+                                            usize::from(width),
+                                            &[[0, 0, width, height]],
+                                        );
+                                        s.surface = (width, height);
+                                        s.regions.mark_full();
+                                        s.published = true;
+                                        s.content = s.content.wrapping_add(1);
+                                        status = 0;
+                                        dirty = true;
+                                    }
+                                }
+                                Frame::Resizable {
+                                    handle,
+                                    min_width,
+                                    min_height,
+                                } if state.owned(id, handle) => {
+                                    if state.set_resizable(handle, min_width, min_height).is_ok() {
+                                        status = 0;
+                                    }
+                                }
+                                Frame::Popup {
+                                    handle,
+                                    kind,
+                                    x,
+                                    y,
+                                    width,
+                                    height,
+                                } if state.owned(id, handle) => {
+                                    if let Ok(popup) =
+                                        state.open_popup(id, handle, kind, x, y, width, height)
+                                    {
+                                        s.popup = PopupState {
+                                            handle: popup,
+                                            ..NO_POPUP
+                                        };
+                                        result = popup;
+                                        status = 0;
+                                        dirty = true;
+                                    }
+                                }
+                                Frame::Dismiss { handle } if state.popup_owned(id, handle) => {
+                                    if state.close_popup(id, handle).is_ok() {
+                                        s.popup = NO_POPUP;
                                         status = 0;
                                         dirty = true;
                                     }

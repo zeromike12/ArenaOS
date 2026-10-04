@@ -1,6 +1,9 @@
 //! Small ordinary userspace graphical client adapter. No raw display/input.
 use crate::abi::*;
-use crate::{model::Event, wire::Frame};
+use crate::{
+    model::{Event, PopupKind, SURFACE_MAX_HEIGHT, SURFACE_MAX_WIDTH, TRANSIENT_MAX_PIXELS},
+    wire::Frame,
+};
 pub const ENDPOINT: u64 = 0;
 pub const BACKING: u64 = 1;
 /// First page is reserved for explicit service I/O; pixels follow it.
@@ -11,6 +14,19 @@ pub struct Client {
     pub pixels: *mut u32,
     pub io: *mut u8,
     pub appearance: core::cell::Cell<u8>,
+    pub width: usize,
+    pub height: usize,
+    /// Pages of the session reservation (ADR-0075): the last
+    /// `TRANSIENT_PAGES` hold the transient surface.
+    pages: usize,
+}
+/// Pages of the bounded transient surface at the end of the reservation.
+pub const TRANSIENT_PAGES: usize = TRANSIENT_MAX_PIXELS * 4 / 4096;
+/// A live transient surface (menu, tooltip, dialog) of this client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Transient {
+    pub handle: u64,
+    pub pixels: *mut u32,
     pub width: usize,
     pub height: usize,
 }
@@ -55,8 +71,8 @@ impl Client {
     pub fn connect(width: usize, height: usize, title: &str) -> Result<Self, i64> {
         if width < 80
             || height < 60
-            || width > 448
-            || height > 288
+            || width > usize::from(SURFACE_MAX_WIDTH)
+            || height > usize::from(SURFACE_MAX_HEIGHT)
             || title.is_empty()
             || title.len() > 32
             || !title.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
@@ -76,7 +92,9 @@ impl Client {
                 0,
             )
         };
-        if rc != 0 || bound[0] == 0 || bound[1] * 4096 < (PIXEL_OFFSET + width * height * 4) as u64
+        if rc != 0
+            || bound[0] == 0
+            || bound[1] * 4096 < (PIXEL_OFFSET + width * height * 4 + TRANSIENT_PAGES * 4096) as u64
         {
             return Err(-2);
         }
@@ -109,7 +127,99 @@ impl Client {
             appearance: core::cell::Cell::new(2),
             width,
             height,
+            pages: bound[1] as usize,
         })
+    }
+    /// Main-surface pixels the reservation holds (the largest surface the
+    /// window policy can configure fits in it).
+    pub fn capacity(&self) -> usize {
+        (self.pages - 1 - TRANSIENT_PAGES) * 1024
+    }
+    /// Declare that this client re-lays out to any size of at least this.
+    pub fn set_resizable(&self, min_width: u16, min_height: u16) -> Result<(), i64> {
+        let f = Frame::Resizable {
+            handle: self.handle,
+            min_width,
+            min_height,
+        };
+        if exchange(f)?.1 != f {
+            return Err(-2);
+        }
+        Ok(())
+    }
+    /// Adopt a configured size: from now on the surface is `width` x
+    /// `height` (stride = width). Paint it completely, then `commit`.
+    pub fn adopt(&mut self, width: usize, height: usize) -> Result<(), i64> {
+        if width * height > self.capacity()
+            || width > usize::from(SURFACE_MAX_WIDTH)
+            || height > usize::from(SURFACE_MAX_HEIGHT)
+        {
+            return Err(-2);
+        }
+        self.width = width;
+        self.height = height;
+        Ok(())
+    }
+    /// Publish the whole surface at its (newly adopted) size.
+    pub fn commit(&self) -> Result<(), i64> {
+        let f = Frame::Resize {
+            handle: self.handle,
+            width: self.width as u16,
+            height: self.height as u16,
+        };
+        if exchange(f)?.1 != f {
+            return Err(-2);
+        }
+        Ok(())
+    }
+    /// Open this window's transient surface at window-local (`x`, `y`).
+    /// Its pixels are private staging until `publish_transient`.
+    pub fn open_transient(
+        &self,
+        kind: PopupKind,
+        x: i32,
+        y: i32,
+        width: u16,
+        height: u16,
+    ) -> Result<Transient, i64> {
+        let f = Frame::Popup {
+            handle: self.handle,
+            kind,
+            x,
+            y,
+            width,
+            height,
+        };
+        let (out, echo) = exchange(f)?;
+        if echo != f || out[1] == 0 {
+            return Err(-2);
+        }
+        let base = self.io as usize + (self.pages - TRANSIENT_PAGES) * 4096;
+        Ok(Transient {
+            handle: out[1],
+            pixels: base as *mut u32,
+            width: usize::from(width),
+            height: usize::from(height),
+        })
+    }
+    /// Publish the whole transient surface.
+    pub fn publish_transient(&self, t: &Transient) -> Result<(), i64> {
+        let f = Frame::Damage {
+            handle: t.handle,
+            rects: crate::wire::DamageRects::FULL,
+        };
+        if exchange(f)?.1 != f {
+            return Err(-2);
+        }
+        Ok(())
+    }
+    /// Close this client's own transient surface.
+    pub fn close_transient(&self, t: &Transient) -> Result<(), i64> {
+        let f = Frame::Dismiss { handle: t.handle };
+        if exchange(f)?.1 != f {
+            return Err(-2);
+        }
+        Ok(())
     }
     /// Publish the whole surface.
     pub fn damage(&self) -> Result<(), i64> {

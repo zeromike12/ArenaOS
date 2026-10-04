@@ -4,7 +4,7 @@
 //! bar, a header band for tools or page identity, content, and a status
 //! band. Colours come only from the theme; geometry only from layout.rs.
 use super::{
-    layout as l,
+    layout::Layout,
     model::{Editor, Line, Terminal},
 };
 use arena_gfxkit::{Canvas, Rect};
@@ -16,8 +16,6 @@ use arena_ui::{
 pub fn string(bytes: &[u8]) -> &str {
     core::str::from_utf8(bytes).unwrap_or("Unsupported text")
 }
-
-const W: i32 = m::WINDOW_WIDTH as i32;
 
 /// Presentation tone of a controller status line. The controllers own the
 /// words; this only chooses how loudly to say them (glyph + colour).
@@ -52,17 +50,18 @@ pub fn tone(status: &str) -> Tone {
 }
 
 pub fn frame(canvas: &mut Canvas<'_>, title: &str, status: &str, t: Theme) {
+    let l = Layout::of(canvas);
     canvas.clear(t.elevated);
     c::rect(
         canvas,
         1,
         m::TITLE_HEIGHT,
-        W - 2,
-        l::HEADER_BOTTOM - m::TITLE_HEIGHT,
+        l.W - 2,
+        l.HEADER_BOTTOM - m::TITLE_HEIGHT,
         t.header,
     );
-    c::hline(canvas, 1, l::HEADER_BOTTOM, W - 2, t.divider);
-    c::status_band(canvas, l::STATUS_Y, status, tone(status), t);
+    c::hline(canvas, 1, l.HEADER_BOTTOM, l.W - 2, t.divider);
+    c::status_band(canvas, l.STATUS_Y, status, tone(status), t);
     c::chrome(canvas, title, true, t);
 }
 
@@ -84,6 +83,7 @@ fn page_header(canvas: &mut Canvas<'_>, title: &str, detail: &str, t: Theme) {
 }
 
 pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Theme) {
+    let l = Layout::of(canvas);
     page_header(
         canvas,
         "Arena session",
@@ -93,7 +93,7 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
     // Scrollback position: real line count, capacity and history offset.
     let mut n = [0u8; 32];
     let count = c::decimal(&mut n, model.count as u64, false);
-    let right = W - m::CONTENT_INSET;
+    let right = l.W - m::CONTENT_INSET;
     let x = right - c::measure("/32 LINES", Style::Caption);
     c::text(canvas, x, 35, "/32 LINES", Style::Caption, t.muted);
     c::text_right(canvas, x, 35, count, Style::Caption, t.secondary);
@@ -109,9 +109,9 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
         c::chip(canvas, right - w, 46, label, Tone::Accent, t);
     }
     // Console fills the content area edge to edge.
-    let top = l::HEADER_BOTTOM + 1;
-    c::rect(canvas, 1, top, W - 2, l::STATUS_Y - top, t.terminal);
-    let visible = l::TERMINAL_ROWS;
+    let top = l.HEADER_BOTTOM + 1;
+    c::rect(canvas, 1, top, l.W - 2, l.STATUS_Y - top, t.terminal);
+    let visible = l.TERMINAL_ROWS;
     let start = model.count.saturating_sub(visible).saturating_sub(older);
     for (row, index) in (start..model.count).take(visible).enumerate() {
         let text = string(&model.lines[index][..model.sizes[index]]);
@@ -123,15 +123,15 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
         c::text(
             canvas,
             m::CONTENT_INSET + 6,
-            l::CONTENT_Y + 6 + row as i32 * m::LINE_HEIGHT,
+            l.CONTENT_Y + 6 + row as i32 * m::LINE_HEIGHT,
             text,
             Style::Body,
             ink,
         );
     }
     // Input line: hairline, Signal chevron prompt, block caret.
-    c::hline(canvas, 1, l::INPUT_Y, W - 2, t.terminal_edge);
-    let y = l::INPUT_Y + (l::STATUS_Y - l::INPUT_Y - m::FONT_HEIGHT) / 2;
+    c::hline(canvas, 1, l.INPUT_Y, l.W - 2, t.terminal_edge);
+    let y = l.INPUT_Y + (l.STATUS_Y - l.INPUT_Y - m::FONT_HEIGHT) / 2;
     c::glyph(
         canvas,
         m::CONTENT_INSET,
@@ -164,9 +164,10 @@ pub fn terminal(canvas: &mut Canvas<'_>, model: &Terminal, older: usize, t: Them
 }
 
 pub fn dialog(canvas: &mut Canvas<'_>, line: &Line, label: &str, t: Theme) {
+    let l = Layout::of(canvas);
     c::field(
         canvas,
-        l::NAME_FIELD,
+        l.NAME_FIELD,
         string(&line.bytes[..line.len]),
         Some(line.cursor),
         State::Focused,
@@ -174,7 +175,7 @@ pub fn dialog(canvas: &mut Canvas<'_>, line: &Line, label: &str, t: Theme) {
     );
     c::button(
         canvas,
-        l::PRIMARY,
+        l.PRIMARY,
         label,
         None,
         Kind::Primary,
@@ -183,7 +184,7 @@ pub fn dialog(canvas: &mut Canvas<'_>, line: &Line, label: &str, t: Theme) {
     );
     c::button(
         canvas,
-        l::SECONDARY,
+        l.SECONDARY,
         "Cancel",
         None,
         Kind::Standard,
@@ -199,7 +200,8 @@ pub fn dialog(canvas: &mut Canvas<'_>, line: &Line, label: &str, t: Theme) {
 /// are right-aligned beyond it, because guest oracles treat a change in
 /// that strip as "a dialog is now open" before typing into it.
 fn document_info(canvas: &mut Canvas<'_>, model: &Editor, t: Theme) {
-    let right = W - m::CONTENT_INSET;
+    let l = Layout::of(canvas);
+    let right = l.W - m::CONTENT_INSET;
     let end = model.path.iter().position(|b| *b == 0).unwrap_or(32);
     let name = if end == 0 {
         "Untitled"
@@ -208,7 +210,7 @@ fn document_info(canvas: &mut Canvas<'_>, model: &Editor, t: Theme) {
     };
     // Fixed reservation so caret movement never re-truncates the name.
     let position_w = 7 * m::FONT_ADVANCE;
-    let x = l::HEADER_INFO_X;
+    let x = l.HEADER_INFO_X;
     c::text_fit(
         canvas,
         x,
@@ -258,10 +260,11 @@ pub fn editor(
     dialogue: u8,
     t: Theme,
 ) {
+    let l = Layout::of(canvas);
     if dialogue == 4 {
         c::button(
             canvas,
-            l::NAME_FIELD,
+            l.NAME_FIELD,
             "Save changes",
             Some(Glyph::Save),
             Kind::Primary,
@@ -270,7 +273,7 @@ pub fn editor(
         );
         c::button(
             canvas,
-            l::PRIMARY,
+            l.PRIMARY,
             "Discard",
             Some(Glyph::Delete),
             Kind::Destructive,
@@ -279,7 +282,7 @@ pub fn editor(
         );
         c::button(
             canvas,
-            l::SECONDARY,
+            l.SECONDARY,
             "Cancel",
             None,
             Kind::Standard,
@@ -291,7 +294,7 @@ pub fn editor(
     } else {
         c::button(
             canvas,
-            l::NEW,
+            l.NEW,
             "New",
             Some(Glyph::Plus),
             Kind::Standard,
@@ -300,7 +303,7 @@ pub fn editor(
         );
         c::button(
             canvas,
-            l::SAVE,
+            l.SAVE,
             "Save",
             Some(Glyph::Save),
             Kind::Primary,
@@ -309,7 +312,7 @@ pub fn editor(
         );
         c::button(
             canvas,
-            l::SAVE_AS,
+            l.SAVE_AS,
             "Save As",
             Some(Glyph::Rename),
             Kind::Standard,
@@ -318,7 +321,7 @@ pub fn editor(
         );
         c::button(
             canvas,
-            l::OPEN,
+            l.OPEN,
             "Open",
             Some(Glyph::Open),
             Kind::Standard,
@@ -328,34 +331,34 @@ pub fn editor(
         document_info(canvas, model, t);
     }
     // Full-bleed text canvas with the caret's line softly highlighted.
-    let caret_row = l::visual_row(model);
-    if caret_row >= top && caret_row < top + l::EDIT_ROWS {
+    let caret_row = l.visual_row(model);
+    if caret_row >= top && caret_row < top + l.EDIT_ROWS {
         c::rect(
             canvas,
             1,
-            l::EDIT_TEXT.y + 3 + (caret_row - top) as i32 * m::LINE_HEIGHT,
-            W - 2,
+            l.EDIT_TEXT.y + 3 + (caret_row - top) as i32 * m::LINE_HEIGHT,
+            l.W - 2,
             m::LINE_HEIGHT,
             t.editor_line,
         );
         c::rect(
             canvas,
             1,
-            l::EDIT_TEXT.y + 3 + (caret_row - top) as i32 * m::LINE_HEIGHT,
+            l.EDIT_TEXT.y + 3 + (caret_row - top) as i32 * m::LINE_HEIGHT,
             2,
             m::LINE_HEIGHT,
             t.editor_caret,
         );
     }
-    let columns = l::EDIT_COLUMNS;
+    let columns = l.EDIT_COLUMNS;
     let mut row = 0usize;
     let mut column = 0usize;
     for i in 0..=model.len {
-        if i == model.cursor && row >= top && row < top + l::EDIT_ROWS {
+        if i == model.cursor && row >= top && row < top + l.EDIT_ROWS {
             c::caret(
                 canvas,
-                l::EDIT_TEXT.x + 6 + column as i32 * m::FONT_ADVANCE,
-                l::EDIT_TEXT.y + 6 + (row - top) as i32 * m::LINE_HEIGHT,
+                l.EDIT_TEXT.x + 6 + column as i32 * m::FONT_ADVANCE,
+                l.EDIT_TEXT.y + 6 + (row - top) as i32 * m::LINE_HEIGHT,
                 t.editor_caret,
             );
         }
@@ -368,12 +371,12 @@ pub fn editor(
             column = 0;
             continue;
         }
-        if row >= top && row < top + l::EDIT_ROWS && b != b'\t' {
+        if row >= top && row < top + l.EDIT_ROWS && b != b'\t' {
             let glyph = [b];
             c::label(
                 canvas,
-                l::EDIT_TEXT.x + 6 + column as i32 * m::FONT_ADVANCE,
-                l::EDIT_TEXT.y + 6 + (row - top) as i32 * m::LINE_HEIGHT,
+                l.EDIT_TEXT.x + 6 + column as i32 * m::FONT_ADVANCE,
+                l.EDIT_TEXT.y + 6 + (row - top) as i32 * m::LINE_HEIGHT,
                 string(&glyph),
                 t.text,
             );
@@ -389,8 +392,8 @@ pub fn editor(
     if model.len == 0 {
         c::label(
             canvas,
-            l::EDIT_TEXT.x + 14,
-            l::EDIT_TEXT.y + 6,
+            l.EDIT_TEXT.x + 14,
+            l.EDIT_TEXT.y + 6,
             "Empty document / ASCII text up to 4096 bytes",
             t.muted,
         );
@@ -422,6 +425,7 @@ fn preference(canvas: &mut Canvas<'_>, r: Rect, title: &str, detail: &str, on: b
 }
 
 fn fact(canvas: &mut Canvas<'_>, y: i32, name: &str, value: &str, t: Theme) {
+    let l = Layout::of(canvas);
     c::text(
         canvas,
         m::CONTENT_INSET + m::L,
@@ -432,7 +436,7 @@ fn fact(canvas: &mut Canvas<'_>, y: i32, name: &str, value: &str, t: Theme) {
     );
     c::text_right(
         canvas,
-        W - m::CONTENT_INSET - m::L,
+        l.W - m::CONTENT_INSET - m::L,
         y,
         value,
         Style::Body,
@@ -441,6 +445,7 @@ fn fact(canvas: &mut Canvas<'_>, y: i32, name: &str, value: &str, t: Theme) {
 }
 
 pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16, u16), t: Theme) {
+    let l = Layout::of(canvas);
     page_header(
         canvas,
         "Appearance",
@@ -450,21 +455,21 @@ pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16
     c::section(canvas, m::CONTENT_INSET, 72, "Theme and motion", None, t);
     let group = Rect {
         x: m::CONTENT_INSET,
-        y: l::APPEARANCE.y,
-        width: l::APPEARANCE.width,
-        height: (l::MOTION.y + l::MOTION.height as i32 - l::APPEARANCE.y) as u32,
+        y: l.APPEARANCE.y,
+        width: l.APPEARANCE.width,
+        height: (l.MOTION.y + l.MOTION.height as i32 - l.APPEARANCE.y) as u32,
     };
     c::outlined(canvas, group, t.field, t.control_edge, m::RADIUS_PANEL);
     c::hline(
         canvas,
         group.x + m::L,
-        l::MOTION.y,
+        l.MOTION.y,
         group.width as i32 - 2 * m::L,
         t.divider,
     );
     preference(
         canvas,
-        l::APPEARANCE,
+        l.APPEARANCE,
         "Dark appearance",
         if dark {
             "Ink palette on every window"
@@ -476,7 +481,7 @@ pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16
     );
     preference(
         canvas,
-        l::MOTION,
+        l.MOTION,
         "Interface motion",
         if motion {
             "Windows open, close and focus smoothly"
@@ -502,25 +507,26 @@ pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16
     let group = Rect {
         x: m::CONTENT_INSET,
         y: 174,
-        width: 424,
+        width: l.APPEARANCE.width,
         height: 66,
     };
     c::outlined(canvas, group, t.elevated, t.divider, m::RADIUS_PANEL);
     fact(canvas, 182, "Resolution", string(&text[..n]), t);
-    c::hline(canvas, group.x + m::L, 196, 424 - 2 * m::L, t.divider);
+    c::hline(canvas, group.x + m::L, 196, l.APPEARANCE.width as i32 - 2 * m::L, t.divider);
     fact(canvas, 204, "Pixel format", "XRGB8888, opaque", t);
-    c::hline(canvas, group.x + m::L, 218, 424 - 2 * m::L, t.divider);
+    c::hline(canvas, group.x + m::L, 218, l.APPEARANCE.width as i32 - 2 * m::L, t.divider);
     fact(canvas, 226, "Type", "ArenaOS 5x7 bitmap", t);
 }
 
 pub fn file_row(canvas: &mut Canvas<'_>, row: usize, name: &[u8], selected: bool, t: Theme) {
+    let l = Layout::of(canvas);
     c::row(
         canvas,
         Rect {
-            x: l::FILE_LIST.x,
-            y: l::FILE_LIST.y + row as i32 * l::ROW_H,
-            width: l::FILE_LIST.width,
-            height: l::ROW_H as u32,
+            x: l.FILE_LIST.x,
+            y: l.FILE_LIST.y + row as i32 * l.ROW_H,
+            width: l.FILE_LIST.width,
+            height: l.ROW_H as u32,
         },
         string(name),
         Some(Glyph::Document),
@@ -534,7 +540,8 @@ pub fn file_row(canvas: &mut Canvas<'_>, row: usize, name: &[u8], selected: bool
 }
 
 pub fn preview(canvas: &mut Canvas<'_>, name: Option<&[u8]>, bytes: &[u8], t: Theme) {
-    let p = l::PREVIEW;
+    let l = Layout::of(canvas);
+    let p = l.PREVIEW;
     c::outlined(canvas, p, t.field, t.control_edge, m::RADIUS_PANEL);
     let x = p.x + m::M + 2;
     let right = p.x + p.width as i32 - m::M - 2;
@@ -578,7 +585,7 @@ pub fn preview(canvas: &mut Canvas<'_>, name: Option<&[u8]>, bytes: &[u8], t: Th
         c::text(
             canvas,
             x,
-            l::PREVIEW_TEXT_Y,
+            l.PREVIEW_TEXT_Y,
             "No previewable text",
             Style::Body,
             t.muted,
@@ -587,19 +594,19 @@ pub fn preview(canvas: &mut Canvas<'_>, name: Option<&[u8]>, bytes: &[u8], t: Th
     }
     for (row, line) in bytes
         .split(|b| *b == b'\n')
-        .take(l::PREVIEW_ROWS)
+        .take(l.PREVIEW_ROWS)
         .enumerate()
     {
         // Tabs have no glyph; show them as single spaces in the preview.
         let mut shown = [0u8; 64];
-        let n = line.len().min(l::PREVIEW_COLUMNS).min(64);
+        let n = line.len().min(l.PREVIEW_COLUMNS).min(64);
         for (i, b) in line[..n].iter().enumerate() {
             shown[i] = if *b == b'\t' { b' ' } else { *b };
         }
         c::text(
             canvas,
             x,
-            l::PREVIEW_TEXT_Y + row as i32 * m::LINE_HEIGHT,
+            l.PREVIEW_TEXT_Y + row as i32 * m::LINE_HEIGHT,
             string(&shown[..n]),
             Style::Body,
             t.text,
@@ -617,6 +624,7 @@ pub struct FilesView<'a> {
     pub dialogue: bool,
 }
 pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
+    let l = Layout::of(canvas);
     let FilesView {
         names,
         top,
@@ -635,7 +643,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
     } else {
         c::button(
             canvas,
-            l::NEW,
+            l.NEW,
             "New",
             Some(Glyph::Plus),
             Kind::Standard,
@@ -644,7 +652,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         );
         c::button(
             canvas,
-            l::SAVE,
+            l.SAVE,
             "Refresh",
             Some(Glyph::Refresh),
             Kind::Standard,
@@ -653,7 +661,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         );
         c::button(
             canvas,
-            l::OPEN,
+            l.OPEN,
             "Open",
             Some(Glyph::Open),
             Kind::Standard,
@@ -662,7 +670,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         );
         c::button(
             canvas,
-            l::DELETE,
+            l.DELETE,
             "Delete",
             Some(Glyph::Delete),
             Kind::Destructive,
@@ -672,10 +680,10 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         // Flat namespace: a count, never a path or folder breadcrumb.
         let mut digits = [0u8; 32];
         let n = c::decimal(&mut digits, names.len() as u64, false);
-        c::text_right(canvas, W - m::CONTENT_INSET, 37, n, Style::Strong, t.text);
+        c::text_right(canvas, l.W - m::CONTENT_INSET, 37, n, Style::Strong, t.text);
         c::text_right(
             canvas,
-            W - m::CONTENT_INSET,
+            l.W - m::CONTENT_INSET,
             50,
             "FILES",
             Style::Caption,
@@ -683,29 +691,29 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         );
     }
     // List pane on the sidebar material.
-    let pane_h = l::STATUS_Y - l::HEADER_BOTTOM - 1;
+    let pane_h = l.STATUS_Y - l.HEADER_BOTTOM - 1;
     c::rect(
         canvas,
         1,
-        l::HEADER_BOTTOM + 1,
-        l::FILE_LIST.x + l::FILE_LIST.width as i32 + 3,
+        l.HEADER_BOTTOM + 1,
+        l.FILE_LIST.x + l.FILE_LIST.width as i32 + 3,
         pane_h,
         t.sidebar,
     );
     c::vline(
         canvas,
-        l::FILE_LIST.x + l::FILE_LIST.width as i32 + 4,
-        l::HEADER_BOTTOM + 1,
+        l.FILE_LIST.x + l.FILE_LIST.width as i32 + 4,
+        l.HEADER_BOTTOM + 1,
         pane_h,
         t.divider,
     );
     if names.is_empty() {
-        let x = l::FILE_LIST.x + m::M;
-        c::glyph(canvas, x, l::CONTENT_Y + 10, Glyph::Document, t.muted);
+        let x = l.FILE_LIST.x + m::M;
+        c::glyph(canvas, x, l.CONTENT_Y + 10, Glyph::Document, t.muted);
         c::text(
             canvas,
             x + 15,
-            l::CONTENT_Y + 11,
+            l.CONTENT_Y + 11,
             "No user files",
             Style::Strong,
             t.text,
@@ -713,7 +721,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         c::text(
             canvas,
             x,
-            l::CONTENT_Y + 30,
+            l.CONTENT_Y + 30,
             "New creates an empty",
             Style::Body,
             t.secondary,
@@ -721,7 +729,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         c::text(
             canvas,
             x,
-            l::CONTENT_Y + 44,
+            l.CONTENT_Y + 44,
             "user-* file on AFS1.",
             Style::Body,
             t.secondary,
@@ -731,7 +739,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
         .iter()
         .enumerate()
         .skip(top)
-        .take(l::FILE_ROWS)
+        .take(l.FILE_ROWS)
         .enumerate()
     {
         let end = name.iter().position(|b| *b == 0).unwrap_or(32);
@@ -763,6 +771,7 @@ pub fn monitor(
     top: usize,
     t: Theme,
 ) {
+    let l = Layout::of(canvas);
     page_header(
         canvas,
         "Live system counters",
@@ -771,7 +780,7 @@ pub fn monitor(
     );
     let mut digits = [0u8; 32];
     let seconds = c::decimal(&mut digits, counts[8] / 1_000_000, true);
-    let right = W - m::CONTENT_INSET;
+    let right = l.W - m::CONTENT_INSET;
     c::text_right(canvas, right, 35, "s", Style::Body, t.secondary);
     c::text_right(canvas, right - 9, 35, seconds, Style::Strong, t.text);
     c::text_right(canvas, right, 48, "UPTIME", Style::Caption, t.muted);
@@ -831,7 +840,7 @@ pub fn monitor(
     }
     // Process list: real PIDs and thread counts; labels are descriptive.
     let lx = 252;
-    let lw = W - m::CONTENT_INSET - lx;
+    let lw = l.W - m::CONTENT_INSET - lx;
     c::section(canvas, lx, 72, "Processes", None, t);
     let mut total = [0u8; 32];
     let total = c::decimal(&mut total, processes.len() as u64, false);
@@ -846,8 +855,8 @@ pub fn monitor(
         t.muted,
     );
     c::hline(canvas, lx, 93, lw, t.divider);
-    for (row, (pid, threads)) in processes.iter().skip(top).take(l::MONITOR_ROWS).enumerate() {
-        let y = l::MONITOR_ROW_Y + row as i32 * m::LINE_HEIGHT;
+    for (row, (pid, threads)) in processes.iter().skip(top).take(l.MONITOR_ROWS).enumerate() {
+        let y = l.MONITOR_ROW_Y + row as i32 * m::LINE_HEIGHT;
         if (row + top) % 2 == 1 {
             c::rect(canvas, lx, y - 3, lw, m::LINE_HEIGHT, t.header);
         }
@@ -869,8 +878,8 @@ pub fn monitor(
         );
     }
     // Scroll position when the real list exceeds the viewport.
-    if processes.len() > l::MONITOR_ROWS {
-        let shown_end = (top + l::MONITOR_ROWS).min(processes.len());
+    if processes.len() > l.MONITOR_ROWS {
+        let shown_end = (top + l.MONITOR_ROWS).min(processes.len());
         let mut a = [0u8; 32];
         let mut b = [0u8; 32];
         let mut text = [0u8; 32];
@@ -882,6 +891,40 @@ pub fn monitor(
         text[first.len() + 1..n].copy_from_slice(last.as_bytes());
         let x = lx + c::measure("PROCESSES", Style::Caption) + m::M;
         c::text(canvas, x, 72, string(&text[..n]), Style::Caption, t.accent);
+    }
+}
+
+/// Height of one context-menu item and the menu's inner padding.
+pub const MENU_ITEM: i32 = 24;
+pub const MENU_PAD: i32 = 4;
+pub const MENU_WIDTH: u16 = 184;
+pub fn menu_height(items: usize) -> u16 {
+    (items as i32 * MENU_ITEM + 2 * MENU_PAD) as u16
+}
+/// Item under transient-local (`x`, `y`), if any.
+pub fn menu_item(items: usize, x: i32, y: i32) -> Option<usize> {
+    let row = (y - MENU_PAD).div_euclid(MENU_ITEM);
+    (x >= 0 && x < i32::from(MENU_WIDTH) && y >= MENU_PAD && (row as usize) < items)
+        .then_some(row as usize)
+}
+/// A context menu painted into its own transient surface.
+pub fn menu(canvas: &mut Canvas<'_>, items: &[&str], hover: Option<usize>, t: Theme) {
+    let (w, h) = canvas.size();
+    c::rect(canvas, 0, 0, w as i32, h as i32, t.elevated);
+    for (i, item) in items.iter().enumerate() {
+        let y = MENU_PAD + i as i32 * MENU_ITEM;
+        let on = hover == Some(i);
+        if on {
+            c::rect(canvas, 3, y, w as i32 - 6, MENU_ITEM, t.accent);
+        }
+        c::text(
+            canvas,
+            m::L,
+            y + (MENU_ITEM - m::FONT_HEIGHT) / 2,
+            item,
+            Style::Body,
+            if on { t.on_accent } else { t.text },
+        );
     }
 }
 

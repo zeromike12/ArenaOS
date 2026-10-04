@@ -106,6 +106,37 @@ pub struct WindowScene {
     pub regions: Regions,
     pub published: bool,
     pub title: [u8; 32],
+    /// Size of the published raster (Phase 11.3). It differs from the
+    /// window size while a resized client has not yet published at the new
+    /// size: the raster is shown clipped and the rest of the frame filled.
+    pub surface: (u16, u16),
+    /// The window's transient surface, drawn directly above it.
+    pub popup: Option<PopupScene>,
+}
+
+/// A transient surface (menu, tooltip, dialog) as presented.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopupScene {
+    pub handle: u64,
+    pub x: i32,
+    pub y: i32,
+    pub width: u16,
+    pub height: u16,
+    pub content: u64,
+    pub regions: Regions,
+    /// Nothing of a transient surface is visible before its first Damage.
+    pub published: bool,
+}
+
+impl PopupScene {
+    pub fn bounds(&self) -> Rect {
+        Rect {
+            x: self.x,
+            y: self.y,
+            width: u32::from(self.width) + c::POPUP_SHADOW as u32,
+            height: u32::from(self.height) + c::POPUP_SHADOW as u32,
+        }
+    }
 }
 
 impl WindowScene {
@@ -255,6 +286,11 @@ impl Damage {
     }
 }
 
+/// The window layer alone (its transient surface is a separate layer).
+fn frame(w: &WindowScene) -> WindowScene {
+    WindowScene { popup: None, ..*w }
+}
+
 /// `a` and `b` differ only in published content whose changed regions are
 /// known (both published before and after; nothing else moved).
 fn content_only(a: &WindowScene, b: &WindowScene) -> bool {
@@ -265,8 +301,32 @@ fn content_only(a: &WindowScene, b: &WindowScene) -> bool {
         && WindowScene {
             content: b.content,
             regions: b.regions,
+            popup: None,
+            ..*a
+        } == frame(b)
+}
+
+fn popup_content_only(a: &PopupScene, b: &PopupScene) -> bool {
+    a.published
+        && b.published
+        && !b.regions.full
+        && b.regions.n > 0
+        && PopupScene {
+            content: b.content,
+            regions: b.regions,
             ..*a
         } == *b
+}
+
+fn add_regions(out: &mut Damage, x: i32, y: i32, regions: &Regions) {
+    for r in regions.rects() {
+        out.add(Rect {
+            x: x + i32::from(r[0]),
+            y: y + i32::from(r[1]),
+            width: u32::from(r[2]),
+            height: u32::from(r[3]),
+        });
+    }
 }
 
 /// Rectangles whose pixels may differ between `prev` and `next`.
@@ -277,27 +337,31 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
         return;
     }
     for slot in 0..MAX_WINDOWS {
-        match (prev.by_slot(slot), next.by_slot(slot)) {
+        let (pa, pb) = (prev.by_slot(slot), next.by_slot(slot));
+        match (pa, pb) {
             (None, None) => {}
-            (Some(a), Some(b)) if a == b => {}
+            (Some(a), Some(b)) if frame(a) == frame(b) => {}
             // Only the published raster changed, and exactly where is known:
             // damage those rectangles instead of the whole window.
-            (Some(a), Some(b)) if content_only(a, b) => {
-                for r in b.regions.rects() {
-                    out.add(Rect {
-                        x: b.x + i32::from(r[0]),
-                        y: b.y + i32::from(r[1]),
-                        width: u32::from(r[2]),
-                        height: u32::from(r[3]),
-                    });
-                }
-            }
+            (Some(a), Some(b)) if content_only(a, b) => add_regions(out, b.x, b.y, &b.regions),
             (a, b) => {
                 if let Some(a) = a {
                     out.add(a.bounds());
                 }
                 if let Some(b) = b {
                     out.add(b.bounds());
+                }
+            }
+        }
+        match (pa.and_then(|w| w.popup), pb.and_then(|w| w.popup)) {
+            (None, None) => {}
+            (Some(a), Some(b)) if a == b => {}
+            (Some(a), Some(b)) if popup_content_only(&a, &b) => {
+                add_regions(out, b.x, b.y, &b.regions)
+            }
+            (a, b) => {
+                for p in [a, b].into_iter().flatten() {
+                    out.add(p.bounds());
                 }
             }
         }
@@ -312,6 +376,9 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
                 for scene in [prev, next] {
                     if let Some(win) = scene.by_slot(s) {
                         out.add(win.bounds());
+                        if let Some(p) = win.popup {
+                            out.add(p.bounds());
+                        }
                     }
                 }
             }
@@ -345,46 +412,60 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
 }
 
 /// Draw `scene` within the canvas clip. `contents(slot)` is the published
-/// raster of a session slot (at least width*height pixels).
+/// main raster (at least surface width*height pixels) and transient raster
+/// (at least popup width*height pixels) of a session slot.
 pub fn compose<'c>(
     canvas: &mut Canvas<'_>,
     scene: &Scene,
-    contents: impl Fn(usize) -> &'c [u32],
+    contents: impl Fn(usize) -> (&'c [u32], &'c [u32]),
     t: Theme,
 ) {
     shell::background(canvas, t);
     let clip = canvas.clip();
     for win in scene.windows[..scene.count].iter().flatten() {
-        if intersect(win.bounds(), clip).is_none() {
-            continue;
-        }
-        let reveal = win.reveal.clamp(0, i32::from(win.height)) as usize;
-        if reveal == 0 {
-            continue;
-        }
-        let width = usize::from(win.width);
-        if win.published {
-            let _ = canvas.blit(contents(win.slot), width, reveal, width, win.x, win.y);
-        } else {
-            c::rect(
+        let reveal = win.reveal.clamp(0, i32::from(win.height));
+        if reveal > 0 && intersect(win.bounds(), clip).is_some() {
+            let width = i32::from(win.width);
+            if win.published {
+                // The raster as published, clipped to the frame; any part of
+                // the frame it does not cover yet is filled.
+                let (sw, sh) = (i32::from(win.surface.0), i32::from(win.surface.1));
+                let (cw, ch) = (sw.min(width), sh.min(reveal));
+                let _ = canvas.blit(
+                    contents(win.slot).0,
+                    cw as usize,
+                    ch as usize,
+                    sw as usize,
+                    win.x,
+                    win.y,
+                );
+                if cw < width {
+                    c::rect(canvas, win.x + cw, win.y, width - cw, reveal, t.elevated);
+                }
+                if ch < reveal {
+                    c::rect(canvas, win.x, win.y + ch, cw, reveal - ch, t.elevated);
+                }
+            } else {
+                c::rect(canvas, win.x, win.y, width, reveal, t.elevated);
+            }
+            c::window_chrome(
                 canvas,
                 win.x,
                 win.y,
-                width as i32,
-                reveal as i32,
-                t.elevated,
+                width,
+                i32::from(win.height),
+                win.title(),
+                win.focus,
+                t,
             );
         }
-        c::window_chrome(
-            canvas,
-            win.x,
-            win.y,
-            width as i32,
-            i32::from(win.height),
-            win.title(),
-            win.focus,
-            t,
-        );
+        if let Some(p) = win.popup.filter(|p| p.published)
+            && intersect(p.bounds(), clip).is_some()
+        {
+            let (w, h) = (usize::from(p.width), usize::from(p.height));
+            let _ = canvas.blit(contents(win.slot).1, w, h, w, p.x, p.y);
+            c::popup_frame(canvas, p.x, p.y, w as i32, h as i32, t);
+        }
     }
     shell::system(canvas, &scene.shell, t);
 }
@@ -413,33 +494,68 @@ mod tests {
         }
     }
 
-    fn contents(generations: &[u64; MAX_WINDOWS]) -> Vec<Vec<u32>> {
+    const PW: usize = 40;
+    const PH: usize = 24;
+
+    /// Published main and transient rasters of every slot (main rasters
+    /// are WW*WH; the surface size decides the stride actually used).
+    fn contents(generations: &[u64; MAX_WINDOWS]) -> Vec<(Vec<u32>, Vec<u32>)> {
         (0..MAX_WINDOWS)
-            .map(|slot| raster(slot, generations[slot]))
+            .map(|slot| {
+                (
+                    raster(slot, generations[slot], WW * WH),
+                    raster(slot, 7, PW * PH),
+                )
+            })
             .collect()
     }
 
-    fn raster(slot: usize, generation: u64) -> Vec<u32> {
-        (0..WW * WH)
+    fn raster(slot: usize, generation: u64, n: usize) -> Vec<u32> {
+        (0..n)
             .map(|i| (i as u32).wrapping_mul(2654435761) ^ (generation as u32) ^ slot as u32)
             .collect()
     }
 
-    fn full(scene: &Scene, data: &[Vec<u32>]) -> Vec<u32> {
+    fn full(scene: &Scene, data: &[(Vec<u32>, Vec<u32>)]) -> Vec<u32> {
         let mut px = std::vec![0u32; W * H];
         let mut canvas = Canvas::new(&mut px, W, H, W).unwrap();
         compose(
             &mut canvas,
             scene,
-            |s| &data[s],
+            |s| (&data[s].0, &data[s].1),
             arena_ui::theme::palette(scene.dark),
         );
         px
     }
 
+    /// Paint random rectangles of a `stride`-wide raster and declare them.
+    fn scribble(
+        rng: &mut Rng,
+        raster: &mut [u32],
+        stride: usize,
+        size: (usize, usize),
+        regions: &mut Regions,
+    ) {
+        for _ in 0..=rng.below(3) {
+            let x = rng.below(size.0 as u64) as u16;
+            let y = rng.below(size.1 as u64) as u16;
+            let rw = 1 + rng.below(size.0 as u64 - u64::from(x)) as u16;
+            let rh = 1 + rng.below(size.1 as u64 - u64::from(y)) as u16;
+            let ink = rng.next() as u32;
+            for row in y..y + rh {
+                for col in x..x + rw {
+                    raster[row as usize * stride + col as usize] = ink;
+                }
+            }
+            regions.add([x, y, rw, rh]);
+        }
+    }
+
     /// Incremental damage composition must equal a full redraw, pixel for
     /// pixel, across random window, focus, content, pointer and shell
-    /// changes, including open/close, raise, theme and notice changes.
+    /// changes, including open/close, raise, theme and notice changes,
+    /// frame resizes ahead of and after the client's new surface, and
+    /// transient surfaces opening, moving, closing and publishing.
     #[test]
     fn damage_composition_matches_full_redraw() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
@@ -450,13 +566,19 @@ mod tests {
         let mut screen = full(&scene, &rasters);
         let mut damaged_total = 0u64;
         let mut partial_updates = 0;
-        for step in 0..240 {
+        let mut popup_partial = 0;
+        let mut resized = 0;
+        const STEPS: u64 = 400;
+        for step in 0..STEPS {
             let mut next = scene;
             // Regions describe changes since the last presented frame only.
             for w in next.windows.iter_mut().flatten() {
                 w.regions = Regions::NONE;
+                if let Some(p) = w.popup.as_mut() {
+                    p.regions = Regions::NONE;
+                }
             }
-            match rng.below(12) {
+            match rng.below(17) {
                 0 if next.count < MAX_WINDOWS => {
                     // Open a window in a free slot on top.
                     let used: Vec<usize> = next.windows[..next.count]
@@ -467,20 +589,26 @@ mod tests {
                     let slot = (0..MAX_WINDOWS).find(|s| !used.contains(s)).unwrap();
                     let mut title = [0u8; 32];
                     title[..4].copy_from_slice(b"Win0");
-                    title[3] = b'0' + slot as u8;
+                    title[3] = b'A' + slot as u8;
+                    let (width, height) = (
+                        (WW / 2 + rng.below(WW as u64 / 2 + 1) as usize) as u16,
+                        (WH / 2 + rng.below(WH as u64 / 2 + 1) as usize) as u16,
+                    );
                     next.windows[next.count] = Some(WindowScene {
                         slot,
                         handle: step + 1,
                         x: rng.below(W as u64) as i32 - 40,
                         y: rng.below(H as u64) as i32 - 20,
-                        width: WW as u16,
-                        height: WH as u16,
-                        reveal: rng.below(WH as u64 + 1) as i32,
+                        width,
+                        height,
+                        reveal: rng.below(u64::from(height) + 1) as i32,
                         focus: 0,
                         content: generations[slot],
                         regions: Regions::NONE,
                         published: rng.below(2) == 0,
                         title,
+                        surface: (width, height),
+                        popup: None,
                     });
                     next.count += 1;
                     next.shell.open = next.count;
@@ -498,8 +626,13 @@ mod tests {
                 2 if next.count > 0 => {
                     let i = rng.below(next.count as u64) as usize;
                     let w = next.windows[i].as_mut().unwrap();
-                    w.x += rng.below(61) as i32 - 30;
-                    w.y += rng.below(41) as i32 - 20;
+                    let (dx, dy) = (rng.below(61) as i32 - 30, rng.below(41) as i32 - 20);
+                    w.x += dx;
+                    w.y += dy;
+                    if let Some(p) = w.popup.as_mut() {
+                        p.x += dx;
+                        p.y += dy;
+                    }
                 }
                 3 if next.count > 1 => {
                     // Raise: move one window to the top.
@@ -515,7 +648,7 @@ mod tests {
                     let i = rng.below(next.count as u64) as usize;
                     let w = next.windows[i].as_mut().unwrap();
                     generations[w.slot] += 1;
-                    rasters[w.slot] = raster(w.slot, generations[w.slot]);
+                    rasters[w.slot].0 = raster(w.slot, generations[w.slot], WW * WH);
                     w.content = generations[w.slot];
                     w.published = true;
                 }
@@ -529,26 +662,76 @@ mod tests {
                         w.published = true;
                         w.regions.mark_full();
                     }
-                    for _ in 0..=rng.below(3) {
-                        let x = rng.below(WW as u64) as u16;
-                        let y = rng.below(WH as u64) as u16;
-                        let rw = 1 + rng.below(WW as u64 - u64::from(x)) as u16;
-                        let rh = 1 + rng.below(WH as u64 - u64::from(y)) as u16;
-                        let ink = rng.next() as u32;
-                        for row in y..y + rh {
-                            for col in x..x + rw {
-                                rasters[w.slot][row as usize * WW + col as usize] = ink;
-                            }
-                        }
-                        w.regions.add([x, y, rw, rh]);
-                    }
+                    let size = (usize::from(w.surface.0), usize::from(w.surface.1));
+                    let mut regions = w.regions;
+                    scribble(&mut rng, &mut rasters[w.slot].0, size.0, size, &mut regions);
+                    w.regions = regions;
                     partial_updates += 1;
+                }
+                12 if next.count > 0 => {
+                    // Policy resize: the frame changes before the client has
+                    // published at the new size.
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    w.width = (WW / 2 + rng.below(WW as u64 / 2 + 1) as usize) as u16;
+                    w.height = (WH / 2 + rng.below(WH as u64 / 2 + 1) as usize) as u16;
+                    w.reveal = w.reveal.min(i32::from(w.height));
+                    resized += 1;
+                }
+                13 if next.count > 0 => {
+                    // The client commits a whole surface at its frame size.
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    generations[w.slot] += 1;
+                    rasters[w.slot].0 = raster(w.slot, generations[w.slot], WW * WH);
+                    w.surface = (w.width, w.height);
+                    w.content = generations[w.slot];
+                    w.published = true;
+                    w.regions.mark_full();
+                }
+                14 if next.count > 0 => {
+                    // Open, replace, move or close a transient surface.
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    w.popup = match rng.below(3) {
+                        0 => None,
+                        _ => Some(PopupScene {
+                            handle: step + 1000,
+                            x: w.x + rng.below(WW as u64) as i32 - 10,
+                            y: w.y + rng.below(WH as u64) as i32 - 10,
+                            width: (PW / 2 + rng.below(PW as u64 / 2 + 1) as usize) as u16,
+                            height: (PH / 2 + rng.below(PH as u64 / 2 + 1) as usize) as u16,
+                            content: 0,
+                            regions: Regions::NONE,
+                            published: rng.below(3) != 0,
+                        }),
+                    };
+                }
+                15 | 16 if next.count > 0 => {
+                    // Partial or whole publication of a transient surface.
+                    let i = rng.below(next.count as u64) as usize;
+                    let w = next.windows[i].as_mut().unwrap();
+                    let slot = w.slot;
+                    if let Some(p) = w.popup.as_mut() {
+                        p.content += 1;
+                        if !p.published || rng.below(4) == 0 {
+                            p.published = true;
+                            rasters[slot].1 = raster(slot, p.content, PW * PH);
+                            p.regions.mark_full();
+                        } else {
+                            let size = (usize::from(p.width), usize::from(p.height));
+                            let mut regions = p.regions;
+                            scribble(&mut rng, &mut rasters[slot].1, size.0, size, &mut regions);
+                            p.regions = regions;
+                            popup_partial += 1;
+                        }
+                    }
                 }
                 5 if next.count > 0 => {
                     let i = rng.below(next.count as u64) as usize;
                     let w = next.windows[i].as_mut().unwrap();
                     w.focus = rng.below(65_537) as i32;
-                    w.reveal = rng.below(WH as u64 + 1) as i32;
+                    w.reveal = rng.below(u64::from(w.height) + 1) as i32;
                 }
                 6 => {
                     // Pointer, sometimes across the dock strip.
@@ -577,7 +760,7 @@ mod tests {
                 compose(
                     &mut canvas,
                     &next,
-                    |s| &data[s],
+                    |s| (&data[s].0, &data[s].1),
                     arena_ui::theme::palette(next.dark),
                 );
             }
@@ -594,10 +777,13 @@ mod tests {
             scene = next;
         }
         // Damage must be a real saving, not a disguised full redraw.
-        assert!(damaged_total < 240 * (W * H) as u64 / 3, "{damaged_total}");
         assert!(
-            partial_updates > 10,
-            "too few partial publications exercised"
+            damaged_total < STEPS * (W * H) as u64 / 3,
+            "{damaged_total}"
+        );
+        assert!(
+            partial_updates > 10 && popup_partial > 5 && resized > 10,
+            "too few partial publications or resizes exercised: {partial_updates} {popup_partial} {resized}"
         );
     }
 

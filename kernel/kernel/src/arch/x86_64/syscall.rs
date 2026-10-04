@@ -2253,11 +2253,13 @@ fn sys_shared_map(slot: u64, writable: u64) -> Status {
         return STATUS_BAD_ARG;
     };
     let span = u64::from(pages) * 4096;
-    // The 2MiB-aligned map slot uses at most one new PT and two parent
-    // tables. IF=0 from preflight through publication; the existing
-    // mapper's OOM assertion is unreachable with this reserve count.
+    // The 2MiB-aligned map slot uses at most one new PT per 2 MiB it
+    // spans and two parent tables (a region above 2 MiB spans several
+    // PTs; ADR-0075). IF=0 from preflight through publication; the
+    // existing mapper's OOM assertion is unreachable with this reserve.
+    let tables = span.div_ceil(MMAP_STRIDE) + 2;
     if !crate::shared::has_map_slot()
-        || crate::frames::free_frames() < 3
+        || crate::frames::free_frames() < tables
         || !crate::sched::current_user_regions()
             .iter()
             .any(|&(lo, hi)| lo == 0 && hi == 0)
@@ -2266,7 +2268,7 @@ fn sys_shared_map(slot: u64, writable: u64) -> Status {
     }
     let regions = crate::sched::current_user_regions();
     let mut va = MMAP_BASE;
-    // At most 32 live shared maps plus 16 registered private windows can
+    // At most MAX_MAPS live shared maps plus USER_REGIONS_MAX windows can
     // occupy distinct strides. Never search an unbounded 1-TiB VA range
     // under IF=0 on malformed or adversarial input.
     let mut probes = 0usize;

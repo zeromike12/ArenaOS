@@ -41,7 +41,7 @@ pub const MAX_ENDPOINTS: usize = 12; // ADR-0056: two disjoint userspace graphic
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 25; // compositor plus six private client clocks
+pub const MAX_NOTIFS: usize = 31; // compositor plus twelve private client clocks (ADR-0075)
 #[path = "ipc_adr50_test.rs"]
 mod adr50_test;
 /// In-guest internal-only M4 fixture; no userspace syscall or authority.

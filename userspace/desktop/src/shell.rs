@@ -197,8 +197,10 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
     let mut count = [0u8; 32];
     let n = c::decimal(&mut count, open as u64, false).len();
     count[n] = b'/';
-    count[n + 1] = b'0' + MAX_WINDOWS as u8;
-    let count = core::str::from_utf8(&count[..n + 2]).unwrap_or("?");
+    let mut max = [0u8; 32];
+    let digits = c::decimal(&mut max, MAX_WINDOWS as u64, false).as_bytes();
+    count[n + 1..n + 1 + digits.len()].copy_from_slice(digits);
+    let count = core::str::from_utf8(&count[..n + 1 + digits.len()]).unwrap_or("?");
     let x = x - m::L;
     c::text_right(
         canvas,
