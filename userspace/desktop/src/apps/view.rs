@@ -512,9 +512,21 @@ pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16
     };
     c::outlined(canvas, group, t.elevated, t.divider, m::RADIUS_PANEL);
     fact(canvas, 182, "Resolution", string(&text[..n]), t);
-    c::hline(canvas, group.x + m::L, 196, l.APPEARANCE.width as i32 - 2 * m::L, t.divider);
+    c::hline(
+        canvas,
+        group.x + m::L,
+        196,
+        l.APPEARANCE.width as i32 - 2 * m::L,
+        t.divider,
+    );
     fact(canvas, 204, "Pixel format", "XRGB8888, opaque", t);
-    c::hline(canvas, group.x + m::L, 218, l.APPEARANCE.width as i32 - 2 * m::L, t.divider);
+    c::hline(
+        canvas,
+        group.x + m::L,
+        218,
+        l.APPEARANCE.width as i32 - 2 * m::L,
+        t.divider,
+    );
     fact(canvas, 226, "Type", "ArenaOS 5x7 bitmap", t);
 }
 

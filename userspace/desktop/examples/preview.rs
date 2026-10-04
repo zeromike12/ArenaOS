@@ -73,13 +73,19 @@ fn main() {
         let mut px = vec![0u32; uw * uh];
         let mut c = Canvas::new(&mut px, uw, uh, uw).unwrap();
         v.paint(&mut c);
-        let file = dir.join(format!("{}-{w}x{h}.ppm", name.to_lowercase().replace(' ', "-")));
+        let file = dir.join(format!(
+            "{}-{w}x{h}.ppm",
+            name.to_lowercase().replace(' ', "-")
+        ));
         ppm(&file, uw, uh, &px);
         println!("{}", file.display());
     }
     // The context menu as its own transient surface.
     let items = ["New", "Open...", "Save", "Save As..."];
-    let (mw, mh) = (usize::from(view::MENU_WIDTH), usize::from(view::menu_height(items.len())));
+    let (mw, mh) = (
+        usize::from(view::MENU_WIDTH),
+        usize::from(view::menu_height(items.len())),
+    );
     let mut px = vec![0u32; mw * mh];
     let mut c = Canvas::new(&mut px, mw, mh, mw).unwrap();
     view::menu(&mut c, &items, Some(2), arena_ui::theme::palette(dark));
