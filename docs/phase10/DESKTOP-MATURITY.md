@@ -201,3 +201,49 @@ Userspace: `userspace/gfxkit/src/lib.rs`, `userspace/displayd/src/main.rs`,
 Tools: `tools/profile_desktop.py` (new); `tools/test_m10_dynamic.py` and
 `tools/test_m10_boundaries_red.py` (publication oracle and control, §5).
 Docs: ADR-0069, ADR-0070, this file, `docs/phase11/PLAN.md`.
+
+## 8. Verification receipts
+
+All guest runs are QEMU TCG on this branch. "Clean" means
+`tools/run_tests.sh` reported `QUALIFICATION SOURCE CLEAN: yes`.
+
+| Run | Source | Result | Failures and disposition |
+|---|---|---|---|
+| 1 | `69393b9` + uncommitted test/doc edits | 93/97 | `test_m10_boundaries_red`: the `frame-publication` control's needle named the removed full-frame blit → control and oracle updated (§5). `test_m5_crash` round 4: file bytes exact, but an m9 fixture's `[window_a] forged input token refused` line landed between `cat`'s content write and its line end (two fsd IPCs later) → `cat` now emits its last bytes and CRLF in one atomic `SYS_DEBUG_WRITE`; test unchanged. `test_m6`: pre-kernel firmware stall (below). Plus the run's own "source changed" marker (a commit landed mid-run). |
+| 2 | `aa1c74c`, clean | stopped | `test_m10_boundaries_red`: the `frame-publication` mutant passed once — the signed child notices `f` on its own timer, after the single sweep → oracle repeats sweep/compare cycles for ≥ 1 s (mutant rejected 3/3 for the expected reason, unmutated GREEN 2/2). |
+| 3 | `aa1c74c`, clean | stopped | host `arena-sync` unit test `owner_token_tracks_acquirer_across_threads`: reads the owner token after `held` is set but before the token is stored (5/400 locally) → test waits for the token; same assertion (0/1000). |
+| 4 | `81d6be7`, clean | 96/97 | `test_m9_shared_ref_hook`: RED half PASS; the GREEN boot hit the pre-kernel firmware stall below. |
+
+Targeted reruns after run 1: `test_m10_boundaries_red` 12/12 RED + GREEN,
+`test_m5_crash` 5/5 rounds, `test_m6` PASS.
+
+### Pre-kernel firmware stall (ADR-0053, still open)
+
+Three boots in these runs (`test_m6`, `test_m9_shared_ref_hook`'s GREEN
+boot, and the round-4 kill boot of the targeted `test_m5_crash` rerun)
+timed out at 120 s with the signature ADR-0053 recorded on 2026-09-30:
+87 serial and 145 virtio-console bytes — exactly a healthy boot's output
+before BDS processes its first boot option — and firmware RIP
+`0x1eb73171`, with identical R8–R15 in all three. This pass narrowed it:
+
+* A healthy boot paused at the same point (87 serial bytes) and dumped
+  over QMP shows `0x1eb73171` inside OVMF's
+  `MdeModulePkg/Universal/Metronome` image (`Metronome.dll`, base
+  `0x1eb72000`, RVA `0x1171`). The bytes there are the ACPI PM-timer
+  busy-wait (`in` from port `0x608`, `bt eax,23`, `pause`) behind
+  `gBS->Stall()`.
+* The two snapshots taken per stall show different timer targets, so the
+  CPU is not stuck inside one delay: some caller invokes `Stall()` in an
+  unbounded polling loop at the start of BDS boot-option processing.
+* 600 firmware-only boots with the harness's exact QEMU arguments
+  (4 parallel workers) did not reproduce it.
+
+No ArenaOS code has run at that point; the kernel, loader and ESP
+contents of this branch cannot be its cause. The harness does not retry
+(by design), so such a boot fails its suite.
+
+The `test_m5_crash` kill boot that stalled was accepted as a crash: by
+design `mtest.boot` SIGKILLs at the timeout and treats that as a
+crash, so the round's crash point was "before the kernel ran" instead of
+its intended write. Recorded for follow-up: a kill round should require
+that its trigger actually fired.
