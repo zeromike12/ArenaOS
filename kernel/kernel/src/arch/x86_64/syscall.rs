@@ -168,6 +168,9 @@ pub const SYS_IPC_TRY_RECV: u64 = 42;
 pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
 pub const SYS_OBSERVE: u64 = 44;
 pub const SYS_SPAWN_CHECK: u64 = 45;
+/// Phase 11.0 (ADR-0071): bind a notification to an endpoint's serve side.
+pub const SYS_ENDPOINT_BIND: u64 = 46;
+pub const SYS_ENDPOINT_UNBIND: u64 = 47;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -209,6 +212,9 @@ pub const STATUS_BUSY: Status = -4;
 /// know, and a status that pretended otherwise would be a lie.
 pub const STATUS_SERVICE_GONE: Status = -5;
 pub const STATUS_CALLER_GONE: Status = -6;
+/// Phase 11.0 (ADR-0071): a per-process bound refused the request (for
+/// example a fifth armed timer) although the shared table may have room.
+pub const STATUS_QUOTA: Status = -7;
 
 /// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
 /// so the m4 suite computes its expectation with the very function the
@@ -687,6 +693,8 @@ extern "C" fn syscall_dispatch(
         SYS_SHARED_INFO => sys_shared_info(a0, a1, [a2, a3, a4, a5]) as u64,
         SYS_SHARED_UNMAP => sys_shared_unmap(a0, [a1, a2, a3, a4, a5]) as u64,
         SYS_PROC_LIVE => sys_proc_live(a0) as u64,
+        SYS_ENDPOINT_BIND if [a3, a4, a5] == [0; 3] => sys_endpoint_bind(a0, a1, a2) as u64,
+        SYS_ENDPOINT_UNBIND if [a1, a2, a3, a4, a5] == [0; 5] => sys_endpoint_unbind(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -843,6 +851,47 @@ fn endpoint_of(pid: u64, slot: u64, right: u32) -> Result<u32, Status> {
     match c.obj {
         crate::cap::CapObj::Endpoint { eid } => Ok(eid),
         _ => Err(STATUS_BAD_ARG),
+    }
+}
+
+/// SYS_ENDPOINT_BIND(endpoint slot, notification slot, badge) — ADR-0071.
+///
+/// Authority is held capabilities only: READ on the endpoint (the serve
+/// side; a WRITE-only client cannot redirect its server's wakes) and
+/// READ|WRITE on the notification (the binder can both wait on it and
+/// signal it, so binding grants nothing it did not already hold). From
+/// then on a CALL queued while no server is parked in RECV ORs `badge`
+/// into that notification. One binding per endpoint; rebinding replaces.
+fn sys_endpoint_bind(a0: u64, a1: u64, a2: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(nid) = notification_of(pid, a1, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    if notification_of(pid, a1, crate::cap::RIGHTS_WRITE).is_err() {
+        return STATUS_BAD_ARG;
+    }
+    match crate::ipc::bind(eid, nid, a2) {
+        Ok(()) => STATUS_OK,
+        Err(e) => e,
+    }
+}
+
+/// SYS_ENDPOINT_UNBIND(endpoint slot) — READ on the endpoint (ADR-0071).
+fn sys_endpoint_unbind(a0: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::ipc::unbind(eid) {
+        Ok(()) => STATUS_OK,
+        Err(e) => e,
     }
 }
 
@@ -1601,6 +1650,7 @@ fn sys_timer_arm(a0: u64, a1: u64, a2: u64) -> Status {
         // erratum): masked to 31 bits there, so it is always a
         // positive status and never collides with the error domain.
         Ok(id) => id as Status,
+        Err(crate::timer::ArmError::Quota) => STATUS_QUOTA,
         Err(_) => STATUS_BUSY,
     }
 }

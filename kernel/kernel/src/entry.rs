@@ -382,6 +382,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 7 suite failed");
     }
 
+    // --- Phase 11.0: kernel event plumbing (ADR-0071/0072) --------------------
+    // Endpoint-bound notifications, generation-pinned cleanup, the
+    // per-process timer quota and direct IPC handoff, proven on the real
+    // objects before any production resident exists (every object minted
+    // here is destroyed again).
+    if !crate::m11::run_suite() {
+        crate::halt::halt_machine("milestone 11 suite failed");
+    }
+
     // ADR-0056: run the bounded ring-3 SharedRegion capacity/teardown
     // probe before ANY production residents start. Exact resource delta
     // then belongs to this process, not asynchronously starting drivers.

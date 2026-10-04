@@ -142,6 +142,18 @@ struct Endpoint {
     /// Thread parked in `recv` (`NO_TID` = none). v1: one server per
     /// endpoint — a second `recv` gets `STATUS_BUSY` (ADR-0018).
     server: u64,
+    /// Phase 11.0 (ADR-0071): at most one bound notification, signalled
+    /// with its badge whenever a call is queued while no server is
+    /// parked in `recv`. The generation pins the exact notification
+    /// object: a destroyed and re-minted index never matches.
+    bound: Option<Binding>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Binding {
+    nid: u32,
+    generation: u64,
+    badge: u64,
 }
 
 const EMPTY_EP: Endpoint = Endpoint {
@@ -149,6 +161,7 @@ const EMPTY_EP: Endpoint = Endpoint {
     orphaned: false,
     q: [EMPTY_SLOT; QUEUE_DEPTH],
     server: NO_TID,
+    bound: None,
 };
 
 #[derive(Clone, Copy)]
@@ -159,12 +172,17 @@ struct Notif {
     /// Thread parked in `wait` (`NO_TID` = none). v1: one waiter —
     /// a second `wait` gets `STATUS_BUSY`.
     waiter: u64,
+    /// Advanced on every mint and destroy of this index (ADR-0071), so a
+    /// binding recorded against an earlier object can never signal a
+    /// later, unrelated one that happens to reuse the index.
+    generation: u64,
 }
 
 const EMPTY_NOTIF: Notif = Notif {
     live: false,
     pending: 0,
     waiter: NO_TID,
+    generation: 0,
 };
 
 /// Dispatcher-visible IPC accounting — the test side asserts deltas, so
@@ -185,6 +203,13 @@ pub struct IpcStats {
     /// Calls answered with `STATUS_SERVICE_GONE` because the serving
     /// process was destroyed under them (M6.5, ADR-0028).
     pub service_gone: u64,
+    /// Bound-notification signals raised by queued calls (ADR-0071).
+    pub bound_signals: u64,
+    /// Bindings removed by object destruction, orphaning or unbind.
+    pub unbinds: u64,
+    /// Wakes that placed the woken thread at the front of the ready ring
+    /// (ADR-0072 direct handoff).
+    pub handoffs: u64,
 }
 
 static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
@@ -197,6 +222,9 @@ static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
     cap_drops: 0,
     blocks: 0,
     service_gone: 0,
+    bound_signals: 0,
+    unbinds: 0,
+    handoffs: 0,
 });
 static ENDPOINTS: SyncCell<[Endpoint; MAX_ENDPOINTS]> = SyncCell::new([EMPTY_EP; MAX_ENDPOINTS]);
 static NOTIFS: SyncCell<[Notif; MAX_NOTIFS]> = SyncCell::new([EMPTY_NOTIF; MAX_NOTIFS]);
@@ -263,6 +291,7 @@ pub fn create_endpoint() -> Result<u32, &'static str> {
                 orphaned: false,
                 q: [EMPTY_SLOT; QUEUE_DEPTH],
                 server: NO_TID,
+                bound: None,
             };
             Ok(i as u32)
         }
@@ -284,6 +313,9 @@ pub fn destroy_endpoint(eid: u32) -> Result<(), &'static str> {
                 return Err("destroy_endpoint: busy (server parked or requests outstanding)");
             }
             ep.live = false;
+            if ep.bound.take().is_some() {
+                (*STATS.get()).unbinds += 1;
+            }
             Ok(())
         }
     })
@@ -307,8 +339,10 @@ pub fn create_notification() -> Result<u32, &'static str> {
             let Some(i) = ns.iter().position(|n| !n.live) else {
                 return Err("notification table full (MAX_NOTIFS)");
             };
+            let generation = ns[i].generation.wrapping_add(1);
             ns[i] = EMPTY_NOTIF;
             ns[i].live = true;
+            ns[i].generation = generation;
             Ok(i as u32)
         }
     })
@@ -330,9 +364,121 @@ pub fn destroy_notification(nid: u32) -> Result<(), &'static str> {
             }
             n.live = false;
             n.pending = 0;
+            n.generation = n.generation.wrapping_add(1);
+            // No endpoint may keep signalling a dead notification, nor a
+            // later object minted at the same index (ADR-0071).
+            for ep in (*ENDPOINTS.get()).iter_mut() {
+                if ep.bound.is_some_and(|b| b.nid == nid) {
+                    ep.bound = None;
+                    (*STATS.get()).unbinds += 1;
+                }
+            }
             Ok(())
         }
     })
+}
+
+// ---- endpoint-bound notifications (Phase 11.0, ADR-0071) ----------------
+
+/// Bind notification `nid` to endpoint `eid` with `badge` (replacing any
+/// previous binding of that endpoint: one binding per endpoint). The
+/// syscall layer has already proved READ on the endpoint (serve side)
+/// and READ|WRITE on the notification; nothing here consults a PID.
+pub fn bind(eid: u32, nid: u32, badge: u64) -> Result<(), Status> {
+    if badge == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let pending = without_interrupts(|| -> Result<Option<Binding>, Status> {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let generation = (*NOTIFS.get())
+                .get(nid as usize)
+                .filter(|n| n.live)
+                .ok_or(STATUS_BAD_ARG)?
+                .generation;
+            let ep = (*ENDPOINTS.get())
+                .get_mut(eid as usize)
+                .filter(|e| e.live)
+                .ok_or(STATUS_BAD_ARG)?;
+            let b = Binding {
+                nid,
+                generation,
+                badge,
+            };
+            ep.bound = Some(b);
+            // Calls queued before the binding existed would otherwise
+            // wait for an unrelated later wake: signal once now.
+            Ok(ep
+                .q
+                .iter()
+                .any(|s| s.state == SlotState::Waiting)
+                .then_some(b))
+        }
+    })?;
+    if let Some(b) = pending {
+        signal_bound(b);
+    }
+    Ok(())
+}
+
+/// Remove endpoint `eid`'s binding (READ on the endpoint proven by the
+/// syscall layer). Unbinding an unbound endpoint is not an error.
+pub fn unbind(eid: u32) -> Result<(), Status> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let ep = (*ENDPOINTS.get())
+                .get_mut(eid as usize)
+                .filter(|e| e.live)
+                .ok_or(STATUS_BAD_ARG)?;
+            if ep.bound.take().is_some() {
+                (*STATS.get()).unbinds += 1;
+            }
+            Ok(())
+        }
+    })
+}
+
+/// The binding currently recorded for `eid` as (nid, badge), for the
+/// in-kernel proofs. `None` when unbound or dead.
+pub fn binding_of(eid: u32) -> Option<(u32, u64)> {
+    without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())
+            .get(eid as usize)
+            .filter(|e| e.live)
+            .and_then(|e| e.bound)
+            .map(|b| (b.nid, b.badge))
+    })
+}
+
+/// Raise a bound notification if — and only if — the exact object the
+/// binding was made against is still live. A stale generation is
+/// dropped silently: the binding should already have been cleared, and
+/// signalling a stranger is the one outcome that must never happen.
+fn signal_bound(b: Binding) {
+    let waiter = without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let n = (*NOTIFS.get()).get_mut(b.nid as usize)?;
+            if !n.live || n.generation != b.generation {
+                return None;
+            }
+            (*STATS.get()).bound_signals += 1;
+            n.pending |= b.badge;
+            let w = n.waiter;
+            n.waiter = NO_TID;
+            Some(w)
+        }
+    });
+    if let Some(w) = waiter.filter(|w| *w != NO_TID) {
+        // The caller is about to block: hand the CPU to the waiting
+        // server (ADR-0072), exactly as a parked recv would get it.
+        bump!(handoffs);
+        if let Err(e) = sched::wake_handoff(w) {
+            error!("ipc", "bound signal: wake(waiter {w}) failed: {e}");
+            crate::halt::halt_machine("ipc: bound signal could not wake its waiter");
+        }
+    }
 }
 
 // ---- the cap-transfer helper ---------------------------------------------
@@ -427,7 +573,8 @@ pub fn call(
 ) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // Phase 1 — enqueue; note a parked server (borrow ends here).
     // SAFETY: single writer under IF=0.
-    let (eidx, qi, parked) = without_interrupts(|| -> Result<(usize, usize, u64), Status> {
+    let (eidx, qi, parked, signal) = without_interrupts(
+        || -> Result<(usize, usize, u64, Option<Binding>), Status> {
         bump!(calls);
         unsafe {
             let eps = &mut *ENDPOINTS.get();
@@ -461,9 +608,17 @@ pub fn call(
             if parked != NO_TID {
                 ep.server = NO_TID;
             }
-            Ok((eidx, qi, parked))
+            // Nobody is parked in recv: tell the server through its bound
+            // notification that work is queued (ADR-0071). Signalled
+            // after this borrow ends; the generation is re-checked there.
+            let signal = if parked == NO_TID { ep.bound } else { None };
+            Ok((eidx, qi, parked, signal))
         }
-    })?;
+        },
+    )?;
+    if let Some(b) = signal {
+        signal_bound(b);
+    }
 
     // Phase 2 — a parked server takes the request now (delivery in the
     // caller's context; ENDPOINTS borrow ended before grant/wake).
@@ -477,7 +632,10 @@ pub fn call(
             error!("ipc", "call: parked server {} has no process", parked);
             crate::halt::halt_machine("ipc: server without a process");
         }
-        if let Err(e) = sched::wake(parked) {
+        // Direct handoff (ADR-0072): the caller blocks next, so the
+        // server it just fed runs immediately on the donated quantum.
+        bump!(handoffs);
+        if let Err(e) = sched::wake_handoff(parked) {
             error!("ipc", "call: wake(server {parked}) failed: {e}");
             crate::halt::halt_machine("ipc: delivered to a server that cannot wake");
         }
@@ -729,7 +887,11 @@ pub fn reply_policy(
         }
     })?;
 
-    // Phase 2 — wake the caller (no borrow live).
+    // Phase 2 — wake the caller (no borrow live). An ordinary FIFO wake,
+    // NOT a handoff: the server keeps running after a reply, so a front
+    // insertion here would let busy client/server groups re-enter ahead
+    // of every other ready thread indefinitely (ADR-0072; observed as a
+    // whole-system livelock under the phase-9 polling fixture).
     if let Err(e) = sched::wake(caller) {
         error!("ipc", "reply: wake(caller {caller}) failed: {e}");
         crate::halt::halt_machine("ipc: reply could not wake the caller");
@@ -809,6 +971,11 @@ pub fn fail_calls_for_server(pid: u64) -> usize {
                 // Whoever held the serve side is dying: until somebody
                 // takes it up again, calls here have nowhere to land.
                 ep.orphaned = true;
+                // Its binding described that server's wait; a successor
+                // binds its own notification (ADR-0071).
+                if ep.bound.take().is_some() {
+                    (*STATS.get()).unbinds += 1;
+                }
                 for slot in ep.q.iter_mut() {
                     if matches!(slot.state, SlotState::Waiting | SlotState::Delivered) {
                         slot.state = SlotState::Failed;

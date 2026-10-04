@@ -139,6 +139,16 @@ impl Ring {
         self.len += 1;
         true
     }
+    /// Insert at the head: the next `pop` returns `idx` (ADR-0072).
+    fn push_front(&mut self, idx: usize) -> bool {
+        if self.len == MAX_THREADS {
+            return false;
+        }
+        self.head = (self.head + MAX_THREADS - 1) % MAX_THREADS;
+        self.q[self.head] = idx;
+        self.len += 1;
+        true
+    }
     fn pop(&mut self) -> Option<usize> {
         if self.len == 0 {
             return None;
@@ -160,6 +170,10 @@ pub(super) struct CpuSched {
     slice: u32,
     /// Ticks left for `current`.
     remaining: u32,
+    /// A direct IPC handoff is pending (ADR-0072): the next switch keeps
+    /// the outgoing thread's remaining quantum instead of refilling it,
+    /// so a call/reply pair cannot reset preemption forever.
+    donate: bool,
 }
 
 impl CpuSched {
@@ -169,6 +183,7 @@ impl CpuSched {
             ready: Ring::new(),
             slice: 0,
             remaining: 0,
+            donate: false,
         }
     }
 }
@@ -455,6 +470,34 @@ pub fn ready_pending() -> bool {
 /// a Ready/Running thread is a caller bug, and double-wakes must never
 /// corrupt the ring.
 pub fn wake(tid: u64) -> Result<(), &'static str> {
+    wake_with(tid, false)
+}
+
+/// Is thread `tid` live and parked in [`State::Blocked`]? (Suite oracle.)
+pub fn thread_blocked(tid: u64) -> bool {
+    without_interrupts(|| unsafe {
+        (*THREADS.get())
+            .iter()
+            .flatten()
+            .any(|t| t.id == tid && t.state == State::Blocked)
+    })
+}
+
+/// IPC rendezvous wake (ADR-0072): the woken thread goes to the FRONT of
+/// the ready ring and inherits the remainder of the current quantum.
+///
+/// Callers MUST block immediately afterwards (a CALL to a parked server,
+/// or a bound signal raised by a caller about to park), so the woken
+/// thread is simply the very next to run: nothing ever accumulates at the
+/// front, FIFO order of every other ready thread is untouched, no
+/// priority is stored, and the donated quantum still expires on the tick.
+/// Using it where the waker keeps running (a REPLY) lets busy groups
+/// re-enter ahead of the whole ring forever — that variant livelocked.
+pub fn wake_handoff(tid: u64) -> Result<(), &'static str> {
+    wake_with(tid, true)
+}
+
+fn wake_with(tid: u64, handoff: bool) -> Result<(), &'static str> {
     without_interrupts(|| {
         // SAFETY: single writer under IF=0; all accesses complete here.
         unsafe {
@@ -471,7 +514,13 @@ pub fn wake(tid: u64) -> Result<(), &'static str> {
             }
             t.state = State::Ready;
             let cpu = &mut (*CPUS.get())[this_cpu()];
-            if !cpu.ready.push(idx) {
+            let pushed = if handoff {
+                cpu.donate = true;
+                cpu.ready.push_front(idx)
+            } else {
+                cpu.ready.push(idx)
+            };
+            if !pushed {
                 return Err("wake: ready ring overflow");
             }
             Ok(())
@@ -681,8 +730,12 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
         cpu.current = next;
         // Fresh quantum for the incoming thread (strict RR; also resets
         // the countdown when a yield found the ring empty and no switch
-        // happens — the current thread simply gets a new slice).
-        cpu.remaining = cpu.slice;
+        // happens — the current thread simply gets a new slice). A
+        // pending IPC handoff donates what is left instead (ADR-0072);
+        // an exhausted donation is refilled, never zero.
+        if !core::mem::replace(&mut cpu.donate, false) || cpu.remaining == 0 {
+            cpu.remaining = cpu.slice;
+        }
         // M3.3 (ADR-0014): the ring-3→ring-0 entry stack pair (TSS RSP0 +
         // the syscall stub's GS scratch) and the address space always
         // describe the thread about to run. Written together, here, so

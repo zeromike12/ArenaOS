@@ -49,6 +49,12 @@ pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
 pub const SYS_OBSERVE: u64 = 44;
 /// Read-only executable/capacity preflight; not a reservation or a spawn.
 pub const SYS_SPAWN_CHECK: u64 = 45;
+/// ADR-0071: endpoint READ + notification READ|WRITE; a CALL queued while
+/// no server is parked in RECV ORs `badge` into the bound notification.
+pub const SYS_ENDPOINT_BIND: u64 = 46;
+pub const SYS_ENDPOINT_UNBIND: u64 = 47;
+/// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
+pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
