@@ -761,8 +761,8 @@ fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
         append(b, n, core::slice::from_ref(digit));
     }
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+arena_desktop::entry!(main, 64 * 1024);
+extern "C" fn main() -> ! {
     let (kind, dark, motion, path) = service::startup().unwrap_or_else(|_| client::exit(70));
     service::audit(kind).unwrap_or_else(|_| client::exit(76));
     let mut client = Client::connect(

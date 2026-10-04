@@ -11,8 +11,8 @@ use arena_ui::{components, metrics, theme};
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
     client::exit(99)
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+arena_desktop::entry!(main, 64 * 1024);
+extern "C" fn main() -> ! {
     let client = Client::connect(
         metrics::WINDOW_WIDTH,
         metrics::WINDOW_HEIGHT,

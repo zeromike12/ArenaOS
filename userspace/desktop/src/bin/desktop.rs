@@ -929,8 +929,8 @@ fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
         die(91)
     }
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+arena_desktop::entry!(main, 64 * 1024);
+extern "C" fn main() -> ! {
     let (mode, b) = display(arena_compositor_model::wire::Frame::Mode, CAP_NONE);
     let w = (mode[1] & 0xffff_ffff) as usize;
     let h = (mode[1] >> 32) as usize;

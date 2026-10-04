@@ -23,3 +23,33 @@ mod abi;
 
 pub mod app_client;
 pub mod apps;
+
+/// Entry point with a dedicated stack (Phase 11.3).
+///
+/// The kernel starts a process on one derived 4 KiB page directly above
+/// its image, so an overflow silently writes into `.bss`. Desktop
+/// binaries hold window scenes and band tables on the stack; this gives
+/// them `$bytes` of stack in the `.stack` segment, which `desktop.ld`
+/// places above an unmapped guard page: an overflow is a page fault, never
+/// corruption.
+#[macro_export]
+macro_rules! entry {
+    ($main:path, $bytes:expr) => {
+        #[repr(C, align(4096))]
+        struct ArenaStack([u8; $bytes]);
+        #[unsafe(link_section = ".stack")]
+        static mut ARENA_STACK: ArenaStack = ArenaStack([0; $bytes]);
+        #[unsafe(naked)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn _start() -> ! {
+            core::arch::naked_asm!(
+                "lea rsp, [rip + {stack} + {size}]",
+                "call {main}",
+                "ud2",
+                stack = sym ARENA_STACK,
+                size = const $bytes,
+                main = sym $main,
+            )
+        }
+    };
+}

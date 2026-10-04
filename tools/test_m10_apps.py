@@ -130,14 +130,22 @@ def workflow(label,disk):
         d.wait(lambda:(file_bytes(disk,b'ui10-prefs') or b'')[:7]==b'UI10\x01\x01\x00','live dark preference not persisted')
         for name,region in zip(names,regions):
             d.shot('live-theme-restored-'+name,lambda p,region=region:crop(p,*region)==crop(owned_dark,*region))
+        # ADR-0075: twelve sessions. Six more real processes (second
+        # cascade lane), then the thirteenth launch is refused.
+        spawned=d.serial().count('[desktop] real application spawned;')
+        for kind in range(6):
+            d.click(255+kind*58,570)
+            d.wait(lambda:d.serial().count('[desktop] real application spawned;')>=spawned+kind+1,'second-lane session not spawned')
+        d.settled('twelve-desktop',(0,26,800,500))
         full=d.shot('full-desktop')
         before=d.serial().count('[desktop] real application spawned;')
         d.click(255,570)
         d.shot('capacity-refused',lambda p:crop(p,10,28,250,20)!=crop(full,10,28,250,20))
-        assert d.serial().count('[desktop] real application spawned;')==before,'capacity refusal spawned a seventh process'
-        for i in reversed(range(6)):
-            d.close(i)
-            d.wait(lambda:d.serial().count('[desktop] application retired:')>=10-i,'close failed to retire held Process')
+        assert d.serial().count('[desktop] real application spawned;')==before,'capacity refusal spawned a thirteenth process'
+        retired=d.serial().count('[desktop] application retired:')
+        for i in range(12):
+            d.q.command('input-send-event',events=[d.q._ev('f8',True),d.q._ev('f8',False)])
+            d.wait(lambda:d.serial().count('[desktop] application retired:')>=retired+i+1,'F8 failed to retire held Process')
         d.shot('all-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
         # Existing VM policy retains empty intermediate page tables until
         # the owning address space dies. Warm all six fixed VA slots, then
@@ -146,12 +154,12 @@ def workflow(label,disk):
             for kind in range(6):d.launch(kind,f'cycle-{cycle}-app-{kind}',kind)
             for i in reversed(range(6)):
                 d.close(i)
-                d.wait(lambda:d.serial().count('[desktop] application retired:')>=10+cycle*6+6-i,'cycle did not retire exact child')
+                d.wait(lambda:d.serial().count('[desktop] application retired:')>=16+cycle*6+6-i,'cycle did not retire exact child')
             d.shot(f'cycle-{cycle}-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
         # Reopen without any generation/cap/resource growth.
         d.launch(5,'gallery-reopened');d.q.key('t');d.shot('gallery-local-theme');d.close()
         d.shot('reopened-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
-        d.wait(lambda:d.serial().count('[desktop] application retired:')>=23,'last application not reaped before shutdown')
+        d.wait(lambda:d.serial().count('[desktop] application retired:')>=29,'last application not reaped before shutdown')
         def clean_snapshot():
             samples=NATIVE_COUNTERS.findall(d.serial())
             return len(samples)>1 and samples[-1][1:]==samples[0][1:]
@@ -170,9 +178,19 @@ def main(esp=None):
     assert samples[0][0]-samples[-1][0]==6,'unexpected retained frames beyond the six existing intermediate PTs'
     empty=[row for row in samples if row[1:]==samples[0][1:]]
     assert len(empty)>=5 and all(row==samples[-1] for row in empty[-4:]),empty
-    cap_peak=max(map(int,re.findall(r'measured broker cap high-water=(\d+)',s)));assert cap_peak==29,cap_peak
-    peak=min(samples,key=lambda row:row[0]);assert peak[1:4]==(samples[0][1]+6,samples[0][2]+6,samples[0][3]+6),peak
-    assert peak[4]==samples[0][4]+6*127 and peak[5]<=32 and peak[6]<=32,peak
+    # ADR-0075 per-session reservation, measured by the broker at boot.
+    shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',s).groups())
+    assert (shared,snapshot)==(470,469),(shared,snapshot)
+    cap_peak=max(map(int,re.findall(r'measured broker cap high-water=(\d+)',s)))
+    # 22 fixed broker caps + region and Process per session + one landed
+    # request cap at the twelfth launch.
+    assert cap_peak==samples[0][6]+2*12+1,(cap_peak,samples[0])
+    peak=max(samples,key=lambda row:row[4])
+    # Twelve sessions: one record and process each, two regions each (the
+    # shared reservation and the broker-only snapshot), three maps each
+    # (broker x2, client x1) and two broker caps each.
+    assert peak[1:4]==(samples[0][1]+12,samples[0][2]+12,samples[0][3]+24),peak
+    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36 and peak[6]==samples[0][6]+24,peak
     print(f'[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline={samples[0]} peak={peak} transient-broker-caps={cap_peak}',flush=True)
     # Durable appearance must affect actual desktop pixels on a fresh boot.
     label='m10-apps-persist'

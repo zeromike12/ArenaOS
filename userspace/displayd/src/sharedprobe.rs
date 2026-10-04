@@ -20,6 +20,9 @@ fn panic(_: &PanicInfo<'_>) -> ! {
     exit(99)
 }
 
+/// The kernel's SharedRegion object table (`shared::MAX_REGIONS`, ADR-0075).
+const REGIONS: usize = 32;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     // Pool/WRITE is the only inherited cap. No GPU, framebuffer, DMA,
@@ -148,9 +151,10 @@ pub extern "C" fn _start() -> ! {
         exit(87)
     }
     // The two mappings pin the first region without any cap references.
-    // Fill all seven remaining object slots; the ninth allocation must
-    // refuse 40 consecutive times WITHOUT consuming a generation ID.
-    let mut slots = [0u64; 7];
+    // Fill every remaining object slot of the kernel's 32-region table
+    // (ADR-0075); the thirty-third allocation must refuse 40 consecutive
+    // times WITHOUT consuming a generation ID.
+    let mut slots = [0u64; REGIONS - 1];
     for slot in &mut slots {
         let mut result = [0u64; 3];
         if unsafe { syscall3(SYS_SHARED_CREATE, 0, 1, result.as_mut_ptr() as u64) } != 0
@@ -174,11 +178,11 @@ pub extern "C" fn _start() -> ! {
             exit(90)
         }
     }
-    // The next ID must be immediately after the eighth real object: no
+    // The next ID must be immediately after the last real object: no
     // refused request may silently burn a generation or physical run.
     let mut again = [0u64; 3];
     if unsafe { syscall3(SYS_SHARED_CREATE, 0, 1, again.as_mut_ptr() as u64) } != 0
-        || again[1] != first_id + 8
+        || again[1] != first_id + REGIONS as u64
     {
         exit(91)
     }
@@ -186,14 +190,14 @@ pub extern "C" fn _start() -> ! {
     // and prove its PTE pin still holds the byte; wrong/partial/duplicate
     // VAs and noncanonical flags refuse. Forty-eight create/map/destroy/
     // unmap rounds must reuse one region-table stride instead of slowly
-    // exhausting its 16 slots or the global 32-map/8-object tables.
+    // exhausting its 40 slots or the global 64-map/32-object tables.
     for round in 0..48u64 {
         let current = if round == 0 {
             again
         } else {
             let mut next = [0u64; 3];
             if unsafe { syscall3(SYS_SHARED_CREATE, 0, 1, next.as_mut_ptr() as u64) } != 0
-                || next[1] != first_id + 8 + round
+                || next[1] != first_id + REGIONS as u64 + round
             {
                 exit(96)
             }
@@ -228,7 +232,7 @@ pub extern "C" fn _start() -> ! {
     }
     let mut leave = [0u64; 3];
     if unsafe { syscall3(SYS_SHARED_CREATE, 0, 1, leave.as_mut_ptr() as u64) } != 0
-        || leave[1] != first_id + 56
+        || leave[1] != first_id + REGIONS as u64 + 48
     {
         exit(100)
     }
