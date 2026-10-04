@@ -211,6 +211,24 @@ impl Layout {
         }
         e.len
     }
+    /// Visual rows of the whole document (wrapped at `EDIT_COLUMNS`).
+    pub fn visual_row_count(&self, e: &super::model::Editor) -> usize {
+        let mut row = 1;
+        let mut col = 0;
+        for b in &e.data[..e.len] {
+            if *b == b'\n' {
+                row += 1;
+                col = 0;
+            } else {
+                col += if *b == b'\t' { 4 - col % 4 } else { 1 };
+                if col >= self.EDIT_COLUMNS {
+                    row += 1;
+                    col = 0;
+                }
+            }
+        }
+        row
+    }
     pub fn visual_row(&self, e: &super::model::Editor) -> usize {
         let mut row = 0;
         let mut col = 0;

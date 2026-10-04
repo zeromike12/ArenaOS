@@ -17,6 +17,31 @@ use arena_gfxkit::{Canvas, Rect};
 
 const FULL: i32 = 65_536;
 
+/// Whether one more 28px title-bar well fits left of `edge` in a window
+/// starting at `x` (it must stay right of the focus lamp strip).
+pub const fn control_fits(x: i32, edge: i32) -> bool {
+    edge - m::CLOSE_WIDTH >= x + 24
+}
+
+/// Title-bar controls beside the close well (Phase 11.4). `hover` names
+/// the well under the pointer: 1 close, 2 maximize, 3 minimize.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Controls {
+    pub minimize: bool,
+    pub maximize: bool,
+    pub maximized: bool,
+    pub hover: u8,
+}
+impl Controls {
+    /// Close only (a client drawing chrome into its own raster).
+    pub const CLOSE: Controls = Controls {
+        minimize: false,
+        maximize: false,
+        maximized: false,
+        hover: 0,
+    };
+}
+
 /// `amount` is the shared focus motion value: 0 resting, 65536 focused.
 #[allow(clippy::too_many_arguments)]
 pub fn window_chrome(
@@ -27,6 +52,7 @@ pub fn window_chrome(
     h: i32,
     title: &str,
     amount: i32,
+    controls: Controls,
     t: Theme,
 ) {
     let a = amount.clamp(0, FULL);
@@ -58,6 +84,83 @@ pub fn window_chrome(
     );
     lamp(c, x + m::L, y + 11, a, t.header, t);
     let close_x = x + w - m::CLOSE_WIDTH;
+    // Maximize and minimize wells sit left of the close well, each in its
+    // own 28px strip (the window policy's hit zones).
+    let mut left = close_x;
+    for (shown, kind) in [(controls.maximize, 2u8), (controls.minimize, 3u8)] {
+        // A well is drawn (and hit-tested by the window policy) only where
+        // it fits right of the focus lamp: `control_fits`.
+        if !shown || !control_fits(x, left) {
+            continue;
+        }
+        left -= m::CLOSE_WIDTH;
+        let well = Rect {
+            x: left + 4,
+            y: y + 6,
+            width: 19,
+            height: 18,
+        };
+        let hot = controls.hover == kind;
+        outlined(
+            c,
+            well,
+            if hot {
+                t.control
+            } else {
+                color(t.header, t.control, a)
+            },
+            if hot {
+                t.control_edge
+            } else {
+                color(t.divider, t.control_edge, a)
+            },
+            m::RADIUS,
+        );
+        let ink = if hot {
+            t.text
+        } else {
+            color(t.muted, t.secondary, a)
+        };
+        let (gx, gy) = (well.x + 5, well.y + 4);
+        if kind == 3 {
+            rect(c, gx, gy + 8, 9, 2, ink);
+        } else if controls.maximized {
+            // Restore: two offset frames.
+            border(
+                c,
+                Rect {
+                    x: gx + 2,
+                    y: gy,
+                    width: 7,
+                    height: 6,
+                },
+                ink,
+            );
+            rect(c, gx, gy + 3, 7, 7, color(t.header, t.control, a));
+            border(
+                c,
+                Rect {
+                    x: gx,
+                    y: gy + 3,
+                    width: 7,
+                    height: 7,
+                },
+                ink,
+            );
+        } else {
+            border(
+                c,
+                Rect {
+                    x: gx,
+                    y: gy + 1,
+                    width: 9,
+                    height: 8,
+                },
+                ink,
+            );
+            rect(c, gx, gy + 1, 9, 2, ink);
+        }
+    }
     text_fit(
         c,
         x + 28,
@@ -65,7 +168,7 @@ pub fn window_chrome(
         title,
         Style::Strong,
         color(t.secondary, t.text, a),
-        close_x - (x + 28) - m::S,
+        left - (x + 28) - m::S,
     );
     // Close well: always visible, quieter at rest.
     let well = Rect {
@@ -74,11 +177,20 @@ pub fn window_chrome(
         width: 19,
         height: 18,
     };
+    let hot = controls.hover == 1;
     outlined(
         c,
         well,
-        color(t.header, t.control, a),
-        color(t.divider, t.control_edge, a),
+        if hot {
+            t.control
+        } else {
+            color(t.header, t.control, a)
+        },
+        if hot {
+            t.control_edge
+        } else {
+            color(t.divider, t.control_edge, a)
+        },
         m::RADIUS,
     );
     glyph(
@@ -86,7 +198,11 @@ pub fn window_chrome(
         well.x + 5,
         well.y + 4,
         Glyph::Close,
-        color(t.muted, t.secondary, a),
+        if hot {
+            t.text
+        } else {
+            color(t.muted, t.secondary, a)
+        },
     );
 }
 
@@ -102,6 +218,7 @@ pub fn chrome(c: &mut Canvas<'_>, title: &str, focused: bool, t: Theme) {
         h as i32,
         title,
         if focused { FULL } else { 0 },
+        Controls::CLOSE,
         t,
     );
 }

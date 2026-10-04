@@ -6,11 +6,23 @@ pub const LAUNCH_FIRST: u16 = 263;
 pub const LAUNCH_LAST: u16 = 268;
 pub const FOCUS_NEXT: u16 = 269;
 pub const CLOSE_FOCUSED: u16 = 270;
-pub const MAX_KEY: u16 = CLOSE_FOCUSED;
+/// Not a key: the modifier state changed (Alt release commits the
+/// switcher).
+pub const MODIFIERS: u16 = 271;
+pub const MAX_KEY: u16 = MODIFIERS;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Frame {
-    Key { code: u16, pressed: bool },
-    Pointer { x: u16, y: u16, buttons: u8 },
+    /// A key press or release with the modifier bits held at the time
+    /// (shift 1, ctrl 2, alt 4, super 8). `MODIFIERS` reports only a
+    /// modifier change.
+    Key { code: u16, pressed: bool, mods: u8 },
+    /// Absolute tablet position, buttons and wheel notches in the batch.
+    Pointer {
+        x: u16,
+        y: u16,
+        buttons: u8,
+        wheel: i8,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -22,15 +34,25 @@ impl Frame {
         b[..4].copy_from_slice(b"AINP");
         b[4] = 1;
         match self {
-            Self::Key { code, pressed } => {
-                if code > MAX_KEY {
+            Self::Key {
+                code,
+                pressed,
+                mods,
+            } => {
+                if code > MAX_KEY || mods > 15 {
                     return Err(Error::Invalid);
                 }
                 b[5] = 1;
                 b[8..10].copy_from_slice(&code.to_le_bytes());
                 b[12] = u8::from(pressed);
+                b[13] = mods;
             }
-            Self::Pointer { x, y, buttons } => {
+            Self::Pointer {
+                x,
+                y,
+                buttons,
+                wheel,
+            } => {
                 if x > 32767 || y > 32767 || buttons > 7 {
                     return Err(Error::Invalid);
                 }
@@ -38,6 +60,7 @@ impl Frame {
                 b[8..10].copy_from_slice(&x.to_le_bytes());
                 b[10..12].copy_from_slice(&y.to_le_bytes());
                 b[12] = buttons;
+                b[13] = wheel as u8;
             }
         }
         Ok(b)
@@ -52,11 +75,13 @@ impl Frame {
             1 if b[12] <= 1 => Self::Key {
                 code: x,
                 pressed: b[12] == 1,
+                mods: b[13],
             },
             2 => Self::Pointer {
                 x,
                 y,
                 buttons: b[12],
+                wheel: b[13] as i8,
             },
             _ => return Err(Error::Invalid),
         };
@@ -75,24 +100,33 @@ mod tests {
             Frame::Key {
                 code: 8,
                 pressed: true,
+                mods: 0,
             },
             Frame::Key {
                 code: 13,
                 pressed: true,
+                mods: 3,
             },
             Frame::Key {
                 code: 256,
                 pressed: false,
+                mods: 8,
+            },
+            Frame::Key {
+                code: MODIFIERS,
+                pressed: true,
+                mods: 0,
             },
             Frame::Pointer {
                 x: 32767,
                 y: 1,
                 buttons: 7,
+                wheel: -3,
             },
         ] {
             let b = f.encode().unwrap();
             assert_eq!(Frame::decode(&b), Ok(f));
-            for at in [6, 7, 13, 63] {
+            for at in [6, 7, 14, 63] {
                 let mut bad = b;
                 bad[at] = 1;
                 assert_eq!(Frame::decode(&bad), Err(Error::Invalid));
@@ -102,7 +136,8 @@ mod tests {
             Frame::Pointer {
                 x: 32768,
                 y: 0,
-                buttons: 0
+                buttons: 0,
+                wheel: 0
             }
             .encode()
             .is_err()
@@ -110,7 +145,8 @@ mod tests {
         assert!(
             Frame::Key {
                 code: MAX_KEY + 1,
-                pressed: true
+                pressed: true,
+                mods: 0
             }
             .encode()
             .is_err()

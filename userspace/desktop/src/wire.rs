@@ -169,6 +169,26 @@ impl Frame {
                         b[24..26].copy_from_slice(&width.to_le_bytes());
                         b[26..28].copy_from_slice(&height.to_le_bytes());
                     }
+                    Event::Chord { code, mods } => {
+                        if code > crate::input_wire::MAX_KEY || mods == 0 || mods > 15 {
+                            return Err(Error::Invalid);
+                        }
+                        b[28] = 8;
+                        b[29] = mods;
+                        b[24..26].copy_from_slice(&code.to_le_bytes());
+                    }
+                    Event::Wheel { x, y, delta } => {
+                        if !(-i32::from(MAX_W)..=i32::from(MAX_W)).contains(&x)
+                            || !(-i32::from(MAX_H)..=i32::from(MAX_H)).contains(&y)
+                            || delta == 0
+                        {
+                            return Err(Error::Invalid);
+                        }
+                        b[28] = 9;
+                        b[29] = delta as u8;
+                        b[16..20].copy_from_slice(&x.to_le_bytes());
+                        b[20..24].copy_from_slice(&y.to_le_bytes());
+                    }
                     Event::Dismissed(popup) => {
                         if popup == 0 {
                             return Err(Error::Invalid);
@@ -289,6 +309,15 @@ impl Frame {
                         y,
                         buttons: b[29],
                     },
+                    8 => Event::Chord {
+                        code: width,
+                        mods: b[29],
+                    },
+                    9 => Event::Wheel {
+                        x,
+                        y,
+                        delta: b[29] as i8,
+                    },
                     7 => Event::Dismissed(u64::from_le_bytes(
                         b[16..24].try_into().map_err(|_| Error::Invalid)?,
                     )),
@@ -382,6 +411,21 @@ mod tests {
             Frame::Event {
                 handle: 9,
                 event: Event::Dismissed(77),
+            },
+            Frame::Event {
+                handle: 9,
+                event: Event::Chord {
+                    code: u16::from(b's'),
+                    mods: 2,
+                },
+            },
+            Frame::Event {
+                handle: 9,
+                event: Event::Wheel {
+                    x: 10,
+                    y: 20,
+                    delta: -3,
+                },
             },
             Frame::Resize {
                 handle: 9,

@@ -162,6 +162,10 @@ fn next_deadline(now: u64) -> u64 {
     {
         due = due.min(now + arena_ui::motion::FRAME_US);
     }
+    // A held key repeats (window policy, Phase 11.4).
+    if let Some(at) = unsafe { (*(&raw const WM)).repeat_deadline() } {
+        due = due.min(at);
+    }
     due
 }
 /// Signal built-in clients that have queued events (or must repaint) on
@@ -534,6 +538,18 @@ fn launch_image(
     log(b"[desktop] real application spawned; held Process and own region bound\n");
     Ok(())
 }
+/// The dock (or F-key) for `kind` first brings back a minimized window of
+/// that kind; only when there is none does it launch a new instance.
+fn restore_minimized(kind: u8) -> bool {
+    let sessions = unsafe { &*(&raw const SESSIONS) };
+    let state = unsafe { &mut *(&raw mut WM) };
+    let pick = state.minimized_window(|backing| {
+        sessions
+            .iter()
+            .any(|s| s.id == backing && s.kind == kind && s.handle != 0)
+    });
+    pick.is_some_and(|h| state.activate(h).is_ok())
+}
 fn retire(index: usize, force: bool) {
     let s = unsafe { SESSIONS[index] };
     if s.id == 0 {
@@ -649,7 +665,8 @@ fn scene(now: u64) -> Scene {
     let mut order = [0usize; LIMIT];
     let mut n = 0;
     for (i, s) in sessions.iter().enumerate() {
-        if s.handle != 0 {
+        // Minimized windows are not drawn (the dock shows them).
+        if s.handle != 0 && state.find(s.handle).is_some_and(|w| !w.minimized) {
             order[n] = i;
             n += 1
         }
@@ -690,19 +707,47 @@ fn scene(now: u64) -> Scene {
                     published: live && s.popup.published,
                 }
             }),
+            controls: arena_ui::components::Controls {
+                minimize: true,
+                maximize: window.resizable,
+                maximized: window.restore.is_some() && window.placement == wm::Placement::Maximized,
+                hover: match state.hover {
+                    Some((h, b)) if h == s.handle => b as u8,
+                    _ => 0,
+                },
+            },
         });
     }
     scene.count = n;
     let mut running = [0u8; 6];
+    let mut minimized = [0u8; 6];
     let mut active = None;
     for s in sessions.iter().filter(|s| s.id != 0) {
         if s.kind < 6 {
             running[s.kind as usize] += 1;
+            if state.find(s.handle).is_some_and(|w| w.minimized) {
+                minimized[s.kind as usize] += 1;
+            }
             if Some(s.handle) == state.focused() {
                 active = Some(s.kind);
             }
         }
     }
+    let switcher = state.switcher().map(|(selected, order, count)| {
+        let mut sw = arena_desktop::shell::Switcher {
+            count: count as u8,
+            selected: selected as u8,
+            titles: [[0; 32]; LIMIT],
+            kinds: [6; LIMIT],
+        };
+        for (row, handle) in order[..count].iter().enumerate() {
+            if let Some(s) = sessions.iter().find(|s| s.handle == *handle) {
+                sw.titles[row] = s.title;
+                sw.kinds[row] = s.kind.min(6);
+            }
+        }
+        sw
+    });
     scene.shell = Shell {
         pointer: state.pointer,
         open: state.windows().count(),
@@ -713,6 +758,14 @@ fn scene(now: u64) -> Scene {
             .filter(|(_, until)| *until > now)
             .map(|(text, _)| text),
         uptime: now / 1_000_000,
+        minimized,
+        switcher,
+        snap: state.snap_preview().map(|(x, y, w, h)| arena_gfxkit::Rect {
+            x,
+            y,
+            width: u32::from(w),
+            height: u32::from(h),
+        }),
     };
     scene.dark = unsafe { PREFS.dark };
     scene
@@ -947,6 +1000,9 @@ pub extern "C" fn _start() -> ! {
     snapshot();
     loop {
         let mut dirty = sweep() | animate();
+        if unsafe { (*(&raw mut WM)).repeat_tick(arena_desktop::app_client::now()) } {
+            wake_clients();
+        }
         let mut request = [0, 0, CAP_NONE];
         let mut bytes = [0; 64];
         let rc = unsafe {
@@ -1016,20 +1072,35 @@ pub extern "C" fn _start() -> ! {
                     // take their own access to the same static state.
                     let action = {
                         let state = unsafe { &mut *(&raw mut WM) };
+                        state.set_time(arena_desktop::app_client::now());
                         match f {
                             input_wire::Frame::Key {
                                 code,
-                                pressed: true,
-                            } => state.keyboard_action(code),
-                            input_wire::Frame::Key { .. } => Action::None,
-                            input_wire::Frame::Pointer { x, y, buttons } => state.pointer(
-                                (u32::from(x) * (w as u32 - 1) / 32767) as i32,
-                                (u32::from(y) * (h as u32 - 1) / 32767) as i32,
+                                pressed,
+                                mods,
+                            } => state.key_input(code, pressed, mods),
+                            input_wire::Frame::Pointer {
+                                x,
+                                y,
                                 buttons,
-                            ),
+                                wheel,
+                            } => {
+                                let a = state.pointer(
+                                    (u32::from(x) * (w as u32 - 1) / 32767) as i32,
+                                    (u32::from(y) * (h as u32 - 1) / 32767) as i32,
+                                    buttons,
+                                );
+                                if wheel != 0 {
+                                    state.wheel(wheel);
+                                }
+                                a
+                            }
                         }
                     };
                     match action {
+                        Action::Launch(kind) if restore_minimized(kind as u8) => {
+                            dirty = true;
+                        }
                         Action::Launch(kind) => {
                             if launch(kind as u8, [0; 32]).is_err() {
                                 unsafe {

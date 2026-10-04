@@ -40,7 +40,7 @@ pub fn background(canvas: &mut Canvas<'_>, t: Theme) {
         t.desktop_mark,
         t.desktop,
     );
-    let hint = "F1-F6 open  /  F7 next window  /  F8 close";
+    let hint = "F1-F6 open  /  Alt+Tab switch  /  F8 close";
     c::text_centered(
         canvas,
         0,
@@ -67,6 +67,22 @@ pub struct Shell {
     pub active: Option<u8>,
     pub notice: Option<&'static str>,
     pub uptime: u64,
+    /// Minimized windows per built-in kind (hollow dock indicator).
+    pub minimized: [u8; 6],
+    /// Alt+Tab overlay, while open.
+    pub switcher: Option<Switcher>,
+    /// Outline of where a title drag would snap if released now.
+    pub snap: Option<Rect>,
+}
+
+/// The window switcher overlay: titles in most-recently-used order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Switcher {
+    pub count: u8,
+    pub selected: u8,
+    pub titles: [[u8; 32]; MAX_WINDOWS],
+    /// Built-in kind per row (6 = other application).
+    pub kinds: [u8; MAX_WINDOWS],
 }
 
 impl Shell {
@@ -78,7 +94,29 @@ impl Shell {
         active: None,
         notice: None,
         uptime: 0,
+        minimized: [0; 6],
+        switcher: None,
+        snap: None,
     };
+}
+
+const SWITCHER_WIDTH: i32 = 360;
+const SWITCHER_ROW: i32 = 26;
+
+/// Region holding the switcher overlay with `count` rows (and its ledge).
+pub fn switcher_region(w: i32, h: i32, count: u8) -> Rect {
+    let height = 34 + i32::from(count) * SWITCHER_ROW;
+    rect(
+        (w - SWITCHER_WIDTH) / 2,
+        (h - height) / 2,
+        SWITCHER_WIDTH + 3,
+        height + 3,
+    )
+}
+
+/// Region covered by a snap-preview outline.
+pub fn snap_region(r: Rect) -> Rect {
+    r
 }
 
 fn rect(x: i32, y: i32, w: i32, h: i32) -> Rect {
@@ -152,6 +190,9 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         active,
         notice,
         uptime,
+        minimized,
+        switcher,
+        snap,
     } = *shell;
     let (w, h) = canvas.size();
     let (w, h) = (w as i32, h as i32);
@@ -307,15 +348,109 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
             ink,
         );
         // Running instances: one dot each; the focused app gets a Signal bar.
+        // Minimized instances are hollow (a frame without its fill).
         let iy = panel.y + 44;
         if is_active {
             c::rect(canvas, cx - 7, iy, 14, 2, t.accent);
         } else if running[i] > 0 {
             let n = i32::from(running[i].min(4));
-            let start = cx - (n * 4 - 2) / 2;
+            let hollow = i32::from(minimized[i].min(running[i]).min(4));
+            let start = cx - (n * 5 - 2) / 2;
             for k in 0..n {
-                c::rect(canvas, start + k * 4, iy, 2, 2, t.bar_muted);
+                if k >= n - hollow {
+                    c::border(
+                        canvas,
+                        Rect {
+                            x: start + k * 5 - 1,
+                            y: iy - 1,
+                            width: 4,
+                            height: 4,
+                        },
+                        t.bar_muted,
+                    );
+                } else {
+                    c::rect(canvas, start + k * 5, iy, 2, 2, t.bar_muted);
+                }
             }
+        }
+    }
+    if let Some(r) = snap {
+        for i in 0..3 {
+            c::border(
+                canvas,
+                Rect {
+                    x: r.x + i,
+                    y: r.y + i,
+                    width: r.width.saturating_sub(2 * i as u32),
+                    height: r.height.saturating_sub(2 * i as u32),
+                },
+                t.accent,
+            );
+        }
+    }
+    if let Some(sw) = switcher {
+        let area = switcher_region(w, h, sw.count);
+        let (x0, y0) = (area.x, area.y);
+        let height = area.height as i32 - 3;
+        c::rect(canvas, x0 + 3, y0 + height, SWITCHER_WIDTH, 3, t.shadow);
+        c::rect(canvas, x0 + SWITCHER_WIDTH, y0 + 3, 3, height, t.shadow);
+        c::outlined(
+            canvas,
+            Rect {
+                x: x0,
+                y: y0,
+                width: SWITCHER_WIDTH as u32,
+                height: height as u32,
+            },
+            t.elevated,
+            t.frame_focus,
+            m::RADIUS_PANEL,
+        );
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + 10,
+            "SWITCH TO",
+            Style::Caption,
+            t.muted,
+        );
+        for row in 0..usize::from(sw.count) {
+            let y = y0 + 26 + row as i32 * SWITCHER_ROW;
+            let on = row == usize::from(sw.selected);
+            if on {
+                c::rect(
+                    canvas,
+                    x0 + 4,
+                    y,
+                    SWITCHER_WIDTH - 8,
+                    SWITCHER_ROW - 2,
+                    t.accent,
+                );
+            }
+            let kind = sw.kinds[row];
+            if kind < 6 {
+                c::app_tile(
+                    canvas,
+                    x0 + m::L,
+                    y + 3,
+                    18,
+                    kind,
+                    false,
+                    if on { t.accent } else { t.elevated },
+                    t,
+                );
+            }
+            let title = &sw.titles[row];
+            let end = title.iter().position(|b| *b == 0).unwrap_or(32);
+            let text = core::str::from_utf8(&title[..end]).unwrap_or("Application");
+            c::text(
+                canvas,
+                x0 + m::L + 26,
+                y + 8,
+                text,
+                Style::Body,
+                if on { t.on_accent } else { t.text },
+            );
         }
     }
     c::pointer(canvas, px, py, t);

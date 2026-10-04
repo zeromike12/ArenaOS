@@ -112,6 +112,8 @@ pub struct WindowScene {
     pub surface: (u16, u16),
     /// The window's transient surface, drawn directly above it.
     pub popup: Option<PopupScene>,
+    /// Title-bar controls and their hover state (Phase 11.4).
+    pub controls: c::Controls,
 }
 
 /// A transient surface (menu, tooltip, dialog) as presented.
@@ -391,14 +393,26 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
     if p.notice != n.notice {
         out.add(shell::notice_region(w));
     }
+    if p.switcher != n.switcher {
+        for s in [p.switcher, n.switcher].into_iter().flatten() {
+            out.add(shell::switcher_region(w, h, s.count));
+        }
+    }
+    if p.snap != n.snap {
+        for r in [p.snap, n.snap].into_iter().flatten() {
+            out.add(shell::snap_region(r));
+        }
+    }
     let full = |s: &Shell| s.open >= crate::model::MAX_WINDOWS;
     if (
         p.running,
+        p.minimized,
         p.active,
         full(p),
         shell::hover_item(w, h, p.pointer),
     ) != (
         n.running,
+        n.minimized,
         n.active,
         full(n),
         shell::hover_item(w, h, n.pointer),
@@ -456,6 +470,7 @@ pub fn compose<'c>(
                 i32::from(win.height),
                 win.title(),
                 win.focus,
+                win.controls,
                 t,
             );
         }
@@ -568,7 +583,7 @@ mod tests {
         let mut partial_updates = 0;
         let mut popup_partial = 0;
         let mut resized = 0;
-        const STEPS: u64 = 400;
+        const STEPS: u64 = 600;
         for step in 0..STEPS {
             let mut next = scene;
             // Regions describe changes since the last presented frame only.
@@ -578,7 +593,8 @@ mod tests {
                     p.regions = Regions::NONE;
                 }
             }
-            match rng.below(17) {
+            let op = rng.below(17);
+            match op {
                 0 if next.count < MAX_WINDOWS => {
                     // Open a window in a free slot on top.
                     let used: Vec<usize> = next.windows[..next.count]
@@ -609,6 +625,12 @@ mod tests {
                         title,
                         surface: (width, height),
                         popup: None,
+                        controls: c::Controls {
+                            minimize: true,
+                            maximize: rng.below(2) == 0,
+                            maximized: false,
+                            hover: 0,
+                        },
                     });
                     next.count += 1;
                     next.shell.open = next.count;
@@ -732,6 +754,8 @@ mod tests {
                     let w = next.windows[i].as_mut().unwrap();
                     w.focus = rng.below(65_537) as i32;
                     w.reveal = rng.below(u64::from(w.height) + 1) as i32;
+                    w.controls.hover = rng.below(4) as u8;
+                    w.controls.maximized = rng.below(2) == 0;
                 }
                 6 => {
                     // Pointer, sometimes across the dock strip.
@@ -742,10 +766,44 @@ mod tests {
                     next.shell.running[rng.below(6) as usize] = rng.below(3) as u8;
                     next.shell.active = [None, Some(rng.below(6) as u8)][rng.below(2) as usize];
                     next.shell.focused_any = rng.below(2) == 0;
+                    next.shell.minimized[rng.below(6) as usize] = rng.below(2) as u8;
                 }
                 8 => {
                     next.shell.notice =
                         [None, Some("LAUNCH REFUSED / DESKTOP CAPACITY")][rng.below(2) as usize];
+                    next.shell.switcher = match rng.below(3) {
+                        0 => None,
+                        _ => {
+                            let mut sw = shell::Switcher {
+                                count: 1 + rng.below(MAX_WINDOWS as u64) as u8,
+                                selected: 0,
+                                titles: [[0; 32]; MAX_WINDOWS],
+                                kinds: [6; MAX_WINDOWS],
+                            };
+                            sw.selected = rng.below(u64::from(sw.count)) as u8;
+                            for (i, t) in sw.titles.iter_mut().enumerate() {
+                                t[..3].copy_from_slice(b"App");
+                                t[3] = b'A' + i as u8;
+                                sw.kinds[i] = (i % 7) as u8;
+                            }
+                            Some(sw)
+                        }
+                    };
+                    next.shell.snap = match rng.below(3) {
+                        0 => Some(Rect {
+                            x: 0,
+                            y: 26,
+                            width: W as u32 / 2,
+                            height: H as u32 - 82,
+                        }),
+                        1 => Some(Rect {
+                            x: W as i32 / 2,
+                            y: 26,
+                            width: W as u32 / 2,
+                            height: H as u32 - 82,
+                        }),
+                        _ => None,
+                    };
                 }
                 9 if rng.below(8) == 0 => next.dark = !next.dark,
                 _ => {}
@@ -768,10 +826,12 @@ mod tests {
             let expected = full(&next, &rasters);
             if let Some(i) = (0..W * H).find(|&i| screen[i] != expected[i]) {
                 panic!(
-                    "step {step}: stale pixel at ({},{}) damage {:?}",
+                    "step {step} op {op}: stale pixel at ({},{}) damage {:?}\nprev {:?}\nnext {:?}",
                     i % W,
                     i / W,
-                    d.rects()
+                    d.rects(),
+                    scene.shell,
+                    next.shell
                 );
             }
             scene = next;

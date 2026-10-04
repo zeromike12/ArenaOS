@@ -632,6 +632,53 @@ impl App {
         }
         Ok(())
     }
+    /// Keyboard shortcuts: the same operations as the context menu.
+    fn chord(&mut self, code: u16, mods: u8, client: &Client) -> Result<(), i64> {
+        use arena_desktop::model::{MOD_CTRL, MOD_SHIFT};
+        if mods & MOD_CTRL == 0 || self.dialog != 0 || self.menu.is_some() {
+            return Ok(());
+        }
+        let shift = mods & MOD_SHIFT != 0;
+        let item = match (self.kind, code as u8) {
+            (apps::TERMINAL, b'l') => Some(0),
+            (apps::EDITOR, b'n') => Some(0),
+            (apps::EDITOR, b'o') => Some(1),
+            (apps::EDITOR, b's') => Some(2),
+            (apps::EDITOR, b'S') if shift => Some(3),
+            (apps::FILES, b'o') => Some(0),
+            (apps::FILES, b'n') => Some(1),
+            (apps::FILES, b'r') => Some(3),
+            (apps::MONITOR, b'r') => Some(0),
+            _ => None,
+        };
+        match item {
+            Some(i) => self.act(i, client),
+            None => Ok(()),
+        }
+    }
+    /// Scroll wheel: `delta` notches away from the user scroll back.
+    fn wheel(&mut self, delta: i8) {
+        let l = self.layout();
+        let step = usize::from(delta.unsigned_abs()) * 3;
+        let back = delta > 0;
+        let (limit, reversed) = match self.kind {
+            // Terminal `top` counts lines back from the newest.
+            apps::TERMINAL => (self.terminal.count.saturating_sub(l.TERMINAL_ROWS), true),
+            apps::EDITOR => (
+                l.visual_row_count(&self.editor).saturating_sub(l.EDIT_ROWS),
+                false,
+            ),
+            apps::FILES => (self.count.saturating_sub(l.FILE_ROWS), false),
+            apps::MONITOR => (self.process_count.saturating_sub(l.MONITOR_ROWS), false),
+            _ => return,
+        };
+        let up = back != reversed;
+        self.top = if up {
+            self.top.saturating_sub(step)
+        } else {
+            (self.top + step).min(limit)
+        };
+    }
     /// Keep scroll positions valid for the current layout (after a resize).
     fn fit(&mut self) {
         let l = self.layout();
@@ -819,6 +866,16 @@ pub extern "C" fn _start() -> ! {
                     if let Err(rc) = app.menu_pointer(x, y, buttons, &client) {
                         app.status = error(rc);
                     }
+                    dirty = true;
+                }
+                Some(Event::Chord { code, mods }) => {
+                    if let Err(rc) = app.chord(code, mods, &client) {
+                        app.status = error(rc);
+                    }
+                    dirty = true;
+                }
+                Some(Event::Wheel { delta, .. }) => {
+                    app.wheel(delta);
                     dirty = true;
                 }
                 Some(Event::Dismissed(handle)) => {

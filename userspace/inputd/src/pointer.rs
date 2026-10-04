@@ -6,6 +6,9 @@ pub struct Sample {
     pub x: u16,
     pub y: u16,
     pub buttons: u8,
+    /// Wheel notches in this batch (REL_WHEEL; positive away from the
+    /// user), saturated to the wire's i8.
+    pub wheel: i8,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pointer {
@@ -25,11 +28,13 @@ impl Pointer {
                 x: 0,
                 y: 0,
                 buttons: 0,
+                wheel: 0,
             },
             published: Sample {
                 x: 0,
                 y: 0,
                 buttons: 0,
+                wheel: 0,
             },
             dirty: false,
         }
@@ -55,11 +60,20 @@ impl Pointer {
                 }
                 self.dirty = true;
             }
+            (2, 8) => {
+                // REL_WHEEL carries a signed notch count in the u32.
+                let notches = (value as i32).clamp(-127, 127) as i8;
+                self.current.wheel = self.current.wheel.saturating_add(notches);
+                self.dirty = true;
+            }
             (0, 0) if self.dirty => {
                 self.dirty = false;
-                if self.current != self.published {
-                    self.published = self.current;
-                    return Some(self.current);
+                let sample = self.current;
+                // Wheel notches are an event, not state: report them once.
+                self.current.wheel = 0;
+                if sample != self.published {
+                    self.published = Sample { wheel: 0, ..sample };
+                    return Some(sample);
                 }
             }
             _ => {}
@@ -104,6 +118,7 @@ mod tests {
     fn unknown_events_and_button_repeat_never_fabricate_motion() {
         let mut p = Pointer::new();
         for e in [(2, 0, 200), (1, 272, 2), (3, 2, 123), (0, 1, 0)] {
+            // REL_X (2, 0) is not a wheel and must not fabricate motion.
             assert_eq!(p.event(e.0, e.1, e.2), None);
         }
         assert_eq!(p.event(0, 0, 0), None);
@@ -111,10 +126,28 @@ mod tests {
             Sample {
                 x: 0,
                 y: 0,
-                buttons: 0
+                buttons: 0,
+                wheel: 0
             }
             .screen(0, 600),
             None
         );
+    }
+    #[test]
+    fn wheel_notches_are_reported_once_per_batch_with_sign() {
+        let mut p = Pointer::new();
+        p.event(3, 0, 100);
+        p.event(0, 0, 0);
+        assert_eq!(p.event(2, 8, (-2i32) as u32), None);
+        let a = p.event(0, 0, 0).unwrap();
+        assert_eq!((a.x, a.wheel), (100, -2));
+        // No motion and no new notches: nothing to report.
+        assert_eq!(p.event(0, 0, 0), None);
+        p.event(2, 8, 1);
+        p.event(2, 8, 1);
+        assert_eq!(p.event(0, 0, 0).unwrap().wheel, 2);
+        p.event(2, 8, 1);
+        let b = p.event(0, 0, 0).unwrap();
+        assert_eq!((b.x, b.wheel), (100, 1), "same position, new notch");
     }
 }
