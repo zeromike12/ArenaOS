@@ -29,27 +29,35 @@ pub fn background(canvas: &mut Canvas<'_>, t: Theme) {
     let cy = (m::SYSTEM_BAR_HEIGHT + h - m::DOCK_HEIGHT) / 2 - 12;
     let ew = (w * 3 / 10).min(240);
     let eh = ew * 11 / 20;
-    c::emblem(
-        canvas,
-        Rect {
-            x: cx - ew / 2,
-            y: cy - eh / 2,
-            width: ew as u32,
-            height: eh as u32,
-        },
-        t.desktop_mark,
-        t.desktop,
-    );
-    let hint = "F1-F6 open  /  Alt+Tab switch  /  F8 close";
-    c::text_centered(
-        canvas,
-        0,
-        w,
-        cy + eh / 2 + 20,
-        hint,
-        Style::Caption,
-        t.desktop_text,
-    );
+    // The emblem and the hint draw only inside their own boxes; a clip
+    // that misses a box skips its (whole-shape) work (Phase 11 latency:
+    // a cursor-sized repaint spent most of its compose time here).
+    let clip = canvas.clip();
+    let hits = |r: Rect| {
+        r.x < clip.x + clip.width as i32
+            && clip.x < r.x + r.width as i32
+            && r.y < clip.y + clip.height as i32
+            && clip.y < r.y + r.height as i32
+    };
+    let emblem = Rect {
+        x: cx - ew / 2,
+        y: cy - eh / 2,
+        width: ew as u32,
+        height: eh as u32,
+    };
+    if hits(emblem) {
+        c::emblem(canvas, emblem, t.desktop_mark, t.desktop);
+    }
+    let hint_y = cy + eh / 2 + 20;
+    if hits(Rect {
+        x: 0,
+        y: hint_y - 2,
+        width: w as u32,
+        height: 22,
+    }) {
+        let hint = "F1-F6 open  /  Alt+Tab switch  /  F8 close";
+        c::text_centered(canvas, 0, w, hint_y, hint, Style::Caption, t.desktop_text);
+    }
 }
 
 /// Descriptive facts the shell draws. Comparable, so the compositor can
@@ -290,66 +298,76 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
     let (w, h) = (w as i32, h as i32);
     let bar = m::SYSTEM_BAR_HEIGHT;
     let ty = (bar - 1 - m::FONT_HEIGHT) / 2;
+    // Each part draws only inside its own region; a clip that misses the
+    // region skips its layout and drawing (Phase 11 latency).
+    let clip = canvas.clip();
+    let hits = |r: Rect| {
+        r.x < clip.x + clip.width as i32
+            && clip.x < r.x + r.width as i32
+            && r.y < clip.y + clip.height as i32
+            && clip.y < r.y + r.height as i32
+    };
     // System bar: identity, active application, real session/uptime facts.
-    c::rect(canvas, 0, 0, w, bar - 1, t.bar);
-    c::hline(canvas, 0, bar - 1, w, t.bar_edge);
-    // Wordmark only: a small capsule mark here could be misread as a
-    // battery or toggle indicator, which ArenaOS does not have.
-    let x = c::text(canvas, m::L, ty, "Arena", Style::Strong, t.bar_text);
-    let x = c::text(canvas, x, ty, "OS", Style::Strong, t.accent);
-    c::vline(canvas, x + m::M, 7, bar - 14, t.bar_edge);
-    let x = x + m::M + 1 + m::M + 1;
-    match active {
-        Some(kind) => {
-            c::app_tile(canvas, x, ty - 2, 11, kind, false, t.bar, t);
-            c::text(
-                canvas,
-                x + 17,
-                ty,
-                TITLES[kind as usize],
-                Style::Body,
-                t.bar_text,
-            );
+    if hits(bar_region(w)) {
+        c::rect(canvas, 0, 0, w, bar - 1, t.bar);
+        c::hline(canvas, 0, bar - 1, w, t.bar_edge);
+        // Wordmark only: a small capsule mark here could be misread as a
+        // battery or toggle indicator, which ArenaOS does not have.
+        let x = c::text(canvas, m::L, ty, "Arena", Style::Strong, t.bar_text);
+        let x = c::text(canvas, x, ty, "OS", Style::Strong, t.accent);
+        c::vline(canvas, x + m::M, 7, bar - 14, t.bar_edge);
+        let x = x + m::M + 1 + m::M + 1;
+        match active {
+            Some(kind) => {
+                c::app_tile(canvas, x, ty - 2, 11, kind, false, t.bar, t);
+                c::text(
+                    canvas,
+                    x + 17,
+                    ty,
+                    TITLES[kind as usize],
+                    Style::Body,
+                    t.bar_text,
+                );
+            }
+            None if focused_any => {
+                c::glyph(canvas, x + 1, ty - 1, Glyph::Idle, t.bar_muted);
+                c::text(canvas, x + 17, ty, "Application", Style::Body, t.bar_text);
+            }
+            None => {
+                c::text(canvas, x, ty, "Desktop", Style::Body, t.bar_muted);
+            }
         }
-        None if focused_any => {
-            c::glyph(canvas, x + 1, ty - 1, Glyph::Idle, t.bar_muted);
-            c::text(canvas, x + 17, ty, "Application", Style::Body, t.bar_text);
-        }
-        None => {
-            c::text(canvas, x, ty, "Desktop", Style::Body, t.bar_muted);
-        }
+        let mut buffer = [0u8; 32];
+        let value = uptime_text(&mut buffer, uptime);
+        let right = w - m::L;
+        c::text_right(canvas, right, ty, value, Style::Body, t.bar_text);
+        let x = right - c::measure(value, Style::Body) - m::S - 2;
+        c::text_right(canvas, x, ty, "UPTIME", Style::Caption, t.bar_muted);
+        let x = x - c::measure("UPTIME", Style::Caption) - m::L;
+        c::vline(canvas, x, 7, bar - 14, t.bar_edge);
+        let mut count = [0u8; 32];
+        let n = c::decimal(&mut count, open as u64, false).len();
+        count[n] = b'/';
+        let mut max = [0u8; 32];
+        let digits = c::decimal(&mut max, MAX_WINDOWS as u64, false).as_bytes();
+        count[n + 1..n + 1 + digits.len()].copy_from_slice(digits);
+        let count = core::str::from_utf8(&count[..n + 1 + digits.len()]).unwrap_or("?");
+        let x = x - m::L;
+        c::text_right(
+            canvas,
+            x,
+            ty,
+            count,
+            Style::Body,
+            if open >= MAX_WINDOWS {
+                t.warning
+            } else {
+                t.bar_text
+            },
+        );
+        let x = x - c::measure(count, Style::Body) - m::S - 2;
+        c::text_right(canvas, x, ty, "WINDOWS", Style::Caption, t.bar_muted);
     }
-    let mut buffer = [0u8; 32];
-    let value = uptime_text(&mut buffer, uptime);
-    let right = w - m::L;
-    c::text_right(canvas, right, ty, value, Style::Body, t.bar_text);
-    let x = right - c::measure(value, Style::Body) - m::S - 2;
-    c::text_right(canvas, x, ty, "UPTIME", Style::Caption, t.bar_muted);
-    let x = x - c::measure("UPTIME", Style::Caption) - m::L;
-    c::vline(canvas, x, 7, bar - 14, t.bar_edge);
-    let mut count = [0u8; 32];
-    let n = c::decimal(&mut count, open as u64, false).len();
-    count[n] = b'/';
-    let mut max = [0u8; 32];
-    let digits = c::decimal(&mut max, MAX_WINDOWS as u64, false).as_bytes();
-    count[n + 1..n + 1 + digits.len()].copy_from_slice(digits);
-    let count = core::str::from_utf8(&count[..n + 1 + digits.len()]).unwrap_or("?");
-    let x = x - m::L;
-    c::text_right(
-        canvas,
-        x,
-        ty,
-        count,
-        Style::Body,
-        if open >= MAX_WINDOWS {
-            t.warning
-        } else {
-            t.bar_text
-        },
-    );
-    let x = x - c::measure(count, Style::Body) - m::S - 2;
-    c::text_right(canvas, x, ty, "WINDOWS", Style::Caption, t.bar_muted);
-
     // Transient shell notice (e.g. capacity refusal): an error toast.
     if let Some(text) = notice {
         let width = c::measure(text, Style::Caption) + m::GLYPH_SMALL + 3 * m::M + 2;
@@ -373,95 +391,96 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
     }
 
     // Dock: a floating panel inside the (unchanged) dock hit strip.
-    let items = DOCK.len() as i32;
-    let strip = m::DOCK_ITEM_WIDTH * items;
-    let dock_x = (w - strip) / 2;
-    let panel = Rect {
-        x: dock_x - 6,
-        y: h - m::DOCK_PANEL_BOTTOM - m::DOCK_PANEL_HEIGHT,
-        width: (strip + 12) as u32,
-        height: m::DOCK_PANEL_HEIGHT as u32,
-    };
-    c::rect(
-        canvas,
-        panel.x + 3,
-        panel.y + panel.height as i32,
-        panel.width as i32 - 3,
-        2,
-        t.shadow,
-    );
-    c::outlined(canvas, panel, t.dock, t.dock_edge, m::RADIUS_PANEL);
-    let full = open >= MAX_WINDOWS;
-    let (px, py) = pointer;
-    let hover = hover_item(w, h, pointer);
-    for (i, name) in DOCK.iter().enumerate() {
-        let x = dock_x + i as i32 * m::DOCK_ITEM_WIDTH;
-        let cx = x + m::DOCK_ITEM_WIDTH / 2;
-        let hovered = hover == Some(i);
-        let is_active = active == Some(i as u8);
-        if hovered {
-            c::well(
-                canvas,
-                Rect {
-                    x: x + 2,
-                    y: panel.y + 3,
-                    width: (m::DOCK_ITEM_WIDTH - 4) as u32,
-                    height: (m::DOCK_PANEL_HEIGHT - 6) as u32,
-                },
-                t.dock_well,
-                None,
-            );
-        }
-        let under = if hovered { t.dock_well } else { t.dock };
-        c::app_tile(
-            canvas,
-            cx - m::TILE_SIZE / 2,
-            panel.y + 4,
-            m::TILE_SIZE,
-            i as u8,
-            full,
-            under,
-            t,
-        );
-        let (style, ink) = if is_active {
-            (Style::Strong, t.bar_text)
-        } else if running[i] > 0 || hovered {
-            (Style::Body, t.bar_text)
-        } else {
-            (Style::Body, t.bar_muted)
+    if hits(dock_region(w, h)) {
+        let items = DOCK.len() as i32;
+        let strip = m::DOCK_ITEM_WIDTH * items;
+        let dock_x = (w - strip) / 2;
+        let panel = Rect {
+            x: dock_x - 6,
+            y: h - m::DOCK_PANEL_BOTTOM - m::DOCK_PANEL_HEIGHT,
+            width: (strip + 12) as u32,
+            height: m::DOCK_PANEL_HEIGHT as u32,
         };
-        c::text_centered(
+        c::rect(
             canvas,
-            x,
-            m::DOCK_ITEM_WIDTH,
-            panel.y + 34,
-            name,
-            style,
-            ink,
+            panel.x + 3,
+            panel.y + panel.height as i32,
+            panel.width as i32 - 3,
+            2,
+            t.shadow,
         );
-        // Running instances: one dot each; the focused app gets a Signal bar.
-        // Minimized instances are hollow (a frame without its fill).
-        let iy = panel.y + 44;
-        if is_active {
-            c::rect(canvas, cx - 7, iy, 14, 2, t.accent);
-        } else if running[i] > 0 {
-            let n = i32::from(running[i].min(4));
-            let hollow = i32::from(minimized[i].min(running[i]).min(4));
-            let start = cx - (n * 5 - 2) / 2;
-            for k in 0..n {
-                if k >= n - hollow {
-                    c::border(
-                        canvas,
-                        Rect {
-                            x: start + k * 5 - 1,
-                            y: iy - 1,
-                            width: 4,
-                            height: 4,
-                        },
-                        t.bar_muted,
-                    );
-                } else {
-                    c::rect(canvas, start + k * 5, iy, 2, 2, t.bar_muted);
+        c::outlined(canvas, panel, t.dock, t.dock_edge, m::RADIUS_PANEL);
+        let full = open >= MAX_WINDOWS;
+        let hover = hover_item(w, h, pointer);
+        for (i, name) in DOCK.iter().enumerate() {
+            let x = dock_x + i as i32 * m::DOCK_ITEM_WIDTH;
+            let cx = x + m::DOCK_ITEM_WIDTH / 2;
+            let hovered = hover == Some(i);
+            let is_active = active == Some(i as u8);
+            if hovered {
+                c::well(
+                    canvas,
+                    Rect {
+                        x: x + 2,
+                        y: panel.y + 3,
+                        width: (m::DOCK_ITEM_WIDTH - 4) as u32,
+                        height: (m::DOCK_PANEL_HEIGHT - 6) as u32,
+                    },
+                    t.dock_well,
+                    None,
+                );
+            }
+            let under = if hovered { t.dock_well } else { t.dock };
+            c::app_tile(
+                canvas,
+                cx - m::TILE_SIZE / 2,
+                panel.y + 4,
+                m::TILE_SIZE,
+                i as u8,
+                full,
+                under,
+                t,
+            );
+            let (style, ink) = if is_active {
+                (Style::Strong, t.bar_text)
+            } else if running[i] > 0 || hovered {
+                (Style::Body, t.bar_text)
+            } else {
+                (Style::Body, t.bar_muted)
+            };
+            c::text_centered(
+                canvas,
+                x,
+                m::DOCK_ITEM_WIDTH,
+                panel.y + 34,
+                name,
+                style,
+                ink,
+            );
+            // Running instances: one dot each; the focused app gets a Signal bar.
+            // Minimized instances are hollow (a frame without its fill).
+            let iy = panel.y + 44;
+            if is_active {
+                c::rect(canvas, cx - 7, iy, 14, 2, t.accent);
+            } else if running[i] > 0 {
+                let n = i32::from(running[i].min(4));
+                let hollow = i32::from(minimized[i].min(running[i]).min(4));
+                let start = cx - (n * 5 - 2) / 2;
+                for k in 0..n {
+                    if k >= n - hollow {
+                        c::border(
+                            canvas,
+                            Rect {
+                                x: start + k * 5 - 1,
+                                y: iy - 1,
+                                width: 4,
+                                height: 4,
+                            },
+                            t.bar_muted,
+                        );
+                    } else {
+                        c::rect(canvas, start + k * 5, iy, 2, 2, t.bar_muted);
+                    }
                 }
             }
         }
@@ -548,7 +567,7 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
     if let Some(ch) = chooser {
         draw_chooser(canvas, &ch, w, h, t);
     }
-    c::pointer(canvas, px, py, t);
+    c::pointer(canvas, pointer.0, pointer.1, t);
 }
 
 fn label(b: &[u8]) -> &str {
