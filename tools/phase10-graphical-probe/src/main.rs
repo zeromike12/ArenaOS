@@ -140,9 +140,14 @@ pub extern "C" fn _start() -> ! {
                     // those exact prior bytes without painting anything new.
                     // r repaints everything but publishes ONE 10x10 rectangle
                     // (Phase 11.1 Damage regions): the rest must stay hidden.
+                    // The rectangle sits at (10, 30): below the 28-pixel
+                    // title band the compositor draws opaquely over every
+                    // surface, so its publication is actually visible.
                     let mut damage = frame(2, handle);
                     if key == b'r' {
                         damage[16] = 1;
+                        damage[24] = 10;
+                        damage[26] = 30;
                         damage[28] = 10;
                         damage[30] = 10;
                     }

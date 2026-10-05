@@ -223,7 +223,9 @@ pub enum Clip {
     Cut,
 }
 
-/// What the application must do after an explorer action.
+/// What the application must do after an explorer action (a `Path` is a
+/// fixed array: there is no heap to box it).
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     None,
