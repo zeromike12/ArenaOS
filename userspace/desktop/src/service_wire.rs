@@ -76,7 +76,9 @@ fn name_valid(name: &[u8; 32], empty: bool) -> bool {
 /// A display title: printable ASCII then zero padding (never authority).
 fn printable(name: &[u8; 32]) -> bool {
     let n = name.iter().position(|b| *b == 0).unwrap_or(32);
-    n < 32 && name[..n].iter().all(|b| (0x20..0x7f).contains(b)) && name[n..].iter().all(|b| *b == 0)
+    n < 32
+        && name[..n].iter().all(|b| (0x20..0x7f).contains(b))
+        && name[n..].iter().all(|b| *b == 0)
 }
 impl Frame {
     pub fn encode(self) -> Result<[u8; BYTES], Error> {
@@ -168,7 +170,11 @@ impl Frame {
                 b[8] = u8::from(save);
                 b[9] = u8::from(read_only);
                 b[32..].copy_from_slice(&name);
-                if matches!(self, Self::Choose { .. }) { 13 } else { 16 }
+                if matches!(self, Self::Choose { .. }) {
+                    13
+                } else {
+                    16
+                }
             }
             Self::Offer => 14,
             Self::TakeGrant => 15,

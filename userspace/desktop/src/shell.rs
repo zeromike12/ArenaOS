@@ -135,7 +135,12 @@ const CHOOSER_LIST_Y: i32 = 52;
 /// Region holding the chooser panel (and its ledge), centred.
 pub fn chooser_region(w: i32, h: i32) -> Rect {
     let height = chooser_height();
-    rect((w - CHOOSER_WIDTH) / 2, (h - height) / 2, CHOOSER_WIDTH + 3, height + 3)
+    rect(
+        (w - CHOOSER_WIDTH) / 2,
+        (h - height) / 2,
+        CHOOSER_WIDTH + 3,
+        height + 3,
+    )
 }
 fn chooser_height() -> i32 {
     CHOOSER_LIST_Y + CHOOSER_ROWS as i32 * CHOOSER_ROW + 88
@@ -578,7 +583,14 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
         Style::Caption,
         t.muted,
     );
-    c::text(canvas, x0 + m::L, y0 + 32, label(&ch.place), Style::Body, t.text);
+    c::text(
+        canvas,
+        x0 + m::L,
+        y0 + 32,
+        label(&ch.place),
+        Style::Body,
+        t.text,
+    );
     c::outlined(
         canvas,
         Rect {
@@ -591,7 +603,14 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
         t.field_edge,
         m::RADIUS,
     );
-    c::text(canvas, x0 + CHOOSER_WIDTH - 62, y0 + 34, "UP", Style::Caption, t.text);
+    c::text(
+        canvas,
+        x0 + CHOOSER_WIDTH - 62,
+        y0 + 34,
+        "UP",
+        Style::Caption,
+        t.text,
+    );
     let list_top = y0 + CHOOSER_LIST_Y;
     c::outlined(
         canvas,
@@ -606,13 +625,27 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
         m::RADIUS,
     );
     if ch.count == 0 {
-        c::text(canvas, x0 + m::L + 4, list_top + 6, "This folder is empty", Style::Body, t.muted);
+        c::text(
+            canvas,
+            x0 + m::L + 4,
+            list_top + 6,
+            "This folder is empty",
+            Style::Body,
+            t.muted,
+        );
     }
     for row in 0..usize::from(ch.count) {
         let y = list_top + row as i32 * CHOOSER_ROW;
         let on = ch.selected == Some(row as u8);
         if on {
-            c::rect(canvas, x0 + m::L - 2, y, CHOOSER_WIDTH - 2 * m::L + 4, CHOOSER_ROW, t.accent);
+            c::rect(
+                canvas,
+                x0 + m::L - 2,
+                y,
+                CHOOSER_WIDTH - 2 * m::L + 4,
+                CHOOSER_ROW,
+                t.accent,
+            );
         }
         c::text(
             canvas,
@@ -624,7 +657,14 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
         );
     }
     if ch.above {
-        c::text(canvas, x0 + CHOOSER_WIDTH - 40, list_top + 4, "^", Style::Body, t.muted);
+        c::text(
+            canvas,
+            x0 + CHOOSER_WIDTH - 40,
+            list_top + 4,
+            "^",
+            Style::Body,
+            t.muted,
+        );
     }
     if ch.below {
         c::text(
@@ -657,9 +697,19 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
         let caret = x0 + m::L + 50 + name.len() as i32 * m::FONT_ADVANCE;
         c::rect(canvas, caret, ny + 5, 1, 13, t.text);
     }
-    c::text(canvas, x0 + m::L, ny + 30, label(&ch.message), Style::Caption, t.muted);
+    c::text(
+        canvas,
+        x0 + m::L,
+        ny + 30,
+        label(&ch.message),
+        Style::Caption,
+        t.muted,
+    );
     let by = y0 + height - 34;
-    for (i, text) in ["CANCEL", if ch.save { "SAVE" } else { "OPEN" }].iter().enumerate() {
+    for (i, text) in ["CANCEL", if ch.save { "SAVE" } else { "OPEN" }]
+        .iter()
+        .enumerate()
+    {
         let bx = x0 + CHOOSER_WIDTH - 196 + i as i32 * 98;
         c::outlined(
             canvas,

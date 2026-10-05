@@ -80,7 +80,11 @@ impl Path {
     }
     /// `rel` resolved against `self` (a leading `/` starts from home).
     fn join(&self, rel: &[u8]) -> Result<Path, i64> {
-        let mut out = if rel.first() == Some(&b'/') { Path::EMPTY } else { *self };
+        let mut out = if rel.first() == Some(&b'/') {
+            Path::EMPTY
+        } else {
+            *self
+        };
         for (_, part) in files::components(rel) {
             match part {
                 b"." => {}
@@ -163,10 +167,7 @@ static mut APP: App = App {
 const CAP_NONE: u64 = u64::MAX;
 fn describe(slot: u64) -> Option<[u64; 3]> {
     let mut d = [0u64; 3];
-    (unsafe {
-        arena_desktop::app_client::describe_raw(slot, &mut d)
-    } == 0)
-        .then_some(d)
+    (unsafe { arena_desktop::app_client::describe_raw(slot, &mut d) } == 0).then_some(d)
 }
 fn length(n: &[u8; 32]) -> usize {
     n.iter().position(|b| *b == 0).unwrap_or(32)
@@ -231,7 +232,9 @@ impl App {
         if self.home == CAP_NONE {
             return Err(fserr(fw::S_DENIED));
         }
-        self.fs()?.walk(self.home, rel.bytes(), rights).map_err(fserr)
+        self.fs()?
+            .walk(self.home, rel.bytes(), rights)
+            .map_err(fserr)
     }
     /// The directory holding `rel` (opened with `rights`) and the final
     /// name. The caller releases the directory capability.
@@ -263,7 +266,11 @@ impl App {
         while more && self.count < self.entries.len() {
             let (n, m) = self
                 .fs()?
-                .list(self.dir_cap, &after[..after_len], &mut self.entries[self.count..])
+                .list(
+                    self.dir_cap,
+                    &after[..after_len],
+                    &mut self.entries[self.count..],
+                )
                 .map_err(fserr)?;
             if n == 0 {
                 break;
@@ -293,7 +300,9 @@ impl App {
         }
         let e = self.entries[self.selected];
         let fs = self.fs()?;
-        let (f, _) = fs.open(self.dir_cap, Some(e.name()), fw::R_READ).map_err(fserr)?;
+        let (f, _) = fs
+            .open(self.dir_cap, Some(e.name()), fw::R_READ)
+            .map_err(fserr)?;
         let r = fs.read_all(f, &mut self.preview);
         fs.release(f);
         let data = match r {
@@ -378,8 +387,12 @@ impl App {
 
     // ---- Editor: one document capability ---------------------------------
     fn open_document(&mut self, title: [u8; 32]) -> Result<(), i64> {
+        self.load_from(self.doc, title)
+    }
+    /// Load document `cap` into the editor; on refusal nothing changes.
+    fn load_from(&mut self, cap: u64, title: [u8; 32]) -> Result<(), i64> {
         let fs = self.fs()?;
-        let data = fs.read_all(self.doc, &mut self.preview).map_err(fserr)?;
+        let data = fs.read_all(cap, &mut self.preview).map_err(fserr)?;
         self.editor
             .load(data, view::string(&title[..length(&title)]))
             .map_err(|_| -2)?;
@@ -419,17 +432,36 @@ impl App {
             read_only,
             name: suggestion,
         })?;
-        self.status = if save { "CHOOSE WHERE TO SAVE" } else { "CHOOSE A DOCUMENT" };
+        self.status = if save {
+            "CHOOSE WHERE TO SAVE"
+        } else {
+            "CHOOSE A DOCUMENT"
+        };
         Ok(())
     }
     /// The chooser finished: take the granted capability, if any.
     fn chosen(&mut self, client: &Client) -> Result<(), i64> {
-        let Some((cap, title, save, read_only)) = service::take_grant()? else {
+        let Some(service::Grant {
+            cap,
+            title,
+            save,
+            read_only,
+        }) = service::take_grant()?
+        else {
             self.status = "CANCELLED";
             return Ok(());
         };
         if self.afs.is_none() {
             self.start_files(client, cap);
+        }
+        if !save {
+            // The editor switches documents only once the new one loaded:
+            // a refused file (binary, too large) leaves the open document
+            // and its capability exactly as they were.
+            if let Err(e) = self.load_from(cap, title) {
+                self.release(cap);
+                return Err(e);
+            }
         }
         if self.doc != CAP_NONE {
             self.release(self.doc);
@@ -439,7 +471,6 @@ impl App {
             self.editor.path = title;
             self.save(client)
         } else {
-            self.open_document(title)?;
             if read_only {
                 // The capability itself carries no write right: a save is
                 // refused by filesd, not by this application.
@@ -613,7 +644,10 @@ impl App {
         let mut after = [0u8; files::NAME_MAX];
         let mut after_len = 0usize;
         loop {
-            let (n, more) = self.fs()?.list(cap, &after[..after_len], &mut batch).map_err(fserr)?;
+            let (n, more) = self
+                .fs()?
+                .list(cap, &after[..after_len], &mut batch)
+                .map_err(fserr)?;
             for e in &batch[..n] {
                 let mut b = [0u8; 64];
                 let mut k = 0;
@@ -1146,7 +1180,8 @@ extern "C" fn main() -> ! {
     let init = match kind {
         apps::TERMINAL => {
             app.terminal.write(if app.afs.is_some() {
-                b"ArenaOS ordinary command session\nType help. Your home folder is /Users/user." as &[u8]
+                b"ArenaOS ordinary command session\nType help. Your home folder is /Users/user."
+                    as &[u8]
             } else {
                 b"ArenaOS ordinary command session\nFile service offline: no file commands."
             });

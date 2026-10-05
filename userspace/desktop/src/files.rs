@@ -63,7 +63,6 @@ pub fn free_slot(from: u64) -> Option<u64> {
     (from..64).find(|s| describe(*s).is_none())
 }
 
-
 pub const NAME_MAX: usize = 255;
 
 /// One directory entry of a listing.
@@ -224,7 +223,13 @@ impl Files {
 
     /// Child `name` of directory `cap` opened with at most `rights`, the new
     /// record placed in the lineage of `place` (lent): the chooser's grant.
-    pub fn open_child_in(&self, cap: u64, name: &[u8], rights: u8, place: u64) -> Result<(u64, u8), Status> {
+    pub fn open_child_in(
+        &self,
+        cap: u64,
+        name: &[u8],
+        rights: u8,
+        place: u64,
+    ) -> Result<(u64, u8), Status> {
         if name.is_empty() || name.len() > NAME_MAX {
             return Err(wire::S_INVAL);
         }
@@ -394,7 +399,6 @@ impl Files {
         Err(wire::S_INVAL)
     }
 }
-
 
 /// Non-empty `/`-separated components with their offsets.
 pub fn components(path: &[u8]) -> impl Iterator<Item = (usize, &[u8])> {

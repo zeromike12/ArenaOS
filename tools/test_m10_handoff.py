@@ -46,6 +46,9 @@ def main(esp=None):
     disk=arena_env.make_scratch_disk()
     rc,_,_=mtest.boot('m10-handoff-seed',esp,[(b'arena>',1,b'shutdown\r')],disk,pointer=True);assert rc==0
     seed.host_seed(disk,{b'ui10-prefs':preference(),b'user-note':b'ArenaOS desktop reference\nOrdinary application, owned pixels.\n'})
+    # Phase 11.6: user documents live on AFS2 (migrated on first boot);
+    # the AFS2 region follows the 8 MiB AFS1 area.
+    with open(disk,'r+b') as f:f.truncate(arena_env.AFS2_DISK_MIB*1024*1024)
     repeat=BUILD/'m10-handoff-repeat.img';shutil.copyfile(disk,repeat)
     label='m10-handoff'
     def workflow():
@@ -58,7 +61,13 @@ def main(esp=None):
                     d.q.type_text('echo ArenaOS desktop\rhelp\r',gap_s=.04)
                 elif kind==1:d.click(110,142)
                 elif kind==2:
-                    d.click(345,110);d.q.key('\r')
+                    # Open asks the trusted chooser (Phase 11.6): the one
+                    # document in Documents, chosen by the user's keys.
+                    d.click(345,110)
+                    d.wait(lambda:'trusted chooser opened' in d.serial(),'chooser not opened')
+                    for key in ('down','ret'):
+                        d.q.command('input-send-event',events=[d.q._ev(key,True),d.q._ev(key,False)])
+                        __import__('time').sleep(.1)
                     d.shot('editor-loaded',lambda p:crop(p,88,134,200,20)!=crop(opened,88,134,200,20))
                 data=d.settled(name+'-reference',(70,60,448,288))
                 save(name,data)
@@ -98,7 +107,7 @@ def main(esp=None):
         finally:d.dispose()
     rc,_,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>'),1,independent)],repeat,pointer=True);assert rc==0
     assert not afs1.audit(disk) and not afs1.audit(repeat)
-    manifest=dict(source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),efi_sha256=hashlib.sha256((BUILD/'arena-boot.efi').read_bytes()).hexdigest(),resolution='800x600 GOP',fixture='user-note text; canonical light/motion-disabled UI10 preference; fresh AFS1; cursor parked at 780,500',capture='QMP screendump, settled owned raster; lossless RGB PNG',entries=entries)
+    manifest=dict(source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),efi_sha256=hashlib.sha256((BUILD/'arena-boot.efi').read_bytes()).hexdigest(),resolution='800x600 GOP',fixture='user-note text and canonical light/motion-disabled UI10 preference seeded on AFS1, user-note migrated to AFS2 Documents on first boot; cursor parked at 780,500',capture='QMP screendump, settled owned raster; lossless RGB PNG',entries=entries)
     (OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print('[m10-handoff] actual desktop, all six real apps, full working set, durable dark appearance; independent-boot byte-identical light/dark owned gallery QMP rasters PASS',flush=True)
 

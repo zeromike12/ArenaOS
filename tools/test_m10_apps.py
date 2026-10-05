@@ -69,13 +69,24 @@ class Desktop:
     def serial(self):return serial_text(BUILD/f'serial-{self.label}.log')
     def dispose(self):self.q.close()
 
+def doc_bytes(path,name):
+    """A document in /Users/user/Documents on the AFS2 region (Phase 11.6:
+    user documents moved from flat AFS1 records to AFS2; settings stay AFS1)."""
+    import afs2
+    for _ in range(50):
+        try:
+            vol=afs2.Volume(path.read_bytes()[arena_env.AFS2_BASE_SECTOR*512:]);afs2.check(vol)
+            return afs2.walk(vol).get('/Users/user/Documents/'+name.decode())
+        except Exception:time.sleep(.1)
+    raise AssertionError('AFS2 region never mounted on the host')
+
 def workflow(label,disk):
     d=Desktop(label)
     try:
         empty=d.shot('empty')
         terminal=d.launch(0,'terminal')
-        d.q.type_text('put user-note hello desktop\r',gap_s=.04)
-        d.wait(lambda:file_bytes(disk,b'user-note')==b'hello desktop','terminal did not commit actual file')
+        d.q.type_text('put Documents/user-note hello desktop\r',gap_s=.04)
+        d.wait(lambda:doc_bytes(disk,b'user-note')==b'hello desktop','terminal did not commit actual file')
         d.q.type_text('echo pointer and keyboard\r',gap_s=.04)
         d.shot('terminal-echo',lambda p:crop(p,82,128,360,160)!=crop(terminal,82,128,360,160))
         d.q.type_text('shutdown\r',gap_s=.04)
@@ -83,15 +94,16 @@ def workflow(label,disk):
         assert 'kernel] shutdown requested by pid' not in d.serial(),'graphical terminal inherited Power'
         d.close();d.shot('terminal-closed',lambda p:crop(p,100,110,300,180)==crop(empty,100,110,300,180))
         blank=d.launch(2,'editor')
-        d.click(345,110)
-        d.shot('editor-open-dialog',lambda p:crop(p,82,96,354,24)!=crop(blank,82,96,354,24))
-        d.q.key('\r')
+        d.click(345,110)  # Open: the trusted chooser (Phase 11.6)
+        d.shot('editor-open-dialog',lambda p:crop(p,190,130,420,340)!=crop(blank,190,130,420,340))
+        for key in ('down','ret'):  # Documents holds exactly the terminal's note
+            d.q.command('input-send-event',events=[d.q._ev(key,True),d.q._ev(key,False)]);time.sleep(.1)
         editor=d.shot('editor-open',lambda p:crop(p,94,134,94,10)!=crop(blank,94,134,94,10))
         d.q.type_text('saved ',gap_s=.04)
         typed=d.shot('editor-typed',lambda p:crop(p,88,134,200,10)!=crop(editor,88,134,200,10))
-        assert file_bytes(disk,b'user-note')==b'hello desktop','typing falsely saved file'
+        assert doc_bytes(disk,b'user-note')==b'hello desktop','typing falsely saved file'
         d.click(185,110)
-        d.wait(lambda:file_bytes(disk,b'user-note')==b'saved hello desktop','editor save failed exact durable bytes')
+        d.wait(lambda:doc_bytes(disk,b'user-note')==b'saved hello desktop','editor save failed exact durable bytes')
         d.q.type_text('dirty',gap_s=.04)
         d.shot('editor-dirty',lambda p:crop(p,88,134,200,10)!=crop(typed,88,134,200,10))
         d.close()
@@ -100,11 +112,11 @@ def workflow(label,disk):
         d.shot('editor-close-cancelled',lambda p:crop(p,82,96,354,24)!=crop(pending,82,96,354,24))
         d.close();d.click(360,110) # Discard only after a new close request.
         d.shot('editor-closed',lambda p:crop(p,100,110,300,180)==crop(empty,100,110,300,180))
-        assert file_bytes(disk,b'user-note')==b'saved hello desktop'
+        assert doc_bytes(disk,b'user-note')==b'saved hello desktop'
         files=d.launch(1,'files');d.click(105,110)
         d.shot('files-new-dialog',lambda p:crop(p,82,96,354,24)!=crop(files,82,96,354,24))
         d.q.key('\r')
-        d.wait(lambda:file_bytes(disk,b'user-new')==b'','file manager did not create actual file')
+        d.wait(lambda:doc_bytes(disk,b'Untitled.txt')==b'','file manager did not create actual file')
         d.shot('files-created');d.close()
         d.shot('files-closed',lambda p:crop(p,100,110,300,180)==crop(empty,100,110,300,180))
         settings=d.launch(3,'settings');d.click(270,160)
@@ -171,10 +183,10 @@ def workflow(label,disk):
 
 def main(esp=None):
     if esp is None:esp=mtest.build('m10-apps',desktop=True)
-    disk=arena_env.make_scratch_disk();label='m10-apps'
-    rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>'),1,lambda:workflow(label,disk))],disk,pointer=True)
+    disk=arena_env.make_scratch_disk(afs2=True);label='m10-apps'
+    rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>',b'AFS2 file service online'),1,lambda:workflow(label,disk))],disk,pointer=True)
     assert rc==0
-    assert afs1.audit(disk)==[] and file_bytes(disk,b'user-note')==b'saved hello desktop'
+    assert afs1.audit(disk)==[] and doc_bytes(disk,b'user-note')==b'saved hello desktop'
     samples=[tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(s)]
     assert samples and samples[-1][1:]==samples[0][1:],(samples[0],samples[-1])
     # Superseded Phase-10 bound (six slots x one PT): ADR-0075 slots hold

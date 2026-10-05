@@ -35,7 +35,7 @@ def workflow():
         d.launch(5,'unresponsive-gallery');d.q.key('h');d.q.type_text('a'*40,gap_s=.035)
         d.close();d.shot('first-close-pending');d.close()
         d.wait(lambda:d.serial().count('[desktop] application retired:')==3 and samples(d)[-1][1:]==base[1:],'full-queue live client could not be forcibly closed')
-        assert base[0]-samples(d)[-1][0]==2,'client death exceeded two warmed private PT slots'
+        assert base[0]-samples(d)[-1][0]==2*2,'client death exceeded two warmed private PT slots (two PTs each, ADR-0075)'
         return b'shutdown\r'
     finally:d.dispose()
 def main():

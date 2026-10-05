@@ -126,7 +126,8 @@ def boot(qualified: bool = True) -> None:
                     or 'm6: RESULT PASS (6/6)' not in text
                     or 'contest: PASS — the port carried bytes BOTH ways:' not in text
                     or 'contest: hello from ArenaOS' not in console_log.read_text(errors='replace')
-                    or 'servicemgr: full fixture notification budget 25/25; twenty-sixth refused' not in text
+                    # ADR-0075: twelve desktop clocks; the table is still exactly full.
+                    or 'servicemgr: full fixture notification budget 31/31; thirty-second refused' not in text
                     or text.count('[desktop] real application spawned;') != 2
                     or text.count('[desktop] application retired:') != 2
                     or 'halting via UEFI ResetSystem(shutdown)' not in text

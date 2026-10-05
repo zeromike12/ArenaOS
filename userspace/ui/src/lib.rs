@@ -4,3 +4,4 @@ pub mod components;
 pub mod metrics;
 pub mod motion;
 pub mod theme;
+pub mod widgets;

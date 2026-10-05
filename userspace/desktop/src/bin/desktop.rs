@@ -568,7 +568,10 @@ fn chooser_up() {
     if ch.dir_len == 0 {
         return;
     }
-    ch.dir_len = ch.dir[..ch.dir_len].iter().rposition(|b| *b == b'/').unwrap_or(0);
+    ch.dir_len = ch.dir[..ch.dir_len]
+        .iter()
+        .rposition(|b| *b == b'/')
+        .unwrap_or(0);
     ch.message = "";
     chooser_load();
 }
@@ -593,7 +596,11 @@ fn chooser_accept() {
         }
         let n = e.name().len().min(31);
         title[..n].copy_from_slice(&e.name()[..n]);
-        let rights = if ch.read_only { arena_desktop::filesd_wire::R_READ } else { R_DOC };
+        let rights = if ch.read_only {
+            arena_desktop::filesd_wire::R_READ
+        } else {
+            R_DOC
+        };
         match f.open_child_in(ch.dir_cap, e.name(), rights, head) {
             Ok((cap, _)) => chooser_finish(Some((cap, title))),
             Err(e) => ch.message = arena_desktop::files::describe_status(e),
@@ -606,7 +613,11 @@ fn chooser_accept() {
         return;
     }
     let exists = ch.entries[..ch.count].iter().any(|e| e.name() == name);
-    if exists && ch.entries[..ch.count].iter().any(|e| e.name() == name && e.is_dir()) {
+    if exists
+        && ch.entries[..ch.count]
+            .iter()
+            .any(|e| e.name() == name && e.is_dir())
+    {
         ch.message = "A FOLDER HAS THAT NAME";
         return;
     }
@@ -661,7 +672,10 @@ fn chooser_key(code: u16) {
             chooser_select(i)
         }
         259 => {
-            let i = ch.selected.map_or(0, |i| i + 1).min(ch.count.saturating_sub(1));
+            let i = ch
+                .selected
+                .map_or(0, |i| i + 1)
+                .min(ch.count.saturating_sub(1));
             chooser_select(i)
         }
         13 => match ch.selected.map(|i| ch.entries[i]) {
@@ -729,7 +743,11 @@ fn chooser_view() -> Option<arena_desktop::shell::ChooserView> {
         message: [0; 48],
     };
     let mut k = 0;
-    for part in [b"Home" as &[u8], if ch.dir_len > 0 { b"/" } else { b"" }, &ch.dir[..ch.dir_len]] {
+    for part in [
+        b"Home" as &[u8],
+        if ch.dir_len > 0 { b"/" } else { b"" },
+        &ch.dir[..ch.dir_len],
+    ] {
         let n = part.len().min(47 - k);
         v.place[k..k + n].copy_from_slice(&part[..n]);
         k += n;
@@ -737,7 +755,11 @@ fn chooser_view() -> Option<arena_desktop::shell::ChooserView> {
     let m = ch.message.as_bytes();
     let n = m.len().min(47);
     v.message[..n].copy_from_slice(&m[..n]);
-    for (row, e) in ch.entries[ch.top..ch.count].iter().take(rows_max).enumerate() {
+    for (row, e) in ch.entries[ch.top..ch.count]
+        .iter()
+        .take(rows_max)
+        .enumerate()
+    {
         let name = e.name();
         let room = if e.is_dir() { 30 } else { 31 };
         let n = name.len().min(room);
@@ -987,7 +1009,11 @@ fn launch_image(
             SYS_SPAWN,
             image,
             spec.as_ptr() as u64,
-            if diagnostics || home != CAP_NONE { 5 } else { 4 },
+            if diagnostics || home != CAP_NONE {
+                5
+            } else {
+                4
+            },
             CLOCK,
             BADGE_EXIT,
         )
@@ -1449,8 +1475,14 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             // belongs to the requesting session's own lineage.
             let offer = unsafe { core::mem::replace(&mut *(&raw mut OFFER), CAP_NONE) };
             let document = match unsafe { &*(&raw const AFS2) } {
-                Some(f) if offer != CAP_NONE && kind == 2 && session.files_head != CAP_NONE
-                    && f.same_lineage(session.files_head, offer) => offer,
+                Some(f)
+                    if offer != CAP_NONE
+                        && kind == 2
+                        && session.files_head != CAP_NONE
+                        && f.same_lineage(session.files_head, offer) =>
+                {
+                    offer
+                }
                 _ => CAP_NONE,
             };
             let r = launch(kind, path, document).map(|_| 0);
@@ -1639,7 +1671,11 @@ extern "C" fn main() -> ! {
                             // The trusted chooser is modal: presses go to it
                             // only; releases still reach the window policy so
                             // no key stays held (and repeats) behind it.
-                            input_wire::Frame::Key { code, pressed: true, .. } if modal => {
+                            input_wire::Frame::Key {
+                                code,
+                                pressed: true,
+                                ..
+                            } if modal => {
                                 chooser_key(code);
                                 Action::Changed
                             }
@@ -1730,10 +1766,10 @@ extern "C" fn main() -> ! {
                     }
                     Err(e) => status = e as u64,
                 }
-            } else if description.is_some_and(|d| {
-                d[0] == 12 && describe(USER_ROOT).is_some_and(|r| r[1] == d[1])
-            }) && arena_desktop::service_wire::Frame::decode(&bytes)
-                == Ok(arena_desktop::service_wire::Frame::Offer)
+            } else if description
+                .is_some_and(|d| d[0] == 12 && describe(USER_ROOT).is_some_and(|r| r[1] == d[1]))
+                && arena_desktop::service_wire::Frame::decode(&bytes)
+                    == Ok(arena_desktop::service_wire::Frame::Offer)
             {
                 // Keep the offered filesd capability for the next launch; it
                 // is used only for the session whose lineage holds it.
@@ -1899,7 +1935,10 @@ extern "C" fn main() -> ! {
                                             rects.rects()
                                         };
                                         publish_rects(
-                                            s.va + (reserve.shared_pages - TRANSIENT_PAGES - FILE_PAGES) * 4096,
+                                            s.va + (reserve.shared_pages
+                                                - TRANSIENT_PAGES
+                                                - FILE_PAGES)
+                                                * 4096,
                                             s.snapshot + reserve.surface_pages * 4096,
                                             pw,
                                             list,

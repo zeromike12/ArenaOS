@@ -20,9 +20,9 @@ pub mod service_wire;
 
 #[path = "../../abi.rs"]
 mod abi;
+pub mod files;
 #[path = "../../filesd_wire.rs"]
 pub mod filesd_wire;
-pub mod files;
 
 pub mod app_client;
 pub mod apps;
