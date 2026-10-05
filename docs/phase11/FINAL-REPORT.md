@@ -22,8 +22,33 @@ and demonstrated, what was found, and what was not met.
   real desktop pixel/input/process proof and the file-service and
   desktop-surface markers. The receipt is
   `33134367…b806 100/100`, and the log is `100-boot.log`.
-* **Archive:** `releases/checkpoints/phase11-complete/`. Its SHA-256 and
-  the independent extracted boot are recorded below and in `PROGRESS.md`.
+* **Archive:**
+  `releases/checkpoints/phase11-complete/arenaos-phase11-complete-qemu-x86_64.tar.gz`,
+  SHA-256 `5221aa5f3c9432e32309cd8ba715ddf138f7b386328374d1d04f6074c1aafc41`.
+  It holds:
+  * the EFI and ESP;
+  * firmware;
+  * the 72 MiB disk template;
+  * the standalone witnesses;
+  * the Phase-11 documents and ADRs 0071–0079;
+  * both logs;
+  * the RED evidence.
+* **Independent extracted boot:** the archive was extracted into a fresh
+  directory and booted with an isolated Python that saw only the
+  extracted files. It reported **EXTRACTED PHASE11 PIXELS PASS** on EFI
+  `33134367…b806`, with a correct EFI hash (`independent-extracted-boot.log`,
+  `extracted-evidence/`). On that one boot:
+  * filesd formatted AFS2 and imported AFS1;
+  * the desktop's file service and surface came up;
+  * real dock launches, an owned key raster, an exact title drag, close
+    and relaunch, with exact resource receipts;
+  * the desktop menu created a folder (read back from AFS2 on the host,
+    icon drawn);
+  * double-clicking it opened a real Files process there;
+  * Ctrl+Shift+N created a folder inside it (read back from AFS2);
+  * F8 retired Files;
+  * the network and console fixtures passed;
+  * the clean UEFI shutdown.
 * **Earlier attempts:** eight attempts before this one failed or were
   invalid. Each is recorded with its root cause in `PROGRESS.md`
   ("Qualification attempts"). None counts, and none was rerun until

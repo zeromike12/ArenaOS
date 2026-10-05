@@ -528,3 +528,15 @@ p50 as **at the target, not robust**.
    `33134367244674cbba85d24ff634d918b27688f4bb878b0209a6a58fd876b806`.
    The fresh stability loop from zero ran **100/100 fully green,
    fail = 0** (23:22–23:37 UTC). This is the qualified source.
+
+### phase11-complete
+
+`tools/phase11_checkpoint_bundle.py` ran on the qualified source
+`fd7f481`, with that suite log and that 100-boot log.
+
+* Archive SHA-256:
+  `5221aa5f3c9432e32309cd8ba715ddf138f7b386328374d1d04f6074c1aafc41`.
+* Independent extracted boot: **EXTRACTED PHASE11 PIXELS PASS**, EFI
+  `33134367…b806`. Receipt line:
+  `PHASE11 DESKTOP-MENU-FOLDER FILES-OPEN FILES-NEW-FOLDER FILES-CLOSE`.
+* Evidence: `releases/checkpoints/phase11-complete/`.
