@@ -97,6 +97,7 @@ def until(d, disk, predicate, what):
         if predicate(t):
             return t
         time.sleep(.15)
+    d.q.command('screendump', filename=str(arena_env.build_dir() / f'{LABEL}-failed.ppm'), format='ppm')
     raise AssertionError(what + ': ' + repr(sorted(tree(disk))))
 
 

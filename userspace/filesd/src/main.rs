@@ -937,12 +937,18 @@ extern "C" fn main() -> ! {
                 r.bytes.as_ptr() as u64,
             )
         };
-        if rr != 0 && r.cap != CAP_NONE {
-            // The caller is gone: the minted capability never left; retire it.
+        if r.cap != CAP_NONE {
+            // A reply carries a copy of the minted capability (IPC transfer
+            // copies): filesd's own slot is dropped either way, or its
+            // 64-slot space fills after a few dozen opens. The record stays
+            // live; the caller's copy names it by badge.
             unsafe {
                 syscall1(SYS_CAP_DESTROY, r.cap);
             }
-            release(r.minted);
+            if rr != 0 {
+                // The caller is gone: the capability never left; retire it.
+                release(r.minted);
+            }
         }
     }
 }

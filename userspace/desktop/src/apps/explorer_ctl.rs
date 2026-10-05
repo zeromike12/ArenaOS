@@ -1106,4 +1106,62 @@ mod tests {
         c.wheel(-1);
         let _ = key(&c);
     }
+
+    /// The guest workflow's opening at the guest window size (448x288).
+    #[test]
+    fn guest_sequence_on_the_default_window() {
+        let mut m = Mem::new();
+        for d in ["Desktop", "Documents", ".Trash"] {
+            m.mkdir(d.as_bytes()).unwrap();
+        }
+        for (f, data) in [
+            ("Documents/user-note", &b"Aa file manager"[..]),
+            ("Documents/user-full", b"ffff"),
+            ("Documents/user-bin", b"\x80binary"),
+        ] {
+            m.create(f.as_bytes()).unwrap();
+            m.write(f.as_bytes(), 0, data).unwrap();
+        }
+        let mut c = Box::new(Controller::new());
+        c.resize((448, 288));
+        c.start(&mut m, Path::of(b"Documents"));
+        let g = c.geometry();
+        let row = |i: i32| (g.content.x + 40, g.content.y + 22 + 20 * i + 10);
+        let place = |i: i32| (30, g.sidebar.y + 8 + 22 * i + 11);
+        let mut now = 0u64;
+        let mut click = |c: &mut Controller, m: &mut Mem, (x, y): (i32, i32)| {
+            now += 1_000_000;
+            c.pointer(m, x, y, 1, now);
+            c.pointer(m, x, y, 0, now);
+        };
+        c.chord(&mut m, u16::from(b'N'), MOD_CTRL | MOD_SHIFT, 0);
+        for k in b"Projects" {
+            c.key(&mut m, u16::from(*k), false, 0);
+        }
+        c.key(&mut m, 13, false, 0);
+        assert!(m.nodes.contains_key(&b"Documents/Projects"[..]));
+        click(&mut c, &mut m, row(3));
+        c.chord(&mut m, u16::from(b'c'), MOD_CTRL, 0);
+        let (x, y) = row(0);
+        c.pointer(&mut m, x, y, 1, 50_000_000);
+        c.pointer(&mut m, x, y, 0, 50_000_000);
+        c.pointer(&mut m, x, y, 1, 50_100_000);
+        c.pointer(&mut m, x, y, 0, 50_100_000);
+        assert_eq!(c.ex.path.bytes(), b"Documents/Projects");
+        c.chord(&mut m, u16::from(b'v'), MOD_CTRL, 0);
+        assert!(m.nodes.contains_key(&b"Documents/Projects/user-note"[..]));
+        c.chord(&mut m, 256, MOD_ALT, 0);
+        click(&mut c, &mut m, row(2));
+        c.chord(&mut m, u16::from(b'x'), MOD_CTRL, 0);
+        click(&mut c, &mut m, place(1));
+        c.chord(&mut m, u16::from(b'v'), MOD_CTRL, 0);
+        assert!(m.nodes.contains_key(&b"Desktop/user-full"[..]));
+        click(&mut c, &mut m, place(2));
+        assert_eq!(c.ex.path.bytes(), b"Documents");
+        click(&mut c, &mut m, row(1));
+        assert_eq!(c.ex.at(1).name(), b"user-bin");
+        assert!(c.ex.selection.contains(1), "{:?}", c.ex.selection);
+        c.key(&mut m, 262, false, 0);
+        assert!(m.nodes.contains_key(&b".Trash/user-bin"[..]), "{}", c.ex.status);
+    }
 }
