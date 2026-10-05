@@ -989,6 +989,7 @@ impl App {
         let item = match (self.kind, code as u8) {
             (apps::TERMINAL, b'l') => Some(0),
             (apps::EDITOR, b'n') => Some(0),
+            (apps::EDITOR, b'O') if shift => Some(4),
             (apps::EDITOR, b'o') => Some(1),
             (apps::EDITOR, b's') => Some(2),
             (apps::EDITOR, b'S') if shift => Some(3),

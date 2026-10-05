@@ -1307,6 +1307,48 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
         }
     }
 }
+/// The chooser requests (ADR-0077). Any live session with a window may ask
+/// the user: the request itself grants nothing, the user decides, and the
+/// grant lands in the session's own lineage. None: not a chooser frame.
+fn choice(index: usize, bytes: &mut [u8; 64]) -> Option<Result<u64, i64>> {
+    use arena_desktop::service_wire::Frame as S;
+    match S::decode(bytes).ok()? {
+        S::Choose {
+            save,
+            read_only,
+            name,
+        } => Some(chooser_open(index, save, read_only, name).map(|_| 0)),
+        S::TakeGrant => {
+            let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(index) };
+            if !s.grant_ready {
+                return Some(Err(-2));
+            }
+            s.grant_ready = false;
+            let granted = core::mem::replace(&mut s.grant, CAP_NONE);
+            let reply = if granted == CAP_NONE {
+                S::TakeGrant
+            } else {
+                S::Granted {
+                    save: s.grant_save,
+                    read_only: s.grant_read_only,
+                    name: s.grant_title,
+                }
+            };
+            match reply.encode() {
+                Ok(b) => {
+                    *bytes = b;
+                    unsafe { REPLY_CAP = granted };
+                    Some(Ok(0))
+                }
+                Err(_) => {
+                    destroy(granted);
+                    Some(Err(-2))
+                }
+            }
+        }
+        _ => None,
+    }
+}
 /// Function policy is based on held object/rights and provisioned scope.
 /// Caller-supplied startup kind, name, PID and window handle grant nothing.
 fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> {
@@ -1316,34 +1358,8 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
     };
     let session = unsafe { SESSIONS[index] };
     let request = S::decode(bytes).map_err(|_| -2)?;
-    match request {
-        S::Choose {
-            save,
-            read_only,
-            name,
-        } => return chooser_open(index, save, read_only, name).map(|_| 0),
-        S::TakeGrant => {
-            let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(index) };
-            if !s.grant_ready {
-                return Err(-2);
-            }
-            s.grant_ready = false;
-            let granted = core::mem::replace(&mut s.grant, CAP_NONE);
-            *bytes = if granted == CAP_NONE {
-                S::TakeGrant
-            } else {
-                S::Granted {
-                    save: s.grant_save,
-                    read_only: s.grant_read_only,
-                    name: s.grant_title,
-                }
-            }
-            .encode()
-            .map_err(|_| -2)?;
-            unsafe { REPLY_CAP = granted };
-            return Ok(0);
-        }
-        _ => {}
+    if let Some(r) = choice(index, bytes) {
+        return r;
     }
     let operation = match request {
         S::List { .. } => O::List,
@@ -1771,6 +1787,20 @@ extern "C" fn main() -> ! {
                         {
                             result = w as u64 | ((h as u64) << 32);
                             status = 0;
+                        }
+                        // Ordinary graphical sessions (signed applications
+                        // included) may ask the user through the chooser.
+                        if rights & RIGHTS_DESTROY == 0 {
+                            if let Some(r) = choice(i, &mut bytes) {
+                                match r {
+                                    Ok(v) => {
+                                        status = 0;
+                                        result = v;
+                                        dirty = true;
+                                    }
+                                    Err(e) => status = e as u64,
+                                }
+                            }
                         }
                         if let Ok(f) = Frame::decode(&bytes) {
                             let state = unsafe { &mut *(&raw mut WM) };
