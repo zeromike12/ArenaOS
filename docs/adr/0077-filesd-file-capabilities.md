@@ -88,6 +88,16 @@ application dies, the broker revokes the head it granted, and every
 capability the application derived goes stale with it. Record 1 cannot
 be revoked.
 
+**Placement (the powerbox rule).** `OPEN` may carry another record of this
+service, lent with the call. The new record then joins *that* record's
+lineage, with rights still `requested & called record`. The broker keeps
+each application's lineage head itself, with no rights, and never hands
+it out. It walks the user's chosen names through **its own** I/O page,
+on record 1, and places only the final record in the application's
+lineage. An application therefore never sees or influences the names
+the broker resolves. Its grant still counts against its quota, and the
+grant dies with the lineage.
+
 ### `SYS_ENDPOINT_BADGE` (51)
 
 `endpoint_badge(server_slot, cap_slot) -> badge`. It succeeds only when

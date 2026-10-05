@@ -227,17 +227,18 @@ fn revoke(i: usize) {
 }
 
 /// A new record and its badged capability (in filesd's own slot),
-/// derived from record `parent`.
-fn mint(parent: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
+/// derived from record `parent`, placed in the lineage of record `place`
+/// (normally `parent` itself).
+fn mint(parent: usize, place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
     // A record index whose generation is exhausted retires for good: a
     // badge is never valid twice.
     let i = (2..GRANTS)
         .find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
         .ok_or(S_FULL)?;
-    let lineage = if parent == 1 {
+    let lineage = if parent == 1 && place == 1 {
         i
     } else {
-        let l = usize::from(unsafe { GRANT[parent].lineage });
+        let l = usize::from(unsafe { GRANT[place].lineage });
         let held = (2..GRANTS)
             .filter(|j| unsafe { GRANT[*j].live && usize::from(GRANT[*j].lineage) == l })
             .count();
@@ -470,8 +471,21 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     Err(e) => return reply(status(e), 0),
                 }
             };
-            // Attenuation only: a child never has more than its parent.
-            match mint(i, object, req.rights & g.rights) {
+            // A lent record of this service places the new record in its
+            // lineage (the broker granting an application: it walks names
+            // in its own lineage and the grant is counted against, and
+            // revoked with, the application's). Rights still come only
+            // from the called record: attenuation only.
+            let place = if landed == CAP_NONE {
+                i
+            } else {
+                let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
+                match (b > 0).then(|| record(b as u32)).flatten() {
+                    Some(j) if j != 1 => j,
+                    _ => return reply(S_DENIED, 0),
+                }
+            };
+            match mint(i, place, object, req.rights & g.rights) {
                 Ok((slot, minted)) => Reply {
                     status: S_OK,
                     value: u64::from(typ),
