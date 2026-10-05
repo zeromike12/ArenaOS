@@ -290,3 +290,21 @@ Qualification disks: `stability_loop.sh` and `run-desktop.sh` boot 72 MiB
 disks, so filesd formats AFS2 and imports AFS1 each boot. The loop also
 requires the file service and the desktop surface to come online.
 
+
+## 11.9 — Measurements on the final image
+
+`tools/profile_desktop.py` (30 trials, TCG, same host as the 11.0 receipts;
+raw: `profile-11.9.json`):
+
+| Measure | Target | 11.0 | 11.9 |
+|---|---|---|---|
+| Pointer motion-to-photon p50 / p95 | p50 ≤ 6 ms | 12.3 / 15.2 ms | 10.6 / 13.9 ms |
+| Terminal key-to-photon p50 / p95 | ≤ 12 / ≤ 20 ms | 17.3 / 27.1 ms | 17.8 / 23.6 ms |
+| Compositor wakes/s, empty desktop | — | 1.06 | 0.97 |
+| Compositor wakes/s, six idle apps | ≤ 5 | 4.69 | 4.87 |
+| Static idle client wakes/s | 0 | 0 (Monitor 1.95) | 0 (Monitor 1.95) |
+| Title drag: compositor render + present per frame (mean) | p95 ≤ 12 ms | — | 12.9 + 8.2 ms |
+
+The idle criteria are met. The latency criteria are **not met**: pointer
+p50 (the host-side figure includes about 4.2 ms of screendump), key p50
+and p95, and the title-drag frame time.
