@@ -257,7 +257,8 @@ for i in $(seq 1 "$N"); do
     # Destructive fault/stall negatives live in the historical host suite.
     elif ! grep -aqF 'audited 22 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 25/25; twenty-sixth refused' "$SERIAL"; then
+    # ADR-0075 (11.3): twelve desktop clocks; the table is still exactly full.
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 31/31; thirty-second refused' "$SERIAL"; then
         why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"

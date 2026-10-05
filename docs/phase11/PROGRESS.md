@@ -308,3 +308,19 @@ raw: `profile-11.9.json`):
 The idle criteria are met. The latency criteria are **not met**: pointer
 p50 (the host-side figure includes about 4.2 ms of screendump), key p50
 and p95, and the title-drag frame time.
+
+### Qualification attempts
+
+1. Complete suite on clean `9976aff` (11:55–13:22 UTC): **ALL TESTS PASSED
+   (108 test suites)**. Shipping EFI from that tree:
+   `3da3ccd595ac4cade5da93a472d71a163f8a35cdd9b05d5b64b5bf2d8b50cae2`.
+2. Stability attempt 1 on that EFI: **FAIL at boot 1**, "full fixture
+   notification bound was not tested". The boot was healthy; the loop's
+   check still required `25/25` after ADR-0075 (11.3) raised the table to
+   31, while every other receipt already expects `31/31`. The suite does
+   not run the loop, so nothing caught it. The serial log is
+   `evidence/stability-attempt1-boot1-fail.log`. The attempt is invalid
+   and does not count. After the fix, a single boot passes every check,
+   including the new file-service and desktop-surface markers. Because a
+   tool changed, the complete suite reruns on the new commit before a new
+   100-boot attempt starts from zero.
