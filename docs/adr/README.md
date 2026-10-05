@@ -119,10 +119,11 @@ What this costs us.
 What this constrains or enables later; what would trigger revisiting.
 ```
 | [0071](0071-endpoint-bound-notifications-and-timer-quota.md) | Endpoint-bound notifications (one wait for IPC, timers and events) and a per-process timer quota | Accepted |
-| [0072](0072-direct-ipc-handoff.md) | Direct handoff to a server woken by a blocking caller | Accepted |
+| [0072](0072-direct-ipc-handoff.md) | Direct handoff to a server woken by a blocking caller; bounded reply handoff (handoff chain budget) | Accepted |
 | [0073](0073-keyed-partial-repaint-and-regional-publication.md) | Keyed partial client repaint and regional Damage publication | Accepted |
 | [0074](0074-badged-endpoint-capabilities.md) | Badged endpoint capabilities (server-minted, generation-safe object handles) | Accepted |
 | [0075](0075-variable-and-transient-surfaces.md) | Variable and transient surfaces; twelve desktop sessions (measured budgets) | Accepted |
 | [0076](0076-afs2-hierarchical-filesystem.md) | AFS2: hierarchical copy-on-write filesystem (crash-prefix proven, fail-closed) | Accepted |
 | [0077](0077-filesd-file-capabilities.md) | filesd: AFS2 file service and badged file capabilities (lineages, Rtc, endpoint_badge) | Accepted |
 | [0078](0078-explorer-and-desktop-surface.md) | Files explorer and desktop surface over capabilities (Trash records, desk in the broker, pointer modifiers) | Accepted |
+| [0079](0079-directory-watches.md) | Directory watches (held directory capability, exact object identity, bounded, lineage-scoped) | Accepted |

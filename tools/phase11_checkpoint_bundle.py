@@ -30,7 +30,7 @@ NAME = 'phase11-complete'
 SCRIPTS = ('phase11_archive_boot.py', 'phase10_archive_boot.py', 'check_phase10_pixels.py', 'qmp.py',
            'network_fixture.py', 'tcp_fixture.py', 'udp_dns_fixture.py', 'vcon.py')
 DOCS = ('docs/phase11/PLAN.md', 'docs/phase11/PROGRESS.md', 'docs/phase11/FINAL-REPORT.md') + tuple(
-    f'docs/adr/{p.name}' for p in sorted((ROOT / 'docs/adr').glob('007[1-8]-*.md')))
+    f'docs/adr/{p.name}' for p in sorted((ROOT / 'docs/adr').glob('007[1-9]-*.md')))
 # Host blocks of tools/run_tests.sh that count as suites besides test_m*.py.
 HOST_SUITES = 14
 REQUIRED = (
