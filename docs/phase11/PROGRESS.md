@@ -291,6 +291,74 @@ disks, so filesd formats AFS2 and imports AFS1 each boot. The loop also
 requires the file service and the desktop surface to come online.
 
 
+## 11.9 — Directory watches (ADR-0079)
+
+The accepted goals required directory change notification, and it had not
+been built. filesd now keeps bounded per-directory watches:
+
+* Authority comes from a held directory record with `R_LIST`, never from
+  a path.
+* The client lends a notification and names a badge bit.
+* The table is capped at 24 watches in all and 4 per lineage, and a
+  refusal happens before anything is kept.
+* A watch matches the exact AFS2 object id, generation included.
+* A rename signals both parents.
+* rmdir tells the removed directory's watchers it is gone.
+* A watch ends with its record: unwatch, release, revoke, or lineage
+  retirement (process death).
+
+The badge is a hint, and `OP_WATCHED` is the authoritative answer. Files
+re-lists the folder it shows from its watch, and the focus-time refresh
+is gone. The broker watches `/Users/user/Desktop`, and the one-second
+Desktop poll is removed.
+
+* **Host.** `filesd/src/watch.rs` has 4 tests. `test_watch_red.py` is RED
+  for stale generations (an index-only match) and for a missing
+  rename-parent notification, and restores source byte-exactly.
+* **Guest.** In `test_m11_watch.py`, Files is snapped left and unfocused
+  while the Terminal changes the folder. Files updates for:
+  * a create;
+  * a rename into the folder;
+  * a contents change;
+  * a rename out of the folder;
+  * removal of the watched folder (Files falls back to home).
+
+  Thirty folder switches never exhaust filesd. Closing Files ends its
+  watch with the lineage. The desktop shows a file the Terminal wrote,
+  with no poll and no click.
+
+A regression this caused, and its fix: the broker's Desktop watch record
+is one more permanent broker cap. That cap took the slack a launch
+reservation had been double-counting (the request's already-landed cap),
+so `test_m10_apps` refused the twelfth session (status −4, BUSY). The
+reservation now counts that cap once (6 free slots), and the twelfth
+session launches again. The broker cap peak is 61 = 24 + 3×12 + 1.
+
+## 11.9 — Latency investigation on the final feature set
+
+Each cost was found with the perf probes before anything was changed:
+
+| Finding | Evidence | Fix |
+|---|---|---|
+| Every publication redrew its whole window on the next frame | Monitor: 132 kpx broker render twice a second for a 31-pixel change; `frame()` compared the per-frame `regions` bookkeeping | Regions stripped from frame equality; host test, RED on the old code |
+| Large dirty bands were published whole | Monitor published 118k px per tick (the band exceeded the scratch) | Row-chunked tightening; about 31 px per tick |
+| Drag compose drew every window under the top one | 4.0 ms compose per drag frame | Occlusion under the topmost revealed window: 1.9 ms |
+| One display IPC per rectangle | Present dominated small frames | `PresentRects`: four rectangles per call, all checked before any copy |
+| A resource receipt on the serial line after every input frame | 3.8 ms per pointer frame, plus the console driver mirroring it | Logged only when a counter changes; lifecycle receipts still always log |
+| The broker waited behind the whole ready ring after every display reply | Cursor PRESENT 3.5 ms for a 0.1 ms copy; a scheduler trace showed the ring ahead of the broker | Bounded reply handoff (ADR-0072 amendment; m11 test plus RED) |
+| A key's release was handled before the application saw the key | Key-to-poll 4.5 ms; inputd's release ran ahead of the woken Terminal | Clients are woken before the reply (causal rule) |
+| A cursor-sized repaint laid out the emblem, bar and dock | Host compose of a 14×22 clip: 30 µs, 77% in the background layer | Layers skip boxes that miss the clip (0.7 µs) |
+| An empty poll after each event | One extra round trip per key | Poll reports whether more events are queued |
+
+Not changed, with evidence:
+* The GOP copy is already `rep movsq`. The remaining drag present cost
+  (about 6 ms for 100 kpx) is QEMU's emulated VRAM writes, roughly
+  60 ns/pixel.
+* A null syscall costs about 21 µs under TCG. The broker spends about
+  ten per request.
+* The host screendump stalls the guest for 4.3–4.7 ms and sits inside
+  every host motion- and key-to-photon sample.
+
 ## 11.9 — Measurements on the final image
 
 `tools/profile_desktop.py` (30 trials, TCG, same host as the 11.0 receipts;

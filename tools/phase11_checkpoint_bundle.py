@@ -27,7 +27,8 @@ from pyfatfs.PyFatFS import PyFatFS
 ROOT = arena_env.REPO_ROOT
 BUILD = arena_env.build_dir()
 NAME = 'phase11-complete'
-SCRIPTS = ('phase11_archive_boot.py', 'phase10_archive_boot.py', 'check_phase10_pixels.py', 'qmp.py',
+SCRIPTS = ('phase11_archive_boot.py', 'phase10_archive_boot.py', 'check_phase10_pixels.py',
+           'check_phase11_files.py', 'afs2.py', 'qmp.py',
            'network_fixture.py', 'tcp_fixture.py', 'udp_dns_fixture.py', 'vcon.py')
 DOCS = ('docs/phase11/PLAN.md', 'docs/phase11/PROGRESS.md', 'docs/phase11/FINAL-REPORT.md') + tuple(
     f'docs/adr/{p.name}' for p in sorted((ROOT / 'docs/adr').glob('007[1-9]-*.md')))
@@ -104,8 +105,11 @@ variables and the 72 MiB disk template; on that boot filesd formats the
 AFS2 region and imports AFS1. It binds the included virtual-network test
 peers, launches real graphical applications, injects keyboard and tablet
 input, checks exact owned raster movement and process retirement, requires
-the file service and the desktop surface online, then shuts down through
-the serial shell. Set ARENA_QEMU to a QEMU invocation if it is not on PATH.
+the file service and the desktop surface online, then (same boot) creates a
+folder from the desktop menu, opens it in a real Files process by
+double-clicking its icon, creates a folder inside it with Shift+N, closes
+Files with F8, and reads both folders back from the disk's AFS2 region on
+the host. It then shuts down through the serial shell. Set ARENA_QEMU to a QEMU invocation if it is not on PATH.
 
 The boot fixture still requires the virtual keyboard input `arena` before
 the desktop starts (the historical inputd service mode); the script types it.

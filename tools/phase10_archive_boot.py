@@ -69,7 +69,8 @@ def type_historical_input_fixture(sock: Path, serial: Path) -> None:
         conn.close()
 
 
-def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE10') -> None:
+def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE10',
+         after=None, launches: int = 2) -> None:
     sha = verified_inputs(qualified)
     with tempfile.TemporaryDirectory(prefix='arena-phase10-extracted-') as tmp:
         work = Path(tmp)
@@ -114,6 +115,10 @@ def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE1
                                          stdout=serial_fd, stderr=err_fd)
                 type_historical_input_fixture(sock, serial)
                 capture(sock, serial, image, receipt, 60)
+                if after is not None:
+                    # A later phase's witness on the same live desktop.
+                    proof = after(sock, serial, image, scratch)
+                    receipt.write_text(receipt.read_text() + f'{label} {proof}\n')
                 if guest.stdin is None:
                     raise RuntimeError('no QEMU serial feeder')
                 # Graphical input is routed independently of the serial shell.
@@ -128,8 +133,8 @@ def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE1
                     or 'contest: hello from ArenaOS' not in console_log.read_text(errors='replace')
                     # ADR-0075: twelve desktop clocks; the table is still exactly full.
                     or 'servicemgr: full fixture notification budget 31/31; thirty-second refused' not in text
-                    or text.count('[desktop] real application spawned;') != 2
-                    or text.count('[desktop] application retired:') != 2
+                    or text.count('[desktop] real application spawned;') != launches
+                    or text.count('[desktop] application retired:') != launches
                     or 'halting via UEFI ResetSystem(shutdown)' not in text
                     or dns_log.read_text().count('DNS_FIXTURE_QUERY ') != 3
                     or 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' not in tcp_log.read_text()

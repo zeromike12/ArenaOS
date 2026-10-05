@@ -21,7 +21,11 @@ def capture(sock,serial,image,receipt,timeout):
             if predicate():return
             time.sleep(.04)
         raise TimeoutError(message)
-    def counts():return [tuple(map(int,m)) for m in COUNTERS.findall(log())]
+    # Receipts after the boot's transient processes ended (the permission
+    # app is reaped last); the desktop may present before that.
+    SETTLED=b'servicemgr: permission app reaped through held Process cap'
+    def counts():
+        text=log();return [tuple(map(int,m)) for m in COUNTERS.findall(text[text.find(SETTLED):])] if SETTLED in text else []
     wait(lambda:READY in log() and b'arena>' in log() and b'servicemgr: production netstackd READY pid' in log() and counts(),'desktop/native snapshot/boot completion absent')
     base=counts()[0];conn=qmp.Qmp(str(sock),connect_timeout_s=4)
     def crop(p,x,y,w,h):return b''.join(p[((y+r)*800+x)*3:((y+r)*800+x+w)*3] for r in range(h))
