@@ -5,6 +5,7 @@ pub mod model;
 pub mod perf;
 
 pub mod compose;
+pub mod desk;
 pub mod shell;
 
 pub mod wire;

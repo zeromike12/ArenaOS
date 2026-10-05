@@ -241,9 +241,12 @@ fn revoke(i: usize) {
 fn mint(place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
     // A record index whose generation is exhausted retires for good: a
     // badge is never valid twice.
-    let i = (2..GRANTS)
-        .find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
-        .ok_or(S_FULL)?;
+    let Some(i) =
+        (2..GRANTS).find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
+    else {
+        log(b"filesd: refused: every capability record is in use\n");
+        return Err(S_FULL);
+    };
     let lineage = if place == 0 {
         i
     } else {
@@ -252,6 +255,9 @@ fn mint(place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
             .filter(|j| unsafe { GRANT[*j].live && usize::from(GRANT[*j].lineage) == l })
             .count();
         if held >= LINEAGE_QUOTA {
+            log(b"filesd: refused: lineage quota reached (");
+            log_num(held as u64);
+            log(b" live records)\n");
             return Err(S_FULL);
         }
         l
@@ -264,13 +270,15 @@ fn mint(place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
             SYS_ENDPOINT_MINT,
             SLOT_EP,
             u64::from(badge),
-            RIGHTS_WRITE | RIGHTS_COPY,
+            // DESTROY: filesd drops its own copy after replying.
+            RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
             0,
             0,
             0,
         )
     };
     if slot < 0 {
+        log(b"filesd: refused: own capability space full\n");
         return Err(S_FULL);
     }
     *g = Grant {
@@ -350,10 +358,14 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
     let has = |r: u8| g.rights & r == r;
     let need_io = !matches!(
         req.op,
-        OP_SESSION | OP_RELEASE | OP_STATFS | OP_REVOKE | OP_TRUNCATE | OP_SAME_LINEAGE
+        OP_SESSION
+            | OP_RELEASE
+            | OP_STATFS
+            | OP_REVOKE
+            | OP_TRUNCATE
+            | OP_SAME_LINEAGE
             | OP_NEW_LINEAGE
-    )
-        && !(req.op == OP_STAT && req.name_len == 0)
+    ) && !(req.op == OP_STAT && req.name_len == 0)
         && !(req.op == OP_OPEN && req.name_len == 0);
     if need_io && g.io == 0 {
         return reply(S_NO_SESSION, 0);
@@ -746,7 +758,11 @@ fn format_and_import() -> afs::Result<(u64, u64)> {
         let mut name = [0u8; 32];
         name[..len].copy_from_slice(&b[16..16 + len]);
         cursor = next;
-        let to = if name.starts_with(b"user-") { docs } else { imported };
+        let to = if name.starts_with(b"user-") {
+            docs
+        } else {
+            imported
+        };
         let file = vol.create(to, &name[..len], wall)?;
         let mut open = [0u8; 64];
         open[..32].copy_from_slice(&name);
@@ -761,7 +777,9 @@ fn format_and_import() -> afs::Result<(u64, u64)> {
             if n == 0 || n > want {
                 return Err(E::Io);
             }
-            unsafe { core::ptr::copy_nonoverlapping(FRAME as *const u8, DATA.as_mut_ptr(), n as usize) };
+            unsafe {
+                core::ptr::copy_nonoverlapping(FRAME as *const u8, DATA.as_mut_ptr(), n as usize)
+            };
             vol.write(file, off, unsafe { &DATA[..n as usize] }, wall)?;
             off += n;
         }
@@ -870,7 +888,11 @@ fn bring_up() -> bool {
     log(b" blocks free, ");
     log_num(u64::from(s.objects));
     log(b" objects; wall clock ");
-    log(if wall_us() == 0 { b"unknown" } else { b"from RTC" });
+    log(if wall_us() == 0 {
+        b"unknown"
+    } else {
+        b"from RTC"
+    });
     log(b"\n");
     true
 }
@@ -890,7 +912,17 @@ extern "C" fn main() -> ! {
         }
         FRAME = win as u64;
         let mut seconds = 0u64;
-        if syscall6(SYS_RTC_READ, SLOT_RTC, (&raw mut seconds) as u64, 0, 0, 0, 0) == 0 && seconds != 0 {
+        if syscall6(
+            SYS_RTC_READ,
+            SLOT_RTC,
+            (&raw mut seconds) as u64,
+            0,
+            0,
+            0,
+            0,
+        ) == 0
+            && seconds != 0
+        {
             WALL_BASE_US = seconds * 1_000_000;
             MONO_BASE_US = mono_us();
         }

@@ -59,3 +59,20 @@ serve-side mint check in turn and requires the guest to report the failure.
 
 `filesd` (Phase 11.6) serves file and directory handles as badged caps on
 one endpoint; per-handle rights live in its table, keyed by badge.
+
+## Amendment (Phase 11.8): a minted badged cap may carry DESTROY
+
+IPC transfer copies a capability, so a server that replies with a freshly
+minted badged cap keeps its own copy. With mint rights limited to WRITE and
+optional COPY, the kernel refused to destroy that copy (no DESTROY right,
+not IPC-landed): `filesd` held one slot per OPEN for ever and its 64-slot
+space filled after a few dozen opens; every later mint failed and the
+explorer reported "Too many open items". Found by
+`tools/test_m11_explorer.py` at its first Delete.
+
+Mint rights are now WRITE with optional COPY and DESTROY. DESTROY only lets
+a holder empty its own slot; it names no endpoint authority (a badged cap
+still never carries READ and never serves). `filesd` mints WRITE | COPY |
+DESTROY and destroys its copy after every reply. `m11:badged_endpoint` now
+also proves that a cap minted without DESTROY cannot be destroyed by its
+minter and that one minted with DESTROY can.

@@ -1162,6 +1162,10 @@ mod tests {
         assert_eq!(c.ex.at(1).name(), b"user-bin");
         assert!(c.ex.selection.contains(1), "{:?}", c.ex.selection);
         c.key(&mut m, 262, false, 0);
-        assert!(m.nodes.contains_key(&b".Trash/user-bin"[..]), "{}", c.ex.status);
+        assert!(
+            m.nodes.contains_key(&b".Trash/user-bin"[..]),
+            "{}",
+            c.ex.status
+        );
     }
 }

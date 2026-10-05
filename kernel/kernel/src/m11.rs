@@ -456,6 +456,17 @@ fn test_badged_endpoint() -> Res {
     if cap::read(server, server_badged)?.rights & R != 0 {
         return Err("a badged cap carries READ");
     }
+    // A server drops the copy it keeps of a cap it replied with only when
+    // it minted that cap with DESTROY (Phase 11.8: filesd's own space
+    // filled after a few dozen opens without it).
+    if cap::destroy(server, server_badged).is_ok() {
+        return Err("a badged cap minted without DESTROY was destroyed");
+    }
+    let droppable = cap::mint_badged(server, 0, 0x0D0D, W | C | cap::RIGHTS_DESTROY)?;
+    cap::destroy(server, droppable)?;
+    if cap::read(server, droppable).is_ok() {
+        return Err("a badged cap minted with DESTROY was not destroyed");
+    }
     if cap::serves_endpoint(client, eid) {
         return Err("a client holding only badged/WRITE caps counts as a server");
     }

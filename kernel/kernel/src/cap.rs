@@ -374,8 +374,11 @@ pub fn mint_badged(pid: u64, slot: usize, badge: u32, rights: u32) -> Result<usi
     if badge == 0 {
         return Err("mint: badge 0 is reserved for unbadged endpoints");
     }
-    if rights & RIGHTS_WRITE == 0 || rights & !(RIGHTS_WRITE | RIGHTS_COPY) != 0 {
-        return Err("mint: badged rights must be WRITE with optional COPY");
+    // DESTROY only lets a holder empty its own slot (ADR-0074 amendment):
+    // without it a server could never drop the copy it keeps of each cap it
+    // minted and replied with (IPC transfer copies), and its space fills.
+    if rights & RIGHTS_WRITE == 0 || rights & !(RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY) != 0 {
+        return Err("mint: badged rights must be WRITE with optional COPY and DESTROY");
     }
     let src = read(pid, slot)?;
     let CapObj::Endpoint { eid } = src.obj else {

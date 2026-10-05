@@ -712,9 +712,7 @@ extern "C" fn syscall_dispatch(
         SYS_ENDPOINT_MINT if [a3, a4, a5] == [0; 3] => sys_endpoint_mint(a0, a1, a2) as u64,
         SYS_IPC_RECV_BADGED if a5 == 0 => sys_ipc_recv_badged(a0, a1, a2, a3, a4) as u64,
         SYS_RTC_READ if [a2, a3, a4, a5] == [0; 4] => sys_rtc_read(a0, a1) as u64,
-        SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => {
-            sys_endpoint_badge(a0, a1) as u64
-        }
+        SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => sys_endpoint_badge(a0, a1) as u64,
         SYS_SHARED_PAGES if [a1, a2, a3, a4, a5] == [0; 5] => sys_shared_pages(a0) as u64,
         _ => {
             // SAFETY: as above.
