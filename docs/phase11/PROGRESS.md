@@ -476,3 +476,25 @@ p50 as **at the target, not robust**.
    suite's clean-source check refused the next start
    (`QUALIFICATION SOURCE CLEAN: no`), and the worktree was reset before
    any run counted.
+6. Complete suite on clean `3eb1344`: **FAIL**, `test_m10_multi_red`.
+   Its `cancel` control (checked replies no longer consume a Cancelled
+   tombstone) fired: `packaged: reply refused`, packaged failed closed,
+   and the cut-over never completed. The oracle, however, required the
+   downstream text `SELECTTEST refused`.
+
+   A Cancelled tombstone appears when a signed child is destroyed while
+   packaged serves its call. A GREEN cut-over boot destroys about 33
+   children mid-call, across the select and the upgrade phases. Which of
+   them lands on a delivered call depends on scheduling. Before the reply
+   handoff it was a select call. On this kernel it was an upgrade call,
+   and the cut-over stalled instead of refusing SELECTTEST.
+
+   * GREEN `test_m85_resources` passed twice on this kernel.
+   * The `cancel` control now asserts its mechanism: a caller destroyed
+     mid-call, packaged's checked reply refused, the run failed. The
+     `quota` control keeps its exact refusal.
+   * `test_m10_multi_red` then passed (both RED, exact GREEN restore).
+
+   The run was stopped and does not count. The worktree had been left
+   with another RED mutant (`servicemgr/src/package.rs`) by the
+   interrupted run, and was reset before the next start.

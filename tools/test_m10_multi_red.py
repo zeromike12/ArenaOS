@@ -33,8 +33,20 @@ def main():
             try:
                 rc,log=fixture(f'm10-multi-{label}-red')
                 serial=(BUILD/'serial-m85-live-cutover-cutover.log').read_text()
-                assert rc!=0 and 'SELECTTEST refused' in serial,(label,rc,log[-500:])
-                if label=='cancel':assert 'packaged: reply refused' in serial
+                if label=='quota':
+                    assert rc!=0 and 'SELECTTEST refused' in serial,(label,rc,log[-500:])
+                else:
+                    # The trigger is a signed child destroyed while packaged
+                    # serves its call (the kernel leaves a Cancelled
+                    # tombstone). Which of the fixture's ~33 such kills lands
+                    # on a delivered call depends on scheduling, so the
+                    # downstream symptom differs (SELECTTEST refusal, or the
+                    # upgrade never completing); the mechanism does not:
+                    # packaged's checked reply is refused instead of
+                    # consuming the tombstone, packaged fails closed and the
+                    # cutover does not complete.
+                    assert rc!=0 and 'packaged: reply refused' in serial,(label,rc,log[-500:])
+                    assert 'abandoned caller slot' in serial,(label,'no caller destroyed mid-call')
                 print(f'[m10-multi-red] production {label} failed actual signed multi-child lifecycle PASS',flush=True)
             finally:path.write_bytes(sources[path])
         mtest.build('m10-multi-restored')
