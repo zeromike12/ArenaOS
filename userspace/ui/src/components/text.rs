@@ -1,18 +1,19 @@
-//! Typography on the Arena-owned 5x7 bitmap face.
+//! Typography on the two Arena-owned bitmap faces.
 //!
-//! Hierarchy comes only from what the renderer really has: integer scale,
-//! case, tracking, double-striking (one-pixel horizontal emboldening),
-//! colour and placement. No other weights, sizes or fonts exist.
+//! Body and Display use the 5x7 face on its fixed grid (the terminal and
+//! editor depend on the grid). Strong and Caption use Arena Sans 13, the
+//! proportional face (Phase 11.7): its capitals sit in the 5x7 box (their
+//! art starts one row above it) so every layout keeps its baselines.
 use crate::metrics as m;
-use arena_gfxkit::Canvas;
+use arena_gfxkit::{Canvas, measure13};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Style {
     /// 5x7, advance 6. Running text, values, console and editor text.
     Body,
-    /// Double-struck 6x7, advance 7. Window titles, names, emphasis.
+    /// Arena Sans 13 bold. Window titles, names, emphasis.
     Strong,
-    /// Upper-case, advance 7. Section labels, status lines, eyebrows.
+    /// Arena Sans 13, upper-case. Section labels, status lines, eyebrows.
     Caption,
     /// Scale 2, advance 12. Page titles and primary figures.
     Display,
@@ -35,17 +36,31 @@ pub const fn height(style: Style) -> i32 {
 
 /// Inked width of `s` (no trailing inter-glyph gap).
 pub fn measure(s: &str, style: Style) -> i32 {
-    let n = s.len() as i32;
-    if n == 0 {
-        return 0;
+    match style {
+        Style::Strong => measure13(s, true),
+        Style::Caption => {
+            let mut w = 0;
+            let mut buf = [0u8; 4];
+            for (i, ch) in s.chars().enumerate() {
+                let up = ch.to_ascii_uppercase();
+                w += measure13(up.encode_utf8(&mut buf), false) + i32::from(i != 0);
+            }
+            w
+        }
+        _ => {
+            let n = s.len() as i32;
+            if n == 0 {
+                return 0;
+            }
+            let gap = if style == Style::Display { 2 } else { 1 };
+            n * advance(style) - gap
+        }
     }
-    let gap = match style {
-        Style::Body | Style::Caption => 1,
-        Style::Strong => 0,
-        Style::Display => 2,
-    };
-    n * advance(style) - gap
 }
+
+/// Arena Sans capitals are 9 rows from art row 0; the 5x7 box starts 2
+/// rows lower (cell row 1 plus one row).
+const SANS_RAISE: i32 = 2;
 
 /// Draws `s` and returns the x just after its last advance.
 pub fn text(c: &mut Canvas<'_>, x: i32, y: i32, s: &str, style: Style, color: u32) -> i32 {
@@ -71,29 +86,55 @@ pub fn text(c: &mut Canvas<'_>, x: i32, y: i32, s: &str, style: Style, color: u3
                 }
             }
         }
-        Style::Strong | Style::Caption => {
-            for (i, b) in s.bytes().enumerate() {
-                let b = if style == Style::Caption {
-                    b.to_ascii_uppercase()
-                } else {
-                    b
-                };
-                let glyph = [b];
-                if let Ok(g) = core::str::from_utf8(&glyph) {
-                    let gx = x + i as i32 * m::TRACKED_ADVANCE;
-                    let _ = c.text_scaled(gx, y, g, color, 1);
-                    if style == Style::Strong {
-                        let _ = c.text_scaled(gx + 1, y, g, color, 1);
-                    }
+        Style::Strong => {
+            let _ = c.text13(x, y - SANS_RAISE, s, color, true);
+        }
+        Style::Caption => {
+            // Upper-cased in bounded chunks (no allocation).
+            let mut pen = x;
+            let mut buf = [0u8; 64];
+            let mut n = 0;
+            let flush = |c: &mut Canvas<'_>, buf: &[u8], pen: &mut i32| {
+                if let Ok(part) = core::str::from_utf8(buf) {
+                    let _ = c.text13(*pen, y - SANS_RAISE, part, color, false);
+                    *pen += measure13(part, false) + 1;
                 }
+            };
+            for ch in s.chars() {
+                let up = ch.to_ascii_uppercase();
+                if n + up.len_utf8() > buf.len() {
+                    flush(c, &buf[..n], &mut pen);
+                    n = 0;
+                }
+                up.encode_utf8(&mut buf[n..]);
+                n += up.len_utf8();
             }
+            flush(c, &buf[..n], &mut pen);
         }
     }
-    x + s.len() as i32 * advance(style)
+    match style {
+        Style::Strong | Style::Caption => x + measure(s, style) + 1,
+        _ => x + s.len() as i32 * advance(style),
+    }
 }
 
 /// Longest prefix of `s` that fits `width`, and whether it was shortened.
 pub fn fit(s: &str, style: Style, width: i32) -> (&str, bool) {
+    if matches!(style, Style::Strong | Style::Caption) {
+        if measure(s, style) <= width {
+            return (s, false);
+        }
+        let room = width - measure("..", style) - 1;
+        let mut end = 0;
+        for (i, ch) in s.char_indices() {
+            let next = i + ch.len_utf8();
+            if measure(&s[..next], style) > room {
+                break;
+            }
+            end = next;
+        }
+        return (&s[..end], true);
+    }
     let max = (width.max(0) / advance(style)) as usize;
     if s.len() <= max {
         return (s, false);

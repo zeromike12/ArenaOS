@@ -527,7 +527,7 @@ pub fn settings(canvas: &mut Canvas<'_>, dark: bool, motion: bool, display: (u16
         l.APPEARANCE.width as i32 - 2 * m::L,
         t.divider,
     );
-    fact(canvas, 226, "Type", "ArenaOS 5x7 bitmap", t);
+    fact(canvas, 226, "Type", "Arena Sans 13, 5x7 grid", t);
 }
 
 pub fn file_row(canvas: &mut Canvas<'_>, row: usize, name: &[u8], selected: bool, t: Theme) {

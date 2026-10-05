@@ -340,6 +340,9 @@ mod tests {
         assert!(Frame::Launch { kind: 1, path }.encode().is_err());
         path[3] = b's';
         path[31] = b'x';
-        assert!(Frame::Launch { kind: 1, path }.encode().is_err(), "no terminator");
+        assert!(
+            Frame::Launch { kind: 1, path }.encode().is_err(),
+            "no terminator"
+        );
     }
 }

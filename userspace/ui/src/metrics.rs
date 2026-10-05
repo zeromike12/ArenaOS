@@ -14,7 +14,8 @@ pub const L: i32 = 12;
 pub const XL: i32 = 16;
 pub const XXL: i32 = 24;
 
-// Typography: the Arena-owned 5x7 bitmap face at integer scales only.
+// Typography: the Arena-owned 5x7 grid face at integer scales (Body,
+// Display) and the proportional Arena Sans 13 (Strong, Caption; Phase 11.7).
 pub const FONT_SCALE: u8 = 1;
 /// Display style (page titles, primary figures).
 pub const TITLE_SCALE: u8 = 2;

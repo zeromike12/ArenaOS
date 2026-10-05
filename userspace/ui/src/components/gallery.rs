@@ -49,9 +49,9 @@ pub fn gallery(c: &mut Canvas<'_>, t: Theme) {
         12,
         48,
         if dark {
-            "Ink palette / 5x7 type / 2px grid"
+            "Ink palette / Arena Sans + 5x7 / 2px grid"
         } else {
-            "Paper palette / 5x7 type / 2px grid"
+            "Paper palette / Arena Sans + 5x7 / 2px grid"
         },
         Style::Body,
         t.secondary,
