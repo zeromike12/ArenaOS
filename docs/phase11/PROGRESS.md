@@ -461,3 +461,18 @@ p50 as **at the target, not robust**.
    * `check_phase10_pixels`, which every stability boot runs.
 
    A real leak still fails both. The run was stopped and does not count.
+5. Complete suite on clean `4ebcf52`: **FAIL**, `test_m10_service_death`,
+   through its green `test_m10_boundaries` run: "launcher did not create
+   three actual processes". It is the same race as attempt 4's base. The
+   first receipt predated the permission app's reaping, so after three
+   launches the count was base − 2 + 3. Attempts 4 and 5 had fixed it one
+   oracle at a time. It is now fixed at the root:
+   `test_m10_apps.receipts()` keeps only receipts logged after the reap,
+   and every desktop receipt oracle uses it (`099904c`). The run was
+   stopped and does not count.
+
+   One more thing found while stopping it: a RED mutant interrupted
+   mid-control had left `MAX_DYNAMIC_CHILDREN = 1` in the worktree. The
+   suite's clean-source check refused the next start
+   (`QUALIFICATION SOURCE CLEAN: no`), and the worktree was reset before
+   any run counted.
