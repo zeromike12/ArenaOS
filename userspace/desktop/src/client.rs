@@ -16,12 +16,15 @@ pub struct Client {
     pub appearance: core::cell::Cell<u8>,
     pub width: usize,
     pub height: usize,
-    /// Pages of the session reservation (ADR-0075): the last
-    /// `TRANSIENT_PAGES` hold the transient surface.
+    /// Pages of the session reservation (ADR-0075): the I/O page, the main
+    /// surface, `TRANSIENT_PAGES` of transient surface, then `FILE_PAGES`.
     pages: usize,
 }
-/// Pages of the bounded transient surface at the end of the reservation.
+/// Pages of the bounded transient surface, after the main surface.
 pub const TRANSIENT_PAGES: usize = TRANSIENT_MAX_PIXELS * 4 / 4096;
+/// The last page of the reservation: this client's filesd I/O page
+/// (ADR-0077). The broker never reads it as pixels.
+pub const FILE_PAGES: usize = 1;
 /// A live transient surface (menu, tooltip, dialog) of this client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Transient {
@@ -94,7 +97,8 @@ impl Client {
         };
         if rc != 0
             || bound[0] == 0
-            || bound[1] * 4096 < (PIXEL_OFFSET + width * height * 4 + TRANSIENT_PAGES * 4096) as u64
+            || bound[1] * 4096
+                < (PIXEL_OFFSET + width * height * 4 + (TRANSIENT_PAGES + FILE_PAGES) * 4096) as u64
         {
             return Err(-2);
         }
@@ -130,10 +134,15 @@ impl Client {
             pages: bound[1] as usize,
         })
     }
+    /// Page index (within the region) and address of the filesd I/O page.
+    pub fn file_page(&self) -> (u64, u64) {
+        let page = self.pages - FILE_PAGES;
+        (page as u64, self.io as u64)
+    }
     /// Main-surface pixels the reservation holds (the largest surface the
     /// window policy can configure fits in it).
     pub fn capacity(&self) -> usize {
-        (self.pages - 1 - TRANSIENT_PAGES) * 1024
+        (self.pages - 1 - TRANSIENT_PAGES - FILE_PAGES) * 1024
     }
     /// Declare that this client re-lays out to any size of at least this.
     pub fn set_resizable(&self, min_width: u16, min_height: u16) -> Result<(), i64> {
@@ -194,7 +203,7 @@ impl Client {
         if echo != f || out[1] == 0 {
             return Err(-2);
         }
-        let base = self.io as usize + (self.pages - TRANSIENT_PAGES) * 4096;
+        let base = self.io as usize + (self.pages - TRANSIENT_PAGES - FILE_PAGES) * 4096;
         Ok(Transient {
             handle: out[1],
             pixels: base as *mut u32,

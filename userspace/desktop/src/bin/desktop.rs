@@ -24,6 +24,8 @@ const POOL: u64 = 3;
 const CLOCK: u64 = 4;
 const CALL_SIDE: u64 = 5;
 const APPLICATION: u64 = 6;
+/// filesd's /Users/user record (ADR-0077), minted by the kernel.
+const USER_ROOT: u64 = 20;
 const PIXEL_OFFSET: usize = 4096;
 const LIMIT: usize = wm::MAX_WINDOWS;
 /// Capability slots in the kernel table (ADR-0075).
@@ -31,6 +33,8 @@ const CAP_SLOTS: u64 = 64;
 /// Pages of one bounded transient surface (ADR-0075); the final pages of a
 /// session's shared reservation and of its private snapshot.
 const TRANSIENT_PAGES: u64 = (wm::TRANSIENT_MAX_PIXELS * 4 / 4096) as u64;
+/// The session's filesd I/O page, last in the reservation (ADR-0077).
+const FILE_PAGES: u64 = arena_desktop::client::FILE_PAGES as u64;
 /// Per-session memory, fixed for the screen at startup (ADR-0075): every
 /// session can take any size up to the work area (maximize) without
 /// reallocation, so a resize never changes which memory backs a session.
@@ -38,7 +42,8 @@ const TRANSIENT_PAGES: u64 = (wm::TRANSIENT_MAX_PIXELS * 4 / 4096) as u64;
 struct Reserve {
     /// Main surface pages (work area, rounded up).
     surface_pages: u64,
-    /// Shared region: I/O page + main surface + transient surface.
+    /// Shared region: I/O page + main surface + transient surface + the
+    /// client's filesd page.
     shared_pages: u64,
     /// Private snapshot region: main surface + transient surface.
     snapshot_pages: u64,
@@ -96,6 +101,9 @@ struct Session {
     /// Size of the published main raster (Phase 11.3).
     surface: (u16, u16),
     popup: PopupState,
+    /// Head of this session's filesd lineage (held by the broker only, no
+    /// rights; revoking it retires every file capability of the session).
+    files_head: u64,
 }
 const EMPTY: Session = Session {
     region: CAP_NONE,
@@ -120,6 +128,7 @@ const EMPTY: Session = Session {
     snapshot: 0,
     surface: (0, 0),
     popup: NO_POPUP,
+    files_head: CAP_NONE,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -127,6 +136,8 @@ static mut PREFS: arena_desktop::preferences::Preferences =
         motion: true,
     };
 static mut FILES: Option<arena_desktop::fs_backend::Fs> = None;
+/// The broker's own filesd session (None = AFS2 offline or absent).
+static mut AFS2: Option<arena_desktop::files::Files> = None;
 static mut UPTIME_SECOND: u64 = 0;
 static mut CAP_HIGH_WATER: u64 = 0;
 static mut NOTICE: Option<(&'static str, u64)> = None;
@@ -350,6 +361,36 @@ fn snapshot() {
     }
     log(b"\n");
 }
+/// The broker's filesd session: one page of its own region (ADR-0077).
+/// With the service offline (no AFS2 region) nothing is created.
+fn start_afs2() {
+    use arena_desktop::files::Files;
+    if describe(USER_ROOT).is_none() || !Files::online(USER_ROOT) {
+        log(b"[desktop] AFS2 file service unavailable; file capabilities offline\n");
+        return;
+    }
+    let mut out = [0; 3];
+    if unsafe { syscall6(SYS_SHARED_CREATE, POOL, 1, out.as_mut_ptr() as u64, 0, 0, 0) } != 0 {
+        die(76)
+    }
+    let va = unsafe { syscall2(SYS_SHARED_MAP, out[0], 1) };
+    if va <= 0 {
+        die(76)
+    }
+    let session = Files::session(USER_ROOT, out[0], va as u64, 0);
+    // The broker keeps only its mapping; filesd holds its own.
+    destroy(out[0]);
+    match session {
+        Ok(files) => {
+            unsafe { AFS2 = Some(files) };
+            log(b"[desktop] AFS2 file service online; /Users/user granted per session\n");
+        }
+        Err(_) => {
+            unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) };
+            log(b"[desktop] AFS2 session refused; file capabilities offline\n");
+        }
+    }
+}
 fn describe(slot: u64) -> Option<[u64; 3]> {
     let mut d = [0; 3];
     (slot != CAP_NONE && unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0)
@@ -415,6 +456,33 @@ fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
         launch_targets,
     )
 }
+/// The session's filesd lineage head and, for the terminal and Files, its
+/// /Users/user capability (ADR-0077). Other kinds get file capabilities
+/// only through the chooser.
+fn file_grants(kind: u8) -> (u64, u64) {
+    let Some(files) = (unsafe { &*(&raw const AFS2) }) else {
+        return (CAP_NONE, CAP_NONE);
+    };
+    let Ok((head, _)) = files.open(USER_ROOT, None, 0) else {
+        return (CAP_NONE, CAP_NONE);
+    };
+    if !matches!(kind, 0 | 1) {
+        return (head, CAP_NONE);
+    }
+    match files.open_in(USER_ROOT, arena_desktop::filesd_wire::R_ALL, head) {
+        Ok((home, _)) => (head, home),
+        Err(_) => (head, CAP_NONE),
+    }
+}
+fn revoke_files(head: u64) {
+    if head == CAP_NONE {
+        return;
+    }
+    match unsafe { &*(&raw const AFS2) } {
+        Some(files) if files.revoke(USER_ROOT, head).is_ok() => {}
+        _ => destroy(head),
+    }
+}
 fn launch_image(
     image: u64,
     kind: u8,
@@ -432,9 +500,10 @@ fn launch_image(
     // that have not yet requested their window. No numerical caller identity.
     let sessions = unsafe { &mut *(&raw mut SESSIONS) };
     let i = sessions.iter().position(|s| s.id == 0).ok_or(STATUS_BUSY)?;
-    // Region, snapshot (transiently), Process and a landed request cap.
+    // Region, snapshot (transiently), Process, a landed request cap, the
+    // filesd lineage head, the home grant and a lent copy (transiently).
     let free = (0..CAP_SLOTS).filter(|s| describe(*s).is_none()).count();
-    if free < 4 {
+    if free < 7 {
         return Err(STATUS_BUSY);
     }
     let reserve = unsafe { RESERVE };
@@ -491,24 +560,33 @@ fn launch_image(
     }
     // Distinct inherited function reference to the exact fresh region. Its
     // marker rights do not enlarge the session's provisioned function scope.
+    // Child slot 4: diagnostics (Monitor) or the /Users/user grant.
+    let (files_head, home) = file_grants(kind);
     let spec = [
         (CALL_SIDE, RIGHTS_WRITE),
         (region, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY),
         (region, function_rights),
         (clock(i), RIGHTS_READ | RIGHTS_WRITE),
-        (POOL, RIGHTS_READ),
+        if diagnostics {
+            (POOL, RIGHTS_READ)
+        } else {
+            (home, RIGHTS_WRITE | RIGHTS_COPY)
+        },
     ];
     let pid = unsafe {
         syscall5(
             SYS_SPAWN,
             image,
             spec.as_ptr() as u64,
-            if diagnostics { 5 } else { 4 },
+            if diagnostics || home != CAP_NONE { 5 } else { 4 },
             CLOCK,
             BADGE_EXIT,
         )
     };
+    // The child holds its own copy; the broker never keeps the grant.
+    destroy(home);
     if pid <= 0 {
+        revoke_files(files_head);
         unsafe {
             syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
             syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
@@ -532,6 +610,7 @@ fn launch_image(
         launch_targets,
         path,
         snapshot: snapshot as u64,
+        files_head,
         ..EMPTY
     };
     transient_caps();
@@ -567,6 +646,7 @@ fn retire(index: usize, force: bool) {
         die(86)
     }
     destroy(s.region);
+    revoke_files(s.files_head);
     let _ = unsafe { syscall1(SYS_TRY_WAIT, clock(index)) };
     unsafe {
         SESSIONS[index] = EMPTY;
@@ -961,7 +1041,7 @@ extern "C" fn main() -> ! {
     unsafe {
         RESERVE = Reserve {
             surface_pages,
-            shared_pages: 1 + surface_pages + TRANSIENT_PAGES,
+            shared_pages: 1 + surface_pages + TRANSIENT_PAGES + FILE_PAGES,
             snapshot_pages: surface_pages + TRANSIENT_PAGES,
         };
     }
@@ -989,6 +1069,7 @@ extern "C" fn main() -> ! {
     unsafe {
         FILES = Some(fs);
     }
+    start_afs2();
 
     // Requests and input arrive on SERVER; queue them onto CLOCK when the
     // compositor is not parked in RECV, so it never polls (ADR-0071).
@@ -1286,7 +1367,7 @@ extern "C" fn main() -> ! {
                                             rects.rects()
                                         };
                                         publish_rects(
-                                            s.va + (reserve.shared_pages - TRANSIENT_PAGES) * 4096,
+                                            s.va + (reserve.shared_pages - TRANSIENT_PAGES - FILE_PAGES) * 4096,
                                             s.snapshot + reserve.surface_pages * 4096,
                                             pw,
                                             list,

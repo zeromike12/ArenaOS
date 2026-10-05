@@ -184,7 +184,8 @@ def main(esp=None):
     assert len(empty)>=5 and all(row==samples[-1] for row in empty[-4:]),empty
     # ADR-0075 per-session reservation, measured by the broker at boot.
     shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',s).groups())
-    assert (shared,snapshot)==(470,469),(shared,snapshot)
+    # Shared = I/O page + snapshot-sized surfaces + the filesd page (ADR-0077).
+    assert (shared,snapshot)==(471,469),(shared,snapshot)
     cap_peak=max(map(int,re.findall(r'measured broker cap high-water=(\d+)',s)))
     # 22 fixed broker caps + region and Process per session + one landed
     # request cap at the twelfth launch.

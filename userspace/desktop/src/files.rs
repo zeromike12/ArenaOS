@@ -118,6 +118,11 @@ impl Files {
         })
     }
 
+    /// Whether the service behind `cap` is online (no session needed).
+    pub fn online(cap: u64) -> bool {
+        call(cap, Request::new(wire::OP_STATFS), CAP_NONE).is_ok()
+    }
+
     fn put(&self, at: usize, bytes: &[u8]) -> Result<(), Status> {
         if at + bytes.len() > PAGE {
             return Err(wire::S_INVAL);
@@ -204,6 +209,23 @@ impl Files {
             return Err(wire::S_IO);
         }
         Ok((r.cap, r.value as u8))
+    }
+
+    /// `open` of `cap` itself with at most `rights`, the new record placed
+    /// in the lineage of `place` (lent as a copy): the broker's grant.
+    pub fn open_in(&self, cap: u64, rights: u8, place: u64) -> Result<(u64, u8), Status> {
+        let mut req = Request::new(wire::OP_OPEN);
+        req.rights = rights;
+        let r = call(cap, req, lendable(place)?)?;
+        if r.cap == CAP_NONE {
+            return Err(wire::S_IO);
+        }
+        Ok((r.cap, r.value as u8))
+    }
+
+    /// Retire the lineage headed by `head` through `cap` (moves `head`).
+    pub fn revoke(&self, cap: u64, head: u64) -> Result<(), Status> {
+        call(cap, Request::new(wire::OP_REVOKE), head).map(|_| ())
     }
 
     pub fn read(&self, cap: u64, offset: u64, out: &mut [u8]) -> Result<usize, Status> {
