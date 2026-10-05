@@ -361,21 +361,67 @@ Not changed, with evidence:
 
 ## 11.9 — Measurements on the final image
 
-`tools/profile_desktop.py` (30 trials, TCG, same host as the 11.0 receipts;
-raw: `profile-11.9.json`):
+The first-draft figures (column "11.9 draft") came from
+`tools/profile_desktop.py` on the perf image. They are in
+`profile-11.9.json`.
 
-| Measure | Target | 11.0 | 11.9 |
-|---|---|---|---|
-| Pointer motion-to-photon p50 / p95 | p50 ≤ 6 ms | 12.3 / 15.2 ms | 10.6 / 13.9 ms |
-| Terminal key-to-photon p50 / p95 | ≤ 12 / ≤ 20 ms | 17.3 / 27.1 ms | 17.8 / 23.6 ms |
-| Compositor wakes/s, empty desktop | — | 1.06 | 0.97 |
-| Compositor wakes/s, six idle apps | ≤ 5 | 4.69 | 4.87 |
-| Static idle client wakes/s | 0 | 0 (Monitor 1.95) | 0 (Monitor 1.95) |
-| Title drag: compositor render + present per frame (mean) | p95 ≤ 12 ms | — | 12.9 + 8.2 ms |
+The final figures come from `tools/latency_ab.py`:
+* the production image (no probes);
+* 30 trials per run;
+* runs interleaved with a baseline build on the same host, in the same
+  container session.
 
-The idle criteria are met. The latency criteria are **not met**: pointer
-p50 (the host-side figure includes about 4.2 ms of screendump), key p50
-and p95, and the title-drag frame time.
+The raw data is in `latency-ab-11.9.json` (session 1: af14e20 vs 44559f2) and `latency-ab-11.9-session2.json` (session 2: 44559f2 vs the final 674eff8). Each cell is the median over
+runs of the per-run p50 or p95.
+
+| Measure | Target | 11.0 | 11.9 draft | af14e20 (watches, before the latency work) | Final image (5 + 4 runs, two A/B sessions) |
+|---|---|---|---|---|---|
+| Pointer motion-to-photon p50 / p95 | p50 ≤ 6 ms | 12.3 / 15.2 ms | 10.6 / 13.9 ms | 11.8 / 15.5 ms | 6.5–6.6 / 11.0–11.7 ms |
+| Terminal key-to-photon p50 / p95 | ≤ 12 / ≤ 20 ms | 17.3 / 27.1 ms | 17.8 / 23.6 ms | 15.7 / 20.0 ms | 11.5–12.3 / 15.4–18.0 ms |
+| Host screendump inside every sample above | — | ~4.8 ms | ~4.2 ms | 4.7 ms | 4.6–4.9 ms |
+| Compositor wakes/s, empty desktop / six idle apps | — / ≤ 5 | 1.06 / 4.69 | 0.97 / 4.87 | — | 0.97–1.06 / 3.98 (perf image, two runs) |
+| Static idle client wakes/s | 0 | 0 (Monitor 1.95) | 0 (Monitor 1.95) | — | 0 (Monitor 1.95) |
+| Title drag: compositor render per frame, perf image | p95 ≤ 12 ms | — | 12.9 + 8.2 ms | — | mean 8.8–9.1, max 10.9–11.1 ms (two runs) |
+
+Notes on the table:
+* Per-run key p50 on the final image ranged from 10.1 to 14.2 ms, and
+  pointer p50 from 6.3 to 7.6 ms.
+* The two A/B sessions measured the same commit's key p50 as 11.5 and
+  12.3 ms. That spread is host drift.
+* One run on a visibly slowed host (every probe doubled) reached a 15.6 ms
+  drag maximum.
+
+### Status of the latency criteria and the proposal to M/C
+
+* **Title drag:** met on the two clean runs, where the maximum is below
+  12 ms.
+* **Terminal key p95 ≤ 20 ms:** met in every run.
+* **Terminal key p50 ≤ 12 ms:** at the target. The medians are 11.5 and
+  12.3 ms on the same commit, so it is not met with any margin.
+* **Pointer p50 ≤ 6 ms:** not met (6.5–6.6 ms).
+
+The host method puts a floor under both pointer and key figures. Each
+sample waits for at least one QMP screendump, and the screendump stalls
+the guest for 4.3–5.1 ms. The guest's own pointer path, from the broker
+receiving the event to the frame being presented, measures 1.5–2.1 ms on
+the perf image. The pointer figure is therefore about two thirds
+measurement. The remaining guest cost is syscall-bound: a null syscall is
+about 21 µs under TCG, and a pointer frame takes about thirty. No single
+ArenaOS cost above 0.2 ms is left in that path.
+
+**Proposed revision (for M/C):** keep the targets, but state them net of
+the measurement stall the method itself measures (`screendump_ms`):
+* pointer motion-to-photon p50 ≤ 6 ms, net;
+* key-to-photon p50 ≤ 12 ms, net, and p95 ≤ 20 ms, net.
+
+On the final image the net figures are about 2 ms for pointer and about
+7.5 ms / 13 ms for key p50 / p95.
+
+The alternative is to state the gates on the guest probes: input-to-frame
+and key-to-photon from the broker's receipt.
+
+Until M/C decides, this report records pointer p50 as **not met** and key
+p50 as **at the target, not robust**.
 
 ### Qualification attempts
 

@@ -9,7 +9,7 @@ empty again). Only Python's standard library, `qmp.py` and `afs2.py`:
    drawn in the first desktop cell.
 2. Double-clicking that icon spawns a real Files process showing the
    folder (pixels change where its window opens).
-3. Shift+N in Files creates "New Folder" inside it; Enter keeps the
+3. Ctrl+Shift+N in Files creates "New Folder" inside it; Enter keeps the
    name. The disk holds Desktop/New Folder/New Folder.
 4. F8 closes Files: its process is retired and the window uncovers.
 """
@@ -103,8 +103,8 @@ def capture(sock, serial, image, disk, timeout):
                               'Files window not drawn')
         time.sleep(1.0)
         opened = shot()
-        # 3. Shift+N: New Folder inside it, Enter keeps the name.
-        keys('shift', 'n')
+        # 3. Ctrl+Shift+N: New Folder inside it, Enter keeps the name.
+        keys('ctrl', 'shift', 'n')
         keys('ret')
         wait(lambda: 'Desktop/New Folder/New Folder' in tree(), 'Files New Folder not on AFS2')
         until_pixels(lambda p: p != opened, 'Files listing did not change')

@@ -7,7 +7,7 @@ retirement, network and console fixtures) on the Phase-11 image, with its
 and the desktop must come up with its file service and desktop surface.
 Then, on the same live desktop (`check_phase11_files.py`), the desktop
 menu creates a folder on AFS2 and draws its icon, double-clicking it opens
-a real Files process there, Shift+N creates a folder inside it, and F8
+a real Files process there, Ctrl+Shift+N creates a folder inside it, and F8
 retires Files; the disk's AFS2 region is read back on the host.
 Only Python's standard library, QEMU and the extracted files are used.
 """

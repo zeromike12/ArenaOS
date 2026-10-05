@@ -21,6 +21,8 @@ and demonstrated, what was found, and what was not met.
 | 11.6 file capabilities | Lineage-scoped badged file and directory capabilities, rights attenuated along every walk, `/System` unreachable, trusted chooser (powerbox) for Open/Save/Read-Only, Files→Editor offers (guest `test_m11_files`, 14-check hostile probe, 2 RED controls) |
 | 11.7 primitives and type | gfxkit origin/blend/darken/mask/bits blits; Arena Sans 13, an owned proportional face; widgets (scroll, virtualized list, grid, input, breadcrumb, splitter, selection); titles and captions set in Arena Sans |
 | 11.8 explorer and desktop | Files explorer (toolbar, breadcrumb, sidebar places, sortable list and icon grid, multi-select with Shift/Ctrl/rubber band, drag-and-drop moves, cut/copy/paste, inline rename, Trash with restore records, properties, open by type) and the desktop surface (`/Users/user/Desktop` icons with persisted positions, open, drag to cells or into folders, context menus) (ADR-0078; guest `test_m11_explorer`, `test_m11_desk`) |
+| 11.9 directory watches | Bounded per-directory watches on held directory capabilities, exact object identity, both rename parents, lineage lifetime; Files and the desktop update from them (no poll) (ADR-0079; host RED for stale generation and missing rename parent; guest `test_m11_watch`) |
+| 11.9 latency | Nine profiled costs removed (`PROGRESS.md` 11.9): no window re-damage after publication, occlusion, chunked tight damage, multi-rect present, bounded reply handoff (ADR-0072 amendment; m11 test plus RED), wake-before-reply, change-only receipts, clip-aware shell layers |
 
 ## Problems found by the proofs (none treated as a flake)
 
@@ -33,18 +35,29 @@ and demonstrated, what was found, and what was not met.
 | 11.8 guest | filesd kept every minted cap (IPC transfer copies) until its 64-slot space filled; the kernel refused the destroy (badged mints had no DESTROY) | filesd drops its copy; ADR-0074 amendment with a kernel test |
 | 11.8 guest | Launch/Started kept the Phase-10 file-name rule: opening "Desktop/New Folder" made the broker die (graphics halted fail-closed); names with spaces could not open | Both frames take the printable title rule |
 | 11.8 guest | The desk lost the press after a menu click (stale button state) | Unrouted pointer state is tracked; host RED test |
+| 11.9 profile | Every client publication made the compositor redraw that whole window on the next frame (the Monitor: 132 kpx twice a second) | Frame equality ignores per-frame region bookkeeping; host test RED on the old code |
+| 11.9 guest | The Desktop watch's record took the slack a launch reservation had counted twice, and the twelfth session was refused (`test_m10_apps`) | Reservation counts the request's landed cap once; refusal logs its status |
+| 11.9 guest | After the reply handoff the desktop presented before boot transients ended, so `test_m10_dynamic` (and potentially every stability boot's pixel check) took a stale resource base | Base taken from receipts after the permission app is reaped |
 | Historical RED | Four `test_m10_boundaries_red` needles had drifted (one control vacuous since 11.4) | Retargeted to the same boundaries in today's code; 12/12 RED |
 
 ## Not met, not built
 
-* **Latency targets** (`PROGRESS.md` 11.9 table): pointer motion-to-photon
-  p50 10.6 ms (target ≤ 6), Terminal key-to-photon p50/p95 17.8/23.6 ms
-  (≤ 12/≤ 20), title-drag compositor work 12.9 + 8.2 ms per frame
-  (p95 ≤ 12). Idle targets are met (4.87 compositor wakes/s with six
-  apps; static clients 0).
-* **Directory watches** were not built. Files re-lists a changed folder
-  on focus, interaction or request. The broker re-checks the Desktop
-  folder once a second on its existing uptime tick.
+* **Latency targets.** The figures are final-image, production, same-host
+  medians over interleaved runs (`PROGRESS.md` 11.9, `latency-ab-11.9.json`):
+
+  | Target | Measured | Status |
+  |---|---|---|
+  | Pointer motion-to-photon p50 ≤ 6 ms | 6.5–6.6 ms | **Not met** |
+  | Terminal key-to-photon p50 ≤ 12 ms | 11.5–12.3 ms | At the target, not robust |
+  | Terminal key-to-photon p95 ≤ 20 ms | 15.4–18.0 ms | Met |
+  | Title-drag render p95 ≤ 12 ms | max 10.9–11.1 ms on two clean runs | Met |
+  | Six idle apps ≤ 5 compositor wakes/s | 3.98 | Met |
+  | Static idle clients 0 wakes/s | 0 | Met |
+
+  Every host sample contains a 4.3–5.1 ms QMP screendump stall, while the
+  guest pointer path is 1.5–2.1 ms. A revised statement of the gates, net
+  of that measured stall, is proposed to M/C in `PROGRESS.md`. It is not
+  assumed accepted.
 * **Desktop rename** happens in Files; the desktop creates items under
   default names.
 * One explorer view holds at most 256 items, and the desktop shows 24;

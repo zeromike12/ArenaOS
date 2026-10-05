@@ -35,7 +35,7 @@ DOCS = ('docs/phase11/PLAN.md', 'docs/phase11/PROGRESS.md', 'docs/phase11/FINAL-
 # Host blocks of tools/run_tests.sh that count as suites besides test_m*.py.
 HOST_SUITES = 14
 REQUIRED = (
-    '[m11-explorer]', '[m11-desk]', '[m11-files]', '[m11-afs2]', '[m11-wm]',
+    '[m11-explorer]', '[m11-desk]', '[m11-files]', '[m11-afs2]', '[m11-wm]', '[m11-watch]',
     '[m10-files] AFS2 explorer:', '[m10-boundaries-red] 12 real production RED controls;',
     '[m10-dynamic]', '[m10-service-death] real compositor death answers in-flight input CALL',
     '[m10-handoff] actual desktop, all six real apps',
@@ -107,7 +107,7 @@ peers, launches real graphical applications, injects keyboard and tablet
 input, checks exact owned raster movement and process retirement, requires
 the file service and the desktop surface online, then (same boot) creates a
 folder from the desktop menu, opens it in a real Files process by
-double-clicking its icon, creates a folder inside it with Shift+N, closes
+double-clicking its icon, creates a folder inside it with Ctrl+Shift+N, closes
 Files with F8, and reads both folders back from the disk's AFS2 region on
 the host. It then shuts down through the serial shell. Set ARENA_QEMU to a QEMU invocation if it is not on PATH.
 

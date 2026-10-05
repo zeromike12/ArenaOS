@@ -52,9 +52,12 @@ def main():
         assert result.returncode == 0 and 'UNQUALIFIED EXTRACTED PHASE11 PREFLIGHT PASS:' in result.stdout, \
             result.stdout + result.stderr
         assert 'EXTRACTED PHASE11 PIXELS PASS:' not in result.stdout
+        # The Phase-11 step ran on the same live desktop (AFS2 read back).
+        assert 'PHASE11 DESKTOP-MENU-FOLDER FILES-OPEN FILES-NEW-FOLDER FILES-CLOSE' in result.stdout, result.stdout
     print('[m11-archive-preflight] independently staged phase11-complete tools, firmware and 72 MiB disk template; '
           'first boot formats AFS2 and brings up the desktop file service and surface; real two-spawn/retire '
-          'graphical workflow PASS; strict qualification refuses absent 100/100 receipt')
+          'graphical workflow, then desktop-menu folder, Files opened from its icon, Ctrl+Shift+N folder and F8 '
+          'retirement read back from AFS2 PASS; strict qualification refuses absent 100/100 receipt')
 
 
 if __name__ == '__main__':
