@@ -792,6 +792,37 @@ mod tests {
                             Some(sw)
                         }
                     };
+                    next.shell.chooser = match rng.below(3) {
+                        0 => None,
+                        _ => {
+                            let mut ch = shell::ChooserView {
+                                save: rng.below(2) == 0,
+                                read_only: false,
+                                place: [0; 48],
+                                rows: [[0; 32]; shell::CHOOSER_ROWS],
+                                count: rng.below(shell::CHOOSER_ROWS as u64 + 1) as u8,
+                                selected: None,
+                                above: rng.below(2) == 0,
+                                below: rng.below(2) == 0,
+                                name: [0; 32],
+                                message: [0; 48],
+                            };
+                            ch.place[..14].copy_from_slice(b"Home/Documents");
+                            for (i, r) in ch.rows.iter_mut().enumerate() {
+                                r[..4].copy_from_slice(b"file");
+                                r[4] = b'a' + i as u8;
+                            }
+                            if ch.count > 0 && rng.below(2) == 0 {
+                                ch.selected = Some(rng.below(u64::from(ch.count)) as u8);
+                            }
+                            let n = rng.below(20) as usize;
+                            ch.name[..n].fill(b'n');
+                            if rng.below(2) == 0 {
+                                ch.message[..9].copy_from_slice(b"TYPE NAME");
+                            }
+                            Some(ch)
+                        }
+                    };
                     next.shell.snap = match rng.below(3) {
                         0 => Some(Rect {
                             x: 0,
