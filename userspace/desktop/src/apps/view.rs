@@ -689,7 +689,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
             none,
             t,
         );
-        // Flat namespace: a count, never a path or folder breadcrumb.
+        // Items in the folder shown (folders end in `/`).
         let mut digits = [0u8; 32];
         let n = c::decimal(&mut digits, names.len() as u64, false);
         c::text_right(canvas, l.W - m::CONTENT_INSET, 37, n, Style::Strong, t.text);
@@ -697,7 +697,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
             canvas,
             l.W - m::CONTENT_INSET,
             50,
-            "FILES",
+            "ITEMS",
             Style::Caption,
             t.muted,
         );
@@ -726,7 +726,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
             canvas,
             x + 15,
             l.CONTENT_Y + 11,
-            "No user files",
+            "Empty folder",
             Style::Strong,
             t.text,
         );
@@ -742,7 +742,7 @@ pub fn files(canvas: &mut Canvas<'_>, model: FilesView<'_>, t: Theme) {
             canvas,
             x,
             l.CONTENT_Y + 44,
-            "user-* file on AFS1.",
+            "file in this folder.",
             Style::Body,
             t.secondary,
         );
