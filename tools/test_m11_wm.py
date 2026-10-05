@@ -87,7 +87,8 @@ def workflow(label):
         assert m, 'reservation receipt absent'
         shared, snapshot = int(m[1]), int(m[2])
         # 800x600: work area 800x518 -> 405 surface pages + 64 transient.
-        assert (shared, snapshot) == (1 + 405 + 64, 405 + 64), (shared, snapshot)
+        # I/O page + surface + transient, and the filesd page (ADR-0077).
+        assert (shared, snapshot) == (1 + 405 + 64 + 1, 405 + 64), (shared, snapshot)
         base = samples(d)[0]
         empty = d.shot('empty')
         desk = px(empty, 700, 300)
@@ -186,7 +187,10 @@ def workflow(label):
             d.wait(lambda: d.serial().count('[desktop] real application spawned;') >= spawned + 1 + 1 + i,
                    f'session {i + 1} not spawned')
         full = d.stable('twelve', (0, 26, 800, 500))
-        d.wait(lambda: samples(d)[-1][4] == base[4] + 12 * (shared + snapshot), 'twelve not mapped')
+        # Pages land when the broker creates a session; each client maps its
+        # own region later. Wait for all three maps of all twelve sessions.
+        d.wait(lambda: samples(d)[-1][4] == base[4] + 12 * (shared + snapshot)
+               and samples(d)[-1][5] == base[5] + 36, 'twelve not mapped')
         peak = samples(d)[-1]
         assert peak[2] == base[2] + 12 and peak[3] == base[3] + 24, (base, peak)
         assert peak[4] == base[4] + 12 * (shared + snapshot), (base, peak)
