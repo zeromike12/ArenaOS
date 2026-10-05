@@ -498,3 +498,9 @@ p50 as **at the target, not robust**.
    The run was stopped and does not count. The worktree had been left
    with another RED mutant (`servicemgr/src/package.rs`) by the
    interrupted run, and was reset before the next start.
+7. Complete suite on clean `fcc09a5`: **ALL TESTS PASSED (110 test
+   suites)** (20:07–21:36 UTC). The final EFI was built in that worktree,
+   and two builds produced the same bytes:
+   `33134367244674cbba85d24ff634d918b27688f4bb878b0209a6a58fd876b806`.
+   The fresh stability loop from zero ran **100/100 fully green, fail = 0**
+   (21:36–21:51 UTC). Receipt: `33134367…b806 100/100`.
