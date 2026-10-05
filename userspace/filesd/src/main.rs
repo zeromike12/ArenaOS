@@ -175,6 +175,8 @@ struct Grant {
     /// The registered I/O page of a lineage head (0 = no session yet);
     /// every record of the lineage uses its head's page.
     io: u64,
+    /// The base of the head's mapping of the client region (for unmap).
+    map: u64,
     /// The grant this record descends from: a record opened from the
     /// broker's /Users/user record (1) is its own lineage; anything opened
     /// from it inherits it. Revoking a lineage retires all of it.
@@ -186,6 +188,7 @@ const NO_GRANT: Grant = Grant {
     object: 0,
     rights: 0,
     io: 0,
+    map: 0,
     lineage: 0,
 };
 static mut GRANT: [Grant; GRANTS] = [NO_GRANT; GRANTS];
@@ -199,14 +202,15 @@ fn record(badge: u32) -> Option<usize> {
 
 fn release(i: usize) {
     let g = unsafe { &mut GRANT[i] };
-    // Only a lineage head maps a page (its records share it).
-    if g.io != 0 {
+    // Only a lineage head maps a region (its records share its page).
+    if g.map != 0 {
         unsafe {
-            syscall6(SYS_SHARED_UNMAP, g.io, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, g.map, 0, 0, 0, 0, 0);
         }
     }
     g.live = false;
     g.io = 0;
+    g.map = 0;
     g.object = 0;
     g.rights = 0;
     g.lineage = 0;
@@ -270,6 +274,7 @@ fn mint(parent: usize, place: usize, object: u64, rights: u8) -> Result<(u64, us
         object,
         rights,
         io: 0,
+        map: 0,
         lineage: lineage as u8,
     };
     Ok((slot as u64, i))
@@ -356,16 +361,28 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             {
                 return reply(S_INVAL, 0);
             }
+            // The client names which page of its region is the I/O page
+            // (offset = page index); filesd checks it against the region's
+            // real size before using it.
+            let pages = unsafe { syscall1(SYS_SHARED_PAGES, landed) };
+            if pages <= 0 || req.offset >= pages as u64 {
+                return reply(S_INVAL, 0);
+            }
             let va = unsafe { syscall2(SYS_SHARED_MAP, landed, 1) };
             if va <= 0 {
                 return reply(S_FULL, 0);
             }
-            if g.io != 0 {
+
+            let old = unsafe { GRANT[head].map };
+            if old != 0 {
                 unsafe {
-                    syscall6(SYS_SHARED_UNMAP, g.io, 0, 0, 0, 0, 0);
+                    syscall6(SYS_SHARED_UNMAP, old, 0, 0, 0, 0, 0);
                 }
             }
-            unsafe { GRANT[head].io = va as u64 };
+            unsafe {
+                GRANT[head].map = va as u64;
+                GRANT[head].io = va as u64 + req.offset * PAGE as u64;
+            }
             reply(S_OK, 0)
         }
         OP_STAT => {
@@ -800,6 +817,7 @@ fn bring_up() -> bool {
                 object,
                 rights: R_ALL,
                 io: 0,
+                map: 0,
                 lineage: 1,
             };
         },

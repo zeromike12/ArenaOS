@@ -11,7 +11,7 @@ pub const BYTES: usize = 64;
 const MAGIC: &[u8; 4] = b"AF2Q";
 
 /// Operations. The called capability is "self".
-pub const OP_SESSION: u8 = 1; // landed SharedRegion: its first page becomes this badge's I/O page
+pub const OP_SESSION: u8 = 1; // landed SharedRegion: page `offset` becomes the lineage's I/O page
 pub const OP_STAT: u8 = 2; // self, or the child named in the I/O page
 pub const OP_LIST: u8 = 3; // entries after the cursor name; packed into the I/O page
 pub const OP_OPEN: u8 = 4; // child (or self when no name) with requested rights; reply carries a new badged cap

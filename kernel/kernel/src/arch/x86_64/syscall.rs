@@ -181,6 +181,10 @@ pub const SYS_RTC_READ: u64 = 50;
 /// SYS_ENDPOINT_BADGE(server endpoint slot, badged cap slot): the badge,
 /// for the endpoint's own server only (ADR-0074 amendment, Phase 11.5).
 pub const SYS_ENDPOINT_BADGE: u64 = 51;
+/// SYS_SHARED_PAGES(region slot): the page count of a SharedRegion the
+/// caller holds (READ or WRITE), so a server mapping a client's region can
+/// bounds-check an offset the client names (Phase 11.6, ADR-0077).
+pub const SYS_SHARED_PAGES: u64 = 52;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -711,6 +715,7 @@ extern "C" fn syscall_dispatch(
         SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => {
             sys_endpoint_badge(a0, a1) as u64
         }
+        SYS_SHARED_PAGES if [a1, a2, a3, a4, a5] == [0; 5] => sys_shared_pages(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -2828,6 +2833,28 @@ fn sys_rtc_read(slot: u64, out: u64) -> Status {
 }
 
 /// SYS_ENDPOINT_BADGE(server slot, cap slot): see `cap::badge_of`.
+fn sys_shared_pages(slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::SharedRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & (crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE) == 0 {
+        return STATUS_BAD_ARG;
+    }
+    match crate::shared::backing(id) {
+        Some((_, pages)) => Status::from(pages),
+        None => STATUS_BAD_ARG,
+    }
+}
+
 fn sys_endpoint_badge(server: u64, slot: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG;

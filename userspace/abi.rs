@@ -63,6 +63,7 @@ pub const SYS_RTC_READ: u64 = 50;
 /// Phase 11.5: the badge of a landed badged cap, for the endpoint's own
 /// server only.
 pub const SYS_ENDPOINT_BADGE: u64 = 51;
+pub const SYS_SHARED_PAGES: u64 = 52;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;
