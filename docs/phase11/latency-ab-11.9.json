@@ -1,0 +1,172 @@
+{
+ "base": {
+  "commit": "af14e205fa96743d356cd121bbbff43951591718",
+  "pointer_p50_median": 11.8,
+  "pointer_p95_median": 15.5,
+  "key_p50_median": 15.7,
+  "key_p95_median": 20.0,
+  "screendump_ms_median": 4.7,
+  "runs": [
+   {
+    "pointer": {
+     "median": 12.5,
+     "p95": 15.5,
+     "max": 20.7,
+     "n": 30,
+     "screendump_ms": 4.7
+    },
+    "key": {
+     "median": 16.3,
+     "p95": 21.4,
+     "max": 21.4,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 13.7,
+     "p95": 15.6,
+     "max": 17.4,
+     "n": 30,
+     "screendump_ms": 5.5
+    },
+    "key": {
+     "median": 17.5,
+     "p95": 21.6,
+     "max": 29.4,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 11.8,
+     "p95": 14.9,
+     "max": 17.8,
+     "n": 30,
+     "screendump_ms": 4.5
+    },
+    "key": {
+     "median": 15.4,
+     "p95": 20.0,
+     "max": 20.8,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 11.2,
+     "p95": 19.5,
+     "max": 24.2,
+     "n": 30,
+     "screendump_ms": 4.7
+    },
+    "key": {
+     "median": 15.0,
+     "p95": 18.0,
+     "max": 25.4,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 11.3,
+     "p95": 12.7,
+     "max": 12.8,
+     "n": 30,
+     "screendump_ms": 4.3
+    },
+    "key": {
+     "median": 15.7,
+     "p95": 19.8,
+     "max": 34.9,
+     "n": 30
+    }
+   }
+  ]
+ },
+ "new": {
+  "commit": "44559f2819209ff8bf16d47c43726e9a6f17199c",
+  "pointer_p50_median": 6.5,
+  "pointer_p95_median": 11.7,
+  "key_p50_median": 11.5,
+  "key_p95_median": 18.0,
+  "screendump_ms_median": 4.6,
+  "runs": [
+   {
+    "pointer": {
+     "median": 6.5,
+     "p95": 9.2,
+     "max": 18.3,
+     "n": 30,
+     "screendump_ms": 4.7
+    },
+    "key": {
+     "median": 11.6,
+     "p95": 19.2,
+     "max": 19.2,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.6,
+     "p95": 17.6,
+     "max": 78.4,
+     "n": 30,
+     "screendump_ms": 4.6
+    },
+    "key": {
+     "median": 11.2,
+     "p95": 15.8,
+     "max": 19.2,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.5,
+     "p95": 12.1,
+     "max": 16.9,
+     "n": 30,
+     "screendump_ms": 4.7
+    },
+    "key": {
+     "median": 12.4,
+     "p95": 18.0,
+     "max": 22.0,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.4,
+     "p95": 10.8,
+     "max": 14.7,
+     "n": 30,
+     "screendump_ms": 4.3
+    },
+    "key": {
+     "median": 11.5,
+     "p95": 20.3,
+     "max": 22.4,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.3,
+     "p95": 11.7,
+     "max": 13.5,
+     "n": 30,
+     "screendump_ms": 4.3
+    },
+    "key": {
+     "median": 10.1,
+     "p95": 14.2,
+     "max": 17.2,
+     "n": 30
+    }
+   }
+  ]
+ }
+}
