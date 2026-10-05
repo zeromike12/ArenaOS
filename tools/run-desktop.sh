@@ -83,7 +83,8 @@ template = os.environ.get('ARENA_OVMF_VARS') or str(unpack('edk2-i386-vars.fd'))
 shutil.copyfile(template, w / 'vars.img')
 disk = w / 'disk.img'
 if fresh or not disk.exists():
-    shutil.copyfile(arena_env.make_scratch_disk(), disk)
+    # 72 MiB: AFS1 plus the AFS2 region filesd formats on first boot.
+    shutil.copyfile(arena_env.make_scratch_disk(afs2=True), disk)
 print('QEMU=(' + ' '.join(map(shlex.quote, arena_env.qemu_cmd() + arena_env.qemu_data_args())) + ')')
 print('OVMF_CODE=' + shlex.quote(code))
 EOF

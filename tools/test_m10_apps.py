@@ -205,15 +205,17 @@ def main(esp=None):
     # Shared = I/O page + snapshot-sized surfaces + the filesd page (ADR-0077).
     assert (shared,snapshot)==(471,469),(shared,snapshot)
     cap_peak=max(map(int,re.findall(r'measured broker cap high-water=(\d+)',s)))
-    # 22 fixed broker caps + region and Process per session + one landed
-    # request cap at the twelfth launch.
-    assert cap_peak==samples[0][6]+2*12+1,(cap_peak,samples[0])
+    # Fixed broker caps + region, Process and filesd lineage head (ADR-0077)
+    # per session + one landed request cap at the twelfth launch
+    # (measured: 60 = 23 + 3x12 + 1).
+    assert cap_peak==samples[0][6]+3*12+1,(cap_peak,samples[0])
     peak=max(samples,key=lambda row:row[4])
     # Twelve sessions: one record and process each, two regions each (the
     # shared reservation and the broker-only snapshot), three maps each
-    # (broker x2, client x1) and two broker caps each.
+    # (broker x2, client x1) and three broker caps each (region, Process,
+    # filesd lineage head).
     assert peak[1:4]==(samples[0][1]+12,samples[0][2]+12,samples[0][3]+24),peak
-    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36 and peak[6]==samples[0][6]+24,peak
+    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36 and peak[6]==samples[0][6]+36,peak
     print(f'[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline={samples[0]} peak={peak} transient-broker-caps={cap_peak}',flush=True)
     # Durable appearance must affect actual desktop pixels on a fresh boot.
     label='m10-apps-persist'

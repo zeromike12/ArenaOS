@@ -116,8 +116,10 @@ for i in $(seq 1 "$N"); do
     # Fresh AFS1 scratch disk EVERY boot (the fixture contract, and
     # load-bearing since M5.3: fs_service's fstest CREATEs a fixed
     # filename — a disk inherited from the previous boot answers
-    # FS_ERR_EXISTS and fails the suite by design).
-    ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk()' >/dev/null )
+    # FS_ERR_EXISTS and fails the suite by design). Phase 11: 72 MiB, so
+    # filesd formats the AFS2 region and imports AFS1 on every boot and the
+    # desktop runs with its file service online.
+    ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk(afs2=True)' >/dev/null )
     rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK" "$REPO_ROOT/build/tcp-stability.log" "$REPO_ROOT/build/udp-dns-stability.log"
     # M7.6: bind the host TCP fixture BEFORE QEMU starts. READY is
     # emitted only after listen() succeeds; no sleep/race and no

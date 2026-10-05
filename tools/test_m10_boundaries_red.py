@@ -24,7 +24,9 @@ CONTROLS=[
     (DESKTOP,b'result = u64::from(unsafe { PREFS.dark })',b'result = u64::from(unsafe { PREFS.dark } && s.kind != 0)','live-theme-delivery',apps,'live-theme-terminal'),
     (SCOPE,b'scope & resource != 0 && rights & needed == needed',b'(scope & resource != 0 && rights & needed == needed) || rights != 0','function-scope',bounded,'terminal'),
     (SCOPE,b'kind < 6 && targets & (1 << kind) != 0',b'kind < 6 && (targets & (1 << kind) != 0 || targets != 0)','launch-target-scope',files,'files'),
-    (MODEL,b'.filter(|w| w.contains(x, y))',b'.filter(|w| w.contains(x, y) && false)','pointer-hit',bounded,('pointer-focus','terminal-key','exact-drag')),
+    # Phase 11.4 routes the pointer through State::target (hit() is host-test
+    # only since then): the live window hit test is the boundary.
+    (MODEL,b'None if w.contains(x, y) => Some(Target::Window(w.handle)),',b'None if w.contains(x, y) && false => Some(Target::Window(w.handle)),','pointer-hit',bounded,('pointer-focus','terminal-key','exact-drag')),
     (DESKTOP,b'            SYS_SPAWN,\n            image,',b'            SYS_SPAWN_CHECK,\n            image,','real-process-spawn',bounded,'terminal'),
     (DESKTOP,b'if unsafe { syscall2(SYS_PROC_FINISH, s.process, u64::from(force)) } != 0 {',b'if force && unsafe { syscall2(SYS_PROC_FINISH, s.process, u64::from(force)) } != 0 {','process-retirement',bounded,'resources did not return exactly'),
     (DESKTOP,b'(POOL, RIGHTS_READ),',b'(POOL, RIGHTS_READ | RIGHTS_WRITE),','readonly-diagnostic-grant',bounded,'monitor'),
