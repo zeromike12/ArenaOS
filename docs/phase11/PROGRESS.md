@@ -522,3 +522,9 @@ p50 as **at the target, not robust**.
    * bundle.
 
    The archive from attempt 7 was discarded.
+9. Complete suite on clean `fd7f481`: **ALL TESTS PASSED (110 test
+   suites)** (21:53–23:22 UTC). The final EFI was built from that
+   worktree. It is byte-identical to attempt 7's:
+   `33134367244674cbba85d24ff634d918b27688f4bb878b0209a6a58fd876b806`.
+   The fresh stability loop from zero ran **100/100 fully green,
+   fail = 0** (23:22–23:37 UTC). This is the qualified source.

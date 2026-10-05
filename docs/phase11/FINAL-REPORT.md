@@ -6,25 +6,25 @@ and demonstrated, what was found, and what was not met.
 
 ## Qualification
 
-* **Source:** `fcc09a5ab9f0530adddbd2a2b446f17df6001bf1`. It was
+* **Source:** `fd7f481b46df6288708e14c5f898f6f00a3d6b02`. It was
   checked out clean in its own worktree, and every later commit changes
   only `docs/phase11/` and `releases/checkpoints/phase11-complete/`.
-* **Complete suite** on that clean source (20:07–21:36 UTC):
+* **Complete suite** on that clean source (21:53–23:22 UTC):
   **ALL TESTS PASSED (110 test suites)**, which is 96 `test_m*.py` plus
   14 host blocks. `QUALIFICATION SOURCE CLEAN: yes`, with the same commit
   at start and end. The log is `full-suite.log` in the archive.
 * **Shipping EFI** (`tools/build.sh --image`, desktop profile; two builds
-  gave the same bytes):
+  gave the same bytes, and the same bytes as the build from `fcc09a5`):
   `33134367244674cbba85d24ff634d918b27688f4bb878b0209a6a58fd876b806`.
 * **Stability:** a fresh `tools/stability_loop.sh 100` from zero on that
-  EFI (21:36–21:51 UTC) ran **100/100 boots fully green, fail = 0**. Each
+  EFI (23:22–23:37 UTC) ran **100/100 boots fully green, fail = 0**. Each
   boot ran the full kernel suites, the network and console fixtures, the
   real desktop pixel/input/process proof and the file-service and
   desktop-surface markers. The receipt is
   `33134367…b806 100/100`, and the log is `100-boot.log`.
 * **Archive:** `releases/checkpoints/phase11-complete/`. Its SHA-256 and
   the independent extracted boot are recorded below and in `PROGRESS.md`.
-* **Earlier attempts:** six attempts before this one failed or were
+* **Earlier attempts:** eight attempts before this one failed or were
   invalid. Each is recorded with its root cause in `PROGRESS.md`
   ("Qualification attempts"). None counts, and none was rerun until
   green without a cause.
