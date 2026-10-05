@@ -469,7 +469,9 @@ fn chooser_load() {
     ch.count = 0;
     ch.selected = None;
     ch.top = 0;
-    match f.walk(USER_ROOT, &ch.dir[..ch.dir_len], R_LIST | R_CREATE) {
+    // Rights only narrow from a folder to what is opened in it, so the
+    // folder carries what the chooser may grant (R_DOC) as well.
+    match f.walk(USER_ROOT, &ch.dir[..ch.dir_len], R_LIST | R_CREATE | R_DOC) {
         Ok((cap, 2)) => ch.dir_cap = cap,
         Ok((cap, _)) => {
             f.release(cap);
@@ -666,12 +668,16 @@ fn chooser_key(code: u16) {
             Some(e) if e.is_dir() => chooser_enter(e.name()),
             _ => chooser_accept(),
         },
-        8 if ch.save && ch.name_len > 0 => {
-            ch.name_len -= 1;
-            ch.name[ch.name_len] = 0;
-            ch.confirm = false;
+        // Backspace edits the name while saving (it never leaves the
+        // folder behind the user's back); Left goes up in either mode.
+        8 if ch.save => {
+            if ch.name_len > 0 {
+                ch.name_len -= 1;
+                ch.name[ch.name_len] = 0;
+                ch.confirm = false;
+            }
         }
-        8 => chooser_up(),
+        8 | 256 => chooser_up(),
         32..=126 if ch.save && ch.name_len < 31 && code != u16::from(b'/') => {
             ch.name[ch.name_len] = code as u8;
             ch.name_len += 1;
@@ -855,7 +861,7 @@ fn file_grants(kind: u8, document: u64) -> (u64, u64) {
     let Some(files) = (unsafe { &*(&raw const AFS2) }) else {
         return (CAP_NONE, CAP_NONE);
     };
-    let Ok((head, _)) = files.open(USER_ROOT, None, 0) else {
+    let Ok(head) = files.new_lineage(USER_ROOT) else {
         return (CAP_NONE, CAP_NONE);
     };
     // An Editor opened on a document: a capability for exactly that file,

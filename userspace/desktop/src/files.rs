@@ -239,6 +239,16 @@ impl Files {
         Ok((r.cap, r.value as u8))
     }
 
+    /// A new lineage head (through the root record only): the broker's
+    /// per-application anchor, no rights.
+    pub fn new_lineage(&self, root: u64) -> Result<u64, Status> {
+        let r = call(root, Request::new(wire::OP_NEW_LINEAGE), CAP_NONE)?;
+        if r.cap == CAP_NONE {
+            return Err(wire::S_IO);
+        }
+        Ok(r.cap)
+    }
+
     /// Whether `other` (lent) is in the lineage of `cap`.
     pub fn same_lineage(&self, cap: u64, other: u64) -> bool {
         call(cap, Request::new(wire::OP_SAME_LINEAGE), other).is_ok()
@@ -339,8 +349,9 @@ impl Files {
     /// Walk `path` (components separated by `/`; `.` skipped; `..`
     /// removes the previous component and never climbs above `root`)
     /// from directory capability `root`. Intermediate directories are
-    /// opened with LIST only and released. Returns (slot, type) for the
-    /// final component (or a copy of `root` for an empty path).
+    /// opened with LIST plus `rights` (never more than `root`) and
+    /// released. Returns (slot, type) for the final component (or a copy
+    /// of `root` for an empty path).
     pub fn walk(&self, root: u64, path: &[u8], rights: u8) -> Result<(u64, u8), Status> {
         let mut parts: [(usize, usize); 32] = [(0, 0); 32];
         let mut n = 0usize;
@@ -363,7 +374,9 @@ impl Files {
         let mut cur = root;
         for (k, (start, len)) in parts[..n].iter().enumerate() {
             let last = k + 1 == n;
-            let want = if last { rights } else { wire::R_LIST };
+            // Rights only ever narrow along a walk (attenuation), so each
+            // intermediate folder keeps what the final object needs.
+            let want = if last { rights } else { wire::R_LIST | rights };
             let next = self.open(cur, Some(&path[*start..start + len]), want);
             if cur != root {
                 self.release(cur);

@@ -33,6 +33,9 @@ pub const OP_REVOKE: u8 = 15;
 /// S_OK when the lent record is in the same lineage as the called one
 /// (the broker attributing an offered file capability to a session).
 pub const OP_SAME_LINEAGE: u8 = 16;
+/// Through the root record only: a new lineage head naming the root
+/// object with no rights (the broker's per-application anchor).
+pub const OP_NEW_LINEAGE: u8 = 17;
 
 /// Rights carried by a capability record.
 pub const R_READ: u8 = 1;
@@ -112,7 +115,7 @@ impl Request {
             len: u32::from_le_bytes(b[16..20].try_into().ok()?),
             name_len: u16::from_le_bytes(b[20..22].try_into().ok()?),
         };
-        (r.op >= OP_SESSION && r.op <= OP_SAME_LINEAGE && r.rights & !R_ALL == 0).then_some(r)
+        (r.op >= OP_SESSION && r.op <= OP_NEW_LINEAGE && r.rights & !R_ALL == 0).then_some(r)
     }
 }
 

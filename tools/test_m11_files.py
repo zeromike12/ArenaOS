@@ -105,6 +105,33 @@ def shown(d, name, before):
 DOCS = '/Users/user/Documents/'
 
 
+def pick(d, disk, name):
+    """Select `name` in the chooser (open on Documents): Down once per
+    row up to it, rows in the directory's byte order, as filesd lists."""
+    rows = sorted(k[len(DOCS):].encode() for k in tree(disk)
+                  if k.startswith(DOCS) and '/' not in k[len(DOCS):])
+    for _ in range(rows.index(name.encode()) + 1):
+        press(d, 'down')
+        time.sleep(.03)
+    press(d, 'ret')
+
+
+def save_as(d, name, before):
+    """Ctrl+Shift+S in the focused Editor: the chooser opens in Documents
+    with the current title as the name; replace it and save."""
+    opened = d.serial().count('trusted chooser opened')
+    chord(d, 'ctrl', 'shift', 's')
+    d.wait(lambda: d.serial().count('trusted chooser opened') > opened, 'Save As chooser not opened')
+    time.sleep(0.3)
+    # Backspace on an empty name changes nothing. Paced like typing: an
+    # unpaced burst overruns inputd's bounded 64-entry key ring (ADR-0026).
+    for _ in range(31):
+        press(d, 'backspace')
+        time.sleep(.03)
+    d.q.type_text(name, gap_s=.03)
+    press(d, 'ret')
+
+
 def main():
     signed, elf = probe_package()
     esp = mtest.build(LABEL, desktop=True)
@@ -159,10 +186,7 @@ def main():
             d.shot('chooser-closed', lambda p: crop(p, *CHOOSER) == crop(editor, *CHOOSER))
             chord(d, 'ctrl', 'o')
             shown(d, 'chooser-open', editor)
-            # Documents: marker.txt, Projects/, user-letter, user-note.
-            for _ in range(4):
-                press(d, 'down')
-            press(d, 'ret')
+            pick(d, disk, 'user-note')
             d.wait(lambda: d.serial().count('trusted chooser granted one file capability') == 1, 'no grant')
             time.sleep(0.3)
             d.q.type_text('EDIT ', gap_s=.03)
@@ -178,12 +202,12 @@ def main():
             time.sleep(0.2)
             d.q.type_text('X', gap_s=.03)
             chord(d, 'ctrl', 's')
-            t = wait_tree(d, disk, lambda t: t.get(DOCS + 'renamed-note') == b'XEDIT ' + NOTE, 'save after rename')
+            t = wait_tree(d, disk, lambda t: t.get(DOCS + 'renamed-note') == b'EDIT X' + NOTE, 'save after rename')
             assert DOCS + 'user-note' not in t
             print('[m11-files] rename under an open document: the capability follows the object PASS', flush=True)
 
             # --- delete underneath the Editor: the capability is stale.
-            d.click(96 + 120, 84 + 10)  # the terminal
+            d.click(300, 362)  # the terminal: its status strip below the Editor
             d.q.type_text('rm Documents/renamed-note\r', gap_s=.03)
             before = wait_tree(d, disk, lambda t: DOCS + 'renamed-note' not in t, 'rm')
             d.click(70 + 120, 60 + 10)
@@ -192,8 +216,12 @@ def main():
             chord(d, 'ctrl', 's')
             time.sleep(1.5)
             assert tree(disk) == before, 'a save through a stale capability changed the volume'
-            print('[m11-files] save through a capability whose file was deleted is refused, nothing created PASS',
-                  flush=True)
+            # Positive control: the Editor really holds the typed text; Save
+            # As writes exactly it to a new file the user names.
+            save_as(d, 'rescued.txt', before)
+            wait_tree(d, disk, lambda t: t.get(DOCS + 'rescued.txt') == b'EDIT XY' + NOTE, 'rescue Save As')
+            print('[m11-files] save through a capability whose file was deleted is refused, nothing created; '
+                  'Save As then writes the exact held text PASS', flush=True)
 
             # --- read-only grant in a second Editor.
             press(d, 'f3')
@@ -202,16 +230,19 @@ def main():
             ro = d.shot('editor-2')
             chord(d, 'ctrl', 'shift', 'o')
             shown(d, 'chooser-ro', ro)
-            for _ in range(3):
-                press(d, 'down')  # marker.txt, Projects/, user-letter
-            press(d, 'ret')
-            d.wait(lambda: d.serial().count('trusted chooser granted one file capability') == 2, 'no RO grant')
+            pick(d, disk, 'user-letter')
+            d.wait(lambda: d.serial().count('trusted chooser granted one file capability') == 3, 'no RO grant')
             time.sleep(0.3)
             d.q.type_text('Z', gap_s=.03)
             chord(d, 'ctrl', 's')
             time.sleep(1.5)
-            assert tree(disk)[DOCS + 'user-letter'] == LETTER, 'read-only grant was written'
-            print('[m11-files] read-only grant: filesd refuses the save, bytes exact PASS', flush=True)
+            t = tree(disk)
+            assert t[DOCS + 'user-letter'] == LETTER, 'read-only grant was written'
+            save_as(d, 'letter-copy.txt', t)
+            wait_tree(d, disk, lambda t: t.get(DOCS + 'letter-copy.txt') == b'Z' + LETTER, 'copy Save As')
+            assert tree(disk)[DOCS + 'user-letter'] == LETTER
+            print('[m11-files] read-only grant: filesd refuses the save, bytes exact; the typed text is real '
+                  '(Save As copy exact) PASS', flush=True)
 
             return b'pkg graphics\r'
         finally:
@@ -220,26 +251,25 @@ def main():
     def probe():
         d = Desktop(LABEL)
         try:
-            d.wait(lambda: d.serial().count('trusted chooser opened') >= 4, 'probe never asked the chooser')
+            d.wait(lambda: d.serial().count('trusted chooser opened') >= 6, 'probe never asked the chooser')
             before = d.shot('probe-chooser', lambda p: True)
-            for _ in range(3):
-                press(d, 'down')
-            press(d, 'ret')
-            d.wait(lambda: d.serial().count('trusted chooser granted one file capability') == 3, 'probe grant')
+            pick(d, disk, 'user-letter')
+            d.wait(lambda: d.serial().count('trusted chooser granted one file capability') == 5, 'probe grant')
             # The probe paints green only when every hostile request was
             # answered as expected.
-            green = d.shot('probe-verdict', lambda p: any(
-                p[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3] == b'\x20\xa0\x40'
-                for y in range(60, 400, 4) for x in range(60, 500, 4)))
-            assert not any(green[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3] == b'\xc0\x20\x20'
-                           for y in range(60, 400, 2) for x in range(60, 500, 2)), 'probe painted red'
+            def painted(p, rgb):
+                return any(p[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3] == rgb
+                           for y in range(60, 400, 2) for x in range(60, 500, 2))
+            verdict = d.shot('probe-verdict', lambda p: painted(p, b'\x20\xa0\x40') or painted(p, b'\xc0\x20\x20'))
+            assert not painted(verdict, b'\xc0\x20\x20'), 'probe painted red'
+            assert painted(verdict, b'\x20\xa0\x40')
             # Application death: closing the probe retires its lineage (its
             # head, the granted document and the attenuated re-open).
             retired = d.serial().count('filesd: lineage retired:')
             press(d, 'f8')
             d.wait(lambda: d.serial().count('filesd: lineage retired:') > retired, 'probe lineage not retired')
             last = re.findall(r'filesd: lineage retired: (\d+) record', d.serial())[-1]
-            assert last == '3', last
+            assert last == '3', f'probe lineage retired {last} record(s), expected 3'
             return b'shutdown\r'
         finally:
             d.dispose()

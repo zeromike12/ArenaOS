@@ -129,3 +129,53 @@ Found by the guest:
 | The endpoint table was full | `MAX_ENDPOINTS` raised from 12 to 16 (ADR-0075 table) |
 | The strict syscalls failed through `syscall1`/`syscall2` (garbage in the unused argument registers) | They are called with explicit zeros |
 | The kernel EFI was not reproducible: relinking identical sources changed the PE timestamps and PDB GUID | `kernel/.cargo/config.toml` now passes `/Brepro /timestamp:0 /DEBUG:NONE`; three relinks are byte-identical |
+
+## 11.6 — File capabilities and the trusted chooser (ADR-0077)
+
+The desktop applications use AFS2 only through filesd capabilities. The
+AFS1 `user-*` function scopes are no longer granted; Settings keeps its
+AFS1 preference record.
+
+| Application | What it holds and does |
+|---|---|
+| Terminal | A `/Users/user` capability. `ls cd pwd cat put mkdir rm rmdir mv` resolve paths client-side; `/` is home and `..` never climbs out. |
+| Files | Browses folders. Opening a file offers its capability; the broker re-grants it, attenuated, in the new Editor's lineage, but only after filesd confirms the offer belongs to the requesting session's own lineage. |
+| Editor | Holds one document capability. Open, Open Read-Only and Save As go through the broker's trusted chooser. |
+
+The chooser is drawn by the shell and is modal: its keys and presses never
+reach applications. It resolves names through the broker's own filesd
+page and asks before replacing a file. Any windowed session may ask it,
+signed applications included, because asking grants nothing.
+
+Guest (`tools/test_m11_files.py`) PASS on a migrated volume:
+
+* The terminal's put, mkdir and mv results are exact, and five `/System`
+  attempts change nothing.
+* A cancelled chooser grants nothing; a read-write grant saves exact
+  bytes.
+* After a rename, the save lands in the renamed file.
+* After a delete, a save through the stale capability is refused and
+  creates nothing; a Save As then writes the exact held text.
+* A read-only grant's save is refused, and a Save As copy proves the text
+  was really typed.
+* A 2,592-byte signed hostile probe, granted one document read-only, gets
+  14 raw requests answered as refusals. Its lineage (3 records) is
+  retired when it closes.
+* The AFS1 originals stay untouched.
+
+RED (`tools/test_m11_files_red.py`): the no-attenuation and shallow-revoke
+mutants each fail the guest test, and the source and EFI are restored
+byte-exactly.
+
+Found by the guest:
+
+| Problem | Fix |
+|---|---|
+| Lineage creation was implicit, so the broker had no session for its own walks | `OP_NEW_LINEAGE` |
+| Path walks lost rights at intermediate folders | Each intermediate opens with LIST plus the final rights |
+| The chooser's folder lacked the rights it grants | The folder is opened with them |
+| In the chooser, Backspace on an empty name left the folder | Backspace edits the name; Left goes up |
+
+An unpaced burst of 62 key events overran inputd's bounded 64-entry key
+ring. That ring is the documented design (ADR-0026); the test now paces
+its keys like typing.

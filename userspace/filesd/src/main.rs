@@ -235,16 +235,16 @@ fn revoke(i: usize) {
     }
 }
 
-/// A new record and its badged capability (in filesd's own slot),
-/// derived from record `parent`, placed in the lineage of record `place`
-/// (normally `parent` itself).
-fn mint(parent: usize, place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
+/// A new record and its badged capability (in filesd's own slot), placed
+/// in the lineage of record `place` (normally the record it was opened
+/// from), or heading a new lineage (`place` = 0).
+fn mint(place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
     // A record index whose generation is exhausted retires for good: a
     // badge is never valid twice.
     let i = (2..GRANTS)
         .find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
         .ok_or(S_FULL)?;
-    let lineage = if parent == 1 && place == 1 {
+    let lineage = if place == 0 {
         i
     } else {
         let l = usize::from(unsafe { GRANT[place].lineage });
@@ -351,6 +351,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
     let need_io = !matches!(
         req.op,
         OP_SESSION | OP_RELEASE | OP_STATFS | OP_REVOKE | OP_TRUNCATE | OP_SAME_LINEAGE
+            | OP_NEW_LINEAGE
     )
         && !(req.op == OP_STAT && req.name_len == 0)
         && !(req.op == OP_OPEN && req.name_len == 0);
@@ -510,7 +511,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     _ => return reply(S_DENIED, 0),
                 }
             };
-            match mint(i, place, object, req.rights & g.rights) {
+            match mint(place, object, req.rights & g.rights) {
                 Ok((slot, minted)) => Reply {
                     status: S_OK,
                     value: u64::from(typ),
@@ -639,6 +640,21 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     reply(S_OK, 0)
                 }
                 _ => reply(S_DENIED, 0),
+            }
+        }
+        OP_NEW_LINEAGE => {
+            if i != 1 {
+                return reply(S_DENIED, 0);
+            }
+            match mint(0, g.object, 0) {
+                Ok((slot, minted)) => Reply {
+                    status: S_OK,
+                    value: 2,
+                    cap: slot,
+                    minted,
+                    bytes: [0; BYTES],
+                },
+                Err(s) => reply(s, 0),
             }
         }
         OP_SAME_LINEAGE => {

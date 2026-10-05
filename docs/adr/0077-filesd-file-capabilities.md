@@ -98,6 +98,20 @@ lineage. An application therefore never sees or influences the names
 the broker resolves. Its grant still counts against its quota, and the
 grant dies with the lineage.
 
+**Creating a lineage (amendment, found by the guest).** Records opened
+from record 1 stay in the broker's own lineage, so they use the broker's
+I/O page. A new lineage head is created only by `OP_NEW_LINEAGE` through
+record 1. Its record names `/Users/user` and has no rights. The first
+design made every open from record 1 a new head with no I/O page, so the
+chooser's own folder walk failed ("no file session").
+
+**Rights along a walk.** Attenuation is transitive: a record opened from
+a folder never has more rights than that folder. A client walking a path
+therefore opens each intermediate folder with LIST plus the rights it
+wants at the end. The chooser opens its folder with the rights it
+grants. Two guest failures found this: a `mv` into a subfolder lost
+CREATE, and a read/write grant came out with no rights at all.
+
 ### `SYS_ENDPOINT_BADGE` (51)
 
 `endpoint_badge(server_slot, cap_slot) -> badge`. It succeeds only when
@@ -141,6 +155,11 @@ Abuse cases and their answers:
   identity, a zero-write remount, interrupted import at verified kill
   points, fail closed on a damaged volume, unknown time when the RTC is
   out of range.
-* Guest (11.6): chooser cancel, read-only and read-write grants, stale
-  after delete, rename semantics, a malicious `/System` request, a forged
-  path, and cleanup on application death, each against the real filesd.
+* Guest (11.6, `tools/test_m11_files.py`, PASS): chooser cancel; read-write
+  and read-only grants (a refused save checked by a Save As positive
+  control); stale capability after delete; rename semantics (the
+  capability follows the object); malicious `/System` requests from the
+  terminal; a signed hostile probe that sends raw forged requests; and
+  cleanup on application death (lineage retirement counted).
+  `tools/test_m11_files_red.py`: the no-attenuation and shallow-revoke
+  mutants each fail it; the source and EFI are restored byte-exactly.
