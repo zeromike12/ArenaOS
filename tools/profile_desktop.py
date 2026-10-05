@@ -7,7 +7,11 @@ per scenario, the guest-measured compositor and client timings plus a
 host-measured pointer motion-to-photon figure. Not a qualification gate:
 TCG absolute times are inflated; compare runs on the same host only.
 
-Usage: python3 tools/profile_desktop.py [--label NAME] [--json OUT]
+Usage: python3 tools/profile_desktop.py [--label NAME] [--json OUT] [--production]
+
+--production measures the host-side figures on the production image (no
+probes compiled in, so no guest timings and no once-a-second perf lines
+for the console driver to mirror).
 """
 import argparse
 import json
@@ -152,8 +156,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--label', default='profile')
     ap.add_argument('--json')
+    ap.add_argument('--production', action='store_true')
     args = ap.parse_args()
-    os.environ['ARENA_PERF'] = '1'
+    if not args.production:
+        os.environ['ARENA_PERF'] = '1'
     try:
         esp = mtest.build(args.label, desktop=True)
     finally:
@@ -172,13 +178,13 @@ def main():
         pick = lambda k: g.get(k, {})
         print(f"{name:18} host={r['host_s']:6.2f}s "
               + ' '.join(f"{k.split('.')[1]}={pick(k).get('count', 0)}x{pick(k).get('mean_us', 0)}us(max{pick(k).get('max_us', 0)})"
-                         for k in ('desktop.render', 'desktop.present', 'desktop.input2frame', 'desktop.damage')
+                         for k in ('desktop.render', 'desktop.compose', 'desktop.present', 'desktop.rects', 'desktop.kpx', 'desktop.input2frame', 'desktop.damage', 'desktop.keydown', 'desktop.keyup', 'desktop.delivered', 'desktop.key2notify', 'desktop.notify2poll', 'desktop.key2poll', 'desktop.key2damage', 'desktop.key2photon', 'desktop.snapshot', 'desktop.handle', 'desktop.reply', 'desktop.wake', 'desktop.tail', 'desktop.request')
                          if k in g)
               + (f" m2p={r['motion_to_photon_ms']}" if 'motion_to_photon_ms' in r else '')
               + (f" k2p={r['key_to_photon_ms']}" if 'key_to_photon_ms' in r else ''))
         apps = {k: v for k, v in g.items() if k.startswith('app')}
         for k in sorted(apps):
-            if k.endswith(('paint', 'event2damage', 'wake')):
+            if k.endswith(('paint', 'damage', 'event2damage', 'wake', 'evkey', 'evptr', 'evother', 'pixels')):
                 print(f"{'':18}   {k}={apps[k]['count']}x{apps[k]['mean_us']}us(max{apps[k]['max_us']})")
         if name.startswith('idle'):
             # The reporting window spans the phase plus the trailing flush.

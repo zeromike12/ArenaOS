@@ -63,12 +63,22 @@ pub enum Frame {
         h: u16,
     },
     Mode,
+    /// Present up to four rectangles in one call (Phase 11 latency): the
+    /// same scanout authority as `Present`; every rectangle is checked
+    /// before any pixel moves. Unused entries are zero.
+    PresentRects {
+        n: u8,
+        rects: [[u16; 4]; PRESENT_RECTS],
+    },
     /// Check the calling owner's key queue. A live server requires an
     /// independently verified, root-provisioned region cap with this handle.
     Poll {
         handle: u64,
     },
 }
+/// Rectangles one `PresentRects` frame carries.
+pub const PRESENT_RECTS: usize = 4;
+
 impl Frame {
     fn fields(self) -> (u8, u64, i32, i32, u16, u16, u8, u8) {
         match self {
@@ -81,6 +91,7 @@ impl Frame {
             Self::Present { x, y, w, h } => (7, 0, x, y, w, h, 0, 0),
             Self::Mode => (8, 0, 0, 0, 0, 0, 0, 0),
             Self::Poll { handle } => (9, handle, 0, 0, 0, 0, 0, 0),
+            Self::PresentRects { n, .. } => (10, 0, 0, 0, 0, 0, n, 0),
         }
     }
     /// Refuse invalid content *before* touching a caller-owned buffer.
@@ -98,6 +109,14 @@ impl Frame {
         b[26..28].copy_from_slice(&h.to_le_bytes());
         b[28] = key;
         b[29] = pressed;
+        if let Self::PresentRects { rects, .. } = self {
+            for (i, r) in rects.iter().enumerate() {
+                for (j, v) in r.iter().enumerate() {
+                    let at = 32 + i * 8 + j * 2;
+                    b[at..at + 2].copy_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
         *out = b;
         Ok(())
     }
@@ -113,7 +132,9 @@ impl Frame {
         if b[4] != VERSION {
             return Err(WireError::Version);
         }
-        if b[6..8].iter().chain(b[30..].iter()).any(|&x| x != 0) {
+        // PresentRects carries its rectangles in bytes 32..64.
+        let tail = if b[5] == 10 { &b[30..32] } else { &b[30..] };
+        if b[6..8].iter().chain(tail.iter()).any(|&x| x != 0) {
             return Err(WireError::Reserved);
         }
         let handle = u64::from_le_bytes(b[8..16].try_into().unwrap());
@@ -136,6 +157,16 @@ impl Frame {
             7 => Self::Present { x, y, w, h },
             8 => Self::Mode,
             9 => Self::Poll { handle },
+            10 => {
+                let mut rects = [[0u16; 4]; PRESENT_RECTS];
+                for (i, r) in rects.iter_mut().enumerate() {
+                    for (j, v) in r.iter_mut().enumerate() {
+                        let at = 32 + i * 8 + j * 2;
+                        *v = u16::from_le_bytes([b[at], b[at + 1]]);
+                    }
+                }
+                Self::PresentRects { n: key, rects }
+            }
             _ => return Err(WireError::UnknownOp),
         };
         frame.check()?;
@@ -154,6 +185,22 @@ impl Frame {
         }
         if matches!(op, 1 | 3) && (w == 0 || h == 0 || w > 320 || h > 200) {
             return Err(WireError::Geometry);
+        }
+        if let Self::PresentRects { n, rects } = self {
+            let n = usize::from(n);
+            if n == 0 || n > PRESENT_RECTS || rects[n..].iter().any(|r| *r != [0; 4]) {
+                return Err(WireError::Geometry);
+            }
+            for &[_, _, rw, rh] in &rects[..n] {
+                if rw == 0
+                    || rh == 0
+                    || rw > 1024
+                    || rh > 768
+                    || u64::from(rw) * u64::from(rh) * 4 > 512 * 4096
+                {
+                    return Err(WireError::Geometry);
+                }
+            }
         }
         if op == 7
             && (w == 0
@@ -314,5 +361,37 @@ mod tests {
             Err(WireError::Geometry)
         );
         assert_eq!(b, old);
+    }
+    #[test]
+    fn present_rects_roundtrip_and_refusals() {
+        let mut rects = [[0u16; 4]; PRESENT_RECTS];
+        rects[0] = [10, 20, 30, 40];
+        rects[1] = [0, 0, 800, 600];
+        let f = Frame::PresentRects { n: 2, rects };
+        let mut b = [0u8; BYTES];
+        f.encode(&mut b).unwrap();
+        assert_eq!(b[5], 10);
+        assert_eq!(b[28], 2);
+        assert_eq!(&b[32..40], &[10, 0, 20, 0, 30, 0, 40, 0]);
+        assert_eq!(Frame::decode(&b), Ok(f));
+        // A stray byte in an unused entry, a zero count, an empty or an
+        // oversized rectangle: refused whole.
+        let mut stray = b;
+        stray[63] = 1;
+        assert!(Frame::decode(&stray).is_err());
+        for bad in [
+            Frame::PresentRects { n: 0, rects },
+            Frame::PresentRects { n: 5, rects },
+            Frame::PresentRects { n: 3, rects },
+        ] {
+            assert!(bad.encode(&mut b).is_err());
+        }
+        let mut huge = rects;
+        huge[1] = [0, 0, 1024, 768];
+        assert!(
+            Frame::PresentRects { n: 2, rects: huge }
+                .encode(&mut b)
+                .is_err()
+        );
     }
 }

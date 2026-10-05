@@ -252,6 +252,8 @@ pub struct State {
     last_click: Option<(u64, i32, i32, u64)>,
     /// Modifier state of the latest key event.
     pub mods: u8,
+    /// Key and chord events delivered to windows (diagnostics).
+    pub delivered: u64,
     /// Key repeat: (code, modifiers, next due time).
     repeat: Option<(u16, u8, u64)>,
     /// Alt+Tab switcher: index of the selected window in `cycle_order`.
@@ -284,6 +286,7 @@ impl State {
             now: 0,
             last_click: None,
             mods: 0,
+            delivered: 0,
             repeat: None,
             switcher: None,
             snap: None,
@@ -632,6 +635,7 @@ impl State {
         let Some(h) = self.focused else {
             return false;
         };
+        self.delivered = self.delivered.wrapping_add(1);
         let shifted_navigation = mods & MOD_SHIFT != 0 && code >= 256;
         if mods & (MOD_CTRL | MOD_ALT | MOD_SUPER) == 0 && !shifted_navigation {
             self.send(h, Event::Key(code))

@@ -165,6 +165,9 @@ static mut APP: App = App {
     doc: CAP_NONE,
 };
 const CAP_NONE: u64 = u64::MAX;
+/// Scratch for the dirty bands' previous pixels (Phase 11 latency): up to
+/// 64K pixels a frame are compared; larger repaints publish their bands.
+static mut BEFORE: [u32; 65536] = [0; 65536];
 fn describe(slot: u64) -> Option<[u64; 3]> {
     let mut d = [0u64; 3];
     (unsafe { arena_desktop::app_client::describe_raw(slot, &mut d) } == 0).then_some(d)
@@ -1135,7 +1138,9 @@ extern "C" fn main() -> ! {
     // Opt-in latency probes (ARENA_PERF builds only; folded away otherwise):
     // [paint, damage IPC, first event -> damage published, poll IPC,
     // notification wake (time asleep)].
-    let mut perf_stats = [arena_desktop::perf::Stat::ZERO; 5];
+    // [paint, damage, event2damage, poll, wake, key events, pointer events,
+    // other events, damaged pixels per publication]
+    let mut perf_stats = [arena_desktop::perf::Stat::ZERO; 9];
     let mut perf_last = 0u64;
     let mut first_event = 0u64;
     loop {
@@ -1151,6 +1156,14 @@ extern "C" fn main() -> ! {
                 perf_stats[3].add(now - polled);
                 if event.is_some() && first_event == 0 {
                     first_event = now;
+                }
+                match event {
+                    Some(Event::Key(_) | Event::Chord { .. }) => perf_stats[5].add(0),
+                    Some(
+                        Event::Pointer { .. } | Event::PopupPointer { .. } | Event::Wheel { .. },
+                    ) => perf_stats[6].add(0),
+                    Some(_) => perf_stats[7].add(0),
+                    None => {}
                 }
             }
             match event {
@@ -1223,6 +1236,11 @@ extern "C" fn main() -> ! {
                 }
                 None => break,
             }
+            // Nothing more queued: no empty poll (a later event signals the
+            // clock again, since this poll cleared the broker's wake mark).
+            if !client.more.get() {
+                break;
+            }
         }
         if client.appearance.get() != appearance {
             appearance = client.appearance.get();
@@ -1258,11 +1276,10 @@ extern "C" fn main() -> ! {
             } else {
                 0
             };
+            let stride = client.width;
             let pixels = unsafe {
                 core::slice::from_raw_parts_mut(client.pixels, client.width * client.height)
             };
-            let mut canvas = Canvas::new(pixels, client.width, client.height, client.width)
-                .unwrap_or_else(|_| client::exit(73));
             // Repaint only the bands whose keys changed since the frame the
             // backing already holds, and publish exactly those rectangles.
             let next = app.view(appearance);
@@ -1273,7 +1290,59 @@ extern "C" fn main() -> ! {
             } else {
                 scene::Dirty::full(client.width as i32, client.height as i32)
             };
-            scene::repaint(&mut canvas, &next, &damage);
+            // Repaint each dirty rectangle in row chunks that fit a bounded
+            // scratch holding the chunk's current pixels, so the publication
+            // shrinks to the pixels that really changed: one box per dirty
+            // rectangle, the union of its chunks' changed boxes.
+            let before = unsafe { &mut *(&raw mut BEFORE) };
+            let tighten = !damage.is_full();
+            let mut tight = [arena_gfxkit::Rect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            }; scene::MAX_DIRTY];
+            let mut tight_n = 0;
+            fn canvas(pixels: &mut [u32], w: usize, h: usize) -> Canvas<'_> {
+                Canvas::new(pixels, w, h, w).unwrap_or_else(|_| client::exit(73))
+            }
+            let (cw, ch) = (client.width, client.height);
+            if tighten {
+                for r in damage.rects() {
+                    let w = r.width as usize;
+                    let rows = (before.len() / w.max(1)).max(1);
+                    let mut changed: Option<arena_gfxkit::Rect> = None;
+                    let mut y = 0usize;
+                    while y < r.height as usize {
+                        let h = rows.min(r.height as usize - y);
+                        let chunk = arena_gfxkit::Rect {
+                            x: r.x,
+                            y: r.y + y as i32,
+                            width: r.width,
+                            height: h as u32,
+                        };
+                        for row in 0..h {
+                            let start = (chunk.y as usize + row) * stride + r.x as usize;
+                            before[row * w..row * w + w].copy_from_slice(&pixels[start..start + w]);
+                        }
+                        let mut c = canvas(&mut *pixels, cw, ch);
+                        c.set_clip(chunk);
+                        next.paint(&mut c);
+                        drop(c);
+                        if let Some(b) = scene::changed_box(&before[..w * h], pixels, stride, chunk)
+                        {
+                            changed = Some(changed.map_or(b, |c| scene::union(c, b)));
+                        }
+                        y += h;
+                    }
+                    if let Some(b) = changed {
+                        tight[tight_n] = b;
+                        tight_n += 1;
+                    }
+                }
+            } else {
+                scene::repaint(&mut canvas(&mut *pixels, cw, ch), &next, &damage);
+            }
             let damaged = if arena_desktop::perf::ENABLED {
                 service::now()
             } else {
@@ -1283,9 +1352,11 @@ extern "C" fn main() -> ! {
                 client.commit().unwrap_or_else(|_| client::exit(74));
             } else if damage.is_full() {
                 client.damage().unwrap_or_else(|_| client::exit(74));
-            } else {
+            } else if tight_n > 0 {
+                // Exactly the changed pixels; an unchanged repaint publishes
+                // nothing.
                 client
-                    .damage_rects(damage.rects())
+                    .damage_rects(&tight[..tight_n])
                     .unwrap_or_else(|_| client::exit(74));
             }
             shown = bands;
@@ -1294,6 +1365,21 @@ extern "C" fn main() -> ! {
                 let now = service::now();
                 perf_stats[0].add(damaged - painted);
                 perf_stats[1].add(now - damaged);
+                // Reported in the "us" columns: pixels per publication.
+                let published = if tighten {
+                    &tight[..tight_n]
+                } else {
+                    damage.rects()
+                };
+                let pixels: u64 = published
+                    .iter()
+                    .map(|r| u64::from(r.width) * u64::from(r.height))
+                    .sum();
+                perf_stats[8].add(if damage.is_full() {
+                    (client.width * client.height) as u64
+                } else {
+                    pixels
+                });
                 if first_event != 0 {
                     perf_stats[2].add(now - first_event);
                     first_event = 0;
@@ -1332,10 +1418,14 @@ extern "C" fn main() -> ! {
                 line.stat(b"event2damage", perf_stats[2]);
                 line.stat(b"poll", perf_stats[3]);
                 line.stat(b"wake", perf_stats[4]);
+                line.stat(b"evkey", perf_stats[5]);
+                line.stat(b"evptr", perf_stats[6]);
+                line.stat(b"evother", perf_stats[7]);
+                line.stat(b"pixels", perf_stats[8]);
                 line.push(b"\n");
-                client::log(line.as_bytes());
+                line.emit(client::log);
             }
-            perf_stats = [arena_desktop::perf::Stat::ZERO; 5];
+            perf_stats = [arena_desktop::perf::Stat::ZERO; 9];
         }
         // Only Monitor has time-driven work; every other built-in client
         // sleeps until the broker signals an event for it.

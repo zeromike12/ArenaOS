@@ -215,6 +215,10 @@ fn wake_clients() {
         }
         if (all || state.pending(s.handle)) && unsafe { syscall2(SYS_NOTIFY, clock(i), 1) } == 0 {
             unsafe { WOKEN[i] = true };
+            if perf::ENABLED && unsafe { KEY_AT != 0 && !KEY_POLLED && KEY_NOTIFIED == 0 } {
+                probe(P_KEY2NOTIFY, unsafe { KEY_AT });
+                unsafe { KEY_NOTIFIED = perf_now() };
+            }
         }
     }
 }
@@ -230,7 +234,31 @@ const P_INPUT: usize = 6;
 const P_SLEEP: usize = 7;
 const P_REQUEST: usize = 8;
 const P_KPIXELS: usize = 9;
-static mut PERF: [Stat; 10] = [Stat::ZERO; 10];
+const P_KEYDOWN: usize = 10;
+const P_KEYUP: usize = 11;
+const P_DELIVERED: usize = 12;
+/// Key press received -> first frame presenting the client's answer.
+const P_KEY2PHOTON: usize = 13;
+/// Key press received -> the focused client's first poll / its Damage.
+const P_KEY2POLL: usize = 14;
+const P_KEY2DAMAGE: usize = 15;
+/// The resource receipt logged after input-driven frames.
+const P_SNAPSHOT: usize = 16;
+/// Key press received -> its client notified; notified -> first poll.
+const P_KEY2NOTIFY: usize = 17;
+const P_NOTIFY2POLL: usize = 18;
+/// Request handling split: decode/handle, reply, client wakes; the idle
+/// tail from an empty TRY_RECV to WAIT.
+const P_HANDLE: usize = 19;
+const P_REPLY: usize = 20;
+const P_WAKE: usize = 21;
+const P_TAIL: usize = 22;
+const P_COUNT: usize = 23;
+static mut KEY_NOTIFIED: u64 = 0;
+static mut KEY_POLLED: bool = false;
+static mut KEY_AT: u64 = 0;
+static mut KEY_FRAME: u64 = 0;
+static mut PERF: [Stat; P_COUNT] = [Stat::ZERO; P_COUNT];
 static mut PERF_LAST: u64 = 0;
 fn probe(index: usize, since: u64) {
     if perf::ENABLED {
@@ -256,7 +284,7 @@ fn perf_report() {
     let stats = unsafe { *(&raw const PERF) };
     unsafe {
         PERF_LAST = now;
-        PERF = [Stat::ZERO; 10];
+        PERF = [Stat::ZERO; P_COUNT];
     }
     let mut line = perf::Line::new();
     line.push(b"[perf desktop]");
@@ -271,11 +299,24 @@ fn perf_report() {
         (b"sleep", P_SLEEP),
         (b"request", P_REQUEST),
         (b"kpx", P_KPIXELS),
+        (b"keydown", P_KEYDOWN),
+        (b"keyup", P_KEYUP),
+        (b"delivered", P_DELIVERED),
+        (b"key2photon", P_KEY2PHOTON),
+        (b"key2poll", P_KEY2POLL),
+        (b"key2damage", P_KEY2DAMAGE),
+        (b"snapshot", P_SNAPSHOT),
+        (b"key2notify", P_KEY2NOTIFY),
+        (b"notify2poll", P_NOTIFY2POLL),
+        (b"handle", P_HANDLE),
+        (b"reply", P_REPLY),
+        (b"wake", P_WAKE),
+        (b"tail", P_TAIL),
     ] {
         line.stat(name, stats[i]);
     }
     line.push(b"\n");
-    log(line.as_bytes());
+    line.emit(log);
 }
 // Private broker memory: each session's snapshot region is mapped only by
 // the broker; clients never map or receive it. Only an authenticated Damage
@@ -364,24 +405,35 @@ fn transient_caps() {
         log(b"\n");
     }
 }
-fn snapshot() {
+/// The last resource receipt logged (Phase 11 latency: an unchanged
+/// receipt after every pointer frame cost milliseconds of serial output).
+static mut LAST_RECEIPT: Option<[u64; 7]> = None;
+/// Log the measured resource receipt. Lifecycle events (`force`) always
+/// log, so a refusal is proven by a fresh unchanged receipt; frames log
+/// only a receipt that differs from the last one, so every change (and
+/// every peak) is still recorded.
+fn snapshot(force: bool) {
     let mut counts = [0u64; 9];
     if unsafe { syscall6(SYS_OBSERVE, POOL, counts.as_mut_ptr() as u64, 0, 0, 0, 0) } != 0 {
         die(77)
     }
-    log(b"[desktop] measured frames/records/processes/regions/pages/maps/caps=");
-    for (i, v) in [
+    let receipt = [
         counts[0], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7],
-    ]
-    .iter()
-    .enumerate()
-    {
-        if i != 0 {
-            log(b"/");
-        }
-        log_number(*v);
+    ];
+    if !force && unsafe { LAST_RECEIPT } == Some(receipt) {
+        return;
     }
-    log(b"\n");
+    unsafe { LAST_RECEIPT = Some(receipt) };
+    let mut line = perf::Line::new();
+    line.push(b"[desktop] measured frames/records/processes/regions/pages/maps/caps=");
+    for (i, v) in receipt.iter().enumerate() {
+        if i != 0 {
+            line.push(b"/");
+        }
+        line.number(*v);
+    }
+    line.push(b"\n");
+    log(line.as_bytes());
 }
 
 // ---- the trusted chooser (powerbox, ADR-0077) ------------------------------
@@ -1052,10 +1104,13 @@ fn launch_image(
     // that have not yet requested their window. No numerical caller identity.
     let sessions = unsafe { &mut *(&raw mut SESSIONS) };
     let i = sessions.iter().position(|s| s.id == 0).ok_or(STATUS_BUSY)?;
-    // Region, snapshot (transiently), Process, a landed request cap, the
-    // filesd lineage head, the home grant and a lent copy (transiently).
+    // Region, snapshot (transiently), Process, the filesd lineage head,
+    // the home grant and a lent copy (transiently). The request asking
+    // for this launch has already landed its own cap, which is counted
+    // as used here (it was once reserved twice; ADR-0079's Desktop watch
+    // record took that slack).
     let free = (0..CAP_SLOTS).filter(|s| describe(*s).is_none()).count();
-    if free < 7 {
+    if free < 6 {
         return Err(STATUS_BUSY);
     }
     let reserve = unsafe { RESERVE };
@@ -1451,15 +1506,20 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
     }
     probe(P_COMPOSE, started);
     let phase = perf_now();
-    for rect in damage.rects() {
-        let frame = arena_compositor_model::wire::Frame::Present {
-            x: rect.x,
-            y: rect.y,
-            w: rect.width as u16,
-            h: rect.height as u16,
+    // One display call carries up to four rectangles (Phase 11 latency:
+    // a synchronous call per rectangle dominated small frames).
+    use arena_compositor_model::wire::{Frame as D, PRESENT_RECTS};
+    for chunk in damage.rects().chunks(PRESENT_RECTS) {
+        let mut rects = [[0u16; 4]; PRESENT_RECTS];
+        for (r, d) in rects.iter_mut().zip(chunk) {
+            *r = [d.x as u16, d.y as u16, d.width as u16, d.height as u16];
+        }
+        let frame = D::PresentRects {
+            n: chunk.len() as u8,
+            rects,
         };
         let (out, b) = display(frame, scanout);
-        if out != [0, 0, CAP_NONE] || arena_compositor_model::wire::Frame::decode(&b) != Ok(frame) {
+        if out != [0, 0, CAP_NONE] || D::decode(&b) != Ok(frame) {
             die(90)
         }
     }
@@ -1467,6 +1527,11 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
     clear_regions();
     probe(P_PRESENT, phase);
     probe(P_RENDER, started);
+    if perf::ENABLED && unsafe { KEY_FRAME } != 0 {
+        probe(P_KEY2PHOTON, unsafe {
+            core::mem::replace(&mut *(&raw mut KEY_FRAME), 0)
+        });
+    }
     if perf::ENABLED {
         unsafe {
             (*(&raw mut PERF))[P_KPIXELS].add(damage.pixels() / 1000);
@@ -1726,11 +1791,14 @@ extern "C" fn main() -> ! {
     }
     render(ram as u64, w, h, scanout);
     log(b"[desktop] real desktop frame presented; gallery launcher available\n");
-    snapshot();
+    snapshot(true);
     loop {
         // A pending Desktop watch is handled by the next scene (render).
         let mut dirty = sweep() | animate() | unsafe { WATCH_SIGNALLED };
         if unsafe { (*(&raw mut WM)).repeat_tick(arena_desktop::app_client::now()) } {
+            if perf::ENABLED {
+                unsafe { (*(&raw mut PERF))[P_DELIVERED].add(1) };
+            }
             wake_clients();
         }
         let mut request = [0, 0, CAP_NONE];
@@ -1747,9 +1815,10 @@ extern "C" fn main() -> ! {
             )
         };
         if rc == STATUS_BUSY {
+            let tail = perf_now();
             if dirty {
                 render(ram as u64, w, h, scanout);
-                snapshot();
+                snapshot(false);
             }
             perf_report();
             let slept = perf_now();
@@ -1771,6 +1840,7 @@ extern "C" fn main() -> ! {
                 }
                 t
             };
+            probe(P_TAIL, tail);
             let woke = unsafe { syscall1(SYS_WAIT, CLOCK) };
             if woke < 0 {
                 die(96)
@@ -1825,7 +1895,19 @@ extern "C" fn main() -> ! {
                                 pressed,
                                 mods,
                             } => {
+                                let before = state.delivered;
                                 let a = state.key_input(code, pressed, mods);
+                                if perf::ENABLED {
+                                    let p = unsafe { &mut *(&raw mut PERF) };
+                                    if pressed && unsafe { KEY_AT } == 0 {
+                                        unsafe { (KEY_AT, KEY_POLLED) = (perf_now(), false) };
+                                    }
+                                    p[if pressed { P_KEYDOWN } else { P_KEYUP }]
+                                        .add(u64::from(code));
+                                    for _ in before..state.delivered {
+                                        p[P_DELIVERED].add(0);
+                                    }
+                                }
                                 // With no window focused, Enter, Delete and
                                 // Esc act on the desktop's selected icons.
                                 if pressed
@@ -1893,14 +1975,16 @@ extern "C" fn main() -> ! {
                             dirty = true;
                         }
                         Action::Launch(kind) => {
-                            if launch(kind as u8, [0; 32], CAP_NONE).is_err() {
+                            if let Err(rc) = launch(kind as u8, [0; 32], CAP_NONE) {
                                 unsafe {
                                     NOTICE = Some((
                                         "LAUNCH REFUSED / DESKTOP CAPACITY",
                                         arena_desktop::app_client::now() + 3_000_000,
                                     ));
                                 }
-                                log(b"[desktop] launch refused at bounded capacity\n");
+                                log(b"[desktop] launch refused at bounded capacity (status -");
+                                log_number(rc.unsigned_abs());
+                                log(b")\n");
                             }
                             dirty = true;
                         }
@@ -2060,6 +2144,13 @@ extern "C" fn main() -> ! {
                                 }
                                 Frame::Damage { handle, rects } if state.owned(id, handle) => {
                                     let copy_started = perf_now();
+                                    if perf::ENABLED && unsafe { KEY_AT } != 0 {
+                                        probe(P_KEY2DAMAGE, unsafe { KEY_AT });
+                                        unsafe {
+                                            KEY_FRAME =
+                                                core::mem::replace(&mut *(&raw mut KEY_AT), 0)
+                                        };
+                                    }
                                     let (ww, wh) =
                                         (usize::from(s.surface.0), usize::from(s.surface.1));
                                     // Every declared rectangle must lie inside this
@@ -2199,9 +2290,21 @@ extern "C" fn main() -> ! {
                                 }
                                 Frame::Poll { handle } if state.owned(id, handle) => {
                                     unsafe { WOKEN[i] = false };
+                                    if perf::ENABLED && unsafe { KEY_AT != 0 && !KEY_POLLED } {
+                                        probe(P_KEY2POLL, unsafe { KEY_AT });
+                                        if unsafe { KEY_NOTIFIED } != 0 {
+                                            probe(P_NOTIFY2POLL, unsafe { KEY_NOTIFIED });
+                                        }
+                                        unsafe { (KEY_POLLED, KEY_NOTIFIED) = (true, 0) };
+                                    }
                                     if let Ok(event) = state.poll(handle) {
+                                        // Bit 2: more events are queued, so a
+                                        // client stops polling when it is clear
+                                        // (Phase 11: an empty poll was a whole
+                                        // round trip on every key).
                                         result = u64::from(unsafe { PREFS.dark })
-                                            | (u64::from(unsafe { PREFS.motion }) << 1);
+                                            | (u64::from(unsafe { PREFS.motion }) << 1)
+                                            | (u64::from(state.pending(handle)) << 2);
                                         if let Some(event) = event {
                                             bytes = Frame::Event { handle, event }
                                                 .encode()
@@ -2221,10 +2324,19 @@ extern "C" fn main() -> ! {
                 }
             }
         }
-        destroy(landed);
-        reply(status, result, &bytes);
+        probe(P_HANDLE, received);
+        // Wake the clients this request gave events to BEFORE replying:
+        // the kernel then queues the reply behind them (ADR-0072 causal
+        // rule), so a typed key reaches its application before inputd
+        // delivers the key's release (Phase 11 latency).
+        let waking = perf_now();
         deliver_chosen();
         wake_clients();
+        probe(P_WAKE, waking);
+        let replying = perf_now();
+        destroy(landed);
+        reply(status, result, &bytes);
+        probe(P_REPLY, replying);
         probe(P_REQUEST, received);
         if dirty {
             render(ram as u64, w, h, scanout)
@@ -2235,7 +2347,11 @@ extern "C" fn main() -> ! {
         if (dirty && (bytes[5] == 1 || description.is_some_and(|d| d[0] == 10)))
             || (bytes[5] == 10 && description.is_some_and(|d| d[0] == 1))
         {
-            snapshot();
+            let logged = perf_now();
+            // Lifecycle requests (a client's surface, a launch) always;
+            // input-driven frames only when a counter changed.
+            snapshot(!input_request);
+            probe(P_SNAPSHOT, logged);
         }
     }
 }

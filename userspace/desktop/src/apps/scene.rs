@@ -239,6 +239,57 @@ impl View<'_> {
     }
 }
 
+/// The bounding box of two rectangles.
+pub fn union(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let x1 = (a.x + a.width as i32).max(b.x + b.width as i32);
+    let y1 = (a.y + a.height as i32).max(b.y + b.height as i32);
+    Rect {
+        x,
+        y,
+        width: (x1 - x) as u32,
+        height: (y1 - y) as u32,
+    }
+}
+
+/// The smallest rectangle inside `r` whose pixels differ between `before`
+/// (the rectangle's previous pixels, row-major, `r.width` per row) and the
+/// canvas `after` (row stride `stride`); None when nothing changed. The
+/// client publishes this instead of the whole dirty band: every pixel
+/// outside it already equals what was published (Phase 11 latency).
+pub fn changed_box(before: &[u32], after: &[u32], stride: usize, r: Rect) -> Option<Rect> {
+    let (w, h) = (r.width as usize, r.height as usize);
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+    for row in 0..h {
+        let old = &before[row * w..row * w + w];
+        let start = (r.y as usize + row) * stride + r.x as usize;
+        let new = &after[start..start + w];
+        if old == new {
+            continue;
+        }
+        let first = old.iter().zip(new).position(|(a, b)| a != b).unwrap_or(0);
+        let last = w
+            - 1
+            - old
+                .iter()
+                .rev()
+                .zip(new.iter().rev())
+                .position(|(a, b)| a != b)
+                .unwrap_or(0);
+        x0 = x0.min(first);
+        x1 = x1.max(last);
+        y0 = y0.min(row);
+        y1 = row;
+    }
+    (y0 != usize::MAX).then(|| Rect {
+        x: r.x + x0 as i32,
+        y: r.y + y0 as i32,
+        width: (x1 - x0 + 1) as u32,
+        height: (y1 - y0 + 1) as u32,
+    })
+}
+
 /// FNV-1a, 64 bit: band keys (a collision only costs a missed repaint of
 /// one band; 2^-64 per comparison).
 #[derive(Clone, Copy)]
@@ -677,5 +728,32 @@ mod tests {
         let d = dirty(&a, &c);
         assert_eq!(d.n, 1);
         assert_eq!((d.rects[0].y, d.rects[0].height), (30, 60));
+    }
+
+    #[test]
+    fn changed_box_is_exactly_the_changed_pixels() {
+        let (w, h) = (20usize, 10usize);
+        let mut after = std::vec![7u32; w * h];
+        let r = Rect {
+            x: 2,
+            y: 1,
+            width: 16,
+            height: 8,
+        };
+        let before: std::vec::Vec<u32> = (0..8)
+            .flat_map(|row| after[(1 + row) * w + 2..(1 + row) * w + 18].to_vec())
+            .collect();
+        assert_eq!(changed_box(&before, &after, w, r), None);
+        after[3 * w + 5] = 9;
+        after[6 * w + 11] = 9;
+        assert_eq!(
+            changed_box(&before, &after, w, r),
+            Some(Rect {
+                x: 5,
+                y: 3,
+                width: 7,
+                height: 4
+            })
+        );
     }
 }

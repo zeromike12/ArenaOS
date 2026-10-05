@@ -289,8 +289,22 @@ impl Damage {
 }
 
 /// The window layer alone (its transient surface is a separate layer).
+/// What a window looks like, without its transient surface and without
+/// `regions` (bookkeeping of where the content last changed: a frame whose
+/// regions were cleared after presenting is the same frame).
 fn frame(w: &WindowScene) -> WindowScene {
-    WindowScene { popup: None, ..*w }
+    WindowScene {
+        popup: None,
+        regions: Regions::NONE,
+        ..*w
+    }
+}
+
+fn popup_frame(p: &PopupScene) -> PopupScene {
+    PopupScene {
+        regions: Regions::NONE,
+        ..*p
+    }
 }
 
 /// `a` and `b` differ only in published content whose changed regions are
@@ -302,9 +316,7 @@ fn content_only(a: &WindowScene, b: &WindowScene) -> bool {
         && b.regions.n > 0
         && WindowScene {
             content: b.content,
-            regions: b.regions,
-            popup: None,
-            ..*a
+            ..frame(a)
         } == frame(b)
 }
 
@@ -315,9 +327,8 @@ fn popup_content_only(a: &PopupScene, b: &PopupScene) -> bool {
         && b.regions.n > 0
         && PopupScene {
             content: b.content,
-            regions: b.regions,
-            ..*a
-        } == *b
+            ..popup_frame(a)
+        } == popup_frame(b)
 }
 
 fn add_regions(out: &mut Damage, x: i32, y: i32, regions: &Regions) {
@@ -357,7 +368,7 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
         }
         match (pa.and_then(|w| w.popup), pb.and_then(|w| w.popup)) {
             (None, None) => {}
-            (Some(a), Some(b)) if a == b => {}
+            (Some(a), Some(b)) if popup_frame(&a) == popup_frame(&b) => {}
             (Some(a), Some(b)) if popup_content_only(&a, &b) => {
                 add_regions(out, b.x, b.y, &b.regions)
             }
@@ -438,10 +449,76 @@ pub fn compose<'c>(
     contents: impl Fn(usize) -> (&'c [u32], &'c [u32]),
     t: Theme,
 ) {
-    shell::background(canvas, t);
-    crate::desk::draw(canvas, &scene.shell.desk, t);
+    // Occlusion (Phase 11 latency): inside the topmost fully revealed
+    // window's frame nothing below it can show (its raster, fill and
+    // chrome cover every frame pixel), so only it and what is drawn above
+    // it are composed there; the rest of the clip composes every layer.
     let clip = canvas.clip();
-    for win in scene.windows[..scene.count].iter().flatten() {
+    let top = scene.windows[..scene.count]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, w)| w.map(|w| (i, w)));
+    if let Some((i, w)) = top
+        && w.reveal >= i32::from(w.height)
+        && let Some(inner) = intersect(
+            Rect {
+                x: w.x,
+                y: w.y,
+                width: u32::from(w.width),
+                height: u32::from(w.height),
+            },
+            clip,
+        )
+    {
+        for strip in subtract(clip, inner).into_iter().flatten() {
+            canvas.set_clip(strip);
+            layers(canvas, scene, &contents, t, None);
+        }
+        canvas.set_clip(inner);
+        layers(canvas, scene, &contents, t, Some(i));
+        canvas.set_clip(clip);
+        return;
+    }
+    layers(canvas, scene, &contents, t, None);
+}
+
+/// `outer` minus `inner` (inside it): up to four strips.
+fn subtract(outer: Rect, inner: Rect) -> [Option<Rect>; 4] {
+    let (ox1, oy1) = (outer.x + outer.width as i32, outer.y + outer.height as i32);
+    let (ix1, iy1) = (inner.x + inner.width as i32, inner.y + inner.height as i32);
+    let r = |x: i32, y: i32, x1: i32, y1: i32| {
+        (x1 > x && y1 > y).then(|| Rect {
+            x,
+            y,
+            width: (x1 - x) as u32,
+            height: (y1 - y) as u32,
+        })
+    };
+    [
+        r(outer.x, outer.y, ox1, inner.y),
+        r(outer.x, iy1, ox1, oy1),
+        r(outer.x, inner.y, inner.x, iy1),
+        r(ix1, inner.y, ox1, iy1),
+    ]
+}
+
+/// Every layer within the canvas clip, or (`from` = Some(i)) only window
+/// `i` and everything drawn above it.
+fn layers<'c>(
+    canvas: &mut Canvas<'_>,
+    scene: &Scene,
+    contents: &impl Fn(usize) -> (&'c [u32], &'c [u32]),
+    t: Theme,
+    from: Option<usize>,
+) {
+    if from.is_none() {
+        shell::background(canvas, t);
+        crate::desk::draw(canvas, &scene.shell.desk, t);
+    }
+    let clip = canvas.clip();
+    let start = from.unwrap_or(0);
+    for win in scene.windows[start..scene.count].iter().flatten() {
         let reveal = win.reveal.clamp(0, i32::from(win.height));
         if reveal > 0 && intersect(win.bounds(), clip).is_some() {
             let width = i32::from(win.width);
@@ -884,6 +961,67 @@ mod tests {
             partial_updates > 10 && popup_partial > 5 && resized > 10,
             "too few partial publications or resizes exercised: {partial_updates} {popup_partial} {resized}"
         );
+    }
+
+    /// A partial publication damages exactly its region; the next frame,
+    /// whose regions were cleared after presenting and whose content did
+    /// not change, damages nothing (it used to redraw the whole window).
+    #[test]
+    fn a_presented_publication_is_not_damaged_again() {
+        let mut a = Scene::EMPTY;
+        a.windows[0] = Some(WindowScene {
+            slot: 0,
+            handle: 1,
+            x: 100,
+            y: 80,
+            width: 300,
+            height: 200,
+            reveal: 200,
+            focus: 0,
+            content: 1,
+            regions: Regions::NONE,
+            published: true,
+            title: [b'M'; 32],
+            surface: (300, 200),
+            popup: Some(PopupScene {
+                handle: 2,
+                x: 120,
+                y: 100,
+                width: 40,
+                height: 30,
+                content: 1,
+                regions: Regions::NONE,
+                published: true,
+            }),
+            controls: c::Controls {
+                minimize: true,
+                maximize: true,
+                maximized: false,
+                hover: 0,
+            },
+        });
+        a.count = 1;
+        a.shell.open = 1;
+        // The client publishes a 10x4 rectangle of its main surface and a
+        // 3x3 one of its transient surface.
+        let mut b = a;
+        let w = b.windows[0].as_mut().unwrap();
+        w.content = 2;
+        w.regions.add([5, 6, 10, 4]);
+        let p = w.popup.as_mut().unwrap();
+        p.content = 2;
+        p.regions.add([1, 1, 3, 3]);
+        let mut d = Damage::new(800, 600);
+        damage(&a, &b, &mut d);
+        assert_eq!(d.pixels(), 40 + 9);
+        // Presented: regions cleared, nothing else changed.
+        let mut c = b;
+        let w = c.windows[0].as_mut().unwrap();
+        w.regions = Regions::NONE;
+        w.popup.as_mut().unwrap().regions = Regions::NONE;
+        let mut d = Damage::new(800, 600);
+        damage(&b, &c, &mut d);
+        assert!(d.is_empty(), "re-damaged {:?}", d.rects());
     }
 
     #[test]

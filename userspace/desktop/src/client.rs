@@ -14,6 +14,8 @@ pub struct Client {
     pub pixels: *mut u32,
     pub io: *mut u8,
     pub appearance: core::cell::Cell<u8>,
+    /// The last poll reported more queued events.
+    pub more: core::cell::Cell<bool>,
     pub width: usize,
     pub height: usize,
     /// Pages of the session reservation (ADR-0075): the I/O page, the main
@@ -129,6 +131,7 @@ impl Client {
             pixels: (va as usize + PIXEL_OFFSET) as *mut u32,
             io: va as *mut u8,
             appearance: core::cell::Cell::new(2),
+            more: core::cell::Cell::new(false),
             width,
             height,
             pages: bound[1] as usize,
@@ -266,10 +269,11 @@ impl Client {
             handle: self.handle,
         };
         let (out, reply) = exchange(f)?;
-        if out[1] > 3 {
+        if out[1] > 7 {
             return Err(-2);
         }
-        self.appearance.set(out[1] as u8);
+        self.appearance.set((out[1] & 3) as u8);
+        self.more.set(out[1] & 4 != 0);
         match reply {
             Frame::Poll { handle } if handle == self.handle => Ok(None),
             Frame::Event { handle, event } if handle == self.handle => Ok(Some(event)),

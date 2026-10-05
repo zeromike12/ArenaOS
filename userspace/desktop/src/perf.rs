@@ -34,7 +34,7 @@ impl Stat {
 
 /// Bounded line formatter for `[perf]` records: `name=count/mean/max`.
 pub struct Line {
-    pub bytes: [u8; 240],
+    pub bytes: [u8; 1024],
     pub len: usize,
 }
 
@@ -47,7 +47,7 @@ impl Default for Line {
 impl Line {
     pub const fn new() -> Self {
         Self {
-            bytes: [0; 240],
+            bytes: [0; 1024],
             len: 0,
         }
     }
@@ -84,6 +84,33 @@ impl Line {
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len]
     }
+    /// Emit through `log` in pieces the kernel's 256-byte debug write
+    /// takes whole: each piece repeats the line's first token (its
+    /// `[perf ...]` prefix) and breaks only between fields.
+    pub fn emit(&self, mut log: impl FnMut(&[u8])) {
+        let all = self.as_bytes();
+        let body = all.strip_suffix(b"\n").unwrap_or(all);
+        let cut = body.iter().position(|b| *b == b']').map_or(0, |i| i + 1);
+        let (prefix, mut rest) = body.split_at(cut);
+        while !rest.is_empty() {
+            let room = 240 - prefix.len();
+            let take = if rest.len() <= room {
+                rest.len()
+            } else {
+                rest[..room]
+                    .iter()
+                    .rposition(|b| *b == b' ')
+                    .filter(|i| *i > 0)
+                    .unwrap_or(room)
+            };
+            let mut piece = [0u8; 256];
+            piece[..prefix.len()].copy_from_slice(prefix);
+            piece[prefix.len()..prefix.len() + take].copy_from_slice(&rest[..take]);
+            piece[prefix.len() + take] = b'\n';
+            log(&piece[..prefix.len() + take + 1]);
+            rest = &rest[take..];
+        }
+    }
 }
 
 #[cfg(test)]
@@ -100,9 +127,28 @@ mod tests {
         l.stat(b"render", s);
         assert_eq!(l.as_bytes(), b"[perf] render=2/20/30");
         let mut full = Line::new();
-        for _ in 0..100 {
+        for _ in 0..300 {
             full.push(b"xxxxx");
         }
-        assert_eq!(full.len, 240);
+        assert_eq!(full.len, 1024);
+    }
+    #[test]
+    fn long_lines_are_emitted_in_prefixed_pieces() {
+        extern crate std;
+        let mut l = Line::new();
+        l.push(b"[perf desktop]");
+        for _ in 0..30 {
+            l.stat(b"render", Stat::ZERO);
+        }
+        l.push(b"\n");
+        let mut pieces = std::vec::Vec::new();
+        l.emit(|p| pieces.push(p.to_vec()));
+        assert!(pieces.len() > 1);
+        let mut fields = 0;
+        for p in &pieces {
+            assert!(p.len() <= 256 && p.starts_with(b"[perf desktop] ") && p.ends_with(b"\n"));
+            fields += p.windows(7).filter(|w| w == b"render=").count();
+        }
+        assert_eq!(fields, 30);
     }
 }
