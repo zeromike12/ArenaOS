@@ -73,6 +73,32 @@ pub struct Shell {
     pub switcher: Option<Switcher>,
     /// Outline of where a title drag would snap if released now.
     pub snap: Option<Rect>,
+    /// The trusted file chooser (ADR-0077), while open.
+    pub chooser: Option<ChooserView>,
+}
+
+/// Rows of the chooser list shown at once.
+pub const CHOOSER_ROWS: usize = 10;
+
+/// What the broker's trusted chooser shows: drawn by the shell, never by
+/// the requesting application, which neither sees nor steers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChooserView {
+    pub save: bool,
+    /// Folder shown, as a breadcrumb (`Home/Documents`), display only.
+    pub place: [u8; 48],
+    /// Visible rows (display names; folders end in `/`).
+    pub rows: [[u8; 32]; CHOOSER_ROWS],
+    pub count: u8,
+    /// Highlighted row (index into `rows`), if any.
+    pub selected: Option<u8>,
+    /// Entries above and below the visible window.
+    pub above: bool,
+    pub below: bool,
+    /// Save: the name being typed.
+    pub name: [u8; 32],
+    /// A one-line message (refusal, confirmation request).
+    pub message: [u8; 48],
 }
 
 /// The window switcher overlay: titles in most-recently-used order.
@@ -97,7 +123,61 @@ impl Shell {
         minimized: [0; 6],
         switcher: None,
         snap: None,
+        chooser: None,
     };
+}
+
+pub const CHOOSER_WIDTH: i32 = 420;
+pub const CHOOSER_ROW: i32 = 20;
+const CHOOSER_LIST_Y: i32 = 52;
+
+/// Region holding the chooser panel (and its ledge), centred.
+pub fn chooser_region(w: i32, h: i32) -> Rect {
+    let height = chooser_height();
+    rect((w - CHOOSER_WIDTH) / 2, (h - height) / 2, CHOOSER_WIDTH + 3, height + 3)
+}
+fn chooser_height() -> i32 {
+    CHOOSER_LIST_Y + CHOOSER_ROWS as i32 * CHOOSER_ROW + 88
+}
+/// What a pointer press at (`x`, `y`) hits in the chooser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChooserHit {
+    Row(usize),
+    Up,
+    Name,
+    Cancel,
+    Accept,
+    Inside,
+    Outside,
+}
+pub fn chooser_hit(w: i32, h: i32, x: i32, y: i32) -> ChooserHit {
+    let a = chooser_region(w, h);
+    let (x0, y0) = (a.x, a.y);
+    let height = chooser_height();
+    if x < x0 || y < y0 || x >= x0 + CHOOSER_WIDTH || y >= y0 + height {
+        return ChooserHit::Outside;
+    }
+    let list_top = y0 + CHOOSER_LIST_Y;
+    if y >= list_top && y < list_top + CHOOSER_ROWS as i32 * CHOOSER_ROW {
+        return ChooserHit::Row(((y - list_top) / CHOOSER_ROW) as usize);
+    }
+    if y >= y0 + 28 && y < y0 + 48 && x >= x0 + CHOOSER_WIDTH - 70 {
+        return ChooserHit::Up;
+    }
+    let by = y0 + height - 34;
+    if y >= by && y < by + 24 {
+        if x >= x0 + CHOOSER_WIDTH - 196 && x < x0 + CHOOSER_WIDTH - 106 {
+            return ChooserHit::Cancel;
+        }
+        if x >= x0 + CHOOSER_WIDTH - 98 && x < x0 + CHOOSER_WIDTH - 8 {
+            return ChooserHit::Accept;
+        }
+    }
+    let ny = y0 + CHOOSER_LIST_Y + CHOOSER_ROWS as i32 * CHOOSER_ROW + 8;
+    if y >= ny && y < ny + 22 {
+        return ChooserHit::Name;
+    }
+    ChooserHit::Inside
 }
 
 const SWITCHER_WIDTH: i32 = 360;
@@ -193,6 +273,7 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         minimized,
         switcher,
         snap,
+        chooser,
     } = *shell;
     let (w, h) = canvas.size();
     let (w, h) = (w as i32, h as i32);
@@ -453,5 +534,145 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
             );
         }
     }
+    if let Some(ch) = chooser {
+        draw_chooser(canvas, &ch, w, h, t);
+    }
     c::pointer(canvas, px, py, t);
+}
+
+fn label(b: &[u8]) -> &str {
+    let end = b.iter().position(|x| *x == 0).unwrap_or(b.len());
+    core::str::from_utf8(&b[..end]).unwrap_or("?")
+}
+
+fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Theme) {
+    let area = chooser_region(w, h);
+    let (x0, y0) = (area.x, area.y);
+    let height = chooser_height();
+    c::rect(canvas, x0 + 3, y0 + height, CHOOSER_WIDTH, 3, t.shadow);
+    c::rect(canvas, x0 + CHOOSER_WIDTH, y0 + 3, 3, height, t.shadow);
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0,
+            y: y0,
+            width: CHOOSER_WIDTH as u32,
+            height: height as u32,
+        },
+        t.elevated,
+        t.frame_focus,
+        m::RADIUS_PANEL,
+    );
+    c::text(
+        canvas,
+        x0 + m::L,
+        y0 + 10,
+        if ch.save { "SAVE DOCUMENT" } else { "OPEN DOCUMENT" },
+        Style::Caption,
+        t.muted,
+    );
+    c::text(canvas, x0 + m::L, y0 + 32, label(&ch.place), Style::Body, t.text);
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0 + CHOOSER_WIDTH - 70,
+            y: y0 + 28,
+            width: 58,
+            height: 20,
+        },
+        t.field,
+        t.field_edge,
+        m::RADIUS,
+    );
+    c::text(canvas, x0 + CHOOSER_WIDTH - 62, y0 + 34, "UP", Style::Caption, t.text);
+    let list_top = y0 + CHOOSER_LIST_Y;
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0 + m::L - 4,
+            y: list_top - 2,
+            width: (CHOOSER_WIDTH - 2 * m::L + 8) as u32,
+            height: (CHOOSER_ROWS as i32 * CHOOSER_ROW + 4) as u32,
+        },
+        t.field,
+        t.field_edge,
+        m::RADIUS,
+    );
+    if ch.count == 0 {
+        c::text(canvas, x0 + m::L + 4, list_top + 6, "This folder is empty", Style::Body, t.muted);
+    }
+    for row in 0..usize::from(ch.count) {
+        let y = list_top + row as i32 * CHOOSER_ROW;
+        let on = ch.selected == Some(row as u8);
+        if on {
+            c::rect(canvas, x0 + m::L - 2, y, CHOOSER_WIDTH - 2 * m::L + 4, CHOOSER_ROW, t.accent);
+        }
+        c::text(
+            canvas,
+            x0 + m::L + 4,
+            y + 5,
+            label(&ch.rows[row]),
+            Style::Body,
+            if on { t.on_accent } else { t.text },
+        );
+    }
+    if ch.above {
+        c::text(canvas, x0 + CHOOSER_WIDTH - 40, list_top + 4, "^", Style::Body, t.muted);
+    }
+    if ch.below {
+        c::text(
+            canvas,
+            x0 + CHOOSER_WIDTH - 40,
+            list_top + (CHOOSER_ROWS as i32 - 1) * CHOOSER_ROW + 4,
+            "v",
+            Style::Body,
+            t.muted,
+        );
+    }
+    let ny = list_top + CHOOSER_ROWS as i32 * CHOOSER_ROW + 8;
+    if ch.save {
+        c::text(canvas, x0 + m::L, ny + 6, "NAME", Style::Caption, t.muted);
+        c::outlined(
+            canvas,
+            Rect {
+                x: x0 + m::L + 44,
+                y: ny,
+                width: (CHOOSER_WIDTH - 2 * m::L - 44) as u32,
+                height: 22,
+            },
+            t.field,
+            t.frame_focus,
+            m::RADIUS,
+        );
+        let name = label(&ch.name);
+        c::text(canvas, x0 + m::L + 50, ny + 7, name, Style::Body, t.text);
+        // The caret after the typed name.
+        let caret = x0 + m::L + 50 + name.len() as i32 * m::FONT_ADVANCE;
+        c::rect(canvas, caret, ny + 5, 1, 13, t.text);
+    }
+    c::text(canvas, x0 + m::L, ny + 30, label(&ch.message), Style::Caption, t.muted);
+    let by = y0 + height - 34;
+    for (i, text) in ["CANCEL", if ch.save { "SAVE" } else { "OPEN" }].iter().enumerate() {
+        let bx = x0 + CHOOSER_WIDTH - 196 + i as i32 * 98;
+        c::outlined(
+            canvas,
+            Rect {
+                x: bx,
+                y: by,
+                width: 90,
+                height: 24,
+            },
+            if i == 1 { t.accent } else { t.control },
+            t.frame,
+            m::RADIUS,
+        );
+        c::text(
+            canvas,
+            bx + 12,
+            by + 8,
+            text,
+            Style::Caption,
+            if i == 1 { t.on_accent } else { t.text },
+        );
+    }
 }

@@ -19,7 +19,8 @@ pub struct Reply {
     pub bytes: [u8; BYTES],
 }
 
-/// One request through capability slot `cap`, lending `lend` (moved).
+/// One request through capability slot `cap`, lending `lend` (the kernel
+/// transfers a copy; this process keeps its own).
 pub fn call(cap: u64, req: Request, lend: u64) -> Result<Reply, Status> {
     let mut bytes = req.encode();
     let mut out = [0, 0, CAP_NONE];
@@ -62,14 +63,6 @@ pub fn free_slot(from: u64) -> Option<u64> {
     (from..64).find(|s| describe(*s).is_none())
 }
 
-/// A copy of `slot` to lend (lending moves the capability).
-fn lendable(slot: u64) -> Result<u64, Status> {
-    let tmp = free_slot(8).ok_or(wire::S_FULL)?;
-    if unsafe { syscall3(SYS_CAP_COPY, slot, tmp, RIGHTS_WRITE | RIGHTS_COPY) } != 0 {
-        return Err(wire::S_DENIED);
-    }
-    Ok(tmp)
-}
 
 pub const NAME_MAX: usize = 255;
 
@@ -101,6 +94,7 @@ impl Entry {
 
 /// A process's view of filesd: its I/O page (the last page of its own
 /// region, registered once per lineage).
+#[derive(Clone, Copy)]
 pub struct Files {
     io: *mut u8,
 }
@@ -109,10 +103,9 @@ impl Files {
     /// Register page `page` of the region in slot `region` (mapped here
     /// at `va`) as the I/O page of the lineage of capability `cap`.
     pub fn session(cap: u64, region: u64, va: u64, page: u64) -> Result<Self, Status> {
-        let lend = lendable_region(region)?;
         let mut req = Request::new(wire::OP_SESSION);
         req.offset = page;
-        call(cap, req, lend)?;
+        call(cap, req, region)?;
         Ok(Files {
             io: (va + page * PAGE as u64) as *mut u8,
         })
@@ -212,20 +205,43 @@ impl Files {
     }
 
     /// `open` of `cap` itself with at most `rights`, the new record placed
-    /// in the lineage of `place` (lent as a copy): the broker's grant.
+    /// in the lineage of `place` (lent): the broker's grant.
     pub fn open_in(&self, cap: u64, rights: u8, place: u64) -> Result<(u64, u8), Status> {
         let mut req = Request::new(wire::OP_OPEN);
         req.rights = rights;
-        let r = call(cap, req, lendable(place)?)?;
+        let r = call(cap, req, place)?;
         if r.cap == CAP_NONE {
             return Err(wire::S_IO);
         }
         Ok((r.cap, r.value as u8))
     }
 
-    /// Retire the lineage headed by `head` through `cap` (moves `head`).
+    /// Retire the lineage headed by `head` (lent) through `cap`. The caller
+    /// still drops its own `head` slot.
     pub fn revoke(&self, cap: u64, head: u64) -> Result<(), Status> {
         call(cap, Request::new(wire::OP_REVOKE), head).map(|_| ())
+    }
+
+    /// Child `name` of directory `cap` opened with at most `rights`, the new
+    /// record placed in the lineage of `place` (lent): the chooser's grant.
+    pub fn open_child_in(&self, cap: u64, name: &[u8], rights: u8, place: u64) -> Result<(u64, u8), Status> {
+        if name.is_empty() || name.len() > NAME_MAX {
+            return Err(wire::S_INVAL);
+        }
+        self.put(0, name)?;
+        let mut req = Request::new(wire::OP_OPEN);
+        req.name_len = name.len() as u16;
+        req.rights = rights;
+        let r = call(cap, req, place)?;
+        if r.cap == CAP_NONE {
+            return Err(wire::S_IO);
+        }
+        Ok((r.cap, r.value as u8))
+    }
+
+    /// Whether `other` (lent) is in the lineage of `cap`.
+    pub fn same_lineage(&self, cap: u64, other: u64) -> bool {
+        call(cap, Request::new(wire::OP_SAME_LINEAGE), other).is_ok()
     }
 
     pub fn read(&self, cap: u64, offset: u64, out: &mut [u8]) -> Result<usize, Status> {
@@ -305,10 +321,7 @@ impl Files {
         }
         self.put(0, from)?;
         self.put(from.len(), to)?;
-        let lend = match dst {
-            Some(d) => lendable(d)?,
-            None => CAP_NONE,
-        };
+        let lend = dst.unwrap_or(CAP_NONE);
         let mut req = Request::new(wire::OP_RENAME);
         req.name_len = from.len() as u16;
         req.len = to.len() as u32;
@@ -369,14 +382,6 @@ impl Files {
     }
 }
 
-/// A copy of a region capability to lend for OP_SESSION.
-fn lendable_region(region: u64) -> Result<u64, Status> {
-    let tmp = free_slot(8).ok_or(wire::S_FULL)?;
-    if unsafe { syscall3(SYS_CAP_COPY, region, tmp, RIGHTS_READ | RIGHTS_WRITE) } != 0 {
-        return Err(wire::S_DENIED);
-    }
-    Ok(tmp)
-}
 
 /// Non-empty `/`-separated components with their offsets.
 pub fn components(path: &[u8]) -> impl Iterator<Item = (usize, &[u8])> {

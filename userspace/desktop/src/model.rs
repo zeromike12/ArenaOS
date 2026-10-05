@@ -91,6 +91,9 @@ pub enum Event {
     /// The window policy dismissed this transient surface (outside press,
     /// focus loss, window move). Its handle is stale from now on.
     Dismissed(u64),
+    /// The trusted chooser this client asked for finished (chosen or
+    /// cancelled); the client collects the outcome with `TakeGrant`.
+    Chosen,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {

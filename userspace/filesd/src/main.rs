@@ -343,7 +343,10 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
     let head = usize::from(g.lineage);
     g.io = unsafe { GRANT[head].io };
     let has = |r: u8| g.rights & r == r;
-    let need_io = !matches!(req.op, OP_SESSION | OP_RELEASE | OP_STATFS | OP_REVOKE | OP_TRUNCATE)
+    let need_io = !matches!(
+        req.op,
+        OP_SESSION | OP_RELEASE | OP_STATFS | OP_REVOKE | OP_TRUNCATE | OP_SAME_LINEAGE
+    )
         && !(req.op == OP_STAT && req.name_len == 0)
         && !(req.op == OP_OPEN && req.name_len == 0);
     if need_io && g.io == 0 {
@@ -630,6 +633,16 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     revoke(j);
                     reply(S_OK, 0)
                 }
+                _ => reply(S_DENIED, 0),
+            }
+        }
+        OP_SAME_LINEAGE => {
+            if landed == CAP_NONE {
+                return reply(S_INVAL, 0);
+            }
+            let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
+            match (b > 0).then(|| record(b as u32)).flatten() {
+                Some(j) if unsafe { GRANT[j].lineage } == g.lineage => reply(S_OK, 0),
                 _ => reply(S_DENIED, 0),
             }
         }

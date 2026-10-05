@@ -32,6 +32,53 @@ pub fn exchange(frame: Frame, cap: u64) -> Result<(u64, Frame), i64> {
     }
     Ok((out[1], Frame::decode(&bytes).map_err(|_| -2)?))
 }
+/// `SYS_CAP_DESCRIBE` of one of this process's slots.
+///
+/// # Safety
+/// `out` is this process's own memory (always true for a reference).
+pub unsafe fn describe_raw(slot: u64, out: &mut [u64; 3]) -> i64 {
+    unsafe { syscall2(SYS_CAP_DESCRIBE, slot, out.as_mut_ptr() as u64) }
+}
+/// Offer filesd capability `cap` for the next application this session
+/// launches (Files opening a document in the Editor). The broker receives
+/// a copy; this process drops its own slot either way.
+pub fn offer(cap: u64) -> Result<(), i64> {
+    let r = exchange(Frame::Offer, cap).map(|_| ());
+    unsafe {
+        syscall1(SYS_CAP_DESTROY, cap);
+    }
+    r
+}
+/// The chooser's outcome: (capability slot, title, save) or None when the
+/// user cancelled.
+pub fn take_grant() -> Result<Option<(u64, [u8; 32], bool)>, i64> {
+    let mut bytes = Frame::TakeGrant.encode().map_err(|_| -2)?;
+    let mut out = [0, 0, CAP_NONE];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            0,
+            0,
+            0,
+            FUNCTION,
+            out.as_mut_ptr() as u64,
+            bytes.as_mut_ptr() as u64,
+        )
+    };
+    let reply = Frame::decode(&bytes);
+    match (rc, out[0], reply) {
+        (0, 0, Ok(Frame::Granted { save, name })) if out[2] != CAP_NONE => Ok(Some((out[2], name, save))),
+        (0, 0, Ok(Frame::TakeGrant)) if out[2] == CAP_NONE => Ok(None),
+        _ => {
+            if out[2] != CAP_NONE {
+                unsafe {
+                    syscall1(SYS_CAP_DESTROY, out[2]);
+                }
+            }
+            Err(if rc != 0 { rc } else { -2 })
+        }
+    }
+}
 pub fn startup() -> Result<(u8, bool, bool, [u8; 32]), i64> {
     match exchange(Frame::Bootstrap, 1)?.1 {
         Frame::Started {

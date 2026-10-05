@@ -203,6 +203,9 @@ impl Frame {
                         b[28] = 4;
                         b[29] = u8::from(f);
                     }
+                    Event::Chosen => {
+                        b[28] = 10;
+                    }
                 }
                 (5, handle)
             }
@@ -321,6 +324,7 @@ impl Frame {
                     7 => Event::Dismissed(u64::from_le_bytes(
                         b[16..24].try_into().map_err(|_| Error::Invalid)?,
                     )),
+                    10 => Event::Chosen,
                     _ => return Err(Error::Invalid),
                 },
             },

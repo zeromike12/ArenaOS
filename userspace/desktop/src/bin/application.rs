@@ -12,6 +12,8 @@ use arena_desktop::{
         scene, view,
     },
     client::{self, Client, Transient},
+    files::{self, Entry, Files},
+    filesd_wire as fw,
     model::{Event, PopupKind},
     service_wire::Frame,
 };
@@ -49,6 +51,61 @@ struct App {
     pending: Option<(u16, u16)>,
     /// The open context menu (a real transient surface), if any.
     menu: Option<Menu>,
+    /// filesd session (ADR-0077); None = no file capability or offline.
+    afs: Option<Files>,
+    /// /Users/user capability (terminal, Files) or CAP_NONE.
+    home: u64,
+    /// Terminal working directory, relative to home.
+    cwd: Path,
+    /// Files: the shown directory (relative to home) and its capability.
+    dir: Path,
+    dir_cap: u64,
+    entries: [Entry; 32],
+    /// Editor: the document capability (granted at launch or by the
+    /// chooser) or CAP_NONE.
+    doc: u64,
+}
+/// A path relative to the home capability, normalized lexically (no `.`,
+/// no `..`, no empty components, no leading `/`). Presentation only: the
+/// authority is the capability it is walked from.
+#[derive(Clone, Copy)]
+struct Path {
+    b: [u8; 256],
+    n: usize,
+}
+impl Path {
+    const EMPTY: Path = Path { b: [0; 256], n: 0 };
+    fn bytes(&self) -> &[u8] {
+        &self.b[..self.n]
+    }
+    /// `rel` resolved against `self` (a leading `/` starts from home).
+    fn join(&self, rel: &[u8]) -> Result<Path, i64> {
+        let mut out = if rel.first() == Some(&b'/') { Path::EMPTY } else { *self };
+        for (_, part) in files::components(rel) {
+            match part {
+                b"." => {}
+                b".." => {
+                    out.n = out.b[..out.n].iter().rposition(|b| *b == b'/').unwrap_or(0);
+                }
+                _ => {
+                    let extra = part.len() + usize::from(out.n != 0);
+                    if out.n + extra > out.b.len() {
+                        return Err(fserr(fw::S_INVAL));
+                    }
+                    if out.n != 0 {
+                        out.b[out.n] = b'/';
+                        out.n += 1;
+                    }
+                    out.b[out.n..out.n + part.len()].copy_from_slice(part);
+                    out.n += part.len();
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+fn fserr(s: files::Status) -> i64 {
+    -3000 - s as i64
 }
 /// Context menu state: its transient surface, hovered item and whether it
 /// must be repainted and republished.
@@ -95,24 +152,47 @@ static mut APP: App = App {
     size: (m::WINDOW_WIDTH as u16, m::WINDOW_HEIGHT as u16),
     pending: None,
     menu: None,
+    afs: None,
+    home: CAP_NONE,
+    cwd: Path::EMPTY,
+    dir: Path::EMPTY,
+    dir_cap: CAP_NONE,
+    entries: [Entry::EMPTY; 32],
+    doc: CAP_NONE,
 };
-fn name(bytes: &[u8]) -> Result<[u8; 32], i64> {
-    let mut n = [0; 32];
-    if bytes.len() > 31 {
-        return Err(-2);
-    }
-    n[..bytes.len()].copy_from_slice(bytes);
-    if arena_desktop::scope::public_name(&n) {
-        Ok(n)
-    } else {
-        Err(-2)
-    }
+const CAP_NONE: u64 = u64::MAX;
+fn describe(slot: u64) -> Option<[u64; 3]> {
+    let mut d = [0u64; 3];
+    (unsafe {
+        arena_desktop::app_client::describe_raw(slot, &mut d)
+    } == 0)
+        .then_some(d)
 }
 fn length(n: &[u8; 32]) -> usize {
     n.iter().position(|b| *b == 0).unwrap_or(32)
 }
+/// A list label: the name (shortened to fit, marked with `~`), folders
+/// ending in `/`. Display only; operations use the full entry name.
+fn display_name(e: &Entry) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let room = if e.is_dir() { 30 } else { 31 };
+    let name = e.name();
+    let n = name.len().min(room);
+    out[..n].copy_from_slice(&name[..n]);
+    let mut k = n;
+    if name.len() > room {
+        out[n - 1] = b'~';
+    }
+    if e.is_dir() {
+        out[k] = b'/';
+        k += 1;
+    }
+    let _ = k;
+    out
+}
 fn error(rc: i64) -> &'static str {
     match rc {
+        -3099..=-3000 => files::describe_status((-rc - 3000) as u64),
         -2001 => "REFUSED: DOCUMENT FULL (4096 BYTES)",
         -1001 => "FILE NOT FOUND",
         -1002 => "FILE ALREADY EXISTS",
@@ -130,123 +210,272 @@ fn error(rc: i64) -> &'static str {
 fn call(f: Frame) -> Result<(u64, Frame), i64> {
     service::exchange(f, service::FUNCTION)
 }
-fn read(client: &Client, path: [u8; 32]) -> Result<&[u8], i64> {
-    let n = call(Frame::Read { name: path })?.0 as usize;
-    if n > 4096 {
-        return Err(-2);
-    }
-    // The service filled only this application's first backing page.
-    Ok(unsafe { core::slice::from_raw_parts(client.io, n) })
-}
-fn put(client: &Client, path: [u8; 32], bytes: &[u8]) -> Result<(), i64> {
-    if bytes.len() > 4096 {
-        return Err(-2);
-    }
-    unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), client.io, bytes.len()) };
-    let result = call(Frame::Put {
-        name: path,
-        length: bytes.len() as u16,
-    })?
-    .0;
-    if result != bytes.len() as u64 {
-        return Err(-2);
-    }
-    Ok(())
-}
 fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
     call(Frame::Launch { kind, path }).map(|_| ())
 }
 impl App {
+    // ---- AFS2 through capabilities (ADR-0077) -----------------------------
+    fn fs(&self) -> Result<Files, i64> {
+        self.afs.ok_or(fserr(fw::S_OFFLINE))
+    }
+    /// Register this client's filesd page for the lineage of `cap`.
+    fn start_files(&mut self, client: &Client, cap: u64) {
+        let (page, base) = client.file_page();
+        match Files::session(cap, client::BACKING, base, page) {
+            Ok(f) => self.afs = Some(f),
+            Err(e) => self.status = files::describe_status(e),
+        }
+    }
+    /// `rel` (relative to home) opened with `rights`: (slot, type).
+    fn walk(&self, rel: &Path, rights: u8) -> Result<(u64, u8), i64> {
+        if self.home == CAP_NONE {
+            return Err(fserr(fw::S_DENIED));
+        }
+        self.fs()?.walk(self.home, rel.bytes(), rights).map_err(fserr)
+    }
+    /// The directory holding `rel` (opened with `rights`) and the final
+    /// name. The caller releases the directory capability.
+    fn parent<'a>(&self, rel: &'a Path, rights: u8) -> Result<(u64, &'a [u8]), i64> {
+        let (dir, name) = files::split_last(rel.bytes());
+        if name.is_empty() {
+            return Err(fserr(fw::S_INVAL));
+        }
+        let mut d = Path::EMPTY;
+        d.b[..dir.len()].copy_from_slice(dir);
+        d.n = dir.len();
+        Ok((self.walk(&d, rights)?.0, name))
+    }
+    fn release(&self, cap: u64) {
+        if let Ok(f) = self.fs() {
+            f.release(cap);
+        }
+    }
+
+    // ---- Files: one directory of /Users/user -----------------------------
     fn refresh(&mut self) -> Result<(), i64> {
-        let mut cursor = 0;
         self.count = 0;
-        for _ in 0..32 {
-            let (_, row) = call(Frame::List { cursor })?;
-            let Frame::Entry {
-                cursor: next,
-                size,
-                name,
-            } = row
-            else {
-                return Err(-2);
-            };
-            if next == u32::MAX {
+        if self.dir_cap == CAP_NONE {
+            self.dir_cap = self.walk(&self.dir, fw::R_ALL)?.0;
+        }
+        let mut after = [0u8; files::NAME_MAX];
+        let mut after_len = 0usize;
+        let mut more = true;
+        while more && self.count < self.entries.len() {
+            let (n, m) = self
+                .fs()?
+                .list(self.dir_cap, &after[..after_len], &mut self.entries[self.count..])
+                .map_err(fserr)?;
+            if n == 0 {
                 break;
             }
-            if next <= cursor || name[0] == 0 {
-                return Err(-2);
-            }
-            self.names[self.count] = name;
-            self.sizes[self.count] = size;
-            self.count += 1;
-            cursor = next;
+            self.count += n;
+            more = m;
+            let last = self.entries[self.count - 1];
+            after[..last.name().len()].copy_from_slice(last.name());
+            after_len = last.name().len();
+        }
+        for i in 0..self.count {
+            let e = self.entries[i];
+            self.names[i] = display_name(&e);
+            self.sizes[i] = e.size;
+        }
+        if more {
+            self.status = "SHOWING THE FIRST 32 ITEMS";
         }
         self.selected = self.selected.min(self.count.saturating_sub(1));
         self.top = self.top.min(self.selected);
         Ok(())
     }
-    fn select(&mut self, client: &Client) -> Result<(), i64> {
+    fn select(&mut self, _client: &Client) -> Result<(), i64> {
         self.preview_len = 0;
-        if self.count == 0 {
+        if self.count == 0 || self.entries[self.selected].is_dir() {
             return Ok(());
         }
-        let data = read(client, self.names[self.selected])?;
-        if !data
+        let e = self.entries[self.selected];
+        let fs = self.fs()?;
+        let (f, _) = fs.open(self.dir_cap, Some(e.name()), fw::R_READ).map_err(fserr)?;
+        let r = fs.read_all(f, &mut self.preview);
+        fs.release(f);
+        let data = match r {
+            Ok(d) => d,
+            Err(fw::S_FBIG) => {
+                self.status = "PREVIEW: FILE LARGER THAN 4096 BYTES";
+                return Ok(());
+            }
+            Err(e) => return Err(fserr(e)),
+        };
+        if data
             .iter()
             .all(|b| b.is_ascii_graphic() || matches!(b, b' ' | b'\n' | b'\t'))
         {
-            return Err(-2);
+            self.preview_len = data.len();
+        } else {
+            self.status = "PREVIEW: NOT A TEXT FILE";
         }
-        self.preview[..data.len()].copy_from_slice(data);
-        self.preview_len = data.len();
         Ok(())
     }
-    fn open(&mut self, client: &Client, path: [u8; 32]) -> Result<(), i64> {
-        let data = read(client, path)?;
+    /// Show directory `to` (relative to home).
+    fn enter(&mut self, client: &Client, to: Path) -> Result<(), i64> {
+        let (cap, typ) = self.walk(&to, fw::R_ALL)?;
+        if typ != 2 {
+            self.release(cap);
+            return Err(fserr(fw::S_NOTDIR));
+        }
+        if self.dir_cap != CAP_NONE {
+            self.release(self.dir_cap);
+        }
+        self.dir = to;
+        self.dir_cap = cap;
+        self.selected = 0;
+        self.top = 0;
+        self.refresh()?;
+        self.select(client)
+    }
+    /// Enter: a folder opens in place; a file opens in a new Editor that
+    /// receives a capability for exactly this file (offered to the broker,
+    /// re-granted in the Editor's lineage; the name is only its title).
+    fn activate(&mut self, client: &Client) -> Result<(), i64> {
+        if self.count == 0 {
+            return Ok(());
+        }
+        let e = self.entries[self.selected];
+        if e.is_dir() {
+            let to = self.dir.join(e.name())?;
+            return self.enter(client, to);
+        }
+        let (f, _) = self
+            .fs()?
+            .open(self.dir_cap, Some(e.name()), fw::R_READ | fw::R_WRITE)
+            .map_err(fserr)?;
+        service::offer(f)?;
+        launch(apps::EDITOR, self.names[self.selected])?;
+        self.status = "OPENED IN EDITOR";
+        Ok(())
+    }
+    fn up(&mut self, client: &Client) -> Result<(), i64> {
+        if self.dir.n == 0 {
+            return Ok(());
+        }
+        let to = self.dir.join(b"..")?;
+        self.enter(client, to)
+    }
+    fn delete_selected(&mut self, client: &Client) -> Result<(), i64> {
+        if self.count == 0 {
+            return Ok(());
+        }
+        let e = self.entries[self.selected];
+        let fs = self.fs()?;
+        if e.is_dir() {
+            fs.rmdir(self.dir_cap, e.name()).map_err(fserr)?;
+        } else {
+            fs.unlink(self.dir_cap, e.name()).map_err(fserr)?;
+        }
+        self.refresh()?;
+        self.select(client)?;
+        self.status = "DELETED";
+        Ok(())
+    }
+
+    // ---- Editor: one document capability ---------------------------------
+    fn open_document(&mut self, title: [u8; 32]) -> Result<(), i64> {
+        let fs = self.fs()?;
+        let data = fs.read_all(self.doc, &mut self.preview).map_err(fserr)?;
         self.editor
-            .load(data, view::string(&path[..length(&path)]))
+            .load(data, view::string(&title[..length(&title)]))
             .map_err(|_| -2)?;
         self.top = 0;
-        self.status = "OPENED FROM AFS1";
+        self.status = "OPENED";
         Ok(())
     }
-    fn save(&mut self, client: &Client, path: [u8; 32]) -> Result<(), i64> {
-        if !arena_desktop::scope::public_name(&path) {
-            return Err(-2);
+    fn save(&mut self, _client: &Client) -> Result<(), i64> {
+        if self.doc == CAP_NONE {
+            return self.choose(true);
         }
-        put(client, path, &self.editor.data[..self.editor.len])?;
-        self.editor.path = path;
+        self.fs()?
+            .write_all(self.doc, &self.editor.data[..self.editor.len])
+            .map_err(fserr)?;
         self.editor.dirty = false;
-        self.status = "SAVED: TRANSACTION COMMITTED";
+        self.status = "SAVED: TRANSACTIONS COMMITTED";
         if self.closing {
             client::exit(42)
         }
         Ok(())
     }
-    fn editor_dialog(&mut self, mode: u8) {
-        self.dialog = mode;
-        self.line.set(if self.editor.path[0] != 0 {
-            &self.editor.path[..length(&self.editor.path)]
+    /// Ask the broker's trusted chooser for a document (Open or Save As).
+    /// The answer arrives later as an event; nothing is granted here.
+    fn choose(&mut self, save: bool) -> Result<(), i64> {
+        let suggestion = if save && self.editor.path[0] != 0 {
+            self.editor.path
         } else {
-            b"user-note"
-        });
+            let mut n = [0u8; 32];
+            n[..12].copy_from_slice(b"Untitled.txt");
+            n
+        };
+        call(Frame::Choose {
+            save,
+            name: suggestion,
+        })?;
+        self.status = if save { "CHOOSE WHERE TO SAVE" } else { "CHOOSE A DOCUMENT" };
+        Ok(())
+    }
+    /// The chooser finished: take the granted capability, if any.
+    fn chosen(&mut self, client: &Client) -> Result<(), i64> {
+        let Some((cap, title, save)) = service::take_grant()? else {
+            self.status = "CANCELLED";
+            return Ok(());
+        };
+        if self.afs.is_none() {
+            self.start_files(client, cap);
+        }
+        if self.doc != CAP_NONE {
+            self.release(self.doc);
+        }
+        self.doc = cap;
+        if save {
+            self.editor.path = title;
+            self.save(client)
+        } else {
+            self.open_document(title)
+        }
+    }
+
+    /// A new, unsaved document (the next save asks where, via the chooser).
+    fn new_document(&mut self) -> Result<(), i64> {
+        if self.editor.dirty {
+            self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
+            return Ok(());
+        }
+        self.editor.load(b"", "").map_err(|_| -2)?;
+        if self.doc != CAP_NONE {
+            self.release(self.doc);
+            self.doc = CAP_NONE;
+        }
+        self.top = 0;
+        Ok(())
     }
     fn accept(&mut self, client: &Client) -> Result<(), i64> {
-        let path = name(&self.line.bytes[..self.line.len])?;
+        let typed = &self.line.bytes[..self.line.len];
         match self.dialog {
-            1 => self.save(client, path)?,
-            2 => self.open(client, path)?,
             3 => {
-                call(Frame::Create { name: path })?;
+                let fs = self.fs()?;
+                fs.create(self.dir_cap, typed).map_err(fserr)?;
                 self.refresh()?;
                 self.select(client)?;
                 self.status = "CREATED EMPTY FILE";
+            }
+            5 => {
+                let fs = self.fs()?;
+                fs.mkdir(self.dir_cap, typed).map_err(fserr)?;
+                self.refresh()?;
+                self.status = "CREATED FOLDER";
             }
             _ => return Err(-2),
         }
         self.dialog = 0;
         Ok(())
     }
+
+    // ---- Terminal ------------------------------------------------------------
     fn command(&mut self, client: &Client) -> Result<(), i64> {
         let (bytes, n) = self.terminal.consume();
         let text = &bytes[..n];
@@ -254,20 +483,151 @@ impl App {
         let split = text.iter().position(|b| *b == b' ').unwrap_or(n);
         let cmd = &text[..split];
         let args = if split < n { &text[split + 1..] } else { b"" };
+        let (first, rest) = match args.iter().position(|b| *b == b' ') {
+            Some(i) => (&args[..i], &args[i + 1..]),
+            None => (args, &b""[..]),
+        };
         match cmd {
-            b"" => {},
-            b"help" => self.terminal.write(b"help echo ls cat ps put rm launch clear\nFiles: user-* / text up to 4096 bytes\nlaunch term|files|edit|settings|monitor|gallery"),
+            b"" => {}
+            b"help" => self.terminal.write(b"help echo ls cd pwd cat put mkdir rm rmdir mv ps launch clear\nPaths are inside your home folder; / is home.\nlaunch term|files|edit|settings|monitor|gallery"),
             b"echo" => self.terminal.write(args),
-            b"ls" => {self.refresh()?; for i in 0..self.count {self.terminal.write(&self.names[i][..length(&self.names[i])]);}},
-            b"cat" => {let data=read(client,name(args)?)?; if !data.is_ascii() {return Err(-2)} self.terminal.write(data);},
-            b"rm" => {call(Frame::Delete{name:name(args)?})?; self.terminal.write(b"Deleted");},
-            b"put" => {let s=args.iter().position(|b|*b==b' ').unwrap_or(args.len()); let data=if s<args.len(){&args[s+1..]}else{b""}; put(client,name(&args[..s])?,data)?; self.terminal.write(b"Committed");},
+            b"pwd" => {
+                let mut b = [0u8; 64];
+                let mut k = 0;
+                append(&mut b, &mut k, b"~/");
+                append(&mut b, &mut k, self.cwd.bytes());
+                self.terminal.write(&b[..k]);
+            }
+            b"cd" => {
+                let to = self.cwd.join(args)?;
+                let (cap, typ) = self.walk(&to, fw::R_LIST)?;
+                self.release(cap);
+                if typ != 2 {
+                    return Err(fserr(fw::S_NOTDIR));
+                }
+                self.cwd = to;
+            }
+            b"ls" => {
+                let at = self.cwd.join(args)?;
+                let (cap, typ) = self.walk(&at, fw::R_LIST | fw::R_READ)?;
+                let r = if typ == 2 { self.list_into_terminal(cap) } else { Ok(()) };
+                if typ != 2 {
+                    let name = files::split_last(at.bytes()).1;
+                    self.terminal.write(name);
+                }
+                self.release(cap);
+                r?;
+            }
+            b"cat" => {
+                let at = self.cwd.join(args)?;
+                let (cap, _) = self.walk(&at, fw::R_READ)?;
+                let r = self.fs()?.read_all(cap, &mut self.preview).map(|d| d.len());
+                self.release(cap);
+                let len = r.map_err(fserr)?;
+                let data = &self.preview[..len];
+                if !data.iter().all(|b| b.is_ascii_graphic() || matches!(b, b' ' | b'\n' | b'\t')) {
+                    return Err(fserr(fw::S_INVAL));
+                }
+                let mut copy = [0u8; 4096];
+                copy[..len].copy_from_slice(data);
+                self.terminal.write(&copy[..len]);
+            }
+            b"put" => {
+                let at = self.cwd.join(first)?;
+                let (dir, name) = self.parent(&at, fw::R_CREATE | fw::R_LIST | fw::R_WRITE)?;
+                let fs = self.fs()?;
+                let r = match fs.create(dir, name) {
+                    Ok(()) | Err(fw::S_EXIST) => fs
+                        .open(dir, Some(name), fw::R_WRITE)
+                        .and_then(|(f, _)| {
+                            let w = fs.write_all(f, rest);
+                            fs.release(f);
+                            w
+                        }),
+                    Err(e) => Err(e),
+                };
+                fs.release(dir);
+                r.map_err(fserr)?;
+                self.terminal.write(b"Saved");
+            }
+            b"mkdir" | b"rm" | b"rmdir" => {
+                let at = self.cwd.join(args)?;
+                let rights = if cmd == b"mkdir" { fw::R_CREATE } else { fw::R_DELETE };
+                let (dir, name) = self.parent(&at, rights)?;
+                let fs = self.fs()?;
+                let r = match cmd {
+                    b"mkdir" => fs.mkdir(dir, name),
+                    b"rm" => fs.unlink(dir, name),
+                    _ => fs.rmdir(dir, name),
+                };
+                fs.release(dir);
+                r.map_err(fserr)?;
+                self.terminal.write(b"Done");
+            }
+            b"mv" => {
+                let from = self.cwd.join(first)?;
+                let mut to = self.cwd.join(rest)?;
+                // Moving onto an existing folder moves into it.
+                if let Ok((cap, typ)) = self.walk(&to, fw::R_LIST) {
+                    self.release(cap);
+                    if typ == 2 {
+                        to = to.join(files::split_last(from.bytes()).1)?;
+                    }
+                }
+                let (src, a) = self.parent(&from, fw::R_RENAME)?;
+                let dst = match self.parent(&to, fw::R_CREATE) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        self.release(src);
+                        return Err(e);
+                    }
+                };
+                let fs = self.fs()?;
+                let r = fs.rename(src, a, Some(dst.0), dst.1);
+                fs.release(src);
+                fs.release(dst.0);
+                r.map_err(fserr)?;
+                self.terminal.write(b"Moved");
+            }
             b"ps" => {self.process_count=service::processes(&mut self.processes)?; for i in 0..self.process_count {let mut b=[0;64]; let mut n=0; append(&mut b,&mut n,b"PID ");number(&mut b,&mut n,self.processes[i].0);append(&mut b,&mut n,b" THREADS ");number(&mut b,&mut n,self.processes[i].1);self.terminal.write(&b[..n]);}},
             b"launch" => {let kind=match args {b"term"=>0,b"files"=>1,b"edit"=>2,b"settings"=>3,b"monitor"=>4,b"gallery"=>5,_=>return Err(-2)};launch(kind,[0;32])?; self.terminal.write(b"Real application started");},
             b"clear" => {self.terminal.count=0;},
             _ => self.terminal.write(b"Unknown command; use help"),
         }
+        let _ = client;
         Ok(())
+    }
+    /// Every entry of directory `cap`, one line each (folders end in `/`).
+    fn list_into_terminal(&mut self, cap: u64) -> Result<(), i64> {
+        let mut batch = [Entry::EMPTY; 8];
+        let mut after = [0u8; files::NAME_MAX];
+        let mut after_len = 0usize;
+        loop {
+            let (n, more) = self.fs()?.list(cap, &after[..after_len], &mut batch).map_err(fserr)?;
+            for e in &batch[..n] {
+                let mut b = [0u8; 64];
+                let mut k = 0;
+                let name = e.name();
+                append(&mut b, &mut k, &name[..name.len().min(40)]);
+                if name.len() > 40 {
+                    append(&mut b, &mut k, b"~");
+                }
+                if e.is_dir() {
+                    append(&mut b, &mut k, b"/");
+                } else {
+                    append(&mut b, &mut k, b"  ");
+                    number(&mut b, &mut k, e.size);
+                    append(&mut b, &mut k, b" B");
+                }
+                self.terminal.write(&b[..k]);
+            }
+            if n == 0 || !more {
+                return Ok(());
+            }
+            let last = batch[n - 1];
+            after[..last.name().len()].copy_from_slice(last.name());
+            after_len = last.name().len();
+        }
     }
     fn layout(&self) -> Layout {
         Layout::new(self.size.0, self.size.1)
@@ -345,7 +705,8 @@ impl App {
                 match key {
                     258 => self.selected = self.selected.saturating_sub(1),
                     259 => self.selected = (self.selected + 1).min(self.count.saturating_sub(1)),
-                    13 if self.count > 0 => launch(apps::EDITOR, self.names[self.selected])?,
+                    13 => return self.activate(client),
+                    8 => return self.up(client),
                     _ => {}
                 }
                 if self.selected < self.top {
@@ -388,11 +749,8 @@ impl App {
         if self.dialog != 0 {
             if self.dialog == 4 {
                 if layout::hit(l.NAME_FIELD, x, y) {
-                    if self.editor.path[0] == 0 {
-                        self.editor_dialog(1)
-                    } else {
-                        self.save(client, self.editor.path)?;
-                    }
+                    self.dialog = 0;
+                    self.save(client)?;
                 } else if layout::hit(l.PRIMARY, x, y) {
                     client::exit(42)
                 } else if layout::hit(l.SECONDARY, x, y) {
@@ -416,25 +774,16 @@ impl App {
         match self.kind {
             apps::EDITOR => {
                 if layout::hit(l.NEW, x, y) {
-                    if self.editor.dirty {
-                        self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
-                    } else {
-                        self.editor.load(b"", "").map_err(|_| -2)?;
-                        self.top = 0;
-                    }
+                    self.new_document()?;
                 } else if layout::hit(l.SAVE, x, y) {
-                    if self.editor.path[0] == 0 {
-                        self.editor_dialog(1)
-                    } else {
-                        self.save(client, self.editor.path)?;
-                    }
+                    self.save(client)?;
                 } else if layout::hit(l.SAVE_AS, x, y) {
-                    self.editor_dialog(1)
+                    self.choose(true)?;
                 } else if layout::hit(l.OPEN, x, y) {
                     if self.editor.dirty {
                         self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
                     } else {
-                        self.editor_dialog(2)
+                        self.choose(false)?;
                     }
                 } else if layout::hit(l.EDIT_TEXT, x, y) {
                     self.editor.cursor = l.visual_cursor(
@@ -446,21 +795,16 @@ impl App {
             }
             apps::FILES => {
                 if layout::hit(l.NEW, x, y) {
-                    self.line.set(b"user-new");
+                    self.line.set(b"Untitled.txt");
                     self.dialog = 3;
                 } else if layout::hit(l.SAVE, x, y) {
                     self.refresh()?;
                     self.select(client)?;
                     self.status = "REFRESHED";
-                } else if layout::hit(l.OPEN, x, y) && self.count > 0 {
-                    launch(apps::EDITOR, self.names[self.selected])?;
-                } else if layout::hit(l.DELETE, x, y) && self.count > 0 {
-                    call(Frame::Delete {
-                        name: self.names[self.selected],
-                    })?;
-                    self.refresh()?;
-                    self.select(client)?;
-                    self.status = "DELETED";
+                } else if layout::hit(l.OPEN, x, y) {
+                    self.activate(client)?;
+                } else if layout::hit(l.DELETE, x, y) {
+                    self.delete_selected(client)?;
                 } else if layout::hit(l.FILE_LIST, x, y) {
                     let row = ((y - l.FILE_LIST.y) / l.ROW_H) as usize + self.top;
                     if row < self.count {
@@ -572,36 +916,22 @@ impl App {
                 self.top = 0;
                 self.command(client)?;
             }
-            (apps::EDITOR, 0) => {
-                if self.editor.dirty {
-                    self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
-                } else {
-                    self.editor.load(b"", "").map_err(|_| -2)?;
-                    self.top = 0;
-                }
-            }
+            (apps::EDITOR, 0) => self.new_document()?,
             (apps::EDITOR, 1) => {
                 if self.editor.dirty {
                     self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
                 } else {
-                    self.editor_dialog(2)
+                    self.choose(false)?
                 }
             }
-            (apps::EDITOR, 2) if self.editor.path[0] != 0 => self.save(client, self.editor.path)?,
-            (apps::EDITOR, 2 | 3) => self.editor_dialog(1),
-            (apps::FILES, 0) if self.count > 0 => launch(apps::EDITOR, self.names[self.selected])?,
+            (apps::EDITOR, 2) => self.save(client)?,
+            (apps::EDITOR, 3) => self.choose(true)?,
+            (apps::FILES, 0) => self.activate(client)?,
             (apps::FILES, 1) => {
-                self.line.set(b"user-new");
+                self.line.set(b"Untitled.txt");
                 self.dialog = 3;
             }
-            (apps::FILES, 2) if self.count > 0 => {
-                call(Frame::Delete {
-                    name: self.names[self.selected],
-                })?;
-                self.refresh()?;
-                self.select(client)?;
-                self.status = "DELETED";
-            }
+            (apps::FILES, 2) => self.delete_selected(client)?,
             (apps::FILES, 3) => {
                 self.refresh()?;
                 self.select(client)?;
@@ -784,14 +1114,33 @@ extern "C" fn main() -> ! {
         .set(u8::from(dark) | (u8::from(motion) << 1));
     let app = unsafe { &mut *(&raw mut APP) };
     app.kind = kind;
+    // Child slot 4: a filesd capability (ADR-0077) for the terminal and
+    // Files (/Users/user) or the Editor (the document it was opened with).
+    let granted = describe(4).is_some_and(|d| d[0] == 12);
+    if granted && matches!(kind, apps::TERMINAL | apps::FILES | apps::EDITOR) {
+        app.start_files(&client, 4);
+        if kind == apps::EDITOR {
+            app.doc = 4;
+        } else {
+            app.home = 4;
+        }
+    }
     let init = match kind {
         apps::TERMINAL => {
-            app.terminal
-                .write(b"ArenaOS ordinary command session\nType help. Files are scoped to user-*.");
+            app.terminal.write(if app.afs.is_some() {
+                b"ArenaOS ordinary command session\nType help. Your home folder is /Users/user." as &[u8]
+            } else {
+                b"ArenaOS ordinary command session\nFile service offline: no file commands."
+            });
             Ok(())
         }
-        apps::FILES => app.refresh().and_then(|_| app.select(&client)),
-        apps::EDITOR if path[0] != 0 => app.open(&client, path),
+        apps::FILES => {
+            let mut docs = Path::EMPTY;
+            docs.b[..9].copy_from_slice(b"Documents");
+            docs.n = 9;
+            app.enter(&client, docs)
+        }
+        apps::EDITOR if app.doc != CAP_NONE => app.open_document(path),
         apps::SETTINGS => match service::exchange(Frame::Display, 1) {
             Ok((v, _)) => {
                 app.display = (v as u16, (v >> 32) as u16);
@@ -858,6 +1207,12 @@ extern "C" fn main() -> ! {
                     dirty = true;
                 }
                 Some(Event::Focus(_)) => dirty = true,
+                Some(Event::Chosen) => {
+                    if let Err(rc) = app.chosen(&client) {
+                        app.status = error(rc);
+                    }
+                    dirty = true;
+                }
                 Some(Event::Configure { width, height }) => {
                     app.pending = Some((width, height));
                     dirty = true;

@@ -104,6 +104,13 @@ struct Session {
     /// Head of this session's filesd lineage (held by the broker only, no
     /// rights; revoking it retires every file capability of the session).
     files_head: u64,
+    /// The chooser's outcome is ready for TakeGrant (granted or cancelled).
+    grant_ready: bool,
+    /// The capability the chooser granted (CAP_NONE: cancelled), its title
+    /// (display only) and whether it was a save.
+    grant: u64,
+    grant_title: [u8; 32],
+    grant_save: bool,
 }
 const EMPTY: Session = Session {
     region: CAP_NONE,
@@ -129,6 +136,10 @@ const EMPTY: Session = Session {
     surface: (0, 0),
     popup: NO_POPUP,
     files_head: CAP_NONE,
+    grant_ready: false,
+    grant: CAP_NONE,
+    grant_title: [0; 32],
+    grant_save: false,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -138,6 +149,10 @@ static mut PREFS: arena_desktop::preferences::Preferences =
 static mut FILES: Option<arena_desktop::fs_backend::Fs> = None;
 /// The broker's own filesd session (None = AFS2 offline or absent).
 static mut AFS2: Option<arena_desktop::files::Files> = None;
+/// A file capability offered for the next Editor launch (ADR-0077).
+static mut OFFER: u64 = CAP_NONE;
+/// Rights an application gets on a document it opened or saved.
+const R_DOC: u8 = arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE;
 static mut UPTIME_SECOND: u64 = 0;
 static mut CAP_HIGH_WATER: u64 = 0;
 static mut NOTICE: Option<(&'static str, u64)> = None;
@@ -361,6 +376,373 @@ fn snapshot() {
     }
     log(b"\n");
 }
+
+// ---- the trusted chooser (powerbox, ADR-0077) ------------------------------
+//
+// Drawn by the shell, driven only by the user's own input, resolving names
+// through the broker's own filesd page on /Users/user. The requesting
+// application learns only the outcome and receives a capability for
+// exactly the chosen file, in its own lineage.
+const CHOOSER_MAX: usize = 64;
+struct Chooser {
+    session: usize,
+    save: bool,
+    /// Folder shown, relative to /Users/user.
+    dir: [u8; 200],
+    dir_len: usize,
+    dir_cap: u64,
+    entries: [arena_desktop::files::Entry; CHOOSER_MAX],
+    count: usize,
+    more: bool,
+    selected: Option<usize>,
+    top: usize,
+    name: [u8; 32],
+    name_len: usize,
+    /// Save over an existing file asks once more.
+    confirm: bool,
+    message: &'static str,
+    buttons: u8,
+}
+static mut CHOOSER: Option<Chooser> = None;
+
+fn chooser_open(index: usize, save: bool, name: [u8; 32]) -> Result<(), i64> {
+    let s = unsafe { SESSIONS[index] };
+    if unsafe { (*(&raw const CHOOSER)).is_some() } || s.handle == 0 || s.grant_ready {
+        return Err(STATUS_BUSY);
+    }
+    if unsafe { (*(&raw const AFS2)).is_none() } || s.files_head == CAP_NONE {
+        return Err(-3015);
+    }
+    let n = name.iter().position(|b| *b == 0).unwrap_or(32).min(31);
+    let mut ch = Chooser {
+        session: index,
+        save,
+        dir: [0; 200],
+        dir_len: 9,
+        dir_cap: CAP_NONE,
+        entries: [arena_desktop::files::Entry::EMPTY; CHOOSER_MAX],
+        count: 0,
+        more: false,
+        selected: None,
+        top: 0,
+        name: [0; 32],
+        name_len: if save { n } else { 0 },
+        confirm: false,
+        message: "",
+        buttons: 0,
+    };
+    ch.dir[..9].copy_from_slice(b"Documents");
+    if save {
+        ch.name[..n].copy_from_slice(&name[..n]);
+    }
+    unsafe { CHOOSER = Some(ch) };
+    chooser_load();
+    log(b"[desktop] trusted chooser opened\n");
+    Ok(())
+}
+fn chooser_close() {
+    if let Some(ch) = unsafe { (*(&raw mut CHOOSER)).take() } {
+        if ch.dir_cap != CAP_NONE {
+            if let Some(f) = unsafe { &*(&raw const AFS2) } {
+                f.release(ch.dir_cap);
+            }
+        }
+    }
+}
+/// (Re)list the chooser's folder through the broker's own session.
+fn chooser_load() {
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    let Some(f) = (unsafe { &*(&raw const AFS2) }) else {
+        return;
+    };
+    if ch.dir_cap != CAP_NONE {
+        f.release(ch.dir_cap);
+        ch.dir_cap = CAP_NONE;
+    }
+    use arena_desktop::filesd_wire::{R_CREATE, R_LIST};
+    ch.count = 0;
+    ch.selected = None;
+    ch.top = 0;
+    match f.walk(USER_ROOT, &ch.dir[..ch.dir_len], R_LIST | R_CREATE) {
+        Ok((cap, 2)) => ch.dir_cap = cap,
+        Ok((cap, _)) => {
+            f.release(cap);
+            ch.message = "NOT A FOLDER";
+            return;
+        }
+        Err(e) => {
+            ch.message = arena_desktop::files::describe_status(e);
+            return;
+        }
+    }
+    let mut after = [0u8; arena_desktop::files::NAME_MAX];
+    let mut after_len = 0;
+    ch.more = false;
+    while ch.count < CHOOSER_MAX {
+        match f.list(ch.dir_cap, &after[..after_len], &mut ch.entries[ch.count..]) {
+            Ok((0, _)) => break,
+            Ok((n, more)) => {
+                ch.count += n;
+                let last = ch.entries[ch.count - 1];
+                after[..last.name().len()].copy_from_slice(last.name());
+                after_len = last.name().len();
+                if !more {
+                    break;
+                }
+                ch.more = ch.count == CHOOSER_MAX;
+            }
+            Err(e) => {
+                ch.message = arena_desktop::files::describe_status(e);
+                break;
+            }
+        }
+    }
+    if ch.more {
+        ch.message = "SHOWING THE FIRST 64 ITEMS";
+    }
+}
+/// Finish: hand the outcome to the requesting session and close.
+fn chooser_finish(granted: Option<(u64, [u8; 32])>) {
+    let Some(index) = (unsafe { (*(&raw const CHOOSER)).as_ref() }).map(|c| c.session) else {
+        return;
+    };
+    let save = unsafe { (*(&raw const CHOOSER)).as_ref() }.is_some_and(|c| c.save);
+    chooser_close();
+    let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(index) };
+    s.grant_ready = true;
+    s.grant_save = save;
+    match granted {
+        Some((cap, title)) => {
+            s.grant = cap;
+            s.grant_title = title;
+            log(b"[desktop] trusted chooser granted one file capability\n");
+        }
+        None => {
+            s.grant = CAP_NONE;
+            log(b"[desktop] trusted chooser cancelled; nothing granted\n");
+        }
+    }
+    // Delivered by the main loop once no window-policy borrow is live.
+    unsafe { CHOSEN_TO = s.handle };
+}
+/// The window whose chooser just finished (0: none).
+static mut CHOSEN_TO: u64 = 0;
+fn deliver_chosen() {
+    let handle = unsafe { core::mem::replace(&mut *(&raw mut CHOSEN_TO), 0) };
+    if handle != 0 {
+        unsafe { (&mut *(&raw mut WM)).send(handle, arena_desktop::model::Event::Chosen) };
+    }
+}
+fn chooser_enter(name: &[u8]) {
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    let extra = name.len() + usize::from(ch.dir_len != 0);
+    if ch.dir_len + extra > ch.dir.len() {
+        ch.message = "PATH TOO LONG";
+        return;
+    }
+    if ch.dir_len != 0 {
+        ch.dir[ch.dir_len] = b'/';
+        ch.dir_len += 1;
+    }
+    ch.dir[ch.dir_len..ch.dir_len + name.len()].copy_from_slice(name);
+    ch.dir_len += name.len();
+    ch.message = "";
+    chooser_load();
+}
+fn chooser_up() {
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    if ch.dir_len == 0 {
+        return;
+    }
+    ch.dir_len = ch.dir[..ch.dir_len].iter().rposition(|b| *b == b'/').unwrap_or(0);
+    ch.message = "";
+    chooser_load();
+}
+/// Open the selected file, or save under the typed name.
+fn chooser_accept() {
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    let Some(f) = (unsafe { &*(&raw const AFS2) }) else {
+        return;
+    };
+    let head = unsafe { SESSIONS[ch.session].files_head };
+    let mut title = [0u8; 32];
+    if !ch.save {
+        let Some(i) = ch.selected else {
+            ch.message = "SELECT A DOCUMENT";
+            return;
+        };
+        let e = ch.entries[i];
+        if e.is_dir() {
+            return chooser_enter(e.name());
+        }
+        let n = e.name().len().min(31);
+        title[..n].copy_from_slice(&e.name()[..n]);
+        match f.open_child_in(ch.dir_cap, e.name(), R_DOC, head) {
+            Ok((cap, _)) => chooser_finish(Some((cap, title))),
+            Err(e) => ch.message = arena_desktop::files::describe_status(e),
+        }
+        return;
+    }
+    let name = &ch.name[..ch.name_len];
+    if name.is_empty() {
+        ch.message = "TYPE A NAME";
+        return;
+    }
+    let exists = ch.entries[..ch.count].iter().any(|e| e.name() == name);
+    if exists && ch.entries[..ch.count].iter().any(|e| e.name() == name && e.is_dir()) {
+        ch.message = "A FOLDER HAS THAT NAME";
+        return;
+    }
+    if exists && !ch.confirm {
+        ch.confirm = true;
+        ch.message = "REPLACE THE EXISTING FILE? SAVE AGAIN";
+        return;
+    }
+    if !exists {
+        if let Err(e) = f.create(ch.dir_cap, name) {
+            ch.message = arena_desktop::files::describe_status(e);
+            return;
+        }
+    }
+    title[..name.len()].copy_from_slice(name);
+    match f.open_child_in(ch.dir_cap, name, R_DOC, head) {
+        Ok((cap, _)) => chooser_finish(Some((cap, title))),
+        Err(e) => ch.message = arena_desktop::files::describe_status(e),
+    }
+}
+fn chooser_select(i: usize) {
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    if i >= ch.count {
+        return;
+    }
+    ch.selected = Some(i);
+    if i < ch.top {
+        ch.top = i;
+    }
+    if i >= ch.top + arena_desktop::shell::CHOOSER_ROWS {
+        ch.top = i + 1 - arena_desktop::shell::CHOOSER_ROWS;
+    }
+    let e = ch.entries[i];
+    if ch.save && !e.is_dir() && e.name().len() < 32 {
+        ch.name = [0; 32];
+        ch.name[..e.name().len()].copy_from_slice(e.name());
+        ch.name_len = e.name().len();
+        ch.confirm = false;
+    }
+}
+/// A key while the chooser is open. All keys go to the chooser (modal).
+fn chooser_key(code: u16) {
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    match code {
+        27 => chooser_finish(None),
+        258 => {
+            let i = ch.selected.map_or(0, |i| i.saturating_sub(1));
+            chooser_select(i)
+        }
+        259 => {
+            let i = ch.selected.map_or(0, |i| i + 1).min(ch.count.saturating_sub(1));
+            chooser_select(i)
+        }
+        13 => match ch.selected.map(|i| ch.entries[i]) {
+            Some(e) if e.is_dir() => chooser_enter(e.name()),
+            _ => chooser_accept(),
+        },
+        8 if ch.save && ch.name_len > 0 => {
+            ch.name_len -= 1;
+            ch.name[ch.name_len] = 0;
+            ch.confirm = false;
+        }
+        8 => chooser_up(),
+        32..=126 if ch.save && ch.name_len < 31 && code != u16::from(b'/') => {
+            ch.name[ch.name_len] = code as u8;
+            ch.name_len += 1;
+            ch.confirm = false;
+        }
+        _ => {}
+    }
+}
+/// The pointer while the chooser is open: presses go to the chooser only.
+fn chooser_pointer(x: i32, y: i32, buttons: u8, w: i32, h: i32) {
+    use arena_desktop::shell::{ChooserHit as H, chooser_hit};
+    let Some(ch) = (unsafe { (*(&raw mut CHOOSER)).as_mut() }) else {
+        return;
+    };
+    let pressed = buttons & 1 != 0 && ch.buttons & 1 == 0;
+    ch.buttons = buttons;
+    if !pressed {
+        return;
+    }
+    match chooser_hit(w, h, x, y) {
+        H::Row(r) => {
+            let i = ch.top + r;
+            if ch.selected == Some(i) {
+                // A second press on the selected row opens it.
+                chooser_key(13);
+            } else {
+                chooser_select(i);
+            }
+        }
+        H::Up => chooser_up(),
+        H::Cancel => chooser_finish(None),
+        H::Accept => chooser_accept(),
+        _ => {}
+    }
+}
+fn chooser_view() -> Option<arena_desktop::shell::ChooserView> {
+    let ch = unsafe { (*(&raw const CHOOSER)).as_ref() }?;
+    let rows_max = arena_desktop::shell::CHOOSER_ROWS;
+    let mut v = arena_desktop::shell::ChooserView {
+        save: ch.save,
+        place: [0; 48],
+        rows: [[0; 32]; arena_desktop::shell::CHOOSER_ROWS],
+        count: 0,
+        selected: None,
+        above: ch.top > 0,
+        below: ch.top + rows_max < ch.count,
+        name: ch.name,
+        message: [0; 48],
+    };
+    let mut k = 0;
+    for part in [b"Home" as &[u8], if ch.dir_len > 0 { b"/" } else { b"" }, &ch.dir[..ch.dir_len]] {
+        let n = part.len().min(47 - k);
+        v.place[k..k + n].copy_from_slice(&part[..n]);
+        k += n;
+    }
+    let m = ch.message.as_bytes();
+    let n = m.len().min(47);
+    v.message[..n].copy_from_slice(&m[..n]);
+    for (row, e) in ch.entries[ch.top..ch.count].iter().take(rows_max).enumerate() {
+        let name = e.name();
+        let room = if e.is_dir() { 30 } else { 31 };
+        let n = name.len().min(room);
+        v.rows[row][..n].copy_from_slice(&name[..n]);
+        if name.len() > room {
+            v.rows[row][n - 1] = b'~';
+        }
+        if e.is_dir() {
+            v.rows[row][n] = b'/';
+        }
+        v.count += 1;
+    }
+    v.selected = ch
+        .selected
+        .filter(|i| *i >= ch.top && *i < ch.top + rows_max)
+        .map(|i| (i - ch.top) as u8);
+    Some(v)
+}
+
 /// The broker's filesd session: one page of its own region (ADR-0077).
 /// With the service offline (no AFS2 region) nothing is created.
 fn start_afs2() {
@@ -421,20 +803,21 @@ fn display(frame: arena_compositor_model::wire::Frame, cap: u64) -> ([u64; 3], [
     }
     (o, b)
 }
-fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
+fn launch(kind: u8, path: [u8; 32], document: u64) -> Result<(), i64> {
     use arena_desktop::scope;
-    if kind > 5 || (path[0] != 0 && !scope::public_name(&path)) {
+    // `path` is a title only (ADR-0077): printable, never authority.
+    let n = path.iter().position(|b| *b == 0).unwrap_or(32);
+    if kind > 5 || n == 32 || !path[..n].iter().all(|b| (0x20..0x7f).contains(b)) {
         return Err(-2);
     }
+    // Files are reached through filesd capabilities, not name scopes: the
+    // AFS1 `user-*` file functions are retired for applications.
     let (scope, function_rights) = match kind {
         0 | 1 => (
-            scope::FILE_READ | scope::FILE_WRITE | scope::LAUNCH,
+            scope::LAUNCH,
             RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
         ),
-        2 => (
-            scope::FILE_READ | scope::FILE_WRITE,
-            RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
-        ),
+        2 => (0, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY),
         3 => (
             scope::PREFERENCES,
             RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
@@ -454,18 +837,27 @@ fn launch(kind: u8, path: [u8; 32]) -> Result<(), i64> {
         path,
         kind == 4,
         launch_targets,
+        document,
     )
 }
 /// The session's filesd lineage head and, for the terminal and Files, its
 /// /Users/user capability (ADR-0077). Other kinds get file capabilities
 /// only through the chooser.
-fn file_grants(kind: u8) -> (u64, u64) {
+fn file_grants(kind: u8, document: u64) -> (u64, u64) {
     let Some(files) = (unsafe { &*(&raw const AFS2) }) else {
         return (CAP_NONE, CAP_NONE);
     };
     let Ok((head, _)) = files.open(USER_ROOT, None, 0) else {
         return (CAP_NONE, CAP_NONE);
     };
+    // An Editor opened on a document: a capability for exactly that file,
+    // no more than the offered one, in the new session's lineage.
+    if kind == 2 && document != CAP_NONE {
+        return match files.open_in(document, R_DOC, head) {
+            Ok((doc, _)) => (head, doc),
+            Err(_) => (head, CAP_NONE),
+        };
+    }
     if !matches!(kind, 0 | 1) {
         return (head, CAP_NONE);
     }
@@ -478,11 +870,13 @@ fn revoke_files(head: u64) {
     if head == CAP_NONE {
         return;
     }
-    match unsafe { &*(&raw const AFS2) } {
-        Some(files) if files.revoke(USER_ROOT, head).is_ok() => {}
-        _ => destroy(head),
+    // Retire the whole lineage in filesd, then drop the broker's slot.
+    if let Some(files) = unsafe { &*(&raw const AFS2) } {
+        let _ = files.revoke(USER_ROOT, head);
     }
+    destroy(head);
 }
+#[allow(clippy::too_many_arguments)]
 fn launch_image(
     image: u64,
     kind: u8,
@@ -491,6 +885,7 @@ fn launch_image(
     path: [u8; 32],
     diagnostics: bool,
     launch_targets: u8,
+    document: u64,
 ) -> Result<(), i64> {
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
     if ready != 0 {
@@ -561,7 +956,7 @@ fn launch_image(
     // Distinct inherited function reference to the exact fresh region. Its
     // marker rights do not enlarge the session's provisioned function scope.
     // Child slot 4: diagnostics (Monitor) or the /Users/user grant.
-    let (files_head, home) = file_grants(kind);
+    let (files_head, home) = file_grants(kind, document);
     let spec = [
         (CALL_SIDE, RIGHTS_WRITE),
         (region, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY),
@@ -646,6 +1041,10 @@ fn retire(index: usize, force: bool) {
         die(86)
     }
     destroy(s.region);
+    if unsafe { (*(&raw const CHOOSER)).as_ref() }.is_some_and(|c| c.session == index) {
+        chooser_close();
+    }
+    destroy(s.grant);
     revoke_files(s.files_head);
     let _ = unsafe { syscall1(SYS_TRY_WAIT, clock(index)) };
     unsafe {
@@ -846,6 +1245,7 @@ fn scene(now: u64) -> Scene {
             width: u32::from(w),
             height: u32::from(h),
         }),
+        chooser: chooser_view(),
     };
     scene.dark = unsafe { PREFS.dark };
     scene
@@ -908,6 +1308,30 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
     };
     let session = unsafe { SESSIONS[index] };
     let request = S::decode(bytes).map_err(|_| -2)?;
+    match request {
+        S::Choose { save, name } => return chooser_open(index, save, name).map(|_| 0),
+        S::TakeGrant => {
+            let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(index) };
+            if !s.grant_ready {
+                return Err(-2);
+            }
+            s.grant_ready = false;
+            let granted = core::mem::replace(&mut s.grant, CAP_NONE);
+            *bytes = if granted == CAP_NONE {
+                S::TakeGrant
+            } else {
+                S::Granted {
+                    save: s.grant_save,
+                    name: s.grant_title,
+                }
+            }
+            .encode()
+            .map_err(|_| -2)?;
+            unsafe { REPLY_CAP = granted };
+            return Ok(0);
+        }
+        _ => {}
+    }
     let operation = match request {
         S::List { .. } => O::List,
         S::Read { .. } => O::Read,
@@ -986,23 +1410,44 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             if !scope::can_launch(session.launch_targets, kind) {
                 return Err(-2);
             }
-            launch(kind, path).map(|_| 0)
+            // An offered file capability opens in the Editor only when it
+            // belongs to the requesting session's own lineage.
+            let offer = unsafe { core::mem::replace(&mut *(&raw mut OFFER), CAP_NONE) };
+            let document = match unsafe { &*(&raw const AFS2) } {
+                Some(f) if offer != CAP_NONE && kind == 2 && session.files_head != CAP_NONE
+                    && f.same_lineage(session.files_head, offer) => offer,
+                _ => CAP_NONE,
+            };
+            let r = launch(kind, path, document).map(|_| 0);
+            if offer != CAP_NONE {
+                if let Some(f) = unsafe { &*(&raw const AFS2) } {
+                    f.release(offer);
+                } else {
+                    destroy(offer);
+                }
+            }
+            r
         }
         _ => Err(-2),
     }
 }
 
+/// A capability the current request's reply transfers (a copy; the
+/// broker drops its own after replying).
+static mut REPLY_CAP: u64 = CAP_NONE;
 fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
+    let cap = unsafe { core::mem::replace(&mut *(&raw mut REPLY_CAP), CAP_NONE) };
     let rc = unsafe {
         syscall5(
             SYS_IPC_REPLY_CHECKED,
             SERVER,
             status,
-            result,
-            CAP_NONE,
+            if status == 0 { result } else { 0 },
+            if status == 0 { cap } else { CAP_NONE },
             bytes.as_ptr() as u64,
         )
     };
+    destroy(cap);
     // A cancelled application call is ordinary liveness, not compositor death.
     // The checked operation consumes the exact abandoned-call tombstone.
     if rc != 0 && rc != STATUS_CALLER_GONE {
@@ -1138,7 +1583,7 @@ extern "C" fn main() -> ! {
         }
         let received = perf_now();
         let mut input_request = false;
-        let landed = request[2];
+        let mut landed = request[2];
         let description = describe(landed);
         transient_caps();
         let mut status = 2;
@@ -1154,7 +1599,15 @@ extern "C" fn main() -> ! {
                     let action = {
                         let state = unsafe { &mut *(&raw mut WM) };
                         state.set_time(arena_desktop::app_client::now());
+                        let modal = unsafe { (*(&raw const CHOOSER)).is_some() };
                         match f {
+                            // The trusted chooser is modal: presses go to it
+                            // only; releases still reach the window policy so
+                            // no key stays held (and repeats) behind it.
+                            input_wire::Frame::Key { code, pressed: true, .. } if modal => {
+                                chooser_key(code);
+                                Action::Changed
+                            }
                             input_wire::Frame::Key {
                                 code,
                                 pressed,
@@ -1166,11 +1619,15 @@ extern "C" fn main() -> ! {
                                 buttons,
                                 wheel,
                             } => {
-                                let a = state.pointer(
+                                let (px, py) = (
                                     (u32::from(x) * (w as u32 - 1) / 32767) as i32,
                                     (u32::from(y) * (h as u32 - 1) / 32767) as i32,
-                                    buttons,
                                 );
+                                if modal {
+                                    chooser_pointer(px, py, buttons, w as i32, h as i32);
+                                }
+                                let a = state.pointer(px, py, if modal { 0 } else { buttons });
+                                let a = if modal { Action::Changed } else { a };
                                 if wheel != 0 {
                                     state.wheel(wheel);
                                 }
@@ -1183,7 +1640,7 @@ extern "C" fn main() -> ! {
                             dirty = true;
                         }
                         Action::Launch(kind) => {
-                            if launch(kind as u8, [0; 32]).is_err() {
+                            if launch(kind as u8, [0; 32], CAP_NONE).is_err() {
                                 unsafe {
                                     NOTICE = Some((
                                         "LAUNCH REFUSED / DESKTOP CAPACITY",
@@ -1222,13 +1679,39 @@ extern "C" fn main() -> ! {
                 && arena_desktop::service_wire::Frame::decode(&bytes)
                     == Ok(arena_desktop::service_wire::Frame::LaunchImage)
             {
-                match launch_image(landed, 255, 0, RIGHTS_READ | RIGHTS_COPY, [0; 32], false, 0) {
+                match launch_image(
+                    landed,
+                    255,
+                    0,
+                    RIGHTS_READ | RIGHTS_COPY,
+                    [0; 32],
+                    false,
+                    0,
+                    CAP_NONE,
+                ) {
                     Ok(()) => {
                         status = 0;
                         dirty = true;
                     }
                     Err(e) => status = e as u64,
                 }
+            } else if description.is_some_and(|d| {
+                d[0] == 12 && describe(USER_ROOT).is_some_and(|r| r[1] == d[1])
+            }) && arena_desktop::service_wire::Frame::decode(&bytes)
+                == Ok(arena_desktop::service_wire::Frame::Offer)
+            {
+                // Keep the offered filesd capability for the next launch; it
+                // is used only for the session whose lineage holds it.
+                let old = unsafe { core::mem::replace(&mut *(&raw mut OFFER), landed) };
+                if old != CAP_NONE {
+                    if let Some(f) = unsafe { &*(&raw const AFS2) } {
+                        f.release(old);
+                    } else {
+                        destroy(old);
+                    }
+                }
+                landed = CAP_NONE;
+                status = 0;
             } else if let Some([7, id, rights]) = description {
                 if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                     .iter()
@@ -1470,6 +1953,7 @@ extern "C" fn main() -> ! {
         }
         destroy(landed);
         reply(status, result, &bytes);
+        deliver_chosen();
         wake_clients();
         probe(P_REQUEST, received);
         if dirty {

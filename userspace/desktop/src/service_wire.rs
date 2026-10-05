@@ -41,6 +41,23 @@ pub enum Frame {
     Create {
         name: [u8; 32],
     },
+    /// Ask the broker's trusted chooser for a document to open (or a place
+    /// to save, `name` suggested). Nothing is granted by the request.
+    Choose {
+        save: bool,
+        name: [u8; 32],
+    },
+    /// The lent capability (a filesd file capability) is offered for the
+    /// next application this session launches.
+    Offer,
+    /// Collect the chooser's outcome: the reply carries the granted
+    /// capability, or none when the user cancelled.
+    TakeGrant,
+    /// Reply to TakeGrant: the title of what was chosen (display only).
+    Granted {
+        save: bool,
+        name: [u8; 32],
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -52,6 +69,11 @@ fn name_valid(name: &[u8; 32], empty: bool) -> bool {
         && n < 32
         && name[..n].iter().all(|b| b.is_ascii_graphic() && *b != b'/')
         && name[n..].iter().all(|b| *b == 0)
+}
+/// A display title: printable ASCII then zero padding (never authority).
+fn printable(name: &[u8; 32]) -> bool {
+    let n = name.iter().position(|b| *b == 0).unwrap_or(32);
+    n < 32 && name[..n].iter().all(|b| (0x20..0x7f).contains(b)) && name[n..].iter().all(|b| *b == 0)
 }
 impl Frame {
     pub fn encode(self) -> Result<[u8; BYTES], Error> {
@@ -127,6 +149,16 @@ impl Frame {
             }
             Self::LaunchImage => 10,
             Self::Display => 11,
+            Self::Choose { save, name } | Self::Granted { save, name } => {
+                if !printable(&name) {
+                    return Err(Error::Invalid);
+                }
+                b[8] = u8::from(save);
+                b[32..].copy_from_slice(&name);
+                if matches!(self, Self::Choose { .. }) { 13 } else { 16 }
+            }
+            Self::Offer => 14,
+            Self::TakeGrant => 15,
         };
         Ok(b)
     }
@@ -167,6 +199,10 @@ impl Frame {
             10 => Self::LaunchImage,
             11 => Self::Display,
             12 => Self::Create { name },
+            13 if b[8] <= 1 => Self::Choose { save: b[8] == 1, name },
+            14 => Self::Offer,
+            15 => Self::TakeGrant,
+            16 if b[8] <= 1 => Self::Granted { save: b[8] == 1, name },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -210,6 +246,10 @@ mod tests {
             },
             Frame::LaunchImage,
             Frame::Display,
+            Frame::Choose { save: true, name },
+            Frame::Offer,
+            Frame::TakeGrant,
+            Frame::Granted { save: false, name },
         ] {
             let b = f.encode().unwrap();
             assert_eq!(Frame::decode(&b), Ok(f));
