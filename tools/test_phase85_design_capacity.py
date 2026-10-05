@@ -113,7 +113,8 @@ def cap_projection() -> None:
     ipc=(ROOT/'kernel/kernel/src/ipc.rs').read_text()
     # ADR-0056 adds exactly two disjoint graphics endpoints without
     # disturbing the ten Phase-8.5 endpoint slots or raising CAP_SLOTS.
-    assert 'pub const MAX_ENDPOINTS: usize = 12;' in ipc
+    # ADR-0077 adds filesd's endpoint: 12 -> 16 (13 live at desktop boot).
+    assert 'pub const MAX_ENDPOINTS: usize = 16;' in ipc
     # Twelve desktop client clocks (ADR-0075): the table is still exactly
     # full at boot, so the accepted marker is actually allocated.
     assert 'pub const MAX_NOTIFS: usize = 31;' in ipc

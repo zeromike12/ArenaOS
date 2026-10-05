@@ -109,10 +109,10 @@ def main():
     signed, elf = probe_package()
     esp = mtest.build(LABEL, desktop=True)
     disk = arena_env.make_scratch_disk()
-    afs1.mkfs_with_files(disk, AFS1_BYTES // afs1.SECTOR, {b'user-note': NOTE, b'user-letter': LETTER})
     rc, s, _ = mtest.boot(LABEL + '-seed', esp, [(b'arena>', 1, b'shutdown\r')], disk, pointer=True)
     assert rc == 0 and 'no AFS2 region' in s, s[-2000:]
-    stage.host_seed(disk, {stage.STAGE1: signed, stage.POLICY1: stage.POLICY})
+    stage.host_seed(disk, {b'user-note': NOTE, b'user-letter': LETTER,
+                           stage.STAGE1: signed, stage.POLICY1: stage.POLICY})
     with open(disk, 'r+b') as f:
         f.truncate(arena_env.AFS2_DISK_MIB * 1024 * 1024)
     afs1_before = disk.read_bytes()[:AFS1_BYTES]

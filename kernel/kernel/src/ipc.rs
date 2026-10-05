@@ -37,7 +37,7 @@ use crate::sched;
 use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
-pub const MAX_ENDPOINTS: usize = 12; // ADR-0056: two disjoint userspace graphics endpoints
+pub const MAX_ENDPOINTS: usize = 16; // ADR-0056 graphics endpoints; ADR-0077 filesd (13 at desktop boot)
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.

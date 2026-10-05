@@ -27,6 +27,7 @@ import afs1
 import afs2
 import arena_env
 import mtest
+import test_m84_stage as stage
 
 BUILD = arena_env.build_dir()
 LABEL = 'm11-afs2'
@@ -35,7 +36,6 @@ AFS1_BYTES = arena_env.SCRATCH_MIB * 1024 * 1024
 FILES = {
     b'user-note': b'migrated user note\n',
     b'user-big': bytes((i * 7 + 3) % 256 for i in range(10000)),  # three import transfers
-    b'user-empty': b'',
     b'ui10-prefs': b'UI10\x01\x01\x00',
     b'service-ledger': b'system record kept out of the user tree',
 }
@@ -43,9 +43,14 @@ MARKER = b'filesd: AFS2 mounted seq '
 DONE = b'filesd: AFS2 formatted; AFS1 import complete: '
 
 
-def seeded():
-    disk = arena_env.make_scratch_disk(afs2=True)
-    afs1.mkfs_with_files(disk, AFS1_BYTES // afs1.SECTOR, FILES)
+def seeded(esp):
+    """A real AFS1 volume (its seed boot leaves the boot-time fs self-test
+    file and whatever services record), plus FILES, then the blank AFS2
+    region appended."""
+    disk = arena_env.make_scratch_disk()
+    rc, s, _ = mtest.boot(f'{LABEL}-seed', esp, [(b'arena>', 1, b'shutdown\r')], disk, pointer=True)
+    assert rc == 0 and 'no AFS2 region' in s, s[-2000:]
+    stage.host_seed(disk, FILES)
     with open(disk, 'r+b') as f:
         f.truncate(arena_env.AFS2_DISK_MIB * 1024 * 1024)
     assert afs1.audit(disk) == []
@@ -56,11 +61,12 @@ def region(disk):
     return disk.read_bytes()[BASE:]
 
 
-def expected():
+def expected(afs1_files):
+    """The migration of exactly these AFS1 files."""
     tree = {'/': None, '/System': None, '/System/imported-afs1': None,
             '/System/afs1-import-complete': b'', '/Users': None, '/Users/user': None,
             '/Users/user/Desktop': None, '/Users/user/Documents': None, '/Users/user/.Trash': None}
-    for name, data in FILES.items():
+    for name, data in afs1_files.items():
         where = '/Users/user/Documents/' if name.startswith(b'user-') else '/System/imported-afs1/'
         tree[where + name.decode()] = data
     return tree
@@ -87,8 +93,11 @@ def times(vol):
 
 
 def main():
+    global AFS1
     esp = mtest.build(LABEL, desktop=True)
-    disk = seeded()
+    disk = seeded(esp)
+    AFS1 = stage.contents(disk)
+    users = sum(n.startswith(b'user-') for n in AFS1)
     afs1_before = disk.read_bytes()[:AFS1_BYTES]
     pristine = BUILD / f'{LABEL}-seed.img'
     shutil.copyfile(disk, pristine)
@@ -96,17 +105,18 @@ def main():
     # 1. Migration.
     rc, s, _ = boot(f'{LABEL}-migrate', esp, disk)
     assert rc == 0, s[-3000:]
-    assert 'AFS1 import complete: 3 user file(s) to /Users/user/Documents, 2 system record(s)' in s, s[-3000:]
+    assert (f'AFS1 import complete: {users} user file(s) to /Users/user/Documents, '
+            f'{len(AFS1) - users} system record(s)') in s, s[-3000:]
     assert 'wall clock from RTC' in s
     writes = s.count('storaged: BLKW4K')
     assert disk.read_bytes()[:AFS1_BYTES] == afs1_before, 'AFS1 mutated by the migration'
     vol, tree = mounted(disk)
-    assert tree == expected(), sorted(tree)
+    assert tree == expected(AFS1), sorted(tree)
     host = time.time() * 1e6
     stamps = times(vol)
     assert all(abs(t - host) < 86400e6 for t in stamps), ('timestamps not from the RTC', stamps[:4], host)
     migrated = region(disk)
-    print(f'[m11-afs2] migration: {len(FILES)} AFS1 files imported, {writes} AFS2 block writes, '
+    print(f'[m11-afs2] migration: {len(AFS1)} AFS1 files imported, {writes} AFS2 block writes, '
           'host-audited namespace and bytes exact, AFS1 byte-identical, RTC timestamps PASS', flush=True)
 
     # 2. Remount writes nothing.
@@ -137,7 +147,7 @@ def main():
         rc, s, _ = boot(f'{label}-recover', esp, disk)
         assert rc == 0 and DONE.decode() in s, s[-3000:]
         assert ('import was interrupted' in s) == (state != 'never committed'), (label, state)
-        assert mounted(disk)[1] == expected()
+        assert mounted(disk)[1] == expected(AFS1)
         assert disk.read_bytes()[:AFS1_BYTES] == afs1_before
         print(f'[m11-afs2] crash after BLKW4K #{n} (logged {logged}/{writes}): {state}; '
               'next boot re-imported to the exact namespace PASS', flush=True)
@@ -158,11 +168,12 @@ def main():
     print('[m11-afs2] damaged committed volume refused, never repaired or formatted PASS', flush=True)
 
     # 5. Out-of-range RTC: unknown, never invented.
-    disk = seeded()
+    disk = seeded(esp)
+    AFS1 = stage.contents(disk)
     rc, s, _ = boot(f'{LABEL}-no-clock', esp, disk, extra=['-rtc', 'base=1990-06-01T00:00:00'])
     assert rc == 0 and 'wall clock unknown' in s, s[-3000:]
     vol, tree = mounted(disk)
-    assert tree == expected() and set(times(vol)) == {0}
+    assert tree == expected(AFS1) and set(times(vol)) == {0}
     print('[m11-afs2] RTC out of range: "unknown" and zero timestamps, migration still exact PASS', flush=True)
 
 

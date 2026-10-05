@@ -366,6 +366,44 @@ impl<D: Device> Volume<D> {
         }
     }
 
+    /// `*self = Self::empty()` with `dev`, in place: the volume is far too
+    /// large (metadata pool, cache, bitmaps) to build as a stack temporary
+    /// in a ring-3 service.
+    fn reset(&mut self, dev: D) {
+        self.dev = Some(dev);
+        self.total = 0;
+        self.nbitmaps = 0;
+        self.volume_id = 0;
+        self.seq = 0;
+        self.root = 0;
+        self.free_blocks = 0;
+        self.used_objects = 0;
+        self.wall_us = 0;
+        self.bitmap_blocks.fill(0);
+        self.bitmap.fill(0);
+        self.cursor = FIRST_DATA;
+        self.hint = 1;
+        for c in self.cache.iter_mut() {
+            c.block = 0;
+            c.data.fill(0);
+        }
+        self.cache_next = 0;
+        self.work.fill(0);
+        self.fresh.fill(0);
+        self.pending.fill(0);
+        self.tx_root.fill(0);
+        for sl in self.slots.iter_mut() {
+            sl.block = 0;
+            sl.kind = 0;
+            sl.data.fill(0);
+        }
+        self.tx_used = 0;
+        self.tx_free = 0;
+        self.tx_hint = 1;
+        self.writes = 0;
+        self.recent = [0; 8];
+    }
+
     pub fn device(&mut self) -> Option<&mut D> {
         self.dev.as_mut()
     }
@@ -442,8 +480,7 @@ impl<D: Device> Volume<D> {
     /// Mount `dev` (fail-closed: any inconsistency of the newest valid
     /// commit is corruption, never a silent fallback).
     pub fn mount(&mut self, dev: D) -> Result<()> {
-        *self = Self::empty();
-        self.dev = Some(dev);
+        self.reset(dev);
         let mut raw = [0u8; BLOCK];
         self.dev()?.read(0, &mut raw)?;
         let sb = &raw[..SECTOR];
@@ -524,8 +561,7 @@ impl<D: Device> Volume<D> {
         if total < 64 || total > MAX_BITMAPS as u64 * BITS_PER_BITMAP {
             return Err(Error::Inval);
         }
-        *self = Self::empty();
-        self.dev = Some(dev);
+        self.reset(dev);
         let zero = [0u8; SECTOR];
         self.dev()?.write_sector(1, &zero)?;
         self.dev()?.write_sector(2, &zero)?;

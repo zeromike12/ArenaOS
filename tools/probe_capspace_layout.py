@@ -123,8 +123,9 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
         if depth is None or width is None:
             raise ValueError("IPC queue/message bounds missing from source")
         # ADR-0075: caller queue depth 8 -> 16 for twelve desktop clients.
-        if depth[1] != '16' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 12;',ipc):
-            raise ValueError('production IPC bounds differ from reviewed Phase-11 16/64/12')
+        # ADR-0077: filesd's endpoint; 12 -> 16 endpoints.
+        if depth[1] != '16' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 16;',ipc):
+            raise ValueError('production IPC bounds differ from reviewed Phase-11 16/64/16')
         # Keep the historical four-entry projection as well as measuring the
         # actual eight-entry production layout from the same source fields.
         ipc_decls[2] = ipc_decls[2].replace('struct Endpoint {','struct Endpoint<const N: usize> {').replace('QUEUE_DEPTH','N')
@@ -138,7 +139,7 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
 pub static ARENA_IPC_LAYOUT: [usize; 8] = [
  size_of::<CallSlot>(),size_of::<Endpoint<4>>(),size_of::<Endpoint<QUEUE_DEPTH>>(),size_of::<Notif>(),
  8*size_of::<Endpoint<QUEUE_DEPTH>>(),9*size_of::<Endpoint<QUEUE_DEPTH>>(),
- 12*size_of::<Endpoint<QUEUE_DEPTH>>(),31*size_of::<Notif>()
+ 16*size_of::<Endpoint<QUEUE_DEPTH>>(),31*size_of::<Notif>()
 ];
 """)
         ipc_target = Path(work) / "ipc.rs"
@@ -172,10 +173,11 @@ pub static ARENA_IPC_LAYOUT: [usize; 8] = [
         # ADR-0075 (Phase 11.3): twelve desktop clocks, 25 -> 31
         # notifications: 800 -> 992 B; caller queue 8 -> 16 per endpoint:
         # Endpoint 1968 -> 3888 B, 12 endpoints 23616 -> 46656 B.
-        if ipc_sizes != (240, 1008, 3888, 32, 31104, 34992, 46656, 992):
+        # ADR-0077 (Phase 11.5): filesd, 12 -> 16 endpoints: 46656 -> 62208 B.
+        if ipc_sizes != (240, 1008, 3888, 32, 31104, 34992, 62208, 992):
             raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
         print("x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=1008; "
-              "production Endpoint<16>=3888 Notif=32; 12 endpoints=46656 B, 31 notifications=992 B "
+              "production Endpoint<16>=3888 Notif=32; 16 endpoints=62208 B, 31 notifications=992 B "
               "(ADR-0071 binding +384 B; ADR-0075 queue depth 16 +23040 B, six more clocks +192 B) PASS")
         # ADR-0051: an *additional* distinct production-fsd marker,
         # on top of ADR-0048's projection; one Notification is 24 B.
