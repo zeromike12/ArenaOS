@@ -32,7 +32,7 @@ SCRIPTS = ('phase11_archive_boot.py', 'phase10_archive_boot.py', 'check_phase10_
 DOCS = ('docs/phase11/PLAN.md', 'docs/phase11/PROGRESS.md', 'docs/phase11/FINAL-REPORT.md') + tuple(
     f'docs/adr/{p.name}' for p in sorted((ROOT / 'docs/adr').glob('007[1-8]-*.md')))
 # Host blocks of tools/run_tests.sh that count as suites besides test_m*.py.
-HOST_SUITES = 13
+HOST_SUITES = 14
 REQUIRED = (
     '[m11-explorer]', '[m11-desk]', '[m11-files]', '[m11-afs2]', '[m11-wm]',
     '[m10-files] AFS2 explorer:', '[m10-boundaries-red] 12 real production RED controls;',

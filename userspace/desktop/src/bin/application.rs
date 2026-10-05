@@ -60,6 +60,9 @@ struct App {
     cwd: Path,
     /// Files: the explorer (Phase 11.8) over the home capability.
     files: Controller,
+    /// Files: the record watching the folder shown (ADR-0079) and its path.
+    watch_cap: u64,
+    watch_path: Option<XPath>,
     /// Editor: the document capability (granted at launch or by the
     /// chooser) or CAP_NONE.
     doc: u64,
@@ -157,6 +160,8 @@ static mut APP: App = App {
     home: CAP_NONE,
     cwd: Path::EMPTY,
     files: Controller::new(),
+    watch_cap: CAP_NONE,
+    watch_path: None,
     doc: CAP_NONE,
 };
 const CAP_NONE: u64 = u64::MAX;
@@ -239,6 +244,50 @@ impl App {
             fs: self.fs()?,
             root: self.home,
         })
+    }
+    /// Keep a watch on the folder shown (ADR-0079): a record for exactly
+    /// that folder, opened from home, with this client's clock lent to
+    /// filesd. Navigation moves the watch; releasing the record ends it.
+    fn files_rewatch(&mut self) {
+        let Ok(fs) = self.fs() else {
+            return;
+        };
+        let path = self.files.ex.path;
+        if self.watch_path == Some(path) {
+            return;
+        }
+        if self.watch_cap != CAP_NONE {
+            fs.release(self.watch_cap);
+            self.watch_cap = CAP_NONE;
+        }
+        self.watch_path = Some(path);
+        if let Ok((cap, _)) = fs.walk(self.home, path.bytes(), fw::R_LIST) {
+            if fs.watch(cap, service::CLOCK, 1).is_ok() {
+                self.watch_cap = cap;
+            } else {
+                fs.release(cap);
+            }
+        }
+    }
+    /// The watch badge arrived: ask filesd through the watched record, and
+    /// re-list only if the folder really changed.
+    fn files_watched(&mut self) -> bool {
+        let (Ok(fs), Ok(mut store)) = (self.fs(), self.store()) else {
+            return false;
+        };
+        if self.watch_cap == CAP_NONE {
+            return false;
+        }
+        match fs.watched(self.watch_cap) {
+            Ok((0, false)) => false,
+            Ok((_, false)) => self.files.poll(&mut store),
+            _ => {
+                // The folder is gone: show home, which is never removed.
+                self.files.start(&mut store, XPath::ROOT);
+                self.files.ex.status = "THE FOLDER WAS REMOVED";
+                true
+            }
+        }
     }
     /// Carry out what an explorer interaction asks of the application.
     fn files_effect(&mut self, e: Effect, client: &Client) -> Result<(), i64> {
@@ -1131,14 +1180,9 @@ extern "C" fn main() -> ! {
                     dirty = true;
                 }
                 Some(Event::Focus(focused)) => {
-                    // Files re-lists a folder that changed while it was in
-                    // the background (no directory watches: a refresh on
-                    // focus, on interaction and on request).
+                    // Freshness comes from the folder watch, not from focus.
                     if kind == apps::FILES {
                         app.files.ui.focused = focused;
-                        if focused && let Ok(mut store) = app.store() {
-                            app.files.poll(&mut store);
-                        }
                     }
                     dirty = true;
                 }
@@ -1301,7 +1345,13 @@ extern "C" fn main() -> ! {
         } else {
             0
         };
-        service::idle(deadline).unwrap_or_else(|_| client::exit(75));
+        if kind == apps::FILES {
+            app.files_rewatch();
+        }
+        let woke = service::idle(deadline).unwrap_or_else(|_| client::exit(75));
+        if kind == apps::FILES && woke & service::WATCH_BADGE != 0 && app.files_watched() {
+            dirty = true;
+        }
         if arena_desktop::perf::ENABLED {
             perf_stats[4].add(service::now() - slept);
         }

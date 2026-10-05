@@ -118,7 +118,12 @@ pub fn startup() -> Result<(u8, bool, bool, [u8; 32]), i64> {
 /// early wake cancels the still-armed timer so armed timers never
 /// accumulate against the per-process quota; cancelling an already-fired
 /// timer is a harmless refusal.
-pub fn idle(deadline: Option<u64>) -> Result<(), i64> {
+/// A directory watch fired (ADR-0079): a hint on the clock, confirmed
+/// through the watched record.
+pub const WATCH_BADGE: u64 = 2;
+/// Sleep until the broker signals (badge 1), a directory watch fires
+/// (badge 2) or `deadline` passes. Returns the merged badge.
+pub fn idle(deadline: Option<u64>) -> Result<u64, i64> {
     let id = match deadline {
         Some(at) => {
             let delay = at.saturating_sub(now()).max(1);
@@ -137,10 +142,11 @@ pub fn idle(deadline: Option<u64>) -> Result<(), i64> {
     if badge < 0 {
         return Err(badge);
     }
-    if badge != 1 {
+    let badge = badge as u64;
+    if badge == 0 || badge & !(1 | WATCH_BADGE) != 0 {
         return Err(-2);
     }
-    Ok(())
+    Ok(badge)
 }
 pub fn observe() -> Result<[u64; 9], i64> {
     let mut counts = [0u64; 9];
@@ -184,7 +190,8 @@ pub fn audit(kind: u8) -> Result<(), i64> {
             }
         || unsafe { syscall2(SYS_CAP_DESCRIBE, CLOCK, clock.as_mut_ptr() as u64) } != 0
         || clock[0] != 3
-        || clock[2] != 3
+        // Files may lend its clock for its folder watch (COPY).
+        || clock[2] != if kind == 1 { 7 } else { 3 }
     {
         return Err(-2);
     }

@@ -28,6 +28,7 @@ use abi::*;
 #[path = "../../filesd_wire.rs"]
 mod wire;
 use wire::*;
+mod watch;
 
 const SLOT_BLK: u64 = 0;
 const SLOT_EP: u64 = 1;
@@ -200,7 +201,37 @@ fn record(badge: u32) -> Option<usize> {
     (i != 0 && g.live && g.generation == generation).then_some(i)
 }
 
+static mut WATCH: watch::Table = watch::Table::new();
+static mut WATCHES_ENDED: u64 = 0;
+
+/// Directory `object` changed: signal its watchers (ADR-0079).
+fn fire(object: u64) {
+    let table = unsafe { &mut *(&raw mut WATCH) };
+    table.changed(object, signal, drop_slot);
+}
+/// A file's contents changed: its parent's listing shows size and time.
+fn contents_changed(vol: &mut Volume<Blk>, object: u64) {
+    if unsafe { (*(&raw const WATCH)).live() } == 0 {
+        return;
+    }
+    if let Ok(st) = vol.stat(object) {
+        fire(st.parent);
+    }
+}
+fn signal(slot: u64, bit: u8) -> bool {
+    unsafe { syscall2(SYS_NOTIFY, slot, 1u64 << bit) == 0 }
+}
+fn drop_slot(slot: u64) {
+    unsafe {
+        syscall1(SYS_CAP_DESTROY, slot);
+    }
+}
+
 fn release(i: usize) {
+    if let Some(slot) = unsafe { (*(&raw mut WATCH)).remove(i as u16) } {
+        drop_slot(slot);
+        unsafe { WATCHES_ENDED += 1 };
+    }
     let g = unsafe { &mut GRANT[i] };
     // Only a lineage head maps a region (its records share its page).
     if g.map != 0 {
@@ -232,6 +263,12 @@ fn revoke(i: usize) {
         log(b"filesd: lineage retired: ");
         log_num(n);
         log(b" record(s) now stale\n");
+        let ended = unsafe { core::mem::replace(&mut *(&raw mut WATCHES_ENDED), 0) };
+        if ended > 0 {
+            log(b"filesd: ");
+            log_num(ended);
+            log(b" directory watch(es) ended with the lineage\n");
+        }
     }
 }
 
@@ -318,6 +355,8 @@ struct Reply {
     /// The record the transferred `cap` names (retired if undelivered).
     minted: usize,
     bytes: [u8; BYTES],
+    /// The landed capability is kept (a watch's notification).
+    keep: bool,
 }
 fn reply(status: u64, value: u64) -> Reply {
     Reply {
@@ -326,6 +365,7 @@ fn reply(status: u64, value: u64) -> Reply {
         cap: CAP_NONE,
         minted: 0,
         bytes: [0; BYTES],
+        keep: false,
     }
 }
 
@@ -365,6 +405,9 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             | OP_TRUNCATE
             | OP_SAME_LINEAGE
             | OP_NEW_LINEAGE
+            | OP_WATCH
+            | OP_UNWATCH
+            | OP_WATCHED
     ) && !(req.op == OP_STAT && req.name_len == 0)
         && !(req.op == OP_OPEN && req.name_len == 0);
     if need_io && g.io == 0 {
@@ -530,6 +573,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     cap: slot,
                     minted,
                     bytes: [0; BYTES],
+                    keep: false,
                 },
                 Err(s) => reply(s, 0),
             }
@@ -547,7 +591,10 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                 vol.mkdir(g.object, n, wall)
             };
             match r {
-                Ok(_) => reply(S_OK, 0),
+                Ok(_) => {
+                    fire(g.object);
+                    reply(S_OK, 0)
+                }
                 Err(e) => reply(status(e), 0),
             }
         }
@@ -576,7 +623,10 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                 }
             }
             match vol.write(g.object, req.offset, unsafe { &DATA[..len] }, wall) {
-                Ok(n) => reply(S_OK, n as u64),
+                Ok(n) => {
+                    contents_changed(vol, g.object);
+                    reply(S_OK, n as u64)
+                }
                 Err(e) => reply(status(e), 0),
             }
         }
@@ -585,7 +635,10 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                 return reply(S_DENIED, 0);
             }
             match vol.truncate(g.object, req.offset, wall) {
-                Ok(()) => reply(S_OK, 0),
+                Ok(()) => {
+                    contents_changed(vol, g.object);
+                    reply(S_OK, 0)
+                }
                 Err(e) => reply(status(e), 0),
             }
         }
@@ -596,13 +649,24 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             let Some(n) = name() else {
                 return reply(S_INVAL, 0);
             };
+            // The removed directory's exact id, for its own watchers.
+            let child = (req.op == OP_RMDIR)
+                .then(|| vol.lookup(g.object, n).ok())
+                .flatten()
+                .map(|(o, _)| o);
             let r = if req.op == OP_UNLINK {
                 vol.unlink(g.object, n, wall)
             } else {
                 vol.rmdir(g.object, n, wall)
             };
             match r {
-                Ok(()) => reply(S_OK, 0),
+                Ok(()) => {
+                    fire(g.object);
+                    if let Some(c) = child {
+                        unsafe { (*(&raw mut WATCH)).removed(c, signal, drop_slot) };
+                    }
+                    reply(S_OK, 0)
+                }
                 Err(e) => reply(status(e), 0),
             }
         }
@@ -633,7 +697,13 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             let mut b = [0u8; 255];
             b[..to.len()].copy_from_slice(to);
             match vol.rename(g.object, &a[..from.len()], dst, &b[..to.len()], wall) {
-                Ok(_) => reply(S_OK, 0),
+                Ok(_) => {
+                    // Both parents change when an entry moves.
+                    for d in watch::affected(g.object, Some(dst)).into_iter().flatten() {
+                        fire(d);
+                    }
+                    reply(S_OK, 0)
+                }
                 Err(e) => reply(status(e), 0),
             }
         }
@@ -641,6 +711,66 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             revoke(i);
             reply(S_OK, 0)
         }
+        OP_WATCH => {
+            // Authority: this directory record, never a path.
+            if !has(R_LIST) {
+                return reply(S_DENIED, 0);
+            }
+            match vol.stat(g.object) {
+                Ok(st) if st.typ == afs::DIR => {}
+                Ok(_) => return reply(S_NOTDIR, 0),
+                Err(e) => return reply(status(e), 0),
+            }
+            let mut d = [0u64; 3];
+            if landed == CAP_NONE
+                || unsafe { syscall2(SYS_CAP_DESCRIBE, landed, d.as_mut_ptr() as u64) } != 0
+                || d[0] != 3
+                || d[2] & RIGHTS_WRITE == 0
+                || req.offset > 63
+            {
+                return reply(S_INVAL, 0);
+            }
+            let table = unsafe { &mut *(&raw mut WATCH) };
+            // Capacity first: nothing is kept on a refusal.
+            let at = match table.reserve(i as u16, g.lineage) {
+                Ok(at) => at,
+                Err(s) => return reply(s, 0),
+            };
+            let replaced = table.install(
+                at,
+                watch::Watch {
+                    live: true,
+                    record: i as u16,
+                    lineage: g.lineage,
+                    object: g.object,
+                    slot: landed,
+                    bit: req.offset as u8,
+                    events: 0,
+                    gone: false,
+                },
+            );
+            if let Some(old) = replaced {
+                drop_slot(old);
+            }
+            let mut r = reply(S_OK, 0);
+            r.keep = true;
+            r
+        }
+        OP_UNWATCH => match unsafe { (*(&raw mut WATCH)).remove(i as u16) } {
+            Some(slot) => {
+                drop_slot(slot);
+                reply(S_OK, 0)
+            }
+            None => reply(S_NOENT, 0),
+        },
+        OP_WATCHED => match unsafe { (*(&raw mut WATCH)).take(i as u16) } {
+            Some((events, gone)) => {
+                let mut r = reply(S_OK, u64::from(events));
+                r.bytes[0] = u8::from(gone);
+                r
+            }
+            None => reply(S_NOENT, 0),
+        },
         OP_REVOKE => {
             if landed == CAP_NONE {
                 return reply(S_INVAL, 0);
@@ -665,6 +795,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     cap: slot,
                     minted,
                     bytes: [0; BYTES],
+                    keep: false,
                 },
                 Err(s) => reply(s, 0),
             }
@@ -953,8 +1084,9 @@ extern "C" fn main() -> ! {
             None => reply(S_INVAL, 0),
         };
         // A landed capability is only ever lent for this request (a
-        // session region stays pinned by its mapping): drop it.
-        if landed != CAP_NONE {
+        // session region stays pinned by its mapping): drop it, unless a
+        // watch keeps it (its notification).
+        if landed != CAP_NONE && !r.keep {
             unsafe {
                 syscall1(SYS_CAP_DESTROY, landed);
             }

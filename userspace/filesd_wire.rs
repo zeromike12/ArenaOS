@@ -36,6 +36,14 @@ pub const OP_SAME_LINEAGE: u8 = 16;
 /// Through the root record only: a new lineage head naming the root
 /// object with no rights (the broker's per-application anchor).
 pub const OP_NEW_LINEAGE: u8 = 17;
+/// Watch the called directory record (ADR-0079): the landed notification
+/// (WRITE) is signalled with bit `offset` (0..=63) when the directory
+/// changes. One watch per record; it ends with the record.
+pub const OP_WATCH: u8 = 18;
+pub const OP_UNWATCH: u8 = 19;
+/// Changes since last asked (value) and whether the directory is gone
+/// (reply byte 0); clears the count. The badge is a hint, this is the fact.
+pub const OP_WATCHED: u8 = 20;
 
 /// Rights carried by a capability record.
 pub const R_READ: u8 = 1;
@@ -115,7 +123,7 @@ impl Request {
             len: u32::from_le_bytes(b[16..20].try_into().ok()?),
             name_len: u16::from_le_bytes(b[20..22].try_into().ok()?),
         };
-        (r.op >= OP_SESSION && r.op <= OP_NEW_LINEAGE && r.rights & !R_ALL == 0).then_some(r)
+        (r.op >= OP_SESSION && r.op <= OP_WATCHED && r.rights & !R_ALL == 0).then_some(r)
     }
 }
 

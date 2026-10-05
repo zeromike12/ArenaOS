@@ -2517,9 +2517,11 @@ fn start_boot_desktop(
                 obj: CapObj::MemoryPool,
                 rights: W,
             },
+            // COPY: the broker lends its clock to filesd for the Desktop
+            // directory watch (ADR-0079).
             Cap {
                 obj: CapObj::Notification { nid: frame_nid },
-                rights: R | W,
+                rights: R | W | C,
             },
             Cap {
                 obj: CapObj::Endpoint { eid },

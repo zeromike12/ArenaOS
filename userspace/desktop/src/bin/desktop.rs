@@ -172,6 +172,11 @@ const BADGE_TIMER: u64 = 1;
 const BADGE_REQUEST: u64 = 2;
 /// A child application process exited (spawn exit notification).
 const BADGE_EXIT: u64 = 4;
+/// filesd: the Desktop folder changed (directory watch, ADR-0079). A hint;
+/// the broker confirms through its own record.
+const BADGE_WATCH_BIT: u8 = 3;
+const BADGE_WATCH: u64 = 1 << BADGE_WATCH_BIT;
+static mut WATCH_SIGNALLED: bool = false;
 /// Nothing time-driven is due: sleep until an event.
 const NO_DEADLINE: u64 = u64::MAX;
 /// Next instant time-driven presentation work is due: a running motion
@@ -816,7 +821,8 @@ fn start_afs2() {
 // Opening a document grants the new Editor exactly that file, in its own
 // lineage, as a Files offer does.
 static mut DESK: arena_desktop::desk::Desk = arena_desktop::desk::Desk::new();
-static mut DESK_POLL: u64 = 0;
+/// The broker's record for /Users/user/Desktop, watched (or CAP_NONE).
+static mut DESK_WATCH: u64 = CAP_NONE;
 static mut DESK_BUTTONS: u8 = 0;
 fn desk_store() -> Option<arena_desktop::apps::explorer::CapStore> {
     unsafe { *(&raw const AFS2) }.map(|fs| arena_desktop::apps::explorer::CapStore {
@@ -831,6 +837,28 @@ fn desk_load(w: i32, h: i32) {
         if desk.load(&mut store).is_ok() {
             log(b"[desktop] desktop surface shows /Users/user/Desktop\n");
         }
+        desk_watch();
+    }
+}
+/// Watch the Desktop folder through the broker's own record for it
+/// (a capability, ADR-0079); its badge lands on the broker's clock.
+fn desk_watch() {
+    let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+        return;
+    };
+    let old = unsafe { core::mem::replace(&mut *(&raw mut DESK_WATCH), CAP_NONE) };
+    if old != CAP_NONE {
+        files.release(old);
+    }
+    let Ok((cap, _)) = files.walk(USER_ROOT, b"Desktop", arena_desktop::filesd_wire::R_LIST) else {
+        return;
+    };
+    if files.watch(cap, CLOCK, BADGE_WATCH_BIT).is_ok() {
+        unsafe { DESK_WATCH = cap };
+        log(b"[desktop] watching /Users/user/Desktop\n");
+    } else {
+        files.release(cap);
+        log(b"[desktop] Desktop watch refused\n");
     }
 }
 fn desk_notice(text: &'static str) {
@@ -880,15 +908,25 @@ fn desk_effect(e: arena_desktop::desk::Effect) {
         }
     }
 }
-/// Re-list the Desktop folder at most once a second (another application
-/// or the terminal may have changed it).
-fn desk_poll(now: u64) {
-    if now < unsafe { DESK_POLL } {
+/// The Desktop watch fired: confirm through the broker's own record, then
+/// re-list (a folder that vanished is looked up and watched again).
+fn desk_watched() {
+    if !unsafe { core::mem::replace(&mut *(&raw mut WATCH_SIGNALLED), false) } {
         return;
     }
-    unsafe { DESK_POLL = now + 1_000_000 };
-    if let Some(mut store) = desk_store() {
-        unsafe { (*(&raw mut DESK)).poll(&mut store) };
+    let (Some(files), Some(mut store)) = (unsafe { *(&raw const AFS2) }, desk_store()) else {
+        return;
+    };
+    let cap = unsafe { DESK_WATCH };
+    match files.watched(cap) {
+        Ok((0, false)) => {}
+        Ok((_, false)) => {
+            unsafe { (*(&raw mut DESK)).poll(&mut store) };
+        }
+        _ => {
+            desk_watch();
+            let _ = unsafe { (*(&raw mut DESK)).load(&mut store) };
+        }
     }
 }
 
@@ -1076,11 +1114,21 @@ fn launch_image(
     // marker rights do not enlarge the session's provisioned function scope.
     // Child slot 4: diagnostics (Monitor) or the /Users/user grant.
     let (files_head, home) = file_grants(kind, document);
+    // A previous session's pending bits never reach this one.
+    unsafe {
+        syscall1(SYS_TRY_WAIT, clock(i));
+    }
+    // Files lends its clock to filesd for its folder watch (ADR-0079).
+    let clock_rights = if kind == 1 {
+        RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY
+    } else {
+        RIGHTS_READ | RIGHTS_WRITE
+    };
     let spec = [
         (CALL_SIDE, RIGHTS_WRITE),
         (region, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY),
         (region, function_rights),
-        (clock(i), RIGHTS_READ | RIGHTS_WRITE),
+        (clock(i), clock_rights),
         if diagnostics {
             (POOL, RIGHTS_READ)
         } else {
@@ -1370,7 +1418,7 @@ fn scene(now: u64) -> Scene {
         }),
         chooser: chooser_view(),
         desk: {
-            desk_poll(now);
+            desk_watched();
             unsafe { (*(&raw const DESK)).view }
         },
     };
@@ -1680,7 +1728,8 @@ extern "C" fn main() -> ! {
     log(b"[desktop] real desktop frame presented; gallery launcher available\n");
     snapshot();
     loop {
-        let mut dirty = sweep() | animate();
+        // A pending Desktop watch is handled by the next scene (render).
+        let mut dirty = sweep() | animate() | unsafe { WATCH_SIGNALLED };
         if unsafe { (*(&raw mut WM)).repeat_tick(arena_desktop::app_client::now()) } {
             wake_clients();
         }
@@ -1722,8 +1771,12 @@ extern "C" fn main() -> ! {
                 }
                 t
             };
-            if unsafe { syscall1(SYS_WAIT, CLOCK) } < 0 {
+            let woke = unsafe { syscall1(SYS_WAIT, CLOCK) };
+            if woke < 0 {
                 die(96)
+            }
+            if woke as u64 & BADGE_WATCH != 0 {
+                unsafe { WATCH_SIGNALLED = true };
             }
             // An event (not the timer) woke us: retire the still-armed
             // timer so wakes never accumulate in the bounded table.
@@ -1816,7 +1869,6 @@ extern "C" fn main() -> ! {
                                 if to_desk && let Some(mut store) = desk_store() {
                                     if pressing && !desk.busy() {
                                         state.blur();
-                                        desk.poll(&mut store);
                                     }
                                     let ctrl = state.mods & arena_desktop::model::MOD_CTRL != 0;
                                     let now = arena_desktop::app_client::now();

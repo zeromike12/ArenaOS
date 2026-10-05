@@ -254,6 +254,24 @@ impl Files {
         Ok(r.cap)
     }
 
+    /// Watch directory `cap` (ADR-0079): `notification` (lent, needs
+    /// WRITE and COPY) gets badge bit `bit` when the directory changes.
+    pub fn watch(&self, cap: u64, notification: u64, bit: u8) -> Result<(), Status> {
+        let mut req = Request::new(wire::OP_WATCH);
+        req.offset = u64::from(bit);
+        call(cap, req, notification).map(|_| ())
+    }
+    pub fn unwatch(&self, cap: u64) -> Result<(), Status> {
+        call(cap, Request::new(wire::OP_UNWATCH), CAP_NONE).map(|_| ())
+    }
+    /// Changes since last asked and whether the directory is gone: the
+    /// fact behind a watch badge (which anyone holding the notification
+    /// could set).
+    pub fn watched(&self, cap: u64) -> Result<(u32, bool), Status> {
+        let r = call(cap, Request::new(wire::OP_WATCHED), CAP_NONE)?;
+        Ok((r.value as u32, r.bytes[0] != 0))
+    }
+
     /// Whether `other` (lent) is in the lineage of `cap`.
     pub fn same_lineage(&self, cap: u64, other: u64) -> bool {
         call(cap, Request::new(wire::OP_SAME_LINEAGE), other).is_ok()
