@@ -93,7 +93,9 @@ impl Frame {
                 motion,
                 path,
             } => {
-                if kind > 5 || theme > 1 || !name_valid(&path, true) {
+                // `path` is the launch title or start folder: presentation
+                // (ADR-0077), validated exactly as launch validates it.
+                if kind > 5 || theme > 1 || !printable(&path) {
                     return Err(Error::Invalid);
                 }
                 b[6] = kind;
@@ -145,7 +147,8 @@ impl Frame {
                 8
             }
             Self::Launch { kind, path } => {
-                if kind > 5 || !name_valid(&path, true) {
+                // A title only since ADR-0077 (never a name scope).
+                if kind > 5 || !printable(&path) {
                     return Err(Error::Invalid);
                 }
                 b[6] = kind;
@@ -314,5 +317,29 @@ mod tests {
         let mut bad = name;
         bad[1] = b'/';
         assert!(Frame::Read { name: bad }.encode().is_err());
+    }
+    /// Launch titles and start folders are presentation: any printable
+    /// ASCII (spaces and `/` included) crosses the wire both ways exactly
+    /// as the broker's launch accepts it; control bytes never do.
+    #[test]
+    fn titles_with_spaces_and_folders_cross_launch_and_started() {
+        let mut path = [0u8; 32];
+        path[..18].copy_from_slice(b"Desktop/New Folder");
+        for f in [
+            Frame::Launch { kind: 1, path },
+            Frame::Started {
+                kind: 1,
+                theme: 0,
+                motion: true,
+                path,
+            },
+        ] {
+            assert_eq!(Frame::decode(&f.encode().unwrap()), Ok(f));
+        }
+        path[3] = 0x07;
+        assert!(Frame::Launch { kind: 1, path }.encode().is_err());
+        path[3] = b's';
+        path[31] = b'x';
+        assert!(Frame::Launch { kind: 1, path }.encode().is_err(), "no terminator");
     }
 }

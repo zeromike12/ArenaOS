@@ -187,6 +187,16 @@ def workflow(disk):
         d.wait(lambda: d.serial().count('[desktop] application retired:') >= 1, 'editor not retired')
         click(d, WX + 200, WY + 14)  # focus Files again
         time.sleep(.2)
+        # A name with a space opens too (its title crosses Launch/Started).
+        spawned = d.serial().count('[desktop] real application spawned;')
+        double(d, *row(1))
+        d.wait(lambda: d.serial().count('[desktop] real application spawned;') == spawned + 1,
+               'a name with a space did not open in the Editor')
+        d.opened('editor-spaced', 1)
+        d.close(1)
+        d.wait(lambda: d.serial().count('[desktop] application retired:') >= 2, 'second editor not retired')
+        click(d, WX + 200, WY + 14)
+        time.sleep(.2)
         # Trash the second note, then empty the Trash from its menu.
         click(d, *row(1))
         keys(d, 'delete')

@@ -193,8 +193,11 @@ def main(esp=None):
     samples=[tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(s)]
     assert samples and samples[-1][1:]==samples[0][1:],(samples[0],samples[-1])
     # Superseded Phase-10 bound (six slots x one PT): ADR-0075 slots hold
-    # 939 pages, so each warmed broker VA slot retains two PTs.
-    assert samples[0][0]-samples[-1][0]==12*2,('unexpected retained frames beyond twelve warmed slots x two PTs',samples[0],samples[-1])
+    # 939 pages, so each warmed broker VA slot retains two PTs. Phase 11.6:
+    # filesd maps each file session's shared region; the twelve-session
+    # sweep holds four at once (two terminals, two Files), warming four PTs
+    # in filesd's space (measured: 28 = 24 + 4).
+    assert samples[0][0]-samples[-1][0]==12*2+4,('unexpected retained frames beyond twelve warmed slots x two PTs and four filesd session maps',samples[0],samples[-1])
     empty=[row for row in samples if row[1:]==samples[0][1:]]
     assert len(empty)>=5 and all(row==samples[-1] for row in empty[-4:]),empty
     # ADR-0075 per-session reservation, measured by the broker at boot.
