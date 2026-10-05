@@ -158,6 +158,18 @@ else
     echo "!! Phase 8.5 records/refusal tests FAILED"
 fi
 
+# ADR-0076 AFS2: host model proofs and the Rust engine against the model
+# (both with RED controls).
+echo "== AFS2 host model and Rust engine (crash prefixes, cross-check, RED)"
+if (cd "$REPO_ROOT/tools" && python3 test_afs2.py && python3 test_afs2.py --red && \
+    python3 test_afs2_rust.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! AFS2 host proofs FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"
