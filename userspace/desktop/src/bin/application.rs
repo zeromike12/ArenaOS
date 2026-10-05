@@ -1325,10 +1325,11 @@ extern "C" fn main() -> ! {
                             let start = (chunk.y as usize + row) * stride + r.x as usize;
                             before[row * w..row * w + w].copy_from_slice(&pixels[start..start + w]);
                         }
-                        let mut c = canvas(&mut *pixels, cw, ch);
-                        c.set_clip(chunk);
-                        next.paint(&mut c);
-                        drop(c);
+                        {
+                            let mut c = canvas(&mut *pixels, cw, ch);
+                            c.set_clip(chunk);
+                            next.paint(&mut c);
+                        }
                         if let Some(b) = scene::changed_box(&before[..w * h], pixels, stride, chunk)
                         {
                             changed = Some(changed.map_or(b, |c| scene::union(c, b)));
