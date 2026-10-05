@@ -69,7 +69,7 @@ def type_historical_input_fixture(sock: Path, serial: Path) -> None:
         conn.close()
 
 
-def boot(qualified: bool = True) -> None:
+def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE10') -> None:
     sha = verified_inputs(qualified)
     with tempfile.TemporaryDirectory(prefix='arena-phase10-extracted-') as tmp:
         work = Path(tmp)
@@ -132,7 +132,8 @@ def boot(qualified: bool = True) -> None:
                     or text.count('[desktop] application retired:') != 2
                     or 'halting via UEFI ResetSystem(shutdown)' not in text
                     or dns_log.read_text().count('DNS_FIXTURE_QUERY ') != 3
-                    or 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' not in tcp_log.read_text()):
+                    or 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' not in tcp_log.read_text()
+                    or any(marker not in text for marker in extra_markers)):
                 raise RuntimeError(f'extracted image boot failed semantic gate: rc={rc}, '
                                    f'serial={serial}, dns={dns_log}, tcp={tcp_log}')
             evidence = os.environ.get('ARENA_EXTRACTED_EVIDENCE')
@@ -140,7 +141,7 @@ def boot(qualified: bool = True) -> None:
                 target = Path(evidence).resolve(); target.mkdir(parents=True, exist_ok=True)
                 for p in (serial, image, receipt, tcp_log, dns_log, console_log):
                     shutil.copyfile(p, target / p.name)
-            prefix='EXTRACTED PHASE10 PIXELS PASS' if qualified else 'UNQUALIFIED EXTRACTED PHASE10 PREFLIGHT PASS'
+            prefix=f'EXTRACTED {label} PIXELS PASS' if qualified else f'UNQUALIFIED EXTRACTED {label} PREFLIGHT PASS'
             print(f'{prefix}: EFI SHA-256 {sha}; {receipt.read_text().strip()}')
         finally:
             if guest is not None and guest.poll() is None:
