@@ -161,6 +161,35 @@ def mkfs(path, total_sectors: int) -> None:
         f.write(disk)
 
 
+def mkfs_with_files(path, total_sectors: int, files: dict[bytes, bytes]) -> None:
+    """`mkfs` plus files laid out host-side (Phase 11.5 migration fixtures):
+    each file gets one extent block and one contiguous data run, all in
+    the first commit. `audit` verifies the result independently."""
+    assert len(files) <= OBJ_COUNT
+    used = set(range(INIT_USED))
+    disk = bytearray(total_sectors * SECTOR)
+    disk[0:SECTOR] = pack_superblock(total_sectors)
+    objtab = b""
+    nxt = INIT_USED
+    for name, data in files.items():
+        head = 0
+        if data:
+            head, start = nxt, nxt + 1
+            n = -(-len(data) // SECTOR)
+            disk[head * SECTOR:(head + 1) * SECTOR] = pack_extent_block(0, [(start, n)])
+            disk[start * SECTOR:start * SECTOR + len(data)] = data
+            used.update(range(head, start + n))
+            nxt = start + n
+        objtab += pack_object(OBJ_FILE, name, len(data), head)
+    objtab += pack_object(OBJ_FREE, b"", 0, 0) * (OBJ_COUNT - len(files))
+    disk[OBJTAB_START * SECTOR:(OBJTAB_START + OBJTAB_SECTORS) * SECTOR] = objtab
+    disk[BITMAP_START * SECTOR:(BITMAP_START + BITMAP_SECTORS) * SECTOR] = pack_bitmap(used, total_sectors)
+    slot = COMMIT_BASE + (1 % COMMIT_SLOTS)
+    disk[slot * SECTOR:(slot + 1) * SECTOR] = pack_commit(1, OBJTAB_START, BITMAP_START)
+    with open(path, "wb") as f:
+        f.write(disk)
+
+
 # ---- read-back parser (test_m5.py's on-disk proof) --------------------------------
 
 

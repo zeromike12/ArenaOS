@@ -388,6 +388,7 @@ def boot(label: str, esp: Path,
          timeout_s: int = TIMEOUT_S,
          video: str = "default",
          pointer: bool = False,
+         extra_args: list[str] | None = None,
          ) -> tuple[int | None, str, float]:
     """One QEMU boot against an EXPLICIT scratch-disk path (M5.4).
 
@@ -448,6 +449,7 @@ def boot(label: str, esp: Path,
             "-chardev", "stdio,id=con0,signal=off",
             "-serial", "chardev:con0",
             "-no-reboot",
+            *(extra_args or []),
         ]
     )
     t0 = time.monotonic()

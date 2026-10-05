@@ -38,7 +38,10 @@ const SLOT_FRAME_LENT: u64 = 9;
 /// The AFS2 region: sectors 16384.. (after the 8 MiB AFS1 legacy area).
 const BASE_SECTOR: u64 = 16384;
 const VOLUME_BLOCKS: u64 = 16384;
-const GRANTS: usize = 64;
+const GRANTS: usize = 256;
+/// Live records one grant lineage may hold (the grant itself included):
+/// one application cannot exhaust the table for everyone else.
+const LINEAGE_QUOTA: usize = 16;
 
 // ---- entry with a guarded dedicated stack (see filesd.ld) ------------------
 #[repr(C, align(4096))]
@@ -169,8 +172,13 @@ struct Grant {
     generation: u16,
     object: u64,
     rights: u8,
-    /// The registered I/O page (0 = no session yet).
+    /// The registered I/O page of a lineage head (0 = no session yet);
+    /// every record of the lineage uses its head's page.
     io: u64,
+    /// The grant this record descends from: a record opened from the
+    /// broker's /Users/user record (1) is its own lineage; anything opened
+    /// from it inherits it. Revoking a lineage retires all of it.
+    lineage: u8,
 }
 const NO_GRANT: Grant = Grant {
     live: false,
@@ -178,6 +186,7 @@ const NO_GRANT: Grant = Grant {
     object: 0,
     rights: 0,
     io: 0,
+    lineage: 0,
 };
 static mut GRANT: [Grant; GRANTS] = [NO_GRANT; GRANTS];
 
@@ -190,6 +199,7 @@ fn record(badge: u32) -> Option<usize> {
 
 fn release(i: usize) {
     let g = unsafe { &mut GRANT[i] };
+    // Only a lineage head maps a page (its records share it).
     if g.io != 0 {
         unsafe {
             syscall6(SYS_SHARED_UNMAP, g.io, 0, 0, 0, 0, 0);
@@ -199,15 +209,45 @@ fn release(i: usize) {
     g.io = 0;
     g.object = 0;
     g.rights = 0;
+    g.lineage = 0;
 }
 
-/// A new record and its badged capability (in filesd's own slot).
-fn mint(object: u64, rights: u8) -> Result<(u64, usize), u64> {
+/// Retire record `i` and, when it heads a lineage, everything derived
+/// from it: copies the application passed on go stale with it.
+fn revoke(i: usize) {
+    let head = usize::from(unsafe { GRANT[i].lineage }) == i;
+    release(i);
+    if head {
+        for j in 2..GRANTS {
+            if unsafe { GRANT[j].live && usize::from(GRANT[j].lineage) == i } {
+                release(j);
+            }
+        }
+    }
+}
+
+/// A new record and its badged capability (in filesd's own slot),
+/// derived from record `parent`.
+fn mint(parent: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
+    // A record index whose generation is exhausted retires for good: a
+    // badge is never valid twice.
     let i = (2..GRANTS)
-        .find(|i| unsafe { !GRANT[*i].live })
+        .find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
         .ok_or(S_FULL)?;
+    let lineage = if parent == 1 {
+        i
+    } else {
+        let l = usize::from(unsafe { GRANT[parent].lineage });
+        let held = (2..GRANTS)
+            .filter(|j| unsafe { GRANT[*j].live && usize::from(GRANT[*j].lineage) == l })
+            .count();
+        if held >= LINEAGE_QUOTA {
+            return Err(S_FULL);
+        }
+        l
+    };
     let g = unsafe { &mut GRANT[i] };
-    g.generation = g.generation.wrapping_add(1).max(1);
+    g.generation += 1;
     let badge = i as u32 | u32::from(g.generation) << 16;
     let slot = unsafe {
         syscall6(
@@ -229,6 +269,7 @@ fn mint(object: u64, rights: u8) -> Result<(u64, usize), u64> {
         object,
         rights,
         io: 0,
+        lineage: lineage as u8,
     };
     Ok((slot as u64, i))
 }
@@ -292,7 +333,9 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
     let Some(i) = record(badge) else {
         return reply(S_DENIED, 0);
     };
-    let g = unsafe { GRANT[i] };
+    let mut g = unsafe { GRANT[i] };
+    let head = usize::from(g.lineage);
+    g.io = unsafe { GRANT[head].io };
     let has = |r: u8| g.rights & r == r;
     let need_io = !matches!(req.op, OP_SESSION | OP_RELEASE | OP_STATFS | OP_REVOKE | OP_TRUNCATE)
         && !(req.op == OP_STAT && req.name_len == 0)
@@ -321,7 +364,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     syscall6(SYS_SHARED_UNMAP, g.io, 0, 0, 0, 0, 0);
                 }
             }
-            unsafe { GRANT[i].io = va as u64 };
+            unsafe { GRANT[head].io = va as u64 };
             reply(S_OK, 0)
         }
         OP_STAT => {
@@ -415,6 +458,10 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                     Err(e) => return reply(status(e), 0),
                 }
             } else {
+                // Naming a child is listing: it reveals what exists.
+                if !has(R_LIST) {
+                    return reply(S_DENIED, 0);
+                }
                 let Some(n) = name() else {
                     return reply(S_INVAL, 0);
                 };
@@ -424,7 +471,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
                 }
             };
             // Attenuation only: a child never has more than its parent.
-            match mint(object, req.rights & g.rights) {
+            match mint(i, object, req.rights & g.rights) {
                 Ok((slot, minted)) => Reply {
                     status: S_OK,
                     value: u64::from(typ),
@@ -539,7 +586,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             }
         }
         OP_RELEASE => {
-            release(i);
+            revoke(i);
             reply(S_OK, 0)
         }
         OP_REVOKE => {
@@ -549,7 +596,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
             match (b > 0).then(|| record(b as u32)).flatten() {
                 Some(j) if j != 1 => {
-                    release(j);
+                    revoke(j);
                     reply(S_OK, 0)
                 }
                 _ => reply(S_DENIED, 0),
@@ -739,6 +786,7 @@ fn bring_up() -> bool {
                 object,
                 rights: R_ALL,
                 io: 0,
+                lineage: 1,
             };
         },
         Err(_) => {
