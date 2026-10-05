@@ -27,7 +27,7 @@ def main(esp=None):
     rc,s,_=mtest.boot(LABEL+'-seed',esp,[(b'arena>',1,b'shutdown\r')],disk,pointer=True);assert rc==0
     stage.host_seed(disk,{stage.STAGE1:signed,stage.POLICY1:stage.POLICY})
     original=stage.contents(disk)
-    pre_refusal=[]
+    pre_refusal=[];owned=[]
     def samples(d):return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())]
     def visible():
         d=Desktop(LABEL)
@@ -103,6 +103,7 @@ def main(esp=None):
                 xs=[(i//3)%region[2] for i in range(0,len(a),3) if a[i:i+3]!=b[i:i+3]]
                 ys=[(i//3)//region[2] for i in range(0,len(a),3) if a[i:i+3]!=b[i:i+3]]
                 return (min(xs),min(ys),max(xs)-min(xs)+1,max(ys)-min(ys)+1,len(xs)) if xs else None
+            owned.append(crop(changed,153,164,45,20))
             d.q.key('r')
             partial=d.shot('partial-publish',lambda p:box(p) is not None)
             partial=d.settled('partial-publish',region)
@@ -119,7 +120,12 @@ def main(esp=None):
         try:
             before=d.shot('revoked-still-live')
             d.q.key('b')
-            d.shot('revoked-child-input',lambda p:sum(a!=b for a,b in zip(crop(p,353,264,45,20),crop(before,353,264,45,20)))>45*20*3*.95)
+            # 'r' staged a whole flip but published one 10x10 cell; 'b'
+            # flips back and publishes everything, so the dragged child
+            # shows exactly its raster from before the partial publish:
+            # only that one cell changes on screen (the child still owns
+            # input and publication after its Image was revoked).
+            d.shot('revoked-child-input',lambda p:crop(p,353,264,45,20)==owned[0]!=crop(before,353,264,45,20))
             # Dynamic and BootImage children share the general session
             # ownership model (twelve sessions, ADR-0075), while the native
             # dynamic quota stays four.
