@@ -608,49 +608,50 @@ pub fn call_badged(
 ) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // Phase 1 — enqueue; note a parked server (borrow ends here).
     // SAFETY: single writer under IF=0.
-    let (eidx, qi, parked, signal) =
-        without_interrupts(|| -> Result<(usize, usize, u64, Option<Binding>), Status> {
-            bump!(calls);
-            unsafe {
-                let eps = &mut *ENDPOINTS.get();
-                let eidx = eid as usize;
-                let Some(ep) = eps.get_mut(eidx).filter(|e| e.live) else {
-                    return Err(STATUS_BAD_ARG);
-                };
-                if ep.orphaned {
-                    // Nobody is serving this. Answer now rather than
-                    // enqueue into silence (M7.1b). Counted directly
-                    // rather than through `bump!`, which brings its own
-                    // `unsafe` and would nest inside this one.
-                    (*STATS.get()).service_gone += 1;
-                    return Err(STATUS_SERVICE_GONE);
-                }
-                let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Empty) else {
-                    return Err(STATUS_BUSY);
-                };
-                let staged = send_cap.unwrap_or(Cap::EMPTY);
-                crate::image_registry::add_cap(staged);
-                crate::shared::add_cap(staged);
-                ep.q[qi] = CallSlot {
-                    state: SlotState::Waiting,
-                    caller: sched::current_thread_id(),
-                    words,
-                    msg,
-                    send_cap: staged,
-                    badge,
-                    ..EMPTY_SLOT
-                };
-                let parked = ep.server;
-                if parked != NO_TID {
-                    ep.server = NO_TID;
-                }
-                // Nobody is parked in recv: tell the server through its bound
-                // notification that work is queued (ADR-0071). Signalled
-                // after this borrow ends; the generation is re-checked there.
-                let signal = if parked == NO_TID { ep.bound } else { None };
-                Ok((eidx, qi, parked, signal))
+    let (eidx, qi, parked, signal) = without_interrupts(
+        || -> Result<(usize, usize, u64, Option<Binding>), Status> {
+        bump!(calls);
+        unsafe {
+            let eps = &mut *ENDPOINTS.get();
+            let eidx = eid as usize;
+            let Some(ep) = eps.get_mut(eidx).filter(|e| e.live) else {
+                return Err(STATUS_BAD_ARG);
+            };
+            if ep.orphaned {
+                // Nobody is serving this. Answer now rather than
+                // enqueue into silence (M7.1b). Counted directly
+                // rather than through `bump!`, which brings its own
+                // `unsafe` and would nest inside this one.
+                (*STATS.get()).service_gone += 1;
+                return Err(STATUS_SERVICE_GONE);
             }
-        })?;
+            let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Empty) else {
+                return Err(STATUS_BUSY);
+            };
+            let staged = send_cap.unwrap_or(Cap::EMPTY);
+            crate::image_registry::add_cap(staged);
+            crate::shared::add_cap(staged);
+            ep.q[qi] = CallSlot {
+                state: SlotState::Waiting,
+                caller: sched::current_thread_id(),
+                words,
+                msg,
+                send_cap: staged,
+                badge,
+                ..EMPTY_SLOT
+            };
+            let parked = ep.server;
+            if parked != NO_TID {
+                ep.server = NO_TID;
+            }
+            // Nobody is parked in recv: tell the server through its bound
+            // notification that work is queued (ADR-0071). Signalled
+            // after this borrow ends; the generation is re-checked there.
+            let signal = if parked == NO_TID { ep.bound } else { None };
+            Ok((eidx, qi, parked, signal))
+        }
+        },
+    )?;
     if let Some(b) = signal {
         signal_bound(b);
     }

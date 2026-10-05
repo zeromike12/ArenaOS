@@ -16,6 +16,7 @@
 
 pub mod arch;
 pub mod cap;
+pub mod rtc;
 pub mod console;
 pub mod drivers;
 pub mod elf;
@@ -27,15 +28,14 @@ pub mod heap;
 pub mod image_registry;
 pub mod ipc;
 pub mod log;
-pub mod m11;
 pub mod m3;
 pub mod m4;
 pub mod m5;
 pub mod m6;
 pub mod m7;
+pub mod m11;
 pub mod proc;
 pub mod relay;
-pub mod rtc;
 pub mod sched;
 pub mod shared;
 pub mod spawn;
