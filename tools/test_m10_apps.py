@@ -209,13 +209,16 @@ def main(esp=None):
     # per session + one landed request cap at the twelfth launch
     # (measured: 60 = 23 + 3x12 + 1).
     assert cap_peak==samples[0][6]+3*12+1,(cap_peak,samples[0])
-    peak=max(samples,key=lambda row:row[4])
+    # The settled peak: most pages, then most maps (clients and filesd map
+    # their views after the broker's region creation is sampled).
+    peak=max(samples,key=lambda row:(row[4],row[5]))
     # Twelve sessions: one record and process each, two regions each (the
     # shared reservation and the broker-only snapshot), three maps each
-    # (broker x2, client x1) and three broker caps each (region, Process,
-    # filesd lineage head).
+    # (broker x2, client x1) plus filesd's map of each of the four file
+    # sessions (two terminals, two Files), and three broker caps each
+    # (region, Process, filesd lineage head). Measured 44 = 4 + 36 + 4.
     assert peak[1:4]==(samples[0][1]+12,samples[0][2]+12,samples[0][3]+24),peak
-    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36 and peak[6]==samples[0][6]+36,peak
+    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36+4 and peak[6]==samples[0][6]+36,peak
     print(f'[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline={samples[0]} peak={peak} transient-broker-caps={cap_peak}',flush=True)
     # Durable appearance must affect actual desktop pixels on a fresh boot.
     label='m10-apps-persist'

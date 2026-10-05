@@ -311,6 +311,13 @@ for i in $(seq 1 "$N"); do
     # on every qualified boot. Crash/restart negatives live in host suites.
     elif ! grep -aqF 'permissiond: validated durable policy generation 0 DENY' "$SERIAL"; then
         why="fresh permission disk did not rehydrate default DENY"
+    # Phase 11: the desktop runs with its file service and surface online.
+    elif ! grep -aqF 'filesd: AFS2 mounted' "$SERIAL"; then
+        why="filesd did not mount the AFS2 region"
+    elif ! grep -aqF '[desktop] AFS2 file service online' "$SERIAL"; then
+        why="desktop file service offline"
+    elif ! grep -aqF '[desktop] desktop surface shows /Users/user/Desktop' "$SERIAL"; then
+        why="desktop surface did not list /Users/user/Desktop"
     elif ! grep -aqF 'permissiond READY (validated durable decision; bearer table fresh)' "$SERIAL"; then
         why="permission broker did not pass authenticated PING/readiness"
     elif ! grep -aqF 'permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty' "$SERIAL"; then

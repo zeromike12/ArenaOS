@@ -180,7 +180,27 @@ An unpaced burst of 62 key events overran inputd's bounded 64-entry key
 ring. That ring is the documented design (ADR-0026); the test now paces
 its keys like typing.
 
-## 11.8 — Files explorer and the desktop surface (in progress)
+## 11.7 — UI primitives, Arena Sans 13 and the typography pass
+
+* **gfxkit:** origin translation, opaque blend and darken rectangles,
+  8-bit alpha-masked blit, 1-bit row-mask blit, and i64 pen arithmetic
+  (hostile origins never overflow); host tests.
+* **Arena Sans 13:** an owned proportional face drawn in
+  `tools/face13.txt` (106 glyphs), generated into `face13.rs`. The suite
+  checks the art and the generated face stay in sync. `measure13` is
+  shared by layout and hit testing.
+* **Widgets** (`ui/src/widgets.rs`): scroll and scrollbar, a
+  1024-item selection, a virtualized list with sortable columns, an icon
+  grid, a text input with selection, a breadcrumb, a splitter, focus
+  order, and ellipsized text. 8 host tests.
+* **Typography pass:** Strong (window titles, names) and Caption (labels,
+  status lines, bar and dock text) are set in Arena Sans 13. Its capitals
+  sit in the old 5x7 box, so every baseline holds. Body and Display keep
+  the 5x7 grid, which the terminal and editor grids depend on. The
+  explorer and the desktop icons use Arena Sans throughout, with 32 px
+  folder and document icons drawn from shapes.
+
+## 11.8 — Files explorer and the desktop surface
 
 Files is now an explorer over the session's /Users/user capability
 (`apps/explorer.rs` logic over a `Store`, `explorer_view.rs` pixels and hit
@@ -227,3 +247,46 @@ title band the compositor draws opaquely. The rectangle is now at (10,30).
 The test's next step then exposed a second never-reached oracle: after a
 partial publish, a full publish changes only that one cell. The oracle now
 requires the exact pre-partial raster. Guest: the whole test PASS.
+
+The desktop surface (ADR-0078) shows `/Users/user/Desktop` as icons drawn
+by the shell. It supports:
+
+* positions persisted in `Desktop/.positions`;
+* click and Ctrl selection;
+* drag to a cell, or onto a folder icon to move into it;
+* double-click open by type: a text file opens in an Editor granted
+  exactly that file, a folder opens in Files;
+* menus: New Folder, New Document, Arrange Icons, Open, Move to Trash;
+* Enter, Delete and Esc when no window is focused.
+
+Guest (`tools/test_m11_desk.py`) PASS: icons appear for objects the
+terminal made. A dragged cell is persisted and drawn identically after a
+fresh boot. A desktop open gives a granted Editor that saves exactly; an
+image opens nothing. The menu creates a folder; a drop onto a folder icon
+moves; Move to Trash leaves a restore record; a folder opens in Files.
+
+More found by the guest:
+
+| Problem | Fix |
+|---|---|
+| Launch and Started still required the Phase-10 file-name rule while `launch` accepted any printable title. Opening "Desktop/New Folder" made the broker die (stage 78) and the graphics service halt fail-closed; any Files open of a name with a space was refused | Both frames take the printable title rule (host test; the explorer test opens "user-note 2") |
+| The desk kept the button state of events it was not given, so the press after a menu click read as a move | The broker passes every unrouted pointer's buttons to the desk (host test, RED without the fix) |
+
+Historical receipts with AFS2 online (measured):
+
+* Retained frames: 28 = 12x2 broker PTs + 4 filesd PTs.
+* Broker cap high-water: 60 = 23 + 3x12 + 1 (each session's lineage
+  head).
+* Maps at the settled peak: 44 = 4 + 36 + 4 (filesd maps each of four
+  file sessions).
+
+`test_m10_files` was rewritten for the explorer, keeping every Phase-10
+invariant (supersessions in its docstring). The `test_m10_boundaries_red`
+pointer-hit mutant had been vacuous since 11.4: `State::hit` is
+host-only, so it now breaks the live hit in `State::target`.
+`test_m10_service_death`'s needle followed the key arm.
+
+Qualification disks: `stability_loop.sh` and `run-desktop.sh` boot 72 MiB
+disks, so filesd formats AFS2 and imports AFS1 each boot. The loop also
+requires the file service and the desktop surface to come online.
+

@@ -29,12 +29,15 @@ CONTROLS=[
     (MODEL,b'None if w.contains(x, y) => Some(Target::Window(w.handle)),',b'None if w.contains(x, y) && false => Some(Target::Window(w.handle)),','pointer-hit',bounded,('pointer-focus','terminal-key','exact-drag')),
     (DESKTOP,b'            SYS_SPAWN,\n            image,',b'            SYS_SPAWN_CHECK,\n            image,','real-process-spawn',bounded,'terminal'),
     (DESKTOP,b'if unsafe { syscall2(SYS_PROC_FINISH, s.process, u64::from(force)) } != 0 {',b'if force && unsafe { syscall2(SYS_PROC_FINISH, s.process, u64::from(force)) } != 0 {','process-retirement',bounded,'resources did not return exactly'),
-    (DESKTOP,b'(POOL, RIGHTS_READ),',b'(POOL, RIGHTS_READ | RIGHTS_WRITE),','readonly-diagnostic-grant',bounded,'monitor'),
+    # Phase 11.6: slot 4 is the diagnostics pool or the /Users/user grant.
+    (DESKTOP,b'            (POOL, RIGHTS_READ)\n',b'            (POOL, RIGHTS_READ | RIGHTS_WRITE)\n','readonly-diagnostic-grant',bounded,'monitor'),
     (MODEL,b'self.find(handle).is_some_and(|w| w.backing == backing)',b'self.find(handle).is_some_and(|w| w.backing == backing || backing != 0)','owned-stale-surface',dynamic,'signed-'),
-    (MODEL,b'let next = self.next.checked_add(1).ok_or(Error::Exhausted)?;',b'let next = self.next;','surface-generation-reuse',dynamic,'signed-'),
+    # Window creation (11.3 transients mint handles the same way).
+    (MODEL,b'.ok_or(Error::Full)?;\n        let handle = self.next;\n        let next = self.next.checked_add(1).ok_or(Error::Exhausted)?;',b'.ok_or(Error::Full)?;\n        let handle = self.next;\n        let next = self.next;','surface-generation-reuse',dynamic,'signed-'),
     # Damage composition reads each window's content through one closure;
     # the mutant serves the client's writable staging bytes instead.
-    (DESKTOP,b'|slot| &published[slot][..]',b'|slot| { let s = unsafe { SESSIONS[slot] }; let w = unsafe { (&*(&raw const WM)).find(s.handle) }.unwrap_or_else(|| die(88)); unsafe { core::slice::from_raw_parts((s.va as usize + PIXEL_OFFSET) as *const u32, w.width as usize * w.height as usize) } }','frame-publication',dynamic,'unpublished backing became visible'),
+    # Phase 11.3: composition reads each session's snapshot via snapshot_of.
+    (DESKTOP,b'|slot| snapshot_of(&sessions[slot])',b'|slot| { let s = &sessions[slot]; let w = unsafe { (&*(&raw const WM)).find(s.handle) }.unwrap_or_else(|| die(88)); (unsafe { core::slice::from_raw_parts((s.va as usize + PIXEL_OFFSET) as *const u32, w.width as usize * w.height as usize) }, snapshot_of(s).1) }','frame-publication',dynamic,'unpublished backing became visible'),
     (DESKTOP,b'    if ready != 0 {',b'    if ready != 0 && false {','capacity-preflight',dynamic,'fifth refusal mutated resources'),
 ]
 def main():
