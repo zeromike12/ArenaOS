@@ -6,7 +6,7 @@ builds the real image, boots it, and requires that the matching m11 boot
 check (and only a real guest observation) reports FAIL. A build error can
 never count as RED. Source and the shipped EFI/ESP are restored byte-exactly
 in `finally`; a final GREEN boot of the restored bytes must report
-`m11: RESULT PASS (7/7)` and reach the shell.
+`m11: RESULT PASS (8/8)` and reach the shell.
 """
 import hashlib
 from pathlib import Path
@@ -55,9 +55,14 @@ CONTROLS = [
      'handoff', 'm11:test:handoff_order: FAIL'),
     # A handoff overtakes the caller's own earlier wakes (the causal-order
     # rule found by the historical stackstop proof).
-    (SCHED, b'            let front = handoff && !cpu.woke_others;',
-     b'            let front = handoff;',
+    (SCHED, b'            let front = handoff && !cpu.woke_others && chain_open(cpu);',
+     b'            let front = handoff && chain_open(cpu);',
      'handoff-causal', 'm11:test:handoff_order: FAIL'),
+    # Handoff chains are unbounded: a call/reply pair keeps the ring from
+    # turning (the livelock that first kept REPLY a FIFO wake).
+    (SCHED, b'    now.wrapping_sub(cpu.chain_since) < budget\n',
+     b'    now.wrapping_sub(cpu.chain_since) < budget.max(u64::MAX)\n',
+     'handoff-chain', 'm11:test:handoff_chain: FAIL'),
 ]
 
 
@@ -100,10 +105,10 @@ def main():
     assert all(p.read_bytes() == d for p, d in sources.items()), 'source not restored'
     assert all(p.read_bytes() == d for p, d in artifacts.items()), 'artifacts not restored'
     rc, serial, _ = boot('m11-green', esp, green=True)
-    assert rc == 0 and 'm11: RESULT PASS (7/7)' in serial, 'restored source is not GREEN'
+    assert rc == 0 and 'm11: RESULT PASS (8/8)' in serial, 'restored source is not GREEN'
     digest = hashlib.sha256(artifacts[BUILD / 'arena-boot.efi']).hexdigest()
     print(f'[m11-red] {len(reds)} production RED controls ({", ".join(reds)}); '
-          f'byte-exact restore; GREEN m11 7/7 sha256={digest}', flush=True)
+          f'byte-exact restore; GREEN m11 8/8 sha256={digest}', flush=True)
 
 
 if __name__ == '__main__':

@@ -73,3 +73,55 @@ Proof: `m11:test:handoff_order` checks both halves (a handoff runs ahead
 of a thread another thread woke; it never runs ahead of the caller's own
 earlier wake), and `test_m11_event_red.py` carries the `handoff-causal`
 RED control that removes the flag check.
+
+## Amendment (Phase 11 completion): bounded reply handoff
+
+**Evidence.** The latency investigation traced the remaining pointer
+cost to the reply wake. On the final feature set the broker's synchronous
+display call took 3.5 ms per cursor frame. The copy itself is about
+0.1 ms for a 2 kpx GOP rectangle. The rest was displayd's FIFO reply
+wake: the broker waited behind every ready thread. A temporary
+reply-handoff build changed, on the same host:
+* cursor PRESENT: 3.5 → 0.63 ms;
+* guest input-to-frame: 5.0 → 1.7 ms;
+* host motion-to-photon p50: 12.2 → 6.5 ms, including about 4.5 ms of
+  screendump.
+
+**Why the original variant livelocked.** `plan_switch` gives every
+incoming thread a fresh quantum, and production runs without preemption
+(the m3 suite arms it only for its own tests). A client and a server that
+hand the CPU to each other by CALL and REPLY handoffs therefore never
+leave the front of the ring. The phase-9 polling fixture did exactly
+that, and the shell never ran.
+
+**Rule.** A REPLY wakes the caller with `wake_handoff`. The causal rule
+still applies: a server that already made another thread ready in its
+current run replies FIFO. Handoffs are additionally bounded by a chain
+budget:
+* A chain is every run since the ring last delivered an ordinary pick.
+  `plan_switch` ends it when the picked thread is not the one a handoff
+  placed at the front.
+* The first handoff starts the chain on the TSC clock.
+* Once the chain is `HANDOFF_CHAIN_US` (10 ms) old, every handoff is an
+  ordinary FIFO wake. The ring then turns at the next block, so a
+  rendezvous pair gets at most one budget of CPU per ring rotation,
+  whatever the preemption setting.
+
+Front insertions within one run are LIFO: the most recent rendezvous runs
+first. FIFO order among all other ready threads is unchanged.
+
+The broker also wakes the clients a request gave events to *before*
+replying. By the causal rule that makes the reply FIFO behind them, so a
+typed key reaches its application before inputd delivers the key's
+release.
+
+**Proof.**
+* `m11:test:handoff_chain`: two kernel threads hand off to each other for
+  up to 400 000 round trips. A thread made ready behind them must run
+  first; it runs after about 4 000 trips, roughly one budget.
+* `test_m11_event_red.py` carries two new mutants:
+  * `handoff-chain` lifts the budget, and the bystander starves
+    (`handoff_chain: FAIL`);
+  * the `handoff-causal` needle follows the new condition.
+* The historical suite, including the phase-9 polling fixture, guards
+  against the livelock.

@@ -943,12 +943,15 @@ pub fn reply_policy(
         }
     })?;
 
-    // Phase 2 — wake the caller (no borrow live). An ordinary FIFO wake,
-    // NOT a handoff: the server keeps running after a reply, so a front
-    // insertion here would let busy client/server groups re-enter ahead
-    // of every other ready thread indefinitely (ADR-0072; observed as a
-    // whole-system livelock under the phase-9 polling fixture).
-    if let Err(e) = sched::wake(caller) {
+    // Phase 2 — wake the caller (no borrow live) as a handoff: the
+    // rendezvous completes and the caller runs as soon as the server
+    // blocks, instead of after every other ready thread (ADR-0072
+    // amendment, Phase 11 latency). The scheduler's causal rule still
+    // applies (a server that already woke another thread in this run
+    // replies FIFO), and its chain budget bounds how long handoff-picked
+    // runs may keep the ring from turning: the unbounded variant of this
+    // livelocked the phase-9 polling fixture.
+    if let Err(e) = sched::wake_handoff(caller) {
         error!("ipc", "reply: wake(caller {caller}) failed: {e}");
         crate::halt::halt_machine("ipc: reply could not wake the caller");
     }

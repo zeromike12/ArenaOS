@@ -23,6 +23,10 @@
 //!    ready earlier (front of the ready ring), but never before a thread
 //!    the calling thread itself woke earlier in its current run (causal
 //!    order: a STOP notified before a CALL is handled first).
+//! 8. `handoff_chain` (ADR-0072 amendment) — two threads that hand the
+//!    CPU to each other forever (call/reply handoffs) cannot keep a thread
+//!    another thread made ready from running: once the chain of
+//!    handoff-picked runs is `HANDOFF_CHAIN_US` old, wakes are FIFO.
 //! 7. `badged_endpoint` (ADR-0074) — only the serve side mints; badges are
 //!    preserved by transfer and attenuated copy, never amplified; a call
 //!    through a badged cap delivers its badge; badged caps never serve; a
@@ -41,7 +45,7 @@ use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 type Res = Result<(), &'static str>;
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Res); 7] = [
+    let checks: [(&str, fn() -> Res); 8] = [
         ("bound_signal", test_bound_signal),
         ("notif_destroy_unbinds", test_notif_destroy_unbinds),
         ("endpoint_destroy_unbinds", test_endpoint_destroy_unbinds),
@@ -49,6 +53,7 @@ pub fn run_suite() -> bool {
         ("timer_quota", test_timer_quota),
         ("handoff_order", test_handoff_order),
         ("badged_endpoint", test_badged_endpoint),
+        ("handoff_chain", test_handoff_chain),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -398,6 +403,88 @@ fn test_handoff_order() -> Res {
     info!(
         "m11",
         "handoff_order: handoff ran ahead of another thread's earlier wake; never ahead of the caller's own earlier wake"
+    );
+    Ok(())
+}
+
+// ---- 8. handoff_chain ---------------------------------------------------------
+
+/// Round trips the pair may make before it stops by itself: far more than
+/// fit in one chain budget, so only the budget lets the bystander run first.
+const PAIR_LIMIT: usize = 400_000;
+static PAIR_TRIPS: AtomicUsize = AtomicUsize::new(0);
+static PAIR_STOP: AtomicUsize = AtomicUsize::new(0);
+static PING_TID: AtomicU64 = AtomicU64::new(0);
+/// Round trips completed when the bystander ran (usize::MAX: not yet).
+static BYSTANDER_AT: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+fn pong_entry(_: usize) {
+    sched::block_current();
+    while PAIR_STOP.load(Ordering::Relaxed) == 0 {
+        PAIR_TRIPS.fetch_add(1, Ordering::Relaxed);
+        if sched::wake_handoff(PING_TID.load(Ordering::Relaxed)).is_err() {
+            return;
+        }
+        sched::block_current();
+    }
+    // Stopped by the bystander while ping may still be parked.
+    let _ = sched::wake(PING_TID.load(Ordering::Relaxed));
+}
+
+fn ping_entry(pong: usize) {
+    PING_TID.store(sched::current_thread_id(), Ordering::Relaxed);
+    loop {
+        if PAIR_STOP.load(Ordering::Relaxed) != 0
+            || PAIR_TRIPS.load(Ordering::Relaxed) >= PAIR_LIMIT
+        {
+            PAIR_STOP.store(1, Ordering::Relaxed);
+            let _ = sched::wake(pong as u64);
+            return;
+        }
+        if sched::wake_handoff(pong as u64).is_err() {
+            PAIR_STOP.store(1, Ordering::Relaxed);
+            return;
+        }
+        sched::block_current();
+    }
+}
+
+fn bystander_entry(_: usize) {
+    BYSTANDER_AT.store(PAIR_TRIPS.load(Ordering::Relaxed), Ordering::Relaxed);
+    PAIR_STOP.store(1, Ordering::Relaxed);
+}
+
+fn test_handoff_chain() -> Res {
+    PAIR_TRIPS.store(0, Ordering::Relaxed);
+    PAIR_STOP.store(0, Ordering::Relaxed);
+    BYSTANDER_AT.store(usize::MAX, Ordering::Relaxed);
+    let pong = sched::spawn("m11-pong", pong_entry, 0)?;
+    for _ in 0..16 {
+        if sched::thread_blocked(pong) {
+            break;
+        }
+        sched::yield_now();
+    }
+    if !sched::thread_blocked(pong) {
+        return Err("pong never blocked");
+    }
+    // Ring: ping, then the bystander. Ping and pong then hand the CPU to
+    // each other; the bystander is the ring's next ordinary pick.
+    sched::spawn("m11-ping", ping_entry, pong as usize)?;
+    sched::spawn("m11-bystander", bystander_entry, 0)?;
+    drain(64)?;
+    let at = BYSTANDER_AT.load(Ordering::Relaxed);
+    let trips = PAIR_TRIPS.load(Ordering::Relaxed);
+    if at == usize::MAX || at >= PAIR_LIMIT {
+        return Err("a handoff pair kept a ready thread from running");
+    }
+    if at == 0 {
+        return Err("the pair never handed off");
+    }
+    info!(
+        "m11",
+        "handoff_chain: bystander ran after {at} handoff round trips (pair stopped at {trips}; budget {} us)",
+        sched::HANDOFF_CHAIN_US
     );
     Ok(())
 }

@@ -177,7 +177,21 @@ pub(super) struct CpuSched {
     /// (or something did on its behalf, e.g. an interrupt). A later
     /// handoff must not overtake those earlier wakes (ADR-0072).
     woke_others: bool,
+    /// The thread most recently placed at the front by a handoff
+    /// (`NO_FRONT` when none is pending).
+    front: usize,
+    /// TSC instant the current handoff chain began (0: no chain). A chain
+    /// is every run since the ring last delivered an ordinary pick; while
+    /// it is older than `HANDOFF_CHAIN_US`, handoffs are ordinary FIFO
+    /// wakes, so a rendezvous pair can never keep the ring from turning
+    /// (ADR-0072 amendment: reply handoff).
+    chain_since: u64,
 }
+
+const NO_FRONT: usize = usize::MAX;
+/// Longest a chain of handoff-picked runs may hold the CPU before the
+/// ready ring must turn (production runs without preemption).
+pub const HANDOFF_CHAIN_US: u64 = 10_000;
 
 impl CpuSched {
     const fn new() -> Self {
@@ -187,6 +201,8 @@ impl CpuSched {
             slice: 0,
             remaining: 0,
             woke_others: false,
+            front: NO_FRONT,
+            chain_since: 0,
         }
     }
 }
@@ -489,17 +505,19 @@ pub fn thread_blocked(tid: u64) -> bool {
 /// IPC rendezvous wake (ADR-0072): the woken thread goes to the FRONT of
 /// the ready ring and gets an ordinary fresh quantum when it runs.
 ///
-/// Callers MUST block immediately afterwards (a CALL to a parked server,
-/// or a bound signal raised by a caller about to park), so the woken
-/// thread is simply the very next to run: nothing ever accumulates at the
-/// front, FIFO order of every other ready thread is untouched and no
-/// priority is stored. If the caller already woke another thread during
+/// Used where a rendezvous completes: a CALL to a parked server or a
+/// bound signal raised by a caller about to park (the caller blocks at
+/// once), and a REPLY (the server usually parks again at once). FIFO
+/// order of every other ready thread is untouched and no priority is
+/// stored. Handoffs form a chain until the ring next delivers an ordinary
+/// pick; a chain older than `HANDOFF_CHAIN_US` gets ordinary wakes, so
+/// no rendezvous pair can keep the ring from turning. If the caller already woke another thread during
 /// its current run, the server goes to the back instead: a handoff never
 /// overtakes the caller's own earlier wakes (a STOP request notified
 /// before a CALL is processed before that CALL, as with plain FIFO). (Donating the waker's remaining quantum was
 /// measured: no latency gain, and the server was preempted mid-copy.)
-/// Using it where the waker keeps running (a REPLY) lets busy groups
-/// re-enter ahead of the whole ring forever — that variant livelocked.
+/// Without the chain budget a busy reply/call pair re-enters ahead of
+/// the whole ring forever — that variant livelocked.
 pub fn wake_handoff(tid: u64) -> Result<(), &'static str> {
     wake_with(tid, true)
 }
@@ -525,7 +543,10 @@ fn wake_with(tid: u64, handoff: bool) -> Result<(), &'static str> {
             // before the server of its later call, exactly as without
             // handoff. Handoff only skips the queue when nothing the
             // caller did earlier is waiting in it.
-            let front = handoff && !cpu.woke_others;
+            let front = handoff && !cpu.woke_others && chain_open(cpu);
+            if front {
+                cpu.front = idx;
+            }
             let pushed = if front {
                 cpu.ready.push_front(idx)
             } else {
@@ -540,6 +561,18 @@ fn wake_with(tid: u64, handoff: bool) -> Result<(), &'static str> {
             Ok(())
         }
     })
+}
+
+/// May a handoff still go to the front? Starts the chain on its first
+/// handoff; refuses once the chain is `HANDOFF_CHAIN_US` old.
+fn chain_open(cpu: &mut CpuSched) -> bool {
+    let now = crate::timekeeping::now_ticks();
+    if cpu.chain_since == 0 {
+        cpu.chain_since = now.max(1);
+        return true;
+    }
+    let budget = crate::timekeeping::tsc_hz() / (1_000_000 / HANDOFF_CHAIN_US);
+    now.wrapping_sub(cpu.chain_since) < budget
 }
 
 /// Kill every live thread belonging to `pid` (M6.5, ADR-0028).
@@ -741,6 +774,11 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
             debug_assert!(ok, "ready ring overflow with a free slot");
         }
         threads[next].as_mut().expect("ready slot vanished").state = State::Running;
+        // An ordinary pick (the ring turned) ends the handoff chain.
+        if cpu.front != next {
+            cpu.chain_since = 0;
+        }
+        cpu.front = NO_FRONT;
         cpu.current = next;
         cpu.woke_others = false;
         // Fresh quantum for the incoming thread (strict RR; also resets
