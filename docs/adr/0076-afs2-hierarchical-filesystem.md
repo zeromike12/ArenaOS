@@ -1,7 +1,8 @@
 # ADR-0076 — AFS2: hierarchical copy-on-write filesystem
 
 Status: accepted (Phase 11.5). Host model `tools/afs2.py` is the format's
-single source of truth on the host; `fsd2` mirrors it in ring 3.
+single source of truth on the host; the ring-3 engine `userspace/afs2`
+(served by `filesd`, ADR-0077) mirrors it.
 
 ## Problem
 
@@ -141,9 +142,21 @@ final commit containing `/System/imported-afs1` (system records: config,
 permission, package and preference records) and `/Users/user/Documents`
 (user files, `user-*` names) plus `/Users/user/Desktop` and
 `/Users/user/.Trash`. The AFS1 legacy area is **read only** during import;
-until the import's last commit lands, a crash leaves the AFS2 volume
-either empty-formatted or at a previous complete state, and a restarted
-import begins again. System services remain authoritative on AFS1 in
+the marker `/System/afs1-import-complete` is the import's last commit,
+and a volume without it is formatted again and the import redone.
+
+**Never committed (amendment, Phase 11.5).** `format` zeroes both commit
+slots, then writes the superblock, then the first commit; no commit ever
+zeroes a slot. So a region is *never committed* exactly when its
+superblock block is blank, or no slot holds a valid commit record while a
+slot is still all zero. Only an absent or interrupted format (including a
+torn first commit) produces that state; a volume that has committed once
+always keeps a valid record in some slot. The file service formats a
+never-committed region; anything else mounts or fails closed and is never
+repaired. Proven on the host over every crash prefix of `format`, from a
+blank region and over an interrupted import, with a RED control that
+treats a damaged committed volume as never committed. The ring-3 engine
+is `userspace/afs2`, served by `filesd` (ADR-0077). System services remain authoritative on AFS1 in
 Phase 11; `/System` holds the imported copy and is reachable only from the
 filesystem service's private system root, never from a user capability.
 
@@ -158,6 +171,6 @@ filesystem service's private system root, never from a user capability.
 * RED controls: in-place metadata mutation, early free (reuse of a block
   freed in the same transaction), a rename that omits the parent update,
   and a half-published rename each fail the proofs.
-* Guest: the same crash-prefix property against the real `fsd2` through
+* Guest: the same crash-prefix property against the real `filesd` through
   QEMU kills at named write triggers, with the trigger required to have
   fired.

@@ -124,3 +124,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0074](0074-badged-endpoint-capabilities.md) | Badged endpoint capabilities (server-minted, generation-safe object handles) | Accepted |
 | [0075](0075-variable-and-transient-surfaces.md) | Variable and transient surfaces; twelve desktop sessions (measured budgets) | Accepted |
 | [0076](0076-afs2-hierarchical-filesystem.md) | AFS2: hierarchical copy-on-write filesystem (crash-prefix proven, fail-closed) | Accepted |
+| [0077](0077-filesd-file-capabilities.md) | filesd: AFS2 file service and badged file capabilities (lineages, Rtc, endpoint_badge) | Accepted |
