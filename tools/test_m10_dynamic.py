@@ -28,7 +28,22 @@ def main(esp=None):
     stage.host_seed(disk,{stage.STAGE1:signed,stage.POLICY1:stage.POLICY})
     original=stage.contents(disk)
     pre_refusal=[];owned=[]
-    def samples(d):return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())]
+    # The resource base is the first receipt after the boot's transient
+    # processes ended (packaged's boot scan exits before READY, then the
+    # permission app is reaped). The desktop may present before that, so
+    # its very first receipt can still count them (seen after the Phase-11
+    # reply handoff let the broker reach its first frame earlier).
+    SETTLED='servicemgr: permission app reaped through held Process cap'
+    def receipts(text):
+        text=text[text.index(SETTLED):] if SETTLED in text else ''
+        return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',text)]
+    def samples(d):return receipts(d.serial())
+    def settled():
+        d=Desktop(LABEL)
+        try:d.wait(lambda:samples(d),'no resource receipt after the boot transients ended')
+        finally:d.dispose()
+        return b'pkg graphics\r'
+
     def visible():
         d=Desktop(LABEL)
         try:
@@ -172,12 +187,12 @@ def main(esp=None):
             d.shot('signed-all-closed')
             return b'shutdown\r'
         finally:d.dispose()
-    feed=[((b'arena>',b'[desktop] real desktop frame presented',b'packaged READY'),1,b'pkg graphics\r')]
+    feed=[((b'arena>',b'[desktop] real desktop frame presented',b'packaged READY',SETTLED.encode()),1,settled)]
     for n in range(1,5):feed.append((b'servicemgr: real signed Image delegated for broker-owned graphical spawn',n,visible))
     feed.extend([(b'servicemgr: graphical Image launch bounded refusal',1,exercised),(b'servicemgr: revoked graphical Image cannot spawn again PASS',1,revoked)])
     rc,s,_=mtest.boot(LABEL,esp,feed,disk,pointer=True,timeout_s=120)
     assert rc==0 and s.count('[desktop] real application spawned;')==12 and s.count('[desktop] application retired:')==12
-    rows=[tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',s)]
+    rows=receipts(s)
     assert rows[-1][1:]==rows[0][1:],('mixed teardown resources',rows[0],rows[-1])
     assert 'GRAPHICALTEST refused' not in s
     assert stage.contents(disk)[stage.STAGE1]==signed and all(stage.contents(disk)[k]==v for k,v in original.items())
