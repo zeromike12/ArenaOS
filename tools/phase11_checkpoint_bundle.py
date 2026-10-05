@@ -135,8 +135,10 @@ See FINAL-REPORT.md for what Phase 11 delivered and what it did not.
             env = os.environ.copy()
             env.pop('PYTHONPATH', None)
             env['ARENA_EXTRACTED_EVIDENCE'] = str(destination / 'extracted-evidence')
-            runner = ('import runpy,sys;sys.path.insert(0,sys.argv[1]);'
-                      'runpy.run_path(sys.argv[1]+"/phase11_archive_boot.py",run_name="__main__")')
+            # The extraction directory is consumed here, so the witness sees
+            # no arguments (its strict, qualified mode).
+            runner = ('import runpy,sys;sys.path.insert(0,sys.argv.pop(1));'
+                      'runpy.run_path(sys.path[0]+"/phase11_archive_boot.py",run_name="__main__")')
             result = subprocess.run([sys.executable, '-I', '-c', runner, str(target)], cwd=target, env=env,
                                     text=True, capture_output=True)
             (destination / 'independent-extracted-boot.log').write_text(result.stdout + result.stderr)

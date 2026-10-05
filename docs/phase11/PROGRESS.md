@@ -504,3 +504,21 @@ p50 as **at the target, not robust**.
    `33134367244674cbba85d24ff634d918b27688f4bb878b0209a6a58fd876b806`.
    The fresh stability loop from zero ran **100/100 fully green, fail = 0**
    (21:36–21:51 UTC). Receipt: `33134367…b806 100/100`.
+8. Bundling attempt 7's artifacts: **the bundle tool failed** at the
+   independent extracted boot, with a usage error. Its runner passed the
+   extraction directory as a script argument, and the witness refuses
+   any argument except `--unqualified-smoke`. The preflight test had
+   always used the correct form, and the full bundle path had never run
+   to completion.
+
+   After the fix (`sys.argv.pop`), the archive built from attempt 7 boots
+   in strict mode with the same invocation:
+   `EXTRACTED PHASE11 PIXELS PASS`, EFI `33134367…b806`, Phase-11 step
+   included. That check does not count. A tool changed after the
+   qualified source, so qualification restarts from the new commit:
+   * complete suite;
+   * final EFI;
+   * fresh 100/100 from zero;
+   * bundle.
+
+   The archive from attempt 7 was discarded.
