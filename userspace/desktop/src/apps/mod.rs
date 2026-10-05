@@ -1,3 +1,4 @@
+pub mod explorer;
 pub mod layout;
 pub mod model;
 pub mod scene;
