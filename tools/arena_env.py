@@ -128,9 +128,14 @@ def build_dir() -> Path:
 # never bootable.
 
 SCRATCH_MIB = 8
+# Phase 11.5 (ADR-0076): a disk with an AFS2 region holds AFS1 in its
+# first 8 MiB and the 64 MiB AFS2 region at sector 16384. On an 8 MiB
+# disk filesd finds no region and stays offline without writing.
+AFS2_DISK_MIB = 72
+AFS2_BASE_SECTOR = 16384
 
 
-def make_scratch_disk() -> Path:
+def make_scratch_disk(afs2: bool = False) -> Path:
     """Create (or re-create) the scratch disk, FORMATTED as AFS1.
 
     M5.2 handed QEMU a zero-filled image; M5.3 (ADR-0023) formats it
@@ -146,6 +151,11 @@ def make_scratch_disk() -> Path:
     with open(p, "wb") as f:
         f.truncate(SCRATCH_MIB * 1024 * 1024)
     afs1.mkfs(p, SCRATCH_MIB * 1024 * 1024 // afs1.SECTOR)
+    if afs2:
+        # The AFS2 region stays blank: filesd formats it and imports AFS1
+        # (read only) on first boot, exactly the shipping migration path.
+        with open(p, "r+b") as f:
+            f.truncate(AFS2_DISK_MIB * 1024 * 1024)
     return p
 
 

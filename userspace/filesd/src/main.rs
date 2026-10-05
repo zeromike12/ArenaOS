@@ -680,12 +680,16 @@ fn bring_up() -> bool {
         log(b"filesd: no AFS2 region (disk smaller than 72 MiB); file service offline\n");
         return false;
     }
-    let mut sb = [0u8; BLOCK];
-    if Blk.read(0, &mut sb).is_err() {
-        log(b"filesd: AFS2 superblock unreadable; file service offline\n");
-        return false;
-    }
-    let blank = sb.iter().all(|b| *b == 0);
+    // A region that never committed (blank, or a format interrupted
+    // before its first commit) is formatted; anything that ever committed
+    // mounts or fails closed (ADR-0076).
+    let blank = match afs::never_committed(&mut Blk) {
+        Ok(b) => b,
+        Err(_) => {
+            log(b"filesd: AFS2 superblock unreadable; file service offline\n");
+            return false;
+        }
+    };
     let mounted = if blank {
         false
     } else {

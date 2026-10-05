@@ -195,6 +195,25 @@ def mkfs(total_blocks, volume_id=0x4152454E41324653, wall_us=0):
     return bytes(vol.dev)
 
 
+def never_committed(image):
+    """True when the region never committed (ADR-0076): a blank superblock
+    block, or no valid commit record while a commit slot is still all zero.
+    `format` zeroes both slots before writing the superblock and no commit
+    zeroes a slot, so this is exactly an interrupted (or absent) format;
+    filesd formats such a region. A volume that ever committed is False:
+    it mounts or fails closed."""
+    if not any(image[:BLOCK]):
+        return True
+    zero_slot = False
+    for slot in (1, 2):
+        raw = image[slot * BLOCK:(slot + 1) * BLOCK]
+        rec = raw[:SECTOR]
+        if rec[:8] == COMMIT_MAGIC and struct.unpack_from("<Q", rec, 504)[0] == fnv(rec[:504]):
+            return False
+        zero_slot |= not any(raw)
+    return zero_slot
+
+
 class Volume:
     """A mounted AFS2 volume over a bytearray image (the volume region)."""
 

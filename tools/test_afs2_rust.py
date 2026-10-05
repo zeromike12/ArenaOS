@@ -5,7 +5,8 @@ host model (`tools/afs2.py`, ADR-0076).
 1. The engine's own host proofs (`cargo test`): randomized operations
    against a reference model with remount and structural audit after every
    step, directory split/merge, crash prefixes of every mutating operation
-   (every prefix exactly old or exactly new, torn commit = old), refusals
+   (every prefix exactly old or exactly new, torn commit = old), crash
+   prefixes of format (never committed or mountable), refusals
    that write nothing, 10,000 objects and a 16 MiB file, fail-closed mount.
 2. Both directions of the format: an image the Rust engine wrote mounts in
    the Python model, passes its independent `check` and has the same
@@ -43,6 +44,11 @@ CONTROLS = [
     (b'        // Dirty metadata.\n        for i in 0..DIRTY {',
      b'        // Dirty metadata.\n        self.write_commit(slot, &rec)?;\n        for i in 0..DIRTY {',
      'commit-not-last', 'crash_prefixes_are_exactly_old_or_new'),
+    # A damaged committed volume treated as never committed (formatted
+    # over instead of failing closed).
+    (b'        zero_slot |= raw.iter().all(|b| *b == 0);',
+     b'        zero_slot = true;',
+     'reformat-damaged', 'format_prefixes_are_never_committed_or_mountable'),
 ]
 
 
@@ -80,6 +86,7 @@ def cross_check():
         tool('build', str(img))
         vol = afs2.Volume(img.read_bytes())
         afs2.check(vol)
+        assert not afs2.never_committed(img.read_bytes()) and afs2.never_committed(bytes(len(vol.image())))
         expect = lines_of_walk(afs2.walk(vol), vol)
         got = sorted(tool('dump', str(img)).splitlines())
         assert got == expect, 'Rust image: namespaces differ'

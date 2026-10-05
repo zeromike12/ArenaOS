@@ -579,3 +579,80 @@ fn mount_fails_closed_on_corruption() {
     bad[3] ^= 1;
     assert_eq!(remount(bad).err(), Some(Error::Corrupt));
 }
+
+/// Every crash prefix of a format, from a blank region and from an
+/// interrupted earlier import (a committed volume without the marker),
+/// is either `never_committed` (formatted again) or mounts and audits
+/// clean; the complete format is a mountable empty root. A torn first
+/// commit is never committed.
+#[test]
+fn format_prefixes_are_never_committed_or_mountable() {
+    let blocks = 512u64;
+    let mut old = fresh(blocks);
+    let root = old.root_id().unwrap();
+    let d = old.mkdir(root, b"half-imported", 1).unwrap();
+    let f = old.create(d, b"f", 1).unwrap();
+    old.write(f, 0, &[5u8; 7000], 1).unwrap();
+    let populated = image(&mut old);
+    for (label, pre) in [("blank", vec![0u8; blocks as usize * BLOCK]), ("re-format", populated)] {
+        let mut v = Box::new(Vol::empty());
+        let mut dev = Mem { img: pre.clone(), log: vec![] };
+        assert_eq!(never_committed(&mut dev).unwrap(), label == "blank");
+        v.format(dev, blocks, 7, 3).unwrap();
+        let log = v.device().unwrap().log.clone();
+        let new_tree = walk(&mut v);
+        let (mut formatted, mut mounted) = (0, 0);
+        for k in 0..=log.len() {
+            let mut img = pre.clone();
+            for (at, data) in &log[..k] {
+                img[*at..*at + data.len()].copy_from_slice(data);
+            }
+            let mut dev = Mem { img: img.clone(), log: vec![] };
+            if never_committed(&mut dev).unwrap() {
+                assert_ne!(k, log.len(), "{label}: a complete format is committed");
+                formatted += 1;
+                continue;
+            }
+            let mut m = remount(img).unwrap_or_else(|e| panic!("{label}: prefix {k} neither blank nor mountable: {e:?}"));
+            // Before the new superblock, an earlier committed generation of
+            // the interrupted volume (its marker still absent) may mount;
+            // filesd formats it again. The complete format is the new root.
+            let got = walk(&mut m);
+            if k == log.len() {
+                assert_eq!(got, new_tree, "{label}: complete format");
+            } else {
+                assert_eq!(label, "re-format", "blank prefix {k} mounted");
+                assert!(!got.keys().any(|p| p.contains("afs1-import-complete")));
+            }
+            check(&mut m);
+            mounted += 1;
+        }
+        // The first commit torn after 256 bytes: still never committed.
+        let mut img = pre.clone();
+        for (at, data) in &log[..log.len() - 1] {
+            img[*at..*at + data.len()].copy_from_slice(data);
+        }
+        let (at, data) = log.last().unwrap();
+        img[*at..*at + 256].copy_from_slice(&data[..256]);
+        assert!(never_committed(&mut Mem { img, log: vec![] }).unwrap(), "{label}: torn first commit");
+        std::println!("[afs2-rust] format crash prefixes ({label}): {} writes, {formatted} never-committed, {mounted} mountable", log.len());
+    }
+    // A volume past its first commit holds a valid record in both slots:
+    // garbage in either one never makes it "never committed", and with
+    // both destroyed it fails closed instead of being formatted.
+    let mut v = fresh(blocks);
+    let r = v.root_id().unwrap();
+    v.mkdir(r, b"x", 1).unwrap();
+    let img = image(&mut v);
+    for slot in [1usize, 2] {
+        let mut bad = img.clone();
+        bad[slot * BLOCK..slot * BLOCK + 100].fill(0xee);
+        assert!(!never_committed(&mut Mem { img: bad.clone(), log: vec![] }).unwrap());
+        assert!(remount(bad).is_ok(), "slot {slot}: the other generation mounts");
+    }
+    let mut bad = img.clone();
+    bad[BLOCK..BLOCK + 100].fill(0xee);
+    bad[2 * BLOCK..2 * BLOCK + 100].fill(0xee);
+    assert!(!never_committed(&mut Mem { img: bad.clone(), log: vec![] }).unwrap());
+    assert!(matches!(remount(bad), Err(Error::Corrupt)));
+}

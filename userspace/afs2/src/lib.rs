@@ -96,6 +96,30 @@ pub const fn split(object: u64) -> (u32, u32) {
     (object as u32, (object >> 32) as u32)
 }
 
+/// True when the region was never committed: a blank superblock block,
+/// or no valid commit record with a commit slot still all zero. `format`
+/// zeroes both slots before it writes the superblock and no commit ever
+/// zeroes a slot, so this holds exactly for an interrupted format (or a
+/// region never formatted); such a region is formatted, never repaired.
+/// Any volume that has committed refuses this and mounts or fails closed.
+pub fn never_committed<D: Device>(dev: &mut D) -> Result<bool> {
+    let mut raw = [0u8; BLOCK];
+    dev.read(0, &mut raw)?;
+    if raw.iter().all(|b| *b == 0) {
+        return Ok(true);
+    }
+    let mut zero_slot = false;
+    for slot in [1u64, 2] {
+        dev.read(slot, &mut raw)?;
+        let r = &raw[..SECTOR];
+        if &r[..8] == COMMIT_MAGIC && le64(r, 504) == fnv(&r[..504]) {
+            return Ok(false);
+        }
+        zero_slot |= raw.iter().all(|b| *b == 0);
+    }
+    Ok(zero_slot)
+}
+
 pub fn valid_name(name: &[u8]) -> bool {
     !name.is_empty()
         && name.len() <= NAME_MAX
