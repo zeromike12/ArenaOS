@@ -170,6 +170,14 @@ else
     echo "!! AFS2 host proofs FAILED"
 fi
 
+echo "== Phase 11.7: Arena Sans 13 art and generated face in sync"
+if (cd "$REPO_ROOT" && python3 tools/gen_face13.py --check); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! face13 generation check FAILED"
+fi
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"
