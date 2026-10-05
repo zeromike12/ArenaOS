@@ -48,6 +48,8 @@ pub struct View<'a> {
     pub gallery_theme: u8,
     /// Surface size the view is laid out for (Phase 11.3).
     pub size: (u16, u16),
+    /// The Files explorer (Phase 11.8); `None` keeps the Phase-10 view.
+    pub files: Option<&'a super::explorer_ctl::Controller>,
 }
 
 impl View<'_> {
@@ -59,6 +61,11 @@ impl View<'_> {
         match self.kind {
             super::TERMINAL => view::terminal(canvas, self.terminal, self.top, t),
             super::EDITOR => view::editor(canvas, self.editor, self.top, self.line, self.dialog, t),
+            super::FILES if self.files.is_some() => {
+                if let Some(f) = self.files {
+                    f.draw(canvas, t);
+                }
+            }
             super::FILES => view::files(
                 canvas,
                 view::FilesView {
@@ -190,6 +197,16 @@ impl View<'_> {
                 if tail < l.STATUS_Y {
                     out.push(tail, l.STATUS_Y, base.0 ^ 0xE1);
                 }
+            }
+            super::FILES if self.files.is_some() => {
+                // The explorer: header (toolbar) and content keyed by a
+                // hash of everything it draws.
+                let mut all = head;
+                if let Some(f) = self.files {
+                    f.fingerprint(&mut all);
+                }
+                out.push(0, header, all.0);
+                out.push(header, l.STATUS_Y, all.0 ^ 0xF1);
             }
             _ => {
                 // Files, Settings, Monitor, Gallery: one content band whose
@@ -447,6 +464,7 @@ mod tests {
                 processes: &self.processes,
                 gallery_theme: 2,
                 size: self.size,
+                files: None,
             }
         }
     }

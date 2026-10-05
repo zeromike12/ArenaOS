@@ -7,6 +7,8 @@ use arena_desktop::{
     app_client as service,
     apps::{
         self,
+        explorer::{CapStore, Path as XPath},
+        explorer_ctl::{Controller, Effect},
         layout::{self, Layout},
         model::{Editor, Line, Terminal},
         scene, view,
@@ -28,7 +30,6 @@ struct App {
     terminal: Terminal,
     line: Line,
     names: [[u8; 32]; 32],
-    sizes: [u64; 32],
     count: usize,
     selected: usize,
     top: usize,
@@ -57,10 +58,8 @@ struct App {
     home: u64,
     /// Terminal working directory, relative to home.
     cwd: Path,
-    /// Files: the shown directory (relative to home) and its capability.
-    dir: Path,
-    dir_cap: u64,
-    entries: [Entry; 32],
+    /// Files: the explorer (Phase 11.8) over the home capability.
+    files: Controller,
     /// Editor: the document capability (granted at launch or by the
     /// chooser) or CAP_NONE.
     doc: u64,
@@ -125,7 +124,6 @@ fn menu_items(kind: u8) -> &'static [&'static str] {
     match kind {
         apps::TERMINAL => &["Clear", "Help", "List Files"],
         apps::EDITOR => &["New", "Open...", "Save", "Save As...", "Open Read-Only..."],
-        apps::FILES => &["Open in Editor", "New File...", "Delete", "Refresh"],
         apps::SETTINGS => &["Toggle Appearance", "Toggle Motion"],
         apps::MONITOR => &["Sample Now"],
         _ => &["Toggle Theme"],
@@ -136,7 +134,6 @@ static mut APP: App = App {
     terminal: Terminal::new(),
     line: Line::new(),
     names: [[0; 32]; 32],
-    sizes: [0; 32],
     count: 0,
     selected: 0,
     top: 0,
@@ -159,9 +156,7 @@ static mut APP: App = App {
     afs: None,
     home: CAP_NONE,
     cwd: Path::EMPTY,
-    dir: Path::EMPTY,
-    dir_cap: CAP_NONE,
-    entries: [Entry::EMPTY; 32],
+    files: Controller::new(),
     doc: CAP_NONE,
 };
 const CAP_NONE: u64 = u64::MAX;
@@ -171,25 +166,6 @@ fn describe(slot: u64) -> Option<[u64; 3]> {
 }
 fn length(n: &[u8; 32]) -> usize {
     n.iter().position(|b| *b == 0).unwrap_or(32)
-}
-/// A list label: the name (shortened to fit, marked with `~`), folders
-/// ending in `/`. Display only; operations use the full entry name.
-fn display_name(e: &Entry) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    let room = if e.is_dir() { 30 } else { 31 };
-    let name = e.name();
-    let n = name.len().min(room);
-    out[..n].copy_from_slice(&name[..n]);
-    let mut k = n;
-    if name.len() > room {
-        out[n - 1] = b'~';
-    }
-    if e.is_dir() {
-        out[k] = b'/';
-        k += 1;
-    }
-    let _ = k;
-    out
 }
 fn error(rc: i64) -> &'static str {
     match rc {
@@ -254,135 +230,43 @@ impl App {
         }
     }
 
-    // ---- Files: one directory of /Users/user -----------------------------
-    fn refresh(&mut self) -> Result<(), i64> {
-        self.count = 0;
-        if self.dir_cap == CAP_NONE {
-            self.dir_cap = self.walk(&self.dir, fw::R_ALL)?.0;
+    // ---- Files: the explorer over /Users/user (Phase 11.8) ---------------
+    fn store(&self) -> Result<CapStore, i64> {
+        if self.home == CAP_NONE {
+            return Err(fserr(fw::S_DENIED));
         }
-        let mut after = [0u8; files::NAME_MAX];
-        let mut after_len = 0usize;
-        let mut more = true;
-        while more && self.count < self.entries.len() {
-            let (n, m) = self
-                .fs()?
-                .list(
-                    self.dir_cap,
-                    &after[..after_len],
-                    &mut self.entries[self.count..],
-                )
-                .map_err(fserr)?;
-            if n == 0 {
-                break;
+        Ok(CapStore {
+            fs: self.fs()?,
+            root: self.home,
+        })
+    }
+    /// Carry out what an explorer interaction asks of the application.
+    fn files_effect(&mut self, e: Effect, client: &Client) -> Result<(), i64> {
+        match e {
+            Effect::None => Ok(()),
+            Effect::Menu { x, y } => self.open_menu(x, y, client),
+            Effect::OpenInEditor(p) => {
+                // A capability for exactly this file, offered to the broker
+                // and re-granted in the new Editor's lineage; the name is
+                // only its title.
+                let fs = self.fs()?;
+                let (f, _) = fs
+                    .walk(self.home, p.bytes(), fw::R_READ | fw::R_WRITE)
+                    .map_err(fserr)?;
+                service::offer(f)?;
+                let mut title = [0u8; 32];
+                for (t, b) in title.iter_mut().zip(p.name()) {
+                    *t = if b.is_ascii_graphic() || *b == b' ' {
+                        *b
+                    } else {
+                        b'?'
+                    };
+                }
+                launch(apps::EDITOR, title)?;
+                self.files.ex.status = "OPENED IN EDITOR";
+                Ok(())
             }
-            self.count += n;
-            more = m;
-            let last = self.entries[self.count - 1];
-            after[..last.name().len()].copy_from_slice(last.name());
-            after_len = last.name().len();
         }
-        for i in 0..self.count {
-            let e = self.entries[i];
-            self.names[i] = display_name(&e);
-            self.sizes[i] = e.size;
-        }
-        if more {
-            self.status = "SHOWING THE FIRST 32 ITEMS";
-        }
-        self.selected = self.selected.min(self.count.saturating_sub(1));
-        self.top = self.top.min(self.selected);
-        Ok(())
-    }
-    fn select(&mut self, _client: &Client) -> Result<(), i64> {
-        self.preview_len = 0;
-        if self.count == 0 || self.entries[self.selected].is_dir() {
-            return Ok(());
-        }
-        let e = self.entries[self.selected];
-        let fs = self.fs()?;
-        let (f, _) = fs
-            .open(self.dir_cap, Some(e.name()), fw::R_READ)
-            .map_err(fserr)?;
-        let r = fs.read_all(f, &mut self.preview);
-        fs.release(f);
-        let data = match r {
-            Ok(d) => d,
-            Err(fw::S_FBIG) => {
-                self.status = "PREVIEW: FILE LARGER THAN 4096 BYTES";
-                return Ok(());
-            }
-            Err(e) => return Err(fserr(e)),
-        };
-        if data
-            .iter()
-            .all(|b| b.is_ascii_graphic() || matches!(b, b' ' | b'\n' | b'\t'))
-        {
-            self.preview_len = data.len();
-        } else {
-            self.status = "PREVIEW: NOT A TEXT FILE";
-        }
-        Ok(())
-    }
-    /// Show directory `to` (relative to home).
-    fn enter(&mut self, client: &Client, to: Path) -> Result<(), i64> {
-        let (cap, typ) = self.walk(&to, fw::R_ALL)?;
-        if typ != 2 {
-            self.release(cap);
-            return Err(fserr(fw::S_NOTDIR));
-        }
-        if self.dir_cap != CAP_NONE {
-            self.release(self.dir_cap);
-        }
-        self.dir = to;
-        self.dir_cap = cap;
-        self.selected = 0;
-        self.top = 0;
-        self.refresh()?;
-        self.select(client)
-    }
-    /// Enter: a folder opens in place; a file opens in a new Editor that
-    /// receives a capability for exactly this file (offered to the broker,
-    /// re-granted in the Editor's lineage; the name is only its title).
-    fn activate(&mut self, client: &Client) -> Result<(), i64> {
-        if self.count == 0 {
-            return Ok(());
-        }
-        let e = self.entries[self.selected];
-        if e.is_dir() {
-            let to = self.dir.join(e.name())?;
-            return self.enter(client, to);
-        }
-        let (f, _) = self
-            .fs()?
-            .open(self.dir_cap, Some(e.name()), fw::R_READ | fw::R_WRITE)
-            .map_err(fserr)?;
-        service::offer(f)?;
-        launch(apps::EDITOR, self.names[self.selected])?;
-        self.status = "OPENED IN EDITOR";
-        Ok(())
-    }
-    fn up(&mut self, client: &Client) -> Result<(), i64> {
-        if self.dir.n == 0 {
-            return Ok(());
-        }
-        let to = self.dir.join(b"..")?;
-        self.enter(client, to)
-    }
-    fn delete_selected(&mut self, client: &Client) -> Result<(), i64> {
-        if self.count == 0 {
-            return Ok(());
-        }
-        let e = self.entries[self.selected];
-        let fs = self.fs()?;
-        if e.is_dir() {
-            fs.rmdir(self.dir_cap, e.name()).map_err(fserr)?;
-        } else {
-            fs.unlink(self.dir_cap, e.name()).map_err(fserr)?;
-        }
-        self.refresh()?;
-        self.select(client)?;
-        self.status = "DELETED";
-        Ok(())
     }
 
     // ---- Editor: one document capability ---------------------------------
@@ -494,24 +378,9 @@ impl App {
         self.top = 0;
         Ok(())
     }
-    fn accept(&mut self, client: &Client) -> Result<(), i64> {
-        let typed = &self.line.bytes[..self.line.len];
-        match self.dialog {
-            3 => {
-                let fs = self.fs()?;
-                fs.create(self.dir_cap, typed).map_err(fserr)?;
-                self.refresh()?;
-                self.select(client)?;
-                self.status = "CREATED EMPTY FILE";
-            }
-            5 => {
-                let fs = self.fs()?;
-                fs.mkdir(self.dir_cap, typed).map_err(fserr)?;
-                self.refresh()?;
-                self.status = "CREATED FOLDER";
-            }
-            _ => return Err(-2),
-        }
+    fn accept(&mut self, _client: &Client) -> Result<(), i64> {
+        // No application dialog takes typed input any more (names are
+        // chosen in the trusted chooser or edited inline in Files).
         self.dialog = 0;
         Ok(())
     }
@@ -746,20 +615,9 @@ impl App {
                 };
             }
             apps::FILES => {
-                match key {
-                    258 => self.selected = self.selected.saturating_sub(1),
-                    259 => self.selected = (self.selected + 1).min(self.count.saturating_sub(1)),
-                    13 => return self.activate(client),
-                    8 => return self.up(client),
-                    _ => {}
-                }
-                if self.selected < self.top {
-                    self.top = self.selected;
-                }
-                if self.selected >= self.top + l.FILE_ROWS {
-                    self.top = self.selected.saturating_sub(l.FILE_ROWS - 1);
-                }
-                self.select(client)?;
+                let mut store = self.store()?;
+                let e = self.files.key(&mut store, key, false, service::now());
+                return self.files_effect(e, client);
             }
             apps::GALLERY if key == 116 => {
                 self.gallery_theme = if self.gallery_theme == 2 {
@@ -781,6 +639,14 @@ impl App {
     }
     fn pointer(&mut self, x: i32, y: i32, buttons: u8, client: &Client) -> Result<(), i64> {
         let l = self.layout();
+        if self.kind == apps::FILES && self.dialog == 0 {
+            self.buttons = buttons;
+            let mut store = self.store()?;
+            let e = self
+                .files
+                .pointer(&mut store, x, y, buttons, service::now());
+            return self.files_effect(e, client);
+        }
         let pressed = buttons & 1 != 0 && self.buttons & 1 == 0;
         let context = buttons & 2 != 0 && self.buttons & 2 == 0;
         self.buttons = buttons;
@@ -837,27 +703,6 @@ impl App {
                     );
                 }
             }
-            apps::FILES => {
-                if layout::hit(l.NEW, x, y) {
-                    self.line.set(b"Untitled.txt");
-                    self.dialog = 3;
-                } else if layout::hit(l.SAVE, x, y) {
-                    self.refresh()?;
-                    self.select(client)?;
-                    self.status = "REFRESHED";
-                } else if layout::hit(l.OPEN, x, y) {
-                    self.activate(client)?;
-                } else if layout::hit(l.DELETE, x, y) {
-                    self.delete_selected(client)?;
-                } else if layout::hit(l.FILE_LIST, x, y) {
-                    let row = ((y - l.FILE_LIST.y) / l.ROW_H) as usize + self.top;
-                    if row < self.count {
-                        self.selected = row;
-                        self.select(client)?;
-                        self.status = "SELECTED / OPEN IN EDITOR";
-                    }
-                }
-            }
             apps::SETTINGS if layout::hit(l.APPEARANCE, x, y) => {
                 let dark = client.appearance.get() & 1 == 0;
                 call(Frame::Configure {
@@ -877,9 +722,22 @@ impl App {
         }
         Ok(())
     }
+    /// The context menu's labels (Files: chosen by what was clicked).
+    fn menu_labels(&self, out: &mut [&'static str; 8]) -> usize {
+        if self.kind == apps::FILES {
+            return self.files.menu_items(out);
+        }
+        let items = menu_items(self.kind);
+        for (o, i) in out.iter_mut().zip(items) {
+            *o = i;
+        }
+        items.len().min(8)
+    }
     /// Open the context menu at window-local (`x`, `y`).
     fn open_menu(&mut self, x: i32, y: i32, client: &Client) -> Result<(), i64> {
-        let items = menu_items(self.kind);
+        let mut labels = [""; 8];
+        let n = self.menu_labels(&mut labels);
+        let items = &labels[..n];
         let surface = client.open_transient(
             PopupKind::Menu,
             x,
@@ -903,7 +761,7 @@ impl App {
         Ok(())
     }
     fn menu_pointer(&mut self, x: i32, y: i32, buttons: u8, client: &Client) -> Result<(), i64> {
-        let n = menu_items(self.kind).len();
+        let n = self.menu_labels(&mut [""; 8]);
         let Some(menu) = self.menu.as_mut() else {
             return Ok(());
         };
@@ -921,7 +779,7 @@ impl App {
         Ok(())
     }
     fn menu_key(&mut self, key: u16, client: &Client) -> Result<(), i64> {
-        let n = menu_items(self.kind).len();
+        let n = self.menu_labels(&mut [""; 8]);
         let Some(menu) = self.menu.as_mut() else {
             return Ok(());
         };
@@ -977,16 +835,10 @@ impl App {
                     self.choose_mode(false, true)?
                 }
             }
-            (apps::FILES, 0) => self.activate(client)?,
-            (apps::FILES, 1) => {
-                self.line.set(b"Untitled.txt");
-                self.dialog = 3;
-            }
-            (apps::FILES, 2) => self.delete_selected(client)?,
-            (apps::FILES, 3) => {
-                self.refresh()?;
-                self.select(client)?;
-                self.status = "REFRESHED";
+            (apps::FILES, _) => {
+                let mut store = self.store()?;
+                let e = self.files.act(&mut store, item);
+                self.files_effect(e, client)?;
             }
             (apps::SETTINGS, 0 | 1) => {
                 let a = client.appearance.get();
@@ -1015,7 +867,17 @@ impl App {
     }
     /// Keyboard shortcuts: the same operations as the context menu.
     fn chord(&mut self, code: u16, mods: u8, client: &Client) -> Result<(), i64> {
-        use arena_desktop::model::{MOD_CTRL, MOD_SHIFT};
+        use arena_desktop::model::{MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_SUPER};
+        if self.kind == apps::FILES && self.dialog == 0 && self.menu.is_none() {
+            let mut store = self.store()?;
+            let e = self.files.chord(&mut store, code, mods, service::now());
+            return self.files_effect(e, client);
+        }
+        // Shifted navigation keys arrive as chords (Phase 11.8); elsewhere
+        // they act as the plain key.
+        if mods & (MOD_CTRL | MOD_ALT | MOD_SUPER) == 0 {
+            return self.key(code, client);
+        }
         if mods & MOD_CTRL == 0 || self.dialog != 0 || self.menu.is_some() {
             return Ok(());
         }
@@ -1027,9 +889,6 @@ impl App {
             (apps::EDITOR, b'o') => Some(1),
             (apps::EDITOR, b's') => Some(2),
             (apps::EDITOR, b'S') if shift => Some(3),
-            (apps::FILES, b'o') => Some(0),
-            (apps::FILES, b'n') => Some(1),
-            (apps::FILES, b'r') => Some(3),
             (apps::MONITOR, b'r') => Some(0),
             _ => None,
         };
@@ -1040,6 +899,10 @@ impl App {
     }
     /// Scroll wheel: `delta` notches away from the user scroll back.
     fn wheel(&mut self, delta: i8) {
+        if self.kind == apps::FILES {
+            self.files.wheel(delta);
+            return;
+        }
         let l = self.layout();
         let step = usize::from(delta.unsigned_abs()) * 3;
         let back = delta > 0;
@@ -1050,7 +913,6 @@ impl App {
                 l.visual_row_count(&self.editor).saturating_sub(l.EDIT_ROWS),
                 false,
             ),
-            apps::FILES => (self.count.saturating_sub(l.FILE_ROWS), false),
             apps::MONITOR => (self.process_count.saturating_sub(l.MONITOR_ROWS), false),
             _ => return,
         };
@@ -1079,12 +941,7 @@ impl App {
                     self.top = row.saturating_sub(l.EDIT_ROWS - 1);
                 }
             }
-            apps::FILES => {
-                if self.selected >= self.top + l.FILE_ROWS {
-                    self.top = self.selected.saturating_sub(l.FILE_ROWS - 1);
-                }
-                self.top = self.top.min(self.count.saturating_sub(l.FILE_ROWS));
-            }
+            apps::FILES => self.files.resize(self.size),
             apps::MONITOR => {
                 self.top = self
                     .top
@@ -1103,10 +960,15 @@ impl App {
     /// Everything this window paints, borrowed from the model (Phase 11.1
     /// keyed bands decide which parts are repainted and published).
     fn view(&self, appearance: u8) -> scene::View<'_> {
+        let files = (self.kind == apps::FILES && self.afs.is_some()).then_some(&self.files);
         scene::View {
             kind: self.kind,
             appearance,
-            status: self.status,
+            status: if files.is_some() {
+                self.files.status()
+            } else {
+                self.status
+            },
             terminal: &self.terminal,
             editor: &self.editor,
             line: &self.line,
@@ -1120,6 +982,7 @@ impl App {
             processes: &self.processes[..self.process_count],
             gallery_theme: self.gallery_theme,
             size: self.size,
+            files,
         }
     }
 }
@@ -1146,6 +1009,7 @@ fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
 arena_desktop::entry!(main, 64 * 1024);
 extern "C" fn main() -> ! {
     let (kind, dark, motion, path) = service::startup().unwrap_or_else(|_| client::exit(70));
+    let app = unsafe { &mut *(&raw mut APP) };
     service::audit(kind).unwrap_or_else(|_| client::exit(76));
     let mut client = Client::connect(
         m::WINDOW_WIDTH,
@@ -1164,7 +1028,6 @@ extern "C" fn main() -> ! {
     client
         .appearance
         .set(u8::from(dark) | (u8::from(motion) << 1));
-    let app = unsafe { &mut *(&raw mut APP) };
     app.kind = kind;
     // Child slot 4: a filesd capability (ADR-0077) for the terminal and
     // Files (/Users/user) or the Editor (the document it was opened with).
@@ -1188,10 +1051,10 @@ extern "C" fn main() -> ! {
             Ok(())
         }
         apps::FILES => {
-            let mut docs = Path::EMPTY;
-            docs.b[..9].copy_from_slice(b"Documents");
-            docs.n = 9;
-            app.enter(&client, docs)
+            app.files.resize(app.size);
+            app.store().map(|mut store| {
+                app.files.start(&mut store, XPath::of(b"Documents"));
+            })
         }
         apps::EDITOR if app.doc != CAP_NONE => app.open_document(path),
         apps::SETTINGS => match service::exchange(Frame::Display, 1) {
@@ -1259,7 +1122,18 @@ extern "C" fn main() -> ! {
                     }
                     dirty = true;
                 }
-                Some(Event::Focus(_)) => dirty = true,
+                Some(Event::Focus(focused)) => {
+                    // Files re-lists a folder that changed while it was in
+                    // the background (no directory watches: a refresh on
+                    // focus, on interaction and on request).
+                    if kind == apps::FILES {
+                        app.files.ui.focused = focused;
+                        if focused && let Ok(mut store) = app.store() {
+                            app.files.poll(&mut store);
+                        }
+                    }
+                    dirty = true;
+                }
                 Some(Event::Chosen) => {
                     if let Err(rc) = app.chosen(&client) {
                         app.status = error(rc);
@@ -1324,6 +1198,9 @@ extern "C" fn main() -> ! {
             dirty = true;
         }
         if dirty {
+            if kind == apps::FILES {
+                app.files.status_line();
+            }
             let painted = if arena_desktop::perf::ENABLED {
                 service::now()
             } else {
@@ -1372,6 +1249,8 @@ extern "C" fn main() -> ! {
             }
             dirty = false;
         }
+        let mut labels = [""; 8];
+        let labels_n = app.menu_labels(&mut labels);
         if let Some(menu) = app.menu.as_mut().filter(|m| m.dirty) {
             let t = menu.surface;
             let pixels = unsafe { core::slice::from_raw_parts_mut(t.pixels, t.width * t.height) };
@@ -1379,7 +1258,7 @@ extern "C" fn main() -> ! {
                 .unwrap_or_else(|_| client::exit(73));
             view::menu(
                 &mut canvas,
-                menu_items(kind),
+                &labels[..labels_n],
                 menu.hover,
                 arena_ui::theme::palette(appearance & 1 != 0),
             );

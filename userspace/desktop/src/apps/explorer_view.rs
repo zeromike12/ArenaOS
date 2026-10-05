@@ -220,6 +220,19 @@ pub fn hit(g: &Geometry, e: &Explorer, x: i32, y: i32) -> Hit {
     Hit::Blank
 }
 
+fn intersect(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = (a.x + a.width as i32).min(b.x + b.width as i32);
+    let y1 = (a.y + a.height as i32).min(b.y + b.height as i32);
+    Rect {
+        x: x0,
+        y: y0,
+        width: (x1 - x0).max(0) as u32,
+        height: (y1 - y0).max(0) as u32,
+    }
+}
+
 fn grid_track(g: &Geometry) -> Rect {
     Rect {
         x: g.content.x + g.content.width as i32 - w::BAR,
@@ -276,7 +289,8 @@ pub fn size_text(v: u64, out: &mut [u8; 16]) -> &str {
 /// Wall microseconds as "YYYY-MM-DD HH:MM" (UTC); 0 = "unknown".
 pub fn time_text(us: u64, out: &mut [u8; 16]) -> &str {
     if us == 0 {
-        return "unknown";
+        out[..7].copy_from_slice(b"unknown");
+        return core::str::from_utf8(&out[..7]).unwrap_or("?");
     }
     let secs = us / 1_000_000;
     let days = (secs / 86_400) as i64;
@@ -320,6 +334,8 @@ pub struct Ui {
     /// Properties sheet of a display item.
     pub sheet: Option<usize>,
     pub focused: bool,
+    /// Rubber band in window coordinates: x, y, width, height.
+    pub band: Option<(i32, i32, i32, i32)>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -471,6 +487,19 @@ pub fn draw(
             t.muted,
             false,
         );
+    }
+    if let Some((x, y, bw, bh)) = ui.band {
+        let r = Rect {
+            x,
+            y,
+            width: bw.max(1) as u32,
+            height: bh.max(1) as u32,
+        };
+        let saved = canvas.clip();
+        canvas.set_clip(intersect(saved, g.content));
+        canvas.blend_rect(r, t.accent, 40);
+        c::border(canvas, r, t.accent);
+        canvas.set_clip(saved);
     }
     // Drag badge.
     if let Some((x, y, _)) = ui.drag {
@@ -678,13 +707,7 @@ fn draw_grid(canvas: &mut Canvas<'_>, e: &Explorer, ui: &Ui, g: &Geometry, t: Th
                 20,
             );
         }
-        big_glyph(
-            canvas,
-            r.x + (r.width as i32 - 27) / 2,
-            r.y + 8,
-            w::kind_glyph(it.dir),
-            if it.dir { t.accent } else { t.secondary },
-        );
+        icon32(canvas, r.x + (r.width as i32 - 32) / 2, r.y + 6, it.dir, t);
         let name = core::str::from_utf8(it.name()).unwrap_or("?");
         let tw = measure13(name, false).min(r.width as i32 - 10);
         w::text_in(
@@ -702,13 +725,63 @@ fn draw_grid(canvas: &mut Canvas<'_>, e: &Explorer, ui: &Ui, g: &Geometry, t: Th
     w::scrollbar(canvas, grid_track(g), &e.grid.scroll, ui.focused, t);
 }
 
-/// A 9x9 glyph at 3x (27 px): grid icons.
-fn big_glyph(canvas: &mut Canvas<'_>, x: i32, y: i32, g: Glyph, color: u32) {
-    for (r, row) in c::glyph_mask(g).iter().enumerate() {
-        for b in 0..9 {
-            if row >> (8 - b) & 1 == 1 {
-                c::rect(canvas, x + b * 3, y + r as i32 * 3, 3, 3, color);
-            }
+/// A 32x32 file icon: a folder (tab and body) or a page with a folded
+/// corner and text lines. Drawn from shapes in theme colours.
+pub fn icon32(canvas: &mut Canvas<'_>, x: i32, y: i32, folder: bool, t: Theme) {
+    if folder {
+        let back = t.accent_strong;
+        c::outlined(
+            canvas,
+            Rect {
+                x: x + 1,
+                y: y + 5,
+                width: 13,
+                height: 6,
+            },
+            back,
+            back,
+            2,
+        );
+        c::outlined(
+            canvas,
+            Rect {
+                x: x + 1,
+                y: y + 8,
+                width: 30,
+                height: 21,
+            },
+            back,
+            back,
+            3,
+        );
+        c::outlined(
+            canvas,
+            Rect {
+                x: x + 1,
+                y: y + 11,
+                width: 30,
+                height: 18,
+            },
+            t.accent,
+            t.accent,
+            3,
+        );
+        c::rect(canvas, x + 4, y + 14, 24, 1, t.accent_soft);
+    } else {
+        let page = Rect {
+            x: x + 5,
+            y: y + 1,
+            width: 22,
+            height: 30,
+        };
+        c::outlined(canvas, page, t.field, t.control_edge, 2);
+        // Folded corner.
+        for k in 0..7 {
+            c::rect(canvas, x + 20 + k, y + 1, 7 - k, 1, t.header);
+            c::rect(canvas, x + 20, y + 1 + k, 1 + k, 1, t.control_edge);
+        }
+        for (k, len) in [14, 12, 14, 9, 13].iter().enumerate() {
+            c::rect(canvas, x + 9, y + 11 + k as i32 * 4, *len, 2, t.muted);
         }
     }
 }
@@ -738,7 +811,7 @@ fn draw_sheet(
         60,
     );
     c::outlined(canvas, r, t.elevated, t.frame_focus, m::RADIUS_PANEL);
-    big_glyph(canvas, r.x + 14, r.y + 14, w::kind_glyph(it.dir), t.accent);
+    icon32(canvas, r.x + 12, r.y + 12, it.dir, t);
     let name = core::str::from_utf8(it.name()).unwrap_or("?");
     w::text_in(canvas, r.x + 52, r.y + 12, 20, 196, name, t.text, true);
     let kind = kind_label(kind_of(it.name(), it.dir));

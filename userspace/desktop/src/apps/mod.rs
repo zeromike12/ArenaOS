@@ -1,4 +1,5 @@
 pub mod explorer;
+pub mod explorer_ctl;
 pub mod explorer_view;
 pub mod layout;
 pub mod model;

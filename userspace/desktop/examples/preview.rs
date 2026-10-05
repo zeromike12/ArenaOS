@@ -3,7 +3,7 @@
 //!
 //! `cargo run --example preview --target x86_64-unknown-linux-gnu -- W H DIR [--dark]`
 use arena_desktop::apps::{
-    self,
+    self, explorer, explorer_ctl, explorer_view,
     model::{Editor, Line, Terminal},
     scene::View,
     view,
@@ -68,6 +68,7 @@ fn main() {
             processes: &processes,
             gallery_theme: 2,
             size: (w, h),
+            files: None,
         };
         let (uw, uh) = (usize::from(w), usize::from(h));
         let mut px = vec![0u32; uw * uh];
@@ -79,6 +80,80 @@ fn main() {
         ));
         ppm(&file, uw, uh, &px);
         println!("{}", file.display());
+    }
+    // The Phase 11.8 explorer, list and grid, with a selection, a hover and
+    // an inline rename; light and dark.
+    let mut ctl = Box::new(explorer_ctl::Controller::new());
+    ctl.resize((w, h));
+    let names: [(&str, bool, u64, u64); 9] = [
+        ("Projects", true, 0, 1_791_158_400_000_000),
+        ("Archive", true, 0, 1_788_000_000_000_000),
+        ("notes.txt", false, 5_120, 1_791_160_000_000_000),
+        ("todo.txt", false, 340, 0),
+        (
+            "Quarterly report draft with a long name.txt",
+            false,
+            18_400,
+            1_790_000_000_000_000,
+        ),
+        ("photo.png", false, 1_250_000, 1_789_000_000_000_000),
+        ("readme", false, 900, 1_791_000_000_000_000),
+        ("budget.csv", false, 2_048, 1_791_100_000_000_000),
+        ("log.log", false, 77, 1_791_150_000_000_000),
+    ];
+    for (i, (n, dir, size, mtime)) in names.iter().enumerate() {
+        ctl.ex.items[i].set(n.as_bytes(), *dir, *size, *mtime);
+    }
+    ctl.ex.count = names.len();
+    ctl.ex.path = explorer::Path::of(b"Documents/Work");
+    ctl.ex.resort();
+    ctl.ex.selection.click(2, false, false);
+    ctl.ex.selection.click(4, false, true);
+    ctl.ui.hover = Some(explorer_view::Hit::Item(5));
+    ctl.resize((w, h));
+    let (ew, eh) = (usize::from(w), usize::from(h));
+    for (view, rename, tag) in [
+        (explorer::View::List, false, "list"),
+        (explorer::View::List, true, "rename"),
+        (explorer::View::Grid, false, "grid"),
+    ] {
+        ctl.ex.view = view;
+        ctl.ex.rename = None;
+        if rename {
+            ctl.ex.begin_rename(3);
+        }
+        ctl.resize((ew as u16, eh as u16));
+        let status = String::from(ctl.status_line());
+        for dark_mode in [false, true] {
+            let mut px = vec![0u32; ew * eh];
+            let mut c = Canvas::new(&mut px, ew, eh, ew).unwrap();
+            let v = View {
+                kind: apps::FILES,
+                appearance: u8::from(dark_mode) | 2,
+                status: &status,
+                terminal: &terminal,
+                editor: &editor,
+                line: &line,
+                top: 0,
+                dialog: 0,
+                names: &[],
+                selected: 0,
+                preview: &[],
+                display: (800, 600),
+                counts: &counts,
+                processes: &processes,
+                gallery_theme: 2,
+                size: (ew as u16, eh as u16),
+                files: Some(&ctl),
+            };
+            v.paint(&mut c);
+            let file = dir.join(format!(
+                "explorer-{tag}{}-{ew}x{eh}.ppm",
+                if dark_mode { "-dark" } else { "" }
+            ));
+            ppm(&file, ew, eh, &px);
+            println!("{}", file.display());
+        }
     }
     // The context menu as its own transient surface.
     let items = ["New", "Open...", "Save", "Save As..."];

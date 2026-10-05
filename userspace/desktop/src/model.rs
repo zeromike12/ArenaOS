@@ -34,6 +34,10 @@ pub const MOD_SHIFT: u8 = 1;
 pub const MOD_CTRL: u8 = 2;
 pub const MOD_ALT: u8 = 4;
 pub const MOD_SUPER: u8 = 8;
+/// Modifier bits a window's `Pointer` buttons carry above the three button
+/// bits (Phase 11.8: Shift range and Ctrl toggle selection by pointer).
+pub const POINTER_SHIFT: u8 = 0x40;
+pub const POINTER_CTRL: u8 = 0x80;
 pub const EDGE_LEFT: u8 = 1;
 pub const EDGE_RIGHT: u8 = 2;
 pub const EDGE_TOP: u8 = 4;
@@ -622,16 +626,29 @@ impl State {
         self.focused.is_some_and(|h| self.send(h, Event::Key(key)))
     }
     /// Deliver a key to the focused window: plain (and shifted) keys as
-    /// `Key`, keys under Ctrl/Alt/Super as `Chord`.
+    /// `Key`, keys under Ctrl/Alt/Super and shifted navigation keys
+    /// (arrows, Home, End, Delete: codes from 256) as `Chord`.
     fn deliver(&mut self, code: u16, mods: u8) -> bool {
         let Some(h) = self.focused else {
             return false;
         };
-        if mods & (MOD_CTRL | MOD_ALT | MOD_SUPER) == 0 {
+        let shifted_navigation = mods & MOD_SHIFT != 0 && code >= 256;
+        if mods & (MOD_CTRL | MOD_ALT | MOD_SUPER) == 0 && !shifted_navigation {
             self.send(h, Event::Key(code))
         } else {
             self.send(h, Event::Chord { code, mods })
         }
+    }
+    fn pointer_mods(&self) -> u8 {
+        (if self.mods & MOD_SHIFT != 0 {
+            POINTER_SHIFT
+        } else {
+            0
+        }) | (if self.mods & MOD_CTRL != 0 {
+            POINTER_CTRL
+        } else {
+            0
+        })
     }
     /// Historical entry point: a press without modifiers.
     pub fn keyboard_action(&mut self, key: u16) -> Action {
@@ -1168,7 +1185,7 @@ impl State {
                         Event::Pointer {
                             x: (x - w.x).clamp(-(w.width as i32), w.width as i32),
                             y: (y - w.y).clamp(-(w.height as i32), w.height as i32),
-                            buttons: buttons & 7,
+                            buttons: (buttons & 7) | self.pointer_mods(),
                         },
                     );
                 }
@@ -1325,7 +1342,7 @@ impl State {
                     Event::Pointer {
                         x: x - w.x,
                         y: y - w.y,
-                        buttons: buttons & 7,
+                        buttons: (buttons & 7) | self.pointer_mods(),
                     },
                 );
             }
