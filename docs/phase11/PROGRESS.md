@@ -438,3 +438,26 @@ p50 as **at the target, not robust**.
    including the new file-service and desktop-surface markers. Because a
    tool changed, the complete suite reruns on the new commit before a new
    100-boot attempt starts from zero.
+3. Complete suite on clean `7ba532a` (after directory watches and the
+   latency work): **FAIL**, `test_m10_ui`. `cargo clippy -D warnings` on
+   the no_std desktop binaries refused a `drop()` of a `Canvas`
+   (`drop_non_drop`), introduced by the chunked tight damage. The fix is a
+   scoped block (`634e18d`). The run was stopped and does not count.
+4. Complete suite on clean `634e18d`: **FAIL**, `test_m10_boundaries_red`.
+   Under the dock-safe-title mutant, `test_m10_dynamic`'s
+   unpublished-backing oracle saw the cursor arrow at both its old and new
+   places. The mutant cannot touch cursor erasure, and the same build
+   passed `test_m10_dynamic` later in the run and 8 of 8 times again. That
+   was not taken as an answer: the mechanism was measured.
+
+   `tools/probe_screendump_tearing.py` makes one immediate capture after
+   each of 300 cursor moves. 85 captures showed both arrows. Every one of
+   the 85 was correct when re-captured 0.3 s later with no input, and none
+   persisted. A QMP screendump is not atomic with the running guest, so
+   the framebuffer was correct and the single capture tore.
+
+   Two oracles that judged a single capture now judge a settled one:
+   * `test_m10_dynamic`;
+   * `check_phase10_pixels`, which every stability boot runs.
+
+   A real leak still fails both. The run was stopped and does not count.
