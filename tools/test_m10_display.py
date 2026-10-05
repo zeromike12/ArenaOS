@@ -5,7 +5,7 @@ import time
 import arena_env
 import mtest
 import qmp
-from test_m10_apps import serial_text, NATIVE_COUNTERS
+from test_m10_apps import serial_text, receipts
 BUILD=arena_env.build_dir()
 def workflow(label,width,height):
     serial=BUILD/f'serial-{label}.log';conn=qmp.Qmp(str(BUILD/f'qmp-{label}.sock'))
@@ -16,7 +16,7 @@ def workflow(label,width,height):
             time.sleep(.04)
         raise AssertionError(message)
     def text():return serial_text(serial)
-    def samples():return [tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(text())]
+    def samples():return receipts(text())
     def crop(p,x,y,w,h):return b''.join(p[((y+r)*width+x)*3:((y+r)*width+x+w)*3] for r in range(h))
     def shot(name,predicate=lambda p:True):
         path=BUILD/f'{label}-{name}.ppm';end=time.monotonic()+12

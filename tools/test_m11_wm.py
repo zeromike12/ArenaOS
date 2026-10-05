@@ -26,7 +26,7 @@ import re
 import time
 import arena_env
 import mtest
-from test_m10_apps import Desktop, NATIVE_COUNTERS
+from test_m10_apps import Desktop, receipts
 from test_m10_desktop import crop
 
 LABEL = 'm11-wm'
@@ -34,7 +34,7 @@ RESERVATION = re.compile(r'\[desktop\] session reservation shared/snapshot pages
 
 
 def samples(d):
-    return [tuple(map(int, m)) for m in NATIVE_COUNTERS.findall(d.serial())]
+    return receipts(d.serial())
 
 
 def px(p, x, y):

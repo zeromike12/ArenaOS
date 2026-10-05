@@ -8,7 +8,7 @@ import mtest
 import package_record as rec
 import test_m84_stage as stage
 from test_package_record import RFC_SEED,openssl_sign
-from test_m10_apps import Desktop
+from test_m10_apps import Desktop, SETTLED, receipts
 from test_m10_desktop import crop
 
 ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir();LABEL='m10-dynamic'
@@ -28,15 +28,6 @@ def main(esp=None):
     stage.host_seed(disk,{stage.STAGE1:signed,stage.POLICY1:stage.POLICY})
     original=stage.contents(disk)
     pre_refusal=[];owned=[]
-    # The resource base is the first receipt after the boot's transient
-    # processes ended (packaged's boot scan exits before READY, then the
-    # permission app is reaped). The desktop may present before that, so
-    # its very first receipt can still count them (seen after the Phase-11
-    # reply handoff let the broker reach its first frame earlier).
-    SETTLED='servicemgr: permission app reaped through held Process cap'
-    def receipts(text):
-        text=text[text.index(SETTLED):] if SETTLED in text else ''
-        return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',text)]
     def samples(d):return receipts(d.serial())
     def settled():
         d=Desktop(LABEL)

@@ -10,6 +10,15 @@ from test_m10_desktop import ppm, crop
 
 BUILD=arena_env.build_dir()
 NATIVE_COUNTERS=re.compile(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n')
+# Resource receipts are judged only after the boot's transient processes
+# ended (packaged's boot scan exits before READY, then the permission app
+# is reaped). The desktop may present before that, and its earliest
+# receipts then still count them (Phase 11: the reply handoff brought the
+# first frame forward), so they are never a base.
+SETTLED='servicemgr: permission app reaped through held Process cap'
+def receipts(text):
+    at=text.find(SETTLED)
+    return [] if at<0 else [tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(text[at:])]
 
 def serial_text(path):
     # QEMU appends while the host reads. A final digit/UTF-8 code point may
@@ -26,7 +35,7 @@ class Desktop:
     def __init__(self,label):
         self.label=label
         self.q=qmp.Qmp(str(BUILD/f'qmp-{label}.sock'))
-        try:self.wait(lambda:NATIVE_COUNTERS.search(self.serial()),'initial complete native accounting sample absent')
+        try:self.wait(lambda:receipts(self.serial()),'initial complete native accounting sample absent')
         except BaseException:
             self.q.close()
             raise
@@ -178,7 +187,7 @@ def workflow(label,disk):
         d.shot('reopened-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
         d.wait(lambda:d.serial().count('[desktop] application retired:')>=29,'last application not reaped before shutdown')
         def clean_snapshot():
-            samples=NATIVE_COUNTERS.findall(d.serial())
+            samples=receipts(d.serial())
             return len(samples)>1 and samples[-1][1:]==samples[0][1:]
         d.wait(clean_snapshot,'final measured teardown not complete before shutdown')
         return b'shutdown\r'
@@ -190,7 +199,7 @@ def main(esp=None):
     rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>',b'AFS2 file service online'),1,lambda:workflow(label,disk))],disk,pointer=True)
     assert rc==0
     assert afs1.audit(disk)==[] and doc_bytes(disk,b'user-note')==b'saved hello desktop'
-    samples=[tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(s)]
+    samples=receipts(s)
     assert samples and samples[-1][1:]==samples[0][1:],(samples[0],samples[-1])
     # Superseded Phase-10 bound (six slots x one PT): ADR-0075 slots hold
     # 939 pages, so each warmed broker VA slot retains two PTs. Phase 11.6:

@@ -3,11 +3,11 @@
 import re
 import arena_env
 import mtest
-from test_m10_apps import Desktop
+from test_m10_apps import Desktop, receipts
 from test_m10_desktop import crop
 LABEL='m10-boundaries'
 def samples(d):
-    return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())]
+    return receipts(d.serial())
 def workflow():
     d=Desktop(LABEL)
     try:

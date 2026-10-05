@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 import arena_env
 import mtest
-from test_m10_apps import Desktop
+from test_m10_apps import Desktop, receipts
 from test_m10_desktop import crop
 import test_m10_boundaries as green
 ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir();LABEL='m10-client-death'
@@ -15,7 +15,7 @@ MUTANT=NEEDLE+b'        if self.kind == apps::GALLERY && key == 103 { client::ex
 def session_pages(d):
     shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',d.serial()).groups())
     return shared+snapshot
-def samples(d):return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())]
+def samples(d):return receipts(d.serial())
 def workflow():
     d=Desktop(LABEL)
     try:
