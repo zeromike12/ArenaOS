@@ -4,10 +4,13 @@
 Superseded storage (ADR-0077): the Phase-10 desktop kept user documents as
 flat AFS1 `user-*` records reached through broker name scopes. Phase 11.6
 retired those scopes; documents live on AFS2 and applications hold file
-capabilities. Every Phase-10 invariant of this test is kept and judged on
-the AFS2 bytes instead: actual select/preview, Files opening the selected
-file in a real Editor (a capability offer), exact save, duplicate create
-refused without overwrite, case-sensitive owned glyphs, delete, the bounded
+capabilities. Superseded UI (Phase 11.8): Files is the explorer. Every
+Phase-10 invariant is kept and judged on the AFS2 bytes: actual selection
+with real facts shown (the Properties sheet replaces the one-line preview),
+Files opening the selected file in a real Editor (a capability offer),
+exact save, an existing name refused without overwriting its bytes (a
+rename onto it; New Document now always picks a free name), case-sensitive
+owned glyphs, delete (to the Trash, with its restore record), the bounded
 4096-byte document and its refusal, Save As durable bytes, an unsupported
 (binary) document refused without touching the open one, and a real
 terminal launch. The AFS1 originals stay byte-identical (read only).
@@ -78,30 +81,36 @@ def workflow(disk):
         d.wait(lambda: 'AFS2 file service online' in d.serial(), 'no AFS2 session')
         empty = d.shot('empty')
         files = d.launch(1, 'files')
-        # Documents: user-bin, user-full, user-note (byte order). Select the
-        # note: its text preview is real pixels.
-        keys(d, 'down', 'down')
-        d.shot('selected-preview', lambda p: crop(p, 296, 136, 190, 14) != crop(files, 296, 136, 190, 14))
+        # Documents (explorer list, names in order): user-bin, user-full,
+        # user-note. Select the note; its Properties sheet shows real facts.
+        keys(d, 'down', 'down', 'down')
+        chord(d, 'ctrl', 'i')
+        d.shot('selected-properties', lambda p: crop(p, 140, 160, 200, 60) != crop(files, 140, 160, 200, 60))
+        keys(d, 'esc')
         count = d.serial().count('[desktop] real application spawned;')
-        d.click(345, 110)  # Open: a real Editor holding exactly this file
+        keys(d, 'ret')  # Open: a real Editor holding exactly this file
         editor = d.opened('files-open-editor', 1)
         assert d.serial().count('[desktop] real application spawned;') == count + 1
         # Case-sensitive bytes have different real glyphs in the owned raster.
         assert crop(editor, 114, 158, 5, 7) != crop(editor, 120, 158, 5, 7), 'upper/lower case rendered identically'
         d.q.type_text('X', gap_s=.04)
-        d.click(70 + 115, 110)  # Save
+        chord(d, 'ctrl', 's')
         d.wait(lambda: doc(disk, 'user-note') == b'XAa file manager', 'Files-open editor did not save the file')
         d.close(1)
         d.wait(lambda: d.serial().count('[desktop] application retired:') >= 1, 'opened editor not retired')
-        # New must refuse an existing name without emptying its bytes.
-        d.click(105, 110)
-        dialog = d.shot('create-dialog', lambda p: crop(p, 82, 96, 354, 24) != crop(files, 82, 96, 354, 24))
-        d.q.type_text('\b' * 31 + 'user-note\r', gap_s=.035)
-        d.shot('create-refused', lambda p: crop(p, 82, 328, 350, 12) != crop(dialog, 82, 328, 350, 12))
-        assert doc(disk, 'user-note') == b'XAa file manager'
+        d.click(270, 74)  # focus Files again (its title)
+        time.sleep(.3)
+        # Renaming onto an existing name is refused without emptying its bytes.
+        keys(d, 'up')  # user-full
+        chord(d, 'ctrl', 'r')
+        time.sleep(.2)
+        d.q.type_text('user-note\r', gap_s=.035)
+        d.shot('rename-refused', lambda p: crop(p, 82, 326, 350, 14) != crop(files, 82, 326, 350, 14))
+        assert doc(disk, 'user-note') == b'XAa file manager' and doc(disk, 'user-full') == b'f' * 4096
         keys(d, 'esc')
-        d.click(420, 110)  # Delete the selected note
-        d.wait(lambda: doc(disk, 'user-note') is None, 'Files delete did not unlink the object')
+        keys(d, 'down', 'delete')  # the note, to the Trash
+        d.wait(lambda: doc(disk, 'user-note') is None and tree(disk).get('/Users/user/.Trash/user-note') == b'XAa file manager',
+               'Files delete did not move the object to the Trash')
         d.close()
         d.wait(lambda: d.serial().count('[desktop] application retired:') >= 2, 'Files not retired')
         blank = d.launch(2, 'editor')
@@ -165,9 +174,11 @@ def main(esp=None):
     assert disk.read_bytes()[:arena_env.SCRATCH_MIB * 1024 * 1024] == afs1_before, 'AFS1 changed'
     t = tree(disk)
     assert DOCS + 'user-note' not in t and t[DOCS + 'user-bin'] == b'\x80binary'
+    assert t['/Users/user/.Trash/user-note'] == b'XAa file manager'
+    assert t['/Users/user/.Trash/.restore/user-note'] == b'Documents/user-note'
     assert t[DOCS + 'user-copy'] == b'f' * 4095 and t[DOCS + 'user-full'] == b'Z' + b'f' * 4095
-    print('[m10-files] AFS2: Files select/preview/open-in-Editor (capability offer)/save/delete, duplicate create '
-          'refused without overwrite, case-sensitive owned glyphs, bounded 4096-byte document and refusal, Save As '
+    print('[m10-files] AFS2 explorer: select/properties/open-in-Editor (capability offer)/save/delete to Trash, '
+          'existing name refused without overwrite, case-sensitive owned glyphs, bounded 4096-byte document and refusal, Save As '
           'durable bytes, binary document refused leaving the open document and its capability, terminal real launch, '
           'AFS1 originals byte-identical PASS')
 

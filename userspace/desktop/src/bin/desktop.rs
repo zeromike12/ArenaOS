@@ -1810,6 +1810,9 @@ extern "C" fn main() -> ! {
                                 let to_desk = !modal
                                     && desk_store().is_some()
                                     && (desk.busy() || (pressing && state.bare(px, py)));
+                                if !to_desk {
+                                    desk.track(buttons);
+                                }
                                 if to_desk && let Some(mut store) = desk_store() {
                                     if pressing && !desk.busy() {
                                         state.blur();

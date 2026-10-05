@@ -470,6 +470,11 @@ impl Desk {
         self.view = v;
     }
 
+    /// Button state of a pointer event the desk was not given (the release
+    /// after a menu click, presses on windows): its edges stay true.
+    pub fn track(&mut self, buttons: u8) {
+        self.buttons = buttons;
+    }
     /// The desktop holds a press or shows its menu: every pointer event
     /// is its own until that ends.
     pub fn busy(&self) -> bool {
@@ -977,5 +982,24 @@ mod tests {
         let mut n = 0;
         changed(a, b, |_| n += 1);
         n
+    }
+
+    /// The release after a menu click is not the desk's (its menu closed on
+    /// the press); with the button tracked, the next press is a press.
+    #[test]
+    fn a_press_after_a_menu_click_is_a_press() {
+        let (mut d, mut m) = setup();
+        d.pointer(&mut m, 700, 400, 2, false, 0);
+        d.pointer(&mut m, 700, 400, 0, false, 0);
+        let r = d.view.menu.unwrap().rect();
+        d.pointer(&mut m, r.x + 20, r.y + 9, 1, false, 0);
+        assert!(!d.busy());
+        d.track(0); // the broker passes the release on without routing it
+        let (x, y, i) = center(&d, "readme");
+        d.pointer(&mut m, x, y, 1, false, 5_000_000);
+        assert!(
+            d.ex.selection.contains(i),
+            "the press after a menu click was lost"
+        );
     }
 }

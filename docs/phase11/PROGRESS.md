@@ -179,3 +179,51 @@ Found by the guest:
 An unpaced burst of 62 key events overran inputd's bounded 64-entry key
 ring. That ring is the documented design (ADR-0026); the test now paces
 its keys like typing.
+
+## 11.8 — Files explorer and the desktop surface (in progress)
+
+Files is now an explorer over the session's /Users/user capability
+(`apps/explorer.rs` logic over a `Store`, `explorer_view.rs` pixels and hit
+testing, `explorer_ctl.rs` interaction). It has:
+
+* a toolbar with back, forward, up, a breadcrumb and a list/grid toggle;
+* a sidebar of places (Home, Desktop, Documents, Trash) with a splitter;
+* a virtualized list with sortable Name/Size/Modified/Kind columns, or a
+  grid of 32 px icons;
+* selection by click, Shift range, Ctrl toggle and rubber band;
+* multi-item drag onto folders and onto places (onto the Trash: delete);
+* keyboard: arrows, Home/End, Enter, Backspace, Delete, Esc, type-ahead,
+  Alt+Left/Right/Up, Ctrl+A/C/X/V, Ctrl+N, Ctrl+Shift+N, Ctrl+R (rename;
+  F1-F6 launch applications), Ctrl+O, Ctrl+I, Ctrl+1/2;
+* inline rename, context menus chosen by what was clicked, a Properties
+  sheet, delete to the Trash with a restore record, restore, empty Trash;
+* open by type, with "Open With Editor" for text by content sniff.
+
+The broker adds Shift and Ctrl to pointer buttons (bits 6 and 7), and
+Shifted navigation keys arrive as chords. A folder changed elsewhere is
+re-listed on focus, on interaction and on request. There are no directory
+watches (not built): Files does not wake itself while idle.
+
+Guest (`tools/test_m11_explorer.py`) PASS, judged on AFS2 bytes: new folder
+named inline, copy/paste into a folder entered by double-click, history
+back, cut/paste through a place, delete to the Trash with its restore
+record, a drag move that takes a free name, restore by context menu,
+keyboard rename, double-click open in a real Editor with an exact save,
+empty Trash; sorting and the grid by pixels; a terminal change seen on
+focus; AFS1 untouched.
+
+Found by the guest:
+
+| Problem | Fix |
+|---|---|
+| filesd kept the badged cap it minted for every OPEN reply (IPC transfer copies); its 64-slot space filled after a few dozen opens and every mint failed (S_FULL) | filesd destroys its copy after each reply |
+| The kernel refused that destroy: badged mint rights were WRITE with optional COPY, and a non-landed cap without DESTROY cannot be destroyed | ADR-0074 amendment: a mint may carry DESTROY (it only empties the holder's own slot); `m11:badged_endpoint` proves both cases |
+| Each S_FULL looked alike | filesd logs which limit refused (records, lineage quota, own space) |
+
+Historical correction (11.1): `test_m10_dynamic` never passed after 11.1.
+Rerun at its own introducing commit 6eab591, it fails identically. The
+probe published its 10x10 Damage at surface (0,0), under the 28-pixel
+title band the compositor draws opaquely. The rectangle is now at (10,30).
+The test's next step then exposed a second never-reached oracle: after a
+partial publish, a full publish changes only that one cell. The oracle now
+requires the exact pre-partial raster. Guest: the whole test PASS.
