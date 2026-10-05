@@ -64,8 +64,11 @@ def capture(sock,serial,image,receipt,timeout):
             changed,after_sha=shot();body=crop(changed,100,110,300,180)
             equal=equal+1 if body==previous else 0;previous=body;time.sleep(.05)
         point(90,70,True);point(290,170);point(290,170,False);point(780,500)
-        moved,moved_sha=shot(lambda p:crop(p,300,210,300,180)==crop(changed,100,110,300,180))
-        if crop(moved,100,110,100,100)==crop(changed,100,110,100,100):raise ValueError('old location did not uncover')
+        # Both halves on one capture: a QMP screendump is not atomic with the
+        # running guest, so a capture can show the new location drawn while
+        # the old rows were read before they were uncovered.
+        moved,moved_sha=shot(lambda p:crop(p,300,210,300,180)==crop(changed,100,110,300,180)
+                             and crop(p,100,110,100,100)!=crop(changed,100,110,100,100))
         click(706,170)
         shot(lambda p:crop(p,300,210,300,180)==crop(empty,300,210,300,180))
         wait(lambda:log().count(b'[desktop] application retired:')==1 and counts()[-1][1:]==base[1:],'first close did not retire exact resources')
