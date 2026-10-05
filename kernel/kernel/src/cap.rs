@@ -113,6 +113,9 @@ pub enum CapObj {
     SharedRegion { id: u32 },
     /// Grants allocation (WRITE); never grants physical access by itself.
     MemoryPool,
+    /// Phase 11.5: read-only CMOS wall clock (READ = `SYS_RTC_READ`). Wall
+    /// time stamps file times; it is data, never authority.
+    Rtc,
     /// A separate bearer for physical backing queries (READ); only the
     /// display service receives this, and must also hold the region cap.
     SharedDma,
@@ -394,6 +397,30 @@ pub fn mint_badged(pid: u64, slot: usize, badge: u32, rights: u32) -> Result<usi
             rights,
         },
     )
+}
+
+/// The badge of `cap_slot`, a badged capability to the endpoint whose
+/// serve side (READ) `pid` holds in `server_slot`. Only the server that
+/// minted a badge can read it back (it alone knows what it names);
+/// `describe` never shows badges.
+pub fn badge_of(pid: u64, server_slot: usize, cap_slot: usize) -> Result<u32, &'static str> {
+    let server = read(pid, server_slot)?;
+    let CapObj::Endpoint { eid } = server.obj else {
+        return Err("badge: not a plain endpoint");
+    };
+    if server.rights & RIGHTS_READ == 0 {
+        return Err("badge: only the serve side may read badges");
+    }
+    match read(pid, cap_slot)?.obj {
+        CapObj::BadgedEndpoint {
+            eid: e,
+            generation,
+            badge,
+        } if u32::from(e) == eid && crate::ipc::endpoint_generation(eid) == Some(generation) => {
+            Ok(badge)
+        }
+        _ => Err("badge: not a live badged cap of this endpoint"),
+    }
 }
 
 /// The endpoint and badge a CALL through `pid`'s `slot` reaches: a plain

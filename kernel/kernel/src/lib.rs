@@ -16,6 +16,7 @@
 
 pub mod arch;
 pub mod cap;
+pub mod rtc;
 pub mod console;
 pub mod drivers;
 pub mod elf;

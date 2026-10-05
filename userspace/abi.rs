@@ -57,6 +57,12 @@ pub const SYS_ENDPOINT_UNBIND: u64 = 47;
 pub const SYS_ENDPOINT_MINT: u64 = 48;
 /// ADR-0074: (endpoint READ slot, out[4]: w0 w1 landed badge, msg, blocking, 0).
 pub const SYS_IPC_RECV_BADGED: u64 = 49;
+/// Phase 11.5: wall seconds since 1970 through a held Rtc cap, or
+/// STATUS_BUSY = unknown.
+pub const SYS_RTC_READ: u64 = 50;
+/// Phase 11.5: the badge of a landed badged cap, for the endpoint's own
+/// server only.
+pub const SYS_ENDPOINT_BADGE: u64 = 51;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;

@@ -148,7 +148,9 @@ def workflow(label,disk):
             d.wait(lambda:d.serial().count('[desktop] application retired:')>=retired+i+1,'F8 failed to retire held Process')
         d.shot('all-closed',lambda p:crop(p,100,110,300,180)==crop(dark_empty,100,110,300,180))
         # Existing VM policy retains empty intermediate page tables until
-        # the owning address space dies. Warm all six fixed VA slots, then
+        # the owning address space dies. The twelve-session sweep warmed all
+        # twelve broker VA slots (two PTs each: an ADR-0075 slot spans the
+        # 470-page shared and 469-page snapshot mappings). Warm the six apps, then
         # independently prove the complete working set can cycle without growth.
         for cycle in range(2):
             for kind in range(6):d.launch(kind,f'cycle-{cycle}-app-{kind}',kind)
@@ -175,7 +177,9 @@ def main(esp=None):
     assert afs1.audit(disk)==[] and file_bytes(disk,b'user-note')==b'saved hello desktop'
     samples=[tuple(map(int,m)) for m in NATIVE_COUNTERS.findall(s)]
     assert samples and samples[-1][1:]==samples[0][1:],(samples[0],samples[-1])
-    assert samples[0][0]-samples[-1][0]==6,'unexpected retained frames beyond the six existing intermediate PTs'
+    # Superseded Phase-10 bound (six slots x one PT): ADR-0075 slots hold
+    # 939 pages, so each warmed broker VA slot retains two PTs.
+    assert samples[0][0]-samples[-1][0]==12*2,'unexpected retained frames beyond twelve warmed slots x two PTs'
     empty=[row for row in samples if row[1:]==samples[0][1:]]
     assert len(empty)>=5 and all(row==samples[-1] for row in empty[-4:]),empty
     # ADR-0075 per-session reservation, measured by the broker at boot.

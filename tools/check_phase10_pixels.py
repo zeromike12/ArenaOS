@@ -66,7 +66,8 @@ def capture(sock,serial,image,receipt,timeout):
         shot(lambda p:crop(p,300,210,300,180)==crop(empty,300,210,300,180))
         wait(lambda:log().count(b'[desktop] application retired:')==1 and counts()[-1][1:]==base[1:],'first close did not retire exact resources')
         warm=counts()[-1]
-        if base[0]-warm[0]!=1:raise ValueError('one warmed broker PT residency not exact')
+        # One warmed broker VA slot: two retained PTs (ADR-0075 reservation).
+        if base[0]-warm[0]!=2:raise ValueError('one warmed broker PT residency not exact')
         click(545,570);second,_=opened();conn.key('t')
         _,final_sha=shot(lambda p:crop(p,100,110,300,180)!=crop(second,100,110,300,180))
         click(506,70)

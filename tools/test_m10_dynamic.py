@@ -40,7 +40,8 @@ def main(esp=None):
                 return a!=b and all(pixel(x+5+k*10,y+35+r*10)==(a if (k+r)%2==0 else b) for r in range(2) for k in range(6))
             d.shot(f'signed-{i}',checker)
             if i==3:
-                d.wait(lambda:samples(d)[-1][5]==10,'four signed children not fully mapped')
+                # Base two maps + three per session (ADR-0075).
+                d.wait(lambda:samples(d)[-1][5]==2+4*3,'four signed children not fully mapped')
                 pre_refusal.append((samples(d)[-1],len(samples(d))))
             return b'pkg graphics\r'
         finally:d.dispose()
@@ -119,29 +120,44 @@ def main(esp=None):
             before=d.shot('revoked-still-live')
             d.q.key('b')
             d.shot('revoked-child-input',lambda p:sum(a!=b for a,b in zip(crop(p,353,264,45,20),crop(before,353,264,45,20)))>45*20*3*.95)
-            # Dynamic and BootImage children share the general six-session
-            # ownership model, while the native dynamic quota stays four.
+            # Dynamic and BootImage children share the general session
+            # ownership model (twelve sessions, ADR-0075), while the native
+            # dynamic quota stays four.
             d.launch(0,'mixed-terminal',4);d.launch(3,'mixed-settings',5)
-            d.wait(lambda:samples(d)[-1][3:6]==(7,1231,14),'mixed working set not fully mapped')
+            shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',d.serial()).groups())
+            base=samples(d)[0]
+            # Six sessions: shared + snapshot region each, three maps each.
+            d.wait(lambda:samples(d)[-1][3:6]==(base[3]+12,base[4]+6*(shared+snapshot),base[5]+18),'mixed working set not fully mapped')
             mixed=samples(d)[-1]
-            assert mixed[1:3]==(20,20) and mixed[6]==28,('mixed working-set counters',mixed)
+            assert mixed[1:3]==(base[1]+6,base[2]+6) and mixed[6]==base[6]+12,('mixed working-set counters',mixed)
+            # Six more builtins fill the twelve sessions; the thirteenth
+            # launch is refused with nothing spawned.
+            for k in range(6):
+                d.click(255+k*58,570)
+                d.wait(lambda:d.serial().count('[desktop] real application spawned;')>=7+k,'mixed second-lane session not spawned')
+            d.wait(lambda:samples(d)[-1][3:6]==(base[3]+24,base[4]+12*(shared+snapshot),base[5]+36),'twelve mixed sessions not fully mapped')
+            d.settled('mixed-twelve',(0,26,800,500))
             full_mixed=d.shot('mixed-full')
             d.click(255+5*58,570)
             d.shot('mixed-capacity-refused',lambda p:crop(p,10,28,250,20)!=crop(full_mixed,10,28,250,20))
-            assert d.serial().count('[desktop] real application spawned;')==6,'seventh mixed application spawned'
+            assert d.serial().count('[desktop] real application spawned;')==12,'thirteenth mixed application spawned'
+            for k in range(6):
+                d.q.command('input-send-event',events=[d.q._ev('f8',True),d.q._ev('f8',False)])
+                d.wait(lambda:d.serial().count('[desktop] application retired:')>=k+1,'F8 failed to retire second-lane session')
+            d.wait(lambda:samples(d)[-1][1:]==mixed[1:],'second lane did not return to the six-session working set')
             for index in (5,4):
                 d.close(index)
-                d.wait(lambda:d.serial().count('[desktop] application retired:')>=6-index,'mixed builtin not reaped')
+                d.wait(lambda:d.serial().count('[desktop] application retired:')>=12-index,'mixed builtin not reaped')
             # A small signed window must remain reachable above the dock.
             # Compare its exact owned chrome after a real bottom-edge drag.
             before_bottom=d.settled('bottom-drag-start',(353,237,60,18))
             d.point(354,242,True);d.point(330,590);d.point(330,590,False);d.point(780,500)
             d.shot('safe-title-above-dock',lambda p:crop(p,329,521,60,18)==crop(before_bottom,353,237,60,18))
             d.click(390,526) # exact child now at x324,y516; reachable close.
-            d.wait(lambda:d.serial().count('[desktop] application retired:')>=3,'signed child close not reaped')
+            d.wait(lambda:d.serial().count('[desktop] application retired:')>=9,'signed child close not reaped')
             for i in (2,1,0):
                 d.click(136+i*26,70+i*24)
-                d.wait(lambda:d.serial().count('[desktop] application retired:')>=6-i,'remaining signed child not reaped')
+                d.wait(lambda:d.serial().count('[desktop] application retired:')>=12-i,'remaining signed child not reaped')
             # Retirement and periodic native observation are independent.
             # Require a fresh exact teardown sample before the serial shell
             # can halt the machine; an old one-child sample is not a leak.
@@ -154,11 +170,11 @@ def main(esp=None):
     for n in range(1,5):feed.append((b'servicemgr: real signed Image delegated for broker-owned graphical spawn',n,visible))
     feed.extend([(b'servicemgr: graphical Image launch bounded refusal',1,exercised),(b'servicemgr: revoked graphical Image cannot spawn again PASS',1,revoked)])
     rc,s,_=mtest.boot(LABEL,esp,feed,disk,pointer=True,timeout_s=120)
-    assert rc==0 and s.count('[desktop] real application spawned;')==6 and s.count('[desktop] application retired:')==6
+    assert rc==0 and s.count('[desktop] real application spawned;')==12 and s.count('[desktop] application retired:')==12
     rows=[tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',s)]
     assert rows[-1][1:]==rows[0][1:],('mixed teardown resources',rows[0],rows[-1])
     assert 'GRAPHICALTEST refused' not in s
     assert stage.contents(disk)[stage.STAGE1]==signed and all(stage.contents(disk)[k]==v for k,v in original.items())
     assert not __import__('afs1').audit(disk)
-    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus two ordinary builtins, mixed capacity refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS')
+    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus eight ordinary builtins, mixed thirteenth-session refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS')
 if __name__=='__main__':main()

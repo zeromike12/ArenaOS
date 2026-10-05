@@ -175,6 +175,12 @@ pub const SYS_ENDPOINT_UNBIND: u64 = 47;
 pub const SYS_ENDPOINT_MINT: u64 = 48;
 /// Phase 11.2 (ADR-0074): receive (blocking or not) returning the badge.
 pub const SYS_IPC_RECV_BADGED: u64 = 49;
+/// SYS_RTC_READ(rtc slot, out u64): wall seconds since 1970, or
+/// STATUS_BUSY when the clock is absent or invalid ("unknown").
+pub const SYS_RTC_READ: u64 = 50;
+/// SYS_ENDPOINT_BADGE(server endpoint slot, badged cap slot): the badge,
+/// for the endpoint's own server only (ADR-0074 amendment, Phase 11.5).
+pub const SYS_ENDPOINT_BADGE: u64 = 51;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -701,6 +707,10 @@ extern "C" fn syscall_dispatch(
         SYS_ENDPOINT_UNBIND if [a1, a2, a3, a4, a5] == [0; 5] => sys_endpoint_unbind(a0) as u64,
         SYS_ENDPOINT_MINT if [a3, a4, a5] == [0; 3] => sys_endpoint_mint(a0, a1, a2) as u64,
         SYS_IPC_RECV_BADGED if a5 == 0 => sys_ipc_recv_badged(a0, a1, a2, a3, a4) as u64,
+        SYS_RTC_READ if [a2, a3, a4, a5] == [0; 4] => sys_rtc_read(a0, a1) as u64,
+        SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => {
+            sys_endpoint_badge(a0, a1) as u64
+        }
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -2531,6 +2541,7 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         // Held one-frame LENT type/geometry; no physical address is exposed.
         crate::cap::CapObj::Untyped { owned: false, .. } => (11, 1),
         crate::cap::CapObj::MemoryPool => (8, 0),
+        crate::cap::CapObj::Rtc => (13, 0),
         crate::cap::CapObj::SharedDma => (9, 0),
         crate::cap::CapObj::ProofToken { id } if id != 0 => (10, id),
         crate::cap::CapObj::Endpoint { eid } => (2, u64::from(eid)),
@@ -2784,4 +2795,48 @@ fn user_range_ok(buf: u64, len: u64) -> bool {
         page = page_end;
     }
     true
+}
+
+/// SYS_RTC_READ(slot, out): the held `Rtc` cap with READ; writes the wall
+/// clock's seconds since 1970, or answers STATUS_BUSY (unknown time).
+fn sys_rtc_read(slot: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.obj != crate::cap::CapObj::Rtc || cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(out, 8) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Some(seconds) = crate::rtc::read_unix_seconds() else {
+        return STATUS_BUSY;
+    };
+    // SAFETY: validated 8-byte user span; STAC/CLAC bracket the store.
+    unsafe {
+        super::stac();
+        core::ptr::write_unaligned(out as *mut u64, seconds);
+        super::clac();
+    }
+    STATUS_OK
+}
+
+/// SYS_ENDPOINT_BADGE(server slot, cap slot): see `cap::badge_of`.
+fn sys_endpoint_badge(server: u64, slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if server >= crate::cap::CAP_SLOTS as u64 || slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    match crate::cap::badge_of(pid, server as usize, slot as usize) {
+        Ok(badge) => Status::from(badge),
+        Err(_) => STATUS_BAD_ARG,
+    }
 }

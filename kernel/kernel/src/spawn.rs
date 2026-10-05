@@ -47,7 +47,7 @@ pub const MAX_SPAWN_RECS: usize = 32;
 /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
 pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
 /// Separate from ALL Image IDs, including future dynamic u32 values.
-pub const MAX_BOOT_IMAGES: u32 = 9;
+pub const MAX_BOOT_IMAGES: u32 = 10;
 pub fn boot_image_live(index: u32) -> bool {
     index < MAX_BOOT_IMAGES && boot_image_bytes(index).is_some()
 }
@@ -89,6 +89,11 @@ fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
         8 => Some(include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../userspace/desktop/target/x86_64-unknown-none/release/application"
+        ))),
+        // Phase 11.5: the AFS2 file service (ADR-0076/0077).
+        9 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/filesd/target/x86_64-unknown-none/release/filesd"
         ))),
         _ => None,
     }

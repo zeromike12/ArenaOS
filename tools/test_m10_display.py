@@ -56,14 +56,18 @@ def workflow(label,width,height):
             # Native grant audits, own map and real raster must complete before
             # launching the next app; slots use deterministic cascade geometry.
             shot(f'app-{kind}',lambda p:len(set(crop(p,82+kind*26,128+kind*24,250,140)[i:i+3] for i in range(0,250*140*3,3)))>=2)
-        wait(lambda:samples()[-1][5]==base[5]+12,'six client mappings did not finish')
-        peak=samples()[-1];assert peak[2:5]==(base[2]+6,base[3]+6,base[4]+762),peak
-        assert peak[3]<=8 and peak[4]<=2048 and peak[5]<=32 and peak[6]<=32,peak
+        # ADR-0075: each session holds a shared and a snapshot region sized
+        # for this mode's work area, mapped three times (broker x2, client).
+        shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',text()).groups())
+        wait(lambda:samples()[-1][5]==base[5]+18,'six client mappings did not finish')
+        peak=samples()[-1];assert peak[2:5]==(base[2]+6,base[3]+12,base[4]+6*(shared+snapshot)),peak
+        assert peak[3]<=32 and peak[4]<=20480 and peak[5]<=64 and peak[6]<=64,peak
         shot('full-six-apps')
         for n in range(6):
             key('f8');wait(lambda:text().count('[desktop] application retired:')==n+2,'mode working set failed exact Process retirement')
         wait(lambda:samples()[-1][1:]==base[1:],'mode working set leaked resources')
-        assert base[0]-samples()[-1][0]==6,'mode warm PT bound not exact'
+        # Six warmed broker VA slots, two retained PTs each (ADR-0075).
+        assert base[0]-samples()[-1][0]==6*2,'mode warm PT bound not exact'
         print(f'[m10-display] {label} {width}x{height}: real pixels/input/drag, six-app peak={peak}, exact teardown PASS',flush=True)
         return b'shutdown\r'
     finally:conn.close()

@@ -12,6 +12,9 @@ ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir();LABEL='m10-client-death'
 SOURCE=ROOT/'userspace/desktop/src/bin/application.rs'
 NEEDLE=b'    fn key(&mut self, key: u16, client: &Client) -> Result<(), i64> {\n'
 MUTANT=NEEDLE+b'        if self.kind == apps::GALLERY && key == 103 { client::exit(77) }\n        if self.kind == apps::GALLERY && key == 104 { loop { let _ = service::idle(None); } }\n'
+def session_pages(d):
+    shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',d.serial()).groups())
+    return shared+snapshot
 def samples(d):return [tuple(map(int,m)) for m in re.findall(r'measured frames/records/processes/regions/pages/maps/caps=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)',d.serial())]
 def workflow():
     d=Desktop(LABEL)
@@ -19,7 +22,9 @@ def workflow():
         base=samples(d)[0];empty=d.shot('empty');terminal=d.launch(0,'terminal')
         d.launch(5,'gallery',1);d.q.key('g')
         d.wait(lambda:d.serial().count('[desktop] application retired:')==1,'dead ordinary Gallery Process not retired')
-        d.wait(lambda:samples(d)[-1][1:]==(base[1]+1,base[2]+1,base[3]+1,base[4]+127,base[5]+2,base[6]+2),'client death did not clean exact shared/cap/process state')
+        # One live session (ADR-0075): record, Process, shared + snapshot
+        # regions, their 939 pages, three maps, two broker caps.
+        d.wait(lambda:samples(d)[-1][1:]==(base[1]+1,base[2]+1,base[3]+2,base[4]+session_pages(d),base[5]+3,base[6]+2),'client death did not clean exact shared/cap/process state')
         d.shot('sibling-preserved',lambda p:crop(p,100,110,300,180)==crop(terminal,100,110,300,180))
         d.q.type_text('echo alive\r',gap_s=.04)
         d.shot('sibling-input',lambda p:crop(p,90,164,290,28)!=crop(terminal,90,164,290,28))

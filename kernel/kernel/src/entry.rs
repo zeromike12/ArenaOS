@@ -781,7 +781,17 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         *nid = crate::ipc::create_notification()
             .unwrap_or_else(|_| crate::halt::halt_machine("desktop: app clock capacity"));
     }
-    let mut graphics = start_boot_display(_input_pid, desktop_frame_nid, &app_clock_nids, fs_eid);
+    // Phase 11.5 (ADR-0076/0077): the AFS2 file service, desktop profile
+    // only (the phase-9 fixture keeps its historical process set).
+    let filesd_eid = (option_env!("ARENA_GRAPHICS_FIXTURE") != Some("phase9"))
+        .then(|| spawn_filesd(blk_eid, fs_eid).unwrap_or_else(|e| crate::halt::halt_machine(e)));
+    let mut graphics = start_boot_display(
+        _input_pid,
+        desktop_frame_nid,
+        &app_clock_nids,
+        fs_eid,
+        filesd_eid,
+    );
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
     if let Some(eid) = graphics.as_ref().and_then(|g| g.launch_endpoint) {
@@ -1147,6 +1157,7 @@ fn start_boot_display(
     frame_nid: u32,
     app_clocks: &[u32; 12],
     fs_eid: u32,
+    filesd_eid: Option<u32>,
 ) -> Option<GraphicsRuntime> {
     let gop = crate::handoff::display();
     if let Some(mode) = gop {
@@ -1340,6 +1351,7 @@ fn start_boot_display(
             frame_nid,
             app_clocks,
             fs_eid,
+            filesd_eid,
         ))
     } else {
         Some(start_boot_compositor(display_pid, eid, input_pid))
@@ -1996,6 +2008,43 @@ fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32, u32), &'static str> {
     Ok((pid, eid, diag_nid))
 }
 
+/// filesd's user-root badge (`filesd_wire::USER_ROOT_BADGE`): record 1,
+/// record generation 1.
+const FILESD_USER_ROOT_BADGE: u32 = 1 | 1 << 16;
+
+/// Spawn the AFS2 file service (Phase 11.5, ADR-0076/0077): boot image 9
+/// with storaged's block endpoint (call side), its own endpoint (serve
+/// side), the read-only RTC and fsd's endpoint (call side, read-only use:
+/// the one-shot AFS1 import). Returns its endpoint.
+fn spawn_filesd(blk_eid: u32, fs_eid: u32) -> Result<u32, &'static str> {
+    use crate::cap::{Cap, CapObj, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let eid = crate::ipc::create_endpoint().map_err(|_| "filesd: endpoint table full")?;
+    let grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid: blk_eid },
+            rights: W,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: R,
+        },
+        Cap {
+            obj: CapObj::Rtc,
+            rights: R,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: fs_eid },
+            rights: W,
+        },
+    ];
+    let pid = crate::spawn::spawn_init_boot(9, &grants, None)?;
+    info!(
+        "kernel",
+        "filesd spawned: pid {pid} (caps: 0=Endpoint{blk_eid}/W 1=Endpoint{eid}/R 2=Rtc/R 3=Endpoint{fs_eid}/W) — AFS2 file service"
+    );
+    Ok(eid)
+}
+
 /// Spawn the production network service (M6.1, ADR-0024): registry
 /// image 6 with storaged's three-cap driver shape — an `Mmio` cap over
 /// the virtio-net structure BAR (R|W), its endpoint serve side (READ),
@@ -2442,6 +2491,7 @@ fn start_boot_desktop(
     frame_nid: u32,
     app_clocks: &[u32; 12],
     fs_eid: u32,
+    filesd_eid: Option<u32>,
 ) -> GraphicsRuntime {
     use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
     let eid = crate::ipc::create_endpoint().unwrap_or_else(|e| crate::halt::halt_machine(e));
@@ -2505,6 +2555,26 @@ fn start_boot_desktop(
         },
     )
     .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // Slot 20: the broker's file grant — a badged capability naming the
+    // filesd record of `/Users/user` (all rights). `/System` has no badge
+    // anyone holds.
+    if let Some(eid) = filesd_eid {
+        let generation = crate::ipc::endpoint_generation(eid)
+            .unwrap_or_else(|| crate::halt::halt_machine("filesd endpoint vanished"));
+        crate::cap::issue(
+            comp,
+            20,
+            Cap {
+                obj: CapObj::BadgedEndpoint {
+                    eid: eid as u16,
+                    generation,
+                    badge: FILESD_USER_ROOT_BADGE,
+                },
+                rights: W | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
     crate::cap::consume(comp, 3).unwrap_or_else(|e| crate::halt::halt_machine(e));
     crate::cap::issue(
         comp,

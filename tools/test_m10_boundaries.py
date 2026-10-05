@@ -36,7 +36,8 @@ def workflow():
         d.close();d.wait(lambda:d.serial().count('[desktop] application retired:')>=3,'terminal not retired')
         d.wait(lambda:samples(d)[-1][1:]==base[1:],'process/map/region/cap resources did not return exactly')
         d.shot('clean-empty',lambda p:crop(p,100,110,300,180)==crop(empty,100,110,300,180))
-        assert base[0]-samples(d)[-1][0]==3,'bounded broker PT residency differs from three warmed VA slots'
+        # Three warmed broker VA slots, two retained PTs each (ADR-0075).
+        assert base[0]-samples(d)[-1][0]==3*2,'bounded broker PT residency differs from three warmed VA slots'
         return b'shutdown\r'
     finally:d.dispose()
 def main(esp=None):
