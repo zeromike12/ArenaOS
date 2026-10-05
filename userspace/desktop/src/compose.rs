@@ -393,6 +393,7 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
     if p.notice != n.notice {
         out.add(shell::notice_region(w));
     }
+    crate::desk::changed(&p.desk, &n.desk, |r| out.add(r));
     if p.chooser != n.chooser && (p.chooser.is_some() || n.chooser.is_some()) {
         out.add(shell::chooser_region(w, h));
     }
@@ -438,6 +439,7 @@ pub fn compose<'c>(
     t: Theme,
 ) {
     shell::background(canvas, t);
+    crate::desk::draw(canvas, &scene.shell.desk, t);
     let clip = canvas.clip();
     for win in scene.windows[..scene.count].iter().flatten() {
         let reveal = win.reveal.clamp(0, i32::from(win.height));
@@ -484,6 +486,9 @@ pub fn compose<'c>(
             let _ = canvas.blit(contents(win.slot).1, w, h, w, p.x, p.y);
             c::popup_frame(canvas, p.x, p.y, w as i32, h as i32, t);
         }
+    }
+    if let Some(menu) = &scene.shell.desk.menu {
+        crate::desk::draw_menu(canvas, menu, t);
     }
     shell::system(canvas, &scene.shell, t);
 }

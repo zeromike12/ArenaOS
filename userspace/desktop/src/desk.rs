@@ -380,9 +380,9 @@ impl Desk {
                 taken[col as usize][row as usize] = true;
             }
         });
-        for i in 0..n {
-            if !placed[i] {
-                self.cells[i] = free(&mut taken, cols, rows);
+        for (cell, done) in self.cells.iter_mut().zip(placed).take(n) {
+            if !done {
+                *cell = free(&mut taken, cols, rows);
             }
         }
         self.view_update();
@@ -470,10 +470,10 @@ impl Desk {
         self.view = v;
     }
 
-    /// Whether the desktop wants this pointer event: a press on the bare
-    /// desktop (or on its menu), or anything while it holds a press.
-    pub fn owns(&self, bare: bool) -> bool {
-        bare || self.press.is_some() || self.view.menu.is_some()
+    /// The desktop holds a press or shows its menu: every pointer event
+    /// is its own until that ends.
+    pub fn busy(&self) -> bool {
+        self.press.is_some() || self.view.menu.is_some()
     }
 
     /// Pointer at screen (`x`, `y`) with `ctrl` held. Only called while

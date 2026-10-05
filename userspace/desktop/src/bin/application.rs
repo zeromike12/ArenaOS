@@ -1052,8 +1052,16 @@ extern "C" fn main() -> ! {
         }
         apps::FILES => {
             app.files.resize(app.size);
+            // A start folder named at launch (the desktop opening one of
+            // its folders), inside the granted home; else Documents.
+            let n = path.iter().position(|b| *b == 0).unwrap_or(32);
+            let start = if n == 0 {
+                XPath::of(b"Documents")
+            } else {
+                XPath::of(&path[..n])
+            };
             app.store().map(|mut store| {
-                app.files.start(&mut store, XPath::of(b"Documents"));
+                app.files.start(&mut store, start);
             })
         }
         apps::EDITOR if app.doc != CAP_NONE => app.open_document(path),

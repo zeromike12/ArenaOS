@@ -809,6 +809,89 @@ fn start_afs2() {
         }
     }
 }
+// ---- the desktop surface (Phase 11.8) ---------------------------------------
+//
+// /Users/user/Desktop as icons on the background, resolved through the
+// broker's own capability for /Users/user (the same one the chooser uses).
+// Opening a document grants the new Editor exactly that file, in its own
+// lineage, as a Files offer does.
+static mut DESK: arena_desktop::desk::Desk = arena_desktop::desk::Desk::new();
+static mut DESK_POLL: u64 = 0;
+static mut DESK_BUTTONS: u8 = 0;
+fn desk_store() -> Option<arena_desktop::apps::explorer::CapStore> {
+    unsafe { *(&raw const AFS2) }.map(|fs| arena_desktop::apps::explorer::CapStore {
+        fs,
+        root: USER_ROOT,
+    })
+}
+fn desk_load(w: i32, h: i32) {
+    if let Some(mut store) = desk_store() {
+        let desk = unsafe { &mut *(&raw mut DESK) };
+        desk.screen = (w, h);
+        if desk.load(&mut store).is_ok() {
+            log(b"[desktop] desktop surface shows /Users/user/Desktop\n");
+        }
+    }
+}
+fn desk_notice(text: &'static str) {
+    unsafe {
+        NOTICE = Some((text, arena_desktop::app_client::now() + 3_000_000));
+    }
+}
+fn desk_effect(e: arena_desktop::desk::Effect) {
+    use arena_desktop::desk::Effect;
+    match e {
+        Effect::None => {}
+        Effect::NoApplication => desk_notice("NO APPLICATION CAN OPEN THIS FILE"),
+        Effect::OpenFolder(p) => {
+            // Where Files starts, inside the home capability it is granted
+            // anyway: presentation, not authority.
+            let mut path = [0u8; 32];
+            let b = p.bytes();
+            let fits = b.len() <= 32 && b.iter().all(|c| c.is_ascii_graphic() || *c == b' ');
+            let shown: &[u8] = if fits { b } else { b"Desktop" };
+            path[..shown.len()].copy_from_slice(shown);
+            if launch(1, path, CAP_NONE).is_err() {
+                desk_notice("LAUNCH REFUSED / DESKTOP CAPACITY");
+            }
+        }
+        Effect::OpenDocument(p) => {
+            let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+                return;
+            };
+            match files.walk(USER_ROOT, p.bytes(), R_DOC) {
+                Ok((doc, _)) => {
+                    let mut title = [0u8; 32];
+                    for (t, c) in title.iter_mut().zip(p.name()) {
+                        *t = if c.is_ascii_graphic() || *c == b' ' {
+                            *c
+                        } else {
+                            b'?'
+                        };
+                    }
+                    let r = launch(2, title, doc);
+                    files.release(doc);
+                    if r.is_err() {
+                        desk_notice("LAUNCH REFUSED / DESKTOP CAPACITY");
+                    }
+                }
+                Err(_) => desk_notice("THE FILE COULD NOT BE OPENED"),
+            }
+        }
+    }
+}
+/// Re-list the Desktop folder at most once a second (another application
+/// or the terminal may have changed it).
+fn desk_poll(now: u64) {
+    if now < unsafe { DESK_POLL } {
+        return;
+    }
+    unsafe { DESK_POLL = now + 1_000_000 };
+    if let Some(mut store) = desk_store() {
+        unsafe { (*(&raw mut DESK)).poll(&mut store) };
+    }
+}
+
 fn describe(slot: u64) -> Option<[u64; 3]> {
     let mut d = [0; 3];
     (slot != CAP_NONE && unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0)
@@ -1286,6 +1369,10 @@ fn scene(now: u64) -> Scene {
             height: u32::from(h),
         }),
         chooser: chooser_view(),
+        desk: {
+            desk_poll(now);
+            unsafe { (*(&raw const DESK)).view }
+        },
     };
     scene.dark = unsafe { PREFS.dark };
     scene
@@ -1582,6 +1669,7 @@ extern "C" fn main() -> ! {
         FILES = Some(fs);
     }
     start_afs2();
+    desk_load(w as i32, h as i32);
 
     // Requests and input arrive on SERVER; queue them onto CLOCK when the
     // compositor is not parked in RECV, so it never polls (ADR-0071).
@@ -1683,7 +1771,22 @@ extern "C" fn main() -> ! {
                                 code,
                                 pressed,
                                 mods,
-                            } => state.key_input(code, pressed, mods),
+                            } => {
+                                let a = state.key_input(code, pressed, mods);
+                                // With no window focused, Enter, Delete and
+                                // Esc act on the desktop's selected icons.
+                                if pressed
+                                    && state.focused().is_none()
+                                    && matches!(code, 13 | 27 | 262)
+                                    && let Some(mut store) = desk_store()
+                                {
+                                    let desk = unsafe { &mut *(&raw mut DESK) };
+                                    desk_effect(desk.key(&mut store, code));
+                                    Action::Changed
+                                } else {
+                                    a
+                                }
+                            }
                             input_wire::Frame::Pointer {
                                 x,
                                 y,
@@ -1697,8 +1800,32 @@ extern "C" fn main() -> ! {
                                 if modal {
                                     chooser_pointer(px, py, buttons, w as i32, h as i32);
                                 }
-                                let a = state.pointer(px, py, if modal { 0 } else { buttons });
-                                let a = if modal { Action::Changed } else { a };
+                                // The desktop surface takes presses on bare
+                                // desktop and everything while it holds a
+                                // press or its menu; the window policy then
+                                // sees the pointer without buttons.
+                                let desk = unsafe { &mut *(&raw mut DESK) };
+                                let pressing = buttons & 3 != 0 && unsafe { DESK_BUTTONS } & 3 == 0;
+                                unsafe { DESK_BUTTONS = buttons };
+                                let to_desk = !modal
+                                    && desk_store().is_some()
+                                    && (desk.busy() || (pressing && state.bare(px, py)));
+                                if to_desk && let Some(mut store) = desk_store() {
+                                    if pressing && !desk.busy() {
+                                        state.blur();
+                                        desk.poll(&mut store);
+                                    }
+                                    let ctrl = state.mods & arena_desktop::model::MOD_CTRL != 0;
+                                    let now = arena_desktop::app_client::now();
+                                    let e = desk.pointer(&mut store, px, py, buttons, ctrl, now);
+                                    desk_effect(e);
+                                }
+                                let a = state.pointer(
+                                    px,
+                                    py,
+                                    if modal || to_desk { 0 } else { buttons },
+                                );
+                                let a = if modal || to_desk { Action::Changed } else { a };
                                 if wheel != 0 {
                                     state.wheel(wheel);
                                 }

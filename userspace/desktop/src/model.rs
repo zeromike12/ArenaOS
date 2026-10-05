@@ -639,6 +639,22 @@ impl State {
             self.send(h, Event::Chord { code, mods })
         }
     }
+    /// Whether (`x`, `y`) is bare desktop: no window, popup or edge there,
+    /// below the system bar and above the dock, with no drag in progress.
+    pub fn bare(&self, x: i32, y: i32) -> bool {
+        self.grab.is_none()
+            && self.capture.is_none()
+            && self.target(x, y).is_none()
+            && y >= m::SYSTEM_BAR_HEIGHT
+            && y < self.screen.1 - m::DOCK_HEIGHT
+    }
+    /// No window has keyboard focus (a click on the bare desktop).
+    pub fn blur(&mut self) {
+        if let Some(h) = self.focused.take() {
+            self.send(h, Event::Focus(false));
+            self.dismiss_transient(h, false);
+        }
+    }
     fn pointer_mods(&self) -> u8 {
         (if self.mods & MOD_SHIFT != 0 {
             POINTER_SHIFT

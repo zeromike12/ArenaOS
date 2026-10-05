@@ -139,9 +139,10 @@ def workflow(disk):
         time.sleep(.3)
         click(d, *row(1))
         keys(d, 'delete')
-        t = until(d, disk, lambda t: t.get('.Trash/user-bin') == b'\x80binary' and 'Documents/user-bin' not in t,
-                  'Delete did not move to the Trash')
-        assert t.get('.Trash/.restore/user-bin') == b'Documents/user-bin', t.get('.Trash/.restore/user-bin')
+        # The move commits first, then the restore record: wait for both.
+        until(d, disk, lambda t: t.get('.Trash/user-bin') == b'\x80binary' and 'Documents/user-bin' not in t
+              and t.get('.Trash/.restore/user-bin') == b'Documents/user-bin',
+              'Delete did not move to the Trash with its restore record')
         # Documents: Projects, user-note. Drag the note onto Projects; the
         # copy there already holds the name, so it lands as "user-note 2".
         x, y = row(1)

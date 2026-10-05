@@ -75,6 +75,8 @@ pub struct Shell {
     pub snap: Option<Rect>,
     /// The trusted file chooser (ADR-0077), while open.
     pub chooser: Option<ChooserView>,
+    /// The desktop surface: /Users/user/Desktop as icons (Phase 11.8).
+    pub desk: crate::desk::DeskView,
 }
 
 /// Rows of the chooser list shown at once.
@@ -125,6 +127,7 @@ impl Shell {
         switcher: None,
         snap: None,
         chooser: None,
+        desk: crate::desk::DeskView::EMPTY,
     };
 }
 
@@ -280,6 +283,8 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         switcher,
         snap,
         chooser,
+        // Drawn by compose.rs: icons under the windows, its menu above.
+        desk: _,
     } = *shell;
     let (w, h) = canvas.size();
     let (w, h) = (w as i32, h as i32);
