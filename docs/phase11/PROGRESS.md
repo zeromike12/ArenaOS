@@ -83,3 +83,49 @@ Super placement, minimize/dock restore, Alt+Tab, key repeat without
 stacking on host autorepeat, chords, wheel), 600-step composition
 equivalence including chrome hover, switcher, snap outline and dock
 state. Guest proof: `tools/test_m11_wm.py`.
+
+## 11.5 — AFS2 (ADR-0076), filesd (ADR-0077), RTC
+
+Host: the Python model `tools/afs2.py` and the Rust engine
+`userspace/afs2` cross-check images both ways. Engine proofs cover
+randomized operations against a model with remount and audit after every
+step, directory split and merge, every crash prefix of every mutating
+operation (exactly old or exactly new; a torn commit is old), and every
+crash prefix of `format` (never committed, or mountable and clean).
+They also cover 10,000 objects, a 16 MiB file and fail-closed mount.
+`tools/test_afs2_rust.py` runs five RED controls: in-place metadata,
+early free, missing parent update, commit not last and
+reformat-damaged.
+
+Guest (`tools/test_m11_afs2.py`, the real desktop, AFS1 seeded by a real
+boot plus host records):
+
+* Migration: 5 AFS1 files are imported. User files go to
+  `/Users/user/Documents`, the rest to `/System/imported-afs1`, and the
+  marker is committed last (129 block writes). The host model finds the
+  exact namespace and bytes, the AFS1 sectors are byte-identical, and
+  timestamps come from the RTC.
+* A second boot mounts with zero writes.
+* Interrupted import: boots are killed after BLKW4K #1, 2, 3, 32, 64 and
+  96. Each kill is verified to fall inside the import (no completion
+  line). The crashed region is either never committed or committed
+  without the marker, and the next boot re-imports to the exact
+  namespace. The kill lands a few writes after its trigger (the log
+  records how many were logged), so the never-committed state is reached
+  in some runs and not in others. That property is also proven
+  exhaustively on the host.
+* A committed volume with both commit records destroyed is refused (fail
+  closed) and is byte-identical afterwards.
+* With no clock, filesd reports "unknown" and every timestamp is 0. The
+  absent clock is injected at the kernel RTC reader, because OVMF
+  rewrites an out-of-range CMOS date: `-rtc base=1990` booted as 2090.
+  The source and EFI are restored byte-exactly.
+
+Found by the guest:
+
+| Problem | Fix |
+|---|---|
+| filesd faulted at startup | The engine built a whole `Volume` (368 KiB) as a stack temporary; it now resets in place |
+| The endpoint table was full | `MAX_ENDPOINTS` raised from 12 to 16 (ADR-0075 table) |
+| The strict syscalls failed through `syscall1`/`syscall2` (garbage in the unused argument registers) | They are called with explicit zeros |
+| The kernel EFI was not reproducible: relinking identical sources changed the PE timestamps and PDB GUID | `kernel/.cargo/config.toml` now passes `/Brepro /timestamp:0 /DEBUG:NONE`; three relinks are byte-identical |

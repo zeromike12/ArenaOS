@@ -17,8 +17,9 @@
 4. Fail closed: a committed volume with both commit records destroyed is
    refused, not repaired or formatted: its bytes do not change.
 5. Wall clock: with the CMOS RTC in range timestamps are real (within a
-   day of the host clock); with it out of range (1990) filesd says
-   "unknown" and every timestamp is 0, never invented.
+   day of the host clock); with no usable clock (injected at the kernel's
+   RTC reader) filesd says "unknown" and every timestamp is 0, never
+   invented.
 """
 import shutil
 import sys
@@ -41,6 +42,7 @@ FILES = {
 }
 MARKER = b'filesd: AFS2 mounted seq '
 DONE = b'filesd: AFS2 formatted; AFS1 import complete: '
+INTERRUPTED = 'filesd: AFS1 import was interrupted'
 
 
 def seeded(esp):
@@ -78,9 +80,9 @@ def mounted(disk):
     return vol, afs2.walk(vol)
 
 
-def boot(label, esp, disk, kill=None, extra=()):
-    # Shut down only once filesd has reported its mount.
-    feed = [] if kill else [((MARKER, b'arena>'), 1, b'shutdown\r')]
+def boot(label, esp, disk, kill=None, extra=(), ready=MARKER):
+    # Shut down only once filesd has reported its mount (or `ready`).
+    feed = [] if kill else [((ready, b'arena>'), 1, b'shutdown\r')]
     return mtest.boot(label, esp, feed, disk, kill=kill, pointer=True, extra_args=list(extra))
 
 
@@ -121,7 +123,7 @@ def main():
 
     # 2. Remount writes nothing.
     rc, s, _ = boot(f'{LABEL}-remount', esp, disk)
-    assert rc == 0 and MARKER.decode() in s and DONE.decode() not in s and 'interrupted' not in s, s[-3000:]
+    assert rc == 0 and MARKER.decode() in s and DONE.decode() not in s and INTERRUPTED not in s, s[-3000:]
     assert s.count('storaged: BLKW4K') == 0 and region(disk) == migrated
     assert disk.read_bytes()[:AFS1_BYTES] == afs1_before
     print('[m11-afs2] second boot mounts the committed volume with zero writes PASS', flush=True)
@@ -146,7 +148,7 @@ def main():
             state = f'committed seq {vol.seq} without marker'
         rc, s, _ = boot(f'{label}-recover', esp, disk)
         assert rc == 0 and DONE.decode() in s, s[-3000:]
-        assert ('import was interrupted' in s) == (state != 'never committed'), (label, state)
+        assert (INTERRUPTED in s) == (state != 'never committed'), (label, state)
         assert mounted(disk)[1] == expected(AFS1)
         assert disk.read_bytes()[:AFS1_BYTES] == afs1_before
         print(f'[m11-afs2] crash after BLKW4K #{n} (logged {logged}/{writes}): {state}; '
@@ -162,20 +164,40 @@ def main():
             f.write(b'\xee' * 64)
     damaged = region(disk)
     assert not afs2.never_committed(damaged)
-    rc, s, _ = boot(f'{LABEL}-corrupt', esp, disk)
+    rc, s, _ = boot(f'{LABEL}-corrupt', esp, disk, ready=b'file service offline')
     assert rc == 0 and 'refused to mount (CORRUPT) - fail closed, never repaired' in s, s[-3000:]
     assert region(disk) == damaged and s.count('storaged: BLKW4K') == 0
     print('[m11-afs2] damaged committed volume refused, never repaired or formatted PASS', flush=True)
 
-    # 5. Out-of-range RTC: unknown, never invented.
-    disk = seeded(esp)
-    AFS1 = stage.contents(disk)
-    rc, s, _ = boot(f'{LABEL}-no-clock', esp, disk, extra=['-rtc', 'base=1990-06-01T00:00:00'])
+    # 5. No usable clock: unknown, never invented. The firmware rewrites an
+    # out-of-range CMOS date (QEMU -rtc base=1990 boots as 2090), so the
+    # absent clock is injected at the kernel's one RTC reader instead; the
+    # source and artifacts are restored byte-exactly afterwards.
+    rtc = arena_env.REPO_ROOT / 'kernel/kernel/src/rtc.rs'
+    original = rtc.read_bytes()
+    needle = b'pub fn read_unix_seconds() -> Option<u64> {\n'
+    assert original.count(needle) == 1
+    artifacts = {p: p.read_bytes() for p in (esp, BUILD / 'arena-boot.efi')}
+    try:
+        rtc.write_bytes(original.replace(needle, needle + b'    if true { return None; }\n', 1))
+        mutant = mtest.build(f'{LABEL}-no-clock', desktop=True)
+        disk = seeded(mutant)
+        AFS1 = stage.contents(disk)
+        rc, s, _ = boot(f'{LABEL}-no-clock', mutant, disk)
+    finally:
+        rtc.write_bytes(original)
+        mtest.build(f'{LABEL}-restored', desktop=True)
+    assert rtc.read_bytes() == original
+    # The kernel image is deterministic (kernel/.cargo/config.toml): the
+    # restored source rebuilds the identical EFI. The ESP's FAT entry
+    # carries the file time, so its original bytes are put back.
+    assert (BUILD / 'arena-boot.efi').read_bytes() == artifacts[BUILD / 'arena-boot.efi'], 'restored EFI differs'
+    esp.write_bytes(artifacts[esp])
     assert rc == 0 and 'wall clock unknown' in s, s[-3000:]
     vol, tree = mounted(disk)
     assert tree == expected(AFS1) and set(times(vol)) == {0}
-    print('[m11-afs2] RTC out of range: "unknown" and zero timestamps, migration still exact PASS', flush=True)
-
+    print('[m11-afs2] no clock: "unknown" and zero timestamps, migration still exact; source/EFI restored '
+          'byte-exact PASS', flush=True)
 
 if __name__ == '__main__':
     sys.exit(main())
