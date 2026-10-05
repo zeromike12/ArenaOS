@@ -45,6 +45,8 @@ pub enum Frame {
     /// to save, `name` suggested). Nothing is granted by the request.
     Choose {
         save: bool,
+        /// Open for reading only (never with `save`).
+        read_only: bool,
         name: [u8; 32],
     },
     /// The lent capability (a filesd file capability) is offered for the
@@ -56,6 +58,7 @@ pub enum Frame {
     /// Reply to TakeGrant: the title of what was chosen (display only).
     Granted {
         save: bool,
+        read_only: bool,
         name: [u8; 32],
     },
 }
@@ -149,11 +152,21 @@ impl Frame {
             }
             Self::LaunchImage => 10,
             Self::Display => 11,
-            Self::Choose { save, name } | Self::Granted { save, name } => {
-                if !printable(&name) {
+            Self::Choose {
+                save,
+                read_only,
+                name,
+            }
+            | Self::Granted {
+                save,
+                read_only,
+                name,
+            } => {
+                if !printable(&name) || (save && read_only) {
                     return Err(Error::Invalid);
                 }
                 b[8] = u8::from(save);
+                b[9] = u8::from(read_only);
                 b[32..].copy_from_slice(&name);
                 if matches!(self, Self::Choose { .. }) { 13 } else { 16 }
             }
@@ -199,10 +212,18 @@ impl Frame {
             10 => Self::LaunchImage,
             11 => Self::Display,
             12 => Self::Create { name },
-            13 if b[8] <= 1 => Self::Choose { save: b[8] == 1, name },
+            13 if b[8] <= 1 && b[9] <= 1 => Self::Choose {
+                save: b[8] == 1,
+                read_only: b[9] == 1,
+                name,
+            },
             14 => Self::Offer,
             15 => Self::TakeGrant,
-            16 if b[8] <= 1 => Self::Granted { save: b[8] == 1, name },
+            16 if b[8] <= 1 && b[9] <= 1 => Self::Granted {
+                save: b[8] == 1,
+                read_only: b[9] == 1,
+                name,
+            },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -246,14 +267,26 @@ mod tests {
             },
             Frame::LaunchImage,
             Frame::Display,
-            Frame::Choose { save: true, name },
+            Frame::Choose {
+                save: true,
+                read_only: false,
+                name,
+            },
             Frame::Offer,
             Frame::TakeGrant,
-            Frame::Granted { save: false, name },
+            Frame::Granted {
+                save: false,
+                read_only: true,
+                name,
+            },
         ] {
             let b = f.encode().unwrap();
             assert_eq!(Frame::decode(&b), Ok(f));
+            let flags = matches!(f, Frame::Choose { .. } | Frame::Granted { .. });
             for i in [9, 24, 25, 26, 27, 28, 29, 30, 31] {
+                if flags && i == 9 {
+                    continue;
+                }
                 let mut bad = b;
                 bad[i] = 1;
                 assert_eq!(Frame::decode(&bad), Err(Error::Invalid));
@@ -261,6 +294,16 @@ mod tests {
             assert!(Frame::decode(&b[..63]).is_err());
         }
         assert!(Frame::Read { name: [0; 32] }.encode().is_err());
+        // A save is never read-only.
+        assert!(
+            Frame::Choose {
+                save: true,
+                read_only: true,
+                name
+            }
+            .encode()
+            .is_err()
+        );
         assert!(Frame::Put { name, length: 4097 }.encode().is_err());
         let mut bad = name;
         bad[1] = b'/';

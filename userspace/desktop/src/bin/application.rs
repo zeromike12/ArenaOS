@@ -120,7 +120,7 @@ struct Menu {
 fn menu_items(kind: u8) -> &'static [&'static str] {
     match kind {
         apps::TERMINAL => &["Clear", "Help", "List Files"],
-        apps::EDITOR => &["New", "Open...", "Save", "Save As..."],
+        apps::EDITOR => &["New", "Open...", "Save", "Save As...", "Open Read-Only..."],
         apps::FILES => &["Open in Editor", "New File...", "Delete", "Refresh"],
         apps::SETTINGS => &["Toggle Appearance", "Toggle Motion"],
         apps::MONITOR => &["Sample Now"],
@@ -404,6 +404,9 @@ impl App {
     /// Ask the broker's trusted chooser for a document (Open or Save As).
     /// The answer arrives later as an event; nothing is granted here.
     fn choose(&mut self, save: bool) -> Result<(), i64> {
+        self.choose_mode(save, false)
+    }
+    fn choose_mode(&mut self, save: bool, read_only: bool) -> Result<(), i64> {
         let suggestion = if save && self.editor.path[0] != 0 {
             self.editor.path
         } else {
@@ -413,6 +416,7 @@ impl App {
         };
         call(Frame::Choose {
             save,
+            read_only,
             name: suggestion,
         })?;
         self.status = if save { "CHOOSE WHERE TO SAVE" } else { "CHOOSE A DOCUMENT" };
@@ -420,7 +424,7 @@ impl App {
     }
     /// The chooser finished: take the granted capability, if any.
     fn chosen(&mut self, client: &Client) -> Result<(), i64> {
-        let Some((cap, title, save)) = service::take_grant()? else {
+        let Some((cap, title, save, read_only)) = service::take_grant()? else {
             self.status = "CANCELLED";
             return Ok(());
         };
@@ -435,7 +439,13 @@ impl App {
             self.editor.path = title;
             self.save(client)
         } else {
-            self.open_document(title)
+            self.open_document(title)?;
+            if read_only {
+                // The capability itself carries no write right: a save is
+                // refused by filesd, not by this application.
+                self.status = "OPENED READ-ONLY";
+            }
+            Ok(())
         }
     }
 
@@ -926,6 +936,13 @@ impl App {
             }
             (apps::EDITOR, 2) => self.save(client)?,
             (apps::EDITOR, 3) => self.choose(true)?,
+            (apps::EDITOR, 4) => {
+                if self.editor.dirty {
+                    self.status = "SAVE FIRST OR OPEN A NEW EDITOR";
+                } else {
+                    self.choose_mode(false, true)?
+                }
+            }
             (apps::FILES, 0) => self.activate(client)?,
             (apps::FILES, 1) => {
                 self.line.set(b"Untitled.txt");

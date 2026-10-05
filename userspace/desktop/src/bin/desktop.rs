@@ -111,6 +111,7 @@ struct Session {
     grant: u64,
     grant_title: [u8; 32],
     grant_save: bool,
+    grant_read_only: bool,
 }
 const EMPTY: Session = Session {
     region: CAP_NONE,
@@ -140,6 +141,7 @@ const EMPTY: Session = Session {
     grant: CAP_NONE,
     grant_title: [0; 32],
     grant_save: false,
+    grant_read_only: false,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -387,6 +389,7 @@ const CHOOSER_MAX: usize = 64;
 struct Chooser {
     session: usize,
     save: bool,
+    read_only: bool,
     /// Folder shown, relative to /Users/user.
     dir: [u8; 200],
     dir_len: usize,
@@ -405,7 +408,7 @@ struct Chooser {
 }
 static mut CHOOSER: Option<Chooser> = None;
 
-fn chooser_open(index: usize, save: bool, name: [u8; 32]) -> Result<(), i64> {
+fn chooser_open(index: usize, save: bool, read_only: bool, name: [u8; 32]) -> Result<(), i64> {
     let s = unsafe { SESSIONS[index] };
     if unsafe { (*(&raw const CHOOSER)).is_some() } || s.handle == 0 || s.grant_ready {
         return Err(STATUS_BUSY);
@@ -417,6 +420,7 @@ fn chooser_open(index: usize, save: bool, name: [u8; 32]) -> Result<(), i64> {
     let mut ch = Chooser {
         session: index,
         save,
+        read_only,
         dir: [0; 200],
         dir_len: 9,
         dir_cap: CAP_NONE,
@@ -508,11 +512,13 @@ fn chooser_finish(granted: Option<(u64, [u8; 32])>) {
     let Some(index) = (unsafe { (*(&raw const CHOOSER)).as_ref() }).map(|c| c.session) else {
         return;
     };
-    let save = unsafe { (*(&raw const CHOOSER)).as_ref() }.is_some_and(|c| c.save);
+    let (save, read_only) = unsafe { (*(&raw const CHOOSER)).as_ref() }
+        .map_or((false, false), |c| (c.save, c.read_only));
     chooser_close();
     let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(index) };
     s.grant_ready = true;
     s.grant_save = save;
+    s.grant_read_only = read_only;
     match granted {
         Some((cap, title)) => {
             s.grant = cap;
@@ -585,7 +591,8 @@ fn chooser_accept() {
         }
         let n = e.name().len().min(31);
         title[..n].copy_from_slice(&e.name()[..n]);
-        match f.open_child_in(ch.dir_cap, e.name(), R_DOC, head) {
+        let rights = if ch.read_only { arena_desktop::filesd_wire::R_READ } else { R_DOC };
+        match f.open_child_in(ch.dir_cap, e.name(), rights, head) {
             Ok((cap, _)) => chooser_finish(Some((cap, title))),
             Err(e) => ch.message = arena_desktop::files::describe_status(e),
         }
@@ -705,6 +712,7 @@ fn chooser_view() -> Option<arena_desktop::shell::ChooserView> {
     let rows_max = arena_desktop::shell::CHOOSER_ROWS;
     let mut v = arena_desktop::shell::ChooserView {
         save: ch.save,
+        read_only: ch.read_only,
         place: [0; 48],
         rows: [[0; 32]; arena_desktop::shell::CHOOSER_ROWS],
         count: 0,
@@ -1309,7 +1317,11 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
     let session = unsafe { SESSIONS[index] };
     let request = S::decode(bytes).map_err(|_| -2)?;
     match request {
-        S::Choose { save, name } => return chooser_open(index, save, name).map(|_| 0),
+        S::Choose {
+            save,
+            read_only,
+            name,
+        } => return chooser_open(index, save, read_only, name).map(|_| 0),
         S::TakeGrant => {
             let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(index) };
             if !s.grant_ready {
@@ -1322,6 +1334,7 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             } else {
                 S::Granted {
                     save: s.grant_save,
+                    read_only: s.grant_read_only,
                     name: s.grant_title,
                 }
             }

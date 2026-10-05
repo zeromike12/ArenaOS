@@ -85,6 +85,7 @@ pub const CHOOSER_ROWS: usize = 10;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChooserView {
     pub save: bool,
+    pub read_only: bool,
     /// Folder shown, as a breadcrumb (`Home/Documents`), display only.
     pub place: [u8; 48],
     /// Visible rows (display names; folders end in `/`).
@@ -567,7 +568,13 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
         canvas,
         x0 + m::L,
         y0 + 10,
-        if ch.save { "SAVE DOCUMENT" } else { "OPEN DOCUMENT" },
+        if ch.save {
+            "SAVE DOCUMENT"
+        } else if ch.read_only {
+            "OPEN DOCUMENT (READ-ONLY)"
+        } else {
+            "OPEN DOCUMENT"
+        },
         Style::Caption,
         t.muted,
     );

@@ -222,11 +222,16 @@ fn revoke(i: usize) {
     let head = usize::from(unsafe { GRANT[i].lineage }) == i;
     release(i);
     if head {
+        let mut n = 1u64;
         for j in 2..GRANTS {
             if unsafe { GRANT[j].live && usize::from(GRANT[j].lineage) == i } {
                 release(j);
+                n += 1;
             }
         }
+        log(b"filesd: lineage retired: ");
+        log_num(n);
+        log(b" record(s) now stale\n");
     }
 }
 

@@ -49,9 +49,9 @@ pub fn offer(cap: u64) -> Result<(), i64> {
     }
     r
 }
-/// The chooser's outcome: (capability slot, title, save) or None when the
-/// user cancelled.
-pub fn take_grant() -> Result<Option<(u64, [u8; 32], bool)>, i64> {
+/// The chooser's outcome: (capability slot, title, save, read-only) or
+/// None when the user cancelled.
+pub fn take_grant() -> Result<Option<(u64, [u8; 32], bool, bool)>, i64> {
     let mut bytes = Frame::TakeGrant.encode().map_err(|_| -2)?;
     let mut out = [0, 0, CAP_NONE];
     let rc = unsafe {
@@ -67,7 +67,11 @@ pub fn take_grant() -> Result<Option<(u64, [u8; 32], bool)>, i64> {
     };
     let reply = Frame::decode(&bytes);
     match (rc, out[0], reply) {
-        (0, 0, Ok(Frame::Granted { save, name })) if out[2] != CAP_NONE => Ok(Some((out[2], name, save))),
+        (0, 0, Ok(Frame::Granted {
+            save,
+            read_only,
+            name,
+        })) if out[2] != CAP_NONE => Ok(Some((out[2], name, save, read_only))),
         (0, 0, Ok(Frame::TakeGrant)) if out[2] == CAP_NONE => Ok(None),
         _ => {
             if out[2] != CAP_NONE {
