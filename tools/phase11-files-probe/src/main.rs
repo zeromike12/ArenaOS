@@ -156,7 +156,7 @@ pub extern "C" fn _start() -> ! {
         // Cancelled: nothing was granted.
         show(va, handle, 0xff20_40c0, 0);
     } else {
-        let pages = unsafe { syscall1(SYS_SHARED_PAGES, 1) } as u64;
+        let pages = unsafe { syscall6(SYS_SHARED_PAGES, 1, 0, 0, 0, 0, 0) } as u64;
         let io = va + (pages - 1) * 4096;
         let mut bad = 0usize;
         let mut k = 0usize;

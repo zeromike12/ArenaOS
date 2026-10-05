@@ -372,7 +372,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             // The client names which page of its region is the I/O page
             // (offset = page index); filesd checks it against the region's
             // real size before using it.
-            let pages = unsafe { syscall1(SYS_SHARED_PAGES, landed) };
+            let pages = unsafe { syscall6(SYS_SHARED_PAGES, landed, 0, 0, 0, 0, 0) };
             if pages <= 0 || req.offset >= pages as u64 {
                 return reply(S_INVAL, 0);
             }
@@ -504,7 +504,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             let place = if landed == CAP_NONE {
                 i
             } else {
-                let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
+                let b = unsafe { syscall6(SYS_ENDPOINT_BADGE, SLOT_EP, landed, 0, 0, 0, 0) };
                 match (b > 0).then(|| record(b as u32)).flatten() {
                     Some(j) if j != 1 => j,
                     _ => return reply(S_DENIED, 0),
@@ -600,7 +600,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             let dst = if landed == CAP_NONE {
                 g.object
             } else {
-                let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
+                let b = unsafe { syscall6(SYS_ENDPOINT_BADGE, SLOT_EP, landed, 0, 0, 0, 0) };
                 let Some(j) = (b > 0).then(|| record(b as u32)).flatten() else {
                     return reply(S_DENIED, 0);
                 };
@@ -632,7 +632,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             if landed == CAP_NONE {
                 return reply(S_INVAL, 0);
             }
-            let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
+            let b = unsafe { syscall6(SYS_ENDPOINT_BADGE, SLOT_EP, landed, 0, 0, 0, 0) };
             match (b > 0).then(|| record(b as u32)).flatten() {
                 Some(j) if j != 1 => {
                     revoke(j);
@@ -645,7 +645,7 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
             if landed == CAP_NONE {
                 return reply(S_INVAL, 0);
             }
-            let b = unsafe { syscall2(SYS_ENDPOINT_BADGE, SLOT_EP, landed) };
+            let b = unsafe { syscall6(SYS_ENDPOINT_BADGE, SLOT_EP, landed, 0, 0, 0, 0) };
             match (b > 0).then(|| record(b as u32)).flatten() {
                 Some(j) if unsafe { GRANT[j].lineage } == g.lineage => reply(S_OK, 0),
                 _ => reply(S_DENIED, 0),
@@ -874,7 +874,7 @@ extern "C" fn main() -> ! {
         }
         FRAME = win as u64;
         let mut seconds = 0u64;
-        if syscall2(SYS_RTC_READ, SLOT_RTC, (&raw mut seconds) as u64) == 0 && seconds != 0 {
+        if syscall6(SYS_RTC_READ, SLOT_RTC, (&raw mut seconds) as u64, 0, 0, 0, 0) == 0 && seconds != 0 {
             WALL_BASE_US = seconds * 1_000_000;
             MONO_BASE_US = mono_us();
         }
