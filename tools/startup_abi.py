@@ -24,6 +24,7 @@ RIGHT_DESTROY = 8
 RIGHTS_MASK = 15
 CAP_SHARED_REGION = 7
 CAP_NOTIFICATION = 3
+CAP_BOOT_IMAGE = 6
 CAP_BADGED_ENDPOINT = 12
 
 # Header offsets; these deliberately match the ADR table, not Rust symbols.
@@ -99,14 +100,19 @@ def encode_sample() -> bytes:
 
 
 def encode_runtime_sample(
-    cap_rights: int = RIGHT_READ | RIGHT_WRITE, instance_slot: int = 4
+    cap_rights: int = RIGHT_READ | RIGHT_WRITE,
+    instance_slot: int = 4,
+    include_boot_image: bool = False,
 ) -> bytes:
     app_id = b"com.arena.startup" + bytes(32 - len(b"com.arena.startup"))
+    caps = [(1, 5, CAP_NOTIFICATION, cap_rights)]
+    if include_boot_image:
+        caps.append((2, 5, CAP_BOOT_IMAGE, RIGHT_READ))
     return _encode_record(
         app_id=app_id,
         args=(b"startup-probe", b"alpha"),
         env=(b"MODE=proof",),
-        caps=((1, 5, CAP_NOTIFICATION, cap_rights),),
+        caps=tuple(caps),
         instance=instance_slot,
         generation=42,
         flags=0,
@@ -280,7 +286,9 @@ def write_runtime_fixtures(directory: Path) -> tuple[Path, Path, Path]:
     write_fixture(
         heap_slot,
         encode_runtime_sample(
-            RIGHT_READ | RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY, instance_slot=5
+            RIGHT_READ | RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY,
+            instance_slot=5,
+            include_boot_image=True,
         ),
     )
     return valid, mismatch, heap_slot

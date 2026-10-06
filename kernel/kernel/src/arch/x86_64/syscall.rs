@@ -187,6 +187,8 @@ pub const SYS_ENDPOINT_BADGE: u64 = 51;
 pub const SYS_SHARED_PAGES: u64 = 52;
 /// ADR-0085: set the current process thread's validated native FS.base.
 pub const SYS_TLS_SET: u64 = 53;
+/// ADR-0086: read only whether one caller-owned capability slot is occupied.
+pub const SYS_CAP_OCCUPIED: u64 = 54;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -717,6 +719,7 @@ extern "C" fn syscall_dispatch(
         SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => sys_endpoint_badge(a0, a1) as u64,
         SYS_SHARED_PAGES if [a1, a2, a3, a4, a5] == [0; 5] => sys_shared_pages(a0) as u64,
         SYS_TLS_SET if [a1, a2, a3, a4, a5] == [0; 5] => sys_tls_set(a0) as u64,
+        SYS_CAP_OCCUPIED if [a1, a2, a3, a4, a5] == [0; 5] => sys_cap_occupied(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -2574,6 +2577,19 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         super::clac();
     }
     STATUS_OK
+}
+
+/// SYS_CAP_OCCUPIED(slot): read caller-owned slot presence without exposing
+/// an object kind, identity, rights, or device address. Returns 0/1, or a typed
+/// error for a kernel caller/out-of-range slot.
+fn sys_cap_occupied(slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    crate::cap::slot_occupied(pid, slot as usize).map_or(STATUS_BAD_ARG, Status::from)
 }
 
 /// SYS_PROC_FINISH(slot, mode): a Process cap with DESTROY, not a pid.

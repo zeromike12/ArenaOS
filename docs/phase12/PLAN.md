@@ -105,11 +105,15 @@ and mutation-free. The Phase-11 qualified behavior is invariant.
 - [x] Add the reusable `arena-runtime` entry gate: copy into fixed private BSS,
   unmap/destroy slot 0, parse without heap allocation, and compare each exact
   live child cap before exposing slices or calling application code.
+- [x] Close the negative-space grant gap in ADR-0086: metadata-free
+  `SYS_CAP_OCCUPIED` scans all 64 caller-owned slots; listed slots must be
+  present with exact kind/rights and every unlisted slot must be empty.
 - [x] Independent ring-3 guest verifies actual startup/Notification caps,
-  argv/env, entry/base, initial RSP/RFLAGS, and one-shot cleanup. Four RED
-  controls (listed-cap rights, slot-0 rights, page count, malformed bytes)
-  refuse before application entry and return frames/processes/maps/regions to
-  baseline. The 512 MiB exact-artifact boot is `tools/test_m12_startup.py`.
+  argv/env, entry/base, initial RSP/RFLAGS, and one-shot cleanup. Five startup
+  RED controls (listed-cap rights, slot-0 rights, page count, malformed bytes,
+  and an unlisted live MemoryPool cap) refuse before application entry and
+  return frames/processes/maps/regions to baseline. The full 7/7 512 MiB
+  exact-artifact boot is `tools/test_m12_startup.py`.
 - [x] No ambient path authority, hidden entry allocator, or undocumented
   inherited capability in the tested ABI-v2 path. Production app-manager
   and installed-registry launch integration remains open.
@@ -147,12 +151,26 @@ and mutation-free. The Phase-11 qualified behavior is invariant.
 
 ### 12.7 — Child/helper process groups
 
-- [ ] Mediated allowlisted helper spawn with argv/env and explicit attenuated
-  cap list; no ambient inheritance.
-- [ ] Retain exact Process caps at the app manager; process group membership
-  is not a PID/app-name lookup. Wait/status/terminate authorization are tested.
-- [ ] Prove parent death, child death during wait, helper restart, cap teardown,
-  stale Process identity and unauthorized helper requests.
+- [x] Add `arena-process::ChildProcess` and fixed-capacity `ProcessGroup`,
+  re-exported from `arena-runtime`: spawn through existing `SYS_SPAWN` with an
+  explicit grant list (≤5), discover and retain the exact Process/READ|DESTROY
+  cap, and use that slot—not the descriptive PID—for liveness and finish.
+  Group membership uses generation handles and capacity preflight; ADR-0087
+  records the wake-hint, retry and cleanup contract.
+- [x] Host and M12 ring-3 tests cover a full-group refusal before spawn, an
+  explicit no-inheritance child spawn, exit-notification wake, Process-cap
+  liveness check, exit reap, bare-PID refusal, stale group handle,
+  live-stop/exited-reap choice, and cleanup failure retaining ownership.
+- [x] Integrate the group with the protected Desktop manager for real spawned
+  application lifecycle at the existing 12-session ceiling; Session records
+  hold only generation-safe process handles and the manager uses exact Process
+  caps for liveness/finish. Targeted M10/M11 lifecycle regressions pass.
+- [ ] Extend manager integration to installed-app/allowlisted helper
+  resolution, stable startup argv/env, and exact attenuated helper delegation;
+  qualify the required 32-window/headless-helper scale without raising limits
+  until a measured resource budget permits it.
+- [ ] Prove parent death, child death during wait, helper restart, concrete
+  cap teardown, stale Process identity and unauthorized helper requests.
 
 ### 12.8 — Streams/pipes and startup stdio
 
@@ -166,11 +184,28 @@ and mutation-free. The Phase-11 qualified behavior is invariant.
 
 ### 12.9 — Userspace integer runtime handle table
 
-- [ ] Optional userspace-only integer handle map over Stream, file/directory
-  capabilities, event/timer, socket client, and child-process objects.
-- [ ] Test duplication, close, invalid/full table, stale generation reuse,
-  rights attenuation and teardown. Kernel capability slots remain native
-  authority; an integer by itself has no cross-process meaning.
+- [x] Add the bounded no_std `arena-runtime::handles::HandleTable` core:
+  process-local opaque indices, per-slot generations, wrap retirement, close
+  returning the owned object for explicit cleanup, and duplication through a
+  caller-supplied capability-copy/attenuation path. A full-table insert returns
+  the rejected object unchanged; duplication refuses before invoking its copy
+  path, so neither can lose or create an untracked capability.
+- [x] Host and M12 ring-3 proofs cover close/reuse stale rejection, invalid and
+  full values, generation exhaustion, rights attenuation, and failure-atomic
+  duplication. The M12 guest also uses `HeldCapability` to copy a real
+  Notification into an empty slot with attenuated rights, verifies the source
+  remains unchanged, closes the duplicate through the kernel, and proves a full
+  handle table never invokes the real copy path. Handle bits confer no
+  authority.
+- [x] Add `HeldCapability` for actual occupied/described cap slots, real
+  attenuation-only copy and explicit destroy; M12 verifies the source remains
+  unchanged and the copied Notification slot is reclaimed.
+- [x] Add generation-safe child-process group handles over exact held Process
+  caps; M12 proves real spawn/liveness/reap, and teardown refusal retains the
+  member for retry. (ADR-0087.)
+- [ ] Bind wrappers to held Stream, file/directory, event/timer, and socket-
+  client objects; prove close/teardown against concrete owners. Add
+  multi-thread synchronization before sharing the table across user threads.
 
 ### 12.10 — PIE and executable modernization
 

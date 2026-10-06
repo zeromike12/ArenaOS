@@ -15,12 +15,24 @@ version = "0.1.0"
 dependencies = [
  "arena-compositor-model",
  "arena-gfxkit",
+ "arena-process",
  "arena-ui",
 ]
 
 [[package]]
 name = "arena-gfxkit"
 version = "0.1.0"
+
+[[package]]
+name = "arena-lib"
+version = "0.1.0"
+
+[[package]]
+name = "arena-process"
+version = "0.1.0"
+dependencies = [
+ "arena-lib",
+]
 
 [[package]]
 name = "arena-ui"

@@ -5,16 +5,19 @@ extern crate alloc;
 
 use alloc::alloc::{alloc, dealloc};
 use arena_lib::abi::{
-    RIGHTS_DESTROY as ABI_RIGHT_DESTROY, RIGHTS_READ as ABI_RIGHT_READ, SYS_CAP_COPY,
-    SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_TIMER_ARM, SYS_TLS_SET, SYS_WAIT, syscall1, syscall2,
-    syscall3, syscall6,
+    CAP_SLOTS, RIGHTS_DESTROY as ABI_RIGHT_DESTROY, RIGHTS_READ as ABI_RIGHT_READ, SYS_CAP_COPY,
+    SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_PROC_FINISH, SYS_PROC_LIVE, SYS_TIMER_ARM, SYS_TLS_SET,
+    SYS_WAIT, syscall1, syscall2, syscall3, syscall6,
 };
 use arena_platform_core::startup::{
-    CAP_KIND_NOTIFICATION, CapabilityRole, RIGHT_COPY, RIGHT_DESTROY, RIGHT_READ, RIGHT_WRITE,
-    StartupView,
+    CAP_KIND_BOOT_IMAGE, CAP_KIND_NOTIFICATION, CapabilityRole, RIGHT_COPY, RIGHT_DESTROY,
+    RIGHT_READ, RIGHT_WRITE, StartupView,
 };
 use arena_runtime::{
+    capabilities::{Error as CapabilityError, HeldCapability},
+    handles::{DuplicateError, Error as HandleError, HandleTable, InsertError},
     heap::BoundedHeap,
+    process::{ChildProcess, ExitSignal, GroupSpawnError, ProcessGroup},
     startup::enter,
     tls::{self, ThreadControlBlock},
 };
@@ -31,6 +34,8 @@ const EXIT_OK: u64 = 37;
 const EXIT_APP_CALLED_ON_BAD_CAP: u64 = 38;
 const EXIT_HEAP_FAILED: u64 = 42;
 const EXIT_TLS_FAILED: u64 = 43;
+const EXIT_HANDLES_FAILED: u64 = 44;
+const EXIT_PROCESS_GROUP_FAILED: u64 = 45;
 const TLS_SENTINEL: u64 = 0xA11C_EA05_F512_0042;
 const HEAP_TEST_BYTES: usize = arena_runtime::heap::MAX_ALLOCATION_BYTES;
 const HEAP_TEST_PAGES: usize = arena_runtime::heap::MAX_HEAP_PAGES;
@@ -139,6 +144,203 @@ fn tls_proof() -> bool {
     // after clearing: with base zero, FS-relative reads intentionally fault.
     // SAFETY: zero is the documented no-TLS value.
     (unsafe { syscall6(SYS_TLS_SET, 0, 0, 0, 0, 0, 0) }) == 0
+}
+
+#[derive(Clone, Copy)]
+struct ProofHandleObject {
+    cap_slot: u8,
+    rights: u32,
+}
+
+fn handles_proof() -> bool {
+    const READ: u32 = 1;
+    const WRITE: u32 = 2;
+    let mut table = HandleTable::<ProofHandleObject, 2>::new();
+    let parent = match table.insert(ProofHandleObject {
+        cap_slot: 3,
+        rights: READ | WRITE,
+    }) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    let copied = match table.duplicate_with(parent, |object| {
+        let requested = READ;
+        if requested & !object.rights != 0 {
+            return Err(());
+        }
+        Ok(ProofHandleObject {
+            cap_slot: 4,
+            rights: requested,
+        })
+    }) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    if table.get(parent).map(|object| object.rights) != Ok(READ | WRITE)
+        || table
+            .get(copied)
+            .map(|object| (object.cap_slot, object.rights))
+            != Ok((4, READ))
+    {
+        return false;
+    }
+    if table.close(copied).map(|object| object.cap_slot) != Ok(4) {
+        return false;
+    }
+    let replacement = match table.insert(ProofHandleObject {
+        cap_slot: 5,
+        rights: WRITE,
+    }) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    if replacement.as_raw() as u16 != copied.as_raw() as u16
+        || replacement.as_raw() >> 16 == copied.as_raw() >> 16
+        || table.get(copied).is_ok()
+        || table.get(replacement).map(|object| object.cap_slot) != Ok(5)
+    {
+        return false;
+    }
+
+    // A full table must refuse before the callback can copy authority.
+    let mut copy_called = false;
+    let full = table.duplicate_with(parent, |_| {
+        copy_called = true;
+        Ok::<_, ()>(ProofHandleObject {
+            cap_slot: 6,
+            rights: READ,
+        })
+    });
+    if copy_called || !matches!(full, Err(DuplicateError::Table(HandleError::Full))) {
+        return false;
+    }
+    let rejected = table.insert(ProofHandleObject {
+        cap_slot: 6,
+        rights: READ,
+    });
+    if !matches!(
+        rejected,
+        Err(InsertError::Full(ProofHandleObject {
+            cap_slot: 6,
+            rights: READ,
+        }))
+    ) {
+        return false;
+    }
+    table.close(parent).is_ok() && table.close(replacement).is_ok() && table.is_empty()
+}
+
+fn capability_table_proof() -> bool {
+    const READ_DESTROY: u32 = RIGHT_READ | RIGHT_DESTROY;
+    const FULL_RIGHTS: u32 = READ_DESTROY | RIGHT_WRITE | RIGHT_COPY;
+    let source = match HeldCapability::from_slot(1) {
+        Ok(capability)
+            if capability.kind() == CAP_KIND_NOTIFICATION && capability.rights() == FULL_RIGHTS =>
+        {
+            capability
+        }
+        _ => return false,
+    };
+    let mut table = HandleTable::<HeldCapability, 2>::new();
+    let source_handle = match table.insert(source) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    let duplicate_handle =
+        match table.duplicate_with(source_handle, |held| held.copy_to(3, READ_DESTROY)) {
+            Ok(handle) => handle,
+            Err(_) => return false,
+        };
+    if table
+        .get(duplicate_handle)
+        .map(|capability| (capability.slot(), capability.kind(), capability.rights()))
+        != Ok((3, CAP_KIND_NOTIFICATION, READ_DESTROY))
+    {
+        return false;
+    }
+
+    // Even with a real copy path available, a full integer-handle table must
+    // refuse before SYS_CAP_COPY could install a second kernel capability.
+    let mut copy_called = false;
+    let full = table.duplicate_with(source_handle, |held| {
+        copy_called = true;
+        held.copy_to(4, READ_DESTROY)
+    });
+    if copy_called || !matches!(full, Err(DuplicateError::Table(HandleError::Full))) {
+        return false;
+    }
+
+    let duplicate = match table.close(duplicate_handle) {
+        Ok(capability) => capability,
+        Err(_) => return false,
+    };
+    if duplicate.destroy().is_err() {
+        return false;
+    }
+    if !matches!(HeldCapability::from_slot(3), Err(CapabilityError::Empty(3)))
+        || !matches!(HeldCapability::from_slot(4), Err(CapabilityError::Empty(4)))
+    {
+        return false;
+    }
+    let original = match HeldCapability::from_slot(1) {
+        Ok(capability) => capability,
+        Err(_) => return false,
+    };
+    if original.rights() != FULL_RIGHTS || original.kind() != CAP_KIND_NOTIFICATION {
+        return false;
+    }
+    table.close(source_handle).is_ok() && table.is_empty()
+}
+
+fn process_group_proof() -> bool {
+    const EXIT_BADGE: u64 = 0x5052_0001;
+    let mut group = ProcessGroup::<ChildProcess, 1>::new();
+    let handle = match group.spawn(|| {
+        ChildProcess::spawn(
+            2,
+            &[],
+            Some(ExitSignal {
+                notification_slot: 1,
+                badge: EXIT_BADGE,
+            }),
+        )
+    }) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    let pid = match group.get(handle) {
+        Ok(child) => child.diagnostic_pid(),
+        Err(_) => return false,
+    };
+    if pid < CAP_SLOTS as u64
+        || group.can_spawn()
+        || unsafe { syscall1(SYS_PROC_LIVE, pid) } >= 0
+        || unsafe { syscall2(SYS_PROC_FINISH, pid, 0) } >= 0
+    {
+        return false;
+    }
+
+    // Table capacity is checked before the create closure could call SYS_SPAWN.
+    let mut spawn_called = false;
+    let full = group.spawn(|| {
+        spawn_called = true;
+        ChildProcess::spawn(2, &[], None)
+    });
+    if spawn_called || !matches!(full, Err(GroupSpawnError::Full)) {
+        return false;
+    }
+
+    // An exit badge is only a wake hint. The group checks the exact held
+    // Process cap before reaping; the PID above was never used as authority.
+    if unsafe { syscall6(SYS_WAIT, 1, 0, 0, 0, 0, 0) } != EXIT_BADGE as i64
+        || group.is_live(handle) != Ok(false)
+        || group.reap_exited(handle).is_err()
+        || !matches!(group.get(handle), Err(HandleError::Stale))
+        || !matches!(HeldCapability::from_slot(3), Err(CapabilityError::Empty(3)))
+    {
+        return false;
+    }
+    group.is_empty()
 }
 
 fn heap_proof(instance_slot: u16) -> bool {
@@ -270,6 +472,7 @@ fn check_startup(view: StartupView<'_>) -> u64 {
     let initial_rsp = unsafe { core::ptr::addr_of!(INITIAL_RSP).read_volatile() };
     // SAFETY: paired with the immediately preceding _start write.
     let initial_rflags = unsafe { core::ptr::addr_of!(INITIAL_RFLAGS).read_volatile() };
+    let expected_capability_count = if view.instance_slot() == 5 { 2 } else { 1 };
     if initial_rsp != INITIAL_STACK_TOP
         || initial_rflags & (1 << 9) == 0
         || initial_rflags & (1 << 10) != 0
@@ -284,7 +487,7 @@ fn check_startup(view: StartupView<'_>) -> u64 {
         || view.argument(1) != Some(&b"alpha"[..])
         || view.environment_count() != 1
         || view.environment(0) != Some(&b"MODE=proof"[..])
-        || view.capability_count() != 1
+        || view.capability_count() != expected_capability_count
         || view.cwd_descriptor().is_some()
         || view.stdin_descriptor().is_some()
         || view.stdout_descriptor().is_some()
@@ -316,11 +519,41 @@ fn check_startup(view: StartupView<'_>) -> u64 {
         arena_lib::abi::write_all(b"m12:startup:descriptor: FAIL\n");
         return 41;
     }
+    if view.instance_slot() == 5 {
+        let Some(boot_image) = view.capability(1) else {
+            return EXIT_PROCESS_GROUP_FAILED;
+        };
+        if boot_image.slot != 2
+            || boot_image.role != CapabilityRole::Other
+            || boot_image.kind != CAP_KIND_BOOT_IMAGE
+            || boot_image.rights != RIGHT_READ
+        {
+            arena_lib::abi::write_all(b"m12:startup:boot-image: FAIL\n");
+            return EXIT_PROCESS_GROUP_FAILED;
+        }
+        if !process_group_proof() {
+            arena_lib::abi::write_all(b"m12:startup:process-group: FAIL\n");
+            return EXIT_PROCESS_GROUP_FAILED;
+        }
+        arena_lib::abi::write_all(b"m12:startup:process-group: PASS\n");
+    }
     if !tls_proof() {
         arena_lib::abi::write_all(b"m12:startup:tls: FAIL\n");
         return EXIT_TLS_FAILED;
     }
     arena_lib::abi::write_all(b"m12:startup:tls: PASS\n");
+    if !handles_proof() {
+        arena_lib::abi::write_all(b"m12:startup:handles: FAIL\n");
+        return EXIT_HANDLES_FAILED;
+    }
+    arena_lib::abi::write_all(b"m12:startup:handles: PASS\n");
+    if view.instance_slot() == 5 {
+        if !capability_table_proof() {
+            arena_lib::abi::write_all(b"m12:startup:capability-handles: FAIL\n");
+            return EXIT_HANDLES_FAILED;
+        }
+        arena_lib::abi::write_all(b"m12:startup:capability-handles: PASS\n");
+    }
     if !heap_proof(view.instance_slot()) {
         arena_lib::abi::write_all(b"m12:startup:heap: FAIL\n");
         return EXIT_HEAP_FAILED;

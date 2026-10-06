@@ -221,6 +221,18 @@ pub fn read(pid: u64, slot: usize) -> Result<Cap, &'static str> {
     })
 }
 
+/// Read occupancy of one exact slot in a live process. This reveals no kind,
+/// object identity, rights, or device address; it is used only to distinguish
+/// an empty slot from an un-describable held object at the startup boundary.
+pub fn slot_occupied(pid: u64, slot: usize) -> Option<bool> {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| {
+            cs.get(slot).map(|cap| !matches!(cap.obj, CapObj::None))
+        })
+        .flatten()
+    })
+}
+
 /// Does `pid` hold the SERVE side of endpoint `eid`? (M6.5, ADR-0028.)
 ///
 /// The serve side is `Endpoint` + READ — the same test `SYS_IPC_RECV`

@@ -677,15 +677,22 @@ userspace compatibility server; the kernel does not interpret its syscall
 numbers or semantics. Phase 12 is building this platform on the Phase-11
 filesystem/desktop without turning ArenaOS into Linux. ADR-0081 freezes APB1,
 ADR-0082 chooses protected AFS2 staged activation, and ADR-0083 freezes an
-additive userspace-owned startup ABI. Host no_std verifier/installer/registry
+additive userspace-owned startup ABI. ADR-0086 adds a metadata-free occupancy
+query so the entry gate verifies the complete 64-slot capability inventory,
+not just listed descriptors. Host no_std verifier/installer/registry
 foundations are not yet integrated into protected guest filesd or the desktop.
 The ABI-v2 codec and reusable no-alloc startup gate have an independently
-linked ring-3 boot proof with four fail-closed controls. ADR-0084's bounded
-native heap is also guest-qualified at its 32-page cap with exact
-process-teardown accounting. ADR-0085 adds per-thread FS-base save/restore and
-an independently tested TLS handoff while leaving GS/`swapgs` unchanged. These
-proofs are not production launcher/service integration; general VM and
-multi-user-thread support remain open. See ADR-0080–0085 and
+linked ring-3 boot proof with five startup RED controls, including refusal of
+an unlisted live cap. ADR-0084's bounded native heap is guest-qualified at its
+32-page cap with exact process-teardown accounting. ADR-0085 adds per-thread
+FS-base save/restore and an independently tested TLS handoff while leaving
+GS/`swapgs` unchanged. ADR-0087 records capability-native ProcessGroup
+lifecycles. The M12 proof exercises the generation-safe runtime handle-table
+core, real attenuated Notification copy/close, and child spawn/wait/reap via an
+exact held Process cap. The protected Desktop manager now uses the same
+capability-native ProcessGroup for its real children at the existing 12-session
+limit; installed-app/helper policy, 32-window scaling, general VM, and
+multi-user-thread support remain open. See ADR-0080–0087 and
 `docs/phase12/ARCHITECTURE-AUDIT.md` for the audit, limits and staged gates.
 
 ## 15. Current implementation state

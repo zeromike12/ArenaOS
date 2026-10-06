@@ -1184,20 +1184,29 @@ ADR-0080 separates app definitions, instances, process groups, windows, native
 capability authority, and the future launch-selected foreign proxy. ADR-0081
 freezes a distinct bounded APB1 multi-file format while preserving APKG v1;
 ADR-0082 chooses protected AFS2 staging, durable readback, cleanup, and atomic
-rename activation; ADR-0083 freezes the additive userspace-owned startup ABI.
-Host-only no_std lifecycle and APB1 install/registry cores now pass 34 Rust
-tests plus the independent Python/OpenSSL oracle; the APB1 key resolver uses
-existing `Chain` semantics but is not fed by guest persistent policy authority.
-ADR-0083's no-alloc codec and reusable startup entry gate pass independent Rust
-and Python vectors. ADR-0084 adds a bounded native `GlobalAlloc`; the exact
-M12 boot independently validates startup, rejects malformed ABI inputs,
-qualifies FS-base TLS across a timer/kernel-thread handoff, fills 32 heap pages,
-refuses page 33, frees/reuses blocks, preserves an occupied runtime cap slot,
-and verifies process-teardown accounting (6/6). APB1/registry are still not
-wired to protected guest filesd or the desktop. Production launcher integration,
-general VM, user-thread lifecycle/TLS uniqueness, process groups, streams,
-handles, PIE, foreign proxy, complete resource qualification, the artifact-bound
-100-boot run and extracted final archive remain open. See [the
+rename activation; ADR-0083 freezes the additive userspace-owned startup ABI;
+ADR-0086 adds metadata-free occupancy checks for an exact 64-slot startup
+capability inventory; ADR-0087 records capability-native ProcessGroup
+lifecycles. Host-only no_std lifecycle and APB1 install/registry cores now pass
+34 Rust tests plus the independent Python/OpenSSL oracle; the APB1 key resolver
+uses existing `Chain` semantics but is not fed by guest persistent policy
+authority. ADR-0083's no-alloc codec and reusable startup entry gate pass
+independent Rust and Python vectors. ADR-0084 adds a bounded native
+`GlobalAlloc`; the exact M12 boot validates startup, rejects malformed ABI
+inputs and an unlisted live capability, qualifies FS-base TLS across a
+timer/kernel-thread handoff, exercises the generation-safe handle table and
+real attenuated Notification copy/close, and spawns/waits/reaps a child only
+through its held Process capability. It fills 32 heap pages, refuses page 33,
+frees/reuses blocks, preserves an occupied runtime cap slot, and verifies
+process-teardown accounting (7/7). The protected Desktop now routes real app
+children through the capability-native ProcessGroup at its existing 12-session
+limit; M10 app/dynamic and M11 window/files regressions pass. APB1/registry are
+still not wired to protected guest filesd or the desktop. Installed-app and
+helper resolution, 32-window process/resource scaling, general VM, user-thread
+lifecycle/TLS uniqueness, parent-death handling, streams, typed
+stream/file/event/socket wrappers, PIE, foreign proxy, complete resource
+qualification, the artifact-bound 100-boot run and extracted final archive
+remain open. See [the
 Phase-12 plan](phase12/PLAN.md) and [progress ledger](phase12/PROGRESS.md).
 
 ---

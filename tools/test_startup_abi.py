@@ -63,17 +63,21 @@ class TestStartupAbi(unittest.TestCase):
             abi.encode_runtime_sample(
                 abi.RIGHT_READ | abi.RIGHT_WRITE | abi.RIGHT_COPY | abi.RIGHT_DESTROY,
                 instance_slot=5,
+                include_boot_image=True,
             ),
         )
         self.assertEqual(abi.parse(heap_slot)["instance_slot"], 5)
         self.assertEqual(
             abi.parse(heap_slot)["capabilities"],
-            ((
-                1,
-                5,
-                abi.CAP_NOTIFICATION,
-                abi.RIGHT_READ | abi.RIGHT_WRITE | abi.RIGHT_COPY | abi.RIGHT_DESTROY,
-            ),),
+            (
+                (
+                    1,
+                    5,
+                    abi.CAP_NOTIFICATION,
+                    abi.RIGHT_READ | abi.RIGHT_WRITE | abi.RIGHT_COPY | abi.RIGHT_DESTROY,
+                ),
+                (2, 5, abi.CAP_BOOT_IMAGE, abi.RIGHT_READ),
+            ),
         )
 
     def test_mutated_offsets_padding_and_tail_refuse(self):
@@ -109,6 +113,21 @@ class TestStartupAbi(unittest.TestCase):
         for mutated in mutations:
             with self.assertRaises(abi.Refusal):
                 abi.parse(bytes(mutated))
+
+    def test_cap_inventory_syscall_number_and_slot_bound_are_mirrored(self):
+        userspace_abi = (ROOT / "userspace/abi.rs").read_text()
+        kernel_syscall = (ROOT / "kernel/kernel/src/arch/x86_64/syscall.rs").read_text()
+        kernel_caps = (ROOT / "kernel/kernel/src/cap.rs").read_text()
+        kernel_spawn = (ROOT / "kernel/kernel/src/spawn.rs").read_text()
+        self.assertIn("pub const SYS_CAP_OCCUPIED: u64 = 54;", userspace_abi)
+        self.assertIn("pub const SYS_CAP_OCCUPIED: u64 = 54;", kernel_syscall)
+        self.assertIn("pub const CAP_SLOTS: usize = 64;", userspace_abi)
+        self.assertIn("pub const CAP_SLOTS: usize = 64;", kernel_caps)
+        self.assertIn("pub const CAP_KIND_PROCESS: u8 = 4;", userspace_abi)
+        platform_startup = (ROOT / "userspace/arena-platform/src/startup.rs").read_text()
+        self.assertIn("pub const CAP_KIND_PROCESS: u8 = 4;", platform_startup)
+        self.assertIn("pub const MAX_SPAWN_INHERIT: usize = 5;", userspace_abi)
+        self.assertIn("pub const MAX_INHERIT: usize = 5;", kernel_spawn)
 
     def test_slot_zero_transport_requires_exact_read_only_one_page(self):
         self.assertTrue(abi.validate_startup_cap((abi.CAP_SHARED_REGION, 1, 9), 1))

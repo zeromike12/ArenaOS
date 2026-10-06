@@ -8,6 +8,7 @@ description = "ArenaOS native, bounded, capability-checked process startup runti
 [dependencies]
 arena-lib = { path = "../arena-lib" }
 arena-platform-core = { path = "../arena-platform" }
+arena-process = { path = "../arena-process" }
 
 [[bin]]
 name = "arena-startup-proof"

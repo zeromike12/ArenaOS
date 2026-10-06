@@ -5,8 +5,8 @@
 //! it a read-only slot-0 SharedRegion and one explicit Notification in slot 1.
 //! The writable staging cap is destroyed before the guest runs. The valid
 //! launch checks slot descriptions, argv/env, entry, RSP/RFLAGS, 32-page heap
-//! OOM/reuse and teardown. Hostile controls prove refusal before app code and
-//! non-overwrite of the runtime's reserved heap-cap slot.
+//! OOM/reuse and teardown. Hostile controls prove refusal before app code,
+//! exact cap-table inventory, and non-overwrite of the reserved heap-cap slot.
 
 use crate::arch::x86_64::syscall;
 use crate::cap::{self, Cap, CapObj};
@@ -15,7 +15,7 @@ use crate::{frames, ipc, proc, sched, shared, spawn, timekeeping, timer};
 
 type Res = Result<(), &'static str>;
 const PROOF_BOOT_IMAGE: u32 = 10;
-const CASE_COUNT: usize = 6;
+const CASE_COUNT: usize = 7;
 const STARTUP_REFUSED: u64 = 0xA12;
 const APP_EXIT_OK: u64 = 37;
 const STACK_TOP_EXPECTED: u64 = 0x0021_4000;
@@ -36,6 +36,7 @@ struct Case {
     pages: u32,
     startup_rights: u32,
     notification_rights: u32,
+    extra_cap: Option<Cap>,
     mutation: Option<(usize, u8)>,
     expected_status: u64,
     expected_write: &'static [u8],
@@ -108,6 +109,7 @@ pub fn run_suite() -> bool {
             pages: 1,
             startup_rights: cap::RIGHTS_READ | cap::RIGHTS_DESTROY,
             notification_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+            extra_cap: None,
             mutation: None,
             expected_status: APP_EXIT_OK,
             expected_write: APP_MESSAGE,
@@ -118,6 +120,7 @@ pub fn run_suite() -> bool {
             pages: 1,
             startup_rights: cap::RIGHTS_READ | cap::RIGHTS_DESTROY,
             notification_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+            extra_cap: None,
             mutation: None,
             expected_status: STARTUP_REFUSED,
             expected_write: REFUSAL_MESSAGE,
@@ -128,6 +131,7 @@ pub fn run_suite() -> bool {
             pages: 1,
             startup_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE | cap::RIGHTS_DESTROY,
             notification_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+            extra_cap: None,
             mutation: None,
             expected_status: STARTUP_REFUSED,
             expected_write: REFUSAL_MESSAGE,
@@ -138,6 +142,7 @@ pub fn run_suite() -> bool {
             pages: 2,
             startup_rights: cap::RIGHTS_READ | cap::RIGHTS_DESTROY,
             notification_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+            extra_cap: None,
             mutation: None,
             expected_status: STARTUP_REFUSED,
             expected_write: REFUSAL_MESSAGE,
@@ -148,7 +153,22 @@ pub fn run_suite() -> bool {
             pages: 1,
             startup_rights: cap::RIGHTS_READ | cap::RIGHTS_DESTROY,
             notification_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+            extra_cap: None,
             mutation: Some((0, b'X')),
+            expected_status: STARTUP_REFUSED,
+            expected_write: REFUSAL_MESSAGE,
+        },
+        Case {
+            name: "unlisted_capability_red",
+            page: VALID_PAGE,
+            pages: 1,
+            startup_rights: cap::RIGHTS_READ | cap::RIGHTS_DESTROY,
+            notification_rights: cap::RIGHTS_READ | cap::RIGHTS_WRITE,
+            extra_cap: Some(Cap {
+                obj: CapObj::MemoryPool,
+                rights: cap::RIGHTS_WRITE,
+            }),
+            mutation: None,
             expected_status: STARTUP_REFUSED,
             expected_write: REFUSAL_MESSAGE,
         },
@@ -161,6 +181,12 @@ pub fn run_suite() -> bool {
                 | cap::RIGHTS_WRITE
                 | cap::RIGHTS_COPY
                 | cap::RIGHTS_DESTROY,
+            extra_cap: Some(Cap {
+                obj: CapObj::BootImage {
+                    index: PROOF_BOOT_IMAGE,
+                },
+                rights: cap::RIGHTS_READ,
+            }),
             mutation: None,
             expected_status: APP_EXIT_OK,
             expected_write: APP_MESSAGE,
@@ -200,7 +226,7 @@ pub fn run_suite() -> bool {
     if passed == cases.len() && all_released {
         info!(
             "m12",
-            "startup/runtime: independent guest verified ABI-v2 caps/argv/env/entry/RSP/IF/DF; FS-base TLS survived checked kernel-thread/timer handoff; bounded heap reused/coalesced blocks, filled 32 mapped pages, refused page 33 without mutation, then process teardown restored frames/maps exactly; four startup RED controls refused before app entry; heap-slot collision preserved the attenuated Notification cap and returned OOM"
+            "startup/runtime: independent guest verified ABI-v2 caps/argv/env/entry/RSP/IF/DF; FS-base TLS survived checked kernel-thread/timer handoff; bounded heap reused/coalesced blocks, filled 32 mapped pages, refused page 33 without mutation, then process teardown restored frames/maps exactly; five startup RED controls refused before app entry, including an unlisted live cap; heap-slot collision preserved the attenuated Notification cap and returned OOM"
         );
         write_marker(format_args!("m12: RESULT PASS ({passed}/{})", cases.len()));
         true
@@ -252,8 +278,10 @@ fn run_case(case: Case) -> Res {
             obj: CapObj::Notification { nid: notification },
             rights: case.notification_rights,
         },
+        case.extra_cap.unwrap_or(Cap::EMPTY),
     ];
-    let child = match spawn::spawn_init_boot(PROOF_BOOT_IMAGE, &grants, None) {
+    let grant_count = if case.extra_cap.is_some() { 3 } else { 2 };
+    let child = match spawn::spawn_init_boot(PROOF_BOOT_IMAGE, &grants[..grant_count], None) {
         Ok(pid) => pid,
         Err(_) => {
             let _ = ipc::destroy_notification(notification);
@@ -290,8 +318,9 @@ fn run_case(case: Case) -> Res {
     if timer::held_by(child) != 0 {
         return Err("TLS timer was not retired before guest teardown");
     }
-    if cap::occupancy(child) != Some((1, cap::CAP_SLOTS as u32)) {
-        return Err("startup/heap caps did not return to the single described Notification");
+    let expected_occupied = if case.extra_cap.is_some() { 2 } else { 1 };
+    if cap::occupancy(child) != Some((expected_occupied, cap::CAP_SLOTS as u32)) {
+        return Err("startup capabilities did not return to their exact case baseline");
     }
     proc::destroy(child).map_err(|_| "startup guest process teardown refused")?;
     spawn::forget(child).map_err(|_| "startup guest spawn record retirement refused")?;

@@ -22,6 +22,7 @@ EXPECTED = [
     "startup_cap_rights_red",
     "startup_page_count_red",
     "malformed_record_red",
+    "unlisted_capability_red",
     "heap_slot_collision_red",
 ]
 
@@ -33,10 +34,13 @@ def main() -> int:
     serial = (Path(__file__).resolve().parents[1] / "build/serial-m12.log").read_text()
     needed = (
         "m12:startup:tls: PASS",
+        "m12:startup:handles: PASS",
+        "m12:startup:capability-handles: PASS",
+        "m12:startup:process-group: PASS",
         "m12:startup:heap: PASS",
         "m12:startup:heap-slot-red: PASS",
         "m12:startup:application: PASS",
-        "m12: RESULT PASS (6/6)",
+        "m12: RESULT PASS (7/7)",
     )
     missing = [marker for marker in needed if marker not in serial]
     if missing:
@@ -44,17 +48,22 @@ def main() -> int:
         return 1
     if "m12:startup:badcap: APPLICATION-RAN" in serial or serial.count(
         "arena-runtime: startup refused"
-    ) < 4:
+    ) < 5:
         print(f"[{LABEL}] FAIL: startup refusal controls did not remain fail-closed")
         return 1
     if "m12:startup:heap: FAIL" in serial:
         print(f"[{LABEL}] FAIL: bounded heap did not prove capacity, reuse and OOM")
         return 1
     print(
-        f"[{LABEL}] PASS: startup guest validated argv/env/cap/entry/RSP and "
-        "per-thread FS-base TLS across a timed scheduler handoff; bounded "
-        "heap filled/reused 32 pages and refused page 33; reserved-slot collision "
-        "preserved the live Notification; four startup RED controls and exact "
+        f"[{LABEL}] PASS: startup guest validated argv/env/cap/entry/RSP, "
+        "per-thread FS-base TLS across a timed scheduler handoff, and the "
+        "generation-safe runtime handle table with real capability copy, "
+        "attenuation and close plus Process-cap child spawn/wait/reap and "
+        "bare-PID refusal; "
+        "bounded heap "
+        "filled/reused 32 pages and refused page 33; reserved-slot collision "
+        "preserved the live Notification; five startup RED controls, including "
+        "an unlisted live cap, and exact "
         "process-teardown resource return passed"
     )
     return 0

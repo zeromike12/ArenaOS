@@ -13,6 +13,13 @@ use arena_desktop::{
     wire::Frame,
 };
 use arena_gfxkit::Canvas;
+use arena_process::{
+    handles::{Handle, InsertError},
+    process::{
+        ChildProcess, ExitSignal, FinishMode, GroupSpawnError, InheritGrant, ProcessGroup,
+        SpawnError,
+    },
+};
 use core::panic::PanicInfo;
 #[path = "../../../abi.rs"]
 mod abi;
@@ -78,7 +85,7 @@ struct Session {
     region: u64,
     id: u64,
     va: u64,
-    process: u64,
+    process: Option<Handle>,
     handle: u64,
     title: [u8; 32],
     published: bool,
@@ -117,7 +124,7 @@ const EMPTY: Session = Session {
     region: CAP_NONE,
     id: 0,
     va: 0,
-    process: CAP_NONE,
+    process: None,
     handle: 0,
     title: [0; 32],
     published: false,
@@ -357,6 +364,9 @@ fn publish_rects(src: u64, dst: u64, stride: usize, rects: &[[u16; 4]]) {
     }
 }
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
+/// The desktop owns every application Process cap through this generation-safe
+/// group; Session stores only a local handle, never a PID or raw cap slot.
+static mut CHILDREN: Option<ProcessGroup<ChildProcess, LIMIT>> = None;
 static mut WM: State = match State::new(800, 600) {
     Ok(s) => s,
     Err(_) => panic!("constant geometry"),
@@ -992,6 +1002,54 @@ fn destroy(slot: u64) {
         die(80)
     }
 }
+fn child_capacity_available() -> bool {
+    unsafe { (&*(&raw const CHILDREN)).as_ref() }.is_some_and(ProcessGroup::can_spawn)
+}
+fn child_live(handle: Handle) -> bool {
+    unsafe { (&*(&raw const CHILDREN)).as_ref() }
+        .unwrap_or_else(|| die(83))
+        .is_live(handle)
+        .unwrap_or_else(|_| die(83))
+}
+fn finish_child(handle: Handle, force: bool) {
+    let group = unsafe { (&mut *(&raw mut CHILDREN)).as_mut() }.unwrap_or_else(|| die(84));
+    let result = if force {
+        group.stop_and_reap(handle)
+    } else {
+        group.reap_exited(handle)
+    };
+    result.unwrap_or_else(|_| die(84));
+}
+fn spawn_child(image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
+    if image >= CAP_SLOTS {
+        return Err(-2);
+    }
+    let group = unsafe { (&mut *(&raw mut CHILDREN)).as_mut() }.unwrap_or_else(|| die(83));
+    match group.spawn(|| {
+        ChildProcess::spawn(
+            image as u8,
+            grants,
+            Some(ExitSignal {
+                notification_slot: CLOCK as u8,
+                badge: BADGE_EXIT,
+            }),
+        )
+    }) {
+        Ok(handle) => Ok(handle),
+        Err(GroupSpawnError::Full) => Err(STATUS_BUSY),
+        Err(GroupSpawnError::Spawn(SpawnError::Kernel(status))) => Err(status),
+        // Every other spawn error is an invariant or capability-query failure
+        // after the kernel may have created a child. Do not continue as if the
+        // app manager owned it.
+        Err(GroupSpawnError::Spawn(_)) => die(83),
+        Err(GroupSpawnError::Record(InsertError::Full(mut child))) => {
+            child
+                .finish(FinishMode::StopAndReap)
+                .unwrap_or_else(|_| die(83));
+            Err(STATUS_BUSY)
+        }
+    }
+}
 fn display(frame: arena_compositor_model::wire::Frame, cap: u64) -> ([u64; 3], [u8; 64]) {
     let mut b = [0; 64];
     frame.encode(&mut b).unwrap_or_else(|_| die(81));
@@ -1104,6 +1162,9 @@ fn launch_image(
     // that have not yet requested their window. No numerical caller identity.
     let sessions = unsafe { &mut *(&raw mut SESSIONS) };
     let i = sessions.iter().position(|s| s.id == 0).ok_or(STATUS_BUSY)?;
+    if !child_capacity_available() {
+        return Err(STATUS_BUSY);
+    }
     // Region, snapshot (transiently), Process, the filesd lineage head,
     // the home grant and a lent copy (transiently). The request asking
     // for this launch has already landed its own cap, which is counted
@@ -1179,53 +1240,48 @@ fn launch_image(
     } else {
         RIGHTS_READ | RIGHTS_WRITE
     };
-    let spec = [
-        (CALL_SIDE, RIGHTS_WRITE),
-        (region, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY),
-        (region, function_rights),
-        (clock(i), clock_rights),
-        if diagnostics {
-            (POOL, RIGHTS_READ)
-        } else {
-            (home, RIGHTS_WRITE | RIGHTS_COPY)
-        },
-    ];
-    let pid = unsafe {
-        syscall5(
-            SYS_SPAWN,
-            image,
-            spec.as_ptr() as u64,
-            if diagnostics || home != CAP_NONE {
-                5
-            } else {
-                4
-            },
-            CLOCK,
-            BADGE_EXIT,
-        )
+    let tail = if diagnostics {
+        InheritGrant::new(POOL as u8, RIGHTS_READ as u32)
+    } else if home != CAP_NONE {
+        InheritGrant::new(home as u8, (RIGHTS_WRITE | RIGHTS_COPY) as u32)
+    } else {
+        InheritGrant::new(0, 0)
     };
+    let spec = [
+        InheritGrant::new(CALL_SIDE as u8, RIGHTS_WRITE as u32),
+        InheritGrant::new(
+            region as u8,
+            (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY) as u32,
+        ),
+        InheritGrant::new(region as u8, function_rights as u32),
+        InheritGrant::new(clock(i) as u8, clock_rights as u32),
+        tail,
+    ];
+    let grant_count = if diagnostics || home != CAP_NONE {
+        5
+    } else {
+        4
+    };
+    let process = spawn_child(image, &spec[..grant_count]);
     // The child holds its own copy; the broker never keeps the grant.
     destroy(home);
-    if pid <= 0 {
-        revoke_files(files_head);
-        unsafe {
-            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
-            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+    let process = match process {
+        Ok(process) => process,
+        Err(status) => {
+            revoke_files(files_head);
+            unsafe {
+                syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+            }
+            destroy(region);
+            return Err(status);
         }
-        destroy(region);
-        return Err(pid);
-    }
-    let process = (0..CAP_SLOTS)
-        .find(|s| {
-            describe(*s)
-                .is_some_and(|d| d[0] == 4 && d[1] == pid as u64 && d[2] & RIGHTS_DESTROY != 0)
-        })
-        .unwrap_or_else(|| die(83));
+    };
     sessions[i] = Session {
         region,
         id,
         va: va as u64,
-        process,
+        process: Some(process),
         kind,
         scope,
         launch_targets,
@@ -1255,9 +1311,7 @@ fn retire(index: usize, force: bool) {
     if s.id == 0 {
         return;
     }
-    if unsafe { syscall2(SYS_PROC_FINISH, s.process, u64::from(force)) } != 0 {
-        die(84)
-    }
+    finish_child(s.process.unwrap_or_else(|| die(84)), force);
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
     }
@@ -1283,7 +1337,7 @@ fn sweep() -> bool {
     let mut changed = false;
     let now = arena_desktop::app_client::now();
     for (i, s) in unsafe { *(&raw const SESSIONS) }.into_iter().enumerate() {
-        if s.id != 0 && unsafe { syscall1(SYS_PROC_LIVE, s.process) } == 0 {
+        if s.id != 0 && !child_live(s.process.unwrap_or_else(|| die(83))) {
             if !s.ending && s.handle != 0 {
                 unsafe {
                     SESSIONS[i].ending = true;
@@ -1723,6 +1777,7 @@ fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
 }
 arena_desktop::entry!(main, 64 * 1024);
 extern "C" fn main() -> ! {
+    unsafe { *(&raw mut CHILDREN) = Some(ProcessGroup::new()) };
     let (mode, b) = display(arena_compositor_model::wire::Frame::Mode, CAP_NONE);
     let w = (mode[1] & 0xffff_ffff) as usize;
     let h = (mode[1] >> 32) as usize;
@@ -2052,7 +2107,7 @@ extern "C" fn main() -> ! {
             } else if let Some([7, id, rights]) = description {
                 if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                     .iter()
-                    .position(|s| s.id == id && unsafe { syscall1(SYS_PROC_LIVE, s.process) } == 1)
+                    .position(|s| s.id == id && s.process.is_some_and(child_live))
                 {
                     if rights & RIGHTS_DESTROY != 0 {
                         match service(i, rights, &mut bytes) {
@@ -2070,9 +2125,10 @@ extern "C" fn main() -> ! {
                 if rights & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
                     == (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
                 {
-                    if let Some(i) = unsafe { &*(&raw const SESSIONS) }.iter().position(|s| {
-                        s.id == id && unsafe { syscall1(SYS_PROC_LIVE, s.process) } == 1
-                    }) {
+                    if let Some(i) = unsafe { &*(&raw const SESSIONS) }
+                        .iter()
+                        .position(|s| s.id == id && s.process.is_some_and(child_live))
+                    {
                         if arena_desktop::service_wire::Frame::decode(&bytes)
                             == Ok(arena_desktop::service_wire::Frame::Bootstrap)
                         {

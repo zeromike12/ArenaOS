@@ -66,6 +66,14 @@ pub const SYS_ENDPOINT_BADGE: u64 = 51;
 pub const SYS_SHARED_PAGES: u64 = 52;
 /// ADR-0085: set the current native user thread's validated FS.base.
 pub const SYS_TLS_SET: u64 = 53;
+/// ADR-0086: read only whether one caller-owned capability slot is occupied.
+pub const SYS_CAP_OCCUPIED: u64 = 54;
+/// Frozen current cap-space width, mirrored from kernel::cap::CAP_SLOTS.
+pub const CAP_SLOTS: usize = 64;
+/// Startup ABI and capability-inventory kind for a held Process cap.
+pub const CAP_KIND_PROCESS: u8 = 4;
+/// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
+pub const MAX_SPAWN_INHERIT: usize = 5;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;

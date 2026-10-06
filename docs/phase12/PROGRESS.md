@@ -10,12 +10,18 @@ ADR-0083 startup codec pass their current host gates. A host signer resolver
 now binds to APKG v1 `Chain` semantics, but neither resolver, installer, nor
 registry scan is integrated into the desktop or protected guest filesd service.
 The reusable no_std startup runtime has host/target validation and an
-independent M12 ring-3 proof covering startup validation, basic per-thread
-FS-base TLS, and bounded heap behavior. It is a qualification image, not the
-production launcher or multi-user-thread runtime. Persistent receiver-policy
-authority, broad lifecycle/registry/stream/child and foreign-proxy paths,
-resource qualification, the remaining guest proofs, and final artifact
-qualification remain open. This is a live ledger, not a completion claim.
+independent M12 ring-3 proof covering exact startup-capability inventory
+(including refusal of an unlisted live cap), the generation-safe handle-table
+core, real attenuated cap copy/close, Process-cap child spawn/wait/reap,
+basic per-thread FS-base TLS, and bounded heap behavior. Its capability-native
+`arena-process` lifecycle crate is now used by the protected Desktop manager
+for real child ownership, liveness, and finish through a generation-safe group,
+while retaining today's 12-session limit. This remains a qualification/runtime
+foundation, not the production installed-app launcher or multi-user-thread
+runtime. Persistent receiver-policy authority, broad registry/stream/child and
+foreign-proxy paths, 32-window resource qualification, remaining guest proofs,
+and final artifact qualification remain open. This is a live ledger, not a
+completion claim.
 
 ## 12.0 — Source audit / ADR-0080
 
@@ -141,27 +147,30 @@ Phase-12 proof. No limits were mutated.
   bounded arg/env tables, exact cap kind/rights/role references, CWD and
   optional stdio descriptors, entry/load-base/page/clock facts, zero reserved
   and tail bytes, and a required one-page read-only transport cap. Five Rust
-  tests and five independent Python oracle tests cover roundtrip, malformed
+  tests and six independent Python tests cover roundtrip, malformed
   offsets/padding/identity, descriptor mismatch, capacity refusal,
-  startup-cap geometry, and the runtime guest vectors. The shared 4 KiB pages
-  are reproducible and byte-identical across codecs. Names and descriptor
-  slots remain descriptive.
+  startup-cap geometry, runtime guest vectors, and mirrored occupancy-syscall/
+  cap-bound constants. The shared 4 KiB pages are reproducible and byte-
+  identical across codecs. Names and descriptor slots remain descriptive.
 - Added no_std `userspace/arena-runtime`: it validates slot 0 as the exact
   one-page `SharedRegion/READ|DESTROY`, maps read-only, copies to private fixed
   BSS, unmaps/destroys the transport before application entry, parses without
   heap/initial-stack allocation, and compares each actual child cap kind and
-  rights while ignoring descriptive object IDs. Host runtime tests pass 4/4;
-  Clippy is clean and the independently linked proof image builds for
-  `x86_64-unknown-none`.
+  rights while ignoring descriptive object IDs. ADR-0086 adds metadata-free
+  `SYS_CAP_OCCUPIED` and scans all 64 slots, requiring every listed capability
+  to be present and every unlisted slot to be empty. The runtime host suite
+  currently passes 13/13 tests; Clippy is clean and the independently linked
+  proof image builds for `x86_64-unknown-none`. The separate process/handle
+  crate adds the seven host tests recorded in 12.7.
 - `tools/test_m12_startup.py` boots the exact artifact. The guest checks
   argv/env, actual Notification slot 1, entry/base, initial RSP, IF/DF, and
-  successful startup-cap reclamation. RED cases for listed-cap rights, slot-0
-  rights, wrong page count, and bad magic refuse before the application
-  closure. Per-case frame/process/notification/map/SharedRegion snapshots
-  return exactly to baseline: m12 PASS 6/6 (four startup RED controls plus the
-  reserved heap-slot collision); m1–m7 and m11 regression markers pass in the
-  same boot. The proof image adds one explicitly bounded boot fixture only;
-  process/cap/resource limits are unchanged.
+  successful startup-cap reclamation. Five RED cases—listed-cap rights, slot-0
+  rights, wrong page count, bad magic, and an extra live MemoryPool cap—refuse
+  before the application closure. Per-case frame/process/notification/map/
+  SharedRegion snapshots return exactly to baseline: m12 PASS 7/7 (five
+  startup RED controls plus the reserved heap-slot collision); m1–m7 and m11
+  regression markers pass in the same boot. The proof image adds one explicitly
+  bounded boot fixture only; process/cap/resource limits are unchanged.
 - This is a qualification guest, not a production app manager. Installed
   registry/launcher integration, general VM, user-thread lifecycle, and the
   broad runtime remain open; the basic FS-base TLS and bounded-heap proofs are
@@ -189,12 +198,75 @@ Phase-12 proof. No limits were mutated.
   scheduler state saves/restores FS.base per thread while GS stays dedicated to
   `swapgs`. The independent guest proves read-only/kernel-half refusal and
   TCB/sentinel survival across a timed block/wakeup; kernel checks the one-shot
-  timer retires. Eight host runtime tests pass, including the frozen TCB
-  layout, heap capacity/OOM, zero-on-new-page, alignment, split/coalesce/reuse
-  and invalid layouts. Clippy and the `x86_64-unknown-none` guest build pass.
+  timer retires. Host tests cover the frozen TCB layout, heap capacity/OOM,
+  zero-on-new-page, alignment, split/coalesce/reuse and invalid layouts.
+  Clippy and the `x86_64-unknown-none` guest build pass.
   TLS is not yet tested across two user threads, and heap mappings remain
   per-thread in syscall pointer validation. Process-wide user-region ownership,
   VM semantics and actual user-thread creation remain open.
+
+## 12.7 — Native child-process group foundation
+
+- Added `arena-process::ChildProcess` over the existing `SYS_SPAWN`,
+  `SYS_PROC_LIVE`, and `SYS_PROC_FINISH` ABI; `arena-runtime` re-exports the
+  process and handle APIs. Spawn grants are an explicit, bounded list of at
+  most five source-slot/rights pairs. The PID result is only diagnostic/
+  correlation metadata: the wrapper scans actual held slots and retains the
+  unique exact Process/READ|DESTROY capability; all liveness and finish calls
+  use that cap slot. Exit badges are wake hints, never proof of exit or
+  lifecycle authority.
+- Added fixed-capacity `ProcessGroup<T, N>` over generation-safe runtime
+  handles. Capacity is refused before calling the spawn closure. Explicit
+  teardown stops live children and reaps exited children; failed cleanup leaves
+  the exact member handle retryable. The group is single-owner, has no
+  destructor syscalls, and must be explicitly shut down. The protected Desktop
+  manager now uses this group for its real spawned applications; sessions hold
+  only local generation handles, and liveness/retirement route through each
+  exact Process cap. This production integration retains the existing 12-window
+  cap. Scaling to 32 windows/headless helpers, parent-death/helper-restart
+  policy, and multi-thread synchronization remain open.
+- The separate `arena-process` suite (7) and `arena-runtime` suite (13) pass
+  20/20 combined; runtime Clippy and the release proof build pass. Host tests
+  cover full-group mutation-free refusal, stale handles, live-stop versus
+  exited-reap selection, and failure retention. M12 spawns the proof
+  BootImage as a child with no inherited caps, waits on an explicit exit
+  notification, checks liveness via the actual Process cap, reaps it, and
+  proves the group handle and cap slot are gone. The badge is only a wake hint;
+  numeric PID values used as Process-cap slots are rejected. The same guest
+  also proves one-member group capacity refusal before a second SYS_SPAWN.
+- ADR-0087 records the lifecycle contract. M12 passes 7/7 and M1–M7/M11
+  regressions pass in the same boot with exact resource return. The integrated
+  Desktop path also passes `test_m10_apps.py`, `test_m10_dynamic.py`,
+  `test_m11_wm.py`, and `test_m11_files.py`, including twelve real sessions,
+  mixed builtin/dynamic children, thirteenth-session mutation-free refusal,
+  normal/forced retirement, and filesystem authority regressions.
+
+## 12.9 — Userspace runtime handle-table foundation
+
+- Added the fixed-capacity no_std `arena-runtime::handles::HandleTable`. A
+  32-bit value encodes only a process-local slot and generation; it is not a
+  cap slot, PID, or transferable authority. Closing returns the held object so
+  its owner can explicitly perform cap cleanup. Slot generations advance on
+  reuse and retire instead of wrapping.
+- `duplicate_with` reserves a free table slot before invoking the caller's
+  object-copy/rights-attenuation closure. Full tables refuse before a kernel
+  cap copy can occur; failed attenuation leaves table contents unchanged.
+  The table does not mint or copy authority itself and requires exclusive
+  mutable access; user-thread synchronization remains open.
+- Four handle-table host tests cover stale alias refusal after reuse,
+  invalid/full slots, generation exhaustion, attenuation, and
+  copy-failure/capacity atomicity. A failed full-table insert returns the exact
+  rejected owner value; the M12 guest proves this and that full-table
+  duplication never calls its capability-copy path. Two capability-wrapper
+  host tests cover requested-right validation;
+  `arena-runtime::capabilities::HeldCapability` wraps actual
+  occupied/described slots, attenuation-only `SYS_CAP_COPY`, and explicit
+  destroy with owner recovery on failure. M12 copies a real Notification into
+  slot 3, verifies source rights unchanged, and destroys the copy. Typed
+  wrappers for streams/files/directories/events/timers/sockets remain open;
+  Process-cap wrappers are implemented and integrated with the Desktop manager
+  at the existing session limit. Parent-death policy and cross-thread
+  synchronization remain open.
 
 ## Qualification attempts and remaining gates
 
@@ -204,10 +276,11 @@ Phase-12 proof. No limits were mutated.
 | APB1 independent Python/OpenSSL oracle | PASS 6/6 |
 | APB1 + policy + lifecycle + AFS2 install/registry/startup Rust host tests | PASS 34/34 |
 | APB1 clippy / format / no_std target build | PASS |
-| Native startup ABI v2 Rust codec / independent Python oracle | PASS 5/5 + 5/5 |
-| arena-runtime startup/live-cap/heap/TLS host tests / no_std build | PASS 8/8; Clippy clean; guest image builds |
-| Independent m12 ring-3 startup + FS-base TLS + 32-page heap, startup/TLS REDs and heap-slot collision | PASS 6/6; exact frame/map/cap/timer/resource return; m1–m7 + m11 regression PASS |
+| Native startup ABI v2 Rust codec / independent Python oracle and ABI parity | PASS 5/5 + 6/6 |
+| arena-process + arena-runtime startup/exact-cap-inventory/heap/TLS/handle/capability/process-group host tests / no_std builds | PASS 20/20 combined (7 + 13); runtime Clippy clean; guest image builds |
+| Independent M12 ring-3 startup + exact cap inventory + FS-base TLS + real attenuated cap copy/close + Process-cap group spawn/wait/reap + 32-page heap, five startup REDs and heap-slot collision | PASS 7/7; exact frame/map/cap/timer/resource return; M1–M7 + M11 regression PASS |
 | APKG v1 independent host tests | PASS 6/6; no wire reinterpretation |
+| Desktop ProcessGroup integration: M10 apps/dynamic and M11 window/files regressions | PASS; twelve-session cap and cleanup preserved |
 | Phase-12 protected filesd install/registry and lifecycle guest proof | NOT RUN / NOT INTEGRATED |
 | Heap/VM/TLS, user threads, helper groups, streams/handles, PIE, foreign ABI, full resource inventory and Phase-12 full suite | NOT RUN |
 | Artifact-bound 100/100 loop and extracted `phase12-complete` boot | NOT RUN |

@@ -27,11 +27,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "arena-process"
+version = "0.1.0"
+dependencies = [
+ "arena-lib",
+]
+
+[[package]]
 name = "arena-runtime"
 version = "0.1.0"
 dependencies = [
  "arena-lib",
  "arena-platform-core",
+ "arena-process",
 ]
 
 [[package]]

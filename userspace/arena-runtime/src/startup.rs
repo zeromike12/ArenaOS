@@ -2,8 +2,8 @@
 //! application closure can run; metadata never creates or names authority.
 
 use arena_lib::abi::{
-    SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_SHARED_MAP, SYS_SHARED_PAGES, SYS_SHARED_UNMAP,
-    SYS_THREAD_EXIT, syscall1, syscall2, syscall6, write_all,
+    CAP_SLOTS, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_CAP_OCCUPIED, SYS_SHARED_MAP,
+    SYS_SHARED_PAGES, SYS_SHARED_UNMAP, SYS_THREAD_EXIT, syscall1, syscall2, syscall6, write_all,
 };
 use arena_platform_core::startup as abi;
 use arena_platform_core::startup::StartupView;
@@ -34,32 +34,69 @@ pub enum Error {
     CapabilityMismatch {
         slot: u16,
     },
+    MissingCapability {
+        slot: u16,
+    },
+    UnexpectedCapability {
+        slot: u16,
+    },
+    OccupancyQuery {
+        slot: u16,
+        status: i64,
+    },
     Cleanup {
         unmap_status: i64,
         destroy_status: i64,
     },
 }
 
-/// Compare every descriptive capability row with the actual current-process
-/// slot. Object IDs are intentionally ignored: they are descriptive and do
-/// not authorize access. Rights and kind must match exactly.
-pub fn verify_live_capabilities<F>(view: &StartupView<'_>, mut describe: F) -> Result<(), Error>
+/// Compare the entire live child cap table with the startup record after slot
+/// 0 has been consumed. Object IDs are descriptive and are ignored; every
+/// occupied slot must be listed exactly once with matching kind/rights, and
+/// every unlisted (including undescribable) slot must be empty.
+pub fn verify_live_capabilities<F, O>(
+    view: &StartupView<'_>,
+    mut describe: F,
+    mut occupied: O,
+) -> Result<(), Error>
 where
     F: FnMut(u64) -> Result<[u64; 3], i64>,
+    O: FnMut(u64) -> Result<bool, i64>,
 {
-    for index in 0..view.capability_count() {
-        let expected = view.capability(index).ok_or(Error::CapabilityMismatch {
-            slot: (index + 1) as u16,
-        })?;
-        let slot = u64::from(expected.slot);
-        let observed = describe(slot).map_err(|status| Error::DescribeCapability {
-            slot: expected.slot,
+    for slot in 0..CAP_SLOTS {
+        let listed_index = if slot > 0 && slot <= view.capability_count() {
+            Some(slot - 1)
+        } else {
+            None
+        };
+        let is_occupied = occupied(slot as u64).map_err(|status| Error::OccupancyQuery {
+            slot: slot as u16,
             status,
         })?;
-        if expected.slot != (index + 1) as u16 || !view.capability_matches(index, observed) {
-            return Err(Error::CapabilityMismatch {
-                slot: expected.slot,
-            });
+        match (listed_index, is_occupied) {
+            (Some(_), false) => {
+                return Err(Error::MissingCapability { slot: slot as u16 });
+            }
+            (None, true) => {
+                return Err(Error::UnexpectedCapability { slot: slot as u16 });
+            }
+            (Some(index), true) => {
+                let expected = view
+                    .capability(index)
+                    .ok_or(Error::CapabilityMismatch { slot: slot as u16 })?;
+                let observed =
+                    describe(slot as u64).map_err(|status| Error::DescribeCapability {
+                        slot: expected.slot,
+                        status,
+                    })?;
+                if expected.slot != (index + 1) as u16 || !view.capability_matches(index, observed)
+                {
+                    return Err(Error::CapabilityMismatch {
+                        slot: expected.slot,
+                    });
+                }
+            }
+            (None, false) => {}
         }
     }
     Ok(())
@@ -142,7 +179,7 @@ where
     // process-global ENTERED gate prevents another runtime invocation.
     let page = unsafe { &*core::ptr::addr_of!(SNAPSHOT) };
     let view = abi::parse(page).map_err(Error::Parse)?;
-    verify_live_capabilities(&view, describe)?;
+    verify_live_capabilities(&view, describe, occupied)?;
     Ok(application(view))
 }
 
@@ -150,6 +187,14 @@ fn describe(slot: u64) -> Result<[u64; 3], i64> {
     let mut words = [0u64; 3];
     let status = unsafe { syscall2(SYS_CAP_DESCRIBE, slot, words.as_mut_ptr() as u64) };
     if status == 0 { Ok(words) } else { Err(status) }
+}
+
+fn occupied(slot: u64) -> Result<bool, i64> {
+    match unsafe { syscall6(SYS_CAP_OCCUPIED, slot, 0, 0, 0, 0, 0) } {
+        0 => Ok(false),
+        1 => Ok(true),
+        status => Err(status),
+    }
 }
 
 fn can_discard_startup_cap(observed: [u64; 3]) -> bool {
@@ -208,6 +253,9 @@ fn error_detail(error: Error) -> &'static [u8] {
         Error::Parse(_) => b"arena-runtime: detail parse-record\n",
         Error::DescribeCapability { .. } => b"arena-runtime: detail describe-listed-cap\n",
         Error::CapabilityMismatch { .. } => b"arena-runtime: detail listed-cap-mismatch\n",
+        Error::MissingCapability { .. } => b"arena-runtime: detail missing-listed-cap\n",
+        Error::UnexpectedCapability { .. } => b"arena-runtime: detail unexpected-capability\n",
+        Error::OccupancyQuery { .. } => b"arena-runtime: detail cap-occupancy\n",
         Error::Cleanup { .. } => b"arena-runtime: detail slot0-cleanup\n",
     }
 }
@@ -260,59 +308,133 @@ mod tests {
         ]));
     }
 
+    fn listed_slots(slot: u64) -> Result<bool, i64> {
+        Ok(slot == 1 || slot == 2)
+    }
+
+    fn descriptions(slot: u64) -> Result<[u64; 3], i64> {
+        Ok(if slot == 1 {
+            [u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 0xDEAD_BEEF, 2]
+        } else {
+            [u64::from(abi::CAP_KIND_IMAGE), 0xCAFE_BABE, 1]
+        })
+    }
+
     #[test]
-    fn live_slot_kinds_and_rights_match_exactly_but_ids_are_descriptive() {
+    fn full_cap_table_matches_listed_kinds_and_rights_but_ignores_ids() {
         let view = abi::parse(PAGE).unwrap();
         let mut checked = [0u64; 2];
-        verify_live_capabilities(&view, |slot| {
-            let item = &mut checked[slot as usize - 1];
-            *item += 1;
-            Ok(if slot == 1 {
-                [u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 0xDEAD_BEEF, 2]
-            } else {
-                [u64::from(abi::CAP_KIND_IMAGE), 0xCAFE_BABE, 1]
-            })
-        })
+        verify_live_capabilities(
+            &view,
+            |slot| {
+                checked[slot as usize - 1] += 1;
+                descriptions(slot)
+            },
+            listed_slots,
+        )
         .unwrap();
         assert_eq!(checked, [1, 1]);
     }
 
     #[test]
-    fn a_kind_or_rights_mismatch_refuses_before_application_entry() {
+    fn kind_or_rights_mismatch_refuses_before_application_entry() {
         let view = abi::parse(PAGE).unwrap();
         assert_eq!(
-            verify_live_capabilities(&view, |slot| {
-                Ok(if slot == 1 {
-                    [u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 7, 1]
-                } else {
-                    [u64::from(abi::CAP_KIND_IMAGE), 9, 1]
-                })
-            }),
+            verify_live_capabilities(
+                &view,
+                |slot| {
+                    Ok(if slot == 1 {
+                        [u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 7, 1]
+                    } else {
+                        [u64::from(abi::CAP_KIND_IMAGE), 9, 1]
+                    })
+                },
+                listed_slots,
+            ),
             Err(Error::CapabilityMismatch { slot: 1 })
         );
         assert_eq!(
-            verify_live_capabilities(&view, |slot| {
-                Ok(if slot == 1 {
-                    [u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 7, 2]
-                } else {
-                    [u64::from(abi::CAP_KIND_IMAGE), 9, 2]
-                })
-            }),
+            verify_live_capabilities(
+                &view,
+                |slot| {
+                    Ok(if slot == 1 {
+                        [u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 7, 2]
+                    } else {
+                        [u64::from(abi::CAP_KIND_IMAGE), 9, 2]
+                    })
+                },
+                listed_slots,
+            ),
             Err(Error::CapabilityMismatch { slot: 2 })
         );
     }
 
     #[test]
-    fn an_unavailable_listed_slot_is_a_fail_closed_refusal() {
+    fn missing_listed_capability_refuses_before_application_entry() {
         let view = abi::parse(PAGE).unwrap();
         assert_eq!(
-            verify_live_capabilities(&view, |slot| {
-                if slot == 1 {
-                    Ok([u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 7, 2])
+            verify_live_capabilities(&view, descriptions, |slot| Ok(slot == 1)),
+            Err(Error::MissingCapability { slot: 2 })
+        );
+    }
+
+    #[test]
+    fn extra_unlisted_capability_refuses_even_when_its_kind_is_unavailable() {
+        let view = abi::parse(PAGE).unwrap();
+        let mut described = [0u64; 2];
+        assert_eq!(
+            verify_live_capabilities(
+                &view,
+                |slot| {
+                    described[slot as usize - 1] += 1;
+                    descriptions(slot)
+                },
+                |slot| Ok(slot == 1 || slot == 2 || slot == 37),
+            ),
+            Err(Error::UnexpectedCapability { slot: 37 })
+        );
+        assert_eq!(described, [1, 1]);
+    }
+
+    #[test]
+    fn unexpected_startup_slot_zero_and_occupancy_query_errors_refuse() {
+        let view = abi::parse(PAGE).unwrap();
+        assert_eq!(
+            verify_live_capabilities(&view, descriptions, |slot| Ok(slot == 0
+                || slot == 1
+                || slot == 2)),
+            Err(Error::UnexpectedCapability { slot: 0 })
+        );
+        assert_eq!(
+            verify_live_capabilities(&view, descriptions, |slot| {
+                if slot == 9 {
+                    Err(-3)
                 } else {
-                    Err(-2)
+                    Ok(slot == 1 || slot == 2)
                 }
             }),
+            Err(Error::OccupancyQuery {
+                slot: 9,
+                status: -3,
+            })
+        );
+    }
+
+    #[test]
+    fn an_unavailable_listed_slot_description_is_fail_closed() {
+        let view = abi::parse(PAGE).unwrap();
+        assert_eq!(
+            verify_live_capabilities(
+                &view,
+                |slot| {
+                    if slot == 1 {
+                        Ok([u64::from(abi::CAP_KIND_BADGED_ENDPOINT), 7, 2])
+                    } else {
+                        Err(-2)
+                    }
+                },
+                listed_slots,
+            ),
             Err(Error::DescribeCapability {
                 slot: 2,
                 status: -2,
