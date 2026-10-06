@@ -43,16 +43,16 @@ pub const MAX_INHERIT: usize = 5;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten). ADR-0075: 14 boot processes plus twelve desktop
 /// sessions need 26; one per possible process (`MAX_PROCESSES`).
-pub const MAX_SPAWN_RECS: usize = 32;
+pub const MAX_SPAWN_RECS: usize = 64;
 /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
 pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
 /// Separate from ALL Image IDs, including future dynamic u32 values.
-pub const MAX_BOOT_IMAGES: u32 = 10;
+pub const MAX_BOOT_IMAGES: u32 = 11;
 pub fn boot_image_live(index: u32) -> bool {
     index < MAX_BOOT_IMAGES && boot_image_bytes(index).is_some()
 }
 
-fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
+pub(crate) fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
     match index {
         0 => Some(include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -94,6 +94,11 @@ fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
         9 => Some(include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../userspace/filesd/target/x86_64-unknown-none/release/filesd"
+        ))),
+        // ADR-0083 independent ABI-v2 entry/capability proof image.
+        10 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/arena-runtime/target/x86_64-unknown-none/release/arena-startup-proof"
         ))),
         _ => None,
     }

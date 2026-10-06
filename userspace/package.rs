@@ -242,6 +242,67 @@ impl Chain {
     }
 }
 
+/// Select an APB1 candidate key from the same receiver-verified APKG v1
+/// policy chain. Inputs are unauthenticated bundle-header claims; callers
+/// must compare them with the claim returned by the cryptographic APB1
+/// verifier before any mutation.
+pub fn apb1_select_key(
+    chain: &Chain,
+    package_id: &[u8; 32],
+    signer_id: &[u8; 32],
+    version: u64,
+) -> Result<[u8; 32], Error> {
+    if chain.id().is_some_and(|id| id != *package_id) {
+        return Err(Error::Collision);
+    }
+    let key = if *signer_id == ROOT_ID {
+        ROOT
+    } else {
+        chain
+            .historical_key(signer_id)
+            .ok_or(Error::UnknownSigner)?
+    };
+    if sha256(&key) != *signer_id {
+        return Err(Error::UnknownSigner);
+    }
+    if let Some(current) = chain.current {
+        if current.id != *package_id {
+            return Err(Error::Collision);
+        }
+        if version < current.minimum {
+            return Err(Error::Downgrade);
+        }
+        if *signer_id != ROOT_ID
+            && (!current.allow || *signer_id != sha256(&current.subordinate))
+        {
+            return Err(Error::Revoked);
+        }
+    } else if *signer_id != ROOT_ID {
+        return Err(Error::UnknownSigner);
+    }
+    Ok(key)
+}
+
+/// Apply current APKG v1 revocation/minimum/signer policy to a cryptographically
+/// verified APB1 claim and whole-bundle digest. This is a policy decision only;
+/// it creates no filesystem or launch authority.
+pub fn apb1_check_eligible(
+    chain: &Chain,
+    package_id: &[u8; 32],
+    signer_id: &[u8; 32],
+    version: u64,
+    bundle_digest: &[u8; 32],
+) -> Result<(), Error> {
+    let _key = apb1_select_key(chain, package_id, signer_id, version)?;
+    if chain
+        .current
+        .is_some_and(|current| current.is_revoked(bundle_digest))
+    {
+        return Err(Error::Revoked);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stage { pub id: [u8; 32], pub version: u64, pub full_digest: [u8; 32] }
 pub struct History { pub count: u8, pub latest: Option<Stage> }

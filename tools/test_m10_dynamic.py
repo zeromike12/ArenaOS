@@ -142,9 +142,9 @@ def main(esp=None):
             # only that one cell changes on screen (the child still owns
             # input and publication after its Image was revoked).
             d.shot('revoked-child-input',lambda p:crop(p,353,264,45,20)==owned[0]!=crop(before,353,264,45,20))
-            # Dynamic and BootImage children share the general session
-            # ownership model (twelve sessions, ADR-0075), while the native
-            # dynamic quota stays four.
+            # Dynamic and BootImage children share the twelve-session
+            # Phase-11 resource regression; the native dynamic quota stays
+            # four independently of Phase-12's 32-window Desktop envelope.
             d.launch(0,'mixed-terminal',4);d.launch(3,'mixed-settings',5)
             shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',d.serial()).groups())
             base=samples(d)[0]
@@ -152,17 +152,16 @@ def main(esp=None):
             d.wait(lambda:samples(d)[-1][3:6]==(base[3]+12,base[4]+6*(shared+snapshot),base[5]+18),'mixed working set not fully mapped')
             mixed=samples(d)[-1]
             assert mixed[1:3]==(base[1]+6,base[2]+6) and mixed[6]==base[6]+12,('mixed working-set counters',mixed)
-            # Six more builtins fill the twelve sessions; the thirteenth
-            # launch is refused with nothing spawned.
+            # Six more builtins preserve the twelve-session mixed working-set
+            # regression. M12 separately drives all 32 slots and the 33rd
+            # mutation-free refusal.
             for k in range(6):
                 d.click(255+k*58,570)
                 d.wait(lambda:d.serial().count('[desktop] real application spawned;')>=7+k,'mixed second-lane session not spawned')
             d.wait(lambda:samples(d)[-1][3:6]==(base[3]+24,base[4]+12*(shared+snapshot),base[5]+36),'twelve mixed sessions not fully mapped')
             d.settled('mixed-twelve',(0,26,800,500))
-            full_mixed=d.shot('mixed-full')
-            d.click(255+5*58,570)
-            d.shot('mixed-capacity-refused',lambda p:crop(p,10,28,250,20)!=crop(full_mixed,10,28,250,20))
-            assert d.serial().count('[desktop] real application spawned;')==12,'thirteenth mixed application spawned'
+            d.shot('mixed-full')
+            assert d.serial().count('[desktop] real application spawned;')==12,'expected twelve mixed applications'
             for k in range(6):
                 d.q.command('input-send-event',events=[d.q._ev('f8',True),d.q._ev('f8',False)])
                 d.wait(lambda:d.serial().count('[desktop] application retired:')>=k+1,'F8 failed to retire second-lane session')
@@ -198,5 +197,5 @@ def main(esp=None):
     assert 'GRAPHICALTEST refused' not in s
     assert stage.contents(disk)[stage.STAGE1]==signed and all(stage.contents(disk)[k]==v for k,v in original.items())
     assert not __import__('afs1').audit(disk)
-    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus eight ordinary builtins, mixed thirteenth-session refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS')
+    print(f'[m10-dynamic] signed ELF {len(elf)} bytes sha256={hashlib.sha256(elf).hexdigest()}; four broker-owned real dynamic graphical processes plus eight ordinary builtins, twelve-session mixed resource regression (M12 separately qualifies 32-window refusal), native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS')
 if __name__=='__main__':main()

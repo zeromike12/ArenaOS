@@ -58,7 +58,9 @@ def run(cmd, **kw):
 
 
 def cargo_test():
-    return run(['cargo', 'test', '--offline', '--release', '--target', TARGET])
+    # The host image omits rustdoc; this crate has no doctests. Keep running
+    # all engine unit proofs without making the historical suite depend on it.
+    return run(['cargo', 'test', '--lib', '--offline', '--release', '--target', TARGET])
 
 
 def lines_of_walk(tree, vol):

@@ -92,6 +92,9 @@ def doc_bytes(path,name):
 def workflow(label,disk):
     d=Desktop(label)
     try:
+        settled_base=receipts(d.serial())
+        assert settled_base, 'settled boot resource baseline is absent'
+        base=settled_base[0]
         empty=d.shot('empty')
         terminal=d.launch(0,'terminal')
         d.q.type_text('put Documents/user-note hello desktop\r',gap_s=.04)
@@ -154,18 +157,28 @@ def workflow(label,disk):
         d.wait(lambda:(file_bytes(disk,b'ui10-prefs') or b'')[:7]==b'UI10\x01\x01\x00','live dark preference not persisted')
         for name,region in zip(names,regions):
             d.shot('live-theme-restored-'+name,lambda p,region=region:crop(p,*region)==crop(owned_dark,*region))
-        # ADR-0075: twelve sessions. Six more real processes (second
-        # cascade lane), then the thirteenth launch is refused.
+        # Preserve Phase-11's twelve-session interaction/resource regression.
+        # Phase 12's independent M12 scale proof fills all 32 slots and checks
+        # the 33rd mutation-free refusal.
         spawned=d.serial().count('[desktop] real application spawned;')
         for kind in range(6):
             d.click(255+kind*58,570)
             d.wait(lambda:d.serial().count('[desktop] real application spawned;')>=spawned+kind+1,'second-lane session not spawned')
         d.settled('twelve-desktop',(0,26,800,500))
-        full=d.shot('full-desktop')
-        before=d.serial().count('[desktop] real application spawned;')
-        d.click(255,570)
-        d.shot('capacity-refused',lambda p:crop(p,10,28,250,20)!=crop(full,10,28,250,20))
-        assert d.serial().count('[desktop] real application spawned;')==before,'capacity refusal spawned a thirteenth process'
+        # Spawn markers precede each app's asynchronous first frame and
+        # filesd view. Wait for the full twelve-session working set before
+        # closing it; this Phase-12 startup audit makes that boundary visible.
+        expected_live=(base[1]+12,base[2]+12,base[3]+24,
+                       base[4]+12*(471+469),base[5]+36+4,base[6]+2*12)
+        end=time.monotonic()+30
+        while time.monotonic()<end:
+            current=receipts(d.serial())
+            if current and current[-1][1:]==expected_live:
+                break
+            time.sleep(.04)
+        else:
+            raise AssertionError(('twelve-session startup working set did not settle',
+                                  expected_live,receipts(d.serial())[-1:]))
         retired=d.serial().count('[desktop] application retired:')
         for i in range(12):
             d.q.command('input-send-event',events=[d.q._ev('f8',True),d.q._ev('f8',False)])
@@ -214,21 +227,23 @@ def main(esp=None):
     # Shared = I/O page + snapshot-sized surfaces + the filesd page (ADR-0077).
     assert (shared,snapshot)==(471,469),(shared,snapshot)
     cap_peak=max(map(int,re.findall(r'measured broker cap high-water=(\d+)',s)))
-    # Fixed broker caps + region, Process and filesd lineage head (ADR-0077)
-    # per session + one landed request cap at the twelfth launch
-    # (measured: 60 = 23 + 3x12 + 1).
-    assert cap_peak==samples[0][6]+3*12+1,(cap_peak,samples[0])
+    # Each managed session leaves one held Process cap and one filesd
+    # lineage-head cap in the broker. The child, not the broker, owns the
+    # delegated session-region cap. One input request cap is transiently
+    # landed during the twelfth launch (Phase-12 startup ownership).
+    assert cap_peak == samples[0][6] + 2 * 12 + 1, (cap_peak, samples[0])
     # The settled peak: most pages, then most maps (clients and filesd map
     # their views after the broker's region creation is sampled).
     peak=max(samples,key=lambda row:(row[4],row[5]))
     # Twelve sessions: one record and process each, two regions each (the
     # shared reservation and the broker-only snapshot), three maps each
     # (broker x2, client x1) plus filesd's map of each of the four file
-    # sessions (two terminals, two Files), and three broker caps each
-    # (region, Process, filesd lineage head). Measured 44 = 4 + 36 + 4.
+    # sessions (two terminals, two Files). The broker retains one Process
+    # and one filesd lineage head per session; the child alone holds the
+    # session-region cap after spawn. Measured 68 = 44 + 24.
     assert peak[1:4]==(samples[0][1]+12,samples[0][2]+12,samples[0][3]+24),peak
-    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36+4 and peak[6]==samples[0][6]+36,peak
-    print(f'[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline={samples[0]} peak={peak} transient-broker-caps={cap_peak}',flush=True)
+    assert peak[4]==samples[0][4]+12*(shared+snapshot) and peak[5]==samples[0][5]+36+4 and peak[6]==samples[0][6]+2*12,peak
+    print(f'[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, twelve-session resource accounting and exact cleanup PASS; baseline={samples[0]} peak={peak} transient-broker-caps={cap_peak}',flush=True)
     # Durable appearance must affect actual desktop pixels on a fresh boot.
     label='m10-apps-persist'
     def persisted():

@@ -253,6 +253,15 @@ for GRAPHICS_ELF in arena-compositord arena-window-a arena-window-b; do
     echo "graphics image: $GRAPHICS_ELF ($(stat -c%s "$REPO_ROOT/phase9-work/target/x86_64-unknown-none/release/$GRAPHICS_ELF") bytes)"
 done
 
+# ADR-0083: independently linked native runtime consumer, embedded only as
+# the kernel's boot-time ABI proof image (not a production resident service).
+echo "== building ArenaOS native startup/runtime proof image =="
+( cd "$REPO_ROOT/userspace/arena-runtime" && \
+    cargo build --offline --locked --release --bin arena-startup-proof )
+STARTUP_PROOF_ELF="$REPO_ROOT/userspace/arena-runtime/target/x86_64-unknown-none/release/arena-startup-proof"
+test -f "$STARTUP_PROOF_ELF"
+echo "startup proof image: ${STARTUP_PROOF_ELF#"$REPO_ROOT"/} ($(stat -c%s "$STARTUP_PROOF_ELF") bytes)"
+
 cd "$REPO_ROOT/kernel"
 # shellcheck disable=SC2086
 ( cd "$REPO_ROOT/userspace/desktop" && cargo build --offline --locked --release )

@@ -64,6 +64,16 @@ pub const SYS_RTC_READ: u64 = 50;
 /// server only.
 pub const SYS_ENDPOINT_BADGE: u64 = 51;
 pub const SYS_SHARED_PAGES: u64 = 52;
+/// ADR-0085: set the current native user thread's validated FS.base.
+pub const SYS_TLS_SET: u64 = 53;
+/// ADR-0086: read only whether one caller-owned capability slot is occupied.
+pub const SYS_CAP_OCCUPIED: u64 = 54;
+/// Phase-12 cap-space width, mirrored from kernel::cap::CAP_SLOTS (ADR-0088).
+pub const CAP_SLOTS: usize = 128;
+/// Startup ABI and capability-inventory kind for a held Process cap.
+pub const CAP_KIND_PROCESS: u8 = 4;
+/// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
+pub const MAX_SPAWN_INHERIT: usize = 5;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;
@@ -145,6 +155,9 @@ pub const MGR_BADGE_PKG_PROBE_OK: u64 = 1 << 15;
 pub const MGR_BADGE_PKG_PROBE_EXIT: u64 = 1 << 16;
 pub const MGR_BADGE_PKG_PROBE_DEADLINE: u64 = 1 << 17;
 pub const MGR_BADGE_PKG_EXIT: u64 = 1 << 18;
+/// ADR-0091 slot-127 install-authority arrival; only a wake hint, manager
+/// revalidates and forwards the held BadgedEndpoint after packaged READY.
+pub const MGR_BADGE_APB1_INSTALL_AUTH: u64 = 1 << 22;
 /// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
 pub const STATUS_BUSY: i64 = -4;
 
@@ -274,6 +287,11 @@ pub const PKG_OP_SELECT_COMMIT: u64 = 6;
 pub const PKG_OP_DEACTIVATE: u64 = 7;
 pub const PKG_OP_LAUNCH: u64 = 8;
 pub const PKG_OP_ABORT: u64 = 9;
+/// Phase 12: trusted Desktop submits one exact filesd File capability;
+/// packaged performs current APKG v1 policy selection before filesd installs.
+pub const PKG_OP_APB1_INSTALL: u64 = 10;
+/// One-time manager-to-packaged transfer after the five-cap receiver is READY.
+pub const PKG_OP_INSTALL_AUTH_HANDOFF: u64 = 11;
 pub const PKG_INSTALLED: u64 = 4;
 pub const PKG_PREPARED: u64 = 5;
 pub const PKG_ACTIVE: u64 = 6;

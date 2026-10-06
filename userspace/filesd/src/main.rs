@@ -20,6 +20,13 @@
 #![allow(static_mut_refs, clippy::deref_addrof)]
 
 use arena_afs2::{self as afs, BLOCK, Device, Error as E, SECTOR, Volume};
+use arena_platform_core::{
+    bundle::{BundleClaim, Error as BundleError, SourceError, Workspace},
+    install::{
+        self as apb1_install, CleanupWorkspace, Error as InstallError, InstallAuthorization,
+        InstallTarget, InstallWorkspace,
+    },
+};
 use core::panic::PanicInfo;
 
 #[path = "../../abi.rs"]
@@ -40,6 +47,9 @@ const SLOT_FRAME_LENT: u64 = 9;
 const BASE_SECTOR: u64 = 16384;
 const VOLUME_BLOCKS: u64 = 16384;
 const GRANTS: usize = 256;
+const INSTALL_RECORD: usize = 2;
+/// Outside R_ALL and never accepted by OPEN: exact private install endpoint only.
+const R_INSTALL: u8 = 1 << 6;
 /// Live records one grant lineage may hold (the grant itself included):
 /// one application cannot exhaust the table for everyone else.
 const LINEAGE_QUOTA: usize = 16;
@@ -146,6 +156,10 @@ impl Device for Blk {
 }
 
 static mut VOL: Volume<Blk> = Volume::empty();
+static mut APB1_VERIFIER: Workspace = Workspace::new();
+static mut APB1_INSTALL_WORKSPACE: InstallWorkspace = InstallWorkspace::new();
+static mut APB1_CLEANUP: CleanupWorkspace = CleanupWorkspace::new();
+static mut APB1_ROOTS: Option<(u64, u64)> = None;
 
 // ---- wall time (ADR-0076 "Time": data, never authority) -------------------
 
@@ -254,7 +268,7 @@ fn revoke(i: usize) {
     release(i);
     if head {
         let mut n = 1u64;
-        for j in 2..GRANTS {
+        for j in 3..GRANTS {
             if unsafe { GRANT[j].live && usize::from(GRANT[j].lineage) == i } {
                 release(j);
                 n += 1;
@@ -279,7 +293,7 @@ fn mint(place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
     // A record index whose generation is exhausted retires for good: a
     // badge is never valid twice.
     let Some(i) =
-        (2..GRANTS).find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
+        (3..GRANTS).find(|i| unsafe { !GRANT[*i].live && GRANT[*i].generation < u16::MAX })
     else {
         log(b"filesd: refused: every capability record is in use\n");
         return Err(S_FULL);
@@ -288,7 +302,7 @@ fn mint(place: usize, object: u64, rights: u8) -> Result<(u64, usize), u64> {
         i
     } else {
         let l = usize::from(unsafe { GRANT[place].lineage });
-        let held = (2..GRANTS)
+        let held = (3..GRANTS)
             .filter(|j| unsafe { GRANT[*j].live && usize::from(GRANT[*j].lineage) == l })
             .count();
         if held >= LINEAGE_QUOTA {
@@ -369,6 +383,196 @@ fn reply(status: u64, value: u64) -> Reply {
     }
 }
 
+fn apb1_source(landed: u64) -> Result<(u64, u64), u64> {
+    if landed == CAP_NONE {
+        return Err(S_DENIED);
+    }
+    let badge = unsafe { syscall6(SYS_ENDPOINT_BADGE, SLOT_EP, landed, 0, 0, 0, 0) };
+    let Some(i) = (badge > 0).then(|| record(badge as u32)).flatten() else {
+        return Err(S_DENIED);
+    };
+    let grant = unsafe { GRANT[i] };
+    if i == INSTALL_RECORD || grant.rights & R_INSTALL != 0 || grant.rights & R_READ == 0 {
+        return Err(S_DENIED);
+    }
+    let stat = unsafe { &mut *(&raw mut VOL) }
+        .stat(grant.object)
+        .map_err(status)?;
+    if stat.typ != afs::FILE {
+        return Err(S_DENIED);
+    }
+    Ok((grant.object, stat.size))
+}
+
+fn apb1_read_exact(
+    volume: &mut Volume<Blk>,
+    object: u64,
+    size: u64,
+    offset: u64,
+    out: &mut [u8],
+) -> Result<(), SourceError> {
+    let end = offset
+        .checked_add(u64::try_from(out.len()).map_err(|_| SourceError)?)
+        .ok_or(SourceError)?;
+    if end > size {
+        return Err(SourceError);
+    }
+    let read = volume.read(object, offset, out).map_err(|_| SourceError)?;
+    if read == out.len() {
+        Ok(())
+    } else {
+        Err(SourceError)
+    }
+}
+
+fn apb1_claim(object: u64, size: u64) -> Result<BundleClaim, BundleError> {
+    let volume = unsafe { &mut *(&raw mut VOL) };
+    let verifier = unsafe { &mut *(&raw mut APB1_VERIFIER) };
+    verifier.inspect_with_reader(size, |offset, out| {
+        apb1_read_exact(volume, object, size, offset, out)
+    })
+}
+
+fn apb1_install_badge(badge: u32) -> bool {
+    if badge != wire::APB1_INSTALL_BADGE || record(badge) != Some(INSTALL_RECORD) {
+        return false;
+    }
+    let roots = unsafe { APB1_ROOTS };
+    roots.is_some_and(|(apps, _)| unsafe {
+        GRANT[INSTALL_RECORD].live
+            && GRANT[INSTALL_RECORD].generation == 1
+            && GRANT[INSTALL_RECORD].rights == R_INSTALL
+            && GRANT[INSTALL_RECORD].object == apps
+    })
+}
+
+fn apb1_bundle_status(error: BundleError) -> u64 {
+    match error {
+        BundleError::Io => S_IO,
+        BundleError::UnknownSigner | BundleError::BadSignature => S_DENIED,
+        _ => S_CORRUPT,
+    }
+}
+
+fn apb1_install_status(error: InstallError) -> u64 {
+    match error {
+        InstallError::Fs(E::NoSpc) => S_NOSPC,
+        InstallError::Fs(E::Io) => S_IO,
+        InstallError::AlreadyInstalled | InstallError::StagingCollision => S_EXIST,
+        InstallError::Bundle(BundleError::UnknownSigner | BundleError::BadSignature)
+        | InstallError::Policy(_) => S_DENIED,
+        InstallError::Bundle(BundleError::Io) => S_IO,
+        InstallError::BadSource | InstallError::SourceChangedOrShort => S_INVAL,
+        _ => S_CORRUPT,
+    }
+}
+
+/// The special `w0` subprotocol is reachable only through the one internal
+/// R_INSTALL badge. Its request bytes are raw bounded APB1 fields, not the
+/// legacy filesd Request format. `landed` must be an exact File capability
+/// from this same filesd endpoint on every operation.
+fn handle_apb1(
+    call: u64,
+    version: u64,
+    badge: u32,
+    landed: u64,
+    bytes: &[u8; BYTES],
+) -> Reply {
+    if badge != wire::APB1_INSTALL_BADGE {
+        return reply(S_DENIED, 0);
+    }
+    if version != wire::CALL_APB1_ABI_V1 {
+        return reply(S_INVAL, 0);
+    }
+    if call == wire::CALL_APB1_PROBE {
+        if landed != CAP_NONE || bytes.iter().any(|&byte| byte != 0) {
+            return reply(S_INVAL, 0);
+        }
+        // Prove the receiver's exact kernel-minted badge even if the AFS2
+        // volume is offline; later operations still fail closed on roots.
+        return reply(S_OK, wire::CALL_APB1_ABI_V1);
+    }
+    if !apb1_install_badge(badge) {
+        return reply(S_OFFLINE, 0);
+    }
+    let (object, size) = match apb1_source(landed) {
+        Ok(source) => source,
+        Err(status) => return reply(status, 0),
+    };
+    match call {
+        wire::CALL_APB1_INSPECT => {
+            if bytes.iter().any(|&byte| byte != 0) {
+                return reply(S_INVAL, 0);
+            }
+            let claim = match apb1_claim(object, size) {
+                Ok(claim) => claim,
+                Err(error) => return reply(apb1_bundle_status(error), 0),
+            };
+            let mut result = reply(S_OK, claim.version);
+            result.bytes[..32].copy_from_slice(&claim.package_id);
+            result.bytes[32..].copy_from_slice(&claim.signer_id);
+            result
+        }
+        wire::CALL_APB1_VERIFY => {
+            if bytes[32..].iter().any(|&byte| byte != 0) {
+                return reply(S_INVAL, 0);
+            }
+            let mut key = [0; 32];
+            key.copy_from_slice(&bytes[..32]);
+            let volume = unsafe { &mut *(&raw mut VOL) };
+            let verifier = unsafe { &mut *(&raw mut APB1_VERIFIER) };
+            let verified = match verifier.verify_with_reader(
+                size,
+                |offset, out| apb1_read_exact(volume, object, size, offset, out),
+                &key,
+            ) {
+                Ok(verified) => verified,
+                Err(error) => return reply(apb1_bundle_status(error), 0),
+            };
+            let mut result = reply(S_OK, verified.manifest().version());
+            result
+                .bytes[..32]
+                .copy_from_slice(verified.manifest().package_id());
+            result.bytes[32..].copy_from_slice(verified.bundle_digest());
+            result
+        }
+        wire::CALL_APB1_INSTALL => {
+            let request = wire::Apb1InstallRequest::decode(bytes);
+            let claim = match apb1_claim(object, size) {
+                Ok(claim) => claim,
+                Err(error) => return reply(apb1_bundle_status(error), 0),
+            };
+            let Some((applications_root, staging_root)) = (unsafe { APB1_ROOTS }) else {
+                return reply(S_OFFLINE, 0);
+            };
+            let authorization = InstallAuthorization::new(
+                claim,
+                request.trusted_key,
+                request.bundle_digest,
+            );
+            let volume = unsafe { &mut *(&raw mut VOL) };
+            let verifier = unsafe { &mut *(&raw mut APB1_VERIFIER) };
+            let scratch = unsafe { &mut *(&raw mut APB1_INSTALL_WORKSPACE) };
+            match apb1_install::install_with_authorization_from_volume_file(
+                volume,
+                verifier,
+                scratch,
+                object,
+                &authorization,
+                InstallTarget::new(applications_root, staging_root, wall_us()),
+            ) {
+                Ok(receipt) => {
+                    let mut result = reply(S_OK, receipt.version);
+                    result.bytes[..32].copy_from_slice(&receipt.bundle_digest);
+                    result
+                }
+                Err(error) => reply(apb1_install_status(error), 0),
+            }
+        }
+        _ => reply(S_INVAL, 0),
+    }
+}
+
 static mut NAME: [u8; 512] = [0; 512];
 static mut DATA: [u8; PAGE] = [0; PAGE];
 
@@ -393,6 +597,12 @@ fn handle(badge: u32, req: Request, landed: u64) -> Reply {
         return reply(S_DENIED, 0);
     };
     let mut g = unsafe { GRANT[i] };
+    // The reserved R_INSTALL record has no generic filesystem semantics.
+    // Keeping it out of this dispatcher makes OPEN/READ/WRITE/UNLINK and
+    // lineage operations unavailable even to its authenticated holder.
+    if g.rights & R_INSTALL != 0 {
+        return reply(S_DENIED, 0);
+    }
     let head = usize::from(g.lineage);
     g.io = unsafe { GRANT[head].io };
     let has = |r: u8| g.rights & r == r;
@@ -933,6 +1143,37 @@ fn user_root(vol: &mut Volume<Blk>) -> afs::Result<u64> {
     Ok(vol.lookup(users, b"user")?.0)
 }
 
+fn ensure_directory(
+    vol: &mut Volume<Blk>,
+    parent: u64,
+    name: &[u8],
+    wall: u64,
+) -> afs::Result<u64> {
+    match vol.lookup(parent, name) {
+        Ok((object, afs::DIR)) => Ok(object),
+        Ok(_) => Err(E::NotDir),
+        Err(E::NoEnt) => vol.mkdir(parent, name, wall),
+        Err(error) => Err(error),
+    }
+}
+
+/// Create/open only the two filesd-owned APB1 roots below protected /System,
+/// then remove exact abandoned stage labels before advertising install-ready.
+fn initialize_apb1_roots(vol: &mut Volume<Blk>) -> afs::Result<(u64, u64, usize)> {
+    let root = vol.root_id()?;
+    let (system, typ) = vol.lookup(root, b"System")?;
+    if typ != afs::DIR {
+        return Err(E::NotDir);
+    }
+    let wall = wall_us();
+    let applications = ensure_directory(vol, system, b"Applications", wall)?;
+    let staging = ensure_directory(vol, system, b".apb1-staging", wall)?;
+    let cleanup = unsafe { &mut *(&raw mut APB1_CLEANUP) };
+    let removed = apb1_install::purge_abandoned_staging(vol, staging, cleanup, wall)
+        .map_err(|_| E::Corrupt)?;
+    Ok((applications, staging, removed))
+}
+
 /// Bring the volume online; false = offline (fail closed or no region).
 fn bring_up() -> bool {
     let vol = unsafe { &mut *(&raw mut VOL) };
@@ -1009,6 +1250,27 @@ fn bring_up() -> bool {
             return false;
         }
     }
+    match initialize_apb1_roots(vol) {
+        Ok((applications, staging, removed)) => unsafe {
+            GRANT[INSTALL_RECORD] = Grant {
+                live: true,
+                generation: 1,
+                object: applications,
+                rights: R_INSTALL,
+                io: 0,
+                map: 0,
+                lineage: INSTALL_RECORD as u8,
+            };
+            APB1_ROOTS = Some((applications, staging));
+            log(b"filesd: protected APB1 roots ready; abandoned staging entries removed=");
+            log_num(removed as u64);
+            log(b"\n");
+        },
+        Err(_) => {
+            unsafe { APB1_ROOTS = None };
+            log(b"filesd: protected APB1 roots unavailable; install endpoint offline\n");
+        }
+    }
     let s = vol.statfs();
     log(b"filesd: AFS2 mounted seq ");
     log_num(s.seq);
@@ -1077,11 +1339,23 @@ extern "C" fn main() -> ! {
             log(b"filesd: receive refused\n");
             exit(72);
         }
-        let (landed, badge) = (out[2], out[3] as u32);
-        let r = match Request::decode(&msg) {
-            _ if !online => reply(S_OFFLINE, 0),
-            Some(req) => handle(badge, req, landed),
-            None => reply(S_INVAL, 0),
+        let (call, version, landed, badge) = (out[0], out[1], out[2], out[3] as u32);
+        let r = if call == wire::CALL_APB1_PROBE {
+            handle_apb1(call, version, badge, landed, &msg)
+        } else if !online {
+            reply(S_OFFLINE, 0)
+        } else if matches!(
+            call,
+            wire::CALL_APB1_INSPECT | wire::CALL_APB1_VERIFY | wire::CALL_APB1_INSTALL
+        ) {
+            handle_apb1(call, version, badge, landed, &msg)
+        } else if call != 0 || version != 0 {
+            reply(S_INVAL, 0)
+        } else {
+            match Request::decode(&msg) {
+                Some(req) => handle(badge, req, landed),
+                None => reply(S_INVAL, 0),
+            }
         };
         // A landed capability is only ever lent for this request (a
         // session region stays pinned by its mapping): drop it, unless a

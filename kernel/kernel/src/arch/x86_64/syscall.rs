@@ -185,6 +185,10 @@ pub const SYS_ENDPOINT_BADGE: u64 = 51;
 /// caller holds (READ or WRITE), so a server mapping a client's region can
 /// bounds-check an offset the client names (Phase 11.6, ADR-0077).
 pub const SYS_SHARED_PAGES: u64 = 52;
+/// ADR-0085: set the current process thread's validated native FS.base.
+pub const SYS_TLS_SET: u64 = 53;
+/// ADR-0086: read only whether one caller-owned capability slot is occupied.
+pub const SYS_CAP_OCCUPIED: u64 = 54;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -712,10 +716,10 @@ extern "C" fn syscall_dispatch(
         SYS_ENDPOINT_MINT if [a3, a4, a5] == [0; 3] => sys_endpoint_mint(a0, a1, a2) as u64,
         SYS_IPC_RECV_BADGED if a5 == 0 => sys_ipc_recv_badged(a0, a1, a2, a3, a4) as u64,
         SYS_RTC_READ if [a2, a3, a4, a5] == [0; 4] => sys_rtc_read(a0, a1) as u64,
-        SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => {
-            sys_endpoint_badge(a0, a1) as u64
-        }
+        SYS_ENDPOINT_BADGE if [a2, a3, a4, a5] == [0; 4] => sys_endpoint_badge(a0, a1) as u64,
         SYS_SHARED_PAGES if [a1, a2, a3, a4, a5] == [0; 5] => sys_shared_pages(a0) as u64,
+        SYS_TLS_SET if [a1, a2, a3, a4, a5] == [0; 5] => sys_tls_set(a0) as u64,
+        SYS_CAP_OCCUPIED if [a1, a2, a3, a4, a5] == [0; 5] => sys_cap_occupied(a0) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -2575,6 +2579,19 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
     STATUS_OK
 }
 
+/// SYS_CAP_OCCUPIED(slot): read caller-owned slot presence without exposing
+/// an object kind, identity, rights, or device address. Returns 0/1, or a typed
+/// error for a kernel caller/out-of-range slot.
+fn sys_cap_occupied(slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    crate::cap::slot_occupied(pid, slot as usize).map_or(STATUS_BAD_ARG, Status::from)
+}
+
 /// SYS_PROC_FINISH(slot, mode): a Process cap with DESTROY, not a pid.
 /// Mode 0 reaps only an exited child; mode 1 explicitly stops a live
 /// child and then reaps it. Kernel-bootstrapped roots (including the
@@ -2852,6 +2869,51 @@ fn sys_shared_pages(slot: u64) -> Status {
     match crate::shared::backing(id) {
         Some((_, pages)) => Status::from(pages),
         None => STATUS_BAD_ARG,
+    }
+}
+
+/// SYS_TLS_SET(base): install the caller's native FS.base for this user
+/// thread. The TCB header must be 16-byte aligned, in a registered user
+/// region, and live on a writable+NX user PTE. Zero clears TLS. This does not
+/// touch GS or confer access outside the current process address space.
+fn sys_tls_set(base: u64) -> Status {
+    if crate::sched::current_proc_id().is_none() {
+        return STATUS_BAD_ARG;
+    }
+    if base == 0 {
+        return if crate::sched::set_current_fs_base(0).is_ok() {
+            STATUS_OK
+        } else {
+            STATUS_BAD_ARG
+        };
+    }
+    if !base.is_multiple_of(16) || !user_range_ok(base, 8) {
+        return STATUS_BAD_ARG;
+    }
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Some(root) = crate::proc::pml4_of(pid) else {
+        return STATUS_BAD_ARG;
+    };
+    let page = base & !0xFFF;
+    // SAFETY: IF=0, root belongs to this live process, and `page` is a
+    // canonical lower-half page validated through its exact current region.
+    let Some(pte) = (unsafe { crate::arch::x86_64::paging::user_pte_flags(root, page) }) else {
+        return STATUS_BAD_ARG;
+    };
+    let required = crate::arch::x86_64::paging::PTE_PRESENT
+        | crate::arch::x86_64::paging::PTE_USER
+        | crate::arch::x86_64::paging::PTE_WRITE
+        | crate::arch::x86_64::paging::PTE_NX;
+    let mmio = crate::arch::x86_64::paging::PTE_PCD | crate::arch::x86_64::paging::PTE_PWT;
+    if pte & required != required || pte & mmio != 0 {
+        return STATUS_BAD_ARG;
+    }
+    if crate::sched::set_current_fs_base(base).is_ok() {
+        STATUS_OK
+    } else {
+        STATUS_BAD_ARG
     }
 }
 

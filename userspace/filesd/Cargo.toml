@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 arena-afs2 = { path = "../afs2" }
+arena-platform-core = { path = "../arena-platform" }
 
 [workspace]
 

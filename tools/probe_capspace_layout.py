@@ -49,7 +49,7 @@ fn print_sizes<const N: usize>() {
 }
 fn main() {
     println!("CapObj={} Cap={}", size_of::<CapObj>(), size_of::<Cap>());
-    print_sizes::<16>(); print_sizes::<18>(); print_sizes::<32>(); print_sizes::<64>();
+    print_sizes::<16>(); print_sizes::<18>(); print_sizes::<32>(); print_sizes::<64>(); print_sizes::<128>();
 }
 """
     with tempfile.TemporaryDirectory(prefix="cap-layout-") as work:
@@ -64,12 +64,13 @@ fn main() {
         # layout without executing bare-metal code or altering the OS.
         sizes = """#[used]
 #[unsafe(no_mangle)]
-pub static ARENA_CAP_LAYOUT: [usize; 18] = [
+pub static ARENA_CAP_LAYOUT: [usize; 22] = [
  size_of::<CapObj>(), size_of::<Cap>(),
  size_of::<CapSpace<16>>(),size_of::<Process<16>>(),size_of::<Option<Process<16>>>(),32*size_of::<Option<Process<16>>>(),
  size_of::<CapSpace<18>>(),size_of::<Process<18>>(),size_of::<Option<Process<18>>>(),32*size_of::<Option<Process<18>>>(),
  size_of::<CapSpace<32>>(),size_of::<Process<32>>(),size_of::<Option<Process<32>>>(),32*size_of::<Option<Process<32>>>(),
  size_of::<CapSpace<64>>(),size_of::<Process<64>>(),size_of::<Option<Process<64>>>(),32*size_of::<Option<Process<64>>>(),
+ size_of::<CapSpace<128>>(),size_of::<Process<128>>(),size_of::<Option<Process<128>>>(),64*size_of::<Option<Process<128>>>(),
 ];
 """
         target = Path(work) / "target.rs"
@@ -79,7 +80,7 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
         subprocess.run(["rustc", "--crate-type=lib", "--edition=2024", "-O",
                         "--target=x86_64-unknown-none", "--emit=llvm-ir",
                         str(target), "-o", str(ir)], check=True)
-        match = re.search(r'@ARENA_CAP_LAYOUT = constant \[144 x i8\] c"([^"]+)"',
+        match = re.search(r'@ARENA_CAP_LAYOUT = constant \[176 x i8\] c"([^"]+)"',
                           ir.read_text())
         if match is None:
             raise ValueError("guest layout constant missing from LLVM IR")
@@ -97,17 +98,22 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
             else:
                 data.append(ord(encoded[i]))
                 i += 1
-        actual = struct.unpack("<18Q", data)
-        # ADR-0075 (Phase 11.3): the production table is 64 slots, so the
-        # 32-process table grows 27136 -> 52736 B (+25600 B, 25 KiB).
+        actual = struct.unpack("<22Q", data)
+        # The historical 16/18/32/64 measurements remain in the first 18
+        # fields. ADR-0088's 128-slot CapSpace and 64-process table are the
+        # final four fields and are measured from the actual source structs.
         expected = (16, 24, 400, 448, 448, 14336, 456, 504, 504,
-                    16128, 800, 848, 848, 27136, 1600, 1648, 1648, 52736)
+                    16128, 800, 848, 848, 27136, 1600, 1648, 1648, 52736,
+                    3200, 3248, 3248, 207872)
         if actual != expected:
             raise ValueError(f"on-target layout changed: {actual!r} != {expected!r}")
-        if not re.search(r"pub const CAP_SLOTS: usize = 64;", cap):
-            raise ValueError("production capability table is not the reviewed 64 slots")
-        print("x86_64-unknown-none target cap layout: identical to host, all 18 fields PASS; "
-              "production 64 slots: 32-process table 52736 B (ADR-0075 +25600 B)")
+        if not re.search(r"pub const CAP_SLOTS: usize = 128;", cap):
+            raise ValueError("production capability table is not the reviewed 128 slots")
+        if not re.search(r"pub const MAX_PROCESSES: usize = 64;", proc):
+            raise ValueError("production process table is not the reviewed 64 slots")
+        print("x86_64-unknown-none target cap layout: historical sizes unchanged; "
+              "CapSpace<128>=3200 B, Option<Process<128>>=3248 B, "
+              "64-process table=207872 B (ADR-0088) PASS")
 
         ipc = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
         ipc_decls = [declaration(ipc, start) for start in (
@@ -122,10 +128,11 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
         width = re.search(r"const MSG_BYTES: usize = (\d+);", ipc)
         if depth is None or width is None:
             raise ValueError("IPC queue/message bounds missing from source")
-        # ADR-0075: caller queue depth 8 -> 16 for twelve desktop clients.
-        # ADR-0077: filesd's endpoint; 12 -> 16 endpoints.
-        if depth[1] != '16' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 16;',ipc):
-            raise ValueError('production IPC bounds differ from reviewed Phase-11 16/64/16')
+        # ADR-0075 raised the queue to 16 for twelve Phase-11 clients;
+        # ADR-0089 raises it to 32 for a simultaneous Phase-12 startup burst.
+        # ADR-0077 set filesd's endpoint bound to 16.
+        if depth[1] != '32' or width[1] != '64' or not re.search(r'pub const MAX_ENDPOINTS: usize = 16;',ipc):
+            raise ValueError('production IPC bounds differ from reviewed Phase-12 32/64/16')
         # Keep the historical four-entry projection as well as measuring the
         # actual eight-entry production layout from the same source fields.
         ipc_decls[2] = ipc_decls[2].replace('struct Endpoint {','struct Endpoint<const N: usize> {').replace('QUEUE_DEPTH','N')
@@ -139,7 +146,7 @@ pub static ARENA_CAP_LAYOUT: [usize; 18] = [
 pub static ARENA_IPC_LAYOUT: [usize; 8] = [
  size_of::<CallSlot>(),size_of::<Endpoint<4>>(),size_of::<Endpoint<QUEUE_DEPTH>>(),size_of::<Notif>(),
  8*size_of::<Endpoint<QUEUE_DEPTH>>(),9*size_of::<Endpoint<QUEUE_DEPTH>>(),
- 16*size_of::<Endpoint<QUEUE_DEPTH>>(),31*size_of::<Notif>()
+ 16*size_of::<Endpoint<QUEUE_DEPTH>>(),64*size_of::<Notif>()
 ];
 """)
         ipc_target = Path(work) / "ipc.rs"
@@ -167,26 +174,18 @@ pub static ARENA_IPC_LAYOUT: [usize; 8] = [
                 data.append(ord(encoded[i]))
                 i += 1
         ipc_sizes = struct.unpack("<8Q", data)
-        # ADR-0071 (Phase 11.0): each endpoint carries one optional bound
-        # notification (+32 B) and each notification a generation (+8 B):
-        # 12 endpoints 23232 -> 23616 B, 25 notifications 600 -> 800 B.
-        # ADR-0075 (Phase 11.3): twelve desktop clocks, 25 -> 31
-        # notifications: 800 -> 992 B; caller queue 8 -> 16 per endpoint:
-        # Endpoint 1968 -> 3888 B, 12 endpoints 23616 -> 46656 B.
-        # ADR-0077 (Phase 11.5): filesd, 12 -> 16 endpoints: 46656 -> 62208 B.
-        if ipc_sizes != (240, 1008, 3888, 32, 31104, 34992, 62208, 992):
+        # ADR-0071/75/77 retain the Phase-11 endpoint and message layouts.
+        # ADR-0088 raises notifications; ADR-0089 doubles only queue depth.
+        if ipc_sizes != (240, 1008, 7728, 32, 61824, 69552, 123648, 2048):
             raise ValueError(f"on-target IPC layout changed: {ipc_sizes!r}")
-        print("x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=1008; "
-              "production Endpoint<16>=3888 Notif=32; 16 endpoints=62208 B, 31 notifications=992 B "
-              "(ADR-0071 binding +384 B; ADR-0075 queue depth 16 +23040 B, six more clocks +192 B) PASS")
+        print("x86_64-unknown-none IPC: CallSlot=240 Endpoint<32>=7728 Notif=32; "
+              "16 endpoints=123648 B, 64 notifications=2048 B (ADR-0089) PASS")
         # ADR-0051: an *additional* distinct production-fsd marker,
         # on top of ADR-0048's projection; one Notification is 24 B.
         actual = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
-        if not re.search(r"pub const MAX_NOTIFS: usize = 31\s*;", actual):
-            raise ValueError("production notification bound not exactly 31")
-        print("ADR-0051/0053 FS and package diagnostics: 15->17 notifications +48 B; "
-              "ADR-0055 lifecycle marker: 17->18 +24 B; ADR-0062/0065 desktop clocks: 18->25 +168 B; "
-              "ADR-0075 twelve desktop clocks: 25->31 PASS")
+        if not re.search(r"pub const MAX_NOTIFS: usize = 64\s*;", actual):
+            raise ValueError("production notification bound not exactly 64")
+        print("Phase-12 fixed notification table: 64 objects (32 client clocks plus system budget) PASS")
 
 
 if __name__ == "__main__":

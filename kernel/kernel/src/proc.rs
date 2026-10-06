@@ -23,7 +23,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// Process-table bound. Fixed capacity, no dynamic growth — the same
 /// discipline as the thread table (MAX_THREADS); both revisit when the
 /// heap-backed object story matures.
-pub const MAX_PROCESSES: usize = 32;
+pub const MAX_PROCESSES: usize = 64;
 
 /// A live process: identity, the address space it owns, and its
 /// capability space (ADR-0014 §5 anchor: process = address space +

@@ -39,7 +39,7 @@ def main():
                and s.count('permission: ACQUIRE received 128-bit bearer') == 3
                and 'permission: READ verified 32 bytes from arena.txt via mediator' in s
                and 'permission: READ refused old/missing bearer' in s
-               and s.count('permapp: audited ONLY mediator WRITE|COPY, 31 other cap slots empty') >= 2
+               and s.count('permapp: audited ONLY mediator WRITE|COPY, 127 other cap slots empty') >= 2
                and 'permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty' in s
                and 'permapp: endpoint-only ALLOW/DENY/REVOKE refused by receiver' in s
                and not afs1.audit(disk) and len(disk_records(disk)) == 2,

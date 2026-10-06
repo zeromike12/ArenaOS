@@ -11,6 +11,7 @@ use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request,
 use arena_servicemgr::readiness::Gate;
 use arena_servicemgr::restart::{Refusal as RestartRefusal, Restart};
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
 mod package;
 mod permission;
 
@@ -31,6 +32,7 @@ const SLOT_PROBE_IMAGE: u8 = 9; // Image20/READ, full fixture only
 const SLOT_RNG_DIAG: u8 = 10; // diagnostic marker, never a data-plane cap
 const SLOT_STACK_DIAG: u8 = 11; // inherited READ-only by production stack
 const READY_DEADLINE_US: u64 = 2_000_000;
+static APB1_INSTALL_HINT_PENDING: AtomicBool = AtomicBool::new(false);
 
 const IMAGE: Key = Key(0);
 const NETD: Key = Key(1);
@@ -243,7 +245,19 @@ fn wait_one(slot: u8, badge: u64) -> Result<(), ()> {
         if observed < 0 {
             return Err(());
         }
-        if gate.observe(observed as u64).map_err(|_| ())? {
+        let mut observed = observed as u64;
+        // The kernel may publish the out-of-band APB1 slot while startup is
+        // still waiting for its exact driver/stack badge. Preserve that wake
+        // for package::State, but never let it satisfy or poison this Gate;
+        // the held cap is re-described before any forwarding.
+        if observed & MGR_BADGE_APB1_INSTALL_AUTH != 0 {
+            APB1_INSTALL_HINT_PENDING.store(true, Ordering::Release);
+            observed &= !MGR_BADGE_APB1_INSTALL_AUTH;
+            if observed == 0 {
+                continue;
+            }
+        }
+        if gate.observe(observed).map_err(|_| ())? {
             let _ = unsafe { syscall1(SYS_TIMER_CANCEL, timer as u64) };
             return Ok(());
         }
@@ -736,7 +750,7 @@ pub extern "C" fn _start() -> ! {
                     None
                 }
             };
-            let pkg = match package::start() {
+            let mut pkg = match package::start() {
                 Ok(state) => Some(state),
                 Err(()) => {
                     log(
@@ -745,6 +759,11 @@ pub extern "C" fn _start() -> ! {
                     None
                 }
             };
+            if APB1_INSTALL_HINT_PENDING.swap(false, Ordering::AcqRel) {
+                if let Some(state) = pkg.as_mut() {
+                    state.event(MGR_BADGE_APB1_INSTALL_AUTH);
+                }
+            }
             monitor(pid, handle, step, perm, pkg);
         }
         Err(()) => {

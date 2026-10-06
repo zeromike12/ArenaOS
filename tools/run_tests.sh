@@ -187,6 +187,36 @@ else
     failures=$((failures+1))
     echo "!! face13 generation check FAILED"
 fi
+
+# Phase 12.3/12.4: independent bundle/startup oracles, Rust host suites,
+# no_std receiver/runtime builds, and the exact guest image used by M12.
+echo "== Phase 12 APB1, startup ABI and native runtime host/target suites"
+if (cd "$REPO_ROOT" && python3 tools/test_package_record.py && \
+    python3 tools/test_apb1_format.py && \
+    python3 tools/test_startup_abi.py && \
+    (cd userspace/arena-platform && \
+        cargo fmt -- --check && \
+        cargo test --manifest-path Cargo.toml --lib \
+            --target x86_64-unknown-linux-gnu --locked && \
+        cargo clippy --lib --target x86_64-unknown-linux-gnu \
+            --locked -- -D warnings && \
+        cargo build --manifest-path Cargo.toml \
+            --release --target x86_64-unknown-none --locked) && \
+    (cd userspace/arena-runtime && \
+        cargo fmt -- --check && \
+        cargo test --manifest-path Cargo.toml --lib \
+            --target x86_64-unknown-linux-gnu --locked && \
+        cargo clippy --lib --target x86_64-unknown-linux-gnu \
+            --locked -- -D warnings && \
+        cargo build --manifest-path Cargo.toml \
+            --bin arena-startup-proof --release --locked)); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! APB1 host or no_std target tests FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

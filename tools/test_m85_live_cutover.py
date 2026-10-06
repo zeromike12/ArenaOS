@@ -61,10 +61,15 @@ def main():
     samples=[tuple(map(int,x)) for x in re.findall(r'pkg: observed frames=(\d+) records=(\d+) processes=(\d+)',s)]
     assert len(samples)==3 and samples[0]==samples[2] and samples[1][0]<samples[0][0]
     assert samples[1][1:]==(samples[0][1]+1,samples[0][2]+1),samples
-    assert 'servicemgr: full fixture notification budget 31/31; thirty-second refused' in s
+    assert 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' in s
     mgr={name:int(n) for name,n in re.findall(r'servicemgr: observed cap occupancy ([\w-]+)=(\d+)',s)}
     assert all(0<mgr[k]<=32 for k in ('baseline','two-live-images','unretired-child','after-finish')),mgr
     assert mgr['two-live-images']>mgr['unretired-child']>=mgr['baseline'] and mgr['after-finish']<mgr['two-live-images'],mgr
+    # This Phase-9 graphics fixture deliberately has no filesd/APB1 grant.
+    # Keep its late slot visible as a separate receipt without widening the
+    # historical low-32 manager inventory or its capacity assertion.
+    late_slot=[int(n) for n in re.findall(r'servicemgr: reserved APB1 slot127 descriptor=(\d+)',s)]
+    assert late_slot and all(n==0 for n in late_slot),late_slot
     peaks=[int(n) for n in re.findall(r'packaged: observed cap high-water (\d+)',s)]
     assert peaks and max(peaks)<=32 and max(peaks)>=7,peaks
     print(f'[{LABEL}] measured frames/records/processes={samples}; manager caps={mgr}; packaged cap peak={max(peaks)}',flush=True)

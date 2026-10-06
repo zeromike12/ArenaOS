@@ -18,9 +18,9 @@ writes about itself:
 * Alt+Tab shows the switcher overlay and Alt release switches focus;
 * a held key repeats (one press, one release, many characters);
 * the wheel scrolls the terminal transcript;
-* twelve real sessions with exact per-session reservation receipts, the
-  thirteenth refused with nothing allocated, and teardown back to the
-  first sample.
+* twelve real sessions with exact per-session reservation receipts and
+  teardown back to the first sample. The separate Phase-12 M12 gate fills
+  all 32 slots and tests mutation-free refusal of the 33rd.
 """
 import re
 import time
@@ -180,13 +180,13 @@ def workflow(label):
             d.keys(('f8', True), ('f8', False))
             d.wait(lambda: d.serial().count('[desktop] application retired:') >= n, 'not retired')
 
-        # --- twelve sessions, exact receipts, thirteenth refused.
-        d.wait(lambda: samples(d)[-1][1:] == base[1:], 'not back to base before capacity')
+        # --- twelve-session Phase-11 regression, exact receipts and cleanup.
+        d.wait(lambda: samples(d)[-1][1:] == base[1:], 'not back to base before session sweep')
         for i in range(12):
             d.keys(('f%d' % (1 + i % 6), True), ('f%d' % (1 + i % 6), False))
             d.wait(lambda: d.serial().count('[desktop] real application spawned;') >= spawned + 1 + 1 + i,
                    f'session {i + 1} not spawned')
-        full = d.stable('twelve', (0, 26, 800, 500))
+        d.stable('twelve', (0, 26, 800, 500))
         # Pages land when the broker creates a session; each client maps its
         # own region later. Wait for all three maps of all twelve sessions.
         d.wait(lambda: samples(d)[-1][4] == base[4] + 12 * (shared + snapshot)
@@ -195,21 +195,21 @@ def workflow(label):
         assert peak[2] == base[2] + 12 and peak[3] == base[3] + 24, (base, peak)
         assert peak[4] == base[4] + 12 * (shared + snapshot), (base, peak)
         assert peak[5] == base[5] + 36, (base, peak)
-        assert peak[6] == base[6] + 24, (base, peak)
-        before13 = d.serial().count('[desktop] real application spawned;')
-        d.keys(('f1', True), ('f1', False))
-        d.stable('thirteenth', (10, 28, 250, 20),
-                 lambda p: crop(p, 10, 28, 250, 20) != crop(full, 10, 28, 250, 20))
-        assert d.serial().count('[desktop] real application spawned;') == before13
-        assert samples(d)[-1][1:] == peak[1:], 'refused launch allocated'
-        for _ in range(12):
+        # This Phase-12 broker retains one held Process cap per session; the
+        # child, rather than the broker, owns the delegated surface-region cap.
+        # AFS2 is offline in this Phase-11 interaction fixture, so there is no
+        # retained filesd lineage-head cap.
+        assert peak[6] == base[6] + 12, (base, peak)
+        retired=d.serial().count('[desktop] application retired:')
+        for i in range(12):
             d.keys(('f8', True), ('f8', False))
-            time.sleep(.3)
+            d.wait(lambda i=i: d.serial().count('[desktop] application retired:')
+                   >= retired+i+1, f'twelve-session teardown stopped before child {i+1}/12')
         d.wait(lambda: samples(d)[-1][1:] == base[1:], 'twelve sessions did not tear down exactly')
         print(f'[{label}] reservation {shared}/{snapshot} pages; base {base}; twelve {peak}; '
               'maximize/restore/edge-resize allocate nothing; menu dismissal and action; '
-              'repeat, chord, wheel, minimize/dock restore, Alt+Tab; thirteenth refused; '
-              'teardown exact PASS', flush=True)
+              'repeat, chord, wheel, minimize/dock restore, Alt+Tab; '
+              'Phase-11 twelve-session teardown exact PASS', flush=True)
         return b'shutdown\r'
     finally:
         d.dispose()

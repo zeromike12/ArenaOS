@@ -13,6 +13,17 @@ use arena_desktop::{
     wire::Frame,
 };
 use arena_gfxkit::Canvas;
+use arena_process::{
+    handles::{Handle, InsertError},
+    process::{
+        ChildProcess, ExitSignal, FinishMode, GroupSpawnError, InheritGrant, ProcessGroup,
+        SpawnError,
+    },
+};
+use arena_startup_abi::{
+    manifest::FLAG_MULTI_INSTANCE,
+    startup::{CapabilityDescriptor, CapabilityRole},
+};
 use core::panic::PanicInfo;
 #[path = "../../../abi.rs"]
 mod abi;
@@ -24,12 +35,21 @@ const POOL: u64 = 3;
 const CLOCK: u64 = 4;
 const CALL_SIDE: u64 = 5;
 const APPLICATION: u64 = 6;
+/// ABI-v2 child slot layout: startup transport 0, per-session badged endpoint
+/// 1, writable surface 2, private clock 3, optional explicit tail grant 4.
+const V2_ENDPOINT_SLOT: u64 = 1;
+const V2_SURFACE_SLOT: u64 = 2;
+const V2_CLOCK_SLOT: u64 = 3;
+const V2_TAIL_SLOT: u64 = 4;
+const V2_BADGE_RIGHTS: u64 = RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
 /// filesd's /Users/user record (ADR-0077), minted by the kernel.
 const USER_ROOT: u64 = 20;
+/// Direct, write-only endpoint to the receiver-verified package service (ADR-0091).
+const PACKAGE_ENDPOINT: u64 = 43;
 const PIXEL_OFFSET: usize = 4096;
 const LIMIT: usize = wm::MAX_WINDOWS;
-/// Capability slots in the kernel table (ADR-0075).
-const CAP_SLOTS: u64 = 64;
+const _: () = assert!(LIMIT == arena_desktop::apps::STARTUP_INSTANCE_SLOTS);
+/// Session clocks and exact-cap scans follow the shared kernel ABI width.
 /// Pages of one bounded transient surface (ADR-0075); the final pages of a
 /// session's shared reservation and of its private snapshot.
 const TRANSIENT_PAGES: u64 = (wm::TRANSIENT_MAX_PIXELS * 4 / 4096) as u64;
@@ -53,10 +73,119 @@ static mut RESERVE: Reserve = Reserve {
     shared_pages: 0,
     snapshot_pages: 0,
 };
-/// Private client clock of session `i`: slots 7..=12, then 14..=19 (13
-/// is the filesystem endpoint).
+/// Private client clock of session `i`: slots 7..=12 and 14..=19, then
+/// 21..=29 and 32..=42. Slot 13 is the filesystem endpoint, slot 20 the
+/// filesd lineage capability, and 30..=31 stay out of the clock range for
+/// the first-free display IPC reply. Filesd scratch uses 125..=126.
 fn clock(i: usize) -> u64 {
-    if i < 6 { 7 + i as u64 } else { 8 + i as u64 }
+    if i < 6 {
+        7 + i as u64
+    } else if i < 12 {
+        8 + i as u64
+    } else if i < 21 {
+        9 + i as u64
+    } else {
+        11 + i as u64
+    }
+}
+fn audit_session_clocks() {
+    let mut objects = [u64::MAX; LIMIT];
+    for i in 0..LIMIT {
+        let slot = clock(i);
+        let Some(desc) = describe(slot) else {
+            log(b"[desktop] clock audit missing cap at slot=");
+            log_number(slot);
+            log(b"\n");
+            die(96)
+        };
+        if slot >= CAP_SLOTS as u64
+            || matches!(slot, 13 | USER_ROOT | 30 | 31)
+            || desc[0] != 3
+            || desc[2] != (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
+            || objects[..i].contains(&desc[1])
+        {
+            log(b"[desktop] clock audit mismatch index/slot/kind/object/rights=");
+            log_number(i as u64);
+            log(b"/");
+            log_number(slot);
+            for word in desc {
+                log(b"/");
+                log_number(word);
+            }
+            log(b"\n");
+            die(96)
+        }
+        objects[i] = desc[1];
+    }
+    let Some(frame_clock) = describe(CLOCK) else {
+        log(b"[desktop] clock audit missing frame clock\n");
+        die(96)
+    };
+    let Some(fs_endpoint) = describe(13) else {
+        log(b"[desktop] clock audit missing filesd endpoint slot13\n");
+        die(96)
+    };
+    let Some(user_root) = describe(USER_ROOT) else {
+        log(b"[desktop] clock audit missing filesd lineage slot20\n");
+        die(96)
+    };
+    let package_endpoint = cap_slot_descriptor(PACKAGE_ENDPOINT as usize);
+    let frame_slot = unsafe {
+        syscall6(
+            SYS_CAP_OCCUPIED,
+            arena_desktop::fs_backend::FILE_FRAME_SLOT,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+    };
+    let lent_slot = unsafe {
+        syscall6(
+            SYS_CAP_OCCUPIED,
+            arena_desktop::fs_backend::FILE_FRAME_LENT_SLOT,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+    };
+    if frame_clock[0] != 3
+        || objects.contains(&frame_clock[1])
+        || fs_endpoint[0] != 2
+        || fs_endpoint[2] != RIGHTS_WRITE
+        || user_root[0] != 12
+        || user_root[2] != (RIGHTS_WRITE | RIGHTS_COPY)
+        || (package_endpoint[0] != 0
+            && (package_endpoint[0] != 2
+                || package_endpoint[2] != RIGHTS_WRITE
+                || package_endpoint[1] == fs_endpoint[1]
+                || package_endpoint[1] == user_root[1]))
+        || frame_slot != 0
+        || lent_slot != 0
+    {
+        log(b"[desktop] fixed-cap audit frame=");
+        for word in frame_clock {
+            log_number(word);
+            log(b"/");
+        }
+        for word in fs_endpoint {
+            log_number(word);
+            log(b"/");
+        }
+        for word in user_root {
+            log_number(word);
+            log(b"/");
+        }
+        log_number(frame_slot as u64);
+        log(b"/");
+        log_number(lent_slot as u64);
+        log(b"\n");
+        die(96)
+    }
+    log(b"[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); scratch slots125/126 free\n");
 }
 /// Presentation state of a session's transient surface, valid only while
 /// the window policy still holds a popup with this handle.
@@ -75,15 +204,19 @@ const NO_POPUP: PopupState = PopupState {
 };
 #[derive(Clone, Copy)]
 struct Session {
-    region: u64,
     id: u64,
     va: u64,
-    process: u64,
+    process: Option<Handle>,
     handle: u64,
     title: [u8; 32],
     published: bool,
     kind: u8,
     scope: u8,
+    /// Rights formerly carried by the attenuated function SharedRegion cap;
+    /// now trusted session policy used only after kernel badge validation.
+    function_rights: u64,
+    /// Monotonic, nonzero badge of this session's inherited service endpoint.
+    badge: u32,
     launch_targets: u8,
     path: [u8; 32],
     close_pending: bool,
@@ -114,15 +247,16 @@ struct Session {
     grant_read_only: bool,
 }
 const EMPTY: Session = Session {
-    region: CAP_NONE,
     id: 0,
     va: 0,
-    process: CAP_NONE,
+    process: None,
     handle: 0,
     title: [0; 32],
     published: false,
     kind: 5,
     scope: 0,
+    function_rights: 0,
+    badge: 0,
     launch_targets: 0,
     path: [0; 32],
     close_pending: false,
@@ -157,6 +291,7 @@ static mut OFFER: u64 = CAP_NONE;
 const R_DOC: u8 = arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE;
 static mut UPTIME_SECOND: u64 = 0;
 static mut CAP_HIGH_WATER: u64 = 0;
+static mut SHARED_CAP_BASELINE: usize = 0;
 static mut NOTICE: Option<(&'static str, u64)> = None;
 /// A built-in client's private clock was signalled for queued events and
 /// it has not polled since (avoids re-signalling on every request).
@@ -357,6 +492,12 @@ fn publish_rects(src: u64, dst: u64, stride: usize, rects: &[[u16; 4]]) {
     }
 }
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
+/// Badges are unique for this Desktop endpoint lifetime. Zero remains the
+/// kernel's plain-endpoint marker; exhaustion refuses rather than wrapping.
+static mut NEXT_SESSION_BADGE: u32 = 1;
+/// The desktop owns every application Process cap through this generation-safe
+/// group; Session stores only a local handle, never a PID or raw cap slot.
+static mut CHILDREN: Option<ProcessGroup<ChildProcess, LIMIT>> = None;
 static mut WM: State = match State::new(800, 600) {
     Ok(s) => s,
     Err(_) => panic!("constant geometry"),
@@ -376,6 +517,13 @@ fn log(s: &[u8]) {
     unsafe {
         syscall2(SYS_DEBUG_WRITE, s.as_ptr() as u64, s.len() as u64);
     }
+}
+fn log_launch_refusal(stage: &[u8], status: i64) {
+    log(b"[desktop] launch-refusal stage/status=");
+    log(stage);
+    log(b"/");
+    log_number(status as u64);
+    log(b"\n");
 }
 fn log_number(mut value: u64) {
     let mut digits = [0u8; 20];
@@ -405,35 +553,46 @@ fn transient_caps() {
         log(b"\n");
     }
 }
+type ResourceReceipt = [u64; 7];
+/// Sample all seven fields used by the Desktop's resource receipts.
+fn observe_receipt() -> ResourceReceipt {
+    let mut counts = [0u64; 9];
+    if unsafe { syscall6(SYS_OBSERVE, POOL, counts.as_mut_ptr() as u64, 0, 0, 0, 0) } != 0 {
+        die(77)
+    }
+    [
+        counts[0], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7],
+    ]
+}
+fn log_resource_receipt(prefix: &[u8], receipt: ResourceReceipt) {
+    let mut line = perf::Line::new();
+    line.push(prefix);
+    for (i, value) in receipt.iter().enumerate() {
+        if i != 0 {
+            line.push(b"/");
+        }
+        line.number(*value);
+    }
+    line.push(b"\n");
+    log(line.as_bytes());
+}
 /// The last resource receipt logged (Phase 11 latency: an unchanged
 /// receipt after every pointer frame cost milliseconds of serial output).
-static mut LAST_RECEIPT: Option<[u64; 7]> = None;
+static mut LAST_RECEIPT: Option<ResourceReceipt> = None;
 /// Log the measured resource receipt. Lifecycle events (`force`) always
 /// log, so a refusal is proven by a fresh unchanged receipt; frames log
 /// only a receipt that differs from the last one, so every change (and
 /// every peak) is still recorded.
 fn snapshot(force: bool) {
-    let mut counts = [0u64; 9];
-    if unsafe { syscall6(SYS_OBSERVE, POOL, counts.as_mut_ptr() as u64, 0, 0, 0, 0) } != 0 {
-        die(77)
-    }
-    let receipt = [
-        counts[0], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7],
-    ];
+    let receipt = observe_receipt();
     if !force && unsafe { LAST_RECEIPT } == Some(receipt) {
         return;
     }
     unsafe { LAST_RECEIPT = Some(receipt) };
-    let mut line = perf::Line::new();
-    line.push(b"[desktop] measured frames/records/processes/regions/pages/maps/caps=");
-    for (i, v) in receipt.iter().enumerate() {
-        if i != 0 {
-            line.push(b"/");
-        }
-        line.number(*v);
-    }
-    line.push(b"\n");
-    log(line.as_bytes());
+    log_resource_receipt(
+        b"[desktop] measured frames/records/processes/regions/pages/maps/caps=",
+        receipt,
+    );
 }
 
 // ---- the trusted chooser (powerbox, ADR-0077) ------------------------------
@@ -935,6 +1094,44 @@ fn desk_effect(e: arena_desktop::desk::Effect) {
                 desk_notice("LAUNCH REFUSED / DESKTOP CAPACITY");
             }
         }
+        Effect::InstallBundle(p) => {
+            let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+                desk_notice("FILESYSTEM SERVICE OFFLINE");
+                return;
+            };
+            // The suffix only selects this affordance after the user's
+            // explicit open action. Open the source via the broker's exact
+            // read-only filesd capability; receiver-side APKG/signature and
+            // transaction checks are the only install authorization.
+            match files.walk(USER_ROOT, p.bytes(), arena_desktop::filesd_wire::R_READ) {
+                Ok((source, _)) => {
+                    let result = arena_desktop::package::install_apb1(source);
+                    files.release(source);
+                    match result {
+                        Ok(receipt) => {
+                            log(b"[desktop] APB1 installed; signed version=");
+                            log_number(receipt.version);
+                            log(b" (no launch authority implied)\n");
+                            desk_notice("APPLICATION INSTALLED");
+                        }
+                        Err(status) if status == PKG_OFFLINE => {
+                            desk_notice("PACKAGE SERVICE OFFLINE");
+                        }
+                        Err(status) if status == PKG_NO_SPACE => {
+                            desk_notice("NOT ENOUGH AFS2 SPACE");
+                        }
+                        Err(status) if status == PKG_CONFLICT => {
+                            desk_notice("APPLICATION VERSION ALREADY INSTALLED");
+                        }
+                        Err(status) if status == PKG_DOWNGRADE => {
+                            desk_notice("PACKAGE VERSION REFUSED BY POLICY");
+                        }
+                        Err(_) => desk_notice("SIGNED PACKAGE REFUSED"),
+                    }
+                }
+                Err(_) => desk_notice("THE PACKAGE FILE COULD NOT BE OPENED"),
+            }
+        }
         Effect::OpenDocument(p) => {
             let Some(files) = (unsafe { *(&raw const AFS2) }) else {
                 return;
@@ -987,9 +1184,206 @@ fn describe(slot: u64) -> Option<[u64; 3]> {
     (slot != CAP_NONE && unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0)
         .then_some(d)
 }
+/// Descriptors retained outside the small kernel stack across a full-session
+/// refusal. The summary is deliberately small; equality is checked slotwise.
+static mut REFUSAL_CAPS: [[u64; 3]; CAP_SLOTS] = [[0; 3]; CAP_SLOTS];
+#[derive(Clone, Copy)]
+struct CapInventory {
+    occupied: u64,
+    digest: u64,
+}
+fn cap_slot_descriptor(slot: usize) -> [u64; 3] {
+    match unsafe { syscall6(SYS_CAP_OCCUPIED, slot as u64, 0, 0, 0, 0, 0) } {
+        0 => [0; 3],
+        1 => describe(slot as u64).unwrap_or_else(|| die(97)),
+        _ => die(97),
+    }
+}
+fn inventory_digest_add(digest: &mut u64, value: u64) {
+    let mut bytes = value;
+    for _ in 0..8 {
+        *digest ^= bytes & 0xff;
+        *digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
+        bytes >>= 8;
+    }
+}
+fn held_cap_kind_count(kind: u64) -> usize {
+    (0..CAP_SLOTS)
+        .filter(|&slot| describe(slot as u64).is_some_and(|desc| desc[0] == kind))
+        .count()
+}
+fn cap_inventory_snapshot() -> CapInventory {
+    let mut inventory = CapInventory {
+        occupied: 0,
+        digest: 0xcbf2_9ce4_8422_2325,
+    };
+    let saved = &raw mut REFUSAL_CAPS;
+    for slot in 0..CAP_SLOTS {
+        let desc = cap_slot_descriptor(slot);
+        if desc[0] != 0 {
+            inventory.occupied += 1;
+        }
+        unsafe { (*saved)[slot] = desc };
+        inventory_digest_add(&mut inventory.digest, slot as u64);
+        for word in desc {
+            inventory_digest_add(&mut inventory.digest, word);
+        }
+    }
+    inventory
+}
+fn cap_inventory_compare() -> (CapInventory, bool) {
+    let mut inventory = CapInventory {
+        occupied: 0,
+        digest: 0xcbf2_9ce4_8422_2325,
+    };
+    let saved = &raw const REFUSAL_CAPS;
+    let mut equal = true;
+    for slot in 0..CAP_SLOTS {
+        let desc = cap_slot_descriptor(slot);
+        if desc[0] != 0 {
+            inventory.occupied += 1;
+        }
+        if desc != unsafe { (*saved)[slot] } {
+            equal = false;
+        }
+        inventory_digest_add(&mut inventory.digest, slot as u64);
+        for word in desc {
+            inventory_digest_add(&mut inventory.digest, word);
+        }
+    }
+    (inventory, equal)
+}
+fn audit_full_session_caps() {
+    let descriptors = &raw const REFUSAL_CAPS;
+    let mut processes = 0usize;
+    let mut regions = 0usize;
+    let mut notifications = 0usize;
+    for slot in 0..CAP_SLOTS {
+        let desc = unsafe { (*descriptors)[slot] };
+        match desc[0] {
+            3 => notifications += 1,
+            4 => {
+                for prior in 0..slot {
+                    let other = unsafe { (*descriptors)[prior] };
+                    if other[0] == 4 && other[1] == desc[1] {
+                        die(98)
+                    }
+                }
+                processes += 1;
+            }
+            7 => {
+                for prior in 0..slot {
+                    let other = unsafe { (*descriptors)[prior] };
+                    if other[0] == 7 && other[1] == desc[1] {
+                        die(98)
+                    }
+                }
+                regions += 1;
+            }
+            _ => {}
+        }
+    }
+    if processes != LIMIT || regions != unsafe { SHARED_CAP_BASELINE } || notifications != LIMIT + 1
+    {
+        die(98)
+    }
+    log(b"[desktop] full-session cap audit distinct Process caps=");
+    log_number(processes as u64);
+    log(b" baseline SharedRegion caps=");
+    log_number(regions as u64);
+    log(b" distinct Notifications=");
+    log_number(notifications as u64);
+    log(b"\n");
+}
+fn log_capacity_refusal_inventory(before: CapInventory, resources_before: ResourceReceipt) {
+    audit_full_session_caps();
+    let (after, caps_equal) = cap_inventory_compare();
+    let resources_after = observe_receipt();
+    log(b"[desktop] full-session refusal cap inventory before occupied=");
+    log_number(before.occupied);
+    log(b" digest=");
+    log_number(before.digest);
+    log(b"\n[desktop] full-session refusal cap inventory after occupied=");
+    log_number(after.occupied);
+    log(b" digest=");
+    log_number(after.digest);
+    log(b"\n[desktop] full-session refusal cap inventory exact-equal=");
+    if caps_equal {
+        log(b"yes\n");
+    } else {
+        log(b"no\n");
+    }
+    log_resource_receipt(
+        b"[desktop] full-session refusal resource inventory before=",
+        resources_before,
+    );
+    log_resource_receipt(
+        b"[desktop] full-session refusal resource inventory after=",
+        resources_after,
+    );
+    log(b"[desktop] full-session refusal resource inventory exact-equal=");
+    if caps_equal && resources_before == resources_after {
+        log(b"yes\n");
+    } else {
+        log(b"no\n");
+        die(98)
+    }
+}
 fn destroy(slot: u64) {
     if slot != CAP_NONE && unsafe { syscall1(SYS_CAP_DESTROY, slot) } != 0 {
         die(80)
+    }
+}
+fn child_capacity_available() -> bool {
+    unsafe { (&*(&raw const CHILDREN)).as_ref() }.is_some_and(ProcessGroup::can_spawn)
+}
+fn child_live(handle: Handle) -> bool {
+    unsafe { (&*(&raw const CHILDREN)).as_ref() }
+        .unwrap_or_else(|| die(83))
+        .is_live(handle)
+        .unwrap_or_else(|_| die(83))
+}
+fn finish_child(handle: Handle, force: bool) {
+    let group = unsafe { (&mut *(&raw mut CHILDREN)).as_mut() }.unwrap_or_else(|| die(84));
+    // A forced close can race an application's own exit after Close was
+    // delivered. Select the kernel finish mode from the exact held Process
+    // capability's current state so mode 1 never targets an already-dead child.
+    let live = group.is_live(handle).unwrap_or_else(|_| die(84));
+    let result = if force && live {
+        group.stop_and_reap(handle)
+    } else {
+        group.reap_exited(handle)
+    };
+    result.unwrap_or_else(|_| die(84));
+}
+fn spawn_child(image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
+    if image >= CAP_SLOTS as u64 {
+        return Err(-2);
+    }
+    let group = unsafe { (&mut *(&raw mut CHILDREN)).as_mut() }.unwrap_or_else(|| die(83));
+    match group.spawn(|| {
+        ChildProcess::spawn(
+            image as u8,
+            grants,
+            Some(ExitSignal {
+                notification_slot: CLOCK as u8,
+                badge: BADGE_EXIT,
+            }),
+        )
+    }) {
+        Ok(handle) => Ok(handle),
+        Err(GroupSpawnError::Full) => Err(STATUS_BUSY),
+        Err(GroupSpawnError::Spawn(SpawnError::Kernel(status))) => Err(status),
+        // Every other spawn error is an invariant or capability-query failure
+        // after the kernel may have created a child. Do not continue as if the
+        // app manager owned it.
+        Err(GroupSpawnError::Spawn(_)) => die(83),
+        Err(GroupSpawnError::Record(InsertError::Full(mut child))) => {
+            child
+                .finish(FinishMode::StopAndReap)
+                .unwrap_or_else(|_| die(83));
+            Err(STATUS_BUSY)
+        }
     }
 }
 fn display(frame: arena_compositor_model::wire::Frame, cap: u64) -> ([u64; 3], [u8; 64]) {
@@ -1096,21 +1490,449 @@ fn launch_image(
     launch_targets: u8,
     document: u64,
 ) -> Result<(), i64> {
+    if kind < 6 {
+        launch_image_v2(
+            image,
+            kind,
+            scope,
+            function_rights,
+            path,
+            diagnostics,
+            launch_targets,
+            document,
+        )
+    } else {
+        launch_image_legacy(
+            image,
+            kind,
+            scope,
+            function_rights,
+            path,
+            diagnostics,
+            launch_targets,
+            document,
+        )
+    }
+}
+fn startup_cap_descriptor(slot: u16, kind: u8, rights: u64) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        slot,
+        role: CapabilityRole::Other,
+        kind,
+        rights: rights as u32,
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_image_v2(
+    image: u64,
+    kind: u8,
+    scope: u8,
+    function_rights: u64,
+    path: [u8; 32],
+    diagnostics: bool,
+    launch_targets: u8,
+    document: u64,
+) -> Result<(), i64> {
+    use arena_startup_abi::startup as startup_abi;
+
+    if kind >= 6 {
+        return Err(-2);
+    }
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
     if ready != 0 {
+        log_launch_refusal(b"spawn-check", ready);
+        return Err(ready);
+    }
+    let sessions = unsafe { &mut *(&raw mut SESSIONS) };
+    let Some(i) = sessions.iter().position(|s| s.id == 0) else {
+        log_launch_refusal(b"session-table", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    };
+    if i >= arena_desktop::apps::STARTUP_INSTANCE_SLOTS {
+        log_launch_refusal(b"startup-instance-slots", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    if !child_capacity_available() {
+        log_launch_refusal(b"process-group", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    let badge = unsafe { NEXT_SESSION_BADGE };
+    if badge == 0 {
+        log_launch_refusal(b"session-badge-exhausted", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    // The exact cap table must have room for the request's landed cap, the
+    // session region/snapshot, filesd lineage/tail, Process, startup page and
+    // minted badge. This is conservative for kinds without a tail.
+    let free = (0..CAP_SLOTS as u64)
+        .filter(|slot| describe(*slot).is_none())
+        .count();
+    if free < 8 {
+        log_launch_refusal(b"cap-slots", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    let path_len = path.iter().position(|byte| *byte == 0).unwrap_or(32);
+    if path_len == 32
+        || !path[..path_len]
+            .iter()
+            .all(|byte| (0x20..0x7f).contains(byte))
+    {
+        return Err(-2);
+    }
+
+    let reserve = unsafe { RESERVE };
+    let mut out = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            reserve.shared_pages,
+            out.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    if rc != 0 {
+        log_launch_refusal(b"shared-region", rc);
+        return Err(rc);
+    }
+    let region = out[0];
+    let id = out[1];
+    let va = unsafe { syscall2(SYS_SHARED_MAP, region, 1) };
+    if va <= 0 {
+        log_launch_refusal(b"shared-map", va);
+        destroy(region);
+        return Err(va);
+    }
+    let mut snap = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            reserve.snapshot_pages,
+            snap.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    let snapshot = if rc == 0 {
+        let mapped = unsafe { syscall2(SYS_SHARED_MAP, snap[0], 1) };
+        if mapped <= 0 {
+            log_launch_refusal(b"snapshot-map", mapped);
+        }
+        destroy(snap[0]);
+        mapped
+    } else {
+        log_launch_refusal(b"snapshot-create", rc);
+        rc
+    };
+    if snapshot <= 0 {
+        log_launch_refusal(b"snapshot-region-or-map", snapshot);
+        unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) };
+        destroy(region);
+        return Err(snapshot);
+    }
+
+    let (files_head, home) = file_grants(kind, document);
+    unsafe { syscall1(SYS_TRY_WAIT, clock(i)) };
+    let clock_rights = if kind == 1 {
+        RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY
+    } else {
+        RIGHTS_READ | RIGHTS_WRITE
+    };
+    let tail = if diagnostics {
+        InheritGrant::new(POOL as u8, RIGHTS_READ as u32)
+    } else if home != CAP_NONE {
+        InheritGrant::new(home as u8, (RIGHTS_WRITE | RIGHTS_COPY) as u32)
+    } else {
+        InheritGrant::new(0, 0)
+    };
+    let has_tail = diagnostics || home != CAP_NONE;
+
+    // Only the READ-side holder can mint a badge. The kernel stores it in the
+    // endpoint capability, hides it from SYS_CAP_DESCRIBE, and delivers it as
+    // trusted receive metadata; it is never supplied in the request bytes.
+    let badge_slot = unsafe {
+        syscall6(
+            SYS_ENDPOINT_MINT,
+            SERVER,
+            u64::from(badge),
+            V2_BADGE_RIGHTS,
+            0,
+            0,
+            0,
+        )
+    };
+    if badge_slot < 0 {
+        log_launch_refusal(b"session-badge", badge_slot);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(badge_slot);
+    }
+    // Never reuse a badge, even when a later allocation/spawn step refuses.
+    unsafe { NEXT_SESSION_BADGE = badge.checked_add(1).unwrap_or(0) };
+
+    let app_id = arena_desktop::apps::APPLICATION_IDS[kind as usize];
+    let id_len = app_id.iter().position(|byte| *byte == 0).unwrap_or(32);
+    let mut arguments: [&[u8]; 2] = [&app_id[..id_len], &[]];
+    let argument_count = if path_len == 0 {
+        1
+    } else {
+        arguments[1] = &path[..path_len];
+        2
+    };
+    let theme_env: &[u8] = if unsafe { PREFS.dark } {
+        b"ARENA_THEME=dark"
+    } else {
+        b"ARENA_THEME=light"
+    };
+    let motion_env: &[u8] = if unsafe { PREFS.motion } {
+        b"ARENA_MOTION=1"
+    } else {
+        b"ARENA_MOTION=0"
+    };
+    let environment = [theme_env, motion_env];
+    let descriptors = [
+        startup_cap_descriptor(
+            V2_ENDPOINT_SLOT as u16,
+            startup_abi::CAP_KIND_BADGED_ENDPOINT,
+            V2_BADGE_RIGHTS,
+        ),
+        startup_cap_descriptor(
+            V2_SURFACE_SLOT as u16,
+            startup_abi::CAP_KIND_SHARED_REGION,
+            RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY,
+        ),
+        startup_cap_descriptor(
+            V2_CLOCK_SLOT as u16,
+            startup_abi::CAP_KIND_NOTIFICATION,
+            clock_rights,
+        ),
+        startup_cap_descriptor(
+            V2_TAIL_SLOT as u16,
+            if diagnostics {
+                startup_abi::CAP_KIND_MEMORY_POOL
+            } else {
+                startup_abi::CAP_KIND_BADGED_ENDPOINT
+            },
+            if diagnostics {
+                RIGHTS_READ
+            } else {
+                RIGHTS_WRITE | RIGHTS_COPY
+            },
+        ),
+    ];
+    let spec = startup_abi::StartupSpec {
+        application_id: &app_id,
+        // The app-instance slot is the actual reserved 32-entry manager
+        // session slot; it is never folded onto a live entry. The monotonic
+        // generation distinguishes later reuse. Neither field authorizes a
+        // syscall or selects a Desktop session.
+        instance_slot: i as u16,
+        instance_generation: u64::from(badge),
+        flags: FLAG_MULTI_INSTANCE,
+        arguments: &arguments[..argument_count],
+        environment: &environment,
+        capabilities: &descriptors[..if has_tail { 4 } else { 3 }],
+        cwd: None,
+        stdin: None,
+        stdout: None,
+        stderr: None,
+        entry: arena_desktop::apps::APPLICATION_ENTRY,
+        load_base: arena_desktop::apps::APPLICATION_LOAD_BASE,
+        clock_us: arena_desktop::app_client::now(),
+    };
+    let mut startup_page = [0u8; startup_abi::BLOCK_BYTES];
+    if startup_abi::encode(&spec, &mut startup_page).is_err() {
+        destroy(badge_slot as u64);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(-2);
+    }
+
+    let mut startup_out = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            1,
+            startup_out.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    if rc != 0 {
+        log_launch_refusal(b"startup-page", rc);
+        destroy(badge_slot as u64);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(rc);
+    }
+    let startup_cap = startup_out[0];
+    // Reuse the already-reserved session mapping VA for this private staging
+    // page. Mapping a third, one-page slot for every launch would permanently
+    // warm an otherwise-unused page-table frame in the long-lived broker.
+    if unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) } != 0 {
+        die(86)
+    }
+    let startup_va = unsafe { syscall2(SYS_SHARED_MAP, startup_cap, 1) };
+    if startup_va <= 0 || startup_va as u64 != va as u64 {
+        let status = if startup_va <= 0 {
+            startup_va
+        } else {
+            STATUS_BUSY
+        };
+        log_launch_refusal(b"startup-map", status);
+        if startup_va > 0 {
+            unsafe { syscall6(SYS_SHARED_UNMAP, startup_va as u64, 0, 0, 0, 0, 0) };
+        }
+        destroy(startup_cap);
+        destroy(badge_slot as u64);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(status);
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            startup_page.as_ptr(),
+            startup_va as *mut u8,
+            startup_abi::BLOCK_BYTES,
+        );
+    }
+    if unsafe { syscall6(SYS_SHARED_UNMAP, startup_va as u64, 0, 0, 0, 0, 0) } != 0 {
+        die(86)
+    }
+    let restored_va = unsafe { syscall2(SYS_SHARED_MAP, region, 1) };
+    if restored_va <= 0 || restored_va as u64 != va as u64 {
+        let status = if restored_va <= 0 {
+            restored_va
+        } else {
+            STATUS_BUSY
+        };
+        log_launch_refusal(b"surface-remap", status);
+        if restored_va > 0 {
+            unsafe { syscall6(SYS_SHARED_UNMAP, restored_va as u64, 0, 0, 0, 0, 0) };
+        }
+        destroy(startup_cap);
+        destroy(badge_slot as u64);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(status);
+    }
+
+    let grants = [
+        InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
+        InheritGrant::new(badge_slot as u8, V2_BADGE_RIGHTS as u32),
+        InheritGrant::new(
+            region as u8,
+            (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY) as u32,
+        ),
+        InheritGrant::new(clock(i) as u8, clock_rights as u32),
+        tail,
+    ];
+    let grant_count = if has_tail { 5 } else { 4 };
+    let process = spawn_child(image, &grants[..grant_count]);
+    // Parent-side seed references are transient; the exact child caps remain.
+    destroy(home);
+    destroy(startup_cap);
+    destroy(badge_slot as u64);
+    let process = match process {
+        Ok(process) => process,
+        Err(status) => {
+            log_launch_refusal(b"kernel-spawn", status);
+            revoke_files(files_head);
+            unsafe {
+                syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+            }
+            destroy(region);
+            return Err(status);
+        }
+    };
+    destroy(region);
+    sessions[i] = Session {
+        id,
+        va: va as u64,
+        process: Some(process),
+        kind,
+        scope,
+        function_rights,
+        badge,
+        launch_targets,
+        path,
+        snapshot: snapshot as u64,
+        files_head,
+        ..EMPTY
+    };
+    transient_caps();
+    log(b"[desktop] real application spawned; ABI-v2 held Process, unique badge and surface bound\n");
+    Ok(())
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_image_legacy(
+    image: u64,
+    kind: u8,
+    scope: u8,
+    function_rights: u64,
+    path: [u8; 32],
+    diagnostics: bool,
+    launch_targets: u8,
+    document: u64,
+) -> Result<(), i64> {
+    let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
+    if ready != 0 {
+        log_launch_refusal(b"spawn-check", ready);
         return Err(ready);
     }
     // The session table reserves original lifecycle owners, including children
     // that have not yet requested their window. No numerical caller identity.
     let sessions = unsafe { &mut *(&raw mut SESSIONS) };
-    let i = sessions.iter().position(|s| s.id == 0).ok_or(STATUS_BUSY)?;
+    let Some(i) = sessions.iter().position(|s| s.id == 0) else {
+        log_launch_refusal(b"session-table", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    };
+    if !child_capacity_available() {
+        log_launch_refusal(b"process-group", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
     // Region, snapshot (transiently), Process, the filesd lineage head,
     // the home grant and a lent copy (transiently). The request asking
     // for this launch has already landed its own cap, which is counted
     // as used here (it was once reserved twice; ADR-0079's Desktop watch
     // record took that slack).
-    let free = (0..CAP_SLOTS).filter(|s| describe(*s).is_none()).count();
+    let free = (0..CAP_SLOTS as u64)
+        .filter(|s| describe(*s).is_none())
+        .count();
     if free < 6 {
+        log_launch_refusal(b"cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
     let reserve = unsafe { RESERVE };
@@ -1127,12 +1949,14 @@ fn launch_image(
         )
     };
     if rc != 0 {
+        log_launch_refusal(b"shared-region", rc);
         return Err(rc);
     }
     let region = out[0];
     let id = out[1];
     let va = unsafe { syscall2(SYS_SHARED_MAP, region, 1) };
     if va <= 0 {
+        log_launch_refusal(b"shared-map", va);
         destroy(region);
         return Err(va);
     }
@@ -1153,12 +1977,17 @@ fn launch_image(
     };
     let snapshot = if rc == 0 {
         let mapped = unsafe { syscall2(SYS_SHARED_MAP, snap[0], 1) };
+        if mapped <= 0 {
+            log_launch_refusal(b"snapshot-map", mapped);
+        }
         destroy(snap[0]);
         mapped
     } else {
+        log_launch_refusal(b"snapshot-create", rc);
         rc
     };
     if snapshot <= 0 {
+        log_launch_refusal(b"snapshot-region-or-map", snapshot);
         unsafe {
             syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
         }
@@ -1179,55 +2008,56 @@ fn launch_image(
     } else {
         RIGHTS_READ | RIGHTS_WRITE
     };
-    let spec = [
-        (CALL_SIDE, RIGHTS_WRITE),
-        (region, RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY),
-        (region, function_rights),
-        (clock(i), clock_rights),
-        if diagnostics {
-            (POOL, RIGHTS_READ)
-        } else {
-            (home, RIGHTS_WRITE | RIGHTS_COPY)
-        },
-    ];
-    let pid = unsafe {
-        syscall5(
-            SYS_SPAWN,
-            image,
-            spec.as_ptr() as u64,
-            if diagnostics || home != CAP_NONE {
-                5
-            } else {
-                4
-            },
-            CLOCK,
-            BADGE_EXIT,
-        )
+    let tail = if diagnostics {
+        InheritGrant::new(POOL as u8, RIGHTS_READ as u32)
+    } else if home != CAP_NONE {
+        InheritGrant::new(home as u8, (RIGHTS_WRITE | RIGHTS_COPY) as u32)
+    } else {
+        InheritGrant::new(0, 0)
     };
+    let spec = [
+        InheritGrant::new(CALL_SIDE as u8, RIGHTS_WRITE as u32),
+        InheritGrant::new(
+            region as u8,
+            (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY) as u32,
+        ),
+        InheritGrant::new(region as u8, function_rights as u32),
+        InheritGrant::new(clock(i) as u8, clock_rights as u32),
+        tail,
+    ];
+    let grant_count = if diagnostics || home != CAP_NONE {
+        5
+    } else {
+        4
+    };
+    let process = spawn_child(image, &spec[..grant_count]);
     // The child holds its own copy; the broker never keeps the grant.
     destroy(home);
-    if pid <= 0 {
-        revoke_files(files_head);
-        unsafe {
-            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
-            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+    let process = match process {
+        Ok(process) => process,
+        Err(status) => {
+            log_launch_refusal(b"kernel-spawn", status);
+            revoke_files(files_head);
+            unsafe {
+                syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+            }
+            destroy(region);
+            return Err(status);
         }
-        destroy(region);
-        return Err(pid);
-    }
-    let process = (0..CAP_SLOTS)
-        .find(|s| {
-            describe(*s)
-                .is_some_and(|d| d[0] == 4 && d[1] == pid as u64 && d[2] & RIGHTS_DESTROY != 0)
-        })
-        .unwrap_or_else(|| die(83));
+    };
+    // The exact child SharedRegion cap now owns the delegated authority.
+    // This process keeps its two mapping pins, which are sufficient for
+    // rendering and exact-va unmap after the held Process is reaped.
+    destroy(region);
     sessions[i] = Session {
-        region,
         id,
         va: va as u64,
-        process,
+        process: Some(process),
         kind,
         scope,
+        function_rights,
+        badge: 0,
         launch_targets,
         path,
         snapshot: snapshot as u64,
@@ -1255,9 +2085,7 @@ fn retire(index: usize, force: bool) {
     if s.id == 0 {
         return;
     }
-    if unsafe { syscall2(SYS_PROC_FINISH, s.process, u64::from(force)) } != 0 {
-        die(84)
-    }
+    finish_child(s.process.unwrap_or_else(|| die(84)), force);
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
     }
@@ -1266,7 +2094,6 @@ fn retire(index: usize, force: bool) {
     {
         die(86)
     }
-    destroy(s.region);
     if unsafe { (*(&raw const CHOOSER)).as_ref() }.is_some_and(|c| c.session == index) {
         chooser_close();
     }
@@ -1277,13 +2104,15 @@ fn retire(index: usize, force: bool) {
         SESSIONS[index] = EMPTY;
         WOKEN[index] = false;
     }
-    log(b"[desktop] application retired: Process consumed; mapping and region released\n");
+    log(b"[desktop] application retired: kind=");
+    log_number(s.kind as u64);
+    log(b" Process consumed; mapping and region released\n");
 }
 fn sweep() -> bool {
     let mut changed = false;
     let now = arena_desktop::app_client::now();
     for (i, s) in unsafe { *(&raw const SESSIONS) }.into_iter().enumerate() {
-        if s.id != 0 && unsafe { syscall1(SYS_PROC_LIVE, s.process) } == 0 {
+        if s.id != 0 && !child_live(s.process.unwrap_or_else(|| die(83))) {
             if !s.ending && s.handle != 0 {
                 unsafe {
                     SESSIONS[i].ending = true;
@@ -1723,6 +2552,7 @@ fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
 }
 arena_desktop::entry!(main, 64 * 1024);
 extern "C" fn main() -> ! {
+    unsafe { *(&raw mut CHILDREN) = Some(ProcessGroup::new()) };
     let (mode, b) = display(arena_compositor_model::wire::Frame::Mode, CAP_NONE);
     let w = (mode[1] & 0xffff_ffff) as usize;
     let h = (mode[1] >> 32) as usize;
@@ -1767,7 +2597,16 @@ extern "C" fn main() -> ! {
         die(94)
     }
     let expected = describe(INPUT).unwrap_or_else(|| die(95));
-    let mut fs = arena_desktop::fs_backend::Fs::start(13).unwrap_or_else(|_| die(79));
+    audit_session_clocks();
+    let mut fs = match arena_desktop::fs_backend::Fs::start(13) {
+        Ok(fs) => fs,
+        Err(rc) => {
+            log(b"[desktop] fs backend start refused status=");
+            log_number(rc.unsigned_abs());
+            log(b"\n");
+            die(79)
+        }
+    };
     let mut pref_name = [0u8; 32];
     pref_name[..10].copy_from_slice(b"ui10-prefs");
     let mut pref_bytes = [0u8; 16];
@@ -1782,6 +2621,7 @@ extern "C" fn main() -> ! {
         FILES = Some(fs);
     }
     start_afs2();
+    unsafe { SHARED_CAP_BASELINE = held_cap_kind_count(7) };
     desk_load(w as i32, h as i32);
 
     // Requests and input arrive on SERVER; queue them onto CLOCK when the
@@ -1792,20 +2632,25 @@ extern "C" fn main() -> ! {
     render(ram as u64, w, h, scanout);
     log(b"[desktop] real desktop frame presented; gallery launcher available\n");
     snapshot(true);
+    let mut pending_render = false;
     loop {
         // A pending Desktop watch is handled by the next scene (render).
-        let mut dirty = sweep() | animate() | unsafe { WATCH_SIGNALLED };
+        // Keep animation/publication dirtiness across internal badge-bootstrap
+        // traffic and first-frame setup; the nonblocking receive loop drains
+        // the burst before presenting one combined frame.
+        let pending = core::mem::replace(&mut pending_render, false);
+        let mut dirty = pending | sweep() | animate() | unsafe { WATCH_SIGNALLED };
         if unsafe { (*(&raw mut WM)).repeat_tick(arena_desktop::app_client::now()) } {
             if perf::ENABLED {
                 unsafe { (*(&raw mut PERF))[P_DELIVERED].add(1) };
             }
             wake_clients();
         }
-        let mut request = [0, 0, CAP_NONE];
+        let mut request = [0, 0, CAP_NONE, 0];
         let mut bytes = [0; 64];
         let rc = unsafe {
             syscall6(
-                SYS_IPC_TRY_RECV,
+                SYS_IPC_RECV_BADGED,
                 SERVER,
                 request.as_mut_ptr() as u64,
                 bytes.as_mut_ptr() as u64,
@@ -1862,11 +2707,70 @@ extern "C" fn main() -> ! {
         let received = perf_now();
         let mut input_request = false;
         let mut landed = request[2];
-        let description = describe(landed);
-        transient_caps();
+        let badge = request[3] as u32;
+        let mut description = describe(landed);
         let mut status = 2;
         let mut result = 0;
-        if request[0] == 0 && request[1] == 0 {
+        let mut badge_rejected = false;
+        let mut badge_bootstrap = false;
+        let mut defer_render = false;
+        if badge != 0 {
+            let sessions = unsafe { &*(&raw const SESSIONS) };
+            let badges: [u32; LIMIT] = core::array::from_fn(|index| sessions[index].badge);
+            let selected =
+                arena_desktop::session_auth::select_live_badge(&badges, badge, |index| {
+                    sessions[index].process.is_some_and(child_live)
+                });
+            if let Ok(Some(i)) = selected {
+                let session = unsafe { SESSIONS[i] };
+                match (
+                    description,
+                    arena_desktop::service_wire::Frame::decode(&bytes),
+                ) {
+                    (None, Ok(arena_desktop::service_wire::Frame::Bootstrap))
+                        if session.kind < 6 =>
+                    {
+                        let prefs = unsafe { PREFS };
+                        bytes = arena_desktop::service_wire::Frame::Started {
+                            kind: session.kind,
+                            theme: u8::from(prefs.dark),
+                            motion: prefs.motion,
+                            path: session.path,
+                        }
+                        .encode()
+                        .unwrap_or_else(|_| die(78));
+                        status = 0;
+                        badge_bootstrap = true;
+                    }
+                    (None, _) => {
+                        // Internal dispatch context only: the session and
+                        // function rights came from the matched badge record,
+                        // not from caller bytes or a numeric SharedRegion ID.
+                        description = Some([7, session.id, session.function_rights]);
+                    }
+                    (Some([7, id, rights]), _)
+                        if id == session.id
+                            && rights == (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY) => {}
+                    (Some([12, id, rights]), Ok(arena_desktop::service_wire::Frame::Offer))
+                        if session.kind == 1
+                            && describe(USER_ROOT).is_some_and(|root| root[1] == id)
+                            && rights & (RIGHTS_WRITE | RIGHTS_COPY)
+                                == (RIGHTS_WRITE | RIGHTS_COPY) => {}
+                    _ => badge_rejected = true,
+                }
+            } else {
+                // Unknown, retired, or dead-owner badges never fall back to
+                // the legacy object-ID dispatcher.
+                badge_rejected = true;
+            }
+        }
+        defer_render = badge_bootstrap;
+        transient_caps();
+        if badge_rejected {
+            // Mutation-free fail-closed path; the landed cap is dropped below.
+        } else if badge_bootstrap {
+            // The bounded startup reply was built from the badge-bound Session.
+        } else if badge == 0 && request[0] == 0 && request[1] == 0 {
             if description
                 .is_some_and(|d| d[0] == 10 && d[1] == expected[1] && d[2] & RIGHTS_READ != 0)
             {
@@ -1975,7 +2879,15 @@ extern "C" fn main() -> ! {
                             dirty = true;
                         }
                         Action::Launch(kind) => {
+                            let full_sessions =
+                                unsafe { (&*(&raw const SESSIONS)).iter().all(|s| s.id != 0) };
+                            let before = full_sessions
+                                .then(|| (cap_inventory_snapshot(), observe_receipt()));
                             if let Err(rc) = launch(kind as u8, [0; 32], CAP_NONE) {
+                                if let Some((caps_before, resources_before)) = before {
+                                    log_capacity_refusal_inventory(caps_before, resources_before);
+                                    snapshot(true);
+                                }
                                 unsafe {
                                     NOTICE = Some((
                                         "LAUNCH REFUSED / DESKTOP CAPACITY",
@@ -2012,313 +2924,307 @@ extern "C" fn main() -> ! {
                     }
                     status = 0;
                 }
-            } else if description.is_some_and(|d| d[0] == 1 && d[2] & RIGHTS_READ != 0)
-                && arena_desktop::service_wire::Frame::decode(&bytes)
-                    == Ok(arena_desktop::service_wire::Frame::LaunchImage)
-            {
-                match launch_image(
-                    landed,
-                    255,
-                    0,
-                    RIGHTS_READ | RIGHTS_COPY,
-                    [0; 32],
-                    false,
-                    0,
-                    CAP_NONE,
-                ) {
-                    Ok(()) => {
-                        status = 0;
-                        dirty = true;
-                    }
-                    Err(e) => status = e as u64,
+            }
+        } else if description.is_some_and(|d| d[0] == 1 && d[2] & RIGHTS_READ != 0)
+            && arena_desktop::service_wire::Frame::decode(&bytes)
+                == Ok(arena_desktop::service_wire::Frame::LaunchImage)
+        {
+            match launch_image(
+                landed,
+                255,
+                0,
+                RIGHTS_READ | RIGHTS_COPY,
+                [0; 32],
+                false,
+                0,
+                CAP_NONE,
+            ) {
+                Ok(()) => {
+                    status = 0;
+                    dirty = true;
                 }
-            } else if description
-                .is_some_and(|d| d[0] == 12 && describe(USER_ROOT).is_some_and(|r| r[1] == d[1]))
-                && arena_desktop::service_wire::Frame::decode(&bytes)
-                    == Ok(arena_desktop::service_wire::Frame::Offer)
+                Err(e) => status = e as u64,
+            }
+        } else if description
+            .is_some_and(|d| d[0] == 12 && describe(USER_ROOT).is_some_and(|r| r[1] == d[1]))
+            && arena_desktop::service_wire::Frame::decode(&bytes)
+                == Ok(arena_desktop::service_wire::Frame::Offer)
+        {
+            // Keep the offered filesd capability for the next launch; it
+            // is used only for the session whose lineage holds it.
+            let old = unsafe { core::mem::replace(&mut *(&raw mut OFFER), landed) };
+            if old != CAP_NONE {
+                if let Some(f) = unsafe { &*(&raw const AFS2) } {
+                    f.release(old);
+                } else {
+                    destroy(old);
+                }
+            }
+            landed = CAP_NONE;
+            status = 0;
+        } else if let Some([7, id, rights]) = description {
+            if let Some(i) = unsafe { &*(&raw const SESSIONS) }
+                .iter()
+                .position(|s| s.id == id && s.process.is_some_and(child_live))
             {
-                // Keep the offered filesd capability for the next launch; it
-                // is used only for the session whose lineage holds it.
-                let old = unsafe { core::mem::replace(&mut *(&raw mut OFFER), landed) };
-                if old != CAP_NONE {
-                    if let Some(f) = unsafe { &*(&raw const AFS2) } {
-                        f.release(old);
-                    } else {
-                        destroy(old);
+                if rights & RIGHTS_DESTROY != 0 {
+                    match service(i, rights, &mut bytes) {
+                        Ok(value) => {
+                            status = 0;
+                            result = value;
+                            dirty = true;
+                        }
+                        Err(error) => {
+                            status = error as u64;
+                        }
                     }
                 }
-                landed = CAP_NONE;
-                status = 0;
-            } else if let Some([7, id, rights]) = description {
+            }
+            if rights & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
+                == (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
+            {
                 if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                     .iter()
-                    .position(|s| s.id == id && unsafe { syscall1(SYS_PROC_LIVE, s.process) } == 1)
+                    .position(|s| s.id == id && s.process.is_some_and(child_live))
                 {
-                    if rights & RIGHTS_DESTROY != 0 {
-                        match service(i, rights, &mut bytes) {
-                            Ok(value) => {
-                                status = 0;
-                                result = value;
-                                dirty = true;
+                    if arena_desktop::service_wire::Frame::decode(&bytes)
+                        == Ok(arena_desktop::service_wire::Frame::Bootstrap)
+                    {
+                        let s = unsafe { SESSIONS[i] };
+                        let p = unsafe { PREFS };
+                        if s.kind < 6 {
+                            bytes = arena_desktop::service_wire::Frame::Started {
+                                kind: s.kind,
+                                theme: u8::from(p.dark),
+                                motion: p.motion,
+                                path: s.path,
                             }
-                            Err(error) => {
-                                status = error as u64;
+                            .encode()
+                            .unwrap_or_else(|_| die(78));
+                            status = 0;
+                        }
+                    }
+                    if arena_desktop::service_wire::Frame::decode(&bytes)
+                        == Ok(arena_desktop::service_wire::Frame::Display)
+                    {
+                        result = w as u64 | ((h as u64) << 32);
+                        status = 0;
+                    }
+                    // Ordinary graphical sessions (signed applications
+                    // included) may ask the user through the chooser.
+                    if rights & RIGHTS_DESTROY == 0 {
+                        if let Some(r) = choice(i, &mut bytes) {
+                            match r {
+                                Ok(v) => {
+                                    status = 0;
+                                    result = v;
+                                    dirty = true;
+                                }
+                                Err(e) => status = e as u64,
                             }
                         }
                     }
-                }
-                if rights & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
-                    == (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
-                {
-                    if let Some(i) = unsafe { &*(&raw const SESSIONS) }.iter().position(|s| {
-                        s.id == id && unsafe { syscall1(SYS_PROC_LIVE, s.process) } == 1
-                    }) {
-                        if arena_desktop::service_wire::Frame::decode(&bytes)
-                            == Ok(arena_desktop::service_wire::Frame::Bootstrap)
-                        {
-                            let s = unsafe { SESSIONS[i] };
-                            let p = unsafe { PREFS };
-                            if s.kind < 6 {
-                                bytes = arena_desktop::service_wire::Frame::Started {
-                                    kind: s.kind,
-                                    theme: u8::from(p.dark),
-                                    motion: p.motion,
-                                    path: s.path,
+                    if let Ok(f) = Frame::decode(&bytes) {
+                        let state = unsafe { &mut *(&raw mut WM) };
+                        let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(i) };
+                        match f {
+                            Frame::Create { width, height }
+                                if s.handle == 0
+                                    && u64::from(width) * u64::from(height)
+                                        <= unsafe { RESERVE.surface_pages } * 1024 =>
+                            {
+                                if let Ok(handle) = state.create(id, width, height) {
+                                    s.handle = handle;
+                                    s.surface = (width, height);
+                                    s.reveal.retarget(
+                                        height as i32,
+                                        arena_desktop::app_client::now(),
+                                        if unsafe { PREFS.motion } {
+                                            arena_ui::motion::OPEN_US
+                                        } else {
+                                            0
+                                        },
+                                        arena_ui::motion::Easing::Smooth,
+                                    );
+                                    result = handle;
+                                    status = 0;
+                                    defer_render = true;
                                 }
-                                .encode()
-                                .unwrap_or_else(|_| die(78));
+                            }
+                            Frame::Title { handle, text } if state.owned(id, handle) => {
+                                s.title = text;
                                 status = 0;
-                            }
-                        }
-                        if arena_desktop::service_wire::Frame::decode(&bytes)
-                            == Ok(arena_desktop::service_wire::Frame::Display)
-                        {
-                            result = w as u64 | ((h as u64) << 32);
-                            status = 0;
-                        }
-                        // Ordinary graphical sessions (signed applications
-                        // included) may ask the user through the chooser.
-                        if rights & RIGHTS_DESTROY == 0 {
-                            if let Some(r) = choice(i, &mut bytes) {
-                                match r {
-                                    Ok(v) => {
-                                        status = 0;
-                                        result = v;
-                                        dirty = true;
-                                    }
-                                    Err(e) => status = e as u64,
+                                if s.published {
+                                    dirty = true;
+                                } else {
+                                    defer_render = true;
                                 }
                             }
-                        }
-                        if let Ok(f) = Frame::decode(&bytes) {
-                            let state = unsafe { &mut *(&raw mut WM) };
-                            let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(i) };
-                            match f {
-                                Frame::Create { width, height }
-                                    if s.handle == 0
-                                        && u64::from(width) * u64::from(height)
-                                            <= unsafe { RESERVE.surface_pages } * 1024 =>
-                                {
-                                    if let Ok(handle) = state.create(id, width, height) {
-                                        s.handle = handle;
-                                        s.surface = (width, height);
-                                        s.reveal.retarget(
-                                            height as i32,
-                                            arena_desktop::app_client::now(),
-                                            if unsafe { PREFS.motion } {
-                                                arena_ui::motion::OPEN_US
-                                            } else {
-                                                0
-                                            },
-                                            arena_ui::motion::Easing::Smooth,
-                                        );
-                                        result = handle;
-                                        status = 0;
-                                        dirty = true;
-                                    }
+                            Frame::Damage { handle, rects } if state.owned(id, handle) => {
+                                let copy_started = perf_now();
+                                if perf::ENABLED && unsafe { KEY_AT } != 0 {
+                                    probe(P_KEY2DAMAGE, unsafe { KEY_AT });
+                                    unsafe {
+                                        KEY_FRAME = core::mem::replace(&mut *(&raw mut KEY_AT), 0)
+                                    };
                                 }
-                                Frame::Title { handle, text } if state.owned(id, handle) => {
-                                    s.title = text;
+                                let (ww, wh) = (usize::from(s.surface.0), usize::from(s.surface.1));
+                                // Every declared rectangle must lie inside this
+                                // session's published surface; otherwise nothing
+                                // is published at all.
+                                let inside = rects.rects().iter().all(|&[x, y, w, h]| {
+                                    x as usize + w as usize <= ww && y as usize + h as usize <= wh
+                                });
+                                if inside {
+                                    let full = [[0, 0, ww as u16, wh as u16]];
+                                    let list = if rects.n == 0 {
+                                        &full[..]
+                                    } else {
+                                        rects.rects()
+                                    };
+                                    publish_rects(s.va + PIXEL_OFFSET as u64, s.snapshot, ww, list);
+                                    if rects.n == 0 || !s.published {
+                                        s.regions.mark_full();
+                                    } else {
+                                        for r in rects.rects() {
+                                            s.regions.add(*r);
+                                        }
+                                    }
+                                    s.published = true;
+                                    s.content = s.content.wrapping_add(1);
+                                    probe(P_DAMAGE, copy_started);
                                     status = 0;
                                     dirty = true;
                                 }
-                                Frame::Damage { handle, rects } if state.owned(id, handle) => {
-                                    let copy_started = perf_now();
-                                    if perf::ENABLED && unsafe { KEY_AT } != 0 {
-                                        probe(P_KEY2DAMAGE, unsafe { KEY_AT });
-                                        unsafe {
-                                            KEY_FRAME =
-                                                core::mem::replace(&mut *(&raw mut KEY_AT), 0)
-                                        };
-                                    }
-                                    let (ww, wh) =
-                                        (usize::from(s.surface.0), usize::from(s.surface.1));
-                                    // Every declared rectangle must lie inside this
-                                    // session's published surface; otherwise nothing
-                                    // is published at all.
-                                    let inside = rects.rects().iter().all(|&[x, y, w, h]| {
-                                        x as usize + w as usize <= ww
-                                            && y as usize + h as usize <= wh
-                                    });
-                                    if inside {
-                                        let full = [[0, 0, ww as u16, wh as u16]];
-                                        let list = if rects.n == 0 {
-                                            &full[..]
-                                        } else {
-                                            rects.rects()
-                                        };
-                                        publish_rects(
-                                            s.va + PIXEL_OFFSET as u64,
-                                            s.snapshot,
-                                            ww,
-                                            list,
-                                        );
-                                        if rects.n == 0 || !s.published {
-                                            s.regions.mark_full();
-                                        } else {
-                                            for r in rects.rects() {
-                                                s.regions.add(*r);
-                                            }
+                            }
+                            // Publication of the session's own transient surface.
+                            Frame::Damage { handle, rects }
+                                if state.popup_owned(id, handle) && s.popup.handle == handle =>
+                            {
+                                let (_, p) = state.find_popup(handle).unwrap_or_else(|| die(88));
+                                let (pw, ph) = (usize::from(p.width), usize::from(p.height));
+                                let inside = rects.rects().iter().all(|&[x, y, w, h]| {
+                                    x as usize + w as usize <= pw && y as usize + h as usize <= ph
+                                });
+                                if inside {
+                                    let reserve = unsafe { RESERVE };
+                                    let full = [[0, 0, pw as u16, ph as u16]];
+                                    let list = if rects.n == 0 {
+                                        &full[..]
+                                    } else {
+                                        rects.rects()
+                                    };
+                                    publish_rects(
+                                        s.va + (reserve.shared_pages
+                                            - TRANSIENT_PAGES
+                                            - FILE_PAGES)
+                                            * 4096,
+                                        s.snapshot + reserve.surface_pages * 4096,
+                                        pw,
+                                        list,
+                                    );
+                                    if rects.n == 0 || !s.popup.published {
+                                        s.popup.regions.mark_full();
+                                    } else {
+                                        for r in rects.rects() {
+                                            s.popup.regions.add(*r);
                                         }
-                                        s.published = true;
-                                        s.content = s.content.wrapping_add(1);
-                                        probe(P_DAMAGE, copy_started);
-                                        status = 0;
-                                        dirty = true;
                                     }
+                                    s.popup.published = true;
+                                    s.popup.content = s.popup.content.wrapping_add(1);
+                                    status = 0;
+                                    dirty = true;
                                 }
-                                // Publication of the session's own transient surface.
-                                Frame::Damage { handle, rects }
-                                    if state.popup_owned(id, handle)
-                                        && s.popup.handle == handle =>
-                                {
-                                    let (_, p) =
-                                        state.find_popup(handle).unwrap_or_else(|| die(88));
-                                    let (pw, ph) = (usize::from(p.width), usize::from(p.height));
-                                    let inside = rects.rects().iter().all(|&[x, y, w, h]| {
-                                        x as usize + w as usize <= pw
-                                            && y as usize + h as usize <= ph
-                                    });
-                                    if inside {
-                                        let reserve = unsafe { RESERVE };
-                                        let full = [[0, 0, pw as u16, ph as u16]];
-                                        let list = if rects.n == 0 {
-                                            &full[..]
-                                        } else {
-                                            rects.rects()
-                                        };
-                                        publish_rects(
-                                            s.va + (reserve.shared_pages
-                                                - TRANSIENT_PAGES
-                                                - FILE_PAGES)
-                                                * 4096,
-                                            s.snapshot + reserve.surface_pages * 4096,
-                                            pw,
-                                            list,
-                                        );
-                                        if rects.n == 0 || !s.popup.published {
-                                            s.popup.regions.mark_full();
-                                        } else {
-                                            for r in rects.rects() {
-                                                s.popup.regions.add(*r);
-                                            }
-                                        }
-                                        s.popup.published = true;
-                                        s.popup.content = s.popup.content.wrapping_add(1);
-                                        status = 0;
-                                        dirty = true;
-                                    }
+                            }
+                            // The client publishes its whole surface at exactly
+                            // the size the window policy configured.
+                            Frame::Resize {
+                                handle,
+                                width,
+                                height,
+                            } if state.owned(id, handle) => {
+                                let window = state.find(handle).unwrap_or_else(|| die(88));
+                                if (width, height) == (window.width, window.height) {
+                                    publish_rects(
+                                        s.va + PIXEL_OFFSET as u64,
+                                        s.snapshot,
+                                        usize::from(width),
+                                        &[[0, 0, width, height]],
+                                    );
+                                    s.surface = (width, height);
+                                    s.regions.mark_full();
+                                    s.published = true;
+                                    s.content = s.content.wrapping_add(1);
+                                    status = 0;
+                                    dirty = true;
                                 }
-                                // The client publishes its whole surface at exactly
-                                // the size the window policy configured.
-                                Frame::Resize {
-                                    handle,
-                                    width,
-                                    height,
-                                } if state.owned(id, handle) => {
-                                    let window = state.find(handle).unwrap_or_else(|| die(88));
-                                    if (width, height) == (window.width, window.height) {
-                                        publish_rects(
-                                            s.va + PIXEL_OFFSET as u64,
-                                            s.snapshot,
-                                            usize::from(width),
-                                            &[[0, 0, width, height]],
-                                        );
-                                        s.surface = (width, height);
-                                        s.regions.mark_full();
-                                        s.published = true;
-                                        s.content = s.content.wrapping_add(1);
-                                        status = 0;
-                                        dirty = true;
-                                    }
-                                }
-                                Frame::Resizable {
-                                    handle,
-                                    min_width,
-                                    min_height,
-                                } if state.owned(id, handle) => {
-                                    if state.set_resizable(handle, min_width, min_height).is_ok() {
-                                        status = 0;
-                                    }
-                                }
-                                Frame::Popup {
-                                    handle,
-                                    kind,
-                                    x,
-                                    y,
-                                    width,
-                                    height,
-                                } if state.owned(id, handle) => {
-                                    if let Ok(popup) =
-                                        state.open_popup(id, handle, kind, x, y, width, height)
-                                    {
-                                        s.popup = PopupState {
-                                            handle: popup,
-                                            ..NO_POPUP
-                                        };
-                                        result = popup;
-                                        status = 0;
-                                        dirty = true;
-                                    }
-                                }
-                                Frame::Dismiss { handle } if state.popup_owned(id, handle) => {
-                                    if state.close_popup(id, handle).is_ok() {
-                                        s.popup = NO_POPUP;
-                                        status = 0;
-                                        dirty = true;
-                                    }
-                                }
-                                Frame::Poll { handle } if state.owned(id, handle) => {
-                                    unsafe { WOKEN[i] = false };
-                                    if perf::ENABLED && unsafe { KEY_AT != 0 && !KEY_POLLED } {
-                                        probe(P_KEY2POLL, unsafe { KEY_AT });
-                                        if unsafe { KEY_NOTIFIED } != 0 {
-                                            probe(P_NOTIFY2POLL, unsafe { KEY_NOTIFIED });
-                                        }
-                                        unsafe { (KEY_POLLED, KEY_NOTIFIED) = (true, 0) };
-                                    }
-                                    if let Ok(event) = state.poll(handle) {
-                                        // Bit 2: more events are queued, so a
-                                        // client stops polling when it is clear
-                                        // (Phase 11: an empty poll was a whole
-                                        // round trip on every key).
-                                        result = u64::from(unsafe { PREFS.dark })
-                                            | (u64::from(unsafe { PREFS.motion }) << 1)
-                                            | (u64::from(state.pending(handle)) << 2);
-                                        if let Some(event) = event {
-                                            bytes = Frame::Event { handle, event }
-                                                .encode()
-                                                .unwrap_or_else(|_| die(98));
-                                        }
-                                        status = 0;
-                                    }
-                                }
-                                Frame::CancelClose { handle } if state.owned(id, handle) => {
-                                    s.close_pending = false;
+                            }
+                            Frame::Resizable {
+                                handle,
+                                min_width,
+                                min_height,
+                            } if state.owned(id, handle) => {
+                                if state.set_resizable(handle, min_width, min_height).is_ok() {
                                     status = 0;
                                 }
-                                _ => {}
                             }
+                            Frame::Popup {
+                                handle,
+                                kind,
+                                x,
+                                y,
+                                width,
+                                height,
+                            } if state.owned(id, handle) => {
+                                if let Ok(popup) =
+                                    state.open_popup(id, handle, kind, x, y, width, height)
+                                {
+                                    s.popup = PopupState {
+                                        handle: popup,
+                                        ..NO_POPUP
+                                    };
+                                    result = popup;
+                                    status = 0;
+                                    dirty = true;
+                                }
+                            }
+                            Frame::Dismiss { handle } if state.popup_owned(id, handle) => {
+                                if state.close_popup(id, handle).is_ok() {
+                                    s.popup = NO_POPUP;
+                                    status = 0;
+                                    dirty = true;
+                                }
+                            }
+                            Frame::Poll { handle } if state.owned(id, handle) => {
+                                unsafe { WOKEN[i] = false };
+                                if perf::ENABLED && unsafe { KEY_AT != 0 && !KEY_POLLED } {
+                                    probe(P_KEY2POLL, unsafe { KEY_AT });
+                                    if unsafe { KEY_NOTIFIED } != 0 {
+                                        probe(P_NOTIFY2POLL, unsafe { KEY_NOTIFIED });
+                                    }
+                                    unsafe { (KEY_POLLED, KEY_NOTIFIED) = (true, 0) };
+                                }
+                                if let Ok(event) = state.poll(handle) {
+                                    // Bit 2: more events are queued, so a
+                                    // client stops polling when it is clear
+                                    // (Phase 11: an empty poll was a whole
+                                    // round trip on every key).
+                                    result = u64::from(unsafe { PREFS.dark })
+                                        | (u64::from(unsafe { PREFS.motion }) << 1)
+                                        | (u64::from(state.pending(handle)) << 2);
+                                    if let Some(event) = event {
+                                        bytes = Frame::Event { handle, event }
+                                            .encode()
+                                            .unwrap_or_else(|_| die(98));
+                                    }
+                                    status = 0;
+                                }
+                            }
+                            Frame::CancelClose { handle } if state.owned(id, handle) => {
+                                s.close_pending = false;
+                                status = 0;
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -2339,7 +3245,14 @@ extern "C" fn main() -> ! {
         probe(P_REPLY, replying);
         probe(P_REQUEST, received);
         if dirty {
-            render(ram as u64, w, h, scanout)
+            if defer_render {
+                // Startup audits, first Create/Title, and the animation they
+                // overlap do not need intermediate scanouts. Preserve dirt
+                // for the next visible mutation or the empty-queue turn.
+                pending_render = true;
+            } else {
+                render(ram as u64, w, h, scanout)
+            }
         }
         if input_request {
             probe(P_INPUT, received);

@@ -21,7 +21,7 @@
 //!   switch**: the decision phase yields a plan of raw values (save-slot
 //!   pointer, restore RSP), the borrow ends, and only then does the
 //!   assembly switch run.
-//! - Every kernel thread stack is 32 KiB of contiguous frames with a
+//! - Every kernel thread stack is 96 KiB of contiguous frames with a
 //!   canary in its bottom qword, checked whenever the thread switches
 //!   away and again at reap; a corrupted canary halts the machine with
 //!   diagnostics (an overflowed kernel stack is never safe to continue).
@@ -49,22 +49,22 @@ pub const MAX_THREADS: usize = 64;
 /// BSP-only until SMP lands (M5) — see [`this_cpu`].
 pub const MAX_CPUS: usize = 4;
 
-/// Kernel stack per thread: 8 contiguous frames = 32 KiB (ADR-0012).
-pub const THREAD_STACK_FRAMES: usize = 8;
+/// Kernel stack per thread: 24 contiguous frames = 96 KiB (ADR-0089).
+pub const THREAD_STACK_FRAMES: usize = 24;
 const THREAD_STACK_BYTES: u64 = (THREAD_STACK_FRAMES * 4096) as u64;
 
 /// Bottom-of-stack canary ("ARENASTK"), checked on every switch-away.
 const STACK_CANARY: u64 = 0x4152_454E_4153_544B;
 
 /// Per-thread user regions the syscall dispatcher validates against
-/// (code / data / stack / driver windows — ADR-0014). Raised 4 → 16 by
-/// ADR-0021: a VirtIO driver maps one window per queue frame plus
-/// descriptor buffers. The cost is a few hundred bytes per (already
-/// static) thread slot.
-/// Registered user windows per thread (ELF segments, stack, shared maps).
-/// ADR-0075: the desktop broker maps the scanout plus a surface and a
-/// private snapshot for each of twelve sessions.
-pub const USER_REGIONS_MAX: usize = 40;
+/// (code / data / stack / driver windows — ADR-0014). ADR-0021 raised the
+/// original four slots for VirtIO windows; ADR-0075 raised that to 40 for
+/// the scanout plus 24 regions across twelve Desktop sessions. ADR-0089
+/// raises the bounded table to 80: 64 per-session broker maps plus the
+/// seven startup regions observed in the 32-session guest topology, leaving
+/// nine slots. The fixed per-thread cost is 1,280 bytes.
+pub const USER_REGIONS_MAX: usize = 80;
+const MSR_FS_BASE: u32 = 0xC000_0100;
 
 /// M3.1 stacks come from the direct map's first 2 GiB (ADR-0008); a frame
 /// beyond that has no kernel-view alias yet, so `spawn` refuses it rather
@@ -110,6 +110,10 @@ pub struct KThread {
     /// field (ADR-0018: no global names — a call finds its space
     /// through the thread the kernel already knows).
     proc_id: u64,
+    /// Per-thread user FS.base (x86-64 TLS). GS remains the kernel/user
+    /// `swapgs` mechanism; this value is saved/restored only at scheduler
+    /// boundaries and starts at zero for every thread.
+    fs_base: u64,
     /// Registered user-memory regions ((lo, hi) page-granular pairs;
     /// (0,0) = slot unused) — the syscall dispatcher validates every
     /// user pointer against exactly these (ADR-0014). Kernel-only
@@ -244,6 +248,9 @@ pub fn init() -> Result<(), &'static str> {
         if threads[0].is_some() {
             return Err("scheduler already initialized");
         }
+        // Kernel threads never inherit firmware/previous-task TLS state.
+        // `swapgs` remains exclusively the syscall entry-stack mechanism.
+        unsafe { crate::arch::x86_64::wrmsr(MSR_FS_BASE, 0) };
         threads[0] = Some(KThread {
             id: 0,
             name: "kmain",
@@ -256,6 +263,7 @@ pub fn init() -> Result<(), &'static str> {
             // back to it restores the canonical CR3 (M3.3b).
             cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
             proc_id: 0,
+            fs_base: 0,
             regions: [(0, 0); USER_REGIONS_MAX],
         });
         // SAFETY: same discipline; fresh scheduler, known values.
@@ -268,7 +276,7 @@ pub fn init() -> Result<(), &'static str> {
 }
 
 /// Create a thread and enqueue it Ready on this CPU. It runs `entry(arg)`
-/// on its own 32 KiB stack the next time the scheduler picks it, then
+/// on its own 96 KiB stack the next time the scheduler picks it, then
 /// exits and is reaped automatically. Returns the thread id.
 pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'static str> {
     spawn_inner(
@@ -342,6 +350,7 @@ fn spawn_inner(
         let base_va = phys.wrapping_add(KERNEL_OFFSET);
         // SAFETY: fresh exclusive frames, mapped RW in the kernel view.
         let rsp0 = unsafe {
+            core::ptr::write_bytes(base_va as *mut u8, 0xa5, THREAD_STACK_BYTES as usize);
             *(base_va as *mut u64) = STACK_CANARY;
             context::new_thread_stack(base_va + THREAD_STACK_BYTES)
         };
@@ -358,6 +367,7 @@ fn spawn_inner(
                 stack_frames: THREAD_STACK_FRAMES,
                 cr3,
                 proc_id,
+                fs_base: 0,
                 regions: [(0, 0); USER_REGIONS_MAX],
             });
             (*CTX.get())[idx] = rsp0;
@@ -655,6 +665,29 @@ pub fn current_proc_id() -> Option<u64> {
     })
 }
 
+/// Update the running process thread's validated user FS.base and the live
+/// IA32_FS_BASE MSR. The syscall handler validates user mapping, write rights,
+/// alignment and range before calling this; kernel threads may never install
+/// user TLS. GS is deliberately untouched (ADR-0014 syscall `swapgs` contract).
+pub fn set_current_fs_base(base: u64) -> Result<(), &'static str> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0; this thread is the live scheduler
+        // current. The syscall validates the user address before reaching here.
+        unsafe {
+            let cur = (*CPUS.get())[this_cpu()].current;
+            let Some(thread) = (*THREADS.get())[cur].as_mut() else {
+                return Err("TLS set: current thread vanished");
+            };
+            if thread.proc_id == 0 {
+                return Err("TLS set: kernel thread has no userspace FS.base");
+            }
+            thread.fs_base = base;
+            crate::arch::x86_64::wrmsr(MSR_FS_BASE, base);
+        }
+        Ok(())
+    })
+}
+
 /// The process a thread belongs to, by id (`None` if unknown/kernel).
 pub fn proc_id_of(tid: u64) -> Option<u64> {
     without_interrupts(|| {
@@ -750,6 +783,15 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
         let cpu = &mut (*CPUS.get())[this_cpu()];
         let cur = cpu.current;
         let threads = &mut *THREADS.get();
+        // FS.base is per logical CPU, not per Rust thread. Snapshot the live
+        // owner before changing `cpu.current`; all entry/exit paths run here
+        // with IF=0 and GS already canonicalized as required above.
+        if let Some(current) = threads[cur].as_mut() {
+            // A terminating thread is made Zombie before this decision phase;
+            // `reap()` may already have cleared its slot. Its outgoing FS.base
+            // is discarded in that case and never needs restoration.
+            current.fs_base = crate::arch::x86_64::rdmsr(MSR_FS_BASE);
+        }
         // Skip stale ready-ring entries. Since M6.5 a thread can be
         // KILLED while Ready (`kill_threads_of`), which zombies it
         // where it stands and leaves its index in this ring; `reap`
@@ -804,6 +846,10 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
                 crate::arch::x86_64::write_cr3(nt.cr3);
             }
         }
+        // Restore the incoming thread's native TLS base before its saved
+        // context can execute. A process/thread ID never authorizes a base;
+        // user memory validation happened in SYS_TLS_SET.
+        crate::arch::x86_64::wrmsr(MSR_FS_BASE, nt.fs_base);
         Some(Plan {
             save: (CTX.get() as *mut u64).add(cur),
             restore: (*CTX.get())[next],
@@ -855,8 +901,22 @@ fn check_canary_current() {
         if t.stack_frames == 0 {
             return; // bootstrap: stack not owned, no canary
         }
-        let canary = *(t.stack_base.wrapping_add(KERNEL_OFFSET) as *const u64);
+        let stack_base = t.stack_base.wrapping_add(KERNEL_OFFSET);
+        let canary = *(stack_base as *const u64);
         if canary != STACK_CANARY {
+            let fill = u64::from_ne_bytes([0xa5; 8]);
+            let mut untouched = 8u64;
+            while untouched + 8 <= THREAD_STACK_BYTES
+                && core::ptr::read_volatile((stack_base + untouched) as *const u64) == fill
+            {
+                untouched += 8;
+            }
+            error!(
+                "sched",
+                "stack high-water estimate={} bytes of {}",
+                THREAD_STACK_BYTES.saturating_sub(untouched),
+                THREAD_STACK_BYTES
+            );
             error!(
                 "sched",
                 "stack canary corrupt: thread {} '{}' base={:#x} canary={:#x} (want {:#x})",

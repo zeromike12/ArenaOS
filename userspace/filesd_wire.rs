@@ -44,6 +44,40 @@ pub const OP_UNWATCH: u8 = 19;
 /// Changes since last asked (value) and whether the directory is gone
 /// (reply byte 0); clears the count. The badge is a hint, this is the fact.
 pub const OP_WATCHED: u8 = 20;
+/// Phase 12's restricted APB1 subprotocol uses IPC w0/w1 so its complete
+/// 64-byte key/digest records fit without changing the legacy 64-byte request
+/// layout or reinterpreting any existing filesd operation.
+pub const CALL_APB1_PROBE: u64 = 0x4150_4231_0000_0000;
+pub const CALL_APB1_INSPECT: u64 = 0x4150_4231_0000_0001;
+pub const CALL_APB1_VERIFY: u64 = 0x4150_4231_0000_0002;
+pub const CALL_APB1_INSTALL: u64 = 0x4150_4231_0000_0003;
+pub const CALL_APB1_ABI_V1: u64 = 1;
+/// filesd's internal APB1 capability record (ADR-0091), index 2/generation 1.
+pub const APB1_INSTALL_BADGE: u32 = 2 | (1 << 16);
+/// Rights in a key-only verification request and a key+digest install request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Apb1InstallRequest {
+    pub trusted_key: [u8; 32],
+    pub bundle_digest: [u8; 32],
+}
+impl Apb1InstallRequest {
+    pub fn encode(&self) -> [u8; BYTES] {
+        let mut bytes = [0; BYTES];
+        bytes[..32].copy_from_slice(&self.trusted_key);
+        bytes[32..].copy_from_slice(&self.bundle_digest);
+        bytes
+    }
+    pub fn decode(bytes: &[u8; BYTES]) -> Self {
+        let mut trusted_key = [0; 32];
+        trusted_key.copy_from_slice(&bytes[..32]);
+        let mut bundle_digest = [0; 32];
+        bundle_digest.copy_from_slice(&bytes[32..]);
+        Self {
+            trusted_key,
+            bundle_digest,
+        }
+    }
+}
 
 /// Rights carried by a capability record.
 pub const R_READ: u8 = 1;
@@ -166,3 +200,26 @@ impl StatReply {
 /// mtime u64, name`. The reply value is the count; reply byte 0 = 1 when
 /// more entries follow the last one.
 pub const LIST_HEAD: usize = 18;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apb1_key_and_digest_share_exactly_one_raw_64_byte_record() {
+        let request = Apb1InstallRequest {
+            trusted_key: core::array::from_fn(|index| index as u8),
+            bundle_digest: core::array::from_fn(|index| 255 - index as u8),
+        };
+        let bytes = request.encode();
+        assert_eq!(&bytes[..32], &request.trusted_key);
+        assert_eq!(&bytes[32..], &request.bundle_digest);
+        assert_eq!(Apb1InstallRequest::decode(&bytes), request);
+
+        // The dedicated w0 operation is not a reinterpretation of legacy
+        // AF2Q request bytes or an extension of the generic R_ALL mask.
+        assert_eq!(Request::decode(&bytes), None);
+        assert_eq!(R_ALL & (1 << 6), 0);
+        assert_eq!(APB1_INSTALL_BADGE, 0x0001_0002);
+    }
+}

@@ -1091,10 +1091,10 @@ fn service_restart_inner() -> NetResult {
     }
 
     // Let the reaper run before counting. A KILLED thread becomes a
-    // zombie holding its 32 KiB kernel stack, and that stack is
+    // zombie holding its 96 KiB kernel stack, and that stack is
     // reclaimed by `reap` on the next scheduler entry — so the first
     // version of this check read the frame count while three corpses
-    // were still warm and reported an 8-frame leak that did not
+    // were still warm and reported a 24-frame leak that did not
     // exist. Every earlier test destroyed processes whose threads had
     // exited and been reaped long before; killing is what makes the
     // timing visible. `yield_now` reaps even when the ready ring is

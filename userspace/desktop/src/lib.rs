@@ -24,9 +24,11 @@ mod abi;
 pub mod files;
 #[path = "../../filesd_wire.rs"]
 pub mod filesd_wire;
+pub mod package;
 
 pub mod app_client;
 pub mod apps;
+pub mod session_auth;
 
 /// Entry point with a dedicated stack (Phase 11.3).
 ///

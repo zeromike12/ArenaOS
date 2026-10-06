@@ -1,0 +1,16 @@
+[package]
+name = "arena-process"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS native held-cap child process and bounded process-group lifecycle"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"

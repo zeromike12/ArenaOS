@@ -11,12 +11,16 @@ mod abi;
 use abi::*;
 #[path = "../../installed.rs"]
 mod installed;
+#[path = "../../filesd_wire.rs"]
+mod filesd_wire;
 
 const FS: u64 = 0;
 const SERVER: u64 = 1;
 const MARKER: u64 = 2;
 const REGISTRAR: u64 = 3;
 const LIFECYCLE: u64 = 4;
+/// Added only by the post-READY manager handoff; not one of the five spawn grants.
+const INSTALLER: u64 = 5;
 const BUFFER: u64 = 7;
 const LENT: u64 = 8;
 // Private provisional Image cap: never an inherited grant or a public slot.
@@ -181,6 +185,36 @@ fn cap_occupancy() -> u64 {
         }
     }
     n
+}
+
+fn install_authority_held() -> bool {
+    let mut d = [0u64; 3];
+    unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, d.as_mut_ptr() as u64) } == 0
+        && d[0] == 12
+        && d[2] == RIGHTS_WRITE | RIGHTS_COPY
+}
+
+/// The manager's late transfer is accepted only into reserved slot 5, with
+/// the narrow BadgedEndpoint shape. Before any APB1 source operation, the
+/// service probes the receiver through this held cap; numeric object words
+/// remain consistency checks, never authority.
+fn receive_install_authority(landed: u64, endpoint_id: u64, request: &[u8; MSG_BYTES]) -> bool {
+    if landed != INSTALLER || request != &[0; MSG_BYTES] {
+        if landed != CAP_NONE {
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, landed) };
+        }
+        return false;
+    }
+    let mut d = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, d.as_mut_ptr() as u64) } != 0
+        || d[0] != 12
+        || d[1] != endpoint_id
+        || d[2] != RIGHTS_WRITE | RIGHTS_COPY
+    {
+        let _ = unsafe { syscall1(SYS_CAP_DESTROY, landed) };
+        return false;
+    }
+    true
 }
 
 fn fail(s: &str) -> ! {
@@ -722,6 +756,178 @@ fn verified_install(
         .eligible(&pkg, &mut buf.signed)
         .map_err(|_| DENY)?;
     Ok(size as usize)
+}
+
+fn filesd_apb1_call(
+    call: u64,
+    source_cap: u64,
+    bytes: &mut [u8; MSG_BYTES],
+) -> Result<[u64; 3], u64> {
+    let mut out = [0, 0, CAP_NONE];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            INSTALLER,
+            call,
+            filesd_wire::CALL_APB1_ABI_V1,
+            source_cap,
+            out.as_mut_ptr() as u64,
+            bytes.as_mut_ptr() as u64,
+        )
+    };
+    if rc != 0 {
+        if out[2] != CAP_NONE {
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+        }
+        return Err(OFFLINE);
+    }
+    if out[2] != CAP_NONE {
+        let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+        return Err(CORRUPT);
+    }
+    Ok(out)
+}
+
+fn filesd_apb1_status(status: u64) -> u64 {
+    match status {
+        filesd_wire::S_OK => PKG_OK,
+        filesd_wire::S_DENIED => DENY,
+        filesd_wire::S_NOSPC | filesd_wire::S_FULL => NO_SPACE,
+        filesd_wire::S_OFFLINE | filesd_wire::S_IO => OFFLINE,
+        filesd_wire::S_EXIST => PKG_CONFLICT,
+        filesd_wire::S_INVAL => BAD_FORMAT,
+        _ => CORRUPT,
+    }
+}
+
+fn apkg_policy_status(error: Error) -> u64 {
+    match error {
+        Error::Collision => COLLISION,
+        Error::Downgrade => PKG_DOWNGRADE,
+        Error::NoSpace => NO_SPACE,
+        Error::Corrupt => CORRUPT,
+        _ => DENY,
+    }
+}
+
+fn install_apb1_from_cap(
+    source_cap: u64,
+    request: &[u8; MSG_BYTES],
+    va: u64,
+    buf: &mut Buffers,
+    answer: &mut [u8; MSG_BYTES],
+) -> (u64, u64) {
+    if source_cap == CAP_NONE || request != &[0; MSG_BYTES] {
+        return (BAD_FORMAT, 0);
+    }
+    let mut source_desc = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, source_cap, source_desc.as_mut_ptr() as u64) } != 0
+        || source_desc[0] != 12
+        || source_desc[2] & (RIGHTS_WRITE | RIGHTS_COPY) != RIGHTS_WRITE | RIGHTS_COPY
+    {
+        return (DENY, 0);
+    }
+    let mut installer_desc = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, installer_desc.as_mut_ptr() as u64) } != 0
+        || installer_desc[0] != 12
+        || installer_desc[2] != RIGHTS_WRITE | RIGHTS_COPY
+    {
+        return (OFFLINE, 0);
+    }
+
+    let mut message = [0u8; MSG_BYTES];
+    let probe = match filesd_apb1_call(filesd_wire::CALL_APB1_PROBE, CAP_NONE, &mut message) {
+        Ok(out) => out,
+        Err(status) => return (status, 0),
+    };
+    if probe[0] != filesd_wire::S_OK || probe[1] != filesd_wire::CALL_APB1_ABI_V1 {
+        return (filesd_apb1_status(probe[0]), 0);
+    }
+
+    message = [0; MSG_BYTES];
+    let inspect = match filesd_apb1_call(
+        filesd_wire::CALL_APB1_INSPECT,
+        source_cap,
+        &mut message,
+    ) {
+        Ok(out) => out,
+        Err(status) => return (status, 0),
+    };
+    if inspect[0] != filesd_wire::S_OK {
+        return (filesd_apb1_status(inspect[0]), 0);
+    }
+    let mut package_id = [0; 32];
+    package_id.copy_from_slice(&message[..32]);
+    let mut signer_id = [0; 32];
+    signer_id.copy_from_slice(&message[32..]);
+    let version = inspect[1];
+    if !package::canonical_id(&package_id) || version == 0 {
+        return (BAD_FORMAT, 0);
+    }
+
+    let state = match scan(va, buf, &package_id) {
+        Ok(state) => state,
+        Err(status) => return (status, 0),
+    };
+    if state.id.is_some_and(|id| id != package_id) {
+        return (COLLISION, 0);
+    }
+    let key = match package::apb1_select_key(&state.chain, &package_id, &signer_id, version) {
+        Ok(key) => key,
+        Err(error) => return (apkg_policy_status(error), 0),
+    };
+
+    message = [0; MSG_BYTES];
+    message[..32].copy_from_slice(&key);
+    let verified = match filesd_apb1_call(
+        filesd_wire::CALL_APB1_VERIFY,
+        source_cap,
+        &mut message,
+    ) {
+        Ok(out) => out,
+        Err(status) => return (status, 0),
+    };
+    if verified[0] != filesd_wire::S_OK {
+        return (filesd_apb1_status(verified[0]), 0);
+    }
+    let mut verified_package_id = [0; 32];
+    verified_package_id.copy_from_slice(&message[..32]);
+    let mut bundle_digest = [0; 32];
+    bundle_digest.copy_from_slice(&message[32..]);
+    if verified_package_id != package_id || verified[1] != version || sha256(&key) != signer_id {
+        return (PKG_STALE, 0);
+    }
+    if let Err(error) = package::apb1_check_eligible(
+        &state.chain,
+        &package_id,
+        &signer_id,
+        version,
+        &bundle_digest,
+    ) {
+        return (apkg_policy_status(error), 0);
+    }
+
+    let mut install = filesd_wire::Apb1InstallRequest {
+        trusted_key: key,
+        bundle_digest,
+    }
+    .encode();
+    let installed = match filesd_apb1_call(
+        filesd_wire::CALL_APB1_INSTALL,
+        source_cap,
+        &mut install,
+    ) {
+        Ok(out) => out,
+        Err(status) => return (status, 0),
+    };
+    if installed[0] != filesd_wire::S_OK {
+        return (filesd_apb1_status(installed[0]), 0);
+    }
+    if installed[1] != version || install[..32] != bundle_digest {
+        return (CORRUPT, 0);
+    }
+    answer[..32].copy_from_slice(&bundle_digest);
+    (PKG_INSTALLED, version)
 }
 
 /// Return (typed status, word1); an Image may only be replied to a fresh
@@ -1495,11 +1701,27 @@ pub extern "C" fn start_on_private_stack() -> ! {
             });
         }
 
-        // Consume every landed reference, even on PING, malformed requests,
-        // wrong-kind/rights/marker or backend failure. A numeric slot is never
-        // approval. `take_diagnostic` compares Notification object identity
-        // and distinct anchor/sent literal rights before SYS_CAP_DESTROY.
-        let marked = if landed == CAP_NONE {
+        // Every IPC-landed cap is either consumed as its one exact role or
+        // destroyed. APKG marker flow is unchanged; APB1 carries a source File
+        // cap only, and the filesd install authority is a separate late grant.
+        let mut install_handoff = false;
+        let mut apb1_source = false;
+        let marked = if op == PKG_OP_INSTALL_AUTH_HANDOFF {
+            install_handoff = receive_install_authority(landed, arg, &req);
+            install_handoff
+        } else if op == PKG_OP_APB1_INSTALL {
+            let mut d = [0u64; 3];
+            apb1_source = landed != CAP_NONE
+                && arg == 0
+                && req == [0; MSG_BYTES]
+                && unsafe { syscall2(SYS_CAP_DESCRIBE, landed, d.as_mut_ptr() as u64) } == 0
+                && d[0] == 12
+                && d[2] & (RIGHTS_WRITE | RIGHTS_COPY) == RIGHTS_WRITE | RIGHTS_COPY;
+            if !apb1_source && landed != CAP_NONE {
+                let _ = take_diagnostic(landed, LIFECYCLE);
+            }
+            apb1_source
+        } else if landed == CAP_NONE {
             false
         } else {
             take_diagnostic(
@@ -1513,7 +1735,19 @@ pub extern "C" fn start_on_private_stack() -> ! {
         };
         let mut reply = [0u8; MSG_BYTES];
         let mut reply_cap = CAP_NONE;
-        let (status, value) = if op <= PKG_OP_STAGE
+        let (status, value) = if op == PKG_OP_INSTALL_AUTH_HANDOFF {
+            if install_handoff {
+                (OK, 0)
+            } else {
+                (DENY, 0)
+            }
+        } else if op == PKG_OP_APB1_INSTALL {
+            if apb1_source {
+                install_apb1_from_cap(landed, &req, va as u64, buf, &mut reply)
+            } else {
+                (DENY, 0)
+            }
+        } else if op <= PKG_OP_STAGE
             && (arg != 0 || req[32..].iter().any(|&b| b != 0))
         {
             (BAD_FORMAT, 0)
@@ -1548,12 +1782,16 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 &mut reply_cap,
             )
         };
+        if apb1_source && unsafe { syscall1(SYS_CAP_DESTROY, landed) } != 0 {
+            fail("APB1 source capability disposal refused");
+        }
         // Exact post-dispatch occupancy: 0..4 bootstrap, slot 8 local
         // LENT frame; slot 7 was consumed by self-map. A wrong-kind or
         // attenuated landed cap may lack DESTROY but IPC provenance still
         // permits disposal. Never leave it to exhaust the 32-slot table.
         for slot in 5..32 {
-            if slot == LENT
+            if (slot == INSTALLER && install_authority_held())
+                || slot == LENT
                 || (slot == PROVISIONAL && (pending.token != 0 || reply_cap == PROVISIONAL))
             {
                 continue;

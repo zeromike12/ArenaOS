@@ -246,7 +246,7 @@ for i in $(seq 1 "$N"); do
         why="host UDP fixture did not observe exactly three independent DNS requests"
     elif grep -aq 'TCP SKIP' "$SERIAL"; then
         why="TCP was skipped although this is a fixture-equipped qualification"
-    elif [[ $(grep -acF 'm83: returncap PASS (72 real reply caps rejected and discarded; slot 2 empty, occupancy 2/64 exact; ordinary no-cap PING unchanged)' "$SERIAL" || true) -ne 2 ]]; then
+    elif [[ $(grep -acF 'm83: returncap PASS (136 real reply caps rejected and discarded; slot 2 empty, occupancy 2/128 exact; ordinary no-cap PING unchanged)' "$SERIAL" || true) -ne 2 ]]; then
         why="linked IPC client did not discard forty landed caps in BOTH real M6 server/client fixtures"
     elif ! grep -aq 'native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer' "$SERIAL"; then
         why="native UDP library did not deliver/revoke its real-wire datagram"
@@ -258,7 +258,7 @@ for i in $(seq 1 "$N"); do
     elif ! grep -aqF 'audited 22 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
     # ADR-0075 (11.3): twelve desktop clocks; the table is still exactly full.
-    elif ! grep -aqF 'servicemgr: full fixture notification budget 31/31; thirty-second refused' "$SERIAL"; then
+    elif ! grep -aqF 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' "$SERIAL"; then
         why="full fixture notification bound was not tested"
     elif ! grep -aqF 'servicemgr: policy validated from live caps and ready drivers' "$SERIAL"; then
         why="ring-3 manager did not validate live inventory and driver readiness"
@@ -323,7 +323,7 @@ for i in $(seq 1 "$N"); do
         why="permission broker did not pass authenticated PING/readiness"
     elif ! grep -aqF 'permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty' "$SERIAL"; then
         why="real broker grants differed from exact four-cap inventory"
-    elif ! grep -aqF 'permapp: audited ONLY mediator WRITE|COPY, 31 other cap slots empty' "$SERIAL"; then
+    elif ! grep -aqF 'permapp: audited ONLY mediator WRITE|COPY, 127 other cap slots empty' "$SERIAL"; then
         why="client app was not independently audited as endpoint-only"
     elif ! grep -aqF 'servicemgr: permission app reaped through held Process cap' "$SERIAL"; then
         why="independent app still live or its manager Process cap not reaped"

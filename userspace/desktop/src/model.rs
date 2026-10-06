@@ -1,9 +1,9 @@
 //! Window policy holds descriptive handles. The service supplies authority
 //! from its own exact backing / held Process associations, never caller IDs.
 use arena_ui::metrics as m;
-/// Concurrent desktop windows (ADR-0075: raised from 6 with measured
-/// kernel budgets).
-pub const MAX_WINDOWS: usize = 12;
+/// Concurrent ordinary windows and managed sessions (ADR-0088: measured
+/// Phase-12 resource envelope for 32 real application processes).
+pub const MAX_WINDOWS: usize = 32;
 pub const EVENT_DEPTH: usize = 32;
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 60;
@@ -1746,7 +1746,7 @@ mod tests {
         assert!(s.create(11, 800, 518).is_ok());
     }
     #[test]
-    fn twelve_windows_fit_on_screen_and_the_thirteenth_is_refused() {
+    fn thirty_two_windows_fit_on_screen_and_the_thirty_third_is_refused() {
         for (width, height) in [(800, 600), (640, 480), (1024, 768)] {
             let mut s = State::new(width, height).unwrap();
             for i in 0..MAX_WINDOWS {
@@ -1756,7 +1756,7 @@ mod tests {
                 assert!(w.y + m::TITLE_HEIGHT <= i32::from(height) - m::DOCK_HEIGHT);
             }
             assert_eq!(s.create(99, 448, 288), Err(Error::Full));
-            assert_eq!(s.windows().count(), 12);
+            assert_eq!(s.windows().count(), 32);
         }
     }
     #[test]

@@ -20,6 +20,14 @@ use arena_desktop::{
     service_wire::Frame,
 };
 use arena_gfxkit::Canvas;
+use arena_startup_abi::{
+    manifest::FLAG_MULTI_INSTANCE,
+    startup::{
+        CAP_KIND_BADGED_ENDPOINT, CAP_KIND_MEMORY_POOL, CAP_KIND_NOTIFICATION,
+        CAP_KIND_SHARED_REGION, CapabilityDescriptor, CapabilityRole, RIGHT_COPY, RIGHT_DESTROY,
+        RIGHT_READ, RIGHT_WRITE, StartupView,
+    },
+};
 use arena_ui::metrics as m;
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
@@ -175,6 +183,110 @@ fn describe(slot: u64) -> Option<[u64; 3]> {
 fn length(n: &[u8; 32]) -> usize {
     n.iter().position(|b| *b == 0).unwrap_or(32)
 }
+/// Check the trusted launcher metadata against this static multicall Image's
+/// identity, actual linked entry, and exact built-in cap profile. None of
+/// these descriptive fields grant authority; the held caps do.
+fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), i64> {
+    let kind = apps::APPLICATION_IDS
+        .iter()
+        .position(|id| id == view.application_id())
+        .ok_or(-2)? as u8;
+    let id = &apps::APPLICATION_IDS[kind as usize];
+    let id_len = length(id);
+    let actual_entry = _start as *const () as usize as u64;
+    if view.flags() != FLAG_MULTI_INSTANCE
+        || view.argument_count() == 0
+        || view.argument_count() > 2
+        || view.argument(0) != Some(&id[..id_len])
+        || view.environment_count() != 2
+        || view.capability_count() < 3
+        || view.capability_count() > 4
+        || view.cwd_descriptor().is_some()
+        || view.stdin_descriptor().is_some()
+        || view.stdout_descriptor().is_some()
+        || view.stderr_descriptor().is_some()
+        || view.page_size() != 4096
+        || view.entry() != actual_entry
+        || view.entry() != apps::APPLICATION_ENTRY
+        || view.load_base() != apps::APPLICATION_LOAD_BASE
+        || view.instance_slot() as usize >= apps::STARTUP_INSTANCE_SLOTS
+        || view.instance_generation() == 0
+        || view.clock_us() > service::now()
+    {
+        return Err(-2);
+    }
+    let theme_env = view.environment(0).ok_or(-2)?;
+    let dark = if theme_env == b"ARENA_THEME=dark" {
+        true
+    } else if theme_env == b"ARENA_THEME=light" {
+        false
+    } else {
+        return Err(-2);
+    };
+    let motion_env = view.environment(1).ok_or(-2)?;
+    let motion = if motion_env == b"ARENA_MOTION=1" {
+        true
+    } else if motion_env == b"ARENA_MOTION=0" {
+        false
+    } else {
+        return Err(-2);
+    };
+    let mut path = [0u8; 32];
+    if view.argument_count() == 2 {
+        let argument = view.argument(1).ok_or(-2)?;
+        if argument.len() > path.len() {
+            return Err(-2);
+        }
+        path[..argument.len()].copy_from_slice(argument);
+    }
+    let expected = [
+        CapabilityDescriptor {
+            slot: 1,
+            role: CapabilityRole::Other,
+            kind: CAP_KIND_BADGED_ENDPOINT,
+            rights: (RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY) as u32,
+        },
+        CapabilityDescriptor {
+            slot: 2,
+            role: CapabilityRole::Other,
+            kind: CAP_KIND_SHARED_REGION,
+            rights: (RIGHT_READ | RIGHT_WRITE | RIGHT_COPY) as u32,
+        },
+        CapabilityDescriptor {
+            slot: 3,
+            role: CapabilityRole::Other,
+            kind: CAP_KIND_NOTIFICATION,
+            rights: if kind == apps::FILES {
+                (RIGHT_READ | RIGHT_WRITE | RIGHT_COPY) as u32
+            } else {
+                (RIGHT_READ | RIGHT_WRITE) as u32
+            },
+        },
+    ];
+    if expected
+        .iter()
+        .enumerate()
+        .any(|(index, cap)| view.capability(index) != Some(*cap))
+    {
+        return Err(-2);
+    }
+    match (kind, view.capability_count(), view.capability(3)) {
+        (apps::MONITOR, 4, Some(cap))
+            if cap.slot == 4
+                && cap.role == CapabilityRole::Other
+                && cap.kind == CAP_KIND_MEMORY_POOL
+                && cap.rights == RIGHT_READ as u32 => {}
+        (apps::TERMINAL | apps::FILES | apps::EDITOR, 4, Some(cap))
+            if cap.slot == 4
+                && cap.role == CapabilityRole::Other
+                && cap.kind == CAP_KIND_BADGED_ENDPOINT
+                && cap.rights == (RIGHT_WRITE | RIGHT_COPY) as u32 => {}
+        (apps::TERMINAL | apps::FILES | apps::EDITOR, 3, None) => {}
+        (apps::SETTINGS | apps::GALLERY, 3, None) => {}
+        _ => return Err(-2),
+    }
+    Ok((kind, dark, motion, path))
+}
 fn error(rc: i64) -> &'static str {
     match rc {
         -3099..=-3000 => files::describe_status((-rc - 3000) as u64),
@@ -206,7 +318,7 @@ impl App {
     /// Register this client's filesd page for the lineage of `cap`.
     fn start_files(&mut self, client: &Client, cap: u64) {
         let (page, base) = client.file_page();
-        match Files::session(cap, client::BACKING, base, page) {
+        match Files::session(cap, client.backing_slot(), base, page) {
             Ok(f) => self.afs = Some(f),
             Err(e) => self.status = files::describe_status(e),
         }
@@ -1060,10 +1172,26 @@ fn number(b: &mut [u8; 64], n: &mut usize, mut v: u64) {
 }
 arena_desktop::entry!(main, 64 * 1024);
 extern "C" fn main() -> ! {
+    match arena_runtime::startup::run(|view| {
+        application_main(view);
+    }) {
+        Ok(()) | Err(_) => client::exit(70),
+    }
+}
+fn application_main(view: StartupView<'_>) -> ! {
+    let (expected_kind, expected_dark, expected_motion, expected_path) =
+        startup_values(&view).unwrap_or_else(|_| client::exit(70));
     let (kind, dark, motion, path) = service::startup().unwrap_or_else(|_| client::exit(70));
+    if kind != expected_kind
+        || dark != expected_dark
+        || motion != expected_motion
+        || path != expected_path
+    {
+        client::exit(72);
+    }
     let app = unsafe { &mut *(&raw mut APP) };
-    service::audit(kind).unwrap_or_else(|_| client::exit(76));
-    let mut client = Client::connect(
+    service::audit(kind, view.instance_generation()).unwrap_or_else(|_| client::exit(76));
+    let mut client = Client::connect_v2(
         m::WINDOW_WIDTH,
         m::WINDOW_HEIGHT,
         apps::TITLES[kind as usize],
@@ -1117,7 +1245,7 @@ extern "C" fn main() -> ! {
             })
         }
         apps::EDITOR if app.doc != CAP_NONE => app.open_document(path),
-        apps::SETTINGS => match service::exchange(Frame::Display, 1) {
+        apps::SETTINGS => match service::exchange(Frame::Display, client::V2_BACKING) {
             Ok((v, _)) => {
                 app.display = (v as u16, (v >> 32) as u16);
                 Ok(())

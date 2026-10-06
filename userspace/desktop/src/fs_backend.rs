@@ -1,6 +1,11 @@
 //! Trusted broker adapter. Raw fsd endpoint and LENT frame stay in this
 //! service; application-scoped authorization precedes each call here.
 use crate::abi::*;
+// The first-free Desktop MODE reply lands its scanout SharedRegion before
+// Fs starts. Keep the filesd bounce frame at the top of the enlarged cap
+// space instead of colliding with that live reply cap.
+pub const FILE_FRAME_SLOT: u64 = 125;
+pub const FILE_FRAME_LENT_SLOT: u64 = 126;
 pub struct Fs {
     pub va: u64,
     endpoint: u64,
@@ -40,22 +45,29 @@ fn call(endpoint: u64, op: u64, arg: u64, cap: u64, bytes: &mut [u8; 64]) -> Res
 }
 impl Fs {
     pub fn start(endpoint: u64) -> Result<Self, i64> {
-        let phys = unsafe { syscall1(SYS_ALLOC_FRAME, 30) };
+        let phys = unsafe { syscall1(SYS_ALLOC_FRAME, FILE_FRAME_SLOT) };
         if phys <= 0 {
             return Err(phys);
         }
-        let rc = unsafe { syscall3(SYS_CAP_COPY, 30, 31, RIGHTS_ALL) };
+        let rc = unsafe {
+            syscall3(
+                SYS_CAP_COPY,
+                FILE_FRAME_SLOT,
+                FILE_FRAME_LENT_SLOT,
+                RIGHTS_ALL,
+            )
+        };
         if rc != 0 {
             unsafe {
-                syscall1(SYS_CAP_DESTROY, 30);
+                syscall1(SYS_CAP_DESTROY, FILE_FRAME_SLOT);
             }
             return Err(rc);
         }
-        let va = unsafe { syscall2(SYS_MAP_MEMORY, 30, 1) };
+        let va = unsafe { syscall2(SYS_MAP_MEMORY, FILE_FRAME_SLOT, 1) };
         if va <= 0 {
             unsafe {
-                syscall1(SYS_CAP_DESTROY, 30);
-                syscall1(SYS_CAP_DESTROY, 31);
+                syscall1(SYS_CAP_DESTROY, FILE_FRAME_SLOT);
+                syscall1(SYS_CAP_DESTROY, FILE_FRAME_LENT_SLOT);
             }
             return Err(va);
         }
@@ -119,7 +131,7 @@ impl Fs {
                     self.endpoint,
                     FS_OP_READ,
                     fs_rw_w1(handle, offset as u64),
-                    31,
+                    FILE_FRAME_LENT_SLOT,
                     &mut b,
                 )? as usize;
                 if n == 0 || n > wanted {
@@ -161,7 +173,11 @@ impl Fs {
             self.endpoint,
             FS_OP_PUT,
             length as u64,
-            if length == 0 { CAP_NONE } else { 31 },
+            if length == 0 {
+                CAP_NONE
+            } else {
+                FILE_FRAME_LENT_SLOT
+            },
             &mut b,
         )?;
         if n != length as u64 {

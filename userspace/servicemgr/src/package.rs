@@ -11,6 +11,9 @@ const FS: u8 = 14;
 const IMAGE: u8 = 17;
 const ENDPOINT: u8 = 18;
 const MARKER: u8 = 19;
+const INSTALL_AUTH: u8 = 127;
+const _: () = assert!(INSTALL_AUTH as usize == CAP_SLOTS - 1);
+const BADGED_ENDPOINT_KIND: u64 = 12;
 const REGISTRAR: u8 = 20;
 const LIFECYCLE: u8 = 21;
 const PROBE_IMAGE: u8 = 9;
@@ -97,6 +100,8 @@ const SERVICES: [Service<'static>; 1] = [Service {
 fn log(s: &str) {
     let _ = unsafe { syscall2(SYS_DEBUG_WRITE, s.as_ptr() as u64, s.len() as u64) };
 }
+/// Preserve the historical low32 manager-cap receipt used by Process-cap
+/// capacity proofs, and separately report the out-of-band late APB1 slot.
 fn observed_caps(label: &str) {
     let mut count = 0u64;
     for slot in 0..32u64 {
@@ -112,6 +117,23 @@ fn observed_caps(label: &str) {
         o.u64(count);
         o.crlf();
     });
+    let mut install = [0u64; 3];
+    let present = unsafe {
+        syscall2(
+            SYS_CAP_DESCRIBE,
+            INSTALL_AUTH as u64,
+            install.as_mut_ptr() as u64,
+        )
+    } == 0;
+    log_line(|o| {
+        o.str("servicemgr: reserved APB1 slot127 descriptor=");
+        o.u64(if present { 1 } else { 0 });
+        o.str(" kind=");
+        o.u64(if present { install[0] } else { 0 });
+        o.str(" rights=");
+        o.u64(if present { install[2] } else { 0 });
+        o.crlf();
+    });
 }
 /// Stronger Phase-10 replacement for the old single-child BUSY probe. The
 /// caller already holds one unretired child; fill the other three entries,
@@ -119,6 +141,8 @@ fn observed_caps(label: &str) {
 fn capacity_refuses(image: u64) -> Result<(), ()> {
     const EXTRA: usize = 3;
     const BADGE: u64 = 1 << 60;
+    // This is the fixed low32 child-handle/inventory window, not total
+    // capability occupancy (the late APB1 authority lives at slot127).
     fn caps() -> usize {
         (0..32)
             .filter(|s| {
@@ -230,6 +254,7 @@ pub struct State {
     step: Step,
     restarts: u8,
     online: bool,
+    install_handed_off: bool,
     test_last_active: Option<[u8; 32]>,
     test_old_image: Option<(u64, u64)>,
     test_old_child: Option<Child>,
@@ -402,12 +427,58 @@ fn probe(receiver: Child) -> Result<(), Option<Child>> {
     finish(worker).map_err(|_| Some(worker))?;
     Ok(())
 }
-fn ready(step: Step) -> Result<Child, ()> {
+fn handoff_install_authority(receiver: Child) -> Result<bool, ()> {
+    if alive(receiver) != Ok(true) {
+        return Err(());
+    }
+    let occupied = unsafe { syscall6(SYS_CAP_OCCUPIED, INSTALL_AUTH as u64, 0, 0, 0, 0, 0) };
+    if occupied == 0 {
+        return Ok(false);
+    }
+    if occupied != 1 {
+        return Err(());
+    }
+    let authority = SyscallProbe.describe(INSTALL_AUTH).map_err(|_| ())?;
+    if authority.kind != BADGED_ENDPOINT_KIND || authority.rights != RIGHTS_WRITE | RIGHTS_COPY {
+        return Err(());
+    }
+    let mut message = [0u8; 64];
+    let mut out = [0, 0, CAP_NONE];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            ENDPOINT as u64,
+            PKG_OP_INSTALL_AUTH_HANDOFF,
+            authority.object,
+            INSTALL_AUTH as u64,
+            out.as_mut_ptr() as u64,
+            message.as_mut_ptr() as u64,
+        )
+    };
+    if rc != 0 || out[0] != PKG_OK || out[1] != 0 || out[2] != CAP_NONE {
+        if out[2] != CAP_NONE {
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+        }
+        return Err(());
+    }
+    log("servicemgr: APB1 install-only BadgedEndpoint handed to READY packaged in late slot5\r\n");
+    Ok(true)
+}
+
+fn ready(step: Step) -> Result<(Child, bool), ()> {
     let receiver = spawn(step)?;
     match probe(receiver) {
         Ok(()) => {
             log("servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)\r\n");
-            Ok(receiver)
+            match handoff_install_authority(receiver) {
+                Ok(handed_off) => Ok((receiver, handed_off)),
+                Err(()) => {
+                    if finish(receiver).is_err() {
+                        log("servicemgr: FATAL packaged failure after APB1 handoff refused\r\n");
+                    }
+                    Err(())
+                }
+            }
         }
         Err(worker) => {
             // Receiver FIRST unblocks a worker parked in IPC_CALL. Reap the
@@ -426,12 +497,13 @@ fn ready(step: Step) -> Result<Child, ()> {
 }
 pub fn start() -> Result<State, ()> {
     let step = plan()?;
-    let receiver = ready(step)?;
+    let (receiver, install_handed_off) = ready(step)?;
     Ok(State {
         receiver,
         step,
         restarts: 0,
         online: true,
+        install_handed_off,
         test_last_active: None,
         test_old_image: None,
         test_old_child: None,
@@ -1834,8 +1906,9 @@ impl State {
         self.restarts += 1;
         log("servicemgr: packaged reaped through held Process cap; no old verification state\r\n");
         match ready(self.step) {
-            Ok(child) => {
+            Ok((child, install_handed_off)) => {
                 self.receiver = child;
+                self.install_handed_off = install_handed_off;
                 self.online = true;
                 log("servicemgr: packaged replacement ready on original endpoint\r\n");
             }
@@ -1843,6 +1916,13 @@ impl State {
         }
     }
     pub fn event(&mut self, bits: u64) {
+        if self.online && !self.install_handed_off {
+            match handoff_install_authority(self.receiver) {
+                Ok(true) => self.install_handed_off = true,
+                Ok(false) => {}
+                Err(()) => log("servicemgr: APB1 install handoff pending; receiver or authority not ready\r\n"),
+            }
+        }
         if !self.online || bits & MGR_BADGE_PKG_EXIT == 0 {
             return;
         }
@@ -1864,8 +1944,9 @@ impl State {
         self.restarts += 1;
         // Every replacement still scans the actual disk before PING.
         match ready(self.step) {
-            Ok(child) => {
+            Ok((child, install_handed_off)) => {
                 self.receiver = child;
+                self.install_handed_off = install_handed_off;
                 self.online = true;
             }
             Err(()) => log("servicemgr: packaged OFFLINE (replacement refused)\r\n"),

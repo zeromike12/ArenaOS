@@ -17,7 +17,15 @@ fn reg(r: u8) -> u8 {
 }
 
 fn snapshot() -> [u8; 7] {
-    [reg(0x00), reg(0x02), reg(0x04), reg(0x07), reg(0x08), reg(0x09), reg(0x32)]
+    [
+        reg(0x00),
+        reg(0x02),
+        reg(0x04),
+        reg(0x07),
+        reg(0x08),
+        reg(0x09),
+        reg(0x32),
+    ]
 }
 
 /// Days since 1970-01-01 of a proleptic Gregorian date.
@@ -80,7 +88,11 @@ pub fn read_unix_seconds() -> Option<u64> {
     let year = conv(a[5])?;
     let century = conv(a[6]).filter(|c| (19..=21).contains(c)).unwrap_or(20);
     let full = i64::from(century) * 100 + i64::from(year);
-    if sec > 59 || min > 59 || hour > 23 || !(1..=31).contains(&day) || !(1..=12).contains(&month)
+    if sec > 59
+        || min > 59
+        || hour > 23
+        || !(1..=31).contains(&day)
+        || !(1..=12).contains(&month)
         || !(2000..=2199).contains(&full)
     {
         return None;

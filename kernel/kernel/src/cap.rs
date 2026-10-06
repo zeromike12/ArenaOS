@@ -32,7 +32,7 @@ use crate::sync::without_interrupts;
 /// bounded mature-userspace headroom, not authority. Source COPY and
 /// destination occupancy/rights are still checked on every delegation;
 /// a full table refuses rather than growing or replacing a cap.
-pub const CAP_SLOTS: usize = 64; // ADR-0075: twelve desktop sessions
+pub const CAP_SLOTS: usize = 128; // ADR-0088: 32 managed desktop sessions
 
 /// Inspect what the cap references (and, for process caps, obtain the
 /// target's PML4 root through [`process_root`]).
@@ -218,6 +218,18 @@ pub fn read(pid: u64, slot: usize) -> Result<Cap, &'static str> {
             Ok(cap)
         })
         .ok_or("cap: no such process")?
+    })
+}
+
+/// Read occupancy of one exact slot in a live process. This reveals no kind,
+/// object identity, rights, or device address; it is used only to distinguish
+/// an empty slot from an un-describable held object at the startup boundary.
+pub fn slot_occupied(pid: u64, slot: usize) -> Option<bool> {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| {
+            cs.get(slot).map(|cap| !matches!(cap.obj, CapObj::None))
+        })
+        .flatten()
     })
 }
 

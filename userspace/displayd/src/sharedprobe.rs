@@ -20,8 +20,8 @@ fn panic(_: &PanicInfo<'_>) -> ! {
     exit(99)
 }
 
-/// The kernel's SharedRegion object table (`shared::MAX_REGIONS`, ADR-0075).
-const REGIONS: usize = 32;
+/// The kernel's SharedRegion object table (`shared::MAX_REGIONS`, ADR-0088).
+const REGIONS: usize = 80;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
@@ -151,8 +151,8 @@ pub extern "C" fn _start() -> ! {
         exit(87)
     }
     // The two mappings pin the first region without any cap references.
-    // Fill every remaining object slot of the kernel's 32-region table
-    // (ADR-0075); the thirty-third allocation must refuse 40 consecutive
+    // Fill every remaining object slot of the kernel's 80-region table
+    // (ADR-0088); the eighty-first allocation must refuse 40 consecutive
     // times WITHOUT consuming a generation ID.
     let mut slots = [0u64; REGIONS - 1];
     for slot in &mut slots {
@@ -190,7 +190,7 @@ pub extern "C" fn _start() -> ! {
     // and prove its PTE pin still holds the byte; wrong/partial/duplicate
     // VAs and noncanonical flags refuse. Forty-eight create/map/destroy/
     // unmap rounds must reuse one region-table stride instead of slowly
-    // exhausting its 40 slots or the global 64-map/32-object tables.
+    // exhausting its 80 slots or the global 128-map/80-object tables.
     for round in 0..48u64 {
         let current = if round == 0 {
             again

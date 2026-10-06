@@ -289,6 +289,8 @@ pub enum Effect {
     OpenFolder(Path),
     /// Open this text file in an Editor (the broker grants it).
     OpenDocument(Path),
+    /// Submit this user-selected bundle through the trusted installer broker.
+    InstallBundle(Path),
     /// Nothing opens this kind.
     NoApplication,
 }
@@ -732,6 +734,12 @@ impl Desk {
         if it.dir {
             return Effect::OpenFolder(path);
         }
+        // The suffix selects an explicit installer affordance only. The
+        // broker still opens an exact read capability and filesd verifies the
+        // APB1 envelope; neither the name nor this association grants rights.
+        if it.name().ends_with(b".apb1") {
+            return Effect::InstallBundle(path);
+        }
         if kind_of(it.name(), false) != Kind::Text || it.size > 4096 {
             return Effect::NoApplication;
         }
@@ -872,6 +880,20 @@ mod tests {
         let cells: std::collections::BTreeSet<_> =
             d.view.icons[..4].iter().map(|i| (i.col, i.row)).collect();
         assert_eq!(cells.len(), 4, "two icons share a cell");
+    }
+
+    #[test]
+    fn bundle_open_requests_trusted_install_without_content_authority() {
+        let mut store = Mem::new();
+        store.mkdir(b"Desktop").unwrap();
+        store.create(b"Desktop/demo.apb1").unwrap();
+        store.write(b"Desktop/demo.apb1", 0, b"not a trusted signature").unwrap();
+        let mut desk = Desk::new();
+        desk.load(&mut store).unwrap();
+        assert_eq!(
+            desk.open(&mut store, 0),
+            Effect::InstallBundle(Path::of(b"Desktop/demo.apb1"))
+        );
     }
 
     #[test]

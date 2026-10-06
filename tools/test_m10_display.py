@@ -61,7 +61,7 @@ def workflow(label,width,height):
         shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',text()).groups())
         wait(lambda:samples()[-1][5]==base[5]+18,'six client mappings did not finish')
         peak=samples()[-1];assert peak[2:5]==(base[2]+6,base[3]+12,base[4]+6*(shared+snapshot)),peak
-        assert peak[3]<=32 and peak[4]<=20480 and peak[5]<=64 and peak[6]<=64,peak
+        assert peak[3]<=80 and peak[4]<=36864 and peak[5]<=128 and peak[6]<=128,peak
         shot('full-six-apps')
         for n in range(6):
             key('f8');wait(lambda:text().count('[desktop] application retired:')==n+2,'mode working set failed exact Process retirement')

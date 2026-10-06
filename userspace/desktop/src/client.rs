@@ -4,8 +4,13 @@ use crate::{
     model::{Event, PopupKind, SURFACE_MAX_HEIGHT, SURFACE_MAX_WIDTH, TRANSIENT_MAX_PIXELS},
     wire::Frame,
 };
+/// Legacy Phase-11 client layout (kept for direct/older images).
 pub const ENDPOINT: u64 = 0;
 pub const BACKING: u64 = 1;
+/// ABI-v2 built-in application layout: startup page is consumed from slot 0,
+/// then the badged service endpoint and surface region occupy slots 1 and 2.
+pub const V2_ENDPOINT: u64 = 1;
+pub const V2_BACKING: u64 = 2;
 /// First page is reserved for explicit service I/O; pixels follow it.
 pub const PIXEL_OFFSET: usize = 4096;
 /// A caller validates geometry before using this mapping as a Canvas.
@@ -18,6 +23,8 @@ pub struct Client {
     pub more: core::cell::Cell<bool>,
     pub width: usize,
     pub height: usize,
+    endpoint: u64,
+    backing: u64,
     /// Pages of the session reservation (ADR-0075): the I/O page, the main
     /// surface, `TRANSIENT_PAGES` of transient surface, then `FILE_PAGES`.
     pages: usize,
@@ -35,45 +42,74 @@ pub struct Transient {
     pub width: usize,
     pub height: usize,
 }
-fn exchange(frame: Frame) -> Result<([u64; 3], Frame), i64> {
-    let mut bytes = frame.encode().map_err(|_| -2)?;
-    let mut out = [0, 0, CAP_NONE];
-    // SAFETY: stack-owned buffers span exactly the syscall ABI's declared sizes.
-    let rc = unsafe {
-        syscall6(
-            SYS_IPC_CALL,
-            ENDPOINT,
-            0,
-            0,
-            BACKING,
-            out.as_mut_ptr() as u64,
-            bytes.as_mut_ptr() as u64,
-        )
-    };
-    if out[2] != CAP_NONE {
-        // SAFETY: drop only the newly landed reply cap, including malformed replies.
-        let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
-        return Err(-2);
+fn exchange_at(endpoint: u64, backing: u64, frame: Frame) -> Result<([u64; 3], Frame), i64> {
+    for attempt in 0..=crate::app_client::IPC_BUSY_RETRIES {
+        let mut bytes = frame.encode().map_err(|_| -2)?;
+        let mut out = [0, 0, CAP_NONE];
+        // SAFETY: stack-owned buffers span exactly the syscall ABI's declared sizes.
+        let rc = unsafe {
+            syscall6(
+                SYS_IPC_CALL,
+                endpoint,
+                0,
+                0,
+                backing,
+                out.as_mut_ptr() as u64,
+                bytes.as_mut_ptr() as u64,
+            )
+        };
+        if out[2] != CAP_NONE {
+            // SAFETY: drop only the newly landed reply cap, including malformed replies.
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+            return Err(-2);
+        }
+        if rc == STATUS_BUSY && attempt < crate::app_client::IPC_BUSY_RETRIES {
+            crate::app_client::retry_after_busy(attempt)?;
+            continue;
+        }
+        if rc != 0 {
+            return Err(rc);
+        }
+        if out[0] != 0 {
+            return Err(-2);
+        }
+        return Ok((out, Frame::decode(&bytes).map_err(|_| -2)?));
     }
-    if rc != 0 {
-        return Err(rc);
-    }
-    if out[0] != 0 {
-        return Err(-2);
-    }
-    Ok((out, Frame::decode(&bytes).map_err(|_| -2)?))
+    Err(STATUS_BUSY)
 }
 impl Client {
+    fn exchange(&self, frame: Frame) -> Result<([u64; 3], Frame), i64> {
+        exchange_at(self.endpoint, self.backing, frame)
+    }
+    /// Exact capability slot used for this client's surface reservation.
+    pub fn backing_slot(&self) -> u64 {
+        self.backing
+    }
     pub fn cancel_close(&self) -> Result<(), i64> {
         let f = Frame::CancelClose {
             handle: self.handle,
         };
-        if exchange(f)?.1 != f {
+        if self.exchange(f)?.1 != f {
             return Err(-2);
         }
         Ok(())
     }
+    /// Connect through the unchanged Phase-11 slot layout.
     pub fn connect(width: usize, height: usize, title: &str) -> Result<Self, i64> {
+        Self::connect_with_slots(width, height, title, ENDPOINT, BACKING)
+    }
+    /// Connect a Phase-12 ABI-v2 application using its badged endpoint and
+    /// explicitly inherited surface slots.
+    pub fn connect_v2(width: usize, height: usize, title: &str) -> Result<Self, i64> {
+        Self::connect_with_slots(width, height, title, V2_ENDPOINT, V2_BACKING)
+    }
+    fn connect_with_slots(
+        width: usize,
+        height: usize,
+        title: &str,
+        endpoint: u64,
+        backing: u64,
+    ) -> Result<Self, i64> {
         if width < 80
             || height < 60
             || width > usize::from(SURFACE_MAX_WIDTH)
@@ -89,7 +125,7 @@ impl Client {
         let rc = unsafe {
             syscall6(
                 SYS_SHARED_INFO,
-                BACKING,
+                backing,
                 bound.as_mut_ptr() as u64,
                 0,
                 0,
@@ -105,7 +141,7 @@ impl Client {
             return Err(-2);
         }
         // SAFETY: mapping an already-held region; kernel validates writable authority.
-        let va = unsafe { syscall2(SYS_SHARED_MAP, BACKING, 1) };
+        let va = unsafe { syscall2(SYS_SHARED_MAP, backing, 1) };
         if va <= 0 {
             return Err(va);
         }
@@ -113,7 +149,7 @@ impl Client {
             width: width as u16,
             height: height as u16,
         };
-        let (reply, echo) = exchange(request)?;
+        let (reply, echo) = exchange_at(endpoint, backing, request)?;
         if echo != request || reply[1] == 0 {
             return Err(-2);
         }
@@ -123,7 +159,7 @@ impl Client {
             handle: reply[1],
             text,
         };
-        if exchange(metadata)?.1 != metadata {
+        if exchange_at(endpoint, backing, metadata)?.1 != metadata {
             return Err(-2);
         }
         Ok(Self {
@@ -134,6 +170,8 @@ impl Client {
             more: core::cell::Cell::new(false),
             width,
             height,
+            endpoint,
+            backing,
             pages: bound[1] as usize,
         })
     }
@@ -154,7 +192,7 @@ impl Client {
             min_width,
             min_height,
         };
-        if exchange(f)?.1 != f {
+        if self.exchange(f)?.1 != f {
             return Err(-2);
         }
         Ok(())
@@ -179,7 +217,7 @@ impl Client {
             width: self.width as u16,
             height: self.height as u16,
         };
-        if exchange(f)?.1 != f {
+        if self.exchange(f)?.1 != f {
             return Err(-2);
         }
         Ok(())
@@ -202,7 +240,7 @@ impl Client {
             width,
             height,
         };
-        let (out, echo) = exchange(f)?;
+        let (out, echo) = self.exchange(f)?;
         if echo != f || out[1] == 0 {
             return Err(-2);
         }
@@ -220,7 +258,7 @@ impl Client {
             handle: t.handle,
             rects: crate::wire::DamageRects::FULL,
         };
-        if exchange(f)?.1 != f {
+        if self.exchange(f)?.1 != f {
             return Err(-2);
         }
         Ok(())
@@ -228,7 +266,7 @@ impl Client {
     /// Close this client's own transient surface.
     pub fn close_transient(&self, t: &Transient) -> Result<(), i64> {
         let f = Frame::Dismiss { handle: t.handle };
-        if exchange(f)?.1 != f {
+        if self.exchange(f)?.1 != f {
             return Err(-2);
         }
         Ok(())
@@ -259,7 +297,7 @@ impl Client {
             handle: self.handle,
             rects,
         };
-        if exchange(f)?.1 != f {
+        if self.exchange(f)?.1 != f {
             return Err(-2);
         }
         Ok(())
@@ -268,7 +306,7 @@ impl Client {
         let f = Frame::Poll {
             handle: self.handle,
         };
-        let (out, reply) = exchange(f)?;
+        let (out, reply) = self.exchange(f)?;
         if out[1] > 7 {
             return Err(-2);
         }

@@ -33,7 +33,7 @@ def main():
     marker = re.search(r'GOP handoff: (\d+)x(\d+) pitch=(\d+) format=(\d+) phys=0x([0-9a-f]+) bytes=(\d+)', s)
     assert rc == 0 and marker is not None and 'm7: RESULT PASS (2/2)' in s
     assert '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' in s
-    assert re.search(r'displayd resources at parked boundary: shared 1/32 runs, 469/20480 pages, 1/64 maps; caps 5/64; free frames \d+; live processes \d+', s)
+    assert re.search(r'displayd resources at parked boundary: shared 1/80 runs, 469/36864 pages, 1/128 maps; caps 5/128; free frames \d+; live processes \d+', s)
     assert '[sharedprobe] capacity/rights/zero PASS' in s
     assert '[sharedprobe] held SharedRegion INFO bound/refusal PASS' in s
     assert '[sharedprobe] exact own SharedRegion UNMAP 48x capless churn PASS' in s

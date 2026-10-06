@@ -37,8 +37,7 @@ use arena_lib::ipc::{self, Transport as _};
 /// Test-only request handled by the isolated faultd fixture, never a
 /// production service or public kernel ABI operation.
 const OP_UNEXPECTED_CAP: u64 = 3;
-const CAP_SLOTS: u64 = 64; // kernel table (ADR-0075)
-const CAP_TRIALS: u64 = 72; // more than the entire fixed cap table
+const CAP_TRIALS: u64 = CAP_SLOTS as u64 + 8; // exceed the full Phase-12 table
 const EXIT_CAP_LEAK: u64 = 70;
 
 fn describable(slot: u64) -> bool {
@@ -46,7 +45,9 @@ fn describable(slot: u64) -> bool {
     unsafe { syscall2(SYS_CAP_DESCRIBE, slot, desc.as_mut_ptr() as u64) == 0 }
 }
 fn occupied() -> u64 {
-    (0..CAP_SLOTS).filter(|&slot| describable(slot)).count() as u64
+    (0..CAP_SLOTS as u64)
+        .filter(|&slot| describable(slot))
+        .count() as u64
 }
 
 const SLOT_EP: u64 = 0;
@@ -91,7 +92,11 @@ unsafe fn call(op: u64, msg: &mut [u8; MSG_BYTES]) -> Result<(u64, u64), i64> {
             SLOT_EP,
             0,
             op,
-            if op == FAULT_OP_HANG { SLOT_QUIET } else { CAP_NONE },
+            if op == FAULT_OP_HANG {
+                SLOT_QUIET
+            } else {
+                CAP_NONE
+            },
             reply.as_mut_ptr() as u64,
             msg.as_mut_ptr() as u64,
         )
@@ -110,7 +115,7 @@ unsafe fn call(op: u64, msg: &mut [u8; MSG_BYTES]) -> Result<(u64, u64), i64> {
 /// HANG request that this client abandoned.
 fn verify_returned_cap(alive: u64, msg: &mut [u8; MSG_BYTES]) -> bool {
     let baseline = occupied();
-    let landing = (0..CAP_SLOTS).find(|&slot| !describable(slot));
+    let landing = (0..CAP_SLOTS as u64).find(|&slot| !describable(slot));
     if baseline != 2 || landing != Some(2) {
         log("m83: returncap FAIL (unexpected baseline cap inventory)");
         return false;
@@ -132,16 +137,25 @@ fn verify_returned_cap(alive: u64, msg: &mut [u8; MSG_BYTES]) -> bool {
         }
     }
     // Same linked production transport, ordinary reply without a cap:
-    // service status and word are unchanged even after 72 refusals.
+    // service status and word remain unchanged after more than one full
+    // capability-space worth of refused reply caps.
     if client.exchange(SLOT_EP, 0, FAULT_OP_PING, CAP_NONE, msg)
-        != Ok(ipc::Reply { status: FAULT_S_OK, value: alive + 1 }) {
+        != Ok(ipc::Reply {
+            status: FAULT_S_OK,
+            value: alive + 1,
+        })
+    {
         log("m83: returncap FAIL (normal no-cap PING changed)");
         return false;
     }
     log_line(|o| {
-        o.str("m83: returncap PASS (72 real reply caps rejected and discarded; slot 2 empty, occupancy ");
+        o.str("m83: returncap PASS (");
+        o.u64(CAP_TRIALS);
+        o.str(" real reply caps rejected and discarded; slot 2 empty, occupancy ");
         o.u64(baseline);
-        o.str("/64 exact; ordinary no-cap PING unchanged)");
+        o.str("/");
+        o.u64(CAP_SLOTS as u64);
+        o.str(" exact; ordinary no-cap PING unchanged)");
     });
     true
 }
