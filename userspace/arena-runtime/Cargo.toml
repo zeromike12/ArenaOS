@@ -1,0 +1,23 @@
+[package]
+name = "arena-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS native, bounded, capability-checked process startup runtime"
+
+[dependencies]
+arena-lib = { path = "../arena-lib" }
+arena-platform-core = { path = "../arena-platform" }
+
+[[bin]]
+name = "arena-startup-proof"
+path = "src/bin/startup-proof.rs"
+test = false
+bench = false
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"

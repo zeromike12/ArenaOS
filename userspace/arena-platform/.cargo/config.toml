@@ -1,0 +1,12 @@
+# APB1 verification is a userspace consumer of the already audited, exact-source
+# Phase-8 Ed25519/SHA-256 closure (ADR-0053). No registry/network access.
+[source.crates-io]
+replace-with = "arena-phase84-vendor"
+[source.arena-phase84-vendor]
+directory = "../../vendor/phase84"
+[net]
+offline = true
+[build]
+target = "x86_64-unknown-none"
+[target.x86_64-unknown-none]
+rustflags = ['--cfg', 'curve25519_dalek_backend="serial"']

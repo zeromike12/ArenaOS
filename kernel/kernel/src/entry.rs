@@ -391,6 +391,13 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 11 suite failed");
     }
 
+    // ADR-0083: an independently linked native runtime consumes a real
+    // read-only startup SharedRegion, validates actual cap slots, and proves
+    // both valid entry and fail-closed hostile startup cases before residents.
+    if !crate::m12::run_suite() {
+        crate::halt::halt_machine("milestone 12 startup ABI suite failed");
+    }
+
     // ADR-0056: run the bounded ring-3 SharedRegion capacity/teardown
     // probe before ANY production residents start. Exact resource delta
     // then belongs to this process, not asynchronously starting drivers.

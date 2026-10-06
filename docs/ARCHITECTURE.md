@@ -665,7 +665,30 @@ on top of a nonexistent IPC layer is how OS projects die.
   (nothing may assume x86 paging/interrupt models outside `arch/`), not a
   deliverable.
 
-## 14. Current implementation state
+## 14. Application platform and foreign ABI boundary (ADR-0080)
+
+Applications, app instances, process groups, and windows are distinct
+userspace concepts. The kernel remains a mechanism provider for generic
+processes, threads, capabilities, IPC and VM; app names, package IDs, window
+handles and integer runtime handles never authorize kernel actions. Native
+ArenaOS processes keep the capability-oriented syscall ABI. Any future
+non-native syscall ABI is selected only by a trusted launcher and proxied to a
+userspace compatibility server; the kernel does not interpret its syscall
+numbers or semantics. Phase 12 is building this platform on the Phase-11
+filesystem/desktop without turning ArenaOS into Linux. ADR-0081 freezes APB1,
+ADR-0082 chooses protected AFS2 staged activation, and ADR-0083 freezes an
+additive userspace-owned startup ABI. Host no_std verifier/installer/registry
+foundations are not yet integrated into protected guest filesd or the desktop.
+The ABI-v2 codec and reusable no-alloc startup gate have an independently
+linked ring-3 boot proof with four fail-closed controls. ADR-0084's bounded
+native heap is also guest-qualified at its 32-page cap with exact
+process-teardown accounting. ADR-0085 adds per-thread FS-base save/restore and
+an independently tested TLS handoff while leaving GS/`swapgs` unchanged. These
+proofs are not production launcher/service integration; general VM and
+multi-user-thread support remain open. See ADR-0080–0085 and
+`docs/phase12/ARCHITECTURE-AUDIT.md` for the audit, limits and staged gates.
+
+## 15. Current implementation state
 
 | Component | State |
 |---|---|

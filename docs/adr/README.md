@@ -127,3 +127,9 @@ What this constrains or enables later; what would trigger revisiting.
 | [0077](0077-filesd-file-capabilities.md) | filesd: AFS2 file service and badged file capabilities (lineages, Rtc, endpoint_badge) | Accepted |
 | [0078](0078-explorer-and-desktop-surface.md) | Files explorer and desktop surface over capabilities (Trash records, desk in the broker, pointer modifiers) | Accepted |
 | [0079](0079-directory-watches.md) | Directory watches (held directory capability, exact object identity, bounded, lineage-scoped) | Accepted |
+| [0080](0080-phase12-application-platform-and-abi.md) | Phase-12 application platform, native ABI boundary, APB1 direction, and isolated foreign syscall proxy | Accepted (implementation gates remain open) |
+| [0081](0081-apb1-bundle-format.md) | APB1 canonical signed multi-file application bundle wire format | Accepted (installer and guest gates remain open) |
+| [0082](0082-apb1-afs2-install-activation.md) | APB1 AFS2 staged install, durable readback and immutable rename activation | Accepted (persistent receiver policy, service integration, janitor wiring and guest gates remain open) |
+| [0083](0083-native-startup-abi-v2.md) | Native startup ABI v2 via explicit read-only SharedRegion and capability descriptors | Accepted (host codec, entry gate and independent guest proof pass; production launcher integration open) |
+| [0084](0084-bounded-native-heap.md) | Bounded native `GlobalAlloc` over owned frame mappings; explicit OOM, cap-slot and teardown contract | Accepted (host and independent single-thread guest proof pass; general VM and multi-user-thread integration open) |
+| [0085](0085-native-per-thread-tls-fsbase.md) | Native per-thread TLS through validated FS.base; preserve GS/`swapgs` | Accepted (host/runtime and independent single-thread guest handoff proof pass; user-thread lifecycle remains open) |
