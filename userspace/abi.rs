@@ -79,6 +79,8 @@ pub const SYS_SYNC_SEQUENCE: u64 = 71;
 pub const SYS_SYNC_WAIT: u64 = 72;
 pub const SYS_SYNC_WAKE: u64 = 73;
 pub const SYS_SYNC_INFO: u64 = 74;
+/// Aggregate native thread, IPC, timer, VM and synchronization occupancy.
+pub const SYS_RESOURCE_DETAIL: u64 = 75;
 pub const VM_PROT_READ: u64 = 1;
 pub const VM_PROT_WRITE: u64 = 2;
 pub const VM_PROT_EXEC: u64 = 4;

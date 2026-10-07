@@ -427,20 +427,16 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
         }
     }
     let full = |s: &Shell| s.open >= crate::model::MAX_WINDOWS;
-    if (
-        p.running,
-        p.minimized,
-        p.active,
-        full(p),
-        shell::hover_item(w, h, p.pointer),
-    ) != (
-        n.running,
-        n.minimized,
-        n.active,
-        full(n),
-        shell::hover_item(w, h, n.pointer),
-    ) {
-        out.add(shell::dock_region(w, h));
+    let legacy_dock_changed = !p.dock.enabled
+        && !n.dock.enabled
+        && (p.running, p.minimized, p.active, full(p))
+            != (n.running, n.minimized, n.active, full(n));
+    let dock_changed = p.dock != n.dock
+        || shell::hover_item_for(w, h, p.pointer, &p.dock)
+            != shell::hover_item_for(w, h, n.pointer, &n.dock);
+    if legacy_dock_changed || dock_changed {
+        out.add(shell::dock_region_for(w, h, &p.dock));
+        out.add(shell::dock_region_for(w, h, &n.dock));
     }
     if p.pointer != n.pointer {
         out.add(shell::pointer_region(p.pointer.0, p.pointer.1));

@@ -17,8 +17,14 @@ pub const FLAG_HEADLESS: u32 = 1 << 2;
 /// Request the trusted launcher to supply the native Startup ABI v2 stream
 /// set. This signed descriptive bit never grants the stream capability.
 pub const FLAG_STANDARD_STREAMS: u32 = 1 << 3;
-pub const KNOWN_FLAGS: u32 =
-    FLAG_MULTI_INSTANCE | FLAG_BACKGROUND | FLAG_HEADLESS | FLAG_STANDARD_STREAMS;
+/// Request an explicitly delegated per-instance native synchronization
+/// domain. This signed descriptive bit does not itself grant the capability.
+pub const FLAG_NATIVE_SYNC: u32 = 1 << 4;
+pub const KNOWN_FLAGS: u32 = FLAG_MULTI_INSTANCE
+    | FLAG_BACKGROUND
+    | FLAG_HEADLESS
+    | FLAG_STANDARD_STREAMS
+    | FLAG_NATIVE_SYNC;
 
 /// These bits are requests to userspace policy, never direct authority.
 pub const REQUEST_DOCUMENT_READ: u32 = 1 << 0;
@@ -380,6 +386,16 @@ mod tests {
         let manifest = Manifest::parse(&bytes).unwrap();
         assert!(manifest.requests_standard_streams());
         assert!(manifest.allows_multiple_instances());
+        assert_eq!(manifest.requested_capabilities(), REQUEST_DOCUMENT_READ);
+    }
+
+    #[test]
+    fn native_sync_opt_in_is_descriptive_and_grants_no_capability() {
+        let mut bytes = base();
+        bytes[112..116].copy_from_slice(&(FLAG_MULTI_INSTANCE | FLAG_NATIVE_SYNC).to_le_bytes());
+        let manifest = Manifest::parse(&bytes).unwrap();
+        assert!(manifest.allows_multiple_instances());
+        assert_eq!(manifest.flags() & FLAG_NATIVE_SYNC, FLAG_NATIVE_SYNC);
         assert_eq!(manifest.requested_capabilities(), REQUEST_DOCUMENT_READ);
     }
 

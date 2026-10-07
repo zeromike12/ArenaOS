@@ -142,11 +142,15 @@ Startup ABI standard streams, focused keyboard stdin, output backpressure,
 partial transfer, EOF, and exact owner teardown. ADR-0105 extends the same
 bounded rings to allowlisted helpers, with a capability returned only after
 explicit request and owner-scoped wake through the authenticated manager.
-Persisted launcher favorites, mixed-load pressure, PIE scope, and final
-qualification remain open. The
-dynamic Image envelope is a bounded executable staging mechanism; it is not
-process VM and does not imply PIE or ASLR support. See `PROGRESS.md` for
-measured receipts.
+AFS2-persisted favorites now feed the launcher and dynamic dock. The mixed
+pressure fixture reached 26 live AppInstances and 32 ordinary windows with
+five installed instances, five helpers, parked document threads, streams,
+timers, and notifications; close-half, reuse, and full teardown returned
+identity-bearing resources to their boot baseline. ADR-0109 records the
+high-water and retained-frame receipt. ADR-0108 records the deliberate
+ET_DYN/PIE deferral. The dynamic Image envelope is a bounded executable
+staging mechanism; it is not process VM and does not imply PIE or ASLR support.
+See `PROGRESS.md` for measured receipts and current qualification state.
 
 ## Work plan
 
@@ -161,6 +165,12 @@ measured receipts.
   any executable whose bytes do not match the verified APB1 record.
 - Keep APKG v1 staging/activation and APB1 bundle installation policy
   distinct.
+  **Status:** boot-time filesd enumeration rebuilds a bounded catalog only
+  from protected installed records, re-verifies APB1 bytes and receiver policy,
+  and publishes descriptive entries. Launch resolves the exact installed
+  version into a kernel-validated Image capability; stale versions, malformed
+  packages, ID collisions, and metadata-only guesses do not resolve to that
+  authority (ADR-0092/0093).
 
 ### B. Launcher and documents
 
@@ -178,12 +188,14 @@ measured receipts.
 ### C. Instance, process, and window lifecycle
 
 - Connect `AppInstanceTable`, exact Process-capability groups, and a separate
-  window set to production broker state. **Status:** each occupied Desktop
-  app-instance slot owns a separate four-member `ProcessGroup`; generation-
-  safe group handles wrap exact Process caps, and retirement drains the whole
-  group before clearing its owner slot (ADR-0099). The reusable
-  `AppInstanceTable`/`WindowSet` remains a host-side model; the Desktop session
-  record still needs a complete multi-process instance lifecycle.
+  window set to production broker state. **Status:** each generation-bearing
+  Desktop Session is a distinct AppInstance record and owns a separate
+  four-member `ProcessGroup`; the group tracks the primary process and
+  explicitly allowlisted helpers through exact Process caps. Retirement drains
+  the group before clearing the owner slot (ADR-0099/0101). Window ownership
+  refers to the AppInstance key, not a process or window ID. The reusable
+  `AppInstanceTable`/`WindowSet` remains a host-side policy model and carries
+  no production launch authority.
 - Give each ordinary window independent surface, compositor, damage,
   publication, close/state, and accounting ownership; prove one app owns at
   least three simultaneous windows. **Status:** window-level production
@@ -234,7 +246,10 @@ measured receipts.
   guest regressions passed, followed by 20/20 clean boots on that checkpoint's
   exact EFI.
 - Replace the 32-page heap ceiling with lazy, bounded, fallible process VM
-  backing and observable allocator/page accounting.
+  backing and observable allocator/page accounting. **Status:** the signed
+  installed-app fixture uses a lazy 16 MiB ScalableHeap, grows by 64-page
+  commits, exercises normal Rust `Vec`, reuse/coalescing, 64 KiB alignment,
+  and fallible OOM, then returns VM pages at teardown (ADR-0096).
 - Only after process-wide mapping ownership is implemented, add real user
   threads with explicit guarded stacks, per-thread FS.base TLS, join/exit, and
   bounded process cleanup. **Status:** implemented under ADR-0106, with the
@@ -252,14 +267,29 @@ measured receipts.
 
 ### F. Qualification and handoff
 
-- Make a representative mixed workload with at least 16 live app instances,
-  32 ordinary windows, one three-window app, installed APB1 apps, helpers,
-  threads, file caps, streams, timers, and notifications.
+- **Status:** the real installed APB1 pressure guest reached 26 AppInstances,
+  32 ordinary windows, and three windows in one AppInstance. Five installed
+  app instances owned five helpers and streams; two document workers were
+  parked; the run exercised timers, notifications, exact document caps,
+  half-close, helper failure, relaunch, and full teardown. Identity counts
+  returned to baseline. ADR-0109 records high-water and post-teardown counts.
 - Measure each identity-bearing resource at baseline, high-water, churn, and
   full teardown; explain retained page tables and prove refusal atomicity.
+  **Status:** the fixture's resource-detail syscall and Desktop receipt cover
+  threads, endpoints, notifications, timers, process VM regions/pages,
+  SyncDomains/keys/waiters, AppInstances, windows, helpers, and stream sets;
+  existing manager counters cover processes, SharedRegions, pages, maps, and
+  caps. Admission/refusal controls remain at their existing bounded limits.
+  Peak use was 49/64 scheduler threads, 46/64 processes, 71/96 SharedRegions,
+  30,555/36,864 SharedRegion pages, 119/160 maps, 119/128 Desktop capability
+  slots, 12/16 endpoints, 56/64 notifications, and 8/32 timers. After close,
+  all measured identity counters matched boot; 79 fewer free physical frames
+  remained, consistent with retained page-table backing seen in the M12
+  scale proof. See ADR-0109 for the exact snapshots and caveat.
 - Audit ET_DYN/PIE and ASLR. Implement only a small statically linked native
   subset if it fits without destabilizing the platform; otherwise record the
-  exact blocker and next phase.
+  exact blocker and next phase. **Status:** ADR-0108 defers `ET_DYN`, relative
+  relocations, and ASLR; current applications remain static non-PIE `ET_EXEC`.
 - Run feature-level guest proofs, then affected regression sets and the final
   Phase-13 historical, guest, stability, exact-artifact, and extracted-archive
   qualification.

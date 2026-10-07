@@ -223,6 +223,8 @@ pub const SYS_SYNC_WAKE: u64 = 73;
 pub const SYS_SYNC_INFO: u64 = 74;
 /// Mint a Desktop-owned bounded Notification through its boot-issued factory.
 pub const SYS_NOTIFICATION_CREATE: u64 = 63;
+/// Read aggregate thread/service/timer/VM/sync occupancy through MemoryPool/READ.
+pub const SYS_RESOURCE_DETAIL: u64 = 75;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -810,6 +812,7 @@ extern "C" fn syscall_dispatch(
         SYS_SYNC_WAIT if [a4, a5] == [0; 2] => sys_sync_wait(a0, a1, a2, a3) as u64,
         SYS_SYNC_WAKE if [a3, a4, a5] == [0; 3] => sys_sync_wake(a0, a1, a2) as u64,
         SYS_SYNC_INFO if [a2, a3, a4, a5] == [0; 4] => sys_sync_info(a0, a1) as u64,
+        SYS_RESOURCE_DETAIL if [a2, a3, a4, a5] == [0; 4] => sys_resource_detail(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -3280,6 +3283,58 @@ fn sys_observe(slot: u64, out: u64) -> Status {
         super::stac();
         for (i, value) in counts.into_iter().enumerate() {
             core::ptr::write_unaligned((out as *mut u64).add(i), value);
+        }
+        super::clac();
+    }
+    STATUS_OK
+}
+
+/// Read aggregate native resource occupancy through an exact
+/// MemoryPool/READ capability. Output words are:
+///
+/// `[total frames, live threads, live endpoints, live notifications,
+///   armed timers, VM regions, VM committed pages, sync domains, sync keys,
+///   parked sync waiters]`.
+///
+/// These totals are descriptive and grant no object authority. Per-process
+/// capability occupancy and shared-region accounting remain in SYS_OBSERVE.
+fn sys_resource_detail(slot: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.obj != crate::cap::CapObj::MemoryPool || cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_writable(out, 10 * 8) {
+        return STATUS_BAD_ADDRESS;
+    }
+
+    let (vm_regions, vm_pages) = crate::vm::usage_snapshot();
+    let (sync_domains, sync_keys, parked_waiters) = crate::sync_domain::usage_snapshot();
+    let timers = crate::timer::stats();
+    let counts = [
+        crate::frames::total_frames(),
+        crate::sched::live_threads() as u64,
+        crate::ipc::endpoint_occupancy() as u64,
+        crate::ipc::notification_occupancy() as u64,
+        timers.armed_now as u64,
+        vm_regions as u64,
+        u64::from(vm_pages),
+        sync_domains as u64,
+        sync_keys as u64,
+        parked_waiters as u64,
+    ];
+    unsafe {
+        super::stac();
+        let out = out as *mut u64;
+        for (index, value) in counts.into_iter().enumerate() {
+            core::ptr::write_unaligned(out.add(index), value);
         }
         super::clac();
     }

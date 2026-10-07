@@ -143,6 +143,20 @@ pub fn init() -> Result<(), &'static str> {
     crate::tick::register(expire_due)
 }
 
+/// Global live-domain/key/waiter occupancy for MemoryPool-gated diagnostics.
+/// Tokens returned by this summary are never accepted as operation authority.
+pub fn usage_snapshot() -> (usize, usize, usize) {
+    without_interrupts(|| unsafe {
+        let domains = &*DOMAINS.get();
+        let keys = &*KEYS.get();
+        (
+            domains.iter().filter(|domain| domain.live).count(),
+            keys.iter().filter(|key| key.live).count(),
+            PARKED.load(Ordering::Relaxed),
+        )
+    })
+}
+
 pub fn create_domain(owner: u64) -> Result<DomainRef, Error> {
     without_interrupts(|| unsafe {
         let domains = &mut *DOMAINS.get();

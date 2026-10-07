@@ -21,7 +21,7 @@ use arena_process::{
     },
 };
 use arena_startup_abi::{
-    manifest::{FLAG_MULTI_INSTANCE, FLAG_STANDARD_STREAMS},
+    manifest::{FLAG_MULTI_INSTANCE, FLAG_NATIVE_SYNC, FLAG_STANDARD_STREAMS},
     startup::{CapabilityDescriptor, CapabilityRole},
 };
 use core::panic::PanicInfo;
@@ -699,6 +699,17 @@ static mut OPEN_WITH_TITLE: [u8; 32] = [0; 32];
 static mut OPEN_WITH_READ_ONLY: bool = false;
 static mut ASSOCIATION_DEFAULTS: arena_desktop::associations::Defaults =
     arena_desktop::associations::Defaults::new();
+static mut APP_FAVORITES: arena_desktop::favorites::Favorites =
+    arena_desktop::favorites::Favorites::new();
+static mut CURRENT_DOCK: arena_desktop::shell::DockView = arena_desktop::shell::DockView::EMPTY;
+// Full identities stay outside the compact compositor snapshot so Scene
+// remains small on the Desktop's bounded stack.
+static mut CURRENT_DOCK_IDS: [[u8; 32]; arena_desktop::shell::MAX_DOCK_ITEMS] =
+    [[0; 32]; arena_desktop::shell::MAX_DOCK_ITEMS];
+static mut DOCK_ACTIVE_IDS: [[u8; 32]; arena_desktop::shell::MAX_ACTIVE_DOCK_APPS] =
+    [[0; 32]; arena_desktop::shell::MAX_ACTIVE_DOCK_APPS];
+static mut DOCK_ACTIVE_OFFSET: usize = 0;
+static mut DOCK_BUTTONS: u8 = 0;
 /// Badges are unique for this Desktop endpoint lifetime. Zero remains the
 /// kernel's plain-endpoint marker; exhaustion refuses rather than wrapping.
 static mut NEXT_SESSION_BADGE: u32 = 1;
@@ -766,6 +777,7 @@ fn transient_caps() {
     }
 }
 type ResourceReceipt = [u64; 7];
+type ResourceDetail = [u64; 15];
 /// Sample all seven fields used by the Desktop's resource receipts.
 fn observe_receipt() -> ResourceReceipt {
     let mut counts = [0u64; 9];
@@ -774,6 +786,63 @@ fn observe_receipt() -> ResourceReceipt {
     }
     [
         counts[0], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7],
+    ]
+}
+/// Read global kernel counts through the manager's MemoryPool/READ cap, then
+/// add this manager's AppInstance, ordinary-window, helper and native-stream
+/// occupancy. IDs in this receipt are measurements only.
+fn observe_resource_detail() -> ResourceDetail {
+    let mut kernel = [0u64; 10];
+    if unsafe {
+        syscall6(
+            SYS_RESOURCE_DETAIL,
+            POOL,
+            kernel.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+            0,
+        )
+    } != 0
+    {
+        die(77)
+    }
+    let sessions = unsafe { &*(&raw const SESSIONS) };
+    let mut instances = 0u64;
+    let mut helpers = 0u64;
+    let mut streams = 0u64;
+    for session in sessions.iter().filter(|session| session.id != 0) {
+        instances += 1;
+        streams += u64::from(session.stream_cap != CAP_NONE);
+        for helper in session.helpers.iter().filter(|helper| helper.active) {
+            helpers += 1;
+            streams += u64::from(helper.stream_cap != CAP_NONE);
+        }
+    }
+    let windows = unsafe { (&*(&raw const WM)).windows().count() as u64 };
+    let mut max_windows_per_instance = 0u64;
+    for session in sessions.iter().filter(|session| session.id != 0) {
+        let owned = unsafe { (&*(&raw const WM)).windows() }
+            .filter(|window| window.owner == session.id)
+            .count() as u64;
+        max_windows_per_instance = max_windows_per_instance.max(owned);
+    }
+    [
+        kernel[0],
+        kernel[1],
+        kernel[2],
+        kernel[3],
+        kernel[4],
+        kernel[5],
+        kernel[6],
+        kernel[7],
+        kernel[8],
+        kernel[9],
+        instances,
+        windows,
+        helpers,
+        streams,
+        max_windows_per_instance,
     ]
 }
 fn log_resource_receipt(prefix: &[u8], receipt: ResourceReceipt) {
@@ -788,23 +857,41 @@ fn log_resource_receipt(prefix: &[u8], receipt: ResourceReceipt) {
     line.push(b"\n");
     log(line.as_bytes());
 }
+fn log_resource_detail(detail: ResourceDetail) {
+    let mut line = perf::Line::new();
+    log(b"[desktop] native resource detail fields=total-frames/threads/endpoints/notifications/timers/vm-regions/vm-committed-pages/sync-domains/sync-keys/sync-waiters/app-instances/windows/helpers/stream-sets/max-windows-per-instance\n");
+    line.push(b"[desktop] native resource detail values=");
+    for (index, value) in detail.iter().enumerate() {
+        if index != 0 {
+            line.push(b"/");
+        }
+        line.number(*value);
+    }
+    line.push(b"\n");
+    log(line.as_bytes());
+}
 /// The last resource receipt logged (Phase 11 latency: an unchanged
 /// receipt after every pointer frame cost milliseconds of serial output).
 static mut LAST_RECEIPT: Option<ResourceReceipt> = None;
+static mut LAST_DETAIL: Option<ResourceDetail> = None;
 /// Log the measured resource receipt. Lifecycle events (`force`) always
 /// log, so a refusal is proven by a fresh unchanged receipt; frames log
 /// only a receipt that differs from the last one, so every change (and
 /// every peak) is still recorded.
 fn snapshot(force: bool) {
     let receipt = observe_receipt();
-    if !force && unsafe { LAST_RECEIPT } == Some(receipt) {
+    let detail = observe_resource_detail();
+    if !force && unsafe { LAST_RECEIPT } == Some(receipt) && unsafe { LAST_DETAIL } == Some(detail)
+    {
         return;
     }
     unsafe { LAST_RECEIPT = Some(receipt) };
+    unsafe { LAST_DETAIL = Some(detail) };
     log_resource_receipt(
         b"[desktop] measured frames/records/processes/regions/pages/maps/caps=",
         receipt,
     );
+    log_resource_detail(detail);
 }
 
 // ---- the trusted chooser (powerbox, ADR-0077) ------------------------------
@@ -1239,6 +1326,7 @@ fn start_afs2() {
 }
 
 const ASSOCIATION_FILE: &[u8] = b".arena-app-associations";
+const FAVORITES_FILE: &[u8] = b".arena-app-favorites";
 
 fn load_association_defaults() {
     let Some(files) = (unsafe { *(&raw const AFS2) }) else {
@@ -1287,6 +1375,128 @@ fn save_association_defaults() -> Result<(), u64> {
     let result = files.write_all(file, &bytes);
     files.release(file);
     result
+}
+
+fn load_favorites() {
+    let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+        unsafe { APP_FAVORITES = arena_desktop::favorites::Favorites::builtins() };
+        return;
+    };
+    match files.walk(
+        USER_ROOT,
+        FAVORITES_FILE,
+        arena_desktop::filesd_wire::R_READ,
+    ) {
+        Ok((file, _)) => {
+            let mut bytes = [0u8; arena_desktop::favorites::BYTES];
+            if let Some(favorites) = files
+                .read_all(file, &mut bytes)
+                .ok()
+                .and_then(arena_desktop::favorites::Favorites::decode)
+            {
+                unsafe { APP_FAVORITES = favorites };
+                log(b"[desktop] AFS2 application dock favorites loaded\n");
+            } else {
+                unsafe { APP_FAVORITES = arena_desktop::favorites::Favorites::builtins() };
+                log(b"[desktop] invalid application dock favorites ignored\n");
+            }
+            files.release(file);
+        }
+        Err(arena_desktop::filesd_wire::S_NOENT) => {
+            unsafe { APP_FAVORITES = arena_desktop::favorites::Favorites::builtins() };
+            if save_favorites().is_ok() {
+                log(b"[desktop] AFS2 default application dock favorites saved\n");
+            }
+        }
+        Err(_) => {
+            unsafe { APP_FAVORITES = arena_desktop::favorites::Favorites::builtins() };
+            log(b"[desktop] application dock favorites unavailable; using built-in defaults\n");
+        }
+    }
+}
+
+fn save_favorites() -> Result<(), u64> {
+    let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+        return Err(arena_desktop::filesd_wire::S_OFFLINE);
+    };
+    let file = match files.walk(
+        USER_ROOT,
+        FAVORITES_FILE,
+        arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE,
+    ) {
+        Ok((file, _)) => file,
+        Err(arena_desktop::filesd_wire::S_NOENT) => {
+            files.create(USER_ROOT, FAVORITES_FILE)?;
+            files
+                .walk(
+                    USER_ROOT,
+                    FAVORITES_FILE,
+                    arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE,
+                )?
+                .0
+        }
+        Err(error) => return Err(error),
+    };
+    let bytes = unsafe { &*(&raw const APP_FAVORITES) }.encode();
+    let result = files.write_all(file, &bytes);
+    files.release(file);
+    result
+}
+
+fn prune_favorites() {
+    if unsafe { ALL_APPS_UNAVAILABLE } {
+        return;
+    }
+    let previous = unsafe { *(&raw const APP_FAVORITES) };
+    let count = unsafe { INSTALLED_APP_COUNT };
+    let installed = unsafe { &*(&raw const INSTALLED_APPS) };
+    let removed = unsafe { &mut *(&raw mut APP_FAVORITES) }.retain(|application_id| {
+        installed[..count]
+            .iter()
+            .flatten()
+            .any(|entry| &entry.application_id == application_id)
+    });
+    if removed == 0 {
+        return;
+    }
+    if save_favorites().is_err() {
+        unsafe { APP_FAVORITES = previous };
+        log(b"[desktop] stale dock favorite cleanup could not be saved\n");
+    } else {
+        log(b"[desktop] removed stale application dock favorites\n");
+    }
+}
+
+fn toggle_favorite(index: usize) {
+    let Some(entry) = (unsafe {
+        (&*(&raw const INSTALLED_APPS))
+            .get(index)
+            .copied()
+            .flatten()
+    }) else {
+        return;
+    };
+    let previous = unsafe { *(&raw const APP_FAVORITES) };
+    let mut updated = previous;
+    let pinned = match updated.toggle(&entry.application_id) {
+        Ok(pinned) => pinned,
+        Err(arena_desktop::favorites::Error::Full) => {
+            desk_notice("DOCK PIN LIMIT REACHED");
+            return;
+        }
+        Err(arena_desktop::favorites::Error::InvalidApplicationId) => return,
+    };
+    unsafe { APP_FAVORITES = updated };
+    if save_favorites().is_err() {
+        unsafe { APP_FAVORITES = previous };
+        desk_notice("COULD NOT SAVE DOCK PIN");
+    } else if pinned {
+        desk_notice("APPLICATION PINNED TO DOCK");
+        log(b"[desktop] AFS2 application favorite saved\n");
+    } else {
+        desk_notice("APPLICATION UNPINNED FROM DOCK");
+        log(b"[desktop] AFS2 application favorite removed\n");
+    }
 }
 
 fn builtin_associations(
@@ -2755,7 +2965,8 @@ fn launch_headless_image_v2(
     let known_flags = arena_startup_abi::manifest::FLAG_MULTI_INSTANCE
         | arena_startup_abi::manifest::FLAG_BACKGROUND
         | arena_startup_abi::manifest::FLAG_HEADLESS
-        | FLAG_STANDARD_STREAMS;
+        | FLAG_STANDARD_STREAMS
+        | FLAG_NATIVE_SYNC;
     if app_flags & FLAG_HEADLESS == 0 || app_flags & !known_flags != 0 {
         return Err(STATUS_BAD_ARG);
     }
@@ -2782,7 +2993,8 @@ fn launch_headless_image_v2(
         .filter(|slot| describe(*slot).is_none())
         .count();
     let wants_streams = app_flags & FLAG_STANDARD_STREAMS != 0;
-    if free < 4 + usize::from(wants_streams) {
+    let wants_sync = app_flags & FLAG_NATIVE_SYNC != 0;
+    if free < 3 + usize::from(wants_streams) + usize::from(wants_sync) {
         log_launch_refusal(b"headless-cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -2833,13 +3045,15 @@ fn launch_headless_image_v2(
         stdout = Some(stream_index);
         stderr = Some(stream_index);
     }
-    descriptors[descriptor_count] = startup_role_descriptor(
-        (descriptor_count + 1) as u16,
-        CapabilityRole::SyncDomain,
-        startup_abi::CAP_KIND_SYNC_DOMAIN,
-        RIGHTS_READ | RIGHTS_WRITE,
-    );
-    descriptor_count += 1;
+    if wants_sync {
+        descriptors[descriptor_count] = startup_role_descriptor(
+            (descriptor_count + 1) as u16,
+            CapabilityRole::SyncDomain,
+            startup_abi::CAP_KIND_SYNC_DOMAIN,
+            RIGHTS_READ | RIGHTS_WRITE,
+        );
+        descriptor_count += 1;
+    }
     let spec = startup_abi::StartupSpec {
         application_id: &application_id,
         instance_slot: i as u16,
@@ -2912,34 +3126,41 @@ fn launch_headless_image_v2(
         grants[grant_count] = InheritGrant::new(CLOCK as u8, RIGHTS_WRITE as u32);
         grant_count += 1;
     }
-    let Some(sync_slot) = free_cap_slot() else {
-        destroy(startup_cap);
-        return Err(STATUS_BUSY);
+    let sync_slot = if wants_sync {
+        let Some(slot) = free_cap_slot() else {
+            destroy(startup_cap);
+            return Err(STATUS_BUSY);
+        };
+        let create_sync = unsafe {
+            syscall6(
+                SYS_SYNC_DOMAIN_CREATE,
+                SYNC_DOMAIN_FACTORY_SLOT,
+                slot,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if create_sync != 0 {
+            destroy(startup_cap);
+            return Err(create_sync);
+        }
+        grants[grant_count] = InheritGrant::new(slot as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+        grant_count += 1;
+        Some(slot)
+    } else {
+        None
     };
-    let create_sync = unsafe {
-        syscall6(
-            SYS_SYNC_DOMAIN_CREATE,
-            SYNC_DOMAIN_FACTORY_SLOT,
-            sync_slot,
-            0,
-            0,
-            0,
-            0,
-        )
-    };
-    if create_sync != 0 {
-        destroy(startup_cap);
-        return Err(create_sync);
-    }
-    grants[grant_count] = InheritGrant::new(sync_slot as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
-    grant_count += 1;
     let process = spawn_child(i, image, &grants[..grant_count]);
     destroy(startup_cap);
     let process = match process {
         Ok(process) => process,
         Err(status) => {
             log_launch_refusal(b"headless-kernel-spawn", status);
-            destroy(sync_slot);
+            if let Some(slot) = sync_slot {
+                destroy(slot);
+            }
             return Err(status);
         }
     };
@@ -2955,7 +3176,7 @@ fn launch_headless_image_v2(
     let id = (1u64 << 63) | u64::from(generation);
     sessions[i] = Session {
         id,
-        sync_slot: sync_slot as u8,
+        sync_slot: sync_slot.map_or(u8::MAX, |slot| slot as u8),
         stream_cap,
         stream_va,
         process: Some(process),
@@ -2967,7 +3188,11 @@ fn launch_headless_image_v2(
     };
     transient_caps();
     log(b"[desktop] verified headless application spawned; ordinary windows=");
-    log_number(unsafe { (&*(&raw const WM)).windows().count() as u64 });
+    log_number(
+        unsafe { (&*(&raw const WM)).windows() }
+            .filter(|window| window.owner == id)
+            .count() as u64,
+    );
     log(b"; no surface or Desktop endpoint inherited\n");
     Ok(())
 }
@@ -3186,7 +3411,8 @@ fn launch_image_v2_for_app_with_document(
         .filter(|slot| describe(*slot).is_none())
         .count();
     let wants_streams = app_flags & FLAG_STANDARD_STREAMS != 0;
-    if free < 9 + usize::from(wants_streams) {
+    let wants_sync = app_flags & FLAG_NATIVE_SYNC != 0;
+    if free < 9 + usize::from(wants_streams) + usize::from(wants_sync) {
         log_launch_refusal(b"cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -3401,13 +3627,15 @@ fn launch_image_v2_for_app_with_document(
         stdout = Some(stream_index);
         stderr = Some(stream_index);
     }
-    descriptors[descriptor_count] = startup_role_descriptor(
-        (descriptor_count + 1) as u16,
-        CapabilityRole::SyncDomain,
-        startup_abi::CAP_KIND_SYNC_DOMAIN,
-        RIGHTS_READ | RIGHTS_WRITE,
-    );
-    descriptor_count += 1;
+    if wants_sync {
+        descriptors[descriptor_count] = startup_role_descriptor(
+            (descriptor_count + 1) as u16,
+            CapabilityRole::SyncDomain,
+            startup_abi::CAP_KIND_SYNC_DOMAIN,
+            RIGHTS_READ | RIGHTS_WRITE,
+        );
+        descriptor_count += 1;
+    }
     let spec = startup_abi::StartupSpec {
         application_id: &application_id,
         // The app-instance slot is the actual reserved 32-entry manager
@@ -3552,43 +3780,48 @@ fn launch_image_v2_for_app_with_document(
         grants[grant_count] = InheritGrant::new(CLOCK as u8, RIGHTS_WRITE as u32);
         grant_count += 1;
     }
-    let Some(sync_slot) = free_cap_slot() else {
-        destroy(startup_cap);
-        destroy(badge_slot as u64);
-        destroy(home);
-        revoke_files(files_head);
-        unsafe {
-            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
-            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+    let sync_slot = if wants_sync {
+        let Some(slot) = free_cap_slot() else {
+            destroy(startup_cap);
+            destroy(badge_slot as u64);
+            destroy(home);
+            revoke_files(files_head);
+            unsafe {
+                syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+            }
+            destroy(region);
+            return Err(STATUS_BUSY);
+        };
+        let create_sync = unsafe {
+            syscall6(
+                SYS_SYNC_DOMAIN_CREATE,
+                SYNC_DOMAIN_FACTORY_SLOT,
+                slot,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if create_sync != 0 {
+            destroy(startup_cap);
+            destroy(badge_slot as u64);
+            destroy(home);
+            revoke_files(files_head);
+            unsafe {
+                syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+            }
+            destroy(region);
+            return Err(create_sync);
         }
-        destroy(region);
-        return Err(STATUS_BUSY);
+        grants[grant_count] = InheritGrant::new(slot as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+        grant_count += 1;
+        Some(slot)
+    } else {
+        None
     };
-    let create_sync = unsafe {
-        syscall6(
-            SYS_SYNC_DOMAIN_CREATE,
-            SYNC_DOMAIN_FACTORY_SLOT,
-            sync_slot,
-            0,
-            0,
-            0,
-            0,
-        )
-    };
-    if create_sync != 0 {
-        destroy(startup_cap);
-        destroy(badge_slot as u64);
-        destroy(home);
-        revoke_files(files_head);
-        unsafe {
-            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
-            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
-        }
-        destroy(region);
-        return Err(create_sync);
-    }
-    grants[grant_count] = InheritGrant::new(sync_slot as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
-    grant_count += 1;
     let process = spawn_child(i, image, &grants[..grant_count]);
     // Parent-side seed references are transient; the exact child caps remain.
     destroy(home);
@@ -3598,7 +3831,9 @@ fn launch_image_v2_for_app_with_document(
         Ok(process) => process,
         Err(status) => {
             log_launch_refusal(b"kernel-spawn", status);
-            destroy(sync_slot);
+            if let Some(slot) = sync_slot {
+                destroy(slot);
+            }
             revoke_files(files_head);
             unsafe {
                 syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
@@ -3616,7 +3851,7 @@ fn launch_image_v2_for_app_with_document(
     sessions[i] = Session {
         id,
         va: va as u64,
-        sync_slot: sync_slot as u8,
+        sync_slot: sync_slot.map_or(u8::MAX, |slot| slot as u8),
         stream_cap,
         stream_va,
         process: Some(process),
@@ -4265,6 +4500,7 @@ fn refresh_installed_applications() -> Result<(), u64> {
             ALL_APPS_TOP = 0;
         }
         prune_association_defaults();
+        prune_favorites();
         return Ok(());
     }
     reset_installed_applications();
@@ -4441,6 +4677,7 @@ fn applications_view() -> Option<arena_desktop::shell::ApplicationsView> {
     let mut view = ApplicationsView {
         names: [[0; 32]; APPLICATION_ROWS],
         running: [false; APPLICATION_ROWS],
+        pinned: [false; APPLICATION_ROWS],
         count: 0,
         selected: selected as u8,
         total,
@@ -4460,9 +4697,246 @@ fn applications_view() -> Option<arena_desktop::shell::ApplicationsView> {
         view.running[row] = unsafe { &*(&raw const SESSIONS) }
             .iter()
             .any(|session| session.id != 0 && session.application_id == entry.application_id);
+        view.pinned[row] = unsafe { &*(&raw const APP_FAVORITES) }.contains(&entry.application_id);
         view.count += 1;
     }
     Some(view)
+}
+
+fn dock_application_name(source: &[u8; 32]) -> [u8; 8] {
+    let mut name = [0; 8];
+    let end = source.iter().position(|byte| *byte == 0).unwrap_or(32);
+    let length = end.min(8);
+    for index in 0..length {
+        name[index] = if source[index].is_ascii_graphic() || source[index] == b' ' {
+            source[index]
+        } else {
+            b'?'
+        };
+    }
+    name
+}
+
+fn dock_entry(application_id: &[u8; 32]) -> Option<(usize, arena_desktop::package::AppEntry)> {
+    let count = unsafe { INSTALLED_APP_COUNT };
+    let installed = unsafe { &*(&raw const INSTALLED_APPS) };
+    installed[..count]
+        .iter()
+        .copied()
+        .enumerate()
+        .find_map(|(index, entry)| {
+            entry
+                .filter(|entry| entry.application_id == *application_id)
+                .map(|entry| (index, entry))
+        })
+}
+
+/// Build the dock only from saved descriptive favorites and currently live
+/// AppInstances. Every launch index is re-resolved through the current
+/// receiver-verified catalog before the event dispatcher can use it.
+fn application_dock_view(state: &State) -> arena_desktop::shell::DockView {
+    use arena_desktop::shell::{DockItem, DockView, MAX_ACTIVE_DOCK_APPS, MAX_DOCK_ITEMS};
+
+    let mut dock = DockView {
+        enabled: true,
+        ..DockView::EMPTY
+    };
+    unsafe {
+        CURRENT_DOCK_IDS = [[0; 32]; MAX_DOCK_ITEMS];
+        DOCK_ACTIVE_IDS = [[0; 32]; MAX_ACTIVE_DOCK_APPS];
+    }
+    let installed = unsafe { &*(&raw const INSTALLED_APPS) };
+    let installed_count = unsafe { INSTALLED_APP_COUNT };
+    let favorites = unsafe { &*(&raw const APP_FAVORITES) };
+    for favorite_index in 0..favorites.len() {
+        let Some(application_id) = favorites.get(favorite_index) else {
+            continue;
+        };
+        let Some((index, entry)) = installed[..installed_count]
+            .iter()
+            .copied()
+            .enumerate()
+            .find_map(|(index, entry)| {
+                entry
+                    .filter(|entry| entry.application_id == *application_id)
+                    .map(|entry| (index, entry))
+            })
+        else {
+            continue;
+        };
+        let item = DockItem {
+            name: dock_application_name(&entry.display_name),
+            application_index: index as u8,
+            icon_kind: if entry.builtin_kind < 6 {
+                entry.builtin_kind
+            } else {
+                5
+            },
+            pinned: true,
+            ..DockItem::EMPTY
+        };
+        let slot = usize::from(dock.pinned_count);
+        if slot < MAX_DOCK_ITEMS {
+            dock.items[slot] = item;
+            unsafe { CURRENT_DOCK_IDS[slot] = entry.application_id };
+            dock.pinned_count += 1;
+        }
+    }
+
+    let sessions = unsafe { &*(&raw const SESSIONS) };
+    let focused_owner = state
+        .focused()
+        .and_then(|handle| state.find(handle))
+        .map(|window| window.owner);
+    let mut active = [DockItem::EMPTY; MAX_ACTIVE_DOCK_APPS];
+    let mut active_count = 0usize;
+    for (session_index, session) in sessions.iter().enumerate() {
+        if session.id == 0
+            || session.application_id == [0; 32]
+            || sessions[..session_index]
+                .iter()
+                .any(|prior| prior.id != 0 && prior.application_id == session.application_id)
+        {
+            continue;
+        }
+        let resolved = dock_entry(&session.application_id);
+        let mut item = if let Some((index, entry)) = resolved {
+            DockItem {
+                name: dock_application_name(&entry.display_name),
+                application_index: index as u8,
+                icon_kind: if entry.builtin_kind < 6 {
+                    entry.builtin_kind
+                } else {
+                    5
+                },
+                ..DockItem::EMPTY
+            }
+        } else {
+            DockItem {
+                name: dock_application_name(&session.application_id),
+                ..DockItem::EMPTY
+            }
+        };
+        for instance in sessions.iter().filter(|instance| {
+            instance.id != 0 && instance.application_id == session.application_id
+        }) {
+            item.running = item.running.saturating_add(1);
+            item.active |= focused_owner == Some(instance.id);
+            let mut any_window = false;
+            let mut all_minimized = true;
+            for window in state.windows().filter(|window| window.owner == instance.id) {
+                any_window = true;
+                all_minimized &= window.minimized;
+            }
+            if any_window && all_minimized {
+                item.minimized = item.minimized.saturating_add(1);
+            }
+        }
+
+        let pinned_slot = (0..usize::from(dock.pinned_count))
+            .find(|slot| unsafe { CURRENT_DOCK_IDS[*slot] == session.application_id });
+        if let Some(slot) = pinned_slot.map(|slot| &mut dock.items[slot]) {
+            slot.running = item.running;
+            slot.minimized = item.minimized;
+            slot.active = item.active;
+        } else if active_count < MAX_ACTIVE_DOCK_APPS {
+            active[active_count] = item;
+            unsafe { DOCK_ACTIVE_IDS[active_count] = session.application_id };
+            active_count += 1;
+        }
+    }
+
+    let capacity = MAX_DOCK_ITEMS - usize::from(dock.pinned_count);
+    let max_offset = active_count.saturating_sub(capacity);
+    let offset = unsafe { DOCK_ACTIVE_OFFSET }.min(max_offset);
+    unsafe { DOCK_ACTIVE_OFFSET = offset };
+    let visible = active_count.saturating_sub(offset).min(capacity);
+    for index in 0..visible {
+        let destination = usize::from(dock.pinned_count) + index;
+        let source = offset + index;
+        dock.items[destination] = active[source];
+        unsafe { CURRENT_DOCK_IDS[destination] = DOCK_ACTIVE_IDS[source] };
+    }
+    dock.active_offset = offset as u8;
+    dock.active_total = active_count as u8;
+    dock.has_previous = offset > 0;
+    dock.has_next = offset + visible < active_count;
+    dock.count = (usize::from(dock.pinned_count) + visible) as u8;
+    dock
+}
+
+fn move_active_dock(direction: i8, dock: arena_desktop::shell::DockView, page: bool) -> bool {
+    let capacity = arena_desktop::shell::MAX_DOCK_ITEMS
+        .saturating_sub(usize::from(dock.pinned_count))
+        .max(1);
+    let step = if page { capacity } else { 1 };
+    let maximum = usize::from(dock.active_total).saturating_sub(capacity);
+    let current = usize::from(dock.active_offset);
+    let next = if direction < 0 {
+        current.saturating_sub(step)
+    } else {
+        current.saturating_add(step).min(maximum)
+    };
+    if next == current {
+        false
+    } else {
+        unsafe { DOCK_ACTIVE_OFFSET = next };
+        true
+    }
+}
+
+fn activate_dock_application(application_id: &[u8; 32]) -> bool {
+    let sessions = unsafe { &*(&raw const SESSIONS) };
+    let state = unsafe { &mut *(&raw mut WM) };
+    let mut topmost = None;
+    for session in sessions
+        .iter()
+        .filter(|session| session.id != 0 && session.application_id == *application_id)
+    {
+        for window in state.windows().filter(|window| window.owner == session.id) {
+            if topmost.is_none_or(|(_, z)| window.z > z) {
+                topmost = Some((window.handle, window.z));
+            }
+        }
+    }
+    topmost.is_some_and(|(handle, _)| state.activate(handle).is_ok())
+}
+
+fn launch_dock_item(index: usize) -> Action {
+    let dock = unsafe { *(&raw const CURRENT_DOCK) };
+    let Some(item) = dock
+        .items
+        .get(index)
+        .copied()
+        .filter(|_| index < usize::from(dock.count))
+    else {
+        return Action::Changed;
+    };
+    if item.running > 0 {
+        let installed = unsafe { &*(&raw const INSTALLED_APPS) };
+        let installed_count = unsafe { INSTALLED_APP_COUNT };
+        let builtin = installed
+            .get(usize::from(item.application_index))
+            .filter(|_| usize::from(item.application_index) < installed_count)
+            .is_some_and(|entry| entry.is_some_and(|entry| entry.builtin_kind < 6));
+        // Preserve the qualified Phase-12 dock behavior for the six legacy
+        // built-ins, whose tiles are the standard path to another live
+        // instance. Installed applications instead use the running dock tile
+        // to activate their current window; All Applications remains the
+        // explicit way to request another installed instance.
+        if !builtin {
+            let application_id = unsafe { CURRENT_DOCK_IDS[index] };
+            if activate_dock_application(&application_id) {
+                log(b"[desktop] dock activated a live application window\n");
+            }
+            return Action::Changed;
+        }
+    }
+    if item.application_index == u8::MAX {
+        Action::Changed
+    } else {
+        launcher_action(usize::from(item.application_index))
+    }
 }
 
 fn move_application_selection(delta: isize) {
@@ -4517,8 +4991,24 @@ fn applications_key(code: u16, pressed: bool, mods: u8) -> Option<Action> {
         13 => filtered_application_index(unsafe { ALL_APPS_SELECTED })
             .map(launcher_action)
             .or(Some(Action::Changed)),
-        value if value == u16::from(b'd') || value == u16::from(b'D') => {
+        value
+            if (value == u16::from(b'd') || value == u16::from(b'D'))
+                && mods & wm::MOD_CTRL != 0
+                && unsafe { ALL_APPS_OPEN_WITH } =>
+        {
             save_selected_handler_default();
+            Some(Action::Changed)
+        }
+        value
+            if (value == u16::from(b'p') || value == u16::from(b'P'))
+                && mods & wm::MOD_CTRL != 0
+                && unsafe { !ALL_APPS_OPEN_WITH } =>
+        {
+            if !unsafe { ALL_APPS_OPEN_WITH }
+                && let Some(index) = filtered_application_index(unsafe { ALL_APPS_SELECTED })
+            {
+                toggle_favorite(index);
+            }
             Some(Action::Changed)
         }
         258 => {
@@ -4599,6 +5089,13 @@ fn applications_pointer(x: i32, y: i32, buttons: u8, w: i32, h: i32) -> Option<A
 
 /// Descriptive snapshot of everything the compositor draws (see compose.rs).
 fn scene(now: u64) -> Scene {
+    let dock = application_dock_view(unsafe { &*(&raw const WM) });
+    unsafe {
+        CURRENT_DOCK = dock;
+        (&mut *(&raw mut WM))
+            .configure_dock_items(usize::from(dock.count))
+            .unwrap_or_else(|_| die(88));
+    }
     let state = unsafe { &*(&raw const WM) };
     let sessions = unsafe { &*(&raw const SESSIONS) };
     let extras = unsafe { &*(&raw const EXTRA_WINDOWS) };
@@ -4754,6 +5251,7 @@ fn scene(now: u64) -> Scene {
             .map(|(text, _)| text),
         uptime: now / 1_000_000,
         minimized,
+        dock,
         switcher,
         snap: state.snap_preview().map(|(x, y, w, h)| arena_gfxkit::Rect {
             x,
@@ -4763,10 +5261,7 @@ fn scene(now: u64) -> Scene {
         }),
         chooser: chooser_view(),
         applications: applications_view(),
-        desk: {
-            desk_watched();
-            unsafe { (*(&raw const DESK)).view }
-        },
+        desk: unsafe { (*(&raw const DESK)).view },
     };
     scene.dark = unsafe { PREFS.dark };
     scene
@@ -4775,6 +5270,9 @@ fn scene(now: u64) -> Scene {
 /// the last presented scene. The scanout backing retains every other pixel.
 fn render(ram: u64, w: usize, h: usize, scanout: u64) {
     let started = perf_now();
+    // Reconcile deep AFS2 directory-watch operations before `scene` builds its
+    // window snapshot, keeping filesystem call depth off the scene frame.
+    desk_watched();
     let next = scene(arena_desktop::app_client::now());
     let mut damage = Damage::new(w, h);
     match unsafe { LAST_SCENE } {
@@ -5026,7 +5524,7 @@ fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
         die(91)
     }
 }
-arena_desktop::entry!(main, 64 * 1024);
+arena_desktop::entry!(main, 96 * 1024);
 extern "C" fn main() -> ! {
     let (mode, b) = display(arena_compositor_model::wire::Frame::Mode, CAP_NONE);
     let w = (mode[1] & 0xffff_ffff) as usize;
@@ -5097,6 +5595,7 @@ extern "C" fn main() -> ! {
     }
     start_afs2();
     load_association_defaults();
+    load_favorites();
     if let Err(error) = refresh_installed_applications() {
         log(b"[desktop] installed application registry unavailable at boot status=");
         log_number(error);
@@ -5125,6 +5624,7 @@ extern "C" fn main() -> ! {
         // the burst before presenting one combined frame.
         let pending = core::mem::replace(&mut pending_render, false);
         let mut dirty = pending | sweep() | animate() | unsafe { WATCH_SIGNALLED };
+        let mut resource_changed = false;
         if unsafe { (*(&raw mut WM)).repeat_tick(arena_desktop::app_client::now()) } {
             if perf::ENABLED {
                 unsafe { (*(&raw mut PERF))[P_DELIVERED].add(1) };
@@ -5366,6 +5866,9 @@ extern "C" fn main() -> ! {
                                 } else {
                                     applications_pointer(px, py, buttons, w as i32, h as i32)
                                 };
+                                let dock_pressed =
+                                    buttons & 1 != 0 && unsafe { DOCK_BUTTONS } & 1 == 0;
+                                unsafe { DOCK_BUTTONS = buttons };
                                 if app_action.is_some() {
                                     state.pointer = (px, py);
                                 }
@@ -5392,7 +5895,7 @@ extern "C" fn main() -> ! {
                                     let e = desk.pointer(&mut store, px, py, buttons, ctrl, now);
                                     desk_effect(e);
                                 }
-                                let a = app_action.unwrap_or_else(|| {
+                                let mut a = app_action.unwrap_or_else(|| {
                                     let action = state.pointer(
                                         px,
                                         py,
@@ -5401,11 +5904,45 @@ extern "C" fn main() -> ! {
                                     if modal || to_desk {
                                         Action::Changed
                                     } else {
-                                        action
+                                        let dock = unsafe { *(&raw const CURRENT_DOCK) };
+                                        if dock_pressed
+                                            && arena_desktop::shell::dock_scroll_hit(
+                                                w as i32, h as i32, &dock, px, py,
+                                            )
+                                            .is_some_and(|direction| {
+                                                move_active_dock(direction, dock, true)
+                                            })
+                                        {
+                                            Action::Changed
+                                        } else if let Action::Launch(index) = action {
+                                            launch_dock_item(index)
+                                        } else {
+                                            action
+                                        }
                                     }
                                 });
                                 if wheel != 0 && app_action.is_none() {
-                                    state.wheel(wheel);
+                                    let dock = unsafe { *(&raw const CURRENT_DOCK) };
+                                    let region = arena_desktop::shell::dock_region_for(
+                                        w as i32, h as i32, &dock,
+                                    );
+                                    let over_dock = px >= region.x
+                                        && py >= region.y
+                                        && px < region.x + region.width as i32
+                                        && py < region.y + region.height as i32;
+                                    if !modal
+                                        && !to_desk
+                                        && over_dock
+                                        && move_active_dock(
+                                            if wheel > 0 { -1 } else { 1 },
+                                            dock,
+                                            false,
+                                        )
+                                    {
+                                        a = Action::Changed;
+                                    } else if !over_dock {
+                                        state.wheel(wheel);
+                                    }
                                 }
                                 a
                             }
@@ -5692,6 +6229,11 @@ extern "C" fn main() -> ! {
                                     result = handle;
                                     status = 0;
                                     defer_render = true;
+                                    dirty = true;
+                                    resource_changed = true;
+                                    log(b"[desktop] registered ordinary window count=");
+                                    log_number(state.windows().count() as u64);
+                                    log(b"\n");
                                 }
                             }
                             Frame::CreateAdditional { width, height }
@@ -5703,6 +6245,11 @@ extern "C" fn main() -> ! {
                                         result = handle;
                                         status = 0;
                                         defer_render = true;
+                                        dirty = true;
+                                        resource_changed = true;
+                                        log(b"[desktop] registered ordinary window count=");
+                                        log_number(state.windows().count() as u64);
+                                        log(b"\n");
                                     }
                                     Err(error) => status = error as u64,
                                 }
@@ -6060,6 +6607,7 @@ extern "C" fn main() -> ! {
                                     s.popup = NO_POPUP;
                                     status = 0;
                                     dirty = true;
+                                    resource_changed = true;
                                 } else if let Some(wi) = extra_index(handle)
                                     && unsafe { EXTRA_WINDOWS[wi].owner_session == i }
                                 {
@@ -6085,6 +6633,7 @@ extern "C" fn main() -> ! {
                                     unsafe { EXTRA_WINDOWS[wi] = EMPTY_EXTRA };
                                     status = 0;
                                     dirty = true;
+                                    resource_changed = true;
                                 }
                             }
                             _ => {}
@@ -6120,7 +6669,8 @@ extern "C" fn main() -> ! {
         if input_request {
             probe(P_INPUT, received);
         }
-        if (dirty && (bytes[5] == 1 || description.is_some_and(|d| d[0] == 10)))
+        if resource_changed
+            || (dirty && (bytes[5] == 1 || description.is_some_and(|d| d[0] == 10)))
             || (bytes[5] == 10 && description.is_some_and(|d| d[0] == 1))
         {
             let logged = perf_now();

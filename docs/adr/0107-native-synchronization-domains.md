@@ -36,9 +36,11 @@ mechanism is therefore required.
 ## Decision
 
 Add a bounded `SyncDomain` object minted only through a Desktop-held
-`SyncDomainFactory`. The manager creates one domain for each AppInstance,
-retains its owning capability, and explicitly grants READ|WRITE to each
-native Process that should share that instance's synchronization state. The
+`SyncDomainFactory`. An installed app's signed `FLAG_NATIVE_SYNC` is a request;
+the manager still applies its launch policy, creates a domain only for an
+approved app that requests it, retains the owning capability, and explicitly
+grants READ|WRITE to each native Process that should share that instance's
+synchronization state. Built-in applications do not request a domain. The
 child cannot destroy, copy, or delegate the domain. Helpers receive it only
 when the manager includes that exact grant. Domain identity and condition
 keys do not authorize operations by themselves; every operation also
@@ -75,6 +77,13 @@ caller, preserving the atomic sequence-check/register/park boundary.
 Domain-owner teardown invalidates domains and wakes waiters even if a
 delegated holder is still alive.
 
+The signed APB1 `FLAG_NATIVE_SYNC` bit requests a domain at launch; it is
+descriptive metadata and does not mint or convey a capability. The trusted
+manager validates the installed app policy before it creates the domain and
+inserts the exact SyncDomain descriptor into Startup ABI v2. Existing built-in
+applications retain their pre-Phase-13 startup cap inventory and do not receive
+an unused synchronization cap.
+
 The additive ABI calls are domain create (68), key create/destroy (69–70),
 sequence read (71), wait (72), wake-one/wake-all (73), and domain accounting
 (74). Timeout returns the native `STATUS_TIMEOUT` (-8). The wait domain is
@@ -94,9 +103,13 @@ boundary for a thread that bypasses safe Rust cleanup.
   thread.
 - The wait domain is an explicit capability. App IDs, Process IDs, key tokens,
   and user pointers carry no synchronization authority.
-- The manager retains one owner cap per AppInstance and retires it after the
-  AppInstance's ProcessGroup. Kernel teardown sweeps domains owned by a dying
-  manager, and Process teardown clears its parked wait records.
+- For an app approved for `FLAG_NATIVE_SYNC`, the manager retains one owner
+  cap for its AppInstance and retires it after the AppInstance's ProcessGroup.
+  Apps that do not request synchronization consume no domain or cap slot.
+  This keeps Phase-12's 32-session cap budget intact while preserving the
+  exact 128-slot table and slot-127 APB1 accounting. Kernel teardown sweeps
+  domains owned by a dying manager, and Process teardown clears its parked
+  wait records.
 - Wait keys use fixed tables, bounded scan cost, and observable domain/key/
   waiter occupancy. The Phase-12 capability width and low-32 accounting stay
   unchanged. ABI-v2 gains one exact SyncDomain descriptor and one inherited

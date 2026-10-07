@@ -2,7 +2,8 @@
 //! caller-owned one-page SharedRegion, never implicit process authority.
 
 use crate::manifest::{
-    FLAG_BACKGROUND, FLAG_HEADLESS, FLAG_MULTI_INSTANCE, FLAG_STANDARD_STREAMS, ID_BYTES,
+    FLAG_BACKGROUND, FLAG_HEADLESS, FLAG_MULTI_INSTANCE, FLAG_NATIVE_SYNC, FLAG_STANDARD_STREAMS,
+    ID_BYTES,
 };
 
 pub const BLOCK_BYTES: usize = 4096;
@@ -42,8 +43,11 @@ pub const RIGHT_WRITE: u32 = 1 << 1;
 pub const RIGHT_COPY: u32 = 1 << 2;
 pub const RIGHT_DESTROY: u32 = 1 << 3;
 pub const RIGHTS_MASK: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY;
-const KNOWN_FLAGS: u32 =
-    FLAG_MULTI_INSTANCE | FLAG_BACKGROUND | FLAG_HEADLESS | FLAG_STANDARD_STREAMS;
+const KNOWN_FLAGS: u32 = FLAG_MULTI_INSTANCE
+    | FLAG_BACKGROUND
+    | FLAG_HEADLESS
+    | FLAG_STANDARD_STREAMS
+    | FLAG_NATIVE_SYNC;
 const USER_ADDRESS_END: u64 = 0x0000_8000_0000_0000;
 const MAGIC: &[u8; 4] = b"ARST";
 
@@ -392,6 +396,9 @@ pub fn parse(page: &[u8; BLOCK_BYTES]) -> Result<StartupView<'_>, Error> {
     let sync_domain = role_descriptor(&capabilities, cap_count, CapabilityRole::SyncDomain);
     let streams_requested = flags & FLAG_STANDARD_STREAMS != 0;
     if streams_requested != stream_set.is_some() || streams_requested != stream_wake.is_some() {
+        return Err(Error::InvalidRoleReference);
+    }
+    if (flags & FLAG_NATIVE_SYNC != 0) != sync_domain.is_some() {
         return Err(Error::InvalidRoleReference);
     }
     if sync_domain.is_some_and(|index| {
@@ -942,6 +949,7 @@ mod tests {
         };
         let caps = [domain];
         let mut spec = sample_spec(&args, &env, &caps);
+        spec.flags |= FLAG_NATIVE_SYNC;
         spec.cwd = None;
         let mut page = [0; BLOCK_BYTES];
         encode(&spec, &mut page).unwrap();
@@ -949,6 +957,22 @@ mod tests {
         assert_eq!(
             view.capability_for_role(CapabilityRole::SyncDomain),
             Some(domain)
+        );
+
+        let mut missing_opt_in = page;
+        put_u32(&mut missing_opt_in, OFF_FLAGS, 0);
+        assert!(matches!(
+            parse(&missing_opt_in),
+            Err(Error::InvalidRoleReference)
+        ));
+
+        let mut missing_domain = sample_spec(&args, &env, &[]);
+        missing_domain.flags |= FLAG_NATIVE_SYNC;
+        missing_domain.cwd = None;
+        let mut missing_domain_page = [0; BLOCK_BYTES];
+        assert_eq!(
+            encode(&missing_domain, &mut missing_domain_page),
+            Err(Error::InvalidRoleReference)
         );
 
         let mut wrong_rights = page;

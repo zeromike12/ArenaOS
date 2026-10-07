@@ -5,6 +5,7 @@ extern crate alloc;
 
 use alloc::{
     alloc::{alloc, dealloc},
+    boxed::Box,
     vec::Vec,
 };
 use arena_desktop::{
@@ -68,6 +69,10 @@ fn application_main(view: StartupView<'_>) -> ! {
     if view.application_id() != &APPLICATION_ID
         || view.argument_count() != 1
         || view.argument(0) != Some(b"org.arenaos.phase13app")
+        || view.flags()
+            != (arena_startup_abi::manifest::FLAG_MULTI_INSTANCE
+                | arena_startup_abi::manifest::FLAG_STANDARD_STREAMS
+                | arena_startup_abi::manifest::FLAG_NATIVE_SYNC)
         || view.capability_count() != if has_document { 7 } else { 6 }
         || view.entry() != actual_entry
         || view.load_base() != 0x0020_0000
@@ -249,6 +254,14 @@ fn application_main(view: StartupView<'_>) -> ! {
     client::log(b"[phase13-helper-stream] crashed child's output reached EOF after exact Process-cap reap\n");
     client::log(b"[phase13-helper] retired private timer object reclaimed after reap\n");
 
+    app_client::spawn_helper(helper_id(b"org.arenaos.phase13orphan"))
+        .unwrap_or_else(|_| client::exit(151));
+    client::log(b"[phase13-helper] live helper left for AppInstance owner cleanup\n");
+    let mut pressure_threads = if has_document {
+        Some(start_pressure_threads(sync_domain))
+    } else {
+        None
+    };
     let window = Client::connect_v2(320, 180, "Phase13 Probe").unwrap_or_else(|_| client::exit(75));
     if has_document {
         let descriptor = view.capability(3).unwrap_or_else(|| client::exit(81));
@@ -374,9 +387,9 @@ fn application_main(view: StartupView<'_>) -> ! {
             }
         }
         if !open[..count].iter().any(|live| *live) {
-            app_client::spawn_helper(helper_id(b"org.arenaos.phase13orphan"))
-                .unwrap_or_else(|_| client::exit(151));
-            client::log(b"[phase13-helper] live helper left for AppInstance owner cleanup\n");
+            if let Some(threads) = pressure_threads.take() {
+                finish_pressure_threads(threads);
+            }
             client::exit(42);
         }
     }
@@ -507,6 +520,129 @@ fn paint(window: &Client, index: usize) {
         }
     }
     window.damage().unwrap_or_else(|_| client::exit(76));
+}
+
+struct PressureThreadFixture {
+    mutex: Mutex<u64>,
+    condition: Condvar,
+    ready: AtomicU64,
+    failures: AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+struct PressureThreadArgument {
+    fixture: *const PressureThreadFixture,
+    ordinal: u64,
+}
+
+struct PressureThreads {
+    domain: SyncDomain,
+    fixture: Box<PressureThreadFixture>,
+    _arguments: [PressureThreadArgument; 2],
+    handles: [Option<JoinHandle>; 2],
+}
+
+extern "C" fn pressure_thread(argument: u64) -> u64 {
+    // SAFETY: the AppInstance keeps its fixture and argument array alive
+    // until the final ordinary window closes and both threads are joined.
+    let argument = unsafe { (argument as *const PressureThreadArgument).read_volatile() };
+    let fixture = unsafe { &*argument.fixture };
+    let mut guard = fixture.mutex.lock().unwrap_or_else(|_| client::exit(178));
+    fixture.ready.fetch_add(1, Ordering::Release);
+    while *guard == 0 {
+        guard = fixture
+            .condition
+            .wait(guard)
+            .unwrap_or_else(|_| client::exit(179));
+    }
+    argument.ordinal
+}
+
+fn start_pressure_threads(domain: SyncDomain) -> PressureThreads {
+    let fixture = Box::new(PressureThreadFixture {
+        mutex: Mutex::new(domain, 0).unwrap_or_else(|_| client::exit(180)),
+        condition: Condvar::new(domain).unwrap_or_else(|_| client::exit(181)),
+        ready: AtomicU64::new(0),
+        failures: AtomicU64::new(0),
+    });
+    let fixture_ptr = &*fixture as *const PressureThreadFixture;
+    let arguments = [
+        PressureThreadArgument {
+            fixture: fixture_ptr,
+            ordinal: 0,
+        },
+        PressureThreadArgument {
+            fixture: fixture_ptr,
+            ordinal: 1,
+        },
+    ];
+    let mut handles = [None, None];
+    for index in 0..2 {
+        handles[index] = Some(
+            threads::spawn(
+                pressure_thread,
+                &arguments[index] as *const PressureThreadArgument as u64,
+            )
+            .unwrap_or_else(|_| client::exit(182)),
+        );
+    }
+    let mut parked = false;
+    for _ in 0..100_000 {
+        if fixture.ready.load(Ordering::Acquire) == 2
+            && domain.info().is_ok_and(|info| info.parked_waiters == 2)
+        {
+            parked = true;
+            break;
+        }
+        threads::yield_now().unwrap_or_else(|_| client::exit(183));
+    }
+    if !parked {
+        client::exit(184);
+    }
+    client::log(
+        b"[phase13-threads] two ring-3 workers remain parked on the live document AppInstance\n",
+    );
+    PressureThreads {
+        domain,
+        fixture,
+        _arguments: arguments,
+        handles,
+    }
+}
+
+fn finish_pressure_threads(mut active: PressureThreads) {
+    {
+        let mut guard = active
+            .fixture
+            .mutex
+            .lock()
+            .unwrap_or_else(|_| client::exit(185));
+        *guard = 1;
+        if active.fixture.condition.notify_all() != Ok(2) {
+            client::exit(186);
+        }
+    }
+    for (ordinal, handle) in active.handles.iter_mut().enumerate() {
+        let result = handle
+            .take()
+            .unwrap_or_else(|| client::exit(187))
+            .join()
+            .unwrap_or_else(|_| client::exit(188));
+        if result.exit_status != ordinal as u64 {
+            client::exit(189);
+        }
+    }
+    if active.fixture.failures.load(Ordering::Relaxed) != 0 {
+        client::exit(190);
+    }
+    drop(active.fixture);
+    let clean = active.domain.info().unwrap_or_else(|_| client::exit(191));
+    if clean.keys != 0 || clean.parked_waiters != 0 || threads::count() != Ok(1) {
+        client::exit(192);
+    }
+    client::log(
+        b"[phase13-threads] closing the document window woke and joined both live workers\n",
+    );
 }
 
 struct ThreadFixture {

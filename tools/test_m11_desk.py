@@ -134,10 +134,10 @@ def workflow(disk, shots):
         drag(d, *cell(0, 1), *cell(0, 0))
         until(d, disk, lambda t: t.get('Desktop/Folder/hello.txt') == b'Xhi' and 'Desktop/hello.txt' not in t,
               'drop onto a folder icon did not move')
-        # Move Folder to the Trash from its icon menu (second item).
+        # Move Folder to the Trash from its icon menu (third item).
         click(d, *cell(0, 0), 'right')
         x, y = cell(0, 0)
-        click(d, x + 20, y + 4 + 24 + 12)
+        click(d, x + 20, y + 4 + 2 * 24 + 12)
         until(d, disk, lambda t: '.Trash/Folder/hello.txt' in t and t.get('.Trash/.restore/Folder') == b'Desktop/Folder',
               'Move to Trash failed')
         # Double-click New Folder: Files opens there.

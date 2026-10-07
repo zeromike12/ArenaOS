@@ -10,6 +10,7 @@ pub mod manifest {
     pub const FLAG_BACKGROUND: u32 = 1 << 1;
     pub const FLAG_HEADLESS: u32 = 1 << 2;
     pub const FLAG_STANDARD_STREAMS: u32 = 1 << 3;
+    pub const FLAG_NATIVE_SYNC: u32 = 1 << 4;
 }
 
 // Keep one implementation of the ARST v2 codec and its 32-slot bound.

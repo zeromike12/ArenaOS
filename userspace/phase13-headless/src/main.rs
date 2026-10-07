@@ -10,7 +10,9 @@ use arena_lib::abi::{
 use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams};
 use arena_runtime::sync::{Condvar, Mutex, SyncDomain};
 use arena_runtime::threads;
-use arena_startup_abi::manifest::{FLAG_HEADLESS, FLAG_STANDARD_STREAMS};
+use arena_startup_abi::manifest::{
+    FLAG_HEADLESS, FLAG_MULTI_INSTANCE, FLAG_NATIVE_SYNC, FLAG_STANDARD_STREAMS,
+};
 use arena_startup_abi::startup::{
     CAP_KIND_NOTIFICATION, CAP_KIND_SHARED_REGION, CAP_KIND_SYNC_DOMAIN, CapabilityRole,
     StartupView,
@@ -73,7 +75,7 @@ fn application_main(view: StartupView<'_>) {
     if view.application_id() != &APPLICATION_ID
         || view.argument_count() != 1
         || view.argument(0) != Some(b"org.arenaos.zzheadless")
-        || view.flags() & FLAG_HEADLESS == 0
+        || view.flags() != (FLAG_HEADLESS | FLAG_NATIVE_SYNC)
         || view.instance_generation() == 0
         || view.capability_count() != 2
         || view.stdin_descriptor().is_some()
@@ -115,11 +117,9 @@ fn helper_main(view: StartupView<'_>) -> ! {
     if view.application_id() != &INSTALLED_APP_ID
         || view.argument(0) != Some(b"org.arenaos.phase13app")
         || view.flags()
-            != if streaming {
-                1 | FLAG_STANDARD_STREAMS
-            } else {
-                1
-            }
+            != (FLAG_MULTI_INSTANCE
+                | FLAG_NATIVE_SYNC
+                | if streaming { FLAG_STANDARD_STREAMS } else { 0 })
         || view.instance_generation() == 0
         || view.capability_count() != 2 + usize::from(signal_parent) + usize::from(streaming)
         || (view.stdin_descriptor().is_some() != streaming)
@@ -179,7 +179,7 @@ fn helper_main(view: StartupView<'_>) -> ! {
     client::log(b"[phase13-helper] exact Startup ABI inventory: private timer Notification; optional owner signal is WRITE-only and a distinct object\n");
     match view.argument(1) {
         Some(id) if id == SLEEPER_ID => sleeper_with_parked_worker(sync_domain),
-        Some(id) if id == ORPHAN_ID => wait_for_helper_timer(45, false),
+        Some(id) if id == ORPHAN_ID => wait_for_helper_timer(45, false, 3_600_000_000),
         Some(id) if id == CRASHER_ID => {
             client::log(
                 b"[phase13-helper] intentional helper fault for Process-cap crash/reap proof\n",
@@ -229,7 +229,7 @@ fn sleeper_with_parked_worker(domain: SyncDomain) -> ! {
     }
     core::mem::forget(worker);
     client::log(b"[phase13-sync] sleeper has a parked ring-3 Condvar worker and two helper-owned keys before teardown\n");
-    wait_for_helper_timer(44, true)
+    wait_for_helper_timer(44, true, 5_000_000)
 }
 
 extern "C" fn live_helper_worker(fixture: u64) -> u64 {
@@ -279,8 +279,8 @@ fn stream_helper(view: StartupView<'_>) -> ! {
     helper_exit(46)
 }
 
-fn wait_for_helper_timer(exit_status: u64, signal_parent: bool) -> ! {
-    let timer = unsafe { syscall3(SYS_TIMER_ARM, 1, COMPLETION_BADGE, 5_000_000) };
+fn wait_for_helper_timer(exit_status: u64, signal_parent: bool, delay_us: u64) -> ! {
+    let timer = unsafe { syscall3(SYS_TIMER_ARM, 1, COMPLETION_BADGE, delay_us) };
     if timer < 0 {
         client::exit(75);
     }

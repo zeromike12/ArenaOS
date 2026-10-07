@@ -276,6 +276,13 @@ pub fn endpoint_live(eid: u32) -> bool {
     })
 }
 
+/// Number of currently live endpoints, for capability-gated resource
+/// diagnostics. This exposes occupancy only; endpoint IDs remain authority
+/// only when held through an exact capability.
+pub fn endpoint_occupancy() -> usize {
+    without_interrupts(|| unsafe { (*ENDPOINTS.get()).iter().filter(|ep| ep.live).count() })
+}
+
 pub fn stats() -> IpcStats {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.

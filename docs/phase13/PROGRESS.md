@@ -17,15 +17,15 @@
 | 13.0 production-path audit | Complete | Read the required Phase-12 reports and ADRs; traced APB1 install, packaged policy, filesd roots, Desktop launch, Image registration, process teardown, scheduler mapping ownership, and resource bounds. Summary is in `PLAN.md`. |
 | Toolchain and guest environment | Ready | Debian 13, unprivileged UID 1000, no sudo/root. Installed Rust 1.97.0 plus rustfmt/Clippy and `x86_64-unknown-none`/`x86_64-unknown-uefi` targets with official rustup under `/tmp`; extracted signed Debian snapshot QEMU 10.0.11 and OVMF 2025.02 under `/tmp`. `tools/dev-env/env.sh` and normal repository build tooling remain in use. |
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
-| 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
+| 13.2 launcher | Registry-backed All Applications and persisted dock favorites implemented; T1 M10 and installed-app guest proofs passed | Search keeps every letter available; Ctrl+P toggles a pin. AFS2-backed favorites reload across boot; dock contains resolved pins plus current running AppInstances, with bounded paging for active identities. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
 | 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, stable process exit status, signed helper lifecycle, and helper stream delegation implemented | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. ADR-0101 guest-proves allowlisted helper Image resolution, explicit private timer and owner-signal grants, wait/reap, terminate, crash, and group cleanup. ADR-0105 extends this to a dedicated helper stream page, exact parent cap, and owner-scoped wake. |
-| 13.4 streams | App and helper standard streams implemented; T1 guest proof passed | ADR-0104 and ADR-0105 provide one-page, three-ring SharedRegions, Startup ABI v2 roles, focused keyboard stdin, output drain, partial transfer, EOF, peer closure, and exact owner teardown. The signed fixture proved parent-to-helper stdin, helper stdout, owner-mediated wake, non-stream helper refusal, invalid stream-handle refusal, and EOF after exact Process-cap reap. Mixed-pressure capacity remains. |
+| 13.4 streams | App and helper standard streams implemented; T1 and mixed-pressure guest proof passed | ADR-0104 and ADR-0105 provide one-page, three-ring SharedRegions, Startup ABI v2 roles, focused keyboard stdin, output drain, partial transfer, EOF, peer closure, and exact owner teardown. The signed fixture proved parent-to-helper stdin, helper stdout, owner-mediated wake, non-stream helper refusal, invalid stream-handle refusal, and EOF after exact Process-cap reap. Five live stream sets were present at the mixed workload high-water. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads | Implemented; T1 guest proof and T3 preservation passed | ADR-0106 uses the existing process PML4/cap space, exact guarded VM stack caps, per-thread FS.base, same-process join/detach, and four created threads per process. The installed APB1 guest ran four concurrent ring-3 threads with shared heap/read-only VM, checked quota and stale IDs, joined/detached, and restored VM accounting. A killed helper also had a live user worker. The exact rebuilt EFI passed 20/20 fresh preservation boots. |
 | 13.7 native synchronization | Implemented; T1 guest proof, M10 built-in launch regression, and 20/20 T3 preservation passed | ADR-0107 adds a Desktop-minted per-AppInstance SyncDomain, generation-checked keys, atomic sequence-and-park waits, bounded timeout, and process-owned key/waiter cleanup. The signed registry guest proves contended Mutex, Condvar wake-one/all, Once, sequence-before-wait, timeout, invalid capability refusal, helper teardown with a parked ring-3 waiter, and key/waiter reclamation. 20/20 clean T3 preservation boots passed on the corrected EFI. |
-| 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
-| Final qualification | Not started | No source freeze, complete historical suite, 100-boot receipt, or extracted-archive witness yet. |
+| 13.7 pressure and PIE | T1 pressure guest passed; PIE scope accepted in ADR-0108 | The signed APB1 mixed workload reached 26 AppInstances and 32 windows, then closed half, relaunched, and fully tore down. ADR-0109 records resource snapshots. Static `ET_EXEC` remains the only native executable format; static `ET_DYN`/ASLR is deferred with its concrete loader blocker in ADR-0108. |
+| Preservation and final qualification | T2 preservation passed; final qualification in progress | M10 Desktop, M11 Files/window manager, M12 scale, the Phase-13 pressure guest, and 10/10 clean preservation boots passed. The source is preserved below. Source freeze, complete historical qualification, 100-boot receipt, and extracted-archive witness remain. |
 
 ## Baseline evidence before implementation
 
@@ -835,3 +835,105 @@ and final qualification remain open.
   Both failed prior attempts remain excluded from green evidence. This is the
   green T3 synchronization/context-switch/teardown preservation checkpoint;
   final Phase-13 qualification remains outstanding.
+
+
+### AFS2 favorites and registry-backed dock T1
+
+- Added a canonical, checksummed AFAV preference record with up to eight
+  descriptive application IDs. A new profile retains the six historical
+  built-in pins. Desktop saves changes through the user's AFS2 namespace,
+  prunes IDs that no longer resolve in the verified catalog, and reloads the
+  record on the next boot. AFS2-offline M10 mode uses the built-in defaults.
+- Replaced the fixed six-kind production dock inventory with saved pins plus
+  distinct live AppInstance application identities. The bounded 12-tile view
+  keeps all pins visible and pages through the remaining active apps; running,
+  minimized, and focused indicators are derived from live AppInstance/window
+  records. A dock click resolves the tile against the current registry or
+  activates a matching live window. Descriptive IDs never supply Image
+  authority.
+- The All Applications surface now shows pin state and supports Ctrl+P pinning.
+  Open With saves a default with Ctrl+D. Both shortcuts leave letters available
+  while filtering; a first registry-guest run caught the old `p` shortcut
+  intercepting the `p` in `phase13`, and the guest control now exercises the
+  corrected behavior.
+- `tools/test_m10_desktop.py` passed with the legacy built-in dock behavior and
+  no AFS2 service. `tools/test_phase13_registry_guest.py` passed in 58.6 seconds
+  over the main and reload boots: it installed a signed APB1 app, persisted its
+  pin, displayed its real running state, clicked its dock tile without
+  spawning a duplicate, completed the existing multi-window/helper/stream/
+  thread/sync/document/teardown proof, then reloaded the pin in a fresh Desktop
+  boot on the same AFS2 image.
+- Desktop host tests passed 88/88; release `cargo check`, targeted Clippy,
+  `rustfmt`, Python fixture compilation, and `git diff --check` passed. The
+  exact guest EFI SHA-256 was
+  `04db1cf24f335bef88c4c913c0b1edbe8ab7ae700e402eb9b0aa0d53681cda81`.
+- This closes the launcher favorites/dock T1 workstream. Mixed workload
+  pressure, the PIE/ASLR decision, broader T2 preservation for this UI change,
+  and final qualification remain outstanding.
+
+### Mixed installed-application workload and lifecycle receipt T1
+
+- ADR-0109 records the mixed workload and its resource model. The new
+  capability-gated resource-detail syscall reports process-wide live threads,
+  endpoints, notifications, timers, native VM regions/pages, synchronization
+  domains/keys/waiters, plus Desktop's AppInstances, ordinary windows,
+  helpers, and stream sets. Existing manager receipts continue to measure
+  process, SharedRegion/page, map, and cap occupancy. No Phase-12 cap-table,
+  notification, timer, endpoint, or historical low-32 accounting bound was
+  widened for this fixture.
+- `python3 tools/test_phase13_registry_guest.py` passed the real QEMU pressure
+  boot and its fresh AFS2 favorite-reload boot. The real installed APB1 app
+  was launched five times while 21 built-in sessions were live. The workload
+  reached 26 AppInstances and 32 ordinary compositor windows, with three
+  windows in one AppInstance, five helpers, five live standard stream sets,
+  two parked document workers, open read-only File authority, active timers
+  and notifications, and a separate installed headless application launch.
+  It closed half the windows, exercised helper failure and reap, relaunched
+  sixteen times through freed capacity, then closed all 32 windows and
+  terminated all app groups.
+- Full snapshot: total frames 115,670; 49/64 threads; 12/16 endpoints;
+  56/64 notifications; 5 timers (8 transient peak)/32; 7 VM regions and 355
+  committed pages (12 and 416 transient peaks); 5 SyncDomains, 2 keys and 2
+  waiters (4 transient keys); 26 AppInstances; 32 windows; 5 helpers; 5
+  streams (6 transient); and three maximum windows per AppInstance.
+- The process/SharedRegion manager peaked at 46/64 records/processes,
+  71/96 regions, 30,555/36,864 region pages, 119/160 maps, and 119/128
+  observed cap occupancy; broker cap high-water was 120. At boot, manager
+  identity counts were `(15, 15, 2, 470, 4, 47)` for records, processes,
+  SharedRegions, pages, maps, and caps. At the full workload, free frames
+  reached 79,188; after teardown they returned to 114,110, while boot was
+  114,189. All identity-bearing detailed counters returned to boot values.
+  The remaining 79-frame difference is consistent with Phase-12's measured
+  77 retained page-table frames; exact allocation attribution was not
+  instrumented. The 16-thread boot baseline and all phase13 detail counters
+  were restored after teardown.
+- The fixture verifies the installed launch and association paths alongside
+  capacity churn: exact read-only document handoff, cancellation without a
+  process/cap change, AFS2 default/favorite persistence, installed-registry
+  search/pointer/keyboard launch, active-window dock activation without a
+  duplicate launch, signed helper authorization, helper crash cleanup,
+  headless exit/reap, real standard-stream transfer/EOF, user-thread/TLS
+  lifecycle, native VM release, synchronization wake/teardown, and clean
+  shutdown. A second boot of the same AFS2 disk reloads and renders the pin.
+- This T1 proof is complete. M10 Desktop, M11 Files/window-manager, and M12
+  scale regressions passed, followed by the T2 10-boot preservation set. ADR-
+  0108 closes the PIE decision by deferring ET_DYN/ASLR to the next native
+  executable phase. Full historical, 100/100, exact archive, and
+  extracted-archive qualification remain outstanding.
+
+### T2 launcher and mixed-workload preservation checkpoint
+
+- Targeted guest regressions passed after the launcher and mixed-load source
+  changes: `test_m10_desktop.py`, `test_m11_desk.py`, `test_m11_wm.py`,
+  `test_m12_scale.py`, and `test_phase13_registry_guest.py`. M12 reported
+  32/32 live ordinary sessions, mutation-free launch-33 refusal, 16-close /
+  16-reuse, exact final identity counts, and 77 retained page-table frames.
+- `tools/stability_loop.sh 10` passed 10/10 clean boots with zero failures in
+  78 seconds. Every boot's historical guest verdicts and clean shutdown were
+  green. Receipt: SHA-256
+  `aa77db7be5f45fb6be104b55789eec5a6d194b044d024fc262831eeb0215efc4`,
+  recording `10/10`. The receipt-bound EFI SHA-256 is the same value.
+- This is a T2 preservation checkpoint, not the source-frozen final
+  qualification. Continue with the complete historical suite, final fresh
+  100-boot run, exact `phase13-complete` artifact, and independent extracted
+  archive boot.

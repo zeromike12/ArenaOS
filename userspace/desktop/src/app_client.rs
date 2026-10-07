@@ -460,12 +460,56 @@ pub fn audit(kind: u8, instance_generation: u64) -> Result<(), i64> {
     }
     if kind == 4 {
         let counts = observe()?;
+        // Built-in Monitor has its exact read-only diagnostic MemoryPool in
+        // addition to its endpoint/surface/clock caps. Built-ins do not
+        // request the optional native synchronization grant.
+        let expected_caps = 4;
         if counts[0] == 0
             || counts[0] >= counts[1]
             || counts[3] == 0
             || counts[4] < 2
             || counts[5] < 127
-            || counts[7] != 4
+            || counts[7] != expected_caps
+        {
+            return Err(-2);
+        }
+        let mut detail = [0u64; 10];
+        if unsafe {
+            syscall6(
+                SYS_RESOURCE_DETAIL,
+                DIAGNOSTICS,
+                detail.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        } != 0
+            || detail[0] == 0
+            || detail[1] == 0
+            || unsafe {
+                syscall6(
+                    SYS_RESOURCE_DETAIL,
+                    SERVICE_ENDPOINT,
+                    detail.as_mut_ptr() as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            } >= 0
+            || unsafe { syscall6(SYS_RESOURCE_DETAIL, DIAGNOSTICS, 0, 0, 0, 0, 0) } >= 0
+            || unsafe {
+                syscall6(
+                    SYS_RESOURCE_DETAIL,
+                    u64::MAX,
+                    detail.as_mut_ptr() as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            } >= 0
         {
             return Err(-2);
         }

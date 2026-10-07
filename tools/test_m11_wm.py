@@ -195,8 +195,9 @@ def workflow(label):
         assert peak[2] == base[2] + 12 and peak[3] == base[3] + 24, (base, peak)
         assert peak[4] == base[4] + 12 * (shared + snapshot), (base, peak)
         assert peak[5] == base[5] + 36, (base, peak)
-        # This Phase-12 broker retains one held Process cap per session; the
-        # child, rather than the broker, owns the delegated surface-region cap.
+        # Built-in applications do not request native synchronization.
+        # Each AFS2-offline instance adds one held Process cap; the child,
+        # rather than the broker, owns the delegated surface-region cap.
         # AFS2 is offline in this Phase-11 interaction fixture, so there is no
         # retained filesd lineage-head cap.
         assert peak[6] == base[6] + 12, (base, peak)

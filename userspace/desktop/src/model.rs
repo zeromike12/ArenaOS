@@ -313,11 +313,20 @@ impl State {
             || width > 1024
             || height > 768
             || dock_items == 0
-            || dock_items > 8
+            || dock_items > 12
         {
             return Err(Error::Invalid);
         }
         self.screen = (width as i32, height as i32);
+        self.dock_items = dock_items;
+        Ok(())
+    }
+    /// Update the number of live dock hit targets without changing the
+    /// display mode. An empty dock has no launch hit targets.
+    pub fn configure_dock_items(&mut self, dock_items: usize) -> Result<(), Error> {
+        if dock_items > 12 {
+            return Err(Error::Invalid);
+        }
         self.dock_items = dock_items;
         Ok(())
     }

@@ -60,6 +60,61 @@ pub fn background(canvas: &mut Canvas<'_>, t: Theme) {
     }
 }
 
+pub const MAX_DOCK_ITEMS: usize = 12;
+pub const MAX_ACTIVE_DOCK_APPS: usize = 32;
+
+/// Descriptive, generation-free identity for one catalog row shown in the
+/// dock. The broker resolves it against installed registry state on launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DockItem {
+    pub name: [u8; 8],
+    pub application_index: u8,
+    pub icon_kind: u8,
+    pub running: u8,
+    pub minimized: u8,
+    pub active: bool,
+    pub pinned: bool,
+}
+
+impl DockItem {
+    pub const EMPTY: Self = Self {
+        name: [0; 8],
+        application_index: u8::MAX,
+        icon_kind: 5,
+        running: 0,
+        minimized: 0,
+        active: false,
+        pinned: false,
+    };
+}
+
+/// A bounded visible page of favorites plus distinct running application IDs.
+/// All active IDs remain reachable through the dock's previous/next controls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DockView {
+    pub enabled: bool,
+    pub items: [DockItem; MAX_DOCK_ITEMS],
+    pub count: u8,
+    pub pinned_count: u8,
+    pub active_offset: u8,
+    pub active_total: u8,
+    pub has_previous: bool,
+    pub has_next: bool,
+}
+
+impl DockView {
+    pub const EMPTY: Self = Self {
+        enabled: false,
+        items: [DockItem::EMPTY; MAX_DOCK_ITEMS],
+        count: 0,
+        pinned_count: 0,
+        active_offset: 0,
+        active_total: 0,
+        has_previous: false,
+        has_next: false,
+    };
+}
+
 /// Descriptive facts the shell draws. Comparable, so the compositor can
 /// tell exactly which shell regions changed between frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,6 +132,8 @@ pub struct Shell {
     pub uptime: u64,
     /// Minimized windows per built-in kind (hollow dock indicator).
     pub minimized: [u8; 6],
+    /// Registry-backed pinned plus active application inventory.
+    pub dock: DockView,
     /// Alt+Tab overlay, while open.
     pub switcher: Option<Switcher>,
     /// Outline of where a title drag would snap if released now.
@@ -96,6 +153,7 @@ pub const APPLICATION_ROWS: usize = 10;
 pub struct ApplicationsView {
     pub names: [[u8; 32]; APPLICATION_ROWS],
     pub running: [bool; APPLICATION_ROWS],
+    pub pinned: [bool; APPLICATION_ROWS],
     pub count: u8,
     pub selected: u8,
     pub total: usize,
@@ -151,6 +209,7 @@ impl Shell {
         notice: None,
         uptime: 0,
         minimized: [0; 6],
+        dock: DockView::EMPTY,
         switcher: None,
         snap: None,
         chooser: None,
@@ -301,32 +360,79 @@ pub fn notice_region(w: i32) -> Rect {
     rect(0, m::SYSTEM_BAR_HEIGHT, w, 30)
 }
 
-fn dock_x(w: i32) -> i32 {
-    (w - m::DOCK_ITEM_WIDTH * DOCK.len() as i32) / 2
-}
-
-/// Region holding the dock panel, its ledge and hover wells.
-pub fn dock_region(w: i32, h: i32) -> Rect {
-    let strip = m::DOCK_ITEM_WIDTH * DOCK.len() as i32;
-    rect(
-        dock_x(w) - 6,
-        h - m::DOCK_HEIGHT,
-        strip + 12,
-        m::DOCK_HEIGHT,
-    )
-}
-
 /// Region covered by the pointer drawn at `(x, y)`.
 pub fn pointer_region(x: i32, y: i32) -> Rect {
     rect(x, y, c::POINTER_WIDTH, c::POINTER_HEIGHT)
 }
 
+fn dock_x_for(w: i32, items: usize) -> i32 {
+    (w - m::DOCK_ITEM_WIDTH * items as i32) / 2
+}
+
+fn visible_dock_count(dock: &DockView) -> usize {
+    if dock.enabled {
+        usize::from(dock.count)
+    } else {
+        DOCK.len()
+    }
+}
+
+/// Region holding the current dock panel, its scrolling controls and hover wells.
+pub fn dock_region_for(w: i32, h: i32, dock: &DockView) -> Rect {
+    let items = visible_dock_count(dock);
+    if dock.enabled && items == 0 {
+        return rect(0, h - m::DOCK_HEIGHT, 0, 0);
+    }
+    let strip = m::DOCK_ITEM_WIDTH * items as i32;
+    let x0 = dock_x_for(w, items);
+    let left = if dock.enabled && dock.has_previous {
+        20
+    } else {
+        0
+    };
+    let right = if dock.enabled && dock.has_next { 20 } else { 0 };
+    rect(
+        x0 - 6 - left,
+        h - m::DOCK_HEIGHT,
+        strip + 12 + left + right,
+        m::DOCK_HEIGHT,
+    )
+}
+
+/// Static six-item region retained for model-only shell tests.
+pub fn dock_region(w: i32, h: i32) -> Rect {
+    dock_region_for(w, h, &DockView::EMPTY)
+}
+
 /// Dock item under the pointer, if any (drawn as a hover well).
-pub fn hover_item(w: i32, h: i32, (px, py): (i32, i32)) -> Option<usize> {
-    let x0 = dock_x(w);
-    let strip = m::DOCK_ITEM_WIDTH * DOCK.len() as i32;
+pub fn hover_item_for(w: i32, h: i32, pointer: (i32, i32), dock: &DockView) -> Option<usize> {
+    let count = visible_dock_count(dock);
+    let x0 = dock_x_for(w, count);
+    let strip = m::DOCK_ITEM_WIDTH * count as i32;
+    let (px, py) = pointer;
     (py >= h - m::DOCK_HEIGHT && px >= x0 && px < x0 + strip)
         .then(|| ((px - x0) / m::DOCK_ITEM_WIDTH) as usize)
+}
+
+pub fn hover_item(w: i32, h: i32, pointer: (i32, i32)) -> Option<usize> {
+    hover_item_for(w, h, pointer, &DockView::EMPTY)
+}
+
+/// Return -1/+1 when a dock scroll control is pressed.
+pub fn dock_scroll_hit(w: i32, h: i32, dock: &DockView, x: i32, y: i32) -> Option<i8> {
+    if !dock.enabled || y < h - m::DOCK_HEIGHT || y >= h {
+        return None;
+    }
+    let count = usize::from(dock.count);
+    let x0 = dock_x_for(w, count);
+    let strip = m::DOCK_ITEM_WIDTH * count as i32;
+    if dock.has_previous && (x0 - 24..x0 - 6).contains(&x) {
+        Some(-1)
+    } else if dock.has_next && (x0 + strip + 6..x0 + strip + 24).contains(&x) {
+        Some(1)
+    } else {
+        None
+    }
 }
 
 /// Formats monotonic seconds as H:MM:SS (an uptime counter, not a clock).
@@ -354,6 +460,7 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         notice,
         uptime,
         minimized,
+        dock,
         switcher,
         snap,
         chooser,
@@ -363,6 +470,11 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
     } = *shell;
     let (w, h) = canvas.size();
     let (w, h) = (w as i32, h as i32);
+    let dock = if dock.enabled {
+        dock
+    } else {
+        legacy_dock(running, active, minimized)
+    };
     let bar = m::SYSTEM_BAR_HEIGHT;
     let ty = (bar - 1 - m::FONT_HEIGHT) / 2;
     // Each part draws only inside its own region; a clip that misses the
@@ -483,15 +595,17 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         );
     }
 
-    // Dock: a floating panel inside the (unchanged) dock hit strip.
-    if hits(dock_region(w, h)) {
-        let items = DOCK.len() as i32;
-        let strip = m::DOCK_ITEM_WIDTH * items;
-        let dock_x = (w - strip) / 2;
+    // Dock: the pinned/active catalog page uses the same panel and tiles.
+    if hits(dock_region_for(w, h, &dock)) {
+        let items = usize::from(dock.count);
+        let strip = m::DOCK_ITEM_WIDTH * items as i32;
+        let dock_x = dock_x_for(w, items);
+        let left = if dock.has_previous { 20 } else { 0 };
+        let right = if dock.has_next { 20 } else { 0 };
         let panel = Rect {
-            x: dock_x - 6,
+            x: dock_x - 6 - left,
             y: h - m::DOCK_PANEL_BOTTOM - m::DOCK_PANEL_HEIGHT,
-            width: (strip + 12) as u32,
+            width: (strip + 12 + left + right) as u32,
             height: m::DOCK_PANEL_HEIGHT as u32,
         };
         c::rect(
@@ -504,12 +618,33 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         );
         c::outlined(canvas, panel, t.dock, t.dock_edge, m::RADIUS_PANEL);
         let full = open >= MAX_WINDOWS;
-        let hover = hover_item(w, h, pointer);
-        for (i, name) in DOCK.iter().enumerate() {
+        let hover = hover_item_for(w, h, pointer, &dock);
+        if dock.has_previous {
+            c::text_centered(
+                canvas,
+                dock_x - 24,
+                18,
+                panel.y + 17,
+                "<",
+                Style::Strong,
+                t.bar_text,
+            );
+        }
+        if dock.has_next {
+            c::text_centered(
+                canvas,
+                dock_x + strip + 6,
+                18,
+                panel.y + 17,
+                ">",
+                Style::Strong,
+                t.bar_text,
+            );
+        }
+        for (i, item) in dock.items[..items].iter().enumerate() {
             let x = dock_x + i as i32 * m::DOCK_ITEM_WIDTH;
             let cx = x + m::DOCK_ITEM_WIDTH / 2;
             let hovered = hover == Some(i);
-            let is_active = active == Some(i as u8);
             if hovered {
                 c::well(
                     canvas,
@@ -529,14 +664,15 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
                 cx - m::TILE_SIZE / 2,
                 panel.y + 4,
                 m::TILE_SIZE,
-                i as u8,
+                item.icon_kind,
                 full,
                 under,
                 t,
             );
-            let (style, ink) = if is_active {
+            let name = label(&item.name);
+            let (style, ink) = if item.active {
                 (Style::Strong, t.bar_text)
-            } else if running[i] > 0 || hovered {
+            } else if item.running > 0 || hovered {
                 (Style::Body, t.bar_text)
             } else {
                 (Style::Body, t.bar_muted)
@@ -550,14 +686,12 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
                 style,
                 ink,
             );
-            // Running instances: one dot each; the focused app gets a Signal bar.
-            // Minimized instances are hollow (a frame without its fill).
             let iy = panel.y + 44;
-            if is_active {
+            if item.active {
                 c::rect(canvas, cx - 7, iy, 14, 2, t.accent);
-            } else if running[i] > 0 {
-                let n = i32::from(running[i].min(4));
-                let hollow = i32::from(minimized[i].min(running[i]).min(4));
+            } else if item.running > 0 {
+                let n = i32::from(item.running.min(4));
+                let hollow = i32::from(item.minimized.min(item.running).min(4));
                 let start = cx - (n * 5 - 2) / 2;
                 for k in 0..n {
                     if k >= n - hollow {
@@ -664,6 +798,32 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         draw_applications(canvas, &apps, w, h, t);
     }
     c::pointer(canvas, pointer.0, pointer.1, t);
+}
+
+fn legacy_dock(running: [u8; 6], active: Option<u8>, minimized: [u8; 6]) -> DockView {
+    let mut dock = DockView {
+        enabled: true,
+        count: DOCK.len() as u8,
+        ..DockView::EMPTY
+    };
+    for index in 0..DOCK.len() {
+        let name = DOCK[index].as_bytes();
+        dock.items[index] = DockItem {
+            name: {
+                let mut field = [0; 8];
+                let length = name.len().min(field.len());
+                field[..length].copy_from_slice(&name[..length]);
+                field
+            },
+            application_index: index as u8,
+            icon_kind: index as u8,
+            running: running[index],
+            minimized: minimized[index],
+            active: active == Some(index as u8),
+            ..DockItem::EMPTY
+        };
+    }
+    dock
 }
 
 fn label(b: &[u8]) -> &str {
@@ -965,10 +1125,21 @@ fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h
             if selected { Style::Strong } else { Style::Body },
             t.text,
         );
+        let right = x0 + APPLICATION_WIDTH - m::M;
+        if apps.pinned[row] {
+            c::text_right(
+                canvas,
+                right,
+                y + 7,
+                "Pinned",
+                Style::Caption,
+                t.accent_strong,
+            );
+        }
         if apps.running[row] {
             c::text_right(
                 canvas,
-                x0 + APPLICATION_WIDTH - m::M,
+                right - if apps.pinned[row] { 38 } else { 0 },
                 y + 7,
                 "Running",
                 Style::Caption,
@@ -982,9 +1153,9 @@ fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h
             x0 + m::L,
             y0 + height - 18,
             if apps.open_with {
-                "Type to search  /  ↑ ↓ move  /  Enter open  /  D default  /  Esc cancel"
+                "Type to search  /  ↑ ↓ move  /  Enter open  /  Ctrl+D default  /  Esc cancel"
             } else {
-                "Type to search  /  ↑ ↓ move  /  Enter launch  /  Esc close"
+                "Type to search  /  ↑ ↓ move  /  Enter launch  /  Ctrl+P pin/unpin  /  Esc close"
             },
             Style::Caption,
             t.muted,
@@ -995,9 +1166,9 @@ fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h
             x0 + m::L,
             y0 + height - 18,
             if apps.open_with {
-                "Enter open  /  D set default  /  Esc cancel"
+                "Enter open  /  Ctrl+D set default  /  Esc cancel"
             } else {
-                "Type to search  /  Enter launch  /  Esc close"
+                "Type to search  /  Enter launch  /  Ctrl+P pin/unpin  /  Esc close"
             },
             Style::Caption,
             t.muted,
