@@ -17,13 +17,16 @@ from test_m10_apps import Desktop, crop
 LABEL = "phase13-registry"
 BASE = arena_env.AFS2_BASE_SECTOR * 512
 SOURCE = b"phase13.apb1"
+HEADLESS_SOURCE = b"zz-headless.apb1"
 APP_ID = b"org.arenaos.phase13app"
+HEADLESS_APP_ID = b"org.arenaos.zzheadless"
 SERIAL_APPS = "[phase13-installed-app] ABI-v2 startup verified; real window published"
 SERIAL_MULTIWINDOW = "[phase13-multiwindow] one process owns three separately backed ordinary windows"
 SERIAL_WINDOW_RETIRED = "[phase13-window] DestroyWindow retired one surface; process and siblings remain live"
 SERIAL_WINDOW_FINAL = "[phase13-window] final surface retired; process exits cleanly"
 SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
+SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present"
 COUNTERS = re.compile(
     r"measured frames/records/processes/regions/pages/maps/caps="
     r"(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n"
@@ -68,11 +71,42 @@ def app_bundle():
     return apb1_format.build_bundle([(1, b"bin/probe", executable.read_bytes())], manifest=manifest)
 
 
-def seed_bundle(disk, bundle):
+def headless_bundle():
+    root = Path(__file__).resolve().parents[1]
+    crate = root / "userspace/phase13-headless"
+    subprocess.run(
+        ["cargo", "build", "--release"],
+        cwd=crate,
+        env=arena_env.rust_env(),
+        check=True,
+    )
+    executable = crate / "target/x86_64-unknown-none/release/arena-phase13-headless"
+    assert executable.is_file() and executable.stat().st_size < 256 * 1024
+    manifest = apb1_format.make_manifest(
+        app_id=HEADLESS_APP_ID,
+        package_id=b"org.arena.editor",
+        display_name=b"Runtime Probe",
+        version=13,
+        flags=4,
+        requested=0,
+        entry=b"bin/headless",
+        icon=b"",
+        width=0,
+        height=0,
+        associations=(),
+    )
+    return apb1_format.build_bundle(
+        [(1, b"bin/headless", executable.read_bytes())], manifest=manifest
+    )
+
+
+def seed_bundle(disk, bundle, headless):
     volume = afs2.Volume(disk.read_bytes()[BASE:])
     desktop = volume.resolve("/Users/user/Desktop")
     source = volume.create(desktop, SOURCE, 1)
     volume.write(source, 0, bundle, 1)
+    headless_source = volume.create(desktop, HEADLESS_SOURCE, 1)
+    volume.write(headless_source, 0, headless, 1)
     document = volume.create(desktop, b"z-associated.txt", 1)
     volume.write(document, 0, b"Phase 13 associated document\n", 1)
     with disk.open("r+b") as f:
@@ -303,6 +337,44 @@ def interaction(disk):
         d.wait(lambda: resource_counts(d)[1:] == baseline[1:],
                "independent window teardown did not return identity resources to baseline")
         d.shot("installed-windows-closed")
+
+        before_headless_install = d.serial().count("[desktop] APB1 installed; signed version=")
+        d.click(52, 206)
+        time.sleep(0.1)
+        d.click(52, 206)
+        d.wait(
+            lambda: d.serial().count("[desktop] APB1 installed; signed version=")
+            == before_headless_install + 1,
+            "Desktop did not complete the protected headless APB1 install",
+        )
+        installed = tree(disk)
+        assert f"/System/Applications/{HEADLESS_APP_ID.decode()}/13/bin/headless" in installed
+
+        # A headless registry record resolves to an exact verified Image and
+        # a tracked Process, but must not add a compositor window or inherit
+        # the Desktop session endpoint/surface/document capabilities.
+        headless_before = resource_counts(d)
+        retired_before_headless = d.serial().count("[desktop] application retired:")
+        background = d.shot("before-headless-launch")
+        d.click(120, 12)
+        d.q.type_text("runtime", gap_s=0.025)
+        d.shot("all-apps-headless-search")
+        send_key(d, "ret")
+        d.wait(lambda: SERIAL_HEADLESS in d.serial(),
+               "signed headless app did not validate its exact startup capability inventory")
+        d.wait(lambda: resource_counts(d)[2] == headless_before[2] + 1,
+               "headless launch did not retain one live exact Process capability")
+        assert "ordinary windows=0; no surface or Desktop endpoint inherited" in d.serial(), \
+            "headless launch allocated a surface/window or inherited its Desktop endpoint"
+        no_window = d.shot("headless-running-no-window")
+        assert crop(no_window, 100, 100, 600, 400) == crop(background, 100, 100, 600, 400), \
+            "headless application created visible window content"
+        d.wait(lambda: "[phase13-headless] timer completed; process exiting for manager reap" in d.serial(),
+               "headless process did not finish its real timer wait")
+        d.wait(lambda: d.serial().count("[desktop] application retired:") == retired_before_headless + 1,
+               "Desktop did not reap the exited headless process")
+        d.wait(lambda: resource_counts(d)[1:] == baseline[1:],
+               "headless timer/process resources did not return to baseline")
         return b"shutdown\r"
     finally:
         d.dispose()
@@ -310,6 +382,9 @@ def interaction(disk):
 
 def main():
     bundle = app_bundle()
+    headless = headless_bundle()
+    for image in arena_env.build_dir().glob(f"{LABEL}-*.ppm"):
+        image.unlink()
     esp = mtest.build(LABEL, desktop=True)
     disk = arena_env.make_scratch_disk()
     rc, serial, _ = mtest.boot(
@@ -324,7 +399,7 @@ def main():
         [(b"filesd: AFS2 mounted", 1, b"shutdown\r")], disk, pointer=True
     )
     assert rc == 0 and "filesd: AFS2 mounted" in serial
-    seed_bundle(disk, bundle)
+    seed_bundle(disk, bundle, headless)
     assert tree(disk)[f"/Users/user/Desktop/{SOURCE.decode()}"] == bundle
     feed = [
         ((b"[desktop] real desktop frame presented", b"filesd: AFS2 mounted"), 1,
@@ -337,6 +412,8 @@ def main():
     assert serial.count(SERIAL_MULTIWINDOW) == 2
     assert serial.count(SERIAL_VM) == 3
     assert serial.count(SERIAL_HEAP) == 3
+    assert serial.count(SERIAL_HEADLESS) == 1
+    assert serial.count("[phase13-headless] timer completed; process exiting for manager reap") == 1
     assert "[phase13-app] exact read-only document capability verified" in serial
     assert "[desktop] installed application registry unavailable" not in serial
     assert "[desktop] application retired:" in serial
@@ -345,7 +422,8 @@ def main():
     print(
         f"[{LABEL}] verified APB1 install -> registry -> keyboard/search/pointer launch of the signed native ELF; "
         f"two instances with three windows each, individual DestroyWindow while siblings stay live, "
-        f"exact resource teardown to baseline; clean shutdown in {elapsed:.1f}s PASS",
+        f"one cap-attenuated headless app with no windows, exact resource teardown to baseline; "
+        f"clean shutdown in {elapsed:.1f}s PASS",
         flush=True,
     )
 

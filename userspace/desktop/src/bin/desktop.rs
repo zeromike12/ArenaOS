@@ -1828,9 +1828,6 @@ fn launch_installed_application(
     read_only: bool,
 ) -> Result<(), i64> {
     use arena_desktop::package::manifest;
-    if app_flags & manifest::FLAG_HEADLESS != 0 {
-        return Err(STATUS_BUSY);
-    }
     if app_flags & manifest::FLAG_MULTI_INSTANCE == 0 {
         let existing = unsafe { &*(&raw const SESSIONS) }
             .iter()
@@ -1847,6 +1844,21 @@ fn launch_installed_application(
     }
     let image = arena_desktop::package::launch_installed(application_id, POOL)
         .map_err(|error| error as i64)?;
+    if app_flags & manifest::FLAG_HEADLESS != 0 {
+        if document != CAP_NONE {
+            destroy(image.capability);
+            return Err(STATUS_BAD_ARG);
+        }
+        let launched = launch_headless_image_v2(
+            image.capability,
+            *application_id,
+            image.entry,
+            image.load_base,
+            app_flags,
+        );
+        destroy(image.capability);
+        return launched;
+    }
     let flags = if app_flags & manifest::FLAG_MULTI_INSTANCE != 0 {
         FLAG_MULTI_INSTANCE
     } else {
@@ -1869,6 +1881,156 @@ fn launch_installed_application(
     );
     destroy(image.capability);
     launched
+}
+
+/// Launch a signed headless application with no window service authority.
+/// The only inherited application capability is its private clock
+/// notification, attenuated to WAIT/TIMER rights. The generation-bearing
+/// instance record and exact Process cap remain owned by the Desktop.
+fn launch_headless_image_v2(
+    image: u64,
+    application_id: [u8; 32],
+    entry: u64,
+    load_base: u64,
+    app_flags: u32,
+) -> Result<(), i64> {
+    use arena_startup_abi::manifest::FLAG_HEADLESS;
+    use arena_startup_abi::startup as startup_abi;
+
+    let known_flags = arena_startup_abi::manifest::FLAG_MULTI_INSTANCE
+        | arena_startup_abi::manifest::FLAG_BACKGROUND
+        | arena_startup_abi::manifest::FLAG_HEADLESS;
+    if app_flags & FLAG_HEADLESS == 0 || app_flags & !known_flags != 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
+    if ready != 0 {
+        log_launch_refusal(b"headless-spawn-check", ready);
+        return Err(ready);
+    }
+    let sessions = unsafe { &mut *(&raw mut SESSIONS) };
+    let Some(i) = sessions.iter().position(|session| session.id == 0) else {
+        log_launch_refusal(b"headless-instance-table", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    };
+    if i >= startup_abi::INSTANCE_SLOTS || !child_capacity_available() {
+        log_launch_refusal(b"headless-process-group", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    let generation = unsafe { NEXT_SESSION_BADGE };
+    if generation == 0 {
+        log_launch_refusal(b"headless-instance-generation", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    let free = (0..CAP_SLOTS as u64)
+        .filter(|slot| describe(*slot).is_none())
+        .count();
+    if free < 3 {
+        log_launch_refusal(b"headless-cap-slots", STATUS_BUSY);
+        return Err(STATUS_BUSY);
+    }
+    let id_len = application_id
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(32);
+    if id_len == 0 || id_len == 32 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let arguments: [&[u8]; 1] = [&application_id[..id_len]];
+    let descriptors = [startup_cap_descriptor(
+        1,
+        startup_abi::CAP_KIND_NOTIFICATION,
+        RIGHTS_READ | RIGHTS_WRITE,
+    )];
+    let spec = startup_abi::StartupSpec {
+        application_id: &application_id,
+        instance_slot: i as u16,
+        instance_generation: u64::from(generation),
+        flags: app_flags,
+        arguments: &arguments,
+        environment: &[],
+        capabilities: &descriptors,
+        cwd: None,
+        stdin: None,
+        stdout: None,
+        stderr: None,
+        entry,
+        load_base,
+        clock_us: arena_desktop::app_client::now(),
+    };
+    let mut startup_page = [0u8; startup_abi::BLOCK_BYTES];
+    if startup_abi::encode(&spec, &mut startup_page).is_err() {
+        return Err(STATUS_BAD_ARG);
+    }
+
+    let mut startup_out = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            1,
+            startup_out.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    if rc != 0 {
+        log_launch_refusal(b"headless-startup-page", rc);
+        return Err(rc);
+    }
+    let startup_cap = startup_out[0];
+    let startup_va = unsafe { syscall2(SYS_SHARED_MAP, startup_cap, 1) };
+    if startup_va <= 0 {
+        destroy(startup_cap);
+        log_launch_refusal(b"headless-startup-map", startup_va);
+        return Err(startup_va);
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            startup_page.as_ptr(),
+            startup_va as *mut u8,
+            startup_abi::BLOCK_BYTES,
+        );
+    }
+    let unmap = unsafe { syscall6(SYS_SHARED_UNMAP, startup_va as u64, 0, 0, 0, 0, 0) };
+    if unmap != 0 {
+        die(86)
+    }
+
+    let clock_rights = RIGHTS_READ | RIGHTS_WRITE;
+    let grants = [
+        InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
+        InheritGrant::new(clock(i) as u8, clock_rights as u32),
+    ];
+    let process = spawn_child(image, &grants);
+    destroy(startup_cap);
+    let process = match process {
+        Ok(process) => process,
+        Err(status) => {
+            log_launch_refusal(b"headless-kernel-spawn", status);
+            return Err(status);
+        }
+    };
+
+    // The high bit separates this descriptive instance key from the small
+    // SharedRegion object IDs used by window authentication. It grants no
+    // authority and is never accepted in place of the held Process cap.
+    unsafe { NEXT_SESSION_BADGE = generation.checked_add(1).unwrap_or(0) };
+    let id = (1u64 << 63) | u64::from(generation);
+    sessions[i] = Session {
+        id,
+        process: Some(process),
+        kind: 6,
+        application_id,
+        badge: 0,
+        ..EMPTY
+    };
+    transient_caps();
+    log(b"[desktop] verified headless application spawned; ordinary windows=");
+    log_number(unsafe { (&*(&raw const WM)).windows().count() as u64 });
+    log(b"; no surface or Desktop endpoint inherited\n");
+    Ok(())
 }
 
 /// The session's filesd lineage head and, for the terminal and Files, its
@@ -2772,7 +2934,7 @@ fn retire(index: usize, force: bool) {
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
     }
-    if unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0 {
+    if s.va != 0 && unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0 {
         die(86)
     }
     if s.snapshot != 0 && unsafe { syscall6(SYS_SHARED_UNMAP, s.snapshot, 0, 0, 0, 0, 0) } != 0 {

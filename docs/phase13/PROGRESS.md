@@ -19,7 +19,7 @@
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
-| 13.3 windows, helpers, lifecycle | Multi-window implemented; helper/AppInstance separation remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. Signed APB1 guest proves three windows per process and two simultaneous instances; helpers and distinct multi-process AppInstance ownership remain. |
+| 13.3 windows, helpers, lifecycle | Multi-window and headless primary launch implemented; helper/AppInstance separation remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. Guest proves three windows per process, two concurrent windowed instances, and one windowless headless instance; allowlisted helpers and distinct multi-process AppInstance ownership remain. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
@@ -191,6 +191,12 @@ multi-window ownership, helper lifecycle, streams, user threads,
 synchronization, pressure, and final qualification were still open; later
 subsections record the subsequent VM/heap and multi-window checkpoints.
 
+The current branch has since added multi-window ownership (ADR-0097), and the
+signed registry guest now also installs and launches a headless package as
+described in ADR-0098. The earlier checkpoint statement is retained as a dated
+status record; helper lifecycle, streams, user threads, synchronization,
+pressure, favorites, and final qualification remain open.
+
 ### Process-owned user mapping inventory implementation
 
 - Added the unchanged 80-entry page-span inventory to each `Process` and
@@ -345,3 +351,67 @@ subsections record the subsequent VM/heap and multi-window checkpoints.
   `3fbdc50` and pushed to `origin/arena/phase13-native-app-maturity`; the
   working tree was clean before this receipt update. Development continues on
   the same branch.
+
+### Signed headless installed application T1
+
+- Added a no-window installed-app launch branch after the same receiver-side
+  APB1 registry refresh and exact Image resolution used by windowed apps. The
+  startup ABI carries the signed headless policy bit and a unique generation.
+  Desktop inherits only the startup block and that instance's notification
+  capability attenuated to `READ|WRITE`; it grants no Desktop endpoint,
+  surface, filesystem root, or document File. No kernel or registry bounds
+  changed. ADR-0098 records the boundary and the remaining manager lifecycle
+  work.
+- Added a signed APB1 guest fixture whose ring-3 runtime verifies the complete
+  startup cap table, arms and waits on its real timer, then exits. Desktop
+  observes and reaps the child through the existing exact Process-capability
+  group. The fixture proves no compositor window was created and the child did
+  not inherit a surface or Desktop endpoint.
+- `python3 tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 / OVMF
+  2025.02 in 14.3 seconds after the image build. It installed two distinct
+  signed APB1 apps; preserved keyboard/search/pointer launch of the windowed
+  app; proved two concurrent instances with three independently backed
+  windows each; proved read-only document handoff; then installed and ran the
+  headless app from All Applications. The headless app's 3-second timer
+  completed, its child exited, and Desktop reaped the Process.
+- Measured `(free frames, process records, processes, SharedRegions, region
+  pages, maps, caps)` at the settled pre-launch baseline:
+  `(114244, 15, 15, 2, 470, 4, 45)`. While headless was live:
+  `(114203, 16, 16, 2, 470, 4, 46)`. The active process added no SharedRegion,
+  region page, or mapping; only one manager Process cap was added. After timer
+  exit and Process-cap reap the measured tuple returned exactly to
+  `(114244, 15, 15, 2, 470, 4, 45)`, including free frames.
+- The first attempt exposed that a 10-second test wait was too close to the
+  guest timer's exact deadline. The fixture now uses a 3-second timer and
+  separately waits for the real completion marker and resource teardown; the
+  corrected guest passed cleanly.
+
+### Headless lifecycle preservation T2
+
+- Host suites passed: Desktop 84/84, arena-platform 34/34, and arena-runtime
+  14/14. Release Clippy with warnings denied passed for the new headless guest;
+  the Desktop binary check and targeted Clippy passed. Formatting and
+  `git diff --check` passed.
+- `tools/test_m10_desktop.py` passed dock launch, owned raster, keyboard/theme,
+  drag, close, and relaunch. `tools/test_m12_scale.py` passed 32 sessions,
+  mutation-free 33rd refusal, 16-close/16-reuse, and full cleanup in 188.8
+  seconds. It observed 77 retained page-table frames; process, SharedRegion,
+  region page, map, and cap identity counts returned to baseline. Its measured
+  `(free frames, records, processes, SharedRegions, pages, maps, caps)` were
+  `(114258,15,15,2,470,4,45)` at baseline,
+  `(78311,47,47,66,30550,110,109)` at full use,
+  `(96246,31,31,34,15510,58,77)` after closing half,
+  `(78310,47,47,66,30550,112,109)` after reuse, and
+  `(114181,15,15,2,470,4,45)` after teardown. The 77-frame decrease is the
+  retained page-table allocation already identified by the Phase-12 scale
+  proof.
+- Rebuilt the exact desktop EFI at SHA-256
+  `fca6c3f041c37503392c539dbe09a3940bdba4fcdc2a36d67698afe468a418a3`.
+  `tools/stability_loop.sh 10` passed 10/10 fresh boots with zero failures in
+  77 seconds. The receipt binds all ten green M1-M12 runs to that exact EFI.
+- The headless launch adds no new kernel bound and leaves the Phase-12 low-32
+  manager accounting, exact 128-slot cap table, and observable slot-127
+  authority unchanged. This source checkpoint is ready to preserve; helper
+  processes, a production multi-process AppInstance table, streams, user
+  threads, synchronization, launcher favorites, mixed-load pressure, and
+  final qualification remain outstanding.

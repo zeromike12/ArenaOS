@@ -145,3 +145,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0095](0095-process-owned-native-vm.md) | Guarded process-owned native VM regions with exact-cap commit, protect, query, and release | Accepted; ring-3 VM proof and 20/20 fresh boots passed |
 | [0096](0096-scalable-native-heap.md) | Lazy 16 MiB native application heap backed by process-owned VM | Accepted; host allocator tests and signed installed-app guest proof passed |
 | [0097](0097-multiple-ordinary-windows-per-application-session.md) | Multiple independently backed ordinary windows per badge-authenticated application session | Accepted; three-window signed APB1 guest proof and teardown passed |
+| [0098](0098-headless-installed-application-launch.md) | Headless signed APB1 launch with no Desktop endpoint or surface authority | Accepted; signed installed-app timer/wait guest proof and Process-cap reap passed |

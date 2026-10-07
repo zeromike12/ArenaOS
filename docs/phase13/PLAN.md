@@ -114,11 +114,14 @@ flow. Its T1 guest proof verifies that a saved default creates no authority
 and that an explicitly selected installed handler receives the exact
 read-only File capability. ADR-0097 and the signed APB1 T1 guest now prove
 three independently backed ordinary windows under one process and two such
-instances at once. Persisted launcher favorites, distinct multi-process
-AppInstance ownership, helpers, streams, user threads, synchronization,
-mixed-load pressure, and final qualification remain open. The dynamic Image
-envelope is a bounded executable staging mechanism; it is not process VM and
-does not imply PIE or ASLR support. See `PROGRESS.md` for measured receipts.
+instances at once. ADR-0098 adds a signed installed headless launch with an
+exact Process cap, one attenuated Notification, no window or Desktop endpoint,
+and real timer-driven teardown. Persisted launcher favorites, distinct
+multi-process AppInstance ownership, helper processes, streams, user threads,
+synchronization, mixed-load pressure, and final qualification remain open. The
+dynamic Image envelope is a bounded executable staging mechanism; it is not
+process VM and does not imply PIE or ASLR support. See `PROGRESS.md` for
+measured receipts.
 
 ## Work plan
 
@@ -156,8 +159,11 @@ does not imply PIE or ASLR support. See `PROGRESS.md` for measured receipts.
   least three simultaneous windows. **Status:** window-level production
   ownership and the three-window installed APB1 guest proof pass (ADR-0097);
   the broker's larger `AppInstance`/multi-process model remains open.
-- Add headless primary instances and allowlisted helpers with explicit grants,
-  wait/reap/terminate policy, status, crash handling, and manager-death cleanup.
+- **Status:** a signed headless primary launch with explicit attenuated
+  Notification authority and exact Process-cap wait/reap is implemented and
+  guest-proved (ADR-0098). Add allowlisted helpers with explicit grants, child
+  status, terminate policy, crash handling, instance-group cleanup, and
+  manager-death policy.
 
 ### D. Streams
 
