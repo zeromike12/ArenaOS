@@ -6,8 +6,8 @@ extern crate alloc;
 use alloc::alloc::{alloc, dealloc};
 use arena_lib::abi::{
     CAP_SLOTS, RIGHTS_DESTROY as ABI_RIGHT_DESTROY, RIGHTS_READ as ABI_RIGHT_READ, SYS_CAP_COPY,
-    SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_PROC_FINISH, SYS_PROC_LIVE, SYS_TIMER_ARM, SYS_TLS_SET,
-    SYS_WAIT, syscall1, syscall2, syscall3, syscall6,
+    SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_CAP_OCCUPIED, SYS_PROC_FINISH, SYS_PROC_LIVE,
+    SYS_TIMER_ARM, SYS_TLS_SET, SYS_WAIT, syscall1, syscall2, syscall3, syscall6,
 };
 use arena_runtime::{
     capabilities::{Error as CapabilityError, HeldCapability},
@@ -312,9 +312,23 @@ fn process_group_proof() -> bool {
         Ok(child) => child.diagnostic_pid(),
         Err(_) => return false,
     };
-    if pid < CAP_SLOTS as u64
-        || group.can_spawn()
-        || unsafe { syscall1(SYS_PROC_LIVE, pid) } >= 0
+    // PIDs are descriptive values, not capability slots, and may numerically
+    // overlap this 128-slot table. Probe PID-as-slot only when that slot is
+    // empty; if occupied, it names an actual held capability and must never be
+    // passed to destructive PROC_FINISH as a supposed bare-PID negative.
+    if pid < CAP_SLOTS as u64 {
+        match unsafe { syscall6(SYS_CAP_OCCUPIED, pid, 0, 0, 0, 0, 0) } {
+            0 => {
+                if unsafe { syscall1(SYS_PROC_LIVE, pid) } >= 0
+                    || unsafe { syscall2(SYS_PROC_FINISH, pid, 0) } >= 0
+                {
+                    return false;
+                }
+            }
+            1 => {}
+            _ => return false,
+        }
+    } else if unsafe { syscall1(SYS_PROC_LIVE, pid) } >= 0
         || unsafe { syscall2(SYS_PROC_FINISH, pid, 0) } >= 0
     {
         return false;

@@ -244,22 +244,22 @@ fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), 
             slot: 1,
             role: CapabilityRole::Other,
             kind: CAP_KIND_BADGED_ENDPOINT,
-            rights: (RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY) as u32,
+            rights: RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY,
         },
         CapabilityDescriptor {
             slot: 2,
             role: CapabilityRole::Other,
             kind: CAP_KIND_SHARED_REGION,
-            rights: (RIGHT_READ | RIGHT_WRITE | RIGHT_COPY) as u32,
+            rights: RIGHT_READ | RIGHT_WRITE | RIGHT_COPY,
         },
         CapabilityDescriptor {
             slot: 3,
             role: CapabilityRole::Other,
             kind: CAP_KIND_NOTIFICATION,
             rights: if kind == apps::FILES {
-                (RIGHT_READ | RIGHT_WRITE | RIGHT_COPY) as u32
+                RIGHT_READ | RIGHT_WRITE | RIGHT_COPY
             } else {
-                (RIGHT_READ | RIGHT_WRITE) as u32
+                RIGHT_READ | RIGHT_WRITE
             },
         },
     ];
@@ -275,12 +275,12 @@ fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), 
             if cap.slot == 4
                 && cap.role == CapabilityRole::Other
                 && cap.kind == CAP_KIND_MEMORY_POOL
-                && cap.rights == RIGHT_READ as u32 => {}
+                && cap.rights == RIGHT_READ => {}
         (apps::TERMINAL | apps::FILES | apps::EDITOR, 4, Some(cap))
             if cap.slot == 4
                 && cap.role == CapabilityRole::Other
                 && cap.kind == CAP_KIND_BADGED_ENDPOINT
-                && cap.rights == (RIGHT_WRITE | RIGHT_COPY) as u32 => {}
+                && cap.rights == (RIGHT_WRITE | RIGHT_COPY) => {}
         (apps::TERMINAL | apps::FILES | apps::EDITOR, 3, None) => {}
         (apps::SETTINGS | apps::GALLERY, 3, None) => {}
         _ => return Err(-2),

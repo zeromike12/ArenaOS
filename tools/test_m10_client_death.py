@@ -23,8 +23,9 @@ def workflow():
         d.launch(5,'gallery',1);d.q.key('g')
         d.wait(lambda:d.serial().count('[desktop] application retired:')==1,'dead ordinary Gallery Process not retired')
         # One live session (ADR-0075): record, Process, shared + snapshot
-        # regions, their 939 pages, three maps, two broker caps.
-        d.wait(lambda:samples(d)[-1][1:]==(base[1]+1,base[2]+1,base[3]+2,base[4]+session_pages(d),base[5]+3,base[6]+2),'client death did not clean exact shared/cap/process state')
+        # regions, their 939 pages, three maps, and a Process cap. This test
+        # uses an AFS2-free disk, so there is no filesd lineage-head cap.
+        d.wait(lambda:samples(d)[-1][1:]==(base[1]+1,base[2]+1,base[3]+2,base[4]+session_pages(d),base[5]+3,base[6]+1),'client death did not clean exact shared/cap/process state')
         d.shot('sibling-preserved',lambda p:crop(p,100,110,300,180)==crop(terminal,100,110,300,180))
         d.q.type_text('echo alive\r',gap_s=.04)
         d.shot('sibling-input',lambda p:crop(p,90,164,290,28)!=crop(terminal,90,164,290,28))

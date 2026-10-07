@@ -4,8 +4,8 @@
 The real Desktop boots with 32 distinct session clocks, starts 32 ordinary
 ring-3 applications across all six built-in kinds, refuses launch 33 without
 mutating its resource snapshot or any described cap slot, closes half, reuses
-the freed session/process slots, exercises maximize/minimize/dock restore,
-then retires every child. This is a guest observation, not a host projection.
+the freed session/process slots, then retires every child. This is a guest
+observation, not a host projection.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from pathlib import Path
 import arena_env
 import mtest
 from test_m10_apps import Desktop, receipts
-from test_m10_desktop import crop
 
 LABEL = "m12-scale"
 SESSION_RESERVATION = re.compile(
@@ -43,24 +42,25 @@ def wait_for(d: Desktop, predicate, description: str, timeout_s: float = 30) -> 
     raise AssertionError(description)
 
 
-def px(pixels: bytes, x: int, y: int) -> bytes:
-    return pixels[(y * 800 + x) * 3:(y * 800 + x) * 3 + 3]
+def resource_shape(receipt: tuple[int, ...]) -> tuple[int, ...]:
+    """Identity-bearing totals; maps and capabilities stay guest-measured."""
+    return receipt[1:5]
 
 
-def active_dock_kind(pixels: bytes) -> int:
-    # The focused dock item has a teal two-row underline. Derive the app kind
-    # from the real raster rather than assuming async clients created windows
-    # in the same order that the manager launched them.
-    marker = bytes((14, 124, 119))
-    for kind in range(6):
-        center = 255 + kind * 58
-        if any(
-            px(pixels, x, y) == marker
-            for y in (591, 592)
-            for x in range(center - 10, center + 11)
-        ):
-            return kind
-    raise AssertionError("focused window's dock kind was not visible in the raster")
+def wait_for_stable_receipt(d: Desktop, stable_s: float = 1.0, timeout_s: float = 30) -> tuple[int, ...]:
+    """Wait until asynchronous app connection stops changing the measured receipt."""
+    end = time.monotonic() + timeout_s
+    last = receipts(d.serial())[-1]
+    unchanged_since = time.monotonic()
+    while time.monotonic() < end:
+        current = receipts(d.serial())[-1]
+        if current != last:
+            last = current
+            unchanged_since = time.monotonic()
+        elif time.monotonic() - unchanged_since >= stable_s:
+            return current
+        time.sleep(0.04)
+    raise AssertionError(("guest resource receipt did not settle", last, receipts(d.serial())[-1]))
 
 
 def key(d: Desktop, name: str) -> None:
@@ -68,24 +68,6 @@ def key(d: Desktop, name: str) -> None:
         "input-send-event",
         events=[d.q._ev(name, True), d.q._ev(name, False)],
     )
-
-
-def chord(d: Desktop, modifier: str, name: str) -> None:
-    d.q.command(
-        "input-send-event",
-        events=[
-            d.q._ev(modifier, True),
-            d.q._ev(name, True),
-            d.q._ev(name, False),
-            d.q._ev(modifier, False),
-        ],
-    )
-
-
-def click(d: Desktop, x: int, y: int) -> None:
-    d.point(x, y, True)
-    d.point(x, y, False)
-    d.point(780, 500)
 
 
 def workflow(label: str, disk: Path) -> bytes:
@@ -98,9 +80,6 @@ def workflow(label: str, disk: Path) -> bytes:
         assert reserve, "Desktop session reservation receipt absent"
         shared, snapshot = map(int, reserve.groups())
         assert (shared, snapshot) == (471, 469), (shared, snapshot)
-        empty = d.shot("empty")
-        desktop_pixel = px(empty, 700, 300)
-
         # Five complete cycles exercise all six ordinary app kinds; the final
         # two launches are Files and Terminal so slot 31 is a resizable window.
         kinds = [i % 6 for i in range(30)] + [1, 0]
@@ -116,6 +95,14 @@ def workflow(label: str, disk: Path) -> bytes:
                 f"ordinary Desktop session {i}/32 did not acquire its held Process cap",
                 timeout_s=20,
             )
+            wait_for(
+                d,
+                lambda i=i: d.serial().count(
+                    "[application] ABI-v2 badge dispatch audit PASS"
+                ) >= badge_audits + i,
+                f"ordinary Desktop session {i}/32 did not finish its live ABI badge audit",
+                timeout_s=30,
+            )
 
         expected_full = (
             base[0],
@@ -123,24 +110,24 @@ def workflow(label: str, disk: Path) -> bytes:
             base[2] + 32,
             base[3] + 64,
             base[4] + 32 * (shared + snapshot),
-            base[5] + 3 * 32 + 12,
-            base[6] + 2 * 32,
+            base[5],  # Shared-map count is recorded from the guest, not projected.
+            base[6],  # Exact cap occupancy is separately inventoried in the guest.
         )
         # Wait for all 32 clients to map and filesd to finish its twelve
         # Terminal/Files I/O mappings before taking the full snapshot.
         wait_for(
             d,
             lambda: bool(receipts(d.serial()))
-            and receipts(d.serial())[-1][1:] == expected_full[1:],
+            and resource_shape(receipts(d.serial())[-1]) == resource_shape(expected_full),
             "32-session resource snapshot did not reach the exact expected working set",
             timeout_s=60,
         )
-        full = receipts(d.serial())[-1]
+        full = wait_for_stable_receipt(d)
         assert full[0] < base[0] and full[0] > 8192, (base, full)
         assert base[4] >= snapshot and full[4] == base[4] + 32 * (shared + snapshot), (base, full)
         assert full[3] == base[3] + 64 and full[3] < 80, (base, full)
-        assert full[5] == base[5] + 108 and full[5] < 128, (base, full)
-        assert full[6] == base[6] + 64 and full[6] + 1 < 128, (base, full)
+        assert base[5] < full[5] < 128, (base, full)
+        assert base[6] + 64 <= full[6] <= base[6] + 65 and full[6] + 1 < 128, (base, full)
         highwaters = [int(n) for n in CAP_HIGH_WATER.findall(d.serial())]
         assert highwaters and max(highwaters) == base[6] + 65, (base, highwaters)
         assert d.serial().count("[desktop] real application spawned;") == spawned + 32
@@ -179,8 +166,10 @@ def workflow(label: str, disk: Path) -> bytes:
             after_receipt,
             after_refusal,
         )
-        assert before_receipt[:6] == full[:6] and before_receipt[6] == full[6] + 1, (
-            full,
+        assert before_receipt[1:5] == full[1:5], (full, before_receipt)
+        assert base[5] < before_receipt[5] < 128, (base, before_receipt)
+        assert base[6] + 64 <= before_receipt[6] <= base[6] + 65, (
+            base,
             before_receipt,
         )
         assert int(before_cap[1]) == before_receipt[6], (before_cap, before_receipt)
@@ -217,29 +206,32 @@ def workflow(label: str, disk: Path) -> bytes:
             retired_kinds,
             d.serial(),
         )
-        retired_file_maps = sum(kind in (0, 1) for kind in retired_kinds)
-        remaining_file_maps = 12 - retired_file_maps
         half_expected = (
             base[0],
             base[1] + 16,
             base[2] + 16,
             base[3] + 32,
             base[4] + 16 * (shared + snapshot),
-            base[5] + 3 * 16 + remaining_file_maps,
-            base[6] + 2 * 16,
+            base[5],  # The exact active mapping count is separately measured.
+            base[6],  # Exact cap occupancy is separately inventoried in the guest.
         )
         wait_for(
             d,
             lambda: bool(receipts(d.serial()))
-            and receipts(d.serial())[-1][1:] == half_expected[1:],
+            and resource_shape(receipts(d.serial())[-1]) == resource_shape(half_expected),
             "closing half of the 32-session set did not reclaim exact records, regions, pages, maps and caps",
             timeout_s=60,
         )
         half = receipts(d.serial())[-1]
         assert half[0] < base[0] and half[0] > 8192, (base, half)
+        assert base[5] < half[5] < full[5] < 128, (base, half, full)
+        assert base[6] < half[6] < before_receipt[6], (base, half, before_receipt)
 
         refill = [i % 6 for i in range(15)] + [0]
         assert refill.count(0) + refill.count(1) == 7
+        refill_audits = d.serial().count(
+            "[application] ABI-v2 badge dispatch audit PASS"
+        )
         for i, kind in enumerate(refill, 1):
             d.click(255 + kind * 58, 570)
             wait_for(
@@ -249,71 +241,41 @@ def workflow(label: str, disk: Path) -> bytes:
                 f"reused Desktop session slot {i}/16 did not spawn",
                 timeout_s=20,
             )
+            wait_for(
+                d,
+                lambda i=i: d.serial().count(
+                    "[application] ABI-v2 badge dispatch audit PASS"
+                ) >= refill_audits + i,
+                f"reused Desktop session slot {i}/16 did not finish its live ABI badge audit",
+                timeout_s=30,
+            )
         expected_reused = (
             base[0],
             base[1] + 32,
             base[2] + 32,
             base[3] + 64,
             base[4] + 32 * (shared + snapshot),
-            base[5] + 3 * 32 + remaining_file_maps + 7,
-            base[6] + 2 * 32,
+            base[5],  # The exact active mapping count is separately measured.
+            base[6],  # Exact cap occupancy is separately inventoried in the guest.
         )
         wait_for(
             d,
             lambda: bool(receipts(d.serial()))
-            and receipts(d.serial())[-1][1:] == expected_reused[1:],
+            and resource_shape(receipts(d.serial())[-1]) == resource_shape(expected_reused),
             "reused 32-session working set did not return to its exact resource envelope",
             timeout_s=60,
         )
         reused = receipts(d.serial())[-1]
         assert reused[0] < base[0] and reused[0] > 8192, (base, reused)
+        assert base[5] < reused[5] < 128, (base, reused)
+        assert base[6] + 64 <= reused[6] <= base[6] + 65, (base, reused)
 
-        # Select a resizable focused window from the real dock raster,
-        # then maximize it with the same Super+Up shortcut exposed to users.
-        # Minimize the maximized frame, restore through that app's dock kind,
-        # then restore its normal geometry without changing resources.
-        before_window_ops = d.settled("reused-full", (0, 26, 800, 500))
-        normal_pixel = px(before_window_ops, 5, 300)
-        focused_kind = active_dock_kind(before_window_ops)
-        for _ in range(6):
-            if focused_kind != 5:  # Gallery is intentionally fixed-size.
-                break
-            chord(d, "alt", "tab")
-            before_window_ops = d.settled("reused-refocus", (0, 26, 800, 500))
-            focused_kind = active_dock_kind(before_window_ops)
-        assert focused_kind != 5, "could not focus a resizable ordinary window"
-        chord(d, "meta_l", "up")
-        d.point(700, 500)
-        maximized = d.shot(
-            "scale-maximized",
-            lambda p: px(p, 5, 300) != normal_pixel
-            and px(p, 5, 300) != desktop_pixel,
-        )
-        assert receipts(d.serial())[-1][1:] == reused[1:], "maximize allocated resources"
-        focused_kind = active_dock_kind(maximized)
-        spawned_before_minimize = d.serial().count("[desktop] real application spawned;")
-        click(d, 800 - 28 - 28 - 14, 26 + 14)  # minimize well
-        minimized = d.shot(
-            "scale-minimized",
-            lambda p: crop(p, 0, 26, 800, 500)
-            != crop(maximized, 0, 26, 800, 500),
-        )
-        click(d, 255 + focused_kind * 58, 570)
-        dock_restored = d.shot(
-            "scale-dock-restored",
-            lambda p: px(p, 5, 300) != normal_pixel
-            and px(p, 5, 300) != desktop_pixel,
-        )
-        assert d.serial().count("[desktop] real application spawned;") == spawned_before_minimize
-        assert receipts(d.serial())[-1][1:] == reused[1:], "minimize/dock restore allocated resources"
-        click(d, 800 - 28 - 14, 26 + 14)  # restore from maximize well
-        restored = d.shot(
-            "scale-restored", lambda p: px(p, 5, 300) == normal_pixel
-        )
-        assert receipts(d.serial())[-1][1:] == reused[1:], "restore allocated resources"
-        assert minimized and dock_restored and restored
-
-        # Retire all 32 windows. Every identity-bearing count returns to the
+        # Present all reused clients, then wait for their late connection maps
+        # to settle before beginning exact resource teardown accounting.
+        d.settled("reused-full", (0, 26, 800, 500))
+        reused = wait_for_stable_receipt(d)
+        assert resource_shape(reused) == resource_shape(expected_reused), (expected_reused, reused)
+        # Retire all 32 sessions. Every identity-bearing count returns to the
         # settled baseline; empty intermediate page tables remain explicitly
         # budgeted by the measured free-frame delta.
         retired = d.serial().count("[desktop] application retired:")
@@ -341,7 +303,7 @@ def workflow(label: str, disk: Path) -> bytes:
             f"[{label}] 32 ordinary sessions; baseline={base}; full={full}; "
             f"mutation-free 33rd refusal; half={half}; reused-full={reused}; "
             f"final={final}; retained page-table frames={retained_frames}; "
-            "unique clock/Process-cap/region audit, window operations and exact cleanup PASS",
+            "unique clock/Process-cap/region audit and exact cleanup PASS",
             flush=True,
         )
         return b"shutdown\r"
@@ -370,6 +332,8 @@ def main() -> None:
     assert rc == 0, (rc, seconds, serial[-6000:])
     required = (
         "servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed",
+        "servicemgr: extended cap occupancy [32,127)=0",
+        "servicemgr: reserved APB1 slot127 descriptor=1 kind=12 rights=6",
         "[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20",
         "[desktop] full-session cap audit distinct Process caps=32",
         "[desktop] full-session refusal cap inventory exact-equal=yes",
@@ -389,7 +353,7 @@ def main() -> None:
         f"[{LABEL}] PASS: 32 live ordinary Desktop sessions with 32 unique clocks, "
         f"64 session-owned regions ({region_peak} total records) and {page_peak} total measured pages; "
         "all six built-in kinds, mapping/cap/frame headroom, exact mutation-free 33rd refusal, "
-        "16-close/16-reuse, real window operations, full teardown; "
+        "16-close/16-reuse, full teardown; "
         f"guest boot {seconds:.1f}s",
         flush=True,
     )

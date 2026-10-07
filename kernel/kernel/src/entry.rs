@@ -803,14 +803,14 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // no child receives it before packaged's readiness proof.
     if let (Some(eid), Some(_package)) = (filesd_eid, package_root) {
         use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_WRITE as W};
-        let generation = crate::ipc::endpoint_generation(eid)
-            .unwrap_or_else(|| crate::halt::halt_machine("filesd endpoint vanished before install handoff"));
-        let eid16 = u16::try_from(eid)
-            .unwrap_or_else(|_| crate::halt::halt_machine("filesd endpoint index exceeds badge ABI"));
+        let generation = crate::ipc::endpoint_generation(eid).unwrap_or_else(|| {
+            crate::halt::halt_machine("filesd endpoint vanished before install handoff")
+        });
+        let eid16 = u16::try_from(eid).unwrap_or_else(|_| {
+            crate::halt::halt_machine("filesd endpoint index exceeds badge ABI")
+        });
         crate::sync::without_interrupts(|| {
-            if crate::cap::slot_occupied(manager_pid, MGR_SLOT_APB1_INSTALL_AUTH)
-                != Some(false)
-            {
+            if crate::cap::slot_occupied(manager_pid, MGR_SLOT_APB1_INSTALL_AUTH) != Some(false) {
                 crate::halt::halt_machine("servicemgr: reserved APB1 slot127 occupied");
             }
             crate::cap::issue(

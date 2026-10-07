@@ -104,9 +104,8 @@ references only; the held Process capability remains the kernel authority.
 
 The protected Desktop process manager now uses `ProcessGroup` for its real
 application children and performs liveness and retirement through group
-handles, preserving the existing explicit launch grants and notification-as-
-wake-hint rule. The integration is bounded by today's twelve-window/session
-policy and does not yet meet Phase 12's 32-window, installed-app, or headless-
-helper targets. Trusted helper allowlists, startup handoff, parent-death and
-restart behavior, stream/file wrappers, multi-thread synchronization, and
-unauthorized-request proofs remain open.
+handles, preserving explicit launch grants and notification-as-wake-hint
+semantics. Closeout guest proofs qualify 32 built-in one-window sessions and
+the mixed signed-dynamic lifecycle regressions. Installed-app registry launch,
+multi-window-per-application behavior, headless helpers, parent-death policy,
+streams, and multithreaded synchronization remain open for Phase 13.

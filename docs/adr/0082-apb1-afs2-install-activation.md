@@ -1,6 +1,6 @@
 # ADR-0082 — APB1 AFS2 staged install and immutable activation
 
-**Status: Accepted for Phase 12 (service integration and guest qualification remain open).**
+**Status: Accepted and guest-qualified for the bounded Phase-12 APB1 install path; boot-integrated installed-app registry and launch remain deferred.**
 
 **Date:** 2026-10-06. **Milestone:** Phase 12, APB1 installation.
 

@@ -1,7 +1,8 @@
 # ADR-0090 — Badge-authenticated Desktop application sessions
 
-**Status:** Accepted for Phase 12; built-in ABI-v2 integration implemented,
-M12 guest qualification pending.
+**Status:** Accepted and guest-qualified for built-in ABI-v2 sessions through
+32-session capacity and affected M10/M11 regressions; multi-window-per-app and
+installed-app launch remain deferred.
 **Date:** 2026-10-06.
 **Related decisions:** ADR-0074, ADR-0083, ADR-0086, ADR-0087, ADR-0088,
 ADR-0089.
@@ -74,8 +75,9 @@ userspace lifecycle model and Desktop's 32 live session rows. The v2 launcher
 writes the exact selected row, never `row % 16`; its nonzero generation changes
 when a row is reused. The startup slot is not a window handle or kernel process
 slot, and neither startup field participates in IPC authentication. The window
-table remains separately bounded; final multi-window-per-AppInstance behavior
-is still a Phase-12 gate.
+table remains separately bounded. Production currently binds one built-in
+process/session to one ordinary window; multi-window-per-application behavior
+is deferred to Phase 13.
 
 ## Security and compatibility properties
 
@@ -96,16 +98,15 @@ is still a Phase-12 gate.
   selected only by the existing trusted launch branch. A nonzero badge cannot
   fall back to it.
 
-## Evidence and remaining qualification
+## Evidence and remaining work
 
 The dependency-light startup codec, `arena-runtime`, Desktop, and built-in
-application are type-checked and linked for `x86_64-unknown-none`; the startup
-and runtime host suites pass. The production guest must still prove that all
-32 built-in sessions use unique exact startup slots and badges, that the
-caller-word and wrong-cap audits pass for every client, and that 33rd-launch
-refusal, teardown, dynamic-launch, and affected Phase-11 regressions remain
-clean on the same artifact. Until those targeted M12/affected regressions
-pass, this integration is implemented but not qualified.
+application are type-checked and linked for `x86_64-unknown-none`; startup and
+runtime host suites pass. The M12 guest checks 32 live sessions, exact startup
+slot/badge audits, 33rd-launch refusal, slot reuse, and teardown. M10/M11
+guest regressions cover dynamic launch, client/service death, Files authority,
+and window behavior. Remaining work is multi-window-per-application and
+installed-app launcher integration.
 
 ## Consequences
 
@@ -114,6 +115,6 @@ BadgedEndpoint, while surface publication remains a separate explicitly
 inherited SharedRegion. The protocol does not grant file authority by name,
 change the legacy dispatcher, add Linux/POSIX behavior to the kernel, or
 replace the future installed-app registry and lifecycle manager. The current
-Desktop still maps one built-in process/session to one ordinary window; true
-multiple-windows-per-process, headless helper lifecycle, signed-app launch,
-and full Phase-12 capacity qualification remain open.
+Desktop still maps one built-in process/session to one ordinary window. True
+multiple-windows-per-process, headless helper lifecycle, and signed installed-
+app launch remain open for Phase 13.

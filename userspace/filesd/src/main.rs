@@ -471,13 +471,7 @@ fn apb1_install_status(error: InstallError) -> u64 {
 /// R_INSTALL badge. Its request bytes are raw bounded APB1 fields, not the
 /// legacy filesd Request format. `landed` must be an exact File capability
 /// from this same filesd endpoint on every operation.
-fn handle_apb1(
-    call: u64,
-    version: u64,
-    badge: u32,
-    landed: u64,
-    bytes: &[u8; BYTES],
-) -> Reply {
+fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BYTES]) -> Reply {
     if badge != wire::APB1_INSTALL_BADGE {
         return reply(S_DENIED, 0);
     }
@@ -530,9 +524,7 @@ fn handle_apb1(
                 Err(error) => return reply(apb1_bundle_status(error), 0),
             };
             let mut result = reply(S_OK, verified.manifest().version());
-            result
-                .bytes[..32]
-                .copy_from_slice(verified.manifest().package_id());
+            result.bytes[..32].copy_from_slice(verified.manifest().package_id());
             result.bytes[32..].copy_from_slice(verified.bundle_digest());
             result
         }
@@ -545,11 +537,8 @@ fn handle_apb1(
             let Some((applications_root, staging_root)) = (unsafe { APB1_ROOTS }) else {
                 return reply(S_OFFLINE, 0);
             };
-            let authorization = InstallAuthorization::new(
-                claim,
-                request.trusted_key,
-                request.bundle_digest,
-            );
+            let authorization =
+                InstallAuthorization::new(claim, request.trusted_key, request.bundle_digest);
             let volume = unsafe { &mut *(&raw mut VOL) };
             let verifier = unsafe { &mut *(&raw mut APB1_VERIFIER) };
             let scratch = unsafe { &mut *(&raw mut APB1_INSTALL_WORKSPACE) };

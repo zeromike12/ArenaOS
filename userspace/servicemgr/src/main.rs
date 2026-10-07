@@ -8,7 +8,7 @@
 
 use arena_servicemgr::inventory::{self, NamedSlot, Probe, SyscallProbe};
 use arena_servicemgr::manifest::{self, Dependency, External, Key, Kind, Request, Service, Step};
-use arena_servicemgr::readiness::Gate;
+use arena_servicemgr::readiness::{self, Gate};
 use arena_servicemgr::restart::{Refusal as RestartRefusal, Restart};
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -245,14 +245,15 @@ fn wait_one(slot: u8, badge: u64) -> Result<(), ()> {
         if observed < 0 {
             return Err(());
         }
-        let mut observed = observed as u64;
+        let observed = observed as u64;
         // The kernel may publish the out-of-band APB1 slot while startup is
         // still waiting for its exact driver/stack badge. Preserve that wake
         // for package::State, but never let it satisfy or poison this Gate;
         // the held cap is re-described before any forwarding.
-        if observed & MGR_BADGE_APB1_INSTALL_AUTH != 0 {
+        let (observed, apb1_hint) =
+            readiness::separate_sideband(observed, MGR_BADGE_APB1_INSTALL_AUTH);
+        if apb1_hint {
             APB1_INSTALL_HINT_PENDING.store(true, Ordering::Release);
-            observed &= !MGR_BADGE_APB1_INSTALL_AUTH;
             if observed == 0 {
                 continue;
             }

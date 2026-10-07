@@ -12,6 +12,7 @@ const IMAGE: u8 = 17;
 const ENDPOINT: u8 = 18;
 const MARKER: u8 = 19;
 const INSTALL_AUTH: u8 = 127;
+const _: () = assert!(CAP_SLOTS == 128);
 const _: () = assert!(INSTALL_AUTH as usize == CAP_SLOTS - 1);
 const BADGED_ENDPOINT_KIND: u64 = 12;
 const REGISTRAR: u8 = 20;
@@ -115,6 +116,18 @@ fn observed_caps(label: &str) {
         o.str(label);
         o.str("=");
         o.u64(count);
+        o.crlf();
+    });
+    let mut upper = 0u64;
+    for slot in 32..INSTALL_AUTH {
+        let mut d = [0u64; 3];
+        if unsafe { syscall2(SYS_CAP_DESCRIBE, slot as u64, d.as_mut_ptr() as u64) } == 0 {
+            upper += 1;
+        }
+    }
+    log_line(|o| {
+        o.str("servicemgr: extended cap occupancy [32,127)=");
+        o.u64(upper);
         o.crlf();
     });
     let mut install = [0u64; 3];
@@ -427,6 +440,72 @@ fn probe(receiver: Child) -> Result<(), Option<Child>> {
     finish(worker).map_err(|_| Some(worker))?;
     Ok(())
 }
+
+/// Exercise the actual packaged receiver with a hostile handoff shape.
+/// The wrong-kind Notification is transferred directly from an existing
+/// held manager slot, so the sender creates no untracked temporary cap.
+/// Neither numeric slot 127 nor a descriptor word is used as authority.
+fn expect_handoff_denied(receiver: Child, source: u8) -> Result<(u64, u64), ()> {
+    if alive(receiver) != Ok(true) {
+        return Err(());
+    }
+    let source_desc = SyscallProbe.describe(source).map_err(|_| ())?;
+    if source_desc.rights & RIGHTS_COPY == 0 {
+        return Err(());
+    }
+    let mut message = [0u8; 64];
+    let mut out = [0, 0, CAP_NONE];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            ENDPOINT as u64,
+            PKG_OP_INSTALL_AUTH_HANDOFF,
+            source_desc.object,
+            source as u64,
+            out.as_mut_ptr() as u64,
+            message.as_mut_ptr() as u64,
+        )
+    };
+    if out[2] != CAP_NONE {
+        let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+    }
+    if rc != 0 || out != [PKG_DENY, 0, CAP_NONE] || SyscallProbe.describe(source) != Ok(source_desc)
+    {
+        log_line(|o| {
+            o.str("servicemgr: APB1 refusal probe failed kind=");
+            o.u64(source_desc.kind);
+            o.str(" rights=");
+            o.u64(source_desc.rights);
+            o.str(" rc=");
+            o.i64(rc);
+            o.str(" reply=");
+            o.u64(out[0]);
+            o.str("/");
+            o.u64(out[1]);
+            o.str(" cap=");
+            o.u64(out[2]);
+            o.crlf();
+        });
+        return Err(());
+    }
+    Ok((source_desc.kind, source_desc.rights))
+}
+
+fn prove_handoff_refusals(receiver: Child) -> Result<(), ()> {
+    let wrong_kind = expect_handoff_denied(receiver, MARKER)?;
+    if wrong_kind.0 == BADGED_ENDPOINT_KIND {
+        return Err(());
+    }
+    log_line(|o| {
+        o.str("servicemgr: APB1 wrong-kind handoff refused kind=");
+        o.u64(wrong_kind.0);
+        o.str(" rights=");
+        o.u64(wrong_kind.1);
+        o.crlf();
+    });
+    Ok(())
+}
+
 fn handoff_install_authority(receiver: Child) -> Result<bool, ()> {
     if alive(receiver) != Ok(true) {
         return Err(());
@@ -442,6 +521,11 @@ fn handoff_install_authority(receiver: Child) -> Result<bool, ()> {
     if authority.kind != BADGED_ENDPOINT_KIND || authority.rights != RIGHTS_WRITE | RIGHTS_COPY {
         return Err(());
     }
+    // Record the late authority only after the live held capability has been
+    // described and its exact kind/rights accepted. The historical low-32
+    // metric remains the same, while slot127 is separately visible.
+    observed_caps("apb1-authority-held");
+    prove_handoff_refusals(receiver)?;
     let mut message = [0u8; 64];
     let mut out = [0, 0, CAP_NONE];
     let rc = unsafe {
@@ -498,6 +582,7 @@ fn ready(step: Step) -> Result<(Child, bool), ()> {
 pub fn start() -> Result<State, ()> {
     let step = plan()?;
     let (receiver, install_handed_off) = ready(step)?;
+    observed_caps("packaged-ready");
     Ok(State {
         receiver,
         step,
@@ -1920,7 +2005,9 @@ impl State {
             match handoff_install_authority(self.receiver) {
                 Ok(true) => self.install_handed_off = true,
                 Ok(false) => {}
-                Err(()) => log("servicemgr: APB1 install handoff pending; receiver or authority not ready\r\n"),
+                Err(()) => log(
+                    "servicemgr: APB1 install handoff pending; receiver or authority not ready\r\n",
+                ),
             }
         }
         if !self.online || bits & MGR_BADGE_PKG_EXIT == 0 {

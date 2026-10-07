@@ -65,7 +65,10 @@ def region(disk):
 
 def expected(afs1_files):
     """The migration of exactly these AFS1 files."""
-    tree = {'/': None, '/System': None, '/System/imported-afs1': None,
+    # Phase 12 format-time infrastructure directories are present on every
+    # freshly formatted AFS2 volume, whether or not a package was installed.
+    tree = {'/': None, '/System': None, '/System/.apb1-staging': None,
+            '/System/Applications': None, '/System/imported-afs1': None,
             '/System/afs1-import-complete': b'', '/Users': None, '/Users/user': None,
             '/Users/user/Desktop': None, '/Users/user/Documents': None, '/Users/user/.Trash': None}
     for name, data in afs1_files.items():

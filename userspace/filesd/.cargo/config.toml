@@ -1,4 +1,10 @@
+[source.crates-io]
+replace-with = "arena-phase84-vendor"
+[source.arena-phase84-vendor]
+directory = "../../vendor/phase84"
+[net]
+offline = true
 [build]
 target = "x86_64-unknown-none"
 [target.x86_64-unknown-none]
-rustflags = ["-C", "link-arg=-Tfilesd.ld", "-C", "link-arg=-no-pie", "-C", "relocation-model=static"]
+rustflags = ["--cfg", "curve25519_dalek_backend=\"serial\"", "-C", "link-arg=-Tfilesd.ld", "-C", "link-arg=-no-pie", "-C", "relocation-model=static"]

@@ -8,6 +8,15 @@ from the Phase-12 request. The audit distinguishes product bounds from
 mechanism bounds and records known documentation/code discrepancies rather
 than silently choosing one.
 
+> **Closeout note:** This document is a historical source audit of the
+> Phase-11 base. Its source-bound tables describe that audit point, not the
+> final Phase-12 tree. For current capability limits, APB1 service integration,
+> and qualified scope, see [PLAN.md](PLAN.md),
+> [SERVICE-INTEGRATION-AUDIT.md](SERVICE-INTEGRATION-AUDIT.md), and
+> [FINAL-REPORT.md](FINAL-REPORT.md). Phase 12 raised the bounded Desktop and
+> capability capacity and integrated the APB1 filesd install path; this audit's
+> old limits are not current qualification results.
+
 ## Executive finding
 
 ArenaOS has a capable userspace desktop and sound capability primitives, but

@@ -1,6 +1,6 @@
 # ADR-0080 — Phase-12 application platform and ABI boundary
 
-**Status: Accepted for Phase 12 (implementation gates remain open).**
+**Status: Accepted; revised Phase-12 foundation scope is qualified by the closeout receipts. Installed-app maturity remains Phase 13; foreign ABI/Linux compatibility is deferred to a later dedicated phase.**
 **Date:** 2026-10-06. **Milestone:** Phase 12, application platform and ABI
 foundations. **Audit:** [`docs/phase12/ARCHITECTURE-AUDIT.md`](../phase12/ARCHITECTURE-AUDIT.md).
 

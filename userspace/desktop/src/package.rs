@@ -24,20 +24,14 @@ pub fn install_apb1(source_file: u64) -> Result<InstallReceipt, u64> {
     let mut package = [0u64; 3];
     let mut source = [0u64; 3];
     if source_file == CAP_NONE
-        || unsafe {
-            syscall2(
-                SYS_CAP_DESCRIBE,
-                ENDPOINT_SLOT,
-                package.as_mut_ptr() as u64,
-            )
-        } != 0
+        || unsafe { syscall2(SYS_CAP_DESCRIBE, ENDPOINT_SLOT, package.as_mut_ptr() as u64) } != 0
         || package[0] != 2
         || package[2] != RIGHTS_WRITE
         || unsafe { syscall2(SYS_CAP_DESCRIBE, source_file, source.as_mut_ptr() as u64) } != 0
         || source[0] != 12
         || source[2] & (RIGHTS_WRITE | RIGHTS_COPY) != RIGHTS_WRITE | RIGHTS_COPY
     {
-        return Err(-2);
+        return Err(PKG_DENY);
     }
 
     let mut request = [0u8; 64];

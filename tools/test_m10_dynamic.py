@@ -151,7 +151,10 @@ def main(esp=None):
             # Six sessions: shared + snapshot region each, three maps each.
             d.wait(lambda:samples(d)[-1][3:6]==(base[3]+12,base[4]+6*(shared+snapshot),base[5]+18),'mixed working set not fully mapped')
             mixed=samples(d)[-1]
-            assert mixed[1:3]==(base[1]+6,base[2]+6) and mixed[6]==base[6]+12,('mixed working-set counters',mixed)
+            # This fixture intentionally has no AFS2 volume, so each
+            # application contributes its held Process cap but no filesd
+            # lineage head. The separate AFS2 desktop proof accounts for two.
+            assert mixed[1:3]==(base[1]+6,base[2]+6) and mixed[6]==base[6]+6,('mixed working-set counters',mixed)
             # Six more builtins preserve the twelve-session mixed working-set
             # regression. M12 separately drives all 32 slots and the 33rd
             # mutation-free refusal.

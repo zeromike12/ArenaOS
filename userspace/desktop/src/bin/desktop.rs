@@ -1099,6 +1099,14 @@ fn desk_effect(e: arena_desktop::desk::Effect) {
                 desk_notice("FILESYSTEM SERVICE OFFLINE");
                 return;
             };
+            if arena_desktop::files::apb1_probe(USER_ROOT)
+                != Ok(arena_desktop::filesd_wire::S_DENIED)
+            {
+                log(b"[desktop] APB1 authority boundary FAILED: ordinary Filesd capability not denied\n");
+                desk_notice("PACKAGE AUTHORITY CHECK FAILED");
+                return;
+            }
+            log(b"[desktop] APB1 authority boundary: ordinary Filesd capability denied protected install\n");
             // The suffix only selects this affordance after the user's
             // explicit open action. Open the source via the broker's exact
             // read-only filesd capability; receiver-side APKG/signature and
@@ -2713,7 +2721,6 @@ extern "C" fn main() -> ! {
         let mut result = 0;
         let mut badge_rejected = false;
         let mut badge_bootstrap = false;
-        let mut defer_render = false;
         if badge != 0 {
             let sessions = unsafe { &*(&raw const SESSIONS) };
             let badges: [u32; LIMIT] = core::array::from_fn(|index| sessions[index].badge);
@@ -2764,13 +2771,18 @@ extern "C" fn main() -> ! {
                 badge_rejected = true;
             }
         }
-        defer_render = badge_bootstrap;
+        let mut defer_render = badge_bootstrap;
         transient_caps();
         if badge_rejected {
             // Mutation-free fail-closed path; the landed cap is dropped below.
         } else if badge_bootstrap {
             // The bounded startup reply was built from the badge-bound Session.
-        } else if badge == 0 && request[0] == 0 && request[1] == 0 {
+        } else if badge == 0
+            && request[0] == 0
+            && request[1] == 0
+            && description
+                .is_some_and(|d| d[0] == 10 && d[1] == expected[1] && d[2] & RIGHTS_READ != 0)
+        {
             if description
                 .is_some_and(|d| d[0] == 10 && d[1] == expected[1] && d[2] & RIGHTS_READ != 0)
             {

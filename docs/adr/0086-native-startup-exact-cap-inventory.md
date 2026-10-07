@@ -1,6 +1,6 @@
 # ADR-0086: Exact live-capability inventory at native entry
 
-Status: Accepted
+Status: Accepted; exact inventory is guest-qualified for the 128-slot process cap table.
 Date: 2026-10-05
 Authors: ArenaOS project / Phase 12
 

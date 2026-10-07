@@ -53,6 +53,33 @@ pub fn call(cap: u64, req: Request, lend: u64) -> Result<Reply, Status> {
     })
 }
 
+/// Diagnostic boundary proof used when the user explicitly opens an APB1
+/// bundle: an ordinary Filesd capability must be refused the protected
+/// install subprotocol even though it can read the selected file.
+pub fn apb1_probe(cap: u64) -> Result<u64, Status> {
+    let mut bytes = [0u8; BYTES];
+    let mut out = [0, 0, CAP_NONE];
+    let rc = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            cap,
+            wire::CALL_APB1_PROBE,
+            wire::CALL_APB1_ABI_V1,
+            CAP_NONE,
+            out.as_mut_ptr() as u64,
+            bytes.as_mut_ptr() as u64,
+        )
+    };
+    if rc != 0 {
+        return Err(wire::S_IO);
+    }
+    if out[2] != CAP_NONE {
+        let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+        return Err(wire::S_IO);
+    }
+    Ok(out[0])
+}
+
 fn describe(slot: u64) -> Option<[u64; 3]> {
     let mut d = [0u64; 3];
     (unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) } == 0).then_some(d)

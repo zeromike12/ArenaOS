@@ -124,15 +124,20 @@ def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE1
                 # Graphical input is routed independently of the serial shell.
                 guest.stdin.write(b'shutdown\r')
                 guest.stdin.flush()
-                rc = guest.wait(timeout=60)
+            rc = guest.wait(timeout=60)
             text = serial.read_text(errors='replace')
+            evidence = os.environ.get('ARENA_EXTRACTED_EVIDENCE')
+            if evidence:
+                target = Path(evidence).resolve(); target.mkdir(parents=True, exist_ok=True)
+                for p in (serial, image, receipt, tcp_log, dns_log, console_log):
+                    shutil.copyfile(p, target / p.name)
             if (rc != 0 or '[arena ERROR halt]' in text or 'PANIC' in text
                     or 'm7: RESULT PASS (2/2)' not in text
                     or 'm6: RESULT PASS (6/6)' not in text
                     or 'contest: PASS — the port carried bytes BOTH ways:' not in text
                     or 'contest: hello from ArenaOS' not in console_log.read_text(errors='replace')
                     # ADR-0075: twelve desktop clocks; the table is still exactly full.
-                    or 'servicemgr: full fixture notification budget 31/31; thirty-second refused' not in text
+                    or 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' not in text
                     or text.count('[desktop] real application spawned;') != launches
                     or text.count('[desktop] application retired:') != launches
                     or 'halting via UEFI ResetSystem(shutdown)' not in text
@@ -141,11 +146,6 @@ def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE1
                     or any(marker not in text for marker in extra_markers)):
                 raise RuntimeError(f'extracted image boot failed semantic gate: rc={rc}, '
                                    f'serial={serial}, dns={dns_log}, tcp={tcp_log}')
-            evidence = os.environ.get('ARENA_EXTRACTED_EVIDENCE')
-            if evidence:
-                target = Path(evidence).resolve(); target.mkdir(parents=True, exist_ok=True)
-                for p in (serial, image, receipt, tcp_log, dns_log, console_log):
-                    shutil.copyfile(p, target / p.name)
             prefix=f'EXTRACTED {label} PIXELS PASS' if qualified else f'UNQUALIFIED EXTRACTED {label} PREFLIGHT PASS'
             print(f'{prefix}: EFI SHA-256 {sha}; {receipt.read_text().strip()}')
         finally:

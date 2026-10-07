@@ -1,6 +1,6 @@
 # ADR-0083 — Native process startup ABI v2
 
-**Status: Accepted for Phase 12 (host codec, reusable entry gate, independent guest proof, and built-in ABI-v2 launcher integration implemented; targeted Desktop guest qualification remains open).**
+**Status: Accepted and guest-qualified for the built-in ABI-v2 startup path; installed-app registry launch, general VM, and user-thread lifecycle remain open.**
 
 **Date:** 2026-10-06. **Milestone:** Phase 12, native application launch. **Revision:** the descriptive instance-slot domain is 0..31, aligned with the accepted 32-entry manager/session envelope in ADR-0088.
 
@@ -161,7 +161,7 @@ POSIX, implicit inheritance, or ambient path semantics are introduced.
   kernel artifact; it verifies slot-0/slot-1 caps, the 4 KiB record, argv/env,
   entry/base, initial RSP/RFLAGS, four startup refusals, TLS address refusals
   and scheduler restoration, heap-slot collision preservation, and exact
-  resource teardown (6/6). The production built-in path now uses this codec
-  and reusable runtime, but Desktop badge/slot integration still requires the
-  targeted M12 guest and security regressions before qualification. The
-  installed-app registry and dynamic native-launch path remain separate gates.
+  resource teardown (6/6). The production built-in path uses this codec and
+  reusable runtime. The closeout M12 scale guest and affected M10/M11 guest
+  regressions qualify the 32-session badge/slot integration. Installed-app
+  registry launch and mature multi-window behavior remain separate gates.

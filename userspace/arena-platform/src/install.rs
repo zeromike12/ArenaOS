@@ -74,11 +74,7 @@ pub struct InstallAuthorization {
     pub bundle_digest: [u8; 32],
 }
 impl InstallAuthorization {
-    pub const fn new(
-        claim: BundleClaim,
-        trusted_key: [u8; 32],
-        bundle_digest: [u8; 32],
-    ) -> Self {
+    pub const fn new(claim: BundleClaim, trusted_key: [u8; 32], bundle_digest: [u8; 32]) -> Self {
         Self {
             claim,
             trusted_key,

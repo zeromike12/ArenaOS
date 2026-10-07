@@ -17,12 +17,7 @@ use crate::{
 /// resulting bundle. This operation only selects key material; it does not
 /// grant filesystem, launch, process, or document authority.
 pub fn select_key(chain: &Chain, claim: &BundleClaim) -> Result<[u8; 32], apkg::Error> {
-    apkg::apb1_select_key(
-        chain,
-        &claim.package_id,
-        &claim.signer_id,
-        claim.version,
-    )
+    apkg::apb1_select_key(chain, &claim.package_id, &claim.signer_id, claim.version)
 }
 
 /// Recheck policy after cryptographic verification. APB1's complete immutable
@@ -139,11 +134,7 @@ mod tests {
         chain.add(revoked).unwrap();
         assert!(chain.current.unwrap().is_revoked(&digest));
         assert_eq!(
-            check_claim_digest(
-                &chain,
-                &claim(package_id, subordinate_id, 7),
-                &digest,
-            ),
+            check_claim_digest(&chain, &claim(package_id, subordinate_id, 7), &digest,),
             Err(apkg::Error::Revoked)
         );
     }

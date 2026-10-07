@@ -1,102 +1,85 @@
-# APB1 service integration audit (Phase 12)
+# APB1 service integration audit (Phase 12 closeout)
 
-This is a source-derived boundary audit, not an accepted install protocol or a
-claim of guest integration. The code and accepted ADRs remain authoritative.
+This closeout update supersedes the pre-integration architecture snapshot below
+in the git history. It describes the implementation qualified by
+`tools/test_phase12_apb1_guest.py`; [ADR-0091](../adr/0091-apb1-filesd-install-handoff.md)
+and [FINAL-REPORT.md](FINAL-REPORT.md) are the current protocol and evidence
+records.
 
 ## Current service boundaries
 
 ### `packaged`
 
-- `userspace/packaged/src/main.rs` is the APKG v1 receiver, lifecycle journal,
-  and Image-registration service. It loads the bounded policy chain by scanning
-  the AFS1 namespace, then performs a full receiver scan before readiness and
-  rescans on requests.
-- It starts with exactly five child grants in slots 0–4: AFS1 endpoint/W,
-  package endpoint/R, diagnostic Notification/R, ImageRegistrar/W, and
-  lifecycle Notification/R. Startup rejects live caps in slots 5–31.
-- The request loop handles every landed cap with `take_diagnostic()` before
-  operation dispatch. That helper only accepts the service's expected
-  Notification marker, destroys the landed reference, and refuses other kinds.
-  Therefore a source-file capability cannot reach a new APB1 handler through
-  the current loop.
-- The service does not own the AFS2 `Volume`, `InstallWorkspace`, APB1 bundle
-  verifier, or installed registry. Its current exact five-grant spawn contract
-  must not be widened as an implementation shortcut.
+- `userspace/packaged/src/main.rs` retains APKG v1 policy and package-record
+  behavior. It starts with the same five explicit capabilities and performs
+  its existing full readiness scan before accepting the APB1 handoff.
+- The APB1 install-only `BadgedEndpoint` is received after readiness into
+  reserved slot 5. The receiver checks the endpoint identity, exact kind, and
+  exact `WRITE|COPY` rights before retaining it. It does not reinterpret
+  APKG v1 policy records as APB1 bundles.
+- A live IPC proof refuses a generic LIST request through the install-only
+  endpoint. A same-kind endpoint cap with extra `DESTROY` rights is refused by
+  the exact shape check and destroyed after the negative control.
 
 ### `servicemgr`
 
-- `userspace/servicemgr/src/package.rs` requests those five grants literally;
-  the child spawn still uses the existing five-cap limit.
-- The manager already has a trusted package-service client endpoint and
-  performs readiness/Process-cap lifecycle checks. It has no source-file cap
-  for a user's AFS2 object and no filesd install authority today.
-- A post-start explicit cap handoff is mechanically distinct from widening
-  `SYS_SPAWN`, but no handoff message, recipient slot, or authority has been
-  accepted or implemented.
+- `userspace/servicemgr/src/package.rs` preserves the historical low-32 cap
+  count, separately counts slots 32–126, and separately reports the descriptor
+  for slot 127. Compile-time assertions tie the table to 128 slots and slot 127
+  to the final valid index.
+- The manager checks that the packaged receiver is still live, checks that
+  slot 127 is occupied, and describes the exact held endpoint before
+  forwarding it. The numeric slot is a location, not authority.
+- `userspace/servicemgr/src/readiness.rs` removes the APB1 wake bit from the
+  strict readiness mask while preserving it as a sideband hint. The targeted
+  coalescing unit test proves that `NET|APB1` does not satisfy a `NET|RNG`
+  gate, an APB1-only wake does not reach the gate, and a later real RNG signal
+  is required. Production subsequently re-describes the live capability.
+- Package restart obtains a replacement receiver, completes the same strict
+  readiness proof, then re-establishes the handoff. The guest proof verifies
+  the restart path.
 
 ### `filesd` and AFS2
 
-- `userspace/filesd/src/main.rs` owns the one live `Volume<Blk>` and is the
-  natural transaction boundary for the APB1 host install core. It holds a
-  read-only AFS1 service endpoint for the one-shot import; AFS2 starts at
-  sector 16,384 and is 16,384 4 KiB blocks in the normal guest profile.
-- The only installed record is the kernel-minted `/Users/user` root, badge
-  record 1/generation 1, with `R_ALL`. Requests are relative to the exact
-  record object; names do not grant authority and `..` is not a filesystem
-  operation. `/System` has no ordinary caller record. The current boot path
-  creates `/System/imported-afs1`, but not yet `/System/Applications` or a
-  private APB1 staging root.
-- The AFS2 request dispatcher has no APB1 install or registry operation.
-  Neither a new generic filesystem right nor a path-based `/System` exception
-  is acceptable. Any future install path must use a separate exact receiver
-  badge/capability and dispatch only to a fixed protected target.
+- `userspace/filesd/src/main.rs` owns the live AFS2 Volume, protected
+  `/System/Applications` and private `/.apb1-staging` objects, and the APB1
+  install dispatch. An ordinary `/Users/user` File capability is denied that
+  private operation.
+- The source bundle crosses the boundary as an exact live filesd File
+  capability selected through the real Desktop affordance. The receiver
+  rechecks the landed capability and badge, requires the source-file rights,
+  verifies the signature and file records, stages bounded writes, verifies
+  durable readback, and activates by atomic rename.
+- The install badge grants only APB1 operations; it is not a normal filesystem
+  root. The guest attempts and observes denial of generic LIST through that
+  authority. The protected AFS2 result contains the signed record and all
+  payload files; staging is empty after activation.
+- Existing AFS1 content is preserved by the tested migration/install flow.
+  APKG v1 host/guest regressions remain separate and pass.
 
-## Host integration seam added
+## Guest evidence
 
-`arena-platform-core` now offers
-`install_with_policy_from_volume_file()`. It takes an internal AFS2 object ID,
-checks that the object is a regular file, and performs bounded random-access
-reads through the same `Volume` that stages and publishes the install. The
-implementation is safe Rust: the reader is called with the single `&mut
-Volume` in sequence, so it does not alias the transaction's volume borrow and
-does not buffer an archive (APB1 remains capped at 32 MiB and 4 KiB chunks).
-It preserves the existing claim/key/policy/digest binding, pre-mutation
-re-verification, durable readback, and atomic rename. The existing independent
-`BundleSource` API and APKG v1 bytes remain unchanged.
+`tools/test_phase12_apb1_guest.py` drives a signed APB1 fixture from the actual
+Desktop file icon, validates the installed signed record and payload bytes by
+reading the AFS2 image on the host, verifies ordinary Filesd and install-only
+scope refusals, exercises wrong-kind and wrong-rights controls, restarts
+`packaged`, verifies the exact slot-127 handoff again, checks that
+`[32,127)` remains separately accounted, and shuts down cleanly. The run and
+EFI hash are recorded in `FINAL-REPORT.md`.
 
-The public host-core function does not turn an object ID into authority. A
-guest receiver must first prove possession of a live same-filesd file
-capability, verify its badge against the held record, require `R_READ` and a
-regular file, then pass that record's exact object ID. It must separately
-possess the install-authority capability for the fixed protected roots.
+A boot without an available AFS2 install endpoint keeps slot 127 empty. The
+M12 scale boot records that empty descriptor before the late APB1 authority is
+available, then separately observes the held `kind=12 rights=6` capability.
+This preserves the historical low-32 metric while making reserved authority
+visible to qualification.
 
-## Unresolved design gate
+## Resource notes
 
-The persistent APKG v1 policy chain is currently verified by `packaged` from
-AFS1, while the AFS2 transaction lives in `filesd`. A source-file cap cannot
-cross the current `packaged` diagnostic-marker gate, and `filesd` does not
-currently reload the policy chain. The service contract must make the selected
-policy receiver explicit, preserve the five bootstrap grants, prevent caller
-metadata from becoming authority, fail closed on damaged/missing persistent
-policy state, and keep `/System` unavailable through ordinary file grants.
-
-No new operation number, install badge, extra bootstrap capability, AFS2
-namespace mutation, or guest-service patch has been accepted in this audit.
-The next architecture step must define that receiver-verified handoff and its
-RED tests before implementation.
-
-## Resource notes relevant to that decision
-
-- Kernel capability slots are 128 per process under Phase-12 ADR-0086; startup
-  identity remains 0–31 under ABI-0083. These are separate domains.
-- `filesd` has 256 record slots, a 16-record per-lineage quota, 24 watch slots
-  globally and four per lineage. Existing values are not install capacity.
-- Kernel endpoint/notification tables are 16/31 with queue depth 16; the M12
-  proof covers the 32-caller queue boundary, not new service endpoint demand.
-- The 32-session Desktop checkpoint is a single-process/single-window-per-
-  session proof. It does not qualify multi-window apps, APB1 installations, or
-  the static memory footprint of the proposed filesd installer workspaces.
-- The settled Phase-11 baseline receipt remains
-  `115127/15/15/1/469/2/23` in its documented order. No new frame, timer,
-  endpoint, notification, watch, or cap high-water was measured by this source
-  audit.
+- Capability spaces contain exactly 128 slots. The manager's legacy count
+  continues to inspect only `0..32`; the separate extended count covers
+  `32..127`, and slot 127 has its own exact descriptor receipt.
+- The kernel IPC endpoint/notification and filesd record/watch limits remain
+  independently bounded. The 32-session Desktop capacity proof does not imply
+  multi-window-per-application or general service scaling.
+- The 32-session resource high-water and exact teardown are reported in the
+  final qualification receipt; no limit is inferred from host model bounds.

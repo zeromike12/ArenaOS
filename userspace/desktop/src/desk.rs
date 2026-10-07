@@ -887,7 +887,9 @@ mod tests {
         let mut store = Mem::new();
         store.mkdir(b"Desktop").unwrap();
         store.create(b"Desktop/demo.apb1").unwrap();
-        store.write(b"Desktop/demo.apb1", 0, b"not a trusted signature").unwrap();
+        store
+            .write(b"Desktop/demo.apb1", 0, b"not a trusted signature")
+            .unwrap();
         let mut desk = Desk::new();
         desk.load(&mut store).unwrap();
         assert_eq!(

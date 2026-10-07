@@ -9,10 +9,10 @@ use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
 use abi::*;
-#[path = "../../installed.rs"]
-mod installed;
 #[path = "../../filesd_wire.rs"]
 mod filesd_wire;
+#[path = "../../installed.rs"]
+mod installed;
 
 const FS: u64 = 0;
 const SERVER: u64 = 1;
@@ -189,9 +189,14 @@ fn cap_occupancy() -> u64 {
 
 fn install_authority_held() -> bool {
     let mut d = [0u64; 3];
-    unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, d.as_mut_ptr() as u64) } == 0
-        && d[0] == 12
-        && d[2] == RIGHTS_WRITE | RIGHTS_COPY
+    let described = unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, d.as_mut_ptr() as u64) };
+    described == 0 && d[0] == 12 && d[2] == RIGHTS_WRITE | RIGHTS_COPY
+}
+
+fn install_authority_shape(slot: u64, endpoint_id: u64) -> bool {
+    let mut d = [0u64; 3];
+    let described = unsafe { syscall2(SYS_CAP_DESCRIBE, slot, d.as_mut_ptr() as u64) };
+    described == 0 && d[0] == 12 && d[1] == endpoint_id && d[2] == RIGHTS_WRITE | RIGHTS_COPY
 }
 
 /// The manager's late transfer is accepted only into reserved slot 5, with
@@ -205,12 +210,7 @@ fn receive_install_authority(landed: u64, endpoint_id: u64, request: &[u8; MSG_B
         }
         return false;
     }
-    let mut d = [0u64; 3];
-    if unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, d.as_mut_ptr() as u64) } != 0
-        || d[0] != 12
-        || d[1] != endpoint_id
-        || d[2] != RIGHTS_WRITE | RIGHTS_COPY
-    {
+    if !install_authority_shape(INSTALLER, endpoint_id) {
         let _ = unsafe { syscall1(SYS_CAP_DESTROY, landed) };
         return false;
     }
@@ -758,8 +758,10 @@ fn verified_install(
     Ok(size as usize)
 }
 
-fn filesd_apb1_call(
+fn filesd_raw_call(
+    endpoint: u64,
     call: u64,
+    version: u64,
     source_cap: u64,
     bytes: &mut [u8; MSG_BYTES],
 ) -> Result<[u64; 3], u64> {
@@ -767,9 +769,9 @@ fn filesd_apb1_call(
     let rc = unsafe {
         syscall6(
             SYS_IPC_CALL,
-            INSTALLER,
+            endpoint,
             call,
-            filesd_wire::CALL_APB1_ABI_V1,
+            version,
             source_cap,
             out.as_mut_ptr() as u64,
             bytes.as_mut_ptr() as u64,
@@ -786,6 +788,37 @@ fn filesd_apb1_call(
         return Err(CORRUPT);
     }
     Ok(out)
+}
+
+fn filesd_apb1_call(
+    call: u64,
+    source_cap: u64,
+    bytes: &mut [u8; MSG_BYTES],
+) -> Result<[u64; 3], u64> {
+    filesd_raw_call(
+        INSTALLER,
+        call,
+        filesd_wire::CALL_APB1_ABI_V1,
+        source_cap,
+        bytes,
+    )
+}
+
+/// Exercise the exact install-only endpoint through live filesd IPC. An
+/// online APB1 integration must receive S_DENIED for generic filesystem work.
+fn prove_install_authority_scope() -> bool {
+    let mut message = filesd_wire::Request::new(filesd_wire::OP_LIST).encode();
+    let generic = filesd_raw_call(INSTALLER, 0, 0, CAP_NONE, &mut message);
+    match generic {
+        Ok(reply) if reply == [filesd_wire::S_DENIED, 0, CAP_NONE] => {
+            say("APB1 scope proof: install-only endpoint denied generic LIST");
+            true
+        }
+        _ => {
+            say("APB1 scope proof failed: install-only endpoint accepted generic LIST");
+            false
+        }
+    }
 }
 
 fn filesd_apb1_status(status: u64) -> u64 {
@@ -810,6 +843,52 @@ fn apkg_policy_status(error: Error) -> u64 {
     }
 }
 
+fn free_package_test_slot() -> Option<u64> {
+    for slot in 10..32u64 {
+        let occupied = unsafe { syscall6(SYS_CAP_OCCUPIED, slot, 0, 0, 0, 0, 0) };
+        if occupied == 0 {
+            return Some(slot);
+        }
+        if occupied != 1 {
+            return None;
+        }
+    }
+    None
+}
+
+/// Use an actual Filesd File capability from the APB1 request. Its
+/// BadgedEndpoint has WRITE|COPY|DESTROY, so this exercises the same exact
+/// rights validator as slot 5 and remains explicitly reclaimable.
+fn prove_wrong_rights_cap_refused(source_cap: u64) -> bool {
+    let mut source = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, source_cap, source.as_mut_ptr() as u64) } != 0
+        || source[0] != 12
+        || source[2] != RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY
+    {
+        return false;
+    }
+    let Some(slot) = free_package_test_slot() else {
+        return false;
+    };
+    if unsafe { syscall3(SYS_CAP_COPY, source_cap, slot, source[2]) } != 0 {
+        return false;
+    }
+    let mut copied = [0u64; 3];
+    let described = unsafe { syscall2(SYS_CAP_DESCRIBE, slot, copied.as_mut_ptr() as u64) };
+    let refused = described == 0
+        && copied == [source[0], source[1], source[2]]
+        && !install_authority_shape(slot, source[1]);
+    let cleaned = unsafe { syscall1(SYS_CAP_DESTROY, slot) } == 0
+        && unsafe { syscall6(SYS_CAP_OCCUPIED, slot, 0, 0, 0, 0, 0) } == 0;
+    if refused && cleaned {
+        say("APB1 scope proof: same-kind capability with wrong rights denied (kind=12 rights=14)");
+        true
+    } else {
+        say("APB1 scope proof failed: same-kind wrong-rights cap was accepted or leaked");
+        false
+    }
+}
+
 fn install_apb1_from_cap(
     source_cap: u64,
     request: &[u8; MSG_BYTES],
@@ -821,18 +900,36 @@ fn install_apb1_from_cap(
         return (BAD_FORMAT, 0);
     }
     let mut source_desc = [0u64; 3];
-    if unsafe { syscall2(SYS_CAP_DESCRIBE, source_cap, source_desc.as_mut_ptr() as u64) } != 0
+    if unsafe {
+        syscall2(
+            SYS_CAP_DESCRIBE,
+            source_cap,
+            source_desc.as_mut_ptr() as u64,
+        )
+    } != 0
         || source_desc[0] != 12
         || source_desc[2] & (RIGHTS_WRITE | RIGHTS_COPY) != RIGHTS_WRITE | RIGHTS_COPY
     {
         return (DENY, 0);
     }
     let mut installer_desc = [0u64; 3];
-    if unsafe { syscall2(SYS_CAP_DESCRIBE, INSTALLER, installer_desc.as_mut_ptr() as u64) } != 0
+    if unsafe {
+        syscall2(
+            SYS_CAP_DESCRIBE,
+            INSTALLER,
+            installer_desc.as_mut_ptr() as u64,
+        )
+    } != 0
         || installer_desc[0] != 12
         || installer_desc[2] != RIGHTS_WRITE | RIGHTS_COPY
     {
         return (OFFLINE, 0);
+    }
+    if !prove_install_authority_scope() {
+        return (DENY, 0);
+    }
+    if !prove_wrong_rights_cap_refused(source_cap) {
+        return (DENY, 0);
     }
 
     let mut message = [0u8; MSG_BYTES];
@@ -845,11 +942,7 @@ fn install_apb1_from_cap(
     }
 
     message = [0; MSG_BYTES];
-    let inspect = match filesd_apb1_call(
-        filesd_wire::CALL_APB1_INSPECT,
-        source_cap,
-        &mut message,
-    ) {
+    let inspect = match filesd_apb1_call(filesd_wire::CALL_APB1_INSPECT, source_cap, &mut message) {
         Ok(out) => out,
         Err(status) => return (status, 0),
     };
@@ -879,11 +972,7 @@ fn install_apb1_from_cap(
 
     message = [0; MSG_BYTES];
     message[..32].copy_from_slice(&key);
-    let verified = match filesd_apb1_call(
-        filesd_wire::CALL_APB1_VERIFY,
-        source_cap,
-        &mut message,
-    ) {
+    let verified = match filesd_apb1_call(filesd_wire::CALL_APB1_VERIFY, source_cap, &mut message) {
         Ok(out) => out,
         Err(status) => return (status, 0),
     };
@@ -912,11 +1001,8 @@ fn install_apb1_from_cap(
         bundle_digest,
     }
     .encode();
-    let installed = match filesd_apb1_call(
-        filesd_wire::CALL_APB1_INSTALL,
-        source_cap,
-        &mut install,
-    ) {
+    let installed = match filesd_apb1_call(filesd_wire::CALL_APB1_INSTALL, source_cap, &mut install)
+    {
         Ok(out) => out,
         Err(status) => return (status, 0),
     };
@@ -1736,20 +1822,14 @@ pub extern "C" fn start_on_private_stack() -> ! {
         let mut reply = [0u8; MSG_BYTES];
         let mut reply_cap = CAP_NONE;
         let (status, value) = if op == PKG_OP_INSTALL_AUTH_HANDOFF {
-            if install_handoff {
-                (OK, 0)
-            } else {
-                (DENY, 0)
-            }
+            if install_handoff { (OK, 0) } else { (DENY, 0) }
         } else if op == PKG_OP_APB1_INSTALL {
             if apb1_source {
                 install_apb1_from_cap(landed, &req, va as u64, buf, &mut reply)
             } else {
                 (DENY, 0)
             }
-        } else if op <= PKG_OP_STAGE
-            && (arg != 0 || req[32..].iter().any(|&b| b != 0))
-        {
+        } else if op <= PKG_OP_STAGE && (arg != 0 || req[32..].iter().any(|&b| b != 0)) {
             (BAD_FORMAT, 0)
         } else if op == PKG_OP_PING {
             if landed != CAP_NONE || req != [0; MSG_BYTES] {

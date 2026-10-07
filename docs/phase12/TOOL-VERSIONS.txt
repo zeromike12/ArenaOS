@@ -1,0 +1,21 @@
+ArenaOS Phase-12 qualification tool receipt
+Captured: 2026-10-06 UTC
+
+Host: Debian GNU/Linux 13 (trixie), Debian release 13.6
+Python: 3.12.14
+Rust compiler: rustc 1.97.0 (2d8144b78 2026-07-07)
+Cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+Formatter: rustfmt 1.9.0-stable (2d8144b788 2026-07-07)
+Linter: clippy 0.1.97 (2d8144b788 2026-07-07)
+Installed Rust targets: x86_64-unknown-linux-gnu, x86_64-unknown-none,
+  x86_64-unknown-uefi
+QEMU: QEMU emulator version 10.0.11 (Debian 1:10.0.11+ds-0+deb13u1)
+UEFI firmware: Debian OVMF 2025.02-8+deb13u1
+OpenSSL: OpenSSL 3.5.7 9 Jun 2026
+Python FAT helper used by ESP qualification: pyfatfs 1.1.0
+
+OVMF code: OVMF_CODE_4M.fd, 3,653,632 bytes
+OVMF variables template: OVMF_VARS_4M.fd, 540,672 bytes
+The archive includes both firmware files under its own names. The archive
+boot witness requires a local qemu-system-x86_64 executable but no repository
+checkout or prebuilt source-tree dependency.

@@ -257,6 +257,12 @@ for i in $(seq 1 "$N"); do
     # Destructive fault/stall negatives live in the historical host suite.
     elif ! grep -aqF 'audited 22 literal caps; no device/Power/Process grants' "$SERIAL"; then
         why="manager bootstrap cap audit absent on full fixture"
+    elif ! grep -aqF 'servicemgr: reserved APB1 slot127 descriptor=1 kind=12 rights=6' "$SERIAL"; then
+        why="reserved APB1 slot127 authority was not separately observed"
+    elif ! grep -aqF 'servicemgr: extended cap occupancy [32,127)=0' "$SERIAL"; then
+        why="manager high-slot occupancy receipt is absent"
+    elif [[ $(grep -acF '[application] ABI-v2 badge dispatch audit PASS' "$SERIAL" || true) -ne 2 ]]; then
+        why="both real native Desktop launches did not pass exact startup-capability audits"
     # ADR-0075 (11.3): twelve desktop clocks; the table is still exactly full.
     elif ! grep -aqF 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' "$SERIAL"; then
         why="full fixture notification bound was not tested"
@@ -384,6 +390,7 @@ for i in $(seq 1 "$N"); do
     fi
 
     if [[ -z "$why" ]]; then
+        printf 'ABI-V2 2\nAPB1_SLOT127 kind=12 rights=6\n' >> "$PIXEL_RECEIPT"
         pass=$((pass + 1))
     else
         fail=$((fail + 1))

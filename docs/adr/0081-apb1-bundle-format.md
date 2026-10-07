@@ -1,8 +1,10 @@
 # ADR-0081 — APB1 canonical signed application bundle format
 
-Status: accepted for Phase 12. Format codec/host evidence is in
-`userspace/arena-platform/` and `tools/test_apb1_format.py`; AFS2 installer,
-signer-policy integration, and guest qualification remain open.
+Status: accepted and qualified for Phase 12. Format codec/host evidence is in
+`userspace/arena-platform/` and `tools/test_apb1_format.py`; protected AFS2
+install and receiver-policy handoff have guest evidence in
+`docs/phase12/FINAL-REPORT.md`. Installed-app boot registry/launch remains
+open for Phase 13.
 
 Supersedes no historical format. APKG v1 remains byte-for-byte unchanged
 (ADR-0053).

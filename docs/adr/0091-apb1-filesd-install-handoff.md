@@ -1,7 +1,7 @@
 # ADR-0091 — APB1 install authority across packaged and filesd
 
-**Status:** Accepted for Phase 12; implementation in progress, guest
-qualification pending.
+**Status:** Accepted and guest-qualified for the bounded Phase-12 APB1 install
+handoff. Installed-app boot registry and launch remain deferred.
 **Date:** 2026-10-06.
 **Related decisions:** ADR-0053, ADR-0074, ADR-0076, ADR-0077, ADR-0080,
 ADR-0081, ADR-0082, ADR-0086, ADR-0088.
@@ -114,24 +114,29 @@ bridge these services safely.
 - The current root key is still the explicitly public Phase-8 test root. This
   ADR does not claim production key provisioning.
 
-## Required evidence
+## Qualification evidence
 
-Before calling this integration qualified, targeted guest tests must prove:
+`tools/test_phase12_apb1_guest.py` exercises the real guest path: a signed
+multi-file APB1 selected through the Desktop icon is installed under protected
+AFS2, read back and verified on the host, while source AFS1 bytes remain intact.
+The run also covers generic LIST denial through install-only authority,
+ordinary Filesd denial, wrong-kind/wrong-rights refusals, slot-127 accounting,
+strict readiness, packaged restart/recovery, and clean shutdown. The exact
+artifact/test receipt is in `docs/phase12/FINAL-REPORT.md`.
 
-- a signed multi-file APB1 in a user file, opened through an exact File cap,
-  reaches filesd through the package receiver, is installed under the protected
-  root, survives remount, and is reconstructed only after independent signed
-  tree verification;
-- exact refusal and no authority gain for ordinary user badges, wrong-kind
-  and foreign-endpoint caps, missing `R_READ`, caller-selected keys/IDs,
-  malformed/trailing/oversized bundles, bad signatures, digest/policy
-  mismatch or revocation, source mutation, duplicate version, offline/damaged
-  AFS2, and incomplete transaction prefixes;
-- `/System` remains inaccessible to ordinary `/Users/user` capabilities, and
-  the install-only badge cannot perform generic filesystem operations;
-- the five-cap package spawn, post-start authority handoff, restart recovery,
-  service cap occupancy, APKG v1 regressions, M12 scale guest, and targeted
-  M10/M11 regressions remain clean.
+The production coalesced-wake path is paired with the `servicemgr` readiness
+unit proof: a simultaneous APB1+readiness wake preserves the APB1 sideband but
+cannot complete the independent readiness gate; the manager later re-describes
+the held capability before forwarding it. The guest proves the subsequent
+capability handoff and its scope.
 
-Until those proofs pass, this decision and the host API are an integration
-plan, not a guest security qualification or Phase-12 completion claim.
+Remaining evidence is production boot integration of the installed-app
+registry/launcher and broader installed-app lifecycle policy; those are
+Phase-13 work. The bounded protected install decision itself is guest-qualified.
+
+Host codec/policy tests separately cover canonical-format and refusal cases;
+the guest proves the real protected service boundary and selected APB1 install.
+The historical APKG v1 package-record suite remains separate and unchanged.
+
+The listed tests qualify the install handoff and format path. They do not claim
+the installed app can be launched from a production registry or launcher.

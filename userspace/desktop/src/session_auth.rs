@@ -17,10 +17,8 @@ pub fn select_live_badge<const N: usize>(
     }
     let mut selected = None;
     for (index, candidate) in badges.iter().enumerate() {
-        if *candidate == badge {
-            if selected.replace(index).is_some() {
-                return Err(Error::DuplicateBadge);
-            }
+        if *candidate == badge && selected.replace(index).is_some() {
+            return Err(Error::DuplicateBadge);
         }
     }
     Ok(selected.filter(|&index| is_live(index)))

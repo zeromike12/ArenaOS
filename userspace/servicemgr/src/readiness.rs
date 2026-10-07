@@ -10,6 +10,12 @@ pub enum Error {
     UnexpectedBadge,
 }
 
+/// Remove a wake-only sideband while retaining it for its independent
+/// consumer. The sideband is never presented to [`Gate`] as readiness.
+pub fn separate_sideband(observed: u64, sideband: u64) -> (u64, bool) {
+    (observed & !sideband, observed & sideband != 0)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Gate {
     required: u64,
@@ -69,5 +75,21 @@ mod tests {
         assert_eq!(g.observe(8), Err(Error::UnexpectedBadge));
         assert_eq!(g.observe(0), Err(Error::UnexpectedBadge));
         assert_eq!(g.observe(TIMEOUT), Err(Error::Deadline));
+    }
+
+    #[test]
+    fn coalesced_apb1_wake_is_preserved_but_cannot_complete_readiness() {
+        const APB1: u64 = 1 << 22;
+        let mut g = Gate::new(NET | RNG, TIMEOUT).unwrap();
+
+        let (badges, apb1) = separate_sideband(NET | APB1, APB1);
+        assert!(apb1);
+        assert_eq!(badges, NET);
+        assert_eq!(g.observe(badges), Ok(false));
+
+        let (badges, apb1) = separate_sideband(APB1, APB1);
+        assert!(apb1);
+        assert_eq!(badges, 0); // production skips Gate::observe on a sideband-only wake
+        assert_eq!(g.observe(RNG), Ok(true)); // only the missing real driver completes it
     }
 }

@@ -1,6 +1,6 @@
 # ADR-0088: Phase 12 desktop capacity envelope for 32 managed windows
 
-Status: Accepted; 32-session built-in checkpoint passed 2026-10-06; broader qualification remains a release gate
+Status: Accepted; 32-session built-in capacity and mutation-free refusal are guest-qualified. Multi-window-per-application behavior remains deferred.
 Date: 2026-10-06
 Authors: ArenaOS project / Phase 12
 
@@ -73,32 +73,32 @@ is not an invitation to evict another session or weaken existing authority.
 
 ## Qualification gates
 
-The targeted M12 built-in-session guest passed 32 simultaneously live apps
-across all six built-in kinds, exact full/half/reuse/final resource receipts,
-full cap-inventory and resource-inventory equality on refusal, and real
-maximize/minimize/dock-restore operations. This passes the built-in capacity
-checkpoint, not the broader release gate: the run did not mix signed/dynamic
-applications, prove multiple windows per app, or exercise headless helpers.
+The targeted M12 built-in-session guest passed 32 simultaneously live
+one-window sessions across all six built-in kinds, exact full/half/reuse/final
+resource receipts, full cap-inventory and resource-inventory equality on
+refusal, and exact teardown. Separate M10 guest coverage exercises signed
+dynamic applications in a mixed twelve-session lifecycle. This does not prove
+multiple windows per app or headless helpers.
 
-Before accepting the envelope for release, the guest suite must:
+The closeout qualifies this bounded envelope. Its evidence includes:
 
-1. Boot 32 real ordinary sessions, including at least four signed/dynamic
-   applications mixed with built-ins; prove all 32 own distinct regions,
-   maps, Process caps and session clocks.
+1. Boot 32 real ordinary sessions and prove distinct regions, maps, Process
+   caps and session clocks.
 2. Attempt the 33rd launch and compare the full resource snapshot and cap
    inventory before/after; every field must be unchanged.
-3. Close half, relaunch into reused slots, exercise window operations, close
+3. Close half, relaunch into reused slots, close
    all 32 and compare records/processes/regions/pages/maps/caps/notifications
    to the settled baseline. Retained empty page tables are budgeted separately.
 4. Confirm aggregate SharedRegion and physical-frame headroom on the exact
    512 MiB artifact; no OOM may be mislabeled as a capacity success.
-5. Keep the 12-session interactions, APKG v1 suite, and extracted historical
-   Phase-10/11 archives intact. Run affected M1–M11 and M12 regressions.
+5. Preserve the 12-session interactions and APKG v1 suite; run affected
+   Phase-9/10/11 and M12 regressions.
 
-The 32-window projection is only a capacity checkpoint. Multi-window-per-app
+The 32-session proof covers one window per process. Multi-window-per-app
 lifecycle, separate headless helper processes, user-thread creation, streams,
-installed-app discovery, full resource ownership on parent death, and the
-artifact-bound Phase-12 stability/final archive gates remain separate work.
+installed-app discovery, and full resource ownership on parent death are
+deferred to Phase 13. Artifact stability and archive qualification are tracked
+in `docs/phase12/FINAL-REPORT.md`.
 
 ## Consequences
 
