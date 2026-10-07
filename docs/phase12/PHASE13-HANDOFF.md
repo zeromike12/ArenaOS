@@ -48,6 +48,8 @@ work belongs to a later dedicated effort.
    authority. Add All Applications browsing/search and running-state behavior.
 2. Launch installed signed applications through a defined native executable
    contract. Preserve APB1 bundle policy and APKG v1 policy as distinct layers.
+   The current loader is the accepted static x86-64 subset; assess and specify
+   native PIE/ASLR separately if that capability is still absent.
 3. Add application associations, persistent defaults, and Open With. Transfer
    a selected document only as its exact filesd capability after broker policy
    authorizes the operation.
