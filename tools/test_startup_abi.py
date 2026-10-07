@@ -139,8 +139,8 @@ class TestStartupAbi(unittest.TestCase):
         self.assertIn("pub const CAP_KIND_PROCESS: u8 = 4;", userspace_abi)
         platform_startup = (ROOT / "userspace/arena-platform/src/startup.rs").read_text()
         self.assertIn("pub const CAP_KIND_PROCESS: u8 = 4;", platform_startup)
-        self.assertIn("pub const MAX_SPAWN_INHERIT: usize = 5;", userspace_abi)
-        self.assertIn("pub const MAX_INHERIT: usize = 5;", kernel_spawn)
+        self.assertIn("pub const MAX_SPAWN_INHERIT: usize = 7;", userspace_abi)
+        self.assertIn("pub const MAX_INHERIT: usize = 7;", kernel_spawn)
 
     def test_slot_zero_transport_requires_exact_read_only_one_page(self):
         self.assertTrue(abi.validate_startup_cap((abi.CAP_SHARED_REGION, 1, 9), 1))

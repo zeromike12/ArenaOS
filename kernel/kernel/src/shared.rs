@@ -13,12 +13,12 @@ use crate::sync::{SyncCell, without_interrupts};
 // ADR-0075 (Phase 11.3): twelve desktop sessions, each with one shared
 // surface reservation and one private snapshot region (mapped, never
 // capability-held), plus the scanout and the historical fixtures.
-pub const MAX_REGIONS: usize = 80;
+pub const MAX_REGIONS: usize = 96;
 /// One work-area surface reservation on the largest supported screen
 /// (1024x768) plus its transient-surface area fits in one region.
 pub const MAX_PAGES: u32 = 1024;
 pub const TOTAL_PAGES: u32 = 36864;
-pub const MAX_MAPS: usize = 128;
+pub const MAX_MAPS: usize = 160;
 
 /// Read-only bounded resource snapshot for boot diagnostics. This never
 /// grants access to region IDs, physical addresses or mapped pages.

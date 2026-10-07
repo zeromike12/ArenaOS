@@ -1,7 +1,9 @@
 //! Native startup ABI v2 (ADR-0083): bounded descriptive data in a
 //! caller-owned one-page SharedRegion, never implicit process authority.
 
-use crate::manifest::{FLAG_BACKGROUND, FLAG_HEADLESS, FLAG_MULTI_INSTANCE, ID_BYTES};
+use crate::manifest::{
+    FLAG_BACKGROUND, FLAG_HEADLESS, FLAG_MULTI_INSTANCE, FLAG_STANDARD_STREAMS, ID_BYTES,
+};
 
 pub const BLOCK_BYTES: usize = 4096;
 pub const HEADER_BYTES: usize = 128;
@@ -10,7 +12,7 @@ pub const HEADER_BYTES: usize = 128;
 pub const INSTANCE_SLOTS: usize = 32;
 pub const ARGUMENT_MAX: usize = 32;
 pub const ENVIRONMENT_MAX: usize = 32;
-pub const CAPABILITY_MAX: usize = 4;
+pub const CAPABILITY_MAX: usize = 6;
 pub const STRING_BYTES_MAX: usize = 3072;
 pub const CAPABILITY_DESCRIPTOR_BYTES: usize = 16;
 pub const STRING_DESCRIPTOR_BYTES: usize = 8;
@@ -38,7 +40,8 @@ pub const RIGHT_WRITE: u32 = 1 << 1;
 pub const RIGHT_COPY: u32 = 1 << 2;
 pub const RIGHT_DESTROY: u32 = 1 << 3;
 pub const RIGHTS_MASK: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY;
-const KNOWN_FLAGS: u32 = FLAG_MULTI_INSTANCE | FLAG_BACKGROUND | FLAG_HEADLESS;
+const KNOWN_FLAGS: u32 =
+    FLAG_MULTI_INSTANCE | FLAG_BACKGROUND | FLAG_HEADLESS | FLAG_STANDARD_STREAMS;
 const USER_ADDRESS_END: u64 = 0x0000_8000_0000_0000;
 const MAGIC: &[u8; 4] = b"ARST";
 
@@ -87,6 +90,8 @@ pub enum CapabilityRole {
     StandardOutput = 3,
     StandardError = 4,
     Other = 5,
+    StandardStreamSet = 6,
+    StreamWake = 7,
 }
 impl CapabilityRole {
     fn from_byte(value: u8) -> Option<Self> {
@@ -96,6 +101,8 @@ impl CapabilityRole {
             3 => Some(Self::StandardOutput),
             4 => Some(Self::StandardError),
             5 => Some(Self::Other),
+            6 => Some(Self::StandardStreamSet),
+            7 => Some(Self::StreamWake),
             _ => None,
         }
     }
@@ -180,6 +187,8 @@ pub struct StartupView<'a> {
     stdin: Option<u16>,
     stdout: Option<u16>,
     stderr: Option<u16>,
+    stream_set: Option<u16>,
+    stream_wake: Option<u16>,
     entry: u64,
     load_base: u64,
     clock_us: u64,
@@ -221,6 +230,15 @@ impl StartupView<'_> {
     }
     pub fn stderr_descriptor(&self) -> Option<u16> {
         self.stderr
+    }
+    /// Descriptor index of the held shared ring set, if the signed
+    /// application requested standard streams.
+    pub fn stream_set_descriptor(&self) -> Option<u16> {
+        self.stream_set
+    }
+    /// Descriptor index of the exact write-only wake capability, if present.
+    pub fn stream_wake_descriptor(&self) -> Option<u16> {
+        self.stream_wake
     }
     pub fn page_size(&self) -> u32 {
         BLOCK_BYTES as u32
@@ -359,6 +377,12 @@ pub fn parse(page: &[u8; BLOCK_BYTES]) -> Result<StartupView<'_>, Error> {
     let stderr = optional_index(page, OFF_STDERR, cap_count)?;
     let capabilities =
         validate_capabilities(page, caps_offset, cap_count, [cwd, stdin, stdout, stderr])?;
+    let stream_set = role_descriptor(&capabilities, cap_count, CapabilityRole::StandardStreamSet);
+    let stream_wake = role_descriptor(&capabilities, cap_count, CapabilityRole::StreamWake);
+    let streams_requested = flags & FLAG_STANDARD_STREAMS != 0;
+    if streams_requested != stream_set.is_some() || streams_requested != stream_wake.is_some() {
+        return Err(Error::InvalidRoleReference);
+    }
     let mut arguments = [StringDescriptor::EMPTY; ARGUMENT_MAX];
     let mut environment = [StringDescriptor::EMPTY; ENVIRONMENT_MAX];
     validate_strings(
@@ -392,6 +416,8 @@ pub fn parse(page: &[u8; BLOCK_BYTES]) -> Result<StartupView<'_>, Error> {
         stdin,
         stdout,
         stderr,
+        stream_set,
+        stream_wake,
         entry,
         load_base,
         clock_us: get_u64(page, OFF_CLOCK),
@@ -582,7 +608,7 @@ fn validate_capabilities(
     references: [Option<u16>; 4],
 ) -> Result<[CapabilityDescriptor; CAPABILITY_MAX], Error> {
     let mut capabilities = [EMPTY_CAPABILITY; CAPABILITY_MAX];
-    let mut found = [None; 4];
+    let mut found = [None; 6];
     for (index, output) in capabilities.iter_mut().enumerate().take(cap_count) {
         let at = caps_offset + index * CAPABILITY_DESCRIPTOR_BYTES;
         let descriptor = read_capability(page, caps_offset, index)?;
@@ -598,6 +624,17 @@ fn validate_capabilities(
         {
             return Err(Error::InvalidCapability);
         }
+        if descriptor.role == CapabilityRole::StandardStreamSet
+            && (descriptor.kind != CAP_KIND_SHARED_REGION
+                || descriptor.rights != (RIGHT_READ | RIGHT_WRITE))
+        {
+            return Err(Error::InvalidCapability);
+        }
+        if descriptor.role == CapabilityRole::StreamWake
+            && (descriptor.kind != CAP_KIND_NOTIFICATION || descriptor.rights != RIGHT_WRITE)
+        {
+            return Err(Error::InvalidCapability);
+        }
         if page[at + 8..at + CAPABILITY_DESCRIPTOR_BYTES]
             .iter()
             .any(|byte| *byte != 0)
@@ -610,6 +647,8 @@ fn validate_capabilities(
             CapabilityRole::StandardOutput => Some(2),
             CapabilityRole::StandardError => Some(3),
             CapabilityRole::Other => None,
+            CapabilityRole::StandardStreamSet => Some(4),
+            CapabilityRole::StreamWake => Some(5),
         };
         if let Some(role_index) = role_index
             && found[role_index].replace(index as u16).is_some()
@@ -618,10 +657,32 @@ fn validate_capabilities(
         }
         *output = descriptor;
     }
-    if found != references {
+    if found[0] != references[0] {
+        return Err(Error::InvalidRoleReference);
+    }
+    if let Some(stream_set) = found[4] {
+        if references[1..] != [Some(stream_set); 3]
+            || found[1..4].iter().any(Option::is_some)
+            || found[5].is_none()
+        {
+            return Err(Error::InvalidRoleReference);
+        }
+    } else if found[1..4] != references[1..] || found[5].is_some() {
         return Err(Error::InvalidRoleReference);
     }
     Ok(capabilities)
+}
+
+fn role_descriptor(
+    capabilities: &[CapabilityDescriptor; CAPABILITY_MAX],
+    cap_count: usize,
+    role: CapabilityRole,
+) -> Option<u16> {
+    capabilities
+        .iter()
+        .take(cap_count)
+        .position(|descriptor| descriptor.role == role)
+        .map(|index| index as u16)
 }
 
 fn optional_index(
@@ -781,6 +842,71 @@ mod tests {
     }
 
     #[test]
+    fn standard_stream_roles_share_one_exact_region_and_writable_wake_cap() {
+        let args: [&[u8]; 1] = [b"com.arena.editor"];
+        let env: [&[u8]; 0] = [];
+        let caps = [
+            CapabilityDescriptor {
+                slot: 1,
+                role: CapabilityRole::StandardStreamSet,
+                kind: CAP_KIND_SHARED_REGION,
+                rights: RIGHT_READ | RIGHT_WRITE,
+            },
+            CapabilityDescriptor {
+                slot: 2,
+                role: CapabilityRole::StreamWake,
+                kind: CAP_KIND_NOTIFICATION,
+                rights: RIGHT_WRITE,
+            },
+        ];
+        let mut spec = sample_spec(&args, &env, &caps);
+        spec.flags |= FLAG_STANDARD_STREAMS;
+        spec.cwd = None;
+        spec.stdin = Some(0);
+        spec.stdout = Some(0);
+        spec.stderr = Some(0);
+        let mut page = [0; BLOCK_BYTES];
+        encode(&spec, &mut page).unwrap();
+        let view = parse(&page).unwrap();
+        assert_eq!(view.stdin_descriptor(), Some(0));
+        assert_eq!(view.stdout_descriptor(), Some(0));
+        assert_eq!(view.stderr_descriptor(), Some(0));
+        assert_eq!(view.stream_set_descriptor(), Some(0));
+        assert_eq!(view.stream_wake_descriptor(), Some(1));
+
+        let mut roles_without_opt_in = page;
+        put_u32(&mut roles_without_opt_in, OFF_FLAGS, 0);
+        assert!(matches!(
+            parse(&roles_without_opt_in),
+            Err(Error::InvalidRoleReference)
+        ));
+
+        let no_stream_caps = sample_caps();
+        let mut flag_without_roles = sample_spec(&args, &env, &no_stream_caps);
+        flag_without_roles.flags |= FLAG_STANDARD_STREAMS;
+        let mut missing_roles = [0; BLOCK_BYTES];
+        assert_eq!(
+            encode(&flag_without_roles, &mut missing_roles),
+            Err(Error::InvalidRoleReference)
+        );
+
+        let mut wrong_wake = page;
+        put_u32(
+            &mut wrong_wake,
+            HEADER_BYTES + CAPABILITY_DESCRIPTOR_BYTES + 4,
+            RIGHT_READ,
+        );
+        assert!(matches!(parse(&wrong_wake), Err(Error::InvalidCapability)));
+
+        let mut split_reference = page;
+        put_u16(&mut split_reference, OFF_STDERR, 1);
+        assert!(matches!(
+            parse(&split_reference),
+            Err(Error::InvalidRoleReference)
+        ));
+    }
+
+    #[test]
     fn noncanonical_offsets_padding_and_tail_are_rejected() {
         let original = encoded();
         for (offset, value) in [(50, 1), (original.len() - 1, 1)] {
@@ -849,14 +975,14 @@ mod tests {
         let args: [&[u8]; 1] = [b"app"];
         let env: [&[u8]; 0] = [];
         let caps = sample_caps();
-        let mut five_caps = [caps[0]; 5];
-        five_caps[1..].copy_from_slice(&[caps[1]; 4]);
-        for index in 1..5 {
-            five_caps[index].slot = (index + 1) as u16;
-            five_caps[index].role = CapabilityRole::Other;
+        let mut oversized_caps = [caps[0]; CAPABILITY_MAX + 1];
+        oversized_caps[1..].copy_from_slice(&[caps[1]; CAPABILITY_MAX]);
+        for index in 1..oversized_caps.len() {
+            oversized_caps[index].slot = (index + 1) as u16;
+            oversized_caps[index].role = CapabilityRole::Other;
         }
         let mut page = [0; BLOCK_BYTES];
-        let spec = sample_spec(&args, &env, &five_caps);
+        let spec = sample_spec(&args, &env, &oversized_caps);
         assert_eq!(encode(&spec, &mut page), Err(Error::Bounds));
         assert!(page.iter().all(|byte| *byte == 0));
 

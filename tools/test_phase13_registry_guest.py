@@ -30,6 +30,12 @@ SERIAL_WINDOW_RETIRED = "[phase13-window] DestroyWindow retired one surface; pro
 SERIAL_WINDOW_FINAL = "[phase13-window] final surface retired; process exits cleanly"
 SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
+SERIAL_STREAM_FULL = "[phase13-stream] output full; extra write returned WouldBlock"
+SERIAL_STREAM_STDOUT = "[phase13-stream] stdout partial transfer reached the broker"
+SERIAL_STREAM_STDERR = "[phase13-stream] stderr channel reached the broker"
+SERIAL_STREAM_STDIN = "[phase13-stream] stdin received exact native keyboard bytes"
+SERIAL_STREAM_STDOUT_EOF = "[desktop] native stream channel stdout reached EOF"
+SERIAL_STREAM_STDERR_EOF = "[desktop] native stream channel stderr reached EOF"
 SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present"
 SERIAL_HEADLESS_EXIT = "[desktop] child Process-cap exit status=42"
 SERIAL_HELPER_EXIT = (
@@ -100,7 +106,7 @@ def app_bundle():
         package_id=b"org.arena.editor",
         display_name=b"Phase13 Probe",
         version=13,
-        flags=1,
+        flags=9,
         requested=0,
         entry=b"bin/probe",
         icon=b"",
@@ -194,6 +200,22 @@ def resource_counts(d):
     return tuple(map(int, rows[-1]))
 
 
+def wait_stream_proof(d, expected):
+    d.wait(
+        lambda: all(
+            d.serial().count(marker) == expected
+            for marker in (
+                SERIAL_STREAM_FULL,
+                SERIAL_STREAM_STDOUT,
+                SERIAL_STREAM_STDERR,
+                SERIAL_STREAM_STDOUT_EOF,
+                SERIAL_STREAM_STDERR_EOF,
+            )
+        ),
+        f"native stream proof count did not reach {expected}",
+    )
+
+
 def interaction(disk):
     d = Desktop(LABEL)
     try:
@@ -261,6 +283,7 @@ def interaction(disk):
                "installed document handler did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 1,
                "installed document handler did not pass its scalable heap proof")
+        wait_stream_proof(d, 1)
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
                "Open With did not spawn the selected installed application")
         assert tree(disk)[f"/Users/user/Desktop/z-associated.txt"] == b"Phase 13 associated document\n", \
@@ -295,6 +318,7 @@ def interaction(disk):
                "All Applications launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 2,
                "All Applications launch did not pass its scalable heap proof")
+        wait_stream_proof(d, 2)
         d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 1,
                "installed app did not create three windows in its one process")
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
@@ -348,6 +372,7 @@ def interaction(disk):
                "pointer launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 3,
                "pointer launch did not pass its scalable heap proof")
+        wait_stream_proof(d, 3)
         d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 2,
                "second application instance did not create three windows in its one process", timeout_s=30)
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 2,
@@ -362,16 +387,24 @@ def interaction(disk):
         assert marker_set(both, second_points), \
             "the second process did not publish its three independently backed surfaces"
 
+        # The focused installed app waits on its private stream notification.
+        # Keyboard events become bytes only through the Desktop's exact stdin
+        # writer for that AppInstance.
+        d.q.type_text("native-stream", gap_s=0.025)
+        send_key(d, "ret")
+        d.wait(lambda: d.serial().count(SERIAL_STREAM_STDIN) == 1,
+               "native stdin did not receive the exact keyboard byte sequence")
+
         # Window publication and the Desktop's measurement line are separate
         # event-loop observations. Wait for the complete six-window resource
         # inventory before taking the baseline for an individual close.
         both_windows_expected = list(baseline)
         both_windows_expected[1] += 2    # Process records
         both_windows_expected[2] += 2    # live processes
-        both_windows_expected[3] += 12   # six windows, two regions each
-        both_windows_expected[4] += 5640 # six bounded 940-page windows
-        both_windows_expected[5] += 18   # three maps per ordinary window
-        both_windows_expected[6] += 4    # one Process cap per instance
+        both_windows_expected[3] += 14   # six windows plus two stream regions
+        both_windows_expected[4] += 5642 # six bounded windows plus two stream pages
+        both_windows_expected[5] += 22   # 18 window maps plus four stream mappings
+        both_windows_expected[6] += 6    # Process, file-lineage, and stream cap per instance
         d.wait(lambda: resource_counts(d)[1:] == tuple(both_windows_expected[1:]),
                "six ordinary windows did not reach their complete resource inventory")
         settled_inventory = resource_counts(d)

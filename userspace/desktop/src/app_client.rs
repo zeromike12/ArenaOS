@@ -219,8 +219,11 @@ pub fn terminate_helper(handle: u32) -> Result<(), i64> {
 /// A directory watch fired (ADR-0079): a hint on the clock, confirmed
 /// through the watched record.
 pub const WATCH_BADGE: u64 = 2;
+/// Native stream state changed (input arrived or output space was reclaimed).
+pub const STREAM_BADGE: u64 = 4;
 /// Sleep until the broker signals (badge 1), a directory watch fires
-/// (badge 2) or `deadline` passes. Returns the merged badge.
+/// (badge 2), standard stream state changes (badge 4), or the deadline
+/// passes. Returns the merged badge.
 pub fn idle(deadline: Option<u64>) -> Result<u64, i64> {
     let id = match deadline {
         Some(at) => {
@@ -241,7 +244,7 @@ pub fn idle(deadline: Option<u64>) -> Result<u64, i64> {
         return Err(badge);
     }
     let badge = badge as u64;
-    if badge == 0 || badge & !(1 | WATCH_BADGE) != 0 {
+    if badge == 0 || badge & !(1 | WATCH_BADGE | STREAM_BADGE) != 0 {
         return Err(-2);
     }
     Ok(badge)

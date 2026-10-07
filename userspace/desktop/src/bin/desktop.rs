@@ -21,7 +21,7 @@ use arena_process::{
     },
 };
 use arena_startup_abi::{
-    manifest::FLAG_MULTI_INSTANCE,
+    manifest::{FLAG_MULTI_INSTANCE, FLAG_STANDARD_STREAMS},
     startup::{CapabilityDescriptor, CapabilityRole},
 };
 use core::panic::PanicInfo;
@@ -40,7 +40,6 @@ const APPLICATION: u64 = 6;
 const V2_ENDPOINT_SLOT: u64 = 1;
 const V2_SURFACE_SLOT: u64 = 2;
 const V2_CLOCK_SLOT: u64 = 3;
-const V2_TAIL_SLOT: u64 = 4;
 const V2_BADGE_RIGHTS: u64 = RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
 /// filesd's /Users/user record (ADR-0077), minted by the kernel.
 const USER_ROOT: u64 = 20;
@@ -54,6 +53,7 @@ const LIMIT: usize = wm::MAX_WINDOWS;
 /// Four members matches the reusable ArenaOS lifecycle model and leaves room
 /// for the primary plus explicitly authorized helpers.
 const APP_GROUP_PROCESSES: usize = 4;
+const STREAM_INPUT_PENDING: usize = 64;
 /// Window presentation records are separate from process sessions. The WM
 /// remains the total-window bound; this table can hold all ordinary windows
 /// beyond one primary window per process.
@@ -237,6 +237,13 @@ const NO_POPUP: PopupState = PopupState {
 struct Session {
     id: u64,
     va: u64,
+    stream_cap: u64,
+    stream_va: u64,
+    stream_faulted: bool,
+    stream_eof: u8,
+    stdin_pending: [u8; STREAM_INPUT_PENDING],
+    stdin_head: u8,
+    stdin_count: u8,
     process: Option<Handle>,
     handle: u64,
     title: [u8; 32],
@@ -330,6 +337,13 @@ const EMPTY_EXTRA: ExtraWindow = ExtraWindow {
 const EMPTY: Session = Session {
     id: 0,
     va: 0,
+    stream_cap: CAP_NONE,
+    stream_va: 0,
+    stream_faulted: false,
+    stream_eof: 0,
+    stdin_pending: [0; STREAM_INPUT_PENDING],
+    stdin_head: 0,
+    stdin_count: 0,
     process: None,
     handle: 0,
     title: [0; 32],
@@ -362,6 +376,67 @@ const EMPTY: Session = Session {
     grant_read_only: false,
     offered_file: CAP_NONE,
 };
+
+/// Temporary owner of a new stream page during launch. A failed launch
+/// removes its mapping and exact owner cap; success transfers both resources
+/// into the AppInstance record.
+struct PendingStream {
+    cap: u64,
+    va: u64,
+}
+
+impl PendingStream {
+    fn create() -> Result<Self, i64> {
+        let mut out = [0u64; 3];
+        let status =
+            unsafe { syscall6(SYS_SHARED_CREATE, POOL, 1, out.as_mut_ptr() as u64, 0, 0, 0) };
+        if status != 0 {
+            return Err(status);
+        }
+        let cap = out[0];
+        let va = unsafe { syscall2(SYS_SHARED_MAP, cap, 1) };
+        if va <= 0 {
+            destroy(cap);
+            return Err(va);
+        }
+        // SAFETY: this is a fresh, zeroed page with an exclusive trusted
+        // owner mapping, so its canonical ring layout can be initialized.
+        let initialized = unsafe {
+            arena_runtime::streams::StreamSet::initialize(
+                va as *mut u8,
+                arena_runtime::streams::STREAM_PAGE_BYTES,
+            )
+        };
+        if initialized.is_err() {
+            // SAFETY: remove only the map returned above.
+            let _ = unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) };
+            destroy(cap);
+            return Err(STATUS_BAD_ARG);
+        }
+        Ok(Self { cap, va: va as u64 })
+    }
+
+    fn commit(mut self) -> (u64, u64) {
+        let pair = (self.cap, self.va);
+        self.cap = CAP_NONE;
+        self.va = 0;
+        pair
+    }
+}
+
+impl Drop for PendingStream {
+    fn drop(&mut self) {
+        if self.va != 0 {
+            // SAFETY: this temporary owns exactly the map it received from
+            // SYS_SHARED_MAP.
+            let _ = unsafe { syscall6(SYS_SHARED_UNMAP, self.va, 0, 0, 0, 0, 0) };
+        }
+        if self.cap != CAP_NONE {
+            destroy(self.cap);
+        }
+    }
+}
+
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
         dark: false,
@@ -390,6 +465,8 @@ const BADGE_TIMER: u64 = 1;
 const BADGE_REQUEST: u64 = 2;
 /// A child application process exited (spawn exit notification).
 const BADGE_EXIT: u64 = 4;
+/// A peer may now read or write on the session's existing private clock.
+const BADGE_STREAM_READY: u64 = 1 << 2;
 /// filesd: the Desktop folder changed (directory watch, ADR-0079). A hint;
 /// the broker confirms through its own record.
 const BADGE_WATCH_BIT: u8 = 3;
@@ -1794,6 +1871,224 @@ fn finish_app_group(instance: usize) {
     log_number(members as u64);
     log(b"; final members=0\n");
 }
+
+fn drain_session_output(index: usize, session: Session) {
+    if session.stream_va == 0 || session.stream_faulted {
+        return;
+    }
+    // SAFETY: the Desktop retains the exact mapping until AppInstance
+    // retirement. A malformed guest ring is handled as a closed stream.
+    let streams = match unsafe {
+        arena_runtime::streams::StreamSet::attach(
+            session.stream_va as *mut u8,
+            arena_runtime::streams::STREAM_PAGE_BYTES,
+        )
+    } {
+        Ok(streams) => streams,
+        Err(_) => {
+            log(b"[desktop] malformed native stream page; output disabled\n");
+            unsafe { SESSIONS[index].stream_faulted = true };
+            return;
+        }
+    };
+    let mut changed = false;
+    let mut buffer = [0u8; 256];
+    for channel in [
+        arena_runtime::streams::Channel::Stdout,
+        arena_runtime::streams::Channel::Stderr,
+    ] {
+        let mut reader = match streams.reader(channel) {
+            Ok(reader) => reader,
+            Err(_) => {
+                unsafe { SESSIONS[index].stream_faulted = true };
+                return;
+            }
+        };
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    if reader.writer_closed() {
+                        let (bit, name): (u8, &[u8]) = match channel {
+                            arena_runtime::streams::Channel::Stdout => (1, b"stdout"),
+                            arena_runtime::streams::Channel::Stderr => (2, b"stderr"),
+                            arena_runtime::streams::Channel::Stdin => (0, b"stdin"),
+                        };
+                        if session.stream_eof & bit == 0 {
+                            unsafe { SESSIONS[index].stream_eof |= bit };
+                            log(b"[desktop] native stream channel ");
+                            log(name);
+                            log(b" reached EOF\n");
+                        }
+                    }
+                    break;
+                }
+                Err(arena_runtime::streams::Error::WouldBlock) => break,
+                Ok(count) => {
+                    log(&buffer[..count]);
+                    changed = true;
+                }
+                Err(_) => {
+                    log(b"[desktop] native output ring refused; output disabled\n");
+                    unsafe { SESSIONS[index].stream_faulted = true };
+                    return;
+                }
+            }
+        }
+    }
+    let mut stdin_changed = false;
+    if session.stdin_count != 0
+        && let Ok(mut writer) = streams.writer(arena_runtime::streams::Channel::Stdin)
+    {
+        let mut head = session.stdin_head;
+        let mut count = session.stdin_count;
+        while count != 0 {
+            let byte = unsafe { SESSIONS[index].stdin_pending[usize::from(head)] };
+            match writer.write(&[byte]) {
+                Ok(1) => {
+                    head = ((usize::from(head) + 1) % STREAM_INPUT_PENDING) as u8;
+                    count -= 1;
+                    stdin_changed = true;
+                }
+                Ok(_) | Err(arena_runtime::streams::Error::WouldBlock) => break,
+                Err(_) => {
+                    unsafe { SESSIONS[index].stream_faulted = true };
+                    break;
+                }
+            }
+        }
+        unsafe {
+            SESSIONS[index].stdin_head = head;
+            SESSIONS[index].stdin_count = count;
+        }
+    }
+    if changed || stdin_changed {
+        // Freeing output capacity may unblock the exact AppInstance writer.
+        let _ = unsafe { syscall2(SYS_NOTIFY, clock(index), BADGE_STREAM_READY) };
+    }
+}
+
+fn queue_stdin_byte(index: usize, byte: u8) {
+    let Some(session) = (unsafe { (&*(&raw const SESSIONS)).get(index).copied() }) else {
+        return;
+    };
+    if session.stream_va == 0 || session.stream_faulted {
+        return;
+    }
+    if session.stdin_count == 0 {
+        let streams = match unsafe {
+            arena_runtime::streams::StreamSet::attach(
+                session.stream_va as *mut u8,
+                arena_runtime::streams::STREAM_PAGE_BYTES,
+            )
+        } {
+            Ok(streams) => streams,
+            Err(_) => {
+                unsafe { SESSIONS[index].stream_faulted = true };
+                return;
+            }
+        };
+        let mut writer = match streams.writer(arena_runtime::streams::Channel::Stdin) {
+            Ok(writer) => writer,
+            Err(_) => {
+                unsafe { SESSIONS[index].stream_faulted = true };
+                return;
+            }
+        };
+        match writer.write(&[byte]) {
+            Ok(1) => {
+                let _ = unsafe { syscall2(SYS_NOTIFY, clock(index), BADGE_STREAM_READY) };
+                return;
+            }
+            Err(arena_runtime::streams::Error::WouldBlock) => {}
+            Err(
+                arena_runtime::streams::Error::BrokenPipe | arena_runtime::streams::Error::Closed,
+            ) => return,
+            _ => {
+                unsafe { SESSIONS[index].stream_faulted = true };
+                return;
+            }
+        }
+    }
+    let count = usize::from(session.stdin_count);
+    if count == STREAM_INPUT_PENDING {
+        log(b"[desktop] native stdin queue full; keyboard byte refused\n");
+        return;
+    }
+    let at = (usize::from(session.stdin_head) + count) % STREAM_INPUT_PENDING;
+    unsafe {
+        SESSIONS[index].stdin_pending[at] = byte;
+        SESSIONS[index].stdin_count += 1;
+    }
+}
+
+fn stream_owner_for_window(handle: u64) -> Option<usize> {
+    if let Some(index) = unsafe {
+        (&*(&raw const SESSIONS))
+            .iter()
+            .position(|session| session.id != 0 && session.handle == handle)
+    } {
+        return Some(index);
+    }
+    unsafe {
+        (&*(&raw const EXTRA_WINDOWS))
+            .iter()
+            .find(|window| window.handle == handle)
+            .map(|window| window.owner_session)
+    }
+}
+
+fn stream_keyboard_byte(code: u16, _mods: u8) -> Option<u8> {
+    // inputd has already decoded evdev events and applies shift state before
+    // publishing this native input frame. Preserve the byte it delivered;
+    // navigation and modifier records use values outside this byte set.
+    let byte = u8::try_from(code).ok()?;
+    matches!(byte, b'\x08' | b'\t' | b'\r' | b' '..=b'~').then_some(byte)
+}
+
+fn drain_standard_streams() {
+    let sessions = unsafe { *(&raw const SESSIONS) };
+    for (index, session) in sessions.into_iter().enumerate() {
+        if session.id != 0 {
+            drain_session_output(index, session);
+        }
+    }
+}
+
+fn retire_streams(session: Session) {
+    if session.stream_va == 0 {
+        return;
+    }
+    if !session.stream_faulted
+        && let Ok(streams) = unsafe {
+            arena_runtime::streams::StreamSet::attach(
+                session.stream_va as *mut u8,
+                arena_runtime::streams::STREAM_PAGE_BYTES,
+            )
+        }
+    {
+        if let Ok(mut stdin) = streams.writer(arena_runtime::streams::Channel::Stdin) {
+            stdin.close();
+        }
+        for channel in [
+            arena_runtime::streams::Channel::Stdout,
+            arena_runtime::streams::Channel::Stderr,
+        ] {
+            if let Ok(mut reader) = streams.reader(channel) {
+                reader.close();
+            }
+            if let Ok(mut writer) = streams.writer(channel) {
+                writer.close();
+            }
+        }
+    }
+    // Unmap before dropping the owner cap so SharedRegion pins/refcounts
+    // return together at exact AppInstance retirement.
+    if unsafe { syscall6(SYS_SHARED_UNMAP, session.stream_va, 0, 0, 0, 0, 0) } != 0 {
+        die(86)
+    }
+    destroy(session.stream_cap);
+}
+
 fn spawn_child(instance: usize, image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
     if instance >= LIMIT {
         return Err(STATUS_BAD_ARG);
@@ -1894,7 +2189,9 @@ fn launch_helper_image_v2(
         application_id: &session.application_id,
         instance_slot: instance as u16,
         instance_generation: u64::from(session.badge),
-        flags: session.app_flags,
+        // Helper streams require an explicit AHL1 opt-in and endpoint grant;
+        // the primary's standard-stream declaration is not ambient inheritance.
+        flags: session.app_flags & !arena_startup_abi::manifest::FLAG_STANDARD_STREAMS,
         arguments: &arguments,
         environment: &[],
         capabilities,
@@ -2275,7 +2572,8 @@ fn launch_headless_image_v2(
 
     let known_flags = arena_startup_abi::manifest::FLAG_MULTI_INSTANCE
         | arena_startup_abi::manifest::FLAG_BACKGROUND
-        | arena_startup_abi::manifest::FLAG_HEADLESS;
+        | arena_startup_abi::manifest::FLAG_HEADLESS
+        | FLAG_STANDARD_STREAMS;
     if app_flags & FLAG_HEADLESS == 0 || app_flags & !known_flags != 0 {
         return Err(STATUS_BAD_ARG);
     }
@@ -2301,10 +2599,16 @@ fn launch_headless_image_v2(
     let free = (0..CAP_SLOTS as u64)
         .filter(|slot| describe(*slot).is_none())
         .count();
-    if free < 3 {
+    let wants_streams = app_flags & FLAG_STANDARD_STREAMS != 0;
+    if free < 3 + usize::from(wants_streams) {
         log_launch_refusal(b"headless-cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
+    let mut streams = if wants_streams {
+        Some(PendingStream::create()?)
+    } else {
+        None
+    };
     let id_len = application_id
         .iter()
         .position(|byte| *byte == 0)
@@ -2313,11 +2617,39 @@ fn launch_headless_image_v2(
         return Err(STATUS_BAD_ARG);
     }
     let arguments: [&[u8]; 1] = [&application_id[..id_len]];
-    let descriptors = [startup_cap_descriptor(
-        1,
-        startup_abi::CAP_KIND_NOTIFICATION,
-        RIGHTS_READ | RIGHTS_WRITE,
-    )];
+    let mut descriptors = [
+        startup_cap_descriptor(
+            1,
+            startup_abi::CAP_KIND_NOTIFICATION,
+            RIGHTS_READ | RIGHTS_WRITE,
+        ),
+        startup_cap_descriptor(2, 0, 0),
+        startup_cap_descriptor(3, 0, 0),
+    ];
+    let mut descriptor_count = 1;
+    let mut stdin = None;
+    let mut stdout = None;
+    let mut stderr = None;
+    if streams.is_some() {
+        let stream_index = descriptor_count as u16;
+        descriptors[descriptor_count] = startup_role_descriptor(
+            (descriptor_count + 1) as u16,
+            CapabilityRole::StandardStreamSet,
+            startup_abi::CAP_KIND_SHARED_REGION,
+            RIGHTS_READ | RIGHTS_WRITE,
+        );
+        descriptor_count += 1;
+        descriptors[descriptor_count] = startup_role_descriptor(
+            (descriptor_count + 1) as u16,
+            CapabilityRole::StreamWake,
+            startup_abi::CAP_KIND_NOTIFICATION,
+            RIGHTS_WRITE,
+        );
+        descriptor_count += 1;
+        stdin = Some(stream_index);
+        stdout = Some(stream_index);
+        stderr = Some(stream_index);
+    }
     let spec = startup_abi::StartupSpec {
         application_id: &application_id,
         instance_slot: i as u16,
@@ -2325,11 +2657,11 @@ fn launch_headless_image_v2(
         flags: app_flags,
         arguments: &arguments,
         environment: &[],
-        capabilities: &descriptors,
+        capabilities: &descriptors[..descriptor_count],
         cwd: None,
-        stdin: None,
-        stdout: None,
-        stderr: None,
+        stdin,
+        stdout,
+        stderr,
         entry,
         load_base,
         clock_us: arena_desktop::app_client::now(),
@@ -2375,11 +2707,21 @@ fn launch_headless_image_v2(
     }
 
     let clock_rights = RIGHTS_READ | RIGHTS_WRITE;
-    let grants = [
+    let mut grants = [
         InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
         InheritGrant::new(clock(i) as u8, clock_rights as u32),
+        InheritGrant::new(0, 0),
+        InheritGrant::new(0, 0),
     ];
-    let process = spawn_child(i, image, &grants);
+    let mut grant_count = 2;
+    if let Some(stream) = streams.as_ref() {
+        grants[grant_count] =
+            InheritGrant::new(stream.cap as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+        grant_count += 1;
+        grants[grant_count] = InheritGrant::new(CLOCK as u8, RIGHTS_WRITE as u32);
+        grant_count += 1;
+    }
+    let process = spawn_child(i, image, &grants[..grant_count]);
     destroy(startup_cap);
     let process = match process {
         Ok(process) => process,
@@ -2388,6 +2730,10 @@ fn launch_headless_image_v2(
             return Err(status);
         }
     };
+    let (stream_cap, stream_va) = streams
+        .take()
+        .map(PendingStream::commit)
+        .unwrap_or((CAP_NONE, 0));
 
     // The high bit separates this descriptive instance key from the small
     // SharedRegion object IDs used by window authentication. It grants no
@@ -2396,6 +2742,8 @@ fn launch_headless_image_v2(
     let id = (1u64 << 63) | u64::from(generation);
     sessions[i] = Session {
         id,
+        stream_cap,
+        stream_va,
         process: Some(process),
         kind: 6,
         application_id,
@@ -2528,6 +2876,19 @@ fn startup_cap_descriptor(slot: u16, kind: u8, rights: u64) -> CapabilityDescrip
         rights: rights as u32,
     }
 }
+fn startup_role_descriptor(
+    slot: u16,
+    role: CapabilityRole,
+    kind: u8,
+    rights: u64,
+) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        slot,
+        role,
+        kind,
+        rights: rights as u32,
+    }
+}
 #[allow(clippy::too_many_arguments)]
 fn launch_image_v2_with_document(
     image: u64,
@@ -2610,7 +2971,8 @@ fn launch_image_v2_for_app_with_document(
     let free = (0..CAP_SLOTS as u64)
         .filter(|slot| describe(*slot).is_none())
         .count();
-    if free < 8 {
+    let wants_streams = app_flags & FLAG_STANDARD_STREAMS != 0;
+    if free < 8 + usize::from(wants_streams) {
         log_launch_refusal(b"cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -2677,6 +3039,23 @@ fn launch_image_v2_for_app_with_document(
         destroy(region);
         return Err(snapshot);
     }
+
+    let mut streams = if wants_streams {
+        match PendingStream::create() {
+            Ok(streams) => Some(streams),
+            Err(status) => {
+                unsafe {
+                    syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                    syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+                }
+                destroy(region);
+                log_launch_refusal(b"stream-region", status);
+                return Err(status);
+            }
+        }
+    } else {
+        None
+    };
 
     let (files_head, home) = file_grants(kind, document, document_read_only);
     unsafe { syscall1(SYS_TRY_WAIT, clock(i)) };
@@ -2747,7 +3126,7 @@ fn launch_image_v2_for_app_with_document(
         b"ARENA_MOTION=0"
     };
     let environment = [theme_env, motion_env];
-    let descriptors = [
+    let mut descriptors = [
         startup_cap_descriptor(
             V2_ENDPOINT_SLOT as u16,
             startup_abi::CAP_KIND_BADGED_ENDPOINT,
@@ -2763,8 +3142,14 @@ fn launch_image_v2_for_app_with_document(
             startup_abi::CAP_KIND_NOTIFICATION,
             clock_rights,
         ),
-        startup_cap_descriptor(
-            V2_TAIL_SLOT as u16,
+        startup_cap_descriptor(4, 0, 0),
+        startup_cap_descriptor(5, 0, 0),
+        startup_cap_descriptor(6, 0, 0),
+    ];
+    let mut descriptor_count = 3;
+    if has_tail {
+        descriptors[descriptor_count] = startup_cap_descriptor(
+            (descriptor_count + 1) as u16,
             if diagnostics {
                 startup_abi::CAP_KIND_MEMORY_POOL
             } else {
@@ -2775,8 +3160,32 @@ fn launch_image_v2_for_app_with_document(
             } else {
                 RIGHTS_WRITE | RIGHTS_COPY
             },
-        ),
-    ];
+        );
+        descriptor_count += 1;
+    }
+    let mut stdin = None;
+    let mut stdout = None;
+    let mut stderr = None;
+    if streams.is_some() {
+        let stream_index = descriptor_count as u16;
+        descriptors[descriptor_count] = startup_role_descriptor(
+            (descriptor_count + 1) as u16,
+            CapabilityRole::StandardStreamSet,
+            startup_abi::CAP_KIND_SHARED_REGION,
+            RIGHTS_READ | RIGHTS_WRITE,
+        );
+        descriptor_count += 1;
+        descriptors[descriptor_count] = startup_role_descriptor(
+            (descriptor_count + 1) as u16,
+            CapabilityRole::StreamWake,
+            startup_abi::CAP_KIND_NOTIFICATION,
+            RIGHTS_WRITE,
+        );
+        descriptor_count += 1;
+        stdin = Some(stream_index);
+        stdout = Some(stream_index);
+        stderr = Some(stream_index);
+    }
     let spec = startup_abi::StartupSpec {
         application_id: &application_id,
         // The app-instance slot is the actual reserved 32-entry manager
@@ -2788,11 +3197,11 @@ fn launch_image_v2_for_app_with_document(
         flags: app_flags,
         arguments: &arguments[..argument_count],
         environment: &environment,
-        capabilities: &descriptors[..if has_tail { 4 } else { 3 }],
+        capabilities: &descriptors[..descriptor_count],
         cwd: None,
-        stdin: None,
-        stdout: None,
-        stderr: None,
+        stdin,
+        stdout,
+        stderr,
         entry,
         load_base,
         clock_us: arena_desktop::app_client::now(),
@@ -2896,7 +3305,7 @@ fn launch_image_v2_for_app_with_document(
         return Err(status);
     }
 
-    let grants = [
+    let mut grants = [
         InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
         InheritGrant::new(badge_slot as u8, V2_BADGE_RIGHTS as u32),
         InheritGrant::new(
@@ -2904,9 +3313,22 @@ fn launch_image_v2_for_app_with_document(
             (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY) as u32,
         ),
         InheritGrant::new(clock(i) as u8, clock_rights as u32),
-        tail,
+        InheritGrant::new(0, 0),
+        InheritGrant::new(0, 0),
+        InheritGrant::new(0, 0),
     ];
-    let grant_count = if has_tail { 5 } else { 4 };
+    let mut grant_count = 4;
+    if has_tail {
+        grants[grant_count] = tail;
+        grant_count += 1;
+    }
+    if let Some(stream) = streams.as_ref() {
+        grants[grant_count] =
+            InheritGrant::new(stream.cap as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+        grant_count += 1;
+        grants[grant_count] = InheritGrant::new(CLOCK as u8, RIGHTS_WRITE as u32);
+        grant_count += 1;
+    }
     let process = spawn_child(i, image, &grants[..grant_count]);
     // Parent-side seed references are transient; the exact child caps remain.
     destroy(home);
@@ -2925,10 +3347,16 @@ fn launch_image_v2_for_app_with_document(
             return Err(status);
         }
     };
+    let (stream_cap, stream_va) = streams
+        .take()
+        .map(PendingStream::commit)
+        .unwrap_or((CAP_NONE, 0));
     destroy(region);
     sessions[i] = Session {
         id,
         va: va as u64,
+        stream_cap,
+        stream_va,
         process: Some(process),
         kind,
         application_id,
@@ -3300,7 +3728,9 @@ fn retire(index: usize, _force: bool) {
     if s.id == 0 {
         return;
     }
+    drain_session_output(index, s);
     finish_app_group(index);
+    retire_streams(s);
     let mut extra_index = 0;
     while extra_index < EXTRA_LIMIT {
         let extra = unsafe { EXTRA_WINDOWS[extra_index] };
@@ -4420,6 +4850,10 @@ extern "C" fn main() -> ! {
     snapshot(true);
     let mut pending_render = false;
     loop {
+        // App writers publish ring state before notifying CLOCK. Drain before
+        // process-exit sweeping so final bytes are visible before exact
+        // ProcessGroup and stream-region teardown.
+        drain_standard_streams();
         // A pending Desktop watch is handled by the next scene (render).
         // Keep animation/publication dirtiness across internal badge-bootstrap
         // traffic and first-frame setup; the nonblocking receive loop drains
@@ -4614,6 +5048,15 @@ extern "C" fn main() -> ! {
                                 let before = state.delivered;
                                 let a = app_action
                                     .unwrap_or_else(|| state.key_input(code, pressed, mods));
+                                if app_action.is_none()
+                                    && pressed
+                                    && !modal
+                                    && let (Some(handle), Some(byte)) =
+                                        (state.focused(), stream_keyboard_byte(code, mods))
+                                    && let Some(owner) = stream_owner_for_window(handle)
+                                {
+                                    queue_stdin_byte(owner, byte);
+                                }
                                 if perf::ENABLED {
                                     let p = unsafe { &mut *(&raw mut PERF) };
                                     if app_action.is_none() && pressed && unsafe { KEY_AT } == 0 {

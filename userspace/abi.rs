@@ -94,7 +94,7 @@ pub const CAP_KIND_VM_REGION: u8 = 14;
 /// Desktop-only authority to mint bounded owner notifications.
 pub const CAP_KIND_NOTIFICATION_FACTORY: u8 = 15;
 /// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
-pub const MAX_SPAWN_INHERIT: usize = 5;
+pub const MAX_SPAWN_INHERIT: usize = 7;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;

@@ -36,10 +36,11 @@ use crate::sync::{SyncCell, without_interrupts};
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
 pub const MAX_IMAGES: usize = 24;
-/// Most handles one spawn may inherit (the spec arrives in registers +
-/// a small user buffer; four is plenty for a supervisor demo and every
-/// excess is a typed refusal).
-pub const MAX_INHERIT: usize = 5;
+/// Bounded explicit authority grants per child. The Phase-13 installed app
+/// profile may include endpoint, surface, clock, optional tail, stream page,
+/// and its write-only stream wake capability, plus the startup transport cap
+/// in slot 0.
+pub const MAX_INHERIT: usize = 7;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten). ADR-0075: 14 boot processes plus twelve desktop
 /// sessions need 26; one per possible process (`MAX_PROCESSES`).

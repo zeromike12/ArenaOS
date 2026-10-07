@@ -98,6 +98,9 @@ The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
 | Scalable heap alignment | ordinary block alignment 16 bytes; page-run alignment up to 2 MiB | ADR-0096 |
 | Scalable heap committed backing | retained for reuse after deallocation; exact VM region release or process teardown returns frames | ADR-0095/0096 |
 | Process exit status | stable full-width final status until reap; exact Process/READ required | syscall 61, ADR-0100 |
+| SharedRegion records / maps | 96 / 160 bounded live records; aggregate page budget remains 36,864 | ADR-0104; sized for 16 stream-enabled instances and 32 windows |
+| Native standard streams | one page per opted-in instance; three single-producer/single-consumer rings, 768 bytes each | ADR-0104 |
+| Spawn grants / startup descriptors | at most 7 grants (including slot-0 startup cap) / 6 descriptors; 128 process capability slots and slot-127 accounting are unchanged | ADR-0104 |
 
 The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
 The Phase-13 application opts into ScalableHeap; no reserved capability slot
@@ -128,9 +131,12 @@ read-only File capability. ADR-0097 and the signed APB1 T1 guest now prove
 three independently backed ordinary windows under one process and two such
 instances at once. ADR-0098 adds a signed installed headless launch with an
 exact Process cap, one attenuated Notification, no window or Desktop endpoint,
-and real timer-driven teardown. Persisted launcher favorites, helper
-processes, streams, user threads,
-synchronization, mixed-load pressure, and final qualification remain open. The
+and real timer-driven teardown. Signed helper execution and manager cleanup
+are guest-proved by ADR-0101. ADR-0104 and the registry T1 guest prove
+Startup ABI standard streams, focused keyboard stdin, output backpressure,
+partial transfer, EOF, and exact owner teardown. Persisted launcher
+favorites, helper-specific streams, user threads, synchronization, mixed-load
+pressure, and final qualification remain open. The
 dynamic Image envelope is a bounded executable staging mechanism; it is not
 process VM and does not imply PIE or ASLR support. See `PROGRESS.md` for
 measured receipts.
@@ -193,10 +199,20 @@ measured receipts.
 
 ### D. Streams
 
-- Add a bounded native byte-stream service or shared-ring/notification
-  implementation with endpoint authority, partial transfer, backpressure,
-  event notification, EOF, close, endpoint death, and teardown.
-- Connect Startup ABI-v2 stdin/stdout/stderr roles to those exact stream caps.
+- Implement ADR-0104's one-page SharedRegion stream set with three bounded
+  rings, partial transfer, backpressure, event wake hints, EOF, peer closure,
+  and owner teardown. The startup role uses the exact stream-region cap;
+  manifest opt-in remains descriptive and grants no authority. **Status:**
+  standard streams are implemented and the real installed-app guest proves
+  ring-full refusal/resume, EOF after close, and exact authority refusal for
+  stream handles used as Notifications. Startup flag/role disagreement is
+  rejected (ADR-0104).
+- Wire stdin to focused Desktop input and stdout/stderr to Desktop's native
+  log sink. **Status:** focused inputd-decoded keyboard bytes reach the exact
+  AppInstance stdin ring; app output reaches the bounded Desktop log sink;
+  stream page, mappings, and caps retire with the exact ProcessGroup. Extend
+  the same exact-region mechanism to explicitly allowlisted helper channels
+  without ambient inheritance.
 
 ### E. Process-wide VM, heap, threads, synchronization
 

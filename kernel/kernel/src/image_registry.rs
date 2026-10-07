@@ -189,7 +189,10 @@ pub fn validate_reserved(idx: usize) -> bool {
             return false;
         };
         if stack_end > 0x0000_8000_0000_0000 || load_base == u64::MAX {
-            crate::log_error!("image", "dynamic Image stack or load-base preflight refused");
+            crate::log_error!(
+                "image",
+                "dynamic Image stack or load-base preflight refused"
+            );
             return false;
         }
         let e = &mut (*REG.get()).entries[idx];

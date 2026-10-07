@@ -14,7 +14,11 @@ pub const CONTENT_TYPE_BYTES: usize = 32;
 pub const FLAG_MULTI_INSTANCE: u32 = 1 << 0;
 pub const FLAG_BACKGROUND: u32 = 1 << 1;
 pub const FLAG_HEADLESS: u32 = 1 << 2;
-pub const KNOWN_FLAGS: u32 = FLAG_MULTI_INSTANCE | FLAG_BACKGROUND | FLAG_HEADLESS;
+/// Request the trusted launcher to supply the native Startup ABI v2 stream
+/// set. This signed descriptive bit never grants the stream capability.
+pub const FLAG_STANDARD_STREAMS: u32 = 1 << 3;
+pub const KNOWN_FLAGS: u32 =
+    FLAG_MULTI_INSTANCE | FLAG_BACKGROUND | FLAG_HEADLESS | FLAG_STANDARD_STREAMS;
 
 /// These bits are requests to userspace policy, never direct authority.
 pub const REQUEST_DOCUMENT_READ: u32 = 1 << 0;
@@ -217,6 +221,9 @@ impl Manifest {
     pub fn allows_headless(&self) -> bool {
         self.flags & FLAG_HEADLESS != 0
     }
+    pub fn requests_standard_streams(&self) -> bool {
+        self.flags & FLAG_STANDARD_STREAMS != 0
+    }
 }
 
 pub(crate) fn valid_id(raw: &[u8; ID_BYTES]) -> bool {
@@ -363,6 +370,17 @@ mod tests {
         assert_eq!(m.associations().len(), 2);
         // A request bit is descriptive; this type has no cap or launch method.
         assert_eq!(m.requested_capabilities(), REQUEST_DOCUMENT_READ);
+    }
+
+    #[test]
+    fn standard_stream_opt_in_is_descriptive_and_grants_no_capability() {
+        let mut bytes = base();
+        bytes[112..116]
+            .copy_from_slice(&(FLAG_MULTI_INSTANCE | FLAG_STANDARD_STREAMS).to_le_bytes());
+        let manifest = Manifest::parse(&bytes).unwrap();
+        assert!(manifest.requests_standard_streams());
+        assert!(manifest.allows_multiple_instances());
+        assert_eq!(manifest.requested_capabilities(), REQUEST_DOCUMENT_READ);
     }
 
     #[test]

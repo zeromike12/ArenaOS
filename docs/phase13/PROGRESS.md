@@ -19,8 +19,8 @@
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
-| 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, and stable process exit status implemented; signed helper execution remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. Guest proves three windows per process, two concurrent windowed instances, one windowless headless instance with status 42, and 32-session group-slot reuse; signed helper allowlisting remains. |
-| 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
+| 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, stable process exit status, and signed helper lifecycle implemented | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. ADR-0101 guest-proves allowlisted helper Image resolution, explicit private timer and owner-signal grants, wait/reap, terminate, crash, and group cleanup. |
+| 13.4 streams | Standard streams implemented; T1 guest proof passed | ADR-0104 now has a one-page, three-ring SharedRegion, Startup ABI v2 opt-in and roles, exact WRITE-only Desktop wake hint, focused stdin, partial output drain, EOF, and owner teardown. The installed ELF proved a full 768-byte ring returns `WouldBlock`, resumed after Desktop drain, and delivered exact keyboard bytes. Helper-specific streams and mixed-pressure capacity remain. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
@@ -189,13 +189,14 @@ the source-frozen final qualification.
 At this registry/association checkpoint, favorites/dock composition,
 multi-window ownership, helper lifecycle, streams, user threads,
 synchronization, pressure, and final qualification were still open; later
-subsections record the subsequent VM/heap and multi-window checkpoints.
+subsections record the subsequent VM/heap, multi-window, helper, and stream
+checkpoints.
 
 The current branch has since added multi-window ownership (ADR-0097), and the
 signed registry guest now also installs and launches a headless package as
 described in ADR-0098. The earlier checkpoint statement is retained as a dated
-status record; helper lifecycle, streams, user threads, synchronization,
-pressure, favorites, and final qualification remain open.
+status record; helper lifecycle, user threads, synchronization, pressure,
+favorites, and final qualification remain open.
 
 ### Process-owned user mapping inventory implementation
 
@@ -572,6 +573,65 @@ pressure, favorites, and final qualification remain open.
   seconds, with zero failures, bound to EFI SHA-256
   `d4066e9f088d0bd648212fe67813eba4955ef2d5c962a5579044c7da750d61d1`.
 - This is a green T3 preservation checkpoint for signed helper lifecycle and
-  notification-capability retirement. Byte streams, persisted favorites,
-  user threads, synchronization, mixed-load pressure, and final qualification
-  remain open.
+  notification-capability retirement. Persisted favorites, user threads,
+  synchronization, mixed-load pressure, and final qualification remain open.
+
+### Native standard streams T1
+
+- Added ADR-0104. A signed APB1 manifest may opt in with
+  `FLAG_STANDARD_STREAMS`; the opt-in must agree with ABI-v2 stream roles and
+  grants no authority by itself. The startup descriptor bound is six, the
+  child inheritance bound is seven including startup transport slot 0, and
+  process cap spaces remain exactly 128 slots with separately observable
+  slot 127.
+- Each opted-in AppInstance owns one one-page SharedRegion with stdin, stdout,
+  and stderr SPSC rings. Each ring has 768 bytes of capacity. Acquire/release
+  counters support partial reads/writes, full-buffer `WouldBlock`, EOF after
+  writer close, peer close, and counter wrap. Startup runtime validates the
+  exact stream SharedRegion and WRITE-only wake Notification before mapping.
+  Startup decoding rejects either a stream role without the signed flag or a
+  signed stream flag with no roles.
+- Desktop produces stdin from focused inputd-decoded bytes and wakes the
+  instance's existing private notification. The app consumes bytes, then
+  sends a write-only Desktop event wake so pending input can drain. Desktop
+  consumes stdout/stderr incrementally into its bounded log sink and wakes
+  the app when output space returns. It drains final bytes, observes explicit
+  EOF, closes all sides at exact ProcessGroup teardown, then unmaps and drops
+  its owner cap. A SharedRegion presented to `SYS_NOTIFY` is refused.
+- The real installed APB1 fixture writes 800 bytes: the first call transfers
+  768, the next returns `WouldBlock`, Desktop drains the ring in partial
+  chunks, the producer resumes, and the broker receives a trailing stdout
+  marker. The app also sends an actual stderr marker, closes both writers,
+  and observes the broker's EOF receipts. Its empty stdin read returns
+  `WouldBlock`; it then sleeps on the private notification and receives the
+  exact QMP keyboard text `native-stream\r` as stream bytes.
+- `python3 tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 / OVMF
+  2025.02. Its signed APB1 package installed and launched once through
+  Open With and twice from All Applications. Stream proof counts were three
+  for full-buffer refusal, stdout, stderr, stdout EOF, and stderr EOF; one
+  focused keyboard sequence reached stdin. The same guest proved six ordinary
+  windows across two three-window AppInstances, individual close while sibling
+  windows stayed live, final ProcessGroup/stream teardown, headless launch,
+  and clean shutdown.
+- Measured `(free frames, process records, processes, regions, region pages,
+  maps, caps)` was baseline `(114232, 15, 15, 2, 470, 4, 46)`, peak
+  `(108295, 17, 17, 16, 6112, 26, 52)`, and final
+  `(114215, 15, 15, 2, 470, 4, 46)`. At peak, six windows add 12 regions,
+  5,640 pages, and 18 maps; two stream sets add two regions/pages and four
+  maps. Each installed instance adds a Process cap, file-lineage cap, and
+  stream cap. Identity-bearing counts return exactly to baseline. The peak
+  consumes 295 more free frames than SharedRegion pages alone; exact page-table
+  and allocator decomposition is deferred to the mixed-pressure workstream.
+  Seventeen fewer free frames remained than the starting sample after close.
+- The first guest failure exposed that `SYS_SHARED_PAGES` requires all unused
+  syscall registers to be explicitly zero; using the one-argument wrapper
+  reached the kernel's bad-call path. A later keyboard proof showed inputd
+  already decodes evdev events to ASCII, so Desktop now forwards those bytes
+  instead of decoding them a second time. The M9 SharedRegion capacity guest
+  was raised to the audited 96-region/160-map limits; its refusal and churn
+  proof passes at the new bounds.
+- `arena-runtime` host tests passed 19/19, Startup ABI v2 tests passed 7/7,
+  `arena-platform` host tests passed 37/37, and kernel/Desktop/installed-app
+  target checks passed. Helper-specific streams, persisted favorites, user
+  threads, synchronization, 16-instance/32-window pressure, and final
+  qualification remain open.

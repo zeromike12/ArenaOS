@@ -15,11 +15,13 @@ use arena_desktop::{
 };
 use arena_lib::abi::{
     CAP_KIND_VM_REGION, RIGHTS_DESTROY, RIGHTS_READ, RIGHTS_WRITE, STATUS_BAD_ADDRESS,
-    STATUS_BAD_ARG, STATUS_BUSY, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_VM_COMMIT, SYS_VM_PROTECT,
-    SYS_WAIT, VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2, syscall6,
+    STATUS_BAD_ARG, STATUS_BUSY, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_NOTIFY, SYS_VM_COMMIT,
+    SYS_VM_PROTECT, SYS_WAIT, VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2,
+    syscall6,
 };
 use arena_runtime::capabilities::HeldCapability;
 use arena_runtime::heap::{HeapUsage, MAX_SCALABLE_HEAP_PAGES, PAGE_BYTES, ScalableHeap};
+use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams, STREAM_CAPACITY};
 use arena_startup_abi::startup::StartupView;
 use core::alloc::Layout;
 
@@ -52,11 +54,14 @@ extern "C" fn main() -> ! {
 
 fn application_main(view: StartupView<'_>) -> ! {
     let actual_entry = _start as *const () as usize as u64;
-    let has_document = view.capability_count() == 4;
+    let has_document = view.capability(3).is_some_and(|capability| {
+        capability.role == arena_startup_abi::startup::CapabilityRole::Other
+            && capability.kind == arena_startup_abi::startup::CAP_KIND_BADGED_ENDPOINT
+    });
     if view.application_id() != &APPLICATION_ID
         || view.argument_count() != 1
         || view.argument(0) != Some(b"org.arenaos.phase13app")
-        || !matches!(view.capability_count(), 3 | 4)
+        || view.capability_count() != if has_document { 6 } else { 5 }
         || view.entry() != actual_entry
         || view.load_base() != 0x0020_0000
         || view.instance_generation() == 0
@@ -71,6 +76,38 @@ fn application_main(view: StartupView<'_>) -> ! {
         client::exit(73);
     }
     app_client::audit(kind, view.instance_generation()).unwrap_or_else(|_| client::exit(74));
+    let streams = match NativeStreams::from_startup(&view) {
+        Ok(streams) => streams,
+        Err(error) => stream_startup_error(error),
+    };
+    if unsafe {
+        syscall2(
+            SYS_NOTIFY,
+            streams.stream_cap_slot(),
+            arena_runtime::streams::STREAM_WAKE_BADGE,
+        )
+    } != STATUS_BAD_ARG
+    {
+        client::exit(157);
+    }
+    let mut stdin = streams
+        .set()
+        .reader(Channel::Stdin)
+        .unwrap_or_else(|_| client::exit(158));
+    let mut stdout = streams
+        .set()
+        .writer(Channel::Stdout)
+        .unwrap_or_else(|_| client::exit(159));
+    let mut stderr = streams
+        .set()
+        .writer(Channel::Stderr)
+        .unwrap_or_else(|_| client::exit(160));
+    let mut empty = [0u8; 1];
+    if stdin.read(&mut empty) != Err(StreamError::WouldBlock) {
+        client::exit(161);
+    }
+    client::log(b"[phase13-stream] empty stdin waits through the AppInstance notification\n");
+    verify_stream_output(&streams, &mut stdout, &mut stderr);
     verify_vm();
     verify_heap();
 
@@ -163,8 +200,41 @@ fn application_main(view: StartupView<'_>) -> ! {
     }
 
     let mut open = [true, count == 3, count == 3];
+    let mut typed = [0u8; 14];
+    let mut typed_len = 0usize;
+    let mut stdin_proved = false;
     loop {
         app_client::idle(None).unwrap_or_else(|_| client::exit(77));
+        if !stdin_proved {
+            loop {
+                let mut bytes = [0u8; 32];
+                match stdin.read(&mut bytes) {
+                    Ok(0) => client::exit(162),
+                    Ok(count) => {
+                        for byte in &bytes[..count] {
+                            if typed_len < typed.len() {
+                                typed[typed_len] = *byte;
+                                typed_len += 1;
+                            } else {
+                                typed.copy_within(1.., 0);
+                                typed[typed.len() - 1] = *byte;
+                            }
+                            if typed_len == typed.len() && &typed == b"native-stream\r" {
+                                stdin_proved = true;
+                                client::log(b"[phase13-stream] stdin received exact native keyboard bytes\n");
+                                break;
+                            }
+                        }
+                        streams.wake_broker().unwrap_or_else(|_| client::exit(163));
+                        if stdin_proved {
+                            break;
+                        }
+                    }
+                    Err(StreamError::WouldBlock) => break,
+                    Err(_) => client::exit(164),
+                }
+            }
+        }
         let mut close_windows = [false; 3];
         loop {
             for index in 0..count {
@@ -212,6 +282,105 @@ fn application_main(view: StartupView<'_>) -> ! {
             client::exit(42);
         }
     }
+}
+
+fn verify_stream_output(
+    streams: &NativeStreams,
+    stdout: &mut arena_runtime::streams::Writer<'_>,
+    stderr: &mut arena_runtime::streams::Writer<'_>,
+) {
+    let payload = [b'Q'; STREAM_CAPACITY + 32];
+    let accepted = stdout.write(&payload).unwrap_or_else(|_| client::exit(165));
+    if accepted != STREAM_CAPACITY
+        || stdout.write(&payload[accepted..]) != Err(StreamError::WouldBlock)
+    {
+        client::exit(166);
+    }
+    client::log(b"[phase13-stream] output full; extra write returned WouldBlock\n");
+    write_stream_bytes(streams, stdout, &payload[accepted..]);
+    let marker = b"\n[phase13-stream] stdout partial transfer reached the broker\n";
+    write_stream_bytes(streams, stdout, marker);
+    write_stream_bytes(
+        streams,
+        stderr,
+        b"[phase13-stream] stderr channel reached the broker\n",
+    );
+    stdout.close();
+    stderr.close();
+    streams.wake_broker().unwrap_or_else(|_| client::exit(167));
+}
+
+fn stream_startup_error(error: StreamError) -> ! {
+    let (message, code): (&[u8], u64) = match error {
+        StreamError::BadAddress => (b"[phase13-stream] attach rejected address\n", 156),
+        StreamError::TooSmall => (b"[phase13-stream] attach rejected page size\n", 157),
+        StreamError::BadFormat => (b"[phase13-stream] attach rejected format\n", 158),
+        StreamError::WouldBlock => (b"[phase13-stream] startup attach would block\n", 159),
+        StreamError::BrokenPipe => (b"[phase13-stream] startup attach broken peer\n", 160),
+        StreamError::Closed => (b"[phase13-stream] startup attach closed peer\n", 161),
+        StreamError::Corrupt => (b"[phase13-stream] startup attach found corrupt ring\n", 162),
+        StreamError::EndpointInUse => (b"[phase13-stream] duplicate standard stream attach\n", 163),
+        StreamError::MissingAuthority => (
+            b"[phase13-stream] exact stream cap authority mismatch\n",
+            164,
+        ),
+        StreamError::CapabilityMismatch => (
+            b"[phase13-stream] held cap differs from startup descriptor\n",
+            165,
+        ),
+        StreamError::RegionGeometry(status) => {
+            client::log(b"[phase13-stream] stream page query returned status=");
+            log_signed(status);
+            client::log(b"\n");
+            (b"[phase13-stream] stream region is not one page\n", 166)
+        }
+        StreamError::Kernel(_) => (
+            b"[phase13-stream] kernel refused standard stream map\n",
+            167,
+        ),
+    };
+    client::log(message);
+    client::exit(code)
+}
+
+fn log_signed(value: i64) {
+    if value < 0 {
+        client::log(b"-");
+    }
+    let mut number = value.unsigned_abs();
+    let mut digits = [0u8; 20];
+    let mut length = 0usize;
+    loop {
+        digits[length] = b'0' + (number % 10) as u8;
+        length += 1;
+        number /= 10;
+        if number == 0 {
+            break;
+        }
+    }
+    for index in (0..length).rev() {
+        client::log(&digits[index..=index]);
+    }
+}
+
+fn write_stream_bytes(
+    streams: &NativeStreams,
+    writer: &mut arena_runtime::streams::Writer<'_>,
+    bytes: &[u8],
+) {
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        match writer.write(&bytes[offset..]) {
+            Ok(0) => client::exit(168),
+            Ok(count) => offset += count,
+            Err(StreamError::WouldBlock) => {
+                streams.wake_broker().unwrap_or_else(|_| client::exit(169));
+                app_client::idle(None).unwrap_or_else(|_| client::exit(170));
+            }
+            Err(_) => client::exit(171),
+        }
+    }
+    streams.wake_broker().unwrap_or_else(|_| client::exit(172));
 }
 
 fn helper_id(name: &[u8]) -> [u8; 32] {
