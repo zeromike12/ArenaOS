@@ -189,6 +189,8 @@ pub const SYS_SHARED_PAGES: u64 = 52;
 pub const SYS_TLS_SET: u64 = 53;
 /// ADR-0086: read only whether one caller-owned capability slot is occupied.
 pub const SYS_CAP_OCCUPIED: u64 = 54;
+/// ADR-0093: entry/load base/byte length from a held exact dynamic Image.
+pub const SYS_IMAGE_INFO: u64 = 55;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -720,6 +722,7 @@ extern "C" fn syscall_dispatch(
         SYS_SHARED_PAGES if [a1, a2, a3, a4, a5] == [0; 5] => sys_shared_pages(a0) as u64,
         SYS_TLS_SET if [a1, a2, a3, a4, a5] == [0; 5] => sys_tls_set(a0) as u64,
         SYS_CAP_OCCUPIED if [a1, a2, a3, a4, a5] == [0; 5] => sys_cap_occupied(a0) as u64,
+        SYS_IMAGE_INFO if [a2, a3, a4, a5] == [0; 4] => sys_image_info(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1294,6 +1297,47 @@ fn sys_image_register(reg: u64, addr: u64, len: u64, dst: u64, r8: u64, r9: u64)
     }
     crate::image_registry::commit_mint(idx);
     id as Status
+}
+
+/// SYS_IMAGE_INFO(image_slot, out[3]): report (entry, lowest PT_LOAD base,
+/// exact registered byte length) for a caller-held live dynamic Image/READ.
+/// It exposes no Image bytes and does not create or transfer authority.
+fn sys_image_info(image_slot: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if image_slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_ok(out, 24) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Ok(cap) = crate::cap::read(pid, image_slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let crate::cap::CapObj::Image { img_id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if img_id < crate::image_registry::FIRST {
+        return STATUS_BAD_ARG;
+    }
+    let Some((entry, load_base, bytes)) = crate::image_registry::info(img_id) else {
+        return STATUS_BAD_ARG;
+    };
+    // SAFETY: all 24 output bytes are page-checked before the copy; the
+    // dynamic Image metadata was read under the registry's IF=0 guard.
+    unsafe {
+        super::stac();
+        let dst = out as *mut u64;
+        for (index, value) in [entry, load_base, bytes].iter().enumerate() {
+            core::ptr::write_unaligned(dst.add(index), *value);
+        }
+        super::clac();
+    }
+    STATUS_OK
 }
 
 fn sys_image_revoke(reg: u64, id: u64, rdx: u64, r10: u64, r8: u64, r9: u64) -> Status {

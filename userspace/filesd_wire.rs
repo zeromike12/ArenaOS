@@ -51,6 +51,17 @@ pub const CALL_APB1_PROBE: u64 = 0x4150_4231_0000_0000;
 pub const CALL_APB1_INSPECT: u64 = 0x4150_4231_0000_0001;
 pub const CALL_APB1_VERIFY: u64 = 0x4150_4231_0000_0002;
 pub const CALL_APB1_INSTALL: u64 = 0x4150_4231_0000_0003;
+/// Ordered descriptive scan of protected installed APB1 version directories.
+pub const CALL_APB1_NEXT_INSTALLED: u64 = 0x4150_4231_0000_0004;
+/// Read an unauthenticated installed APB1 claim for receiver policy lookup.
+pub const CALL_APB1_INSPECT_INSTALLED: u64 = 0x4150_4231_0000_0005;
+/// Verify the exact installed tree with the selected receiver key.
+pub const CALL_APB1_VERIFY_INSTALLED: u64 = 0x4150_4231_0000_0006;
+/// Read a chunk from metadata bound to the preceding verification token.
+pub const CALL_APB1_READ_VERIFIED_METADATA: u64 = 0x4150_4231_0000_0007;
+/// Copy one executable chunk from the verified installed entry into a lent
+/// SharedRegion page. The cap remains temporary and is never inherited.
+pub const CALL_APB1_READ_VERIFIED_EXECUTABLE: u64 = 0x4150_4231_0000_0008;
 pub const CALL_APB1_ABI_V1: u64 = 1;
 /// filesd's internal APB1 capability record (ADR-0091), index 2/generation 1.
 pub const APB1_INSTALL_BADGE: u32 = 2 | (1 << 16);

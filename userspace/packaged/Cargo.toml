@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 arena-lib = { path = "../arena-lib" }
+arena-platform-core = { path = "../arena-platform" }
 arena-phase84-crypto-audit = { path = "../../audit/phase84-crypto" }
 
 [lib]

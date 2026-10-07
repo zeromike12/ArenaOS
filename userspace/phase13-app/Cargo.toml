@@ -1,0 +1,17 @@
+[package]
+name = "arena-phase13-installed-app"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+arena-desktop = { path = "../desktop" }
+arena-runtime = { path = "../arena-runtime" }
+arena-startup-abi = { path = "../arena-startup-abi" }
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"

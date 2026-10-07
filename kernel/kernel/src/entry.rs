@@ -797,10 +797,37 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // only (the phase-9 fixture keeps its historical process set).
     let filesd_eid = (option_env!("ARENA_GRAPHICS_FIXTURE") != Some("phase9"))
         .then(|| spawn_filesd(blk_eid, fs_eid).unwrap_or_else(|e| crate::halt::halt_machine(e)));
+    let mut graphics = start_boot_display(
+        _input_pid,
+        desktop_frame_nid,
+        &app_clock_nids,
+        fs_eid,
+        filesd_eid,
+        package_root.map(|(eid, _)| eid),
+    );
+    let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
+        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    if let Some(eid) = graphics.as_ref().and_then(|g| g.launch_endpoint) {
+        crate::cap::issue(
+            manager_pid,
+            31,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Endpoint { eid },
+                rights: crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_COPY,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        info!(
+            "m10",
+            "late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image"
+        );
+    }
     // ADR-0091: issue the exact filesd APB1 badge into servicemgr's reserved
-    // root-owned slot127. It is outside the manager's fixed 32-slot named
-    // child/process inventory, so it does not consume a Process-handle slot;
-    // no child receives it before packaged's readiness proof.
+    // root-owned slot127 after the other late boot grants. It is outside the
+    // manager's fixed 32-slot named child/process inventory, so it does not
+    // consume a Process-handle slot; no child receives it before packaged's
+    // readiness proof. Issuing it here also makes the historical low-32
+    // manager occupancy receipt independent of this later slot127 handoff.
     if let (Some(eid), Some(_package)) = (filesd_eid, package_root) {
         use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_WRITE as W};
         let generation = crate::ipc::endpoint_generation(eid).unwrap_or_else(|| {
@@ -832,31 +859,6 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         info!(
             "m12",
             "late filesd APB1 BadgedEndpoint issued to servicemgr slot127; authority remains withheld from packaged until receiver READY"
-        );
-    }
-    let mut graphics = start_boot_display(
-        _input_pid,
-        desktop_frame_nid,
-        &app_clock_nids,
-        fs_eid,
-        filesd_eid,
-        package_root.map(|(eid, _)| eid),
-    );
-    let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
-        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
-    if let Some(eid) = graphics.as_ref().and_then(|g| g.launch_endpoint) {
-        crate::cap::issue(
-            manager_pid,
-            31,
-            crate::cap::Cap {
-                obj: crate::cap::CapObj::Endpoint { eid },
-                rights: crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_COPY,
-            },
-        )
-        .unwrap_or_else(|e| crate::halt::halt_machine(e));
-        info!(
-            "m10",
-            "late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image"
         );
     }
     if expected_stack_caps.is_some() {

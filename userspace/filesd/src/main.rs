@@ -24,7 +24,7 @@ use arena_platform_core::{
     bundle::{BundleClaim, Error as BundleError, SourceError, Workspace},
     install::{
         self as apb1_install, CleanupWorkspace, Error as InstallError, InstallAuthorization,
-        InstallTarget, InstallWorkspace,
+        InstallTarget, InstallWorkspace, RegistryScanWorkspace,
     },
 };
 use core::panic::PanicInfo;
@@ -159,7 +159,28 @@ static mut VOL: Volume<Blk> = Volume::empty();
 static mut APB1_VERIFIER: Workspace = Workspace::new();
 static mut APB1_INSTALL_WORKSPACE: InstallWorkspace = InstallWorkspace::new();
 static mut APB1_CLEANUP: CleanupWorkspace = CleanupWorkspace::new();
+static mut APB1_TREE_WORKSPACE: RegistryScanWorkspace = RegistryScanWorkspace::new();
 static mut APB1_ROOTS: Option<(u64, u64)> = None;
+
+#[derive(Clone, Copy)]
+struct VerifiedInstalledState {
+    token: u64,
+    version: u64,
+    manifest: [u8; 512],
+    executable_object: u64,
+    executable_size: u64,
+}
+impl VerifiedInstalledState {
+    const EMPTY: Self = Self {
+        token: 0,
+        version: 0,
+        manifest: [0; 512],
+        executable_object: 0,
+        executable_size: 0,
+    };
+}
+static mut APB1_VERIFIED: VerifiedInstalledState = VerifiedInstalledState::EMPTY;
+static mut APB1_VERIFY_GENERATION: u64 = 0;
 
 // ---- wall time (ADR-0076 "Time": data, never authority) -------------------
 
@@ -456,6 +477,7 @@ fn apb1_bundle_status(error: BundleError) -> u64 {
 
 fn apb1_install_status(error: InstallError) -> u64 {
     match error {
+        InstallError::Fs(E::NoEnt) => S_NOENT,
         InstallError::Fs(E::NoSpc) => S_NOSPC,
         InstallError::Fs(E::Io) => S_IO,
         InstallError::AlreadyInstalled | InstallError::StagingCollision => S_EXIST,
@@ -475,7 +497,17 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
     if badge != wire::APB1_INSTALL_BADGE {
         return reply(S_DENIED, 0);
     }
-    if version != wire::CALL_APB1_ABI_V1 {
+    // The first four operations are tagged with the APB1 call ABI. The
+    // installed verification/read operations use w1 for the selected
+    // protected version, so their message token and exact application ID
+    // bind the operation while w1 selects the immutable installed version.
+    let versioned_install_call = matches!(
+        call,
+        wire::CALL_APB1_VERIFY_INSTALLED
+            | wire::CALL_APB1_READ_VERIFIED_METADATA
+            | wire::CALL_APB1_READ_VERIFIED_EXECUTABLE
+    );
+    if !versioned_install_call && version != wire::CALL_APB1_ABI_V1 {
         return reply(S_INVAL, 0);
     }
     if call == wire::CALL_APB1_PROBE {
@@ -488,6 +520,222 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
     }
     if !apb1_install_badge(badge) {
         return reply(S_OFFLINE, 0);
+    }
+    match call {
+        wire::CALL_APB1_NEXT_INSTALLED => {
+            if version != wire::CALL_APB1_ABI_V1
+                || landed != CAP_NONE
+                || bytes[40..].iter().any(|&byte| byte != 0)
+            {
+                return reply(S_INVAL, 0);
+            }
+            let mut after_id = [0u8; 32];
+            after_id.copy_from_slice(&bytes[..32]);
+            let after_version = u64::from_le_bytes(bytes[32..40].try_into().unwrap());
+            if (after_id == [0; 32]) != (after_version == 0)
+                || (after_id != [0; 32] && !valid_application_id(&after_id))
+            {
+                return reply(S_INVAL, 0);
+            }
+            let Some((applications_root, _)) = (unsafe { APB1_ROOTS }) else {
+                return reply(S_OFFLINE, 0);
+            };
+            let result = apb1_install::next_installed_candidate(
+                unsafe { &mut *(&raw mut VOL) },
+                applications_root,
+                &after_id,
+                after_version,
+            );
+            return match result {
+                Ok(Some(candidate)) => {
+                    let mut result = reply(S_OK, candidate.version);
+                    result.bytes[..32].copy_from_slice(&candidate.application_id);
+                    result
+                }
+                Ok(None) => reply(S_NOENT, 0),
+                Err(error) => reply(apb1_install_status(error), 0),
+            };
+        }
+        wire::CALL_APB1_INSPECT_INSTALLED => {
+            if version != wire::CALL_APB1_ABI_V1
+                || landed != CAP_NONE
+                || bytes[40..].iter().any(|&byte| byte != 0)
+            {
+                return reply(S_INVAL, 0);
+            }
+            let mut application_id = [0u8; 32];
+            application_id.copy_from_slice(&bytes[..32]);
+            let app_version = u64::from_le_bytes(bytes[32..40].try_into().unwrap());
+            if !valid_application_id(&application_id) || app_version == 0 {
+                return reply(S_INVAL, 0);
+            }
+            let Some((applications_root, _)) = (unsafe { APB1_ROOTS }) else {
+                return reply(S_OFFLINE, 0);
+            };
+            let claim = apb1_install::inspect_installed_candidate(
+                unsafe { &mut *(&raw mut VOL) },
+                unsafe { &mut *(&raw mut APB1_VERIFIER) },
+                unsafe { &mut *(&raw mut APB1_INSTALL_WORKSPACE) },
+                applications_root,
+                &application_id,
+                app_version,
+            );
+            return match claim {
+                Ok(claim) => {
+                    let mut result = reply(S_OK, claim.version);
+                    result.bytes[..32].copy_from_slice(&claim.package_id);
+                    result.bytes[32..].copy_from_slice(&claim.signer_id);
+                    result
+                }
+                Err(error) => reply(apb1_install_status(error), 0),
+            };
+        }
+        wire::CALL_APB1_VERIFY_INSTALLED => {
+            if version == 0 || landed != CAP_NONE {
+                return reply(S_INVAL, 0);
+            }
+            let mut application_id = [0u8; 32];
+            application_id.copy_from_slice(&bytes[..32]);
+            let mut trusted_key = [0u8; 32];
+            trusted_key.copy_from_slice(&bytes[32..]);
+            if !valid_application_id(&application_id) {
+                return reply(S_INVAL, 0);
+            }
+            let Some((applications_root, _)) = (unsafe { APB1_ROOTS }) else {
+                return reply(S_OFFLINE, 0);
+            };
+            let verified = apb1_install::verify_installed_candidate(
+                unsafe { &mut *(&raw mut VOL) },
+                unsafe { &mut *(&raw mut APB1_VERIFIER) },
+                unsafe { &mut *(&raw mut APB1_INSTALL_WORKSPACE) },
+                unsafe { &mut *(&raw mut APB1_TREE_WORKSPACE) },
+                applications_root,
+                &application_id,
+                version,
+                &trusted_key,
+            );
+            let verified = match verified {
+                Ok(verified) => verified,
+                Err(error) => {
+                    unsafe { APB1_VERIFIED = VerifiedInstalledState::EMPTY };
+                    return reply(apb1_install_status(error), 0);
+                }
+            };
+            let Some(token) = (unsafe { APB1_VERIFY_GENERATION.checked_add(1) }) else {
+                return reply(S_FULL, 0);
+            };
+            if token == 0 {
+                return reply(S_FULL, 0);
+            }
+            unsafe {
+                APB1_VERIFY_GENERATION = token;
+                APB1_VERIFIED = VerifiedInstalledState {
+                    token,
+                    version,
+                    manifest: verified.manifest,
+                    executable_object: verified.executable_object(),
+                    executable_size: verified.executable_size,
+                };
+            }
+            let mut result = reply(S_OK, verified.executable_size);
+            result.bytes[..8].copy_from_slice(&token.to_le_bytes());
+            result.bytes[8..40].copy_from_slice(&verified.bundle_digest);
+            return result;
+        }
+        wire::CALL_APB1_READ_VERIFIED_METADATA => {
+            if landed != CAP_NONE || bytes[16..].iter().any(|&byte| byte != 0) {
+                return reply(S_INVAL, 0);
+            }
+            let token = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+            let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap()) as usize;
+            let verified = unsafe { APB1_VERIFIED };
+            if token == 0
+                || token != verified.token
+                || version != verified.version
+                || offset >= verified.manifest.len()
+                || !offset.is_multiple_of(BYTES)
+            {
+                return reply(S_DENIED, 0);
+            }
+            let mut result = reply(S_OK, (verified.manifest.len() - offset).min(BYTES) as u64);
+            let take = (verified.manifest.len() - offset).min(BYTES);
+            result.bytes[..take].copy_from_slice(&verified.manifest[offset..offset + take]);
+            return result;
+        }
+        wire::CALL_APB1_READ_VERIFIED_EXECUTABLE => {
+            if version == 0 || landed == CAP_NONE || bytes[16..].iter().any(|&byte| byte != 0) {
+                return reply(S_INVAL, 0);
+            }
+            let token = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+            let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+            let verified = unsafe { APB1_VERIFIED };
+            if token == 0
+                || token != verified.token
+                || version != verified.version
+                || offset >= verified.executable_size
+                || !offset.is_multiple_of(PAGE as u64)
+            {
+                return reply(S_DENIED, 0);
+            }
+            let mut desc = [0u64; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, landed, desc.as_mut_ptr() as u64) } != 0
+                || desc[0] != 7
+                || desc[2] & RIGHTS_WRITE == 0
+            {
+                return reply(S_DENIED, 0);
+            }
+            let mut shared_info = [0u64; 2];
+            if unsafe {
+                syscall6(
+                    SYS_SHARED_INFO,
+                    landed,
+                    shared_info.as_mut_ptr() as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            } != 0
+                || shared_info[0] != desc[1]
+            {
+                return reply(S_DENIED, 0);
+            }
+            let amount = (verified.executable_size - offset).min(PAGE as u64) as usize;
+            let Some(end) = offset.checked_add(amount as u64) else {
+                return reply(S_INVAL, 0);
+            };
+            if end > shared_info[1].saturating_mul(PAGE as u64) {
+                return reply(S_DENIED, 0);
+            }
+            let mapped = unsafe { syscall2(SYS_SHARED_MAP, landed, 1) };
+            if mapped <= 0 {
+                return reply(S_FULL, 0);
+            }
+            let read = unsafe {
+                (&mut *(&raw mut VOL)).read(
+                    verified.executable_object,
+                    offset,
+                    core::slice::from_raw_parts_mut(
+                        (mapped as *mut u8).add(offset as usize),
+                        amount,
+                    ),
+                )
+            };
+            let unmapped = unsafe { syscall6(SYS_SHARED_UNMAP, mapped as u64, 0, 0, 0, 0, 0) };
+            if unmapped != 0 {
+                log(b"filesd: fatal: APB1 executable scratch unmap refused\n");
+                exit(73);
+            }
+            return match read {
+                Ok(read) if read == amount => reply(S_OK, amount as u64),
+                Ok(_) => reply(S_CORRUPT, 0),
+                Err(error) => reply(status(error), 0),
+            };
+        }
+        _ => {}
+    }
+    if version != wire::CALL_APB1_ABI_V1 {
+        return reply(S_INVAL, 0);
     }
     let (object, size) = match apb1_source(landed) {
         Ok(source) => source,
@@ -560,6 +808,19 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
         }
         _ => reply(S_INVAL, 0),
     }
+}
+
+fn valid_application_id(raw: &[u8; 32]) -> bool {
+    let Some(end) = raw.iter().position(|&byte| byte == 0) else {
+        return false;
+    };
+    if !(1..=31).contains(&end) || raw[end..].iter().any(|&byte| byte != 0) {
+        return false;
+    }
+    (raw[0].is_ascii_lowercase() || raw[0].is_ascii_digit())
+        && raw[..end].iter().all(|&byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.' || byte == b'-'
+        })
 }
 
 static mut NAME: [u8; 512] = [0; 512];
@@ -1335,7 +1596,14 @@ extern "C" fn main() -> ! {
             reply(S_OFFLINE, 0)
         } else if matches!(
             call,
-            wire::CALL_APB1_INSPECT | wire::CALL_APB1_VERIFY | wire::CALL_APB1_INSTALL
+            wire::CALL_APB1_INSPECT
+                | wire::CALL_APB1_VERIFY
+                | wire::CALL_APB1_INSTALL
+                | wire::CALL_APB1_NEXT_INSTALLED
+                | wire::CALL_APB1_INSPECT_INSTALLED
+                | wire::CALL_APB1_VERIFY_INSTALLED
+                | wire::CALL_APB1_READ_VERIFIED_METADATA
+                | wire::CALL_APB1_READ_VERIFIED_EXECUTABLE
         ) {
             handle_apb1(call, version, badge, landed, &msg)
         } else if call != 0 || version != 0 {

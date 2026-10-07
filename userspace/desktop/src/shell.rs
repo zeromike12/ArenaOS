@@ -85,6 +85,23 @@ pub struct Shell {
     pub chooser: Option<ChooserView>,
     /// The desktop surface: /Users/user/Desktop as icons (Phase 11.8).
     pub desk: crate::desk::DeskView,
+    /// Installed application catalog launcher, backed by the verified
+    /// package-service registry rather than the built-in dock list.
+    pub applications: Option<ApplicationsView>,
+}
+
+pub const APPLICATION_ROWS: usize = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplicationsView {
+    pub names: [[u8; 32]; APPLICATION_ROWS],
+    pub running: [bool; APPLICATION_ROWS],
+    pub count: u8,
+    pub selected: u8,
+    pub total: usize,
+    pub query: [u8; 32],
+    pub query_len: u8,
+    pub unavailable: bool,
 }
 
 /// Rows of the chooser list shown at once.
@@ -136,7 +153,54 @@ impl Shell {
         snap: None,
         chooser: None,
         desk: crate::desk::DeskView::EMPTY,
+        applications: None,
     };
+}
+
+const APPLICATION_WIDTH: i32 = 440;
+const APPLICATION_ROW_HEIGHT: i32 = 24;
+const APPLICATION_TOP: i32 = 84;
+const APPLICATION_FOOTER: i32 = 28;
+
+pub fn applications_region(w: i32, h: i32) -> Rect {
+    let height =
+        APPLICATION_TOP + APPLICATION_ROWS as i32 * APPLICATION_ROW_HEIGHT + APPLICATION_FOOTER;
+    rect(
+        (w - APPLICATION_WIDTH) / 2,
+        (h - height) / 2,
+        APPLICATION_WIDTH + 3,
+        height + 3,
+    )
+}
+
+pub fn applications_contains(w: i32, h: i32, x: i32, y: i32) -> bool {
+    let area = applications_region(w, h);
+    x >= area.x && y >= area.y && x < area.x + area.width as i32 && y < area.y + area.height as i32
+}
+
+pub fn applications_row(w: i32, h: i32, x: i32, y: i32) -> Option<usize> {
+    let area = applications_region(w, h);
+    let y0 = area.y + APPLICATION_TOP;
+    if x < area.x + 8
+        || x >= area.x + APPLICATION_WIDTH - 8
+        || y < y0
+        || y >= y0 + APPLICATION_ROWS as i32 * APPLICATION_ROW_HEIGHT
+    {
+        return None;
+    }
+    Some(((y - y0) / APPLICATION_ROW_HEIGHT) as usize)
+}
+
+/// Stable hit target for the All Applications control in the system bar.
+pub fn applications_button_region() -> Rect {
+    // Keep this aligned with the wordmark width used by `system` below.
+    let wordmark = c::measure("Arena", Style::Strong) + c::measure("OS", Style::Strong);
+    rect(
+        m::L + wordmark as i32 + m::M,
+        3,
+        56,
+        m::SYSTEM_BAR_HEIGHT - 6,
+    )
 }
 
 pub const CHOOSER_WIDTH: i32 = 420;
@@ -291,6 +355,7 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         switcher,
         snap,
         chooser,
+        applications,
         // Drawn by compose.rs: icons under the windows, its menu above.
         desk: _,
     } = *shell;
@@ -314,9 +379,35 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
         // Wordmark only: a small capsule mark here could be misread as a
         // battery or toggle indicator, which ArenaOS does not have.
         let x = c::text(canvas, m::L, ty, "Arena", Style::Strong, t.bar_text);
-        let x = c::text(canvas, x, ty, "OS", Style::Strong, t.accent);
-        c::vline(canvas, x + m::M, 7, bar - 14, t.bar_edge);
-        let x = x + m::M + 1 + m::M + 1;
+        let _x = c::text(canvas, x, ty, "OS", Style::Strong, t.accent);
+        let apps_button = applications_button_region();
+        c::outlined(
+            canvas,
+            apps_button,
+            if applications.is_some() {
+                t.dock_well
+            } else {
+                t.bar
+            },
+            t.bar_edge,
+            m::RADIUS,
+        );
+        c::text_centered(
+            canvas,
+            apps_button.x,
+            apps_button.width as i32,
+            ty,
+            "Apps",
+            Style::Body,
+            if applications.is_some() {
+                t.accent_strong
+            } else {
+                t.bar_text
+            },
+        );
+        let divider = apps_button.x + apps_button.width as i32 + m::S;
+        c::vline(canvas, divider, 7, bar - 14, t.bar_edge);
+        let x = divider + m::M;
         match active {
             Some(kind) => {
                 c::app_tile(canvas, x, ty - 2, 11, kind, false, t.bar, t);
@@ -567,6 +658,9 @@ pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
     if let Some(ch) = chooser {
         draw_chooser(canvas, &ch, w, h, t);
     }
+    if let Some(apps) = applications {
+        draw_applications(canvas, &apps, w, h, t);
+    }
     c::pointer(canvas, pointer.0, pointer.1, t);
 }
 
@@ -754,6 +848,145 @@ fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Th
             text,
             Style::Caption,
             if i == 1 { t.on_accent } else { t.text },
+        );
+    }
+}
+
+fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h: i32, t: Theme) {
+    let area = applications_region(w, h);
+    let x0 = area.x;
+    let y0 = area.y;
+    let height = area.height as i32 - 3;
+    c::rect(canvas, x0 + 3, y0 + height, APPLICATION_WIDTH, 3, t.shadow);
+    c::rect(canvas, x0 + APPLICATION_WIDTH, y0 + 3, 3, height, t.shadow);
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0,
+            y: y0,
+            width: APPLICATION_WIDTH as u32,
+            height: height as u32,
+        },
+        t.elevated,
+        t.frame_focus,
+        m::RADIUS_PANEL,
+    );
+    c::text(
+        canvas,
+        x0 + m::L,
+        y0 + 10,
+        "ALL APPLICATIONS",
+        Style::Caption,
+        t.muted,
+    );
+    let search = Rect {
+        x: x0 + m::L,
+        y: y0 + 30,
+        width: (APPLICATION_WIDTH - 2 * m::L) as u32,
+        height: 24,
+    };
+    c::outlined(canvas, search, t.field, t.field_edge, m::RADIUS);
+    let query = core::str::from_utf8(&apps.query[..usize::from(apps.query_len)]).unwrap_or("");
+    c::text(
+        canvas,
+        search.x + m::S,
+        search.y + 7,
+        if query.is_empty() {
+            "Search applications"
+        } else {
+            query
+        },
+        Style::Body,
+        if query.is_empty() { t.muted } else { t.text },
+    );
+    if apps.unavailable {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + APPLICATION_TOP + 6,
+            "Application catalog unavailable",
+            Style::Body,
+            t.warning,
+        );
+    } else if apps.total == 0 {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + APPLICATION_TOP + 6,
+            "No installed applications",
+            Style::Body,
+            t.muted,
+        );
+    } else if apps.count == 0 {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + APPLICATION_TOP + 6,
+            "No applications match this search",
+            Style::Body,
+            t.muted,
+        );
+    }
+    for row in 0..usize::from(apps.count) {
+        let y = y0 + APPLICATION_TOP + row as i32 * APPLICATION_ROW_HEIGHT;
+        let selected = row == usize::from(apps.selected);
+        if selected {
+            c::rect(
+                canvas,
+                x0 + 6,
+                y,
+                APPLICATION_WIDTH - 12,
+                APPLICATION_ROW_HEIGHT - 1,
+                t.accent_soft,
+            );
+            c::border(
+                canvas,
+                Rect {
+                    x: x0 + 6,
+                    y,
+                    width: (APPLICATION_WIDTH - 12) as u32,
+                    height: (APPLICATION_ROW_HEIGHT - 1) as u32,
+                },
+                t.accent,
+            );
+        }
+        let name = label(&apps.names[row]);
+        c::text(
+            canvas,
+            x0 + m::M,
+            y + 7,
+            name,
+            if selected { Style::Strong } else { Style::Body },
+            t.text,
+        );
+        if apps.running[row] {
+            c::text_right(
+                canvas,
+                x0 + APPLICATION_WIDTH - m::M,
+                y + 7,
+                "Running",
+                Style::Caption,
+                t.success,
+            );
+        }
+    }
+    if apps.total > APPLICATION_ROWS {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + height - 18,
+            "Type to search  /  ↑ ↓ move  /  Enter launch  /  Esc close",
+            Style::Caption,
+            t.muted,
+        );
+    } else {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + height - 18,
+            "Type to search  /  Enter launch  /  Esc close",
+            Style::Caption,
+            t.muted,
         );
     }
 }

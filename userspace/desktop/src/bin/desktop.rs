@@ -211,6 +211,9 @@ struct Session {
     title: [u8; 32],
     published: bool,
     kind: u8,
+    /// Descriptive identity for registry-backed active-instance indicators;
+    /// the held Process capability remains the only process authority.
+    application_id: [u8; 32],
     scope: u8,
     /// Rights formerly carried by the attenuated function SharedRegion cap;
     /// now trusted session policy used only after kernel badge validation.
@@ -254,6 +257,7 @@ const EMPTY: Session = Session {
     title: [0; 32],
     published: false,
     kind: 5,
+    application_id: [0; 32],
     scope: 0,
     function_rights: 0,
     badge: 0,
@@ -336,16 +340,14 @@ fn next_deadline(now: u64) -> u64 {
     }
     due
 }
-/// Signal built-in clients that have queued events (or must repaint) on
-/// the private clock the broker already holds for them. Their `idle()`
-/// cancels the then-redundant timer. Third-party signed applications are
-/// not signalled: they are not known to cancel timers, and early wakes
-/// could otherwise accumulate armed timers in the kernel's bounded table.
+/// Signal live ABI-v2 clients that have queued events (or must repaint) on
+/// the private clock the broker already holds for them. The native runtime's
+/// `idle()` cancels a pending timer on an early notification wake.
 fn wake_clients() {
     let state = unsafe { &*(&raw const WM) };
     let all = unsafe { core::mem::replace(&mut *(&raw mut WAKE_ALL), false) };
     for (i, s) in unsafe { &*(&raw const SESSIONS) }.iter().enumerate() {
-        if s.handle == 0 || s.kind >= 6 || unsafe { WOKEN[i] } {
+        if s.handle == 0 || s.kind > 6 || unsafe { WOKEN[i] } {
             continue;
         }
         if (all || state.pending(s.handle)) && unsafe { syscall2(SYS_NOTIFY, clock(i), 1) } == 0 {
@@ -492,6 +494,17 @@ fn publish_rects(src: u64, dst: u64, stride: usize, rects: &[[u16; 4]]) {
     }
 }
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
+const ALL_APPS_CAPACITY: usize = 6 + arena_desktop::package::MAX_CATALOG_APPS;
+static mut INSTALLED_APPS: [Option<arena_desktop::package::AppEntry>; ALL_APPS_CAPACITY] =
+    [None; ALL_APPS_CAPACITY];
+static mut INSTALLED_APP_COUNT: usize = 0;
+static mut ALL_APPS_OPEN: bool = false;
+static mut ALL_APPS_UNAVAILABLE: bool = false;
+static mut ALL_APPS_QUERY: [u8; 32] = [0; 32];
+static mut ALL_APPS_QUERY_LEN: usize = 0;
+static mut ALL_APPS_SELECTED: usize = 0;
+static mut ALL_APPS_TOP: usize = 0;
+static mut ALL_APPS_BUTTONS: u8 = 0;
 /// Badges are unique for this Desktop endpoint lifetime. Zero remains the
 /// kernel's plain-endpoint marker; exhaustion refuses rather than wrapping.
 static mut NEXT_SESSION_BADGE: u32 = 1;
@@ -1451,6 +1464,51 @@ fn launch(kind: u8, path: [u8; 32], document: u64) -> Result<(), i64> {
         document,
     )
 }
+
+/// Launch a descriptive installed-catalog selection through packaged's
+/// fresh receiver-side revalidation. The registry row and app ID never enter
+/// SYS_SPAWN as authority; the exact returned Image capability does.
+fn launch_installed_application(application_id: &[u8; 32], app_flags: u32) -> Result<(), i64> {
+    use arena_desktop::package::manifest;
+    if app_flags & manifest::FLAG_HEADLESS != 0 {
+        return Err(STATUS_BUSY);
+    }
+    if app_flags & manifest::FLAG_MULTI_INSTANCE == 0 {
+        let existing = unsafe { &*(&raw const SESSIONS) }
+            .iter()
+            .find(|session| session.id != 0 && session.application_id == *application_id);
+        if let Some(session) = existing {
+            if session.handle != 0 {
+                let _ = unsafe { (&mut *(&raw mut WM)).activate(session.handle) };
+            }
+            return Ok(());
+        }
+    }
+    let image = arena_desktop::package::launch_installed(application_id, POOL)
+        .map_err(|error| error as i64)?;
+    let flags = if app_flags & manifest::FLAG_MULTI_INSTANCE != 0 {
+        FLAG_MULTI_INSTANCE
+    } else {
+        0
+    };
+    let launched = launch_image_v2_for_app(
+        image.capability,
+        6,
+        0,
+        RIGHTS_READ | RIGHTS_COPY,
+        [0; 32],
+        false,
+        0,
+        CAP_NONE,
+        *application_id,
+        image.entry,
+        image.load_base,
+        flags,
+    );
+    destroy(image.capability);
+    launched
+}
+
 /// The session's filesd lineage head and, for the terminal and Files, its
 /// /Users/user capability (ADR-0077). Other kinds get file capabilities
 /// only through the chooser.
@@ -1541,9 +1599,43 @@ fn launch_image_v2(
     launch_targets: u8,
     document: u64,
 ) -> Result<(), i64> {
+    if kind >= 6 {
+        return Err(-2);
+    }
+    launch_image_v2_for_app(
+        image,
+        kind,
+        scope,
+        function_rights,
+        path,
+        diagnostics,
+        launch_targets,
+        document,
+        arena_desktop::apps::APPLICATION_IDS[kind as usize],
+        arena_desktop::apps::APPLICATION_ENTRY,
+        arena_desktop::apps::APPLICATION_LOAD_BASE,
+        FLAG_MULTI_INSTANCE,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn launch_image_v2_for_app(
+    image: u64,
+    kind: u8,
+    scope: u8,
+    function_rights: u64,
+    path: [u8; 32],
+    diagnostics: bool,
+    launch_targets: u8,
+    document: u64,
+    application_id: [u8; 32],
+    entry: u64,
+    load_base: u64,
+    app_flags: u32,
+) -> Result<(), i64> {
     use arena_startup_abi::startup as startup_abi;
 
-    if kind >= 6 {
+    if kind > 6 {
         return Err(-2);
     }
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
@@ -1687,9 +1779,14 @@ fn launch_image_v2(
     // Never reuse a badge, even when a later allocation/spawn step refuses.
     unsafe { NEXT_SESSION_BADGE = badge.checked_add(1).unwrap_or(0) };
 
-    let app_id = arena_desktop::apps::APPLICATION_IDS[kind as usize];
-    let id_len = app_id.iter().position(|byte| *byte == 0).unwrap_or(32);
-    let mut arguments: [&[u8]; 2] = [&app_id[..id_len], &[]];
+    let id_len = application_id
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(32);
+    if id_len == 32 {
+        return Err(-2);
+    }
+    let mut arguments: [&[u8]; 2] = [&application_id[..id_len], &[]];
     let argument_count = if path_len == 0 {
         1
     } else {
@@ -1738,14 +1835,14 @@ fn launch_image_v2(
         ),
     ];
     let spec = startup_abi::StartupSpec {
-        application_id: &app_id,
+        application_id: &application_id,
         // The app-instance slot is the actual reserved 32-entry manager
         // session slot; it is never folded onto a live entry. The monotonic
         // generation distinguishes later reuse. Neither field authorizes a
         // syscall or selects a Desktop session.
         instance_slot: i as u16,
         instance_generation: u64::from(badge),
-        flags: FLAG_MULTI_INSTANCE,
+        flags: app_flags,
         arguments: &arguments[..argument_count],
         environment: &environment,
         capabilities: &descriptors[..if has_tail { 4 } else { 3 }],
@@ -1753,8 +1850,8 @@ fn launch_image_v2(
         stdin: None,
         stdout: None,
         stderr: None,
-        entry: arena_desktop::apps::APPLICATION_ENTRY,
-        load_base: arena_desktop::apps::APPLICATION_LOAD_BASE,
+        entry,
+        load_base,
         clock_us: arena_desktop::app_client::now(),
     };
     let mut startup_page = [0u8; startup_abi::BLOCK_BYTES];
@@ -1891,6 +1988,7 @@ fn launch_image_v2(
         va: va as u64,
         process: Some(process),
         kind,
+        application_id,
         scope,
         function_rights,
         badge,
@@ -2063,6 +2161,11 @@ fn launch_image_legacy(
         va: va as u64,
         process: Some(process),
         kind,
+        application_id: if kind < 6 {
+            arena_desktop::apps::APPLICATION_IDS[kind as usize]
+        } else {
+            [0; 32]
+        },
         scope,
         function_rights,
         badge: 0,
@@ -2200,6 +2303,329 @@ fn clear_regions() {
         s.popup.regions = compose::Regions::NONE;
     }
 }
+
+fn refresh_installed_applications() -> Result<(), u64> {
+    let mut base: [Option<arena_desktop::package::AppEntry>; ALL_APPS_CAPACITY] =
+        [None; ALL_APPS_CAPACITY];
+    for kind in 0..6 {
+        let mut display_name = [0u8; 32];
+        let name = arena_desktop::apps::TITLES[kind].as_bytes();
+        display_name[..name.len()].copy_from_slice(name);
+        base[kind] = Some(arena_desktop::package::AppEntry {
+            application_id: arena_desktop::apps::APPLICATION_IDS[kind],
+            display_name,
+            flags: arena_desktop::package::manifest::FLAG_MULTI_INSTANCE,
+            builtin_kind: kind as u8,
+        });
+    }
+    for _ in 0..2 {
+        let (count, epoch) = match arena_desktop::package::app_catalog_count() {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                unsafe {
+                    INSTALLED_APPS = base;
+                    INSTALLED_APP_COUNT = 6;
+                    ALL_APPS_UNAVAILABLE = true;
+                }
+                return Err(error);
+            }
+        };
+        let mut entries = base;
+        let mut retry = false;
+        for index in 0..count {
+            match arena_desktop::package::app_catalog_entry(index, epoch) {
+                Ok(entry) => {
+                    if entries[..6]
+                        .iter()
+                        .flatten()
+                        .any(|prior| prior.application_id == entry.application_id)
+                    {
+                        unsafe {
+                            INSTALLED_APPS = base;
+                            INSTALLED_APP_COUNT = 6;
+                            ALL_APPS_UNAVAILABLE = true;
+                        }
+                        return Err(PKG_CORRUPT);
+                    }
+                    entries[6 + index] = Some(entry);
+                }
+                Err(PKG_STALE) => {
+                    retry = true;
+                    break;
+                }
+                Err(error) => {
+                    unsafe {
+                        INSTALLED_APPS = base;
+                        INSTALLED_APP_COUNT = 6;
+                        ALL_APPS_UNAVAILABLE = true;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        if retry {
+            continue;
+        }
+        unsafe {
+            INSTALLED_APPS = entries;
+            INSTALLED_APP_COUNT = 6 + count;
+            ALL_APPS_UNAVAILABLE = false;
+            ALL_APPS_SELECTED = 0;
+            ALL_APPS_TOP = 0;
+        }
+        return Ok(());
+    }
+    unsafe {
+        INSTALLED_APPS = base;
+        INSTALLED_APP_COUNT = 6;
+        ALL_APPS_UNAVAILABLE = true;
+    }
+    Err(PKG_STALE)
+}
+
+fn open_all_applications() {
+    unsafe {
+        ALL_APPS_OPEN = true;
+        core::ptr::write_bytes(&raw mut ALL_APPS_QUERY, 0, 1);
+        ALL_APPS_QUERY_LEN = 0;
+        ALL_APPS_SELECTED = 0;
+        ALL_APPS_TOP = 0;
+    }
+    if let Err(error) = refresh_installed_applications() {
+        unsafe { ALL_APPS_UNAVAILABLE = true };
+        log(b"[desktop] installed application registry unavailable status=");
+        log_number(error);
+        log(b"\n");
+    }
+}
+
+fn close_all_applications() {
+    unsafe { ALL_APPS_OPEN = false };
+}
+
+fn query_matches(name: &[u8; 32], query: &[u8], query_len: usize) -> bool {
+    if query_len == 0 {
+        return true;
+    }
+    let length = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
+    if query_len > length {
+        return false;
+    }
+    (0..=length - query_len).any(|start| {
+        name[start..start + query_len]
+            .iter()
+            .zip(query)
+            .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    })
+}
+
+fn filtered_application_index(ordinal: usize) -> Option<usize> {
+    let entries = unsafe { &*(&raw const INSTALLED_APPS) };
+    let count = unsafe { INSTALLED_APP_COUNT };
+    let query = unsafe { &*(&raw const ALL_APPS_QUERY) };
+    let query_len = unsafe { ALL_APPS_QUERY_LEN };
+    let mut matched = 0usize;
+    for (index, entry) in entries.iter().take(count).enumerate() {
+        let Some(entry) = entry else { continue };
+        if query_matches(&entry.display_name, query, query_len) {
+            if matched == ordinal {
+                return Some(index);
+            }
+            matched += 1;
+        }
+    }
+    None
+}
+
+fn filtered_application_count() -> usize {
+    let entries = unsafe { &*(&raw const INSTALLED_APPS) };
+    let count = unsafe { INSTALLED_APP_COUNT };
+    let query = unsafe { &*(&raw const ALL_APPS_QUERY) };
+    let query_len = unsafe { ALL_APPS_QUERY_LEN };
+    entries
+        .iter()
+        .take(count)
+        .flatten()
+        .filter(|entry| query_matches(&entry.display_name, query, query_len))
+        .count()
+}
+
+fn launcher_action(index: usize) -> Action {
+    match unsafe { (&*(&raw const INSTALLED_APPS))[index] } {
+        Some(app) if app.builtin_kind != u8::MAX => Action::Launch(app.builtin_kind as usize),
+        Some(_) => Action::Launch(index),
+        None => Action::Changed,
+    }
+}
+
+fn applications_view() -> Option<arena_desktop::shell::ApplicationsView> {
+    if !unsafe { ALL_APPS_OPEN } {
+        return None;
+    }
+    use arena_desktop::shell::{APPLICATION_ROWS, ApplicationsView};
+    let total = filtered_application_count();
+    let max_top = total.saturating_sub(APPLICATION_ROWS);
+    let top = unsafe { ALL_APPS_TOP.min(max_top) };
+    let selected = unsafe {
+        ALL_APPS_SELECTED
+            .saturating_sub(top)
+            .min(APPLICATION_ROWS.saturating_sub(1))
+    };
+    let mut view = ApplicationsView {
+        names: [[0; 32]; APPLICATION_ROWS],
+        running: [false; APPLICATION_ROWS],
+        count: 0,
+        selected: selected as u8,
+        total,
+        query: unsafe { *(&raw const ALL_APPS_QUERY) },
+        query_len: unsafe { ALL_APPS_QUERY_LEN as u8 },
+        unavailable: unsafe { ALL_APPS_UNAVAILABLE },
+    };
+    for row in 0..APPLICATION_ROWS {
+        let Some(index) = filtered_application_index(top + row) else {
+            break;
+        };
+        let Some(entry) = (unsafe { (&*(&raw const INSTALLED_APPS))[index] }) else {
+            continue;
+        };
+        view.names[row] = entry.display_name;
+        view.running[row] = unsafe { &*(&raw const SESSIONS) }
+            .iter()
+            .any(|session| session.id != 0 && session.application_id == entry.application_id);
+        view.count += 1;
+    }
+    Some(view)
+}
+
+fn move_application_selection(delta: isize) {
+    let total = filtered_application_count();
+    if total == 0 {
+        unsafe {
+            ALL_APPS_SELECTED = 0;
+            ALL_APPS_TOP = 0
+        };
+        return;
+    }
+    let selected = unsafe { ALL_APPS_SELECTED };
+    let next = if delta < 0 {
+        selected.saturating_sub(delta.unsigned_abs())
+    } else {
+        selected.saturating_add(delta as usize).min(total - 1)
+    };
+    let top = if next < unsafe { ALL_APPS_TOP } {
+        next
+    } else if next >= unsafe { ALL_APPS_TOP } + arena_desktop::shell::APPLICATION_ROWS {
+        next + 1 - arena_desktop::shell::APPLICATION_ROWS
+    } else {
+        unsafe { ALL_APPS_TOP }
+    };
+    unsafe {
+        ALL_APPS_SELECTED = next;
+        ALL_APPS_TOP = top;
+    }
+}
+
+fn applications_key(code: u16, pressed: bool, mods: u8) -> Option<Action> {
+    let super_a = mods & wm::MOD_SUPER != 0 && (code == b'a' as u16 || code == b'A' as u16);
+    if super_a && pressed {
+        if unsafe { ALL_APPS_OPEN } {
+            close_all_applications();
+        } else {
+            open_all_applications();
+        }
+        return Some(Action::Changed);
+    }
+    if !unsafe { ALL_APPS_OPEN } {
+        return None;
+    }
+    if !pressed {
+        return Some(Action::None);
+    }
+    match code {
+        27 => {
+            close_all_applications();
+            Some(Action::Changed)
+        }
+        13 => filtered_application_index(unsafe { ALL_APPS_SELECTED })
+            .map(launcher_action)
+            .or(Some(Action::Changed)),
+        258 => {
+            move_application_selection(-1);
+            Some(Action::Changed)
+        }
+        259 => {
+            move_application_selection(1);
+            Some(Action::Changed)
+        }
+        8 => {
+            let length = unsafe { ALL_APPS_QUERY_LEN };
+            if length > 0 {
+                unsafe {
+                    ALL_APPS_QUERY_LEN -= 1;
+                    let index = ALL_APPS_QUERY_LEN;
+                    ALL_APPS_QUERY[index] = 0;
+                    ALL_APPS_SELECTED = 0;
+                    ALL_APPS_TOP = 0;
+                }
+            }
+            Some(Action::Changed)
+        }
+        32..=126 if mods & (wm::MOD_CTRL | wm::MOD_ALT | wm::MOD_SUPER) == 0 => {
+            let length = unsafe { ALL_APPS_QUERY_LEN };
+            if length < 32 {
+                unsafe {
+                    ALL_APPS_QUERY[length] = (code as u8).to_ascii_lowercase();
+                    ALL_APPS_QUERY_LEN += 1;
+                    ALL_APPS_SELECTED = 0;
+                    ALL_APPS_TOP = 0;
+                }
+            }
+            Some(Action::Changed)
+        }
+        _ => Some(Action::None),
+    }
+}
+
+fn applications_pointer(x: i32, y: i32, buttons: u8, w: i32, h: i32) -> Option<Action> {
+    let pressed = buttons & 1 != 0 && unsafe { ALL_APPS_BUTTONS } & 1 == 0;
+    unsafe { ALL_APPS_BUTTONS = buttons };
+    if !unsafe { ALL_APPS_OPEN } {
+        let button = arena_desktop::shell::applications_button_region();
+        if pressed
+            && x >= button.x
+            && y >= button.y
+            && x < button.x + button.width as i32
+            && y < button.y + button.height as i32
+        {
+            open_all_applications();
+            return Some(Action::Changed);
+        }
+        return None;
+    }
+    if pressed {
+        let area = arena_desktop::shell::applications_region(w, h);
+        if x >= area.x
+            && y >= area.y
+            && x < area.x + area.width as i32
+            && y < area.y + area.height as i32
+        {
+            if let Some(row) = arena_desktop::shell::applications_row(w, h, x, y) {
+                let ordinal = unsafe { ALL_APPS_TOP } + row;
+                if let Some(index) = filtered_application_index(ordinal) {
+                    unsafe { ALL_APPS_SELECTED = ordinal };
+                    close_all_applications();
+                    return Some(launcher_action(index));
+                }
+            }
+        }
+        close_all_applications();
+    }
+    Some(Action::Changed)
+}
+
 /// Descriptive snapshot of everything the compositor draws (see compose.rs).
 fn scene(now: u64) -> Scene {
     let state = unsafe { &*(&raw const WM) };
@@ -2309,6 +2735,7 @@ fn scene(now: u64) -> Scene {
             height: u32::from(h),
         }),
         chooser: chooser_view(),
+        applications: applications_view(),
         desk: {
             desk_watched();
             unsafe { (*(&raw const DESK)).view }
@@ -2735,7 +3162,7 @@ extern "C" fn main() -> ! {
                     arena_desktop::service_wire::Frame::decode(&bytes),
                 ) {
                     (None, Ok(arena_desktop::service_wire::Frame::Bootstrap))
-                        if session.kind < 6 =>
+                        if session.kind <= 6 =>
                     {
                         let prefs = unsafe { PREFS };
                         bytes = arena_desktop::service_wire::Frame::Started {
@@ -2747,6 +3174,9 @@ extern "C" fn main() -> ! {
                         .encode()
                         .unwrap_or_else(|_| die(78));
                         status = 0;
+                        if session.kind == 6 {
+                            log(b"[desktop] installed app ABI-v2 bootstrap replied\n");
+                        }
                         badge_bootstrap = true;
                     }
                     (None, _) => {
@@ -2811,11 +3241,17 @@ extern "C" fn main() -> ! {
                                 pressed,
                                 mods,
                             } => {
+                                let app_action = if modal {
+                                    None
+                                } else {
+                                    applications_key(code, pressed, mods)
+                                };
                                 let before = state.delivered;
-                                let a = state.key_input(code, pressed, mods);
+                                let a = app_action
+                                    .unwrap_or_else(|| state.key_input(code, pressed, mods));
                                 if perf::ENABLED {
                                     let p = unsafe { &mut *(&raw mut PERF) };
-                                    if pressed && unsafe { KEY_AT } == 0 {
+                                    if app_action.is_none() && pressed && unsafe { KEY_AT } == 0 {
                                         unsafe { (KEY_AT, KEY_POLLED) = (perf_now(), false) };
                                     }
                                     p[if pressed { P_KEYDOWN } else { P_KEYUP }]
@@ -2826,7 +3262,8 @@ extern "C" fn main() -> ! {
                                 }
                                 // With no window focused, Enter, Delete and
                                 // Esc act on the desktop's selected icons.
-                                if pressed
+                                if app_action.is_none()
+                                    && pressed
                                     && state.focused().is_none()
                                     && matches!(code, 13 | 27 | 262)
                                     && let Some(mut store) = desk_store()
@@ -2851,6 +3288,14 @@ extern "C" fn main() -> ! {
                                 if modal {
                                     chooser_pointer(px, py, buttons, w as i32, h as i32);
                                 }
+                                let app_action = if modal {
+                                    None
+                                } else {
+                                    applications_pointer(px, py, buttons, w as i32, h as i32)
+                                };
+                                if app_action.is_some() {
+                                    state.pointer = (px, py);
+                                }
                                 // The desktop surface takes presses on bare
                                 // desktop and everything while it holds a
                                 // press or its menu; the window policy then
@@ -2858,10 +3303,11 @@ extern "C" fn main() -> ! {
                                 let desk = unsafe { &mut *(&raw mut DESK) };
                                 let pressing = buttons & 3 != 0 && unsafe { DESK_BUTTONS } & 3 == 0;
                                 unsafe { DESK_BUTTONS = buttons };
-                                let to_desk = !modal
+                                let to_desk = app_action.is_none()
+                                    && !modal
                                     && desk_store().is_some()
                                     && (desk.busy() || (pressing && state.bare(px, py)));
-                                if !to_desk {
+                                if app_action.is_none() && !to_desk {
                                     desk.track(buttons);
                                 }
                                 if to_desk && let Some(mut store) = desk_store() {
@@ -2873,13 +3319,19 @@ extern "C" fn main() -> ! {
                                     let e = desk.pointer(&mut store, px, py, buttons, ctrl, now);
                                     desk_effect(e);
                                 }
-                                let a = state.pointer(
-                                    px,
-                                    py,
-                                    if modal || to_desk { 0 } else { buttons },
-                                );
-                                let a = if modal || to_desk { Action::Changed } else { a };
-                                if wheel != 0 {
+                                let a = app_action.unwrap_or_else(|| {
+                                    let action = state.pointer(
+                                        px,
+                                        py,
+                                        if modal || to_desk { 0 } else { buttons },
+                                    );
+                                    if modal || to_desk {
+                                        Action::Changed
+                                    } else {
+                                        action
+                                    }
+                                });
+                                if wheel != 0 && app_action.is_none() {
                                     state.wheel(wheel);
                                 }
                                 a
@@ -2887,15 +3339,34 @@ extern "C" fn main() -> ! {
                         }
                     };
                     match action {
-                        Action::Launch(kind) if restore_minimized(kind as u8) => {
+                        Action::Launch(kind) if kind < 6 && restore_minimized(kind as u8) => {
                             dirty = true;
                         }
-                        Action::Launch(kind) => {
+                        Action::Launch(selection) => {
                             let full_sessions =
                                 unsafe { (&*(&raw const SESSIONS)).iter().all(|s| s.id != 0) };
                             let before = full_sessions
                                 .then(|| (cap_inventory_snapshot(), observe_receipt()));
-                            if let Err(rc) = launch(kind as u8, [0; 32], CAP_NONE) {
+                            let result = if selection < 6 {
+                                close_all_applications();
+                                launch(selection as u8, [0; 32], CAP_NONE)
+                            } else {
+                                close_all_applications();
+                                match unsafe { (&*(&raw const INSTALLED_APPS))[selection] } {
+                                    Some(app) => {
+                                        if app.builtin_kind != u8::MAX {
+                                            launch(app.builtin_kind, [0; 32], CAP_NONE)
+                                        } else {
+                                            launch_installed_application(
+                                                &app.application_id,
+                                                app.flags,
+                                            )
+                                        }
+                                    }
+                                    None => Err(PKG_STALE as i64),
+                                }
+                            };
+                            if let Err(rc) = result {
                                 if let Some((caps_before, resources_before)) = before {
                                     log_capacity_refusal_inventory(caps_before, resources_before);
                                     snapshot(true);
@@ -3004,7 +3475,7 @@ extern "C" fn main() -> ! {
                     {
                         let s = unsafe { SESSIONS[i] };
                         let p = unsafe { PREFS };
-                        if s.kind < 6 {
+                        if s.kind <= 6 {
                             bytes = arena_desktop::service_wire::Frame::Started {
                                 kind: s.kind,
                                 theme: u8::from(p.dark),

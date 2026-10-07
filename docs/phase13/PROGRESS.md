@@ -5,7 +5,8 @@
 - Starting documentation tip / branch parent: `330a691797343c8ef997cbb791ca54ec10e89fc5`
 - Qualified Phase-12 implementation ancestor: `cd8c78a0189ce365fd5af93b0006f15fb647ed6f`
 - Working branch: `arena/phase13-native-app-maturity`
-- Starting tree: clean after checkout; no Phase-13 source edits have been made.
+- Starting tree: clean after checkout; implementation work began after the
+  audit and environment receipt below.
 - Read first: Phase-12 final report, Phase-13 handoff, compatibility handoff,
   Phase-12 plan, ADR-0080 through ADR-0089 and ADR-0090/0091.
 
@@ -15,8 +16,9 @@
 |---|---|---|
 | 13.0 production-path audit | Complete | Read the required Phase-12 reports and ADRs; traced APB1 install, packaged policy, filesd roots, Desktop launch, Image registration, process teardown, scheduler mapping ownership, and resource bounds. Summary is in `PLAN.md`. |
 | Toolchain and guest environment | Ready | Debian 13, unprivileged UID 1000, no sudo/root. Installed Rust 1.97.0 plus rustfmt/Clippy and `x86_64-unknown-none`/`x86_64-unknown-uefi` targets with official rustup under `/tmp`; extracted signed Debian snapshot QEMU 10.0.11 and OVMF 2025.02 under `/tmp`. `tools/dev-env/env.sh` and normal repository build tooling remain in use. |
-| 13.1 installed registry and launch | Design accepted; implementation in progress | ADR-0092 assigns protected AFS2 enumeration/reverification to filesd, current signer policy and the descriptive catalog to packaged, and exact Image-cap launch authority to the existing ABI-v2 broker path. Next: add narrow filesd scan/verify operations, wire boot rebuild, and implement real installed ELF resolution/launch. |
-| 13.2 launcher and associations | Not started | Desktop accepts only built-in kinds 0–5; association/default model is descriptive host-side logic and is not persisted or used by Desktop. |
+| 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
+| 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
+| 13.2 associations and Open With | Not started | Desktop still uses the historical Editor-specific document path; defaults and Open With are not persisted or registry-backed. |
 | 13.3 windows, helpers, lifecycle | Not started | Production session couples one Process child to one ordinary window. `AppInstanceTable`, `ProcessGroup`, and `WindowSet` are foundations; group/helper and multi-window production policy is absent. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
 | 13.5 VM and heap | Not started | 32-page heap uses writable/NX owned frames through slot 63; mapping tracking is per scheduler thread and ordinary map release/protection is absent. |
@@ -94,3 +96,49 @@ targeted host/model proof and 1–3 real guest boots; architectural scheduler,
 address-space, or teardown changes get broader T3 evidence before preservation
 checkpoints. The full historical suite and 100-boot witness are reserved for
 the source-frozen final qualification.
+
+## Phase-13 implementation receipts
+
+### Installed registry, launch, and initial launcher T1
+
+- Added protected installed-candidate enumerate/inspect/verify operations in
+  filesd and a bounded descriptive catalog in packaged. The catalog is rebuilt
+  from receiver-verified APB1 state at boot. Every launch rechecks current
+  signer policy and the installed tree, transfers the verified executable into
+  bounded staging, and asks the kernel Image authority to accept those bytes.
+  App ID, package ID, version, and paths only select descriptive records; they
+  do not authorize execution. APKG v1 policy remains separate.
+- Added Desktop launch for the installed-app ABI-v2 profile. It receives a
+  fresh Image capability from packaged and uses the existing exact startup
+  capability inventory. The dynamic Image envelope is now 16 images of at most
+  256 KiB each, with at most 128 load pages per image; ADR-0093 records the
+  bound and ELF constraints.
+- Added an All Applications surface backed by the verified catalog and the six
+  built-in apps. Search, keyboard selection, pointer launch, and current-run
+  indication are exercised. Pinned/favorite persistence and dock composition
+  are still outstanding.
+- `python3 tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 with
+  OVMF 2025.02. The test builds and signs an APB1 package, seeds and installs
+  it through the real guest path, opens the catalog, keyboard/search launches
+  the real native ELF, then pointer-launches a second instance. Both processes
+  audit ABI-v2 startup and publish real compositor windows. Closing both
+  retires their ProcessGroups and returns identity-bearing resource counts to
+  baseline; the guest shuts down cleanly.
+- Measured `(free frames, process records, processes, SharedRegions, region
+  pages, maps, caps)` at baseline: `(114307, 15, 15, 2, 470, 4, 45)`; with two
+  installed instances: `(112309, 17, 17, 6, 2350, 9, 49)`; after close:
+  `(114301, 15, 15, 2, 470, 4, 45)`. Process, region, map, and cap values
+  returned exactly
+  to baseline. Six additional frames were free after close; this is a net
+  reclaim, not retained application memory. Other Phase-13 resource classes
+  are not yet included in this fixture.
+- Development fixes found by this proof: filesd now writes executable chunks
+  at verified file offsets in the lent staging region; packaged and Desktop
+  IPC argument ordering and strict zeroed syscall arguments were corrected;
+  kind 6 now receives ABI-v2 bootstrap and close-event wakeups. The kernel's
+  128-slot/slot-127 accounting behavior was preserved, and the APB1 install
+  regression passed after the integration.
+- Focused checks passed: arena-platform host tests (34/34), Desktop/filesd/
+  packaged release builds and rustfmt checks, `test_m12_startup.py` (7/7 plus
+  M1–M7 and M11 markers), and the real APB1 install/registry/launch guest above.
+  This is a feature checkpoint; the full historical suite has not been run.

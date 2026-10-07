@@ -40,6 +40,21 @@ impl AppDefinition {
             bundle_digest: *bundle.bundle_digest(),
         }
     }
+    /// Build a descriptive record after the trusted package owner has
+    /// accepted filesd's fresh signature/tree-verification response and
+    /// applied current receiver policy. The record itself still grants no
+    /// launch, filesystem, or process authority.
+    pub fn from_receiver_verified_install(
+        manifest: Manifest,
+        signer_id: [u8; 32],
+        bundle_digest: [u8; 32],
+    ) -> Self {
+        Self {
+            manifest,
+            signer_id,
+            bundle_digest,
+        }
+    }
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
     }

@@ -187,17 +187,23 @@ fn length(n: &[u8; 32]) -> usize {
 /// identity, actual linked entry, and exact built-in cap profile. None of
 /// these descriptive fields grant authority; the held caps do.
 fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), i64> {
-    let kind = apps::APPLICATION_IDS
+    let built_in = apps::APPLICATION_IDS
         .iter()
         .position(|id| id == view.application_id())
-        .ok_or(-2)? as u8;
-    let id = &apps::APPLICATION_IDS[kind as usize];
-    let id_len = length(id);
+        .map(|kind| kind as u8);
+    let kind = built_in.unwrap_or(6);
+    let application_id = *view.application_id();
+    let id_len = length(&application_id);
     let actual_entry = _start as *const () as usize as u64;
-    if view.flags() != FLAG_MULTI_INSTANCE
+    let flags_valid = if built_in.is_some() {
+        view.flags() == FLAG_MULTI_INSTANCE
+    } else {
+        view.flags() & !FLAG_MULTI_INSTANCE == 0 && valid_application_id(&application_id)
+    };
+    if !flags_valid
         || view.argument_count() == 0
         || view.argument_count() > 2
-        || view.argument(0) != Some(&id[..id_len])
+        || view.argument(0) != Some(&application_id[..id_len])
         || view.environment_count() != 2
         || view.capability_count() < 3
         || view.capability_count() > 4
@@ -282,10 +288,24 @@ fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), 
                 && cap.kind == CAP_KIND_BADGED_ENDPOINT
                 && cap.rights == (RIGHT_WRITE | RIGHT_COPY) => {}
         (apps::TERMINAL | apps::FILES | apps::EDITOR, 3, None) => {}
-        (apps::SETTINGS | apps::GALLERY, 3, None) => {}
+        (apps::SETTINGS | apps::GALLERY | 6, 3, None) => {}
         _ => return Err(-2),
     }
     Ok((kind, dark, motion, path))
+}
+
+fn valid_application_id(id: &[u8; 32]) -> bool {
+    let Some(end) = id.iter().position(|byte| *byte == 0) else {
+        return false;
+    };
+    if !(1..=31).contains(&end) || id[end..].iter().any(|byte| *byte != 0) {
+        return false;
+    }
+    id[..end].iter().enumerate().all(|(index, byte)| {
+        byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || (index != 0 && matches!(*byte, b'.' | b'-' | b'_'))
+    })
 }
 fn error(rc: i64) -> &'static str {
     match rc {
@@ -1194,7 +1214,11 @@ fn application_main(view: StartupView<'_>) -> ! {
     let mut client = Client::connect_v2(
         m::WINDOW_WIDTH,
         m::WINDOW_HEIGHT,
-        apps::TITLES[kind as usize],
+        if (kind as usize) < apps::TITLES.len() {
+            apps::TITLES[kind as usize]
+        } else {
+            "Installed Application"
+        },
     )
     .unwrap_or_else(|_| client::exit(71));
     // Every built-in application re-lays out to any size from its minimum

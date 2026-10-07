@@ -95,7 +95,7 @@ impl Frame {
             } => {
                 // `path` is the launch title or start folder: presentation
                 // (ADR-0077), validated exactly as launch validates it.
-                if kind > 5 || theme > 1 || !printable(&path) {
+                if kind > 6 || theme > 1 || !printable(&path) {
                     return Err(Error::Invalid);
                 }
                 b[6] = kind;

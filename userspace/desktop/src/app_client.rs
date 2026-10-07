@@ -207,7 +207,7 @@ pub fn audit(kind: u8, instance_generation: u64) -> Result<(), i64> {
     let mut endpoint = [0u64; 3];
     let mut surface = [0u64; 3];
     let mut clock = [0u64; 3];
-    if kind > 5
+    if kind > 6
         || unsafe { syscall6(SYS_CAP_OCCUPIED, 0, 0, 0, 0, 0, 0) } != 0
         || unsafe { syscall2(SYS_CAP_DESCRIBE, SERVICE_ENDPOINT, endpoint.as_mut_ptr() as u64) }
             != 0

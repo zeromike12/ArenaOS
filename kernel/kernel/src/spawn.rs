@@ -200,7 +200,7 @@ static LOADER_OWNER: SyncCell<Option<u32>> = SyncCell::new(None);
 pub fn loader_pin_count(id: u32) -> u32 {
     without_interrupts(|| unsafe { u32::from(*LOADER_OWNER.get() == Some(id)) })
 }
-pub const MAX_DYNAMIC_CHILDREN: usize = 4;
+pub const MAX_DYNAMIC_CHILDREN: usize = 24;
 pub fn dynamic_children_full() -> bool {
     without_interrupts(|| unsafe {
         (*RECORDS.get())

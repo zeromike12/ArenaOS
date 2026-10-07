@@ -408,6 +408,10 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
     if p.chooser != n.chooser && (p.chooser.is_some() || n.chooser.is_some()) {
         out.add(shell::chooser_region(w, h));
     }
+    if p.applications != n.applications && (p.applications.is_some() || n.applications.is_some()) {
+        out.add(shell::applications_region(w, h));
+        out.add(shell::bar_region(w));
+    }
     if p.switcher != n.switcher {
         for s in [p.switcher, n.switcher].into_iter().flatten() {
             out.add(shell::switcher_region(w, h, s.count));

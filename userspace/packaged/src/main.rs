@@ -5,6 +5,10 @@
 use arena_lib::fs::Client;
 use arena_packaged::package::{self, Chain, Error, History, PACKAGE_MAX, VERIFY_SCRATCH};
 use arena_phase84_crypto_audit::sha256;
+use arena_platform_core::{
+    manifest::Manifest,
+    registry::{AppDefinition, AppRegistry, MAX_APPLICATIONS},
+};
 use core::panic::PanicInfo;
 #[path = "../../abi.rs"]
 mod abi;
@@ -106,6 +110,44 @@ fn register_payload(buf: &Buffers, size: usize) -> Result<u32, u64> {
     }
     Ok(id as u32)
 }
+
+fn register_native_image(address: u64, size: usize) -> Result<u32, u64> {
+    if !(1..=NATIVE_IMAGE_BYTES_MAX).contains(&size) {
+        return Err(BAD_FORMAT);
+    }
+    let id = unsafe {
+        syscall6(
+            SYS_IMAGE_REGISTER,
+            REGISTRAR,
+            address,
+            size as u64,
+            PROVISIONAL,
+            0,
+            0,
+        )
+    };
+    if id < 0 {
+        return Err(if id == -4 { PKG_BUSY } else { DENY });
+    }
+    if !(27..=u32::MAX as i64).contains(&id) {
+        fail("invalid minted native Image ID");
+    }
+    let mut observed = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, PROVISIONAL, observed.as_mut_ptr() as u64) } != 0
+        || observed != [1, id as u64, RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY]
+    {
+        fail("native Image cap inventory mismatch");
+    }
+    Ok(id as u32)
+}
+
+fn revoke_provisional_image(image_id: u32) {
+    if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR, image_id as u64, 0, 0, 0, 0) } != 0
+        || unsafe { syscall1(SYS_CAP_DESTROY, PROVISIONAL) } != 0
+    {
+        fail("native provisional Image cleanup refused");
+    }
+}
 const BAD_FORMAT: u64 = PKG_BAD_FORMAT;
 const DENY: u64 = PKG_DENY;
 const NO_SPACE: u64 = PKG_NO_SPACE;
@@ -147,6 +189,11 @@ static mut BUFFERS: Buffers = Buffers {
     file: [0; PACKAGE_MAX],
     signed: [0; VERIFY_SCRATCH],
 };
+static mut APP_REGISTRY: AppRegistry = AppRegistry::new();
+static mut APP_CANDIDATE: AppRegistry = AppRegistry::new();
+static mut APP_REGISTRY_READY: bool = false;
+static mut APP_REGISTRY_EPOCH: u64 = 0;
+const MAX_INSTALLED_CANDIDATES: usize = MAX_APPLICATIONS * 4;
 
 #[derive(Clone, Copy)]
 struct Entry {
@@ -804,6 +851,15 @@ fn filesd_apb1_call(
     )
 }
 
+fn filesd_installed_call(
+    call: u64,
+    version: u64,
+    source_cap: u64,
+    bytes: &mut [u8; MSG_BYTES],
+) -> Result<[u64; 3], u64> {
+    filesd_raw_call(INSTALLER, call, version, source_cap, bytes)
+}
+
 /// Exercise the exact install-only endpoint through live filesd IPC. An
 /// online APB1 integration must receive S_DENIED for generic filesystem work.
 fn prove_install_authority_scope() -> bool {
@@ -1014,6 +1070,423 @@ fn install_apb1_from_cap(
     }
     answer[..32].copy_from_slice(&bundle_digest);
     (PKG_INSTALLED, version)
+}
+
+fn inspect_installed_claim(
+    application_id: &[u8; 32],
+    version: u64,
+) -> Result<([u8; 32], [u8; 32]), u64> {
+    let mut request = [0u8; MSG_BYTES];
+    request[..32].copy_from_slice(application_id);
+    request[32..40].copy_from_slice(&version.to_le_bytes());
+    let out = filesd_installed_call(
+        filesd_wire::CALL_APB1_INSPECT_INSTALLED,
+        filesd_wire::CALL_APB1_ABI_V1,
+        CAP_NONE,
+        &mut request,
+    )?;
+    if out[0] != filesd_wire::S_OK || out[1] != version {
+        return Err(filesd_apb1_status(out[0]));
+    }
+    let mut package_id = [0u8; 32];
+    package_id.copy_from_slice(&request[..32]);
+    let mut signer_id = [0u8; 32];
+    signer_id.copy_from_slice(&request[32..]);
+    if !package::canonical_id(&package_id) {
+        return Err(CORRUPT);
+    }
+    Ok((package_id, signer_id))
+}
+
+fn verify_installed_candidate(
+    va: u64,
+    buf: &mut Buffers,
+    application_id: &[u8; 32],
+    version: u64,
+) -> Result<(AppDefinition, [u8; 32], u64), u64> {
+    let (package_id, signer_id) = inspect_installed_claim(application_id, version)?;
+    let state = scan(va, buf, &package_id)?;
+    let key = package::apb1_select_key(&state.chain, &package_id, &signer_id, version)
+        .map_err(apkg_policy_status)?;
+
+    let mut request = [0u8; MSG_BYTES];
+    request[..32].copy_from_slice(application_id);
+    request[32..].copy_from_slice(&key);
+    let verified = filesd_installed_call(
+        filesd_wire::CALL_APB1_VERIFY_INSTALLED,
+        version,
+        CAP_NONE,
+        &mut request,
+    )?;
+    if verified[0] != filesd_wire::S_OK || verified[1] == 0 {
+        return Err(filesd_apb1_status(verified[0]));
+    }
+    let token = u64::from_le_bytes(request[..8].try_into().unwrap());
+    let mut digest = [0u8; 32];
+    digest.copy_from_slice(&request[8..40]);
+    if token == 0 || sha256(&key) != signer_id {
+        return Err(CORRUPT);
+    }
+    package::apb1_check_eligible(&state.chain, &package_id, &signer_id, version, &digest)
+        .map_err(apkg_policy_status)?;
+
+    let mut manifest_bytes = [0u8; arena_platform_core::manifest::MANIFEST_BYTES];
+    for offset in (0..manifest_bytes.len()).step_by(MSG_BYTES) {
+        let mut read = [0u8; MSG_BYTES];
+        read[..8].copy_from_slice(&token.to_le_bytes());
+        read[8..16].copy_from_slice(&(offset as u64).to_le_bytes());
+        let out = filesd_installed_call(
+            filesd_wire::CALL_APB1_READ_VERIFIED_METADATA,
+            version,
+            CAP_NONE,
+            &mut read,
+        )?;
+        let take = (manifest_bytes.len() - offset).min(MSG_BYTES);
+        if out[0] != filesd_wire::S_OK || out[1] != take as u64 {
+            return Err(filesd_apb1_status(out[0]));
+        }
+        manifest_bytes[offset..offset + take].copy_from_slice(&read[..take]);
+    }
+    let manifest = Manifest::parse(&manifest_bytes).map_err(|_| CORRUPT)?;
+    if manifest.application_id() != application_id
+        || manifest.package_id() != &package_id
+        || manifest.version() != version
+    {
+        return Err(COLLISION);
+    }
+    Ok((
+        AppDefinition::from_receiver_verified_install(manifest, signer_id, digest),
+        digest,
+        verified[1],
+    ))
+}
+
+fn rejectable_installed_error(status: u64) -> bool {
+    matches!(
+        status,
+        filesd_wire::S_NOENT
+            | filesd_wire::S_INVAL
+            | filesd_wire::S_CORRUPT
+            | filesd_wire::S_DENIED
+            | BAD_FORMAT
+            | DENY
+            | CORRUPT
+            | COLLISION
+            | PKG_DOWNGRADE
+    )
+}
+
+fn rebuild_installed_registry(va: u64, buf: &mut Buffers) -> Result<usize, u64> {
+    unsafe {
+        APP_REGISTRY_READY = false;
+        (&mut *(&raw mut APP_CANDIDATE)).clear();
+    }
+    let mut cursor_id = [0u8; 32];
+    let mut cursor_version = 0u64;
+    let mut completed = false;
+    for _ in 0..MAX_INSTALLED_CANDIDATES {
+        let mut request = [0u8; MSG_BYTES];
+        request[..32].copy_from_slice(&cursor_id);
+        request[32..40].copy_from_slice(&cursor_version.to_le_bytes());
+        let next = filesd_installed_call(
+            filesd_wire::CALL_APB1_NEXT_INSTALLED,
+            filesd_wire::CALL_APB1_ABI_V1,
+            CAP_NONE,
+            &mut request,
+        )?;
+        if next[0] == filesd_wire::S_NOENT {
+            completed = true;
+            break;
+        }
+        if next[0] != filesd_wire::S_OK || next[1] == 0 {
+            return Err(filesd_apb1_status(next[0]));
+        }
+        let mut application_id = [0u8; 32];
+        application_id.copy_from_slice(&request[..32]);
+        let version = next[1];
+        if !package::canonical_id(&application_id) || version == 0 {
+            return Err(CORRUPT);
+        }
+        match verify_installed_candidate(va, buf, &application_id, version) {
+            Ok((definition, _digest, _size)) => {
+                let candidate = unsafe { &mut *(&raw mut APP_CANDIDATE) };
+                if let Some(current) = candidate.get(&application_id).copied() {
+                    if current.manifest().package_id() != definition.manifest().package_id() {
+                        return Err(COLLISION);
+                    }
+                    if definition.version() > current.version() {
+                        let _ = candidate.remove(&application_id);
+                        candidate.insert(definition).map_err(|_| NO_SPACE)?;
+                    }
+                } else {
+                    candidate.insert(definition).map_err(|_| NO_SPACE)?;
+                }
+            }
+            Err(error) if rejectable_installed_error(error) => {
+                log_line(|o| {
+                    o.str("packaged: installed candidate rejected status=");
+                    o.u64(error);
+                    o.crlf();
+                });
+            }
+            Err(error) => return Err(error),
+        }
+        cursor_id = application_id;
+        cursor_version = version;
+    }
+    if !completed {
+        return Err(NO_SPACE);
+    }
+    let next_epoch = unsafe { APP_REGISTRY_EPOCH }
+        .checked_add(1)
+        .ok_or(NO_SPACE)?;
+    unsafe {
+        core::mem::swap(
+            &mut *(&raw mut APP_REGISTRY),
+            &mut *(&raw mut APP_CANDIDATE),
+        );
+        APP_REGISTRY_READY = true;
+        APP_REGISTRY_EPOCH = next_epoch;
+        Ok((&*(&raw const APP_REGISTRY)).len())
+    }
+}
+
+fn app_catalog_count(va: u64, buf: &mut Buffers) -> Result<usize, u64> {
+    if !unsafe { APP_REGISTRY_READY } {
+        rebuild_installed_registry(va, buf)?;
+    }
+    Ok(unsafe { (&*(&raw const APP_REGISTRY)).len() })
+}
+
+fn app_catalog_chunk(index: usize, offset: usize, answer: &mut [u8; MSG_BYTES]) -> Result<(), u64> {
+    if !unsafe { APP_REGISTRY_READY }
+        || offset >= arena_platform_core::manifest::MANIFEST_BYTES
+        || !offset.is_multiple_of(MSG_BYTES)
+    {
+        return Err(PKG_STALE);
+    }
+    let registry = unsafe { &*(&raw const APP_REGISTRY) };
+    let Some(app) = registry.iter().nth(index) else {
+        return Err(PKG_STALE);
+    };
+    let manifest = app.manifest().encode();
+    let take = (manifest.len() - offset).min(MSG_BYTES);
+    answer[..take].copy_from_slice(&manifest[offset..offset + take]);
+    Ok(())
+}
+
+fn app_catalog_entry(
+    index: usize,
+    expected_epoch: u64,
+    answer: &mut [u8; MSG_BYTES],
+) -> Result<u32, u64> {
+    if !unsafe { APP_REGISTRY_READY }
+        || expected_epoch == 0
+        || unsafe { APP_REGISTRY_EPOCH } != expected_epoch
+    {
+        return Err(PKG_STALE);
+    }
+    let registry = unsafe { &*(&raw const APP_REGISTRY) };
+    let Some(app) = registry.iter().nth(index) else {
+        return Err(PKG_STALE);
+    };
+    answer[..32].copy_from_slice(app.application_id());
+    answer[32..].copy_from_slice(app.manifest().display_name());
+    Ok(app.manifest().flags())
+}
+
+fn launch_installed_application(
+    va: u64,
+    buf: &mut Buffers,
+    application_id: &[u8; 32],
+    staging_slot: u64,
+    pending: &Pending,
+    answer: &mut [u8; MSG_BYTES],
+    reply_cap: &mut u64,
+) -> (u64, u64) {
+    if pending.token != 0 {
+        say("installed app launch refused: package transaction busy");
+        return (PKG_BUSY, 0);
+    }
+    if let Err(error) = rebuild_installed_registry(va, buf) {
+        log_line(|o| {
+            o.str("packaged: installed app launch registry rebuild failed status=");
+            o.u64(error);
+            o.crlf();
+        });
+        return (error, 0);
+    }
+    let Some(catalogued) = (unsafe { &*(&raw const APP_REGISTRY) })
+        .get(application_id)
+        .copied()
+    else {
+        say("installed app launch refused: identity absent from current verified registry");
+        return (PKG_STALE, 0);
+    };
+    let version = catalogued.version();
+    let (verified, digest, executable_size) =
+        match verify_installed_candidate(va, buf, application_id, version) {
+            Ok(verified) => verified,
+            Err(error) => {
+                log_line(|o| {
+                    o.str("packaged: installed app launch re-verification failed status=");
+                    o.u64(error);
+                    o.crlf();
+                });
+                return (error, 0);
+            }
+        };
+    if verified.version() != catalogued.version()
+        || verified.signer_id() != catalogued.signer_id()
+        || verified.bundle_digest() != catalogued.bundle_digest()
+        || !(1..=NATIVE_IMAGE_BYTES_MAX as u64).contains(&executable_size)
+    {
+        say("installed app launch refused: verified version or digest changed");
+        return (PKG_STALE, 0);
+    }
+
+    let mut cap_desc = [0u64; 3];
+    let mut shared_info = [0u64; 2];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, staging_slot, cap_desc.as_mut_ptr() as u64) } != 0
+        || cap_desc[0] != 7
+        || cap_desc[2] & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
+            != RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY
+        || unsafe {
+            syscall6(
+                SYS_SHARED_INFO,
+                staging_slot,
+                shared_info.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        } != 0
+        || shared_info[0] != cap_desc[1]
+        || shared_info[1] != (NATIVE_IMAGE_BYTES_MAX / 4096) as u64
+    {
+        say("installed app launch refused: staging capability shape mismatch");
+        return (DENY, 0);
+    }
+
+    let mapped = unsafe { syscall2(SYS_SHARED_MAP, staging_slot, 1) };
+    if mapped <= 0 {
+        log_line(|o| {
+            o.str("packaged: installed executable staging map failed status=");
+            o.u64(mapped as u64);
+            o.crlf();
+        });
+        return (PKG_BUSY, 0);
+    }
+    let mut registered: Option<u32> = None;
+    let result = (|| -> Result<(u32, [u64; 3]), u64> {
+        let token = {
+            let mut request = [0u8; MSG_BYTES];
+            request[..32].copy_from_slice(application_id);
+            let (package_id, signer_id) = inspect_installed_claim(application_id, version)?;
+            let state = scan(va, buf, &package_id)?;
+            let key = package::apb1_select_key(&state.chain, &package_id, &signer_id, version)
+                .map_err(apkg_policy_status)?;
+            request[32..].copy_from_slice(&key);
+            let verified = filesd_installed_call(
+                filesd_wire::CALL_APB1_VERIFY_INSTALLED,
+                version,
+                CAP_NONE,
+                &mut request,
+            )?;
+            if verified[0] != filesd_wire::S_OK || verified[1] != executable_size {
+                return Err(filesd_apb1_status(verified[0]));
+            }
+            let token = u64::from_le_bytes(request[..8].try_into().unwrap());
+            let mut current_digest = [0u8; 32];
+            current_digest.copy_from_slice(&request[8..40]);
+            if token == 0 || current_digest != digest {
+                return Err(PKG_STALE);
+            }
+            package::apb1_check_eligible(
+                &state.chain,
+                &package_id,
+                &signer_id,
+                version,
+                &current_digest,
+            )
+            .map_err(apkg_policy_status)?;
+            token
+        };
+        let mut offset = 0u64;
+        while offset < executable_size {
+            let mut request = [0u8; MSG_BYTES];
+            request[..8].copy_from_slice(&token.to_le_bytes());
+            request[8..16].copy_from_slice(&offset.to_le_bytes());
+            let read = filesd_installed_call(
+                filesd_wire::CALL_APB1_READ_VERIFIED_EXECUTABLE,
+                version,
+                staging_slot,
+                &mut request,
+            )?;
+            let expected = (executable_size - offset).min(4096);
+            if read[0] != filesd_wire::S_OK || read[1] != expected {
+                return Err(filesd_apb1_status(read[0]));
+            }
+            offset += expected;
+        }
+        let image_id =
+            register_native_image(mapped as u64, executable_size as usize).map_err(|error| {
+                log_line(|o| {
+                    o.str("packaged: installed executable Image registration failed status=");
+                    o.u64(error);
+                    o.crlf();
+                });
+                error
+            })?;
+        registered = Some(image_id);
+        let mut image_info = [0u64; 3];
+        let info_status = unsafe {
+            syscall6(
+                SYS_IMAGE_INFO,
+                PROVISIONAL,
+                image_info.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if info_status != 0 || image_info[0] < image_info[1] || image_info[2] != executable_size {
+            log_line(|o| {
+                o.str("packaged: registered Image info refused status/entry/base/bytes/expected=");
+                o.u64(info_status as u64);
+                o.str("/");
+                o.u64(image_info[0]);
+                o.str("/");
+                o.u64(image_info[1]);
+                o.str("/");
+                o.u64(image_info[2]);
+                o.str("/");
+                o.u64(executable_size);
+                o.crlf();
+            });
+            return Err(CORRUPT);
+        }
+        Ok((image_id, image_info))
+    })();
+    unsafe { core::ptr::write_bytes(mapped as *mut u8, 0, NATIVE_IMAGE_BYTES_MAX) };
+    if unsafe { syscall6(SYS_SHARED_UNMAP, mapped as u64, 0, 0, 0, 0, 0) } != 0 {
+        fail("installed Image staging unmap refused");
+    }
+    match result {
+        Ok((image_id, _image_info)) => {
+            answer[..32].copy_from_slice(&digest);
+            *reply_cap = PROVISIONAL;
+            (PKG_LAUNCH_READY, u64::from(image_id))
+        }
+        Err(error) => {
+            if let Some(image_id) = registered {
+                revoke_provisional_image(image_id);
+            }
+            (error, 0)
+        }
+    }
 }
 
 /// Return (typed status, word1); an Image may only be replied to a fresh
@@ -1792,6 +2265,7 @@ pub extern "C" fn start_on_private_stack() -> ! {
         // cap only, and the filesd install authority is a separate late grant.
         let mut install_handoff = false;
         let mut apb1_source = false;
+        let mut app_staging = false;
         let marked = if op == PKG_OP_INSTALL_AUTH_HANDOFF {
             install_handoff = receive_install_authority(landed, arg, &req);
             install_handoff
@@ -1807,6 +2281,20 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 let _ = take_diagnostic(landed, LIFECYCLE);
             }
             apb1_source
+        } else if op == PKG_OP_APP_LAUNCH {
+            let mut d = [0u64; 3];
+            app_staging = landed != CAP_NONE
+                && arg == 0
+                && req[32..].iter().all(|&byte| byte == 0)
+                && package::canonical_id(&req[..32])
+                && unsafe { syscall2(SYS_CAP_DESCRIBE, landed, d.as_mut_ptr() as u64) } == 0
+                && d[0] == 7
+                && d[2] & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
+                    == RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY;
+            if !app_staging && landed != CAP_NONE {
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, landed) };
+            }
+            app_staging
         } else if landed == CAP_NONE {
             false
         } else {
@@ -1828,6 +2316,56 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 install_apb1_from_cap(landed, &req, va as u64, buf, &mut reply)
             } else {
                 (DENY, 0)
+            }
+        } else if op == PKG_OP_APP_COUNT {
+            if landed != CAP_NONE || arg != 0 || req != [0; MSG_BYTES] {
+                (BAD_FORMAT, 0)
+            } else {
+                match app_catalog_count(va as u64, buf) {
+                    Ok(count) => {
+                        reply[..8].copy_from_slice(&unsafe { APP_REGISTRY_EPOCH }.to_le_bytes());
+                        (OK, count as u64)
+                    }
+                    Err(error) => (error, 0),
+                }
+            }
+        } else if op == PKG_OP_APP_METADATA {
+            let offset = u64::from_le_bytes(req[..8].try_into().unwrap()) as usize;
+            if landed != CAP_NONE || req[8..].iter().any(|&byte| byte != 0) {
+                (BAD_FORMAT, 0)
+            } else if let Err(error) = app_catalog_count(va as u64, buf) {
+                (error, 0)
+            } else {
+                match app_catalog_chunk(arg as usize, offset, &mut reply) {
+                    Ok(()) => (OK, MSG_BYTES as u64),
+                    Err(error) => (error, 0),
+                }
+            }
+        } else if op == PKG_OP_APP_ENTRY {
+            let epoch = u64::from_le_bytes(req[..8].try_into().unwrap());
+            if landed != CAP_NONE || req[8..].iter().any(|&byte| byte != 0) {
+                (BAD_FORMAT, 0)
+            } else {
+                match app_catalog_entry(arg as usize, epoch, &mut reply) {
+                    Ok(flags) => (OK, u64::from(flags)),
+                    Err(error) => (error, 0),
+                }
+            }
+        } else if op == PKG_OP_APP_LAUNCH {
+            if !app_staging {
+                (DENY, 0)
+            } else {
+                let mut application_id = [0u8; 32];
+                application_id.copy_from_slice(&req[..32]);
+                launch_installed_application(
+                    va as u64,
+                    buf,
+                    &application_id,
+                    landed,
+                    &pending,
+                    &mut reply,
+                    &mut reply_cap,
+                )
             }
         } else if op <= PKG_OP_STAGE && (arg != 0 || req[32..].iter().any(|&b| b != 0)) {
             (BAD_FORMAT, 0)
@@ -1862,8 +2400,42 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 &mut reply_cap,
             )
         };
+        if install_handoff {
+            match rebuild_installed_registry(va as u64, buf) {
+                Ok(count) => {
+                    log_line(|o| {
+                        o.str("packaged: protected installed-app registry ready entries=");
+                        o.u64(count as u64);
+                        o.crlf();
+                    });
+                }
+                Err(error) => {
+                    unsafe { APP_REGISTRY_READY = false };
+                    log_line(|o| {
+                        o.str("packaged: installed-app registry offline status=");
+                        o.u64(error);
+                        o.crlf();
+                    });
+                }
+            }
+        }
+        if (status == PKG_INSTALLED && op == PKG_OP_APB1_INSTALL)
+            || (status == OK && op == PKG_OP_POLICY)
+        {
+            if let Err(error) = rebuild_installed_registry(va as u64, buf) {
+                unsafe { APP_REGISTRY_READY = false };
+                log_line(|o| {
+                    o.str("packaged: installed-app registry refresh deferred status=");
+                    o.u64(error);
+                    o.crlf();
+                });
+            }
+        }
         if apb1_source && unsafe { syscall1(SYS_CAP_DESTROY, landed) } != 0 {
             fail("APB1 source capability disposal refused");
+        }
+        if app_staging && unsafe { syscall1(SYS_CAP_DESTROY, landed) } != 0 {
+            fail("installed Image staging capability disposal refused");
         }
         // Exact post-dispatch occupancy: 0..4 bootstrap, slot 8 local
         // LENT frame; slot 7 was consumed by self-map. A wrong-kind or

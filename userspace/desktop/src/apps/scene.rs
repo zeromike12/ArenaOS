@@ -57,7 +57,12 @@ impl View<'_> {
     pub fn paint(&self, canvas: &mut Canvas<'_>) {
         let dark = self.appearance & 1 != 0;
         let t = theme::palette(dark);
-        view::frame(canvas, super::TITLES[self.kind as usize], self.status, t);
+        let title = if (self.kind as usize) < super::TITLES.len() {
+            super::TITLES[self.kind as usize]
+        } else {
+            "Installed Application"
+        };
+        view::frame(canvas, title, self.status, t);
         match self.kind {
             super::TERMINAL => view::terminal(canvas, self.terminal, self.top, t),
             super::EDITOR => view::editor(canvas, self.editor, self.top, self.line, self.dialog, t),

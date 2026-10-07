@@ -49,6 +49,8 @@ pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
 pub const SYS_OBSERVE: u64 = 44;
 /// Read-only executable/capacity preflight; not a reservation or a spawn.
 pub const SYS_SPAWN_CHECK: u64 = 45;
+/// ADR-0093: query validated startup metadata from a held dynamic Image cap.
+pub const SYS_IMAGE_INFO: u64 = 55;
 /// ADR-0071: endpoint READ + notification READ|WRITE; a CALL queued while
 /// no server is parked in RECV ORs `badge` into the bound notification.
 pub const SYS_ENDPOINT_BIND: u64 = 46;
@@ -292,6 +294,17 @@ pub const PKG_OP_ABORT: u64 = 9;
 pub const PKG_OP_APB1_INSTALL: u64 = 10;
 /// One-time manager-to-packaged transfer after the five-cap receiver is READY.
 pub const PKG_OP_INSTALL_AUTH_HANDOFF: u64 = 11;
+/// Rebuild the verified installed APB1 catalog and return its entry count.
+pub const PKG_OP_APP_COUNT: u64 = 12;
+/// Read one fixed 64-byte chunk of a descriptive catalog manifest.
+pub const PKG_OP_APP_METADATA: u64 = 13;
+/// Resolve an app ID through the current verified catalog and return an exact
+/// Image capability. The caller lends one SharedRegion page for executable
+/// staging; that region is consumed only as a temporary byte buffer.
+pub const PKG_OP_APP_LAUNCH: u64 = 14;
+/// Read one bounded identity/label row from a specific catalog generation.
+pub const PKG_OP_APP_ENTRY: u64 = 15;
+pub const NATIVE_IMAGE_BYTES_MAX: usize = 256 * 1024;
 pub const PKG_INSTALLED: u64 = 4;
 pub const PKG_PREPARED: u64 = 5;
 pub const PKG_ACTIVE: u64 = 6;

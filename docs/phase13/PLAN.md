@@ -71,6 +71,24 @@ region table. Ordinary mapped pages have no release/protection operation;
 process teardown reclaims the address space. This mapping model cannot safely
 support multiple user threads sharing heap and syscall buffers.
 
+## Implementation status after the first T1 checkpoint
+
+The initial audit above describes the branch at its starting SHA. The first
+implementation checkpoint now integrates protected installed APB1 enumeration
+and re-verification through filesd, the packaged receiver-policy catalog, an
+exact dynamic Image-capability launch path, and an initial All Applications
+surface. A real QEMU guest installed a signed bundle, launched the verified
+ELF twice through keyboard/search and pointer selection, observed two ABI-v2
+processes and compositor windows, and returned identity resource counts to
+baseline after close. See `PROGRESS.md` and ADR-0093 for measured details.
+
+The checkpoint does not complete launcher favorites/dock behavior,
+associations/Open With, true multi-window instances, helper lifecycle,
+byte-streams, process-wide VM, scalable heap, user threads, synchronization,
+mixed-load pressure, or final qualification. The dynamic Image envelope is a
+bounded executable staging mechanism; it is not process VM and does not imply
+PIE or ASLR support.
+
 ## Work plan
 
 ### A. Package registry and executable authority

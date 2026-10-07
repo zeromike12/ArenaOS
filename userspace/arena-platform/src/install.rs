@@ -62,6 +62,273 @@ pub struct InstallReceipt {
     pub directory: u64,
 }
 
+/// One protected namespace candidate. The directory object is an AFS2-local
+/// selector retained inside filesd; callers should exchange only the
+/// application ID and version, never treat this number as authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstalledCandidate {
+    pub application_id: [u8; 32],
+    pub version: u64,
+    pub(crate) directory: u64,
+}
+
+/// Output of receiver-side verification of one installed version. The entry
+/// object is a filesd-local AFS2 selector used only to mint a narrow read
+/// capability after this function succeeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedInstalledApp {
+    pub manifest: [u8; MANIFEST_BYTES],
+    pub signer_id: [u8; 32],
+    pub bundle_digest: [u8; 32],
+    pub(crate) executable_object: u64,
+    pub executable_size: u64,
+}
+impl VerifiedInstalledApp {
+    /// AFS2-local selector for the exact file just verified. It is descriptive
+    /// state for the owning filesd and does not authorize filesystem access.
+    pub fn executable_object(&self) -> u64 {
+        self.executable_object
+    }
+}
+
+/// Return the next application/version directory after the descriptive
+/// cursor. The root is supplied by trusted filesd state. Candidate names and
+/// numeric versions are only selectors; every result still needs signature,
+/// policy, and exact-tree verification.
+pub fn next_installed_candidate<D: Device>(
+    volume: &mut Volume<D>,
+    applications_root: u64,
+    after_application_id: &[u8; 32],
+    after_version: u64,
+) -> Result<Option<InstalledCandidate>, Error> {
+    require_directory(volume, applications_root)?;
+    let mut budget = volume.statfs().objects as usize;
+    let after_len = cstr_len(after_application_id).unwrap_or(0);
+    let mut app_cursor = [0u8; NAME_MAX];
+    let mut app_cursor_len = after_len;
+    app_cursor[..after_len].copy_from_slice(&after_application_id[..after_len]);
+    let mut inspect_same_app = after_len != 0 && after_version != 0;
+
+    loop {
+        let mut app_name = [0u8; NAME_MAX];
+        let mut app_name_len = 0usize;
+        let app_object = if inspect_same_app {
+            inspect_same_app = false;
+            match volume.lookup(applications_root, &app_cursor[..app_cursor_len]) {
+                Ok((object, DIR)) => {
+                    app_name[..app_cursor_len].copy_from_slice(&app_cursor[..app_cursor_len]);
+                    app_name_len = app_cursor_len;
+                    Some(object)
+                }
+                Ok(_) | Err(afs2::Error::NoEnt) => None,
+                Err(error) => return Err(Error::Fs(error)),
+            }
+        } else {
+            let mut entry = [afs2::Entry::EMPTY; 1];
+            if volume
+                .list(applications_root, &app_cursor[..app_cursor_len], &mut entry)
+                .map_err(Error::Fs)?
+                == 0
+            {
+                return Ok(None);
+            }
+            consume_scan_budget(&mut budget)?;
+            let entry = entry[0];
+            advance_cursor(&mut app_cursor, &mut app_cursor_len, entry.name())?;
+            if entry.typ == DIR {
+                app_name_len = entry.name().len();
+                app_name[..app_name_len].copy_from_slice(entry.name());
+                Some(entry.object)
+            } else {
+                None
+            }
+        };
+
+        let Some(app_object) = app_object else {
+            if app_cursor_len == 0 {
+                return Ok(None);
+            }
+            continue;
+        };
+        let Some(application_id) = fixed_application_id(&app_name[..app_name_len]) else {
+            continue;
+        };
+        let same_application = application_id == *after_application_id;
+        let mut version_storage = [0u8; 20];
+        let version_cursor = if same_application && after_version != 0 {
+            decimal(after_version, &mut version_storage)
+        } else {
+            &[]
+        };
+        let mut version_after = [0u8; NAME_MAX];
+        let mut version_after_len = version_cursor.len();
+        version_after[..version_after_len].copy_from_slice(version_cursor);
+        loop {
+            let mut entry = [afs2::Entry::EMPTY; 1];
+            if volume
+                .list(app_object, &version_after[..version_after_len], &mut entry)
+                .map_err(Error::Fs)?
+                == 0
+            {
+                break;
+            }
+            consume_scan_budget(&mut budget)?;
+            let entry = entry[0];
+            advance_cursor(&mut version_after, &mut version_after_len, entry.name())?;
+            if entry.typ != DIR {
+                continue;
+            }
+            let Some(version) = parse_version_name(entry.name()) else {
+                continue;
+            };
+            return Ok(Some(InstalledCandidate {
+                application_id,
+                version,
+                directory: entry.object,
+            }));
+        }
+        // This app had no later canonical version directory. Continue at the
+        // next app name; all identities are compared as exact fixed fields.
+        app_cursor[..app_name_len].copy_from_slice(&app_name[..app_name_len]);
+        app_cursor_len = app_name_len;
+    }
+}
+
+/// Read only the APB1 claim from a protected version record. The result is
+/// unauthenticated by design and may only select a key in the current trusted
+/// signer-policy chain.
+pub fn inspect_installed_candidate<D: Device>(
+    volume: &mut Volume<D>,
+    verifier: &mut Workspace,
+    scratch: &mut InstallWorkspace,
+    applications_root: u64,
+    application_id: &[u8; 32],
+    version: u64,
+) -> Result<BundleClaim, Error> {
+    let candidate = lookup_installed_candidate(volume, applications_root, application_id, version)?;
+    let info = read_installed_record(volume, scratch, candidate.directory)?;
+    let mut source = installed_source(volume, candidate.directory, &scratch.record, info);
+    let claim = verifier.inspect(&mut source).map_err(Error::Bundle)?;
+    if claim.application_id != *application_id || claim.version != version {
+        return Err(Error::NamespaceMismatch);
+    }
+    Ok(claim)
+}
+
+/// Verify the exact installed APB1 signature, policy-selected key binding,
+/// payload hashes, namespace, and complete AFS2 tree. The returned executable
+/// object remains private to filesd; only filesd may mint a file capability
+/// for it after this succeeds.
+pub fn verify_installed_candidate<D: Device>(
+    volume: &mut Volume<D>,
+    verifier: &mut Workspace,
+    install_scratch: &mut InstallWorkspace,
+    tree_scratch: &mut RegistryScanWorkspace,
+    applications_root: u64,
+    application_id: &[u8; 32],
+    version: u64,
+    trusted_key: &[u8; 32],
+) -> Result<VerifiedInstalledApp, Error> {
+    let candidate = lookup_installed_candidate(volume, applications_root, application_id, version)?;
+    let info = read_installed_record(volume, install_scratch, candidate.directory)?;
+    let verified = {
+        let mut source =
+            installed_source(volume, candidate.directory, &install_scratch.record, info);
+        let verified = verifier
+            .verify(&mut source, trusted_key)
+            .map_err(Error::Bundle)?;
+        if verified.manifest().application_id() != application_id
+            || verified.manifest().version() != version
+        {
+            return Err(Error::NamespaceMismatch);
+        }
+        verified
+    };
+    verify_tree_exact(
+        volume,
+        candidate.directory,
+        info.record_len,
+        &verified,
+        tree_scratch,
+    )?;
+    let manifest = *verified.manifest();
+    let manifest_bytes = manifest.encode();
+    let signer_id = *verified.signer_id();
+    let bundle_digest = *verified.bundle_digest();
+    let entry_path = fixed_path_field(manifest.entry_path()).ok_or(Error::BadRecord)?;
+    let executable_object = lookup_bundle_file(volume, candidate.directory, entry_path)?;
+    let executable_stat = volume.stat(executable_object).map_err(Error::Fs)?;
+    if executable_stat.typ != FILE {
+        return Err(Error::BadInstalledTree);
+    }
+    Ok(VerifiedInstalledApp {
+        manifest: manifest_bytes,
+        signer_id,
+        bundle_digest,
+        executable_object,
+        executable_size: executable_stat.size,
+    })
+}
+
+fn fixed_path_field<const N: usize>(field: &[u8; N]) -> Option<&[u8]> {
+    let end = field.iter().position(|&byte| byte == 0)?;
+    (end != 0 && field[end..].iter().all(|&byte| byte == 0)).then_some(&field[..end])
+}
+
+fn lookup_installed_candidate<D: Device>(
+    volume: &mut Volume<D>,
+    applications_root: u64,
+    application_id: &[u8; 32],
+    version: u64,
+) -> Result<InstalledCandidate, Error> {
+    let id_len = cstr_len(application_id).ok_or(Error::BadRecord)?;
+    let mut version_storage = [0u8; 20];
+    let version_name = decimal(version, &mut version_storage);
+    let (app_dir, app_type) = volume
+        .lookup(applications_root, &application_id[..id_len])
+        .map_err(Error::Fs)?;
+    if app_type != DIR {
+        return Err(Error::NamespaceMismatch);
+    }
+    let (directory, version_type) = volume.lookup(app_dir, version_name).map_err(Error::Fs)?;
+    if version_type != DIR {
+        return Err(Error::NamespaceMismatch);
+    }
+    Ok(InstalledCandidate {
+        application_id: *application_id,
+        version,
+        directory,
+    })
+}
+
+fn lookup_bundle_file<D: Device>(
+    volume: &mut Volume<D>,
+    root: u64,
+    path: &[u8],
+) -> Result<u64, Error> {
+    let mut current = root;
+    let mut start = 0;
+    for (index, byte) in path.iter().enumerate() {
+        if *byte != b'/' && index + 1 != path.len() {
+            continue;
+        }
+        let end = if *byte == b'/' { index } else { index + 1 };
+        if end <= start {
+            return Err(Error::BadRecord);
+        }
+        let (child, typ) = volume
+            .lookup(current, &path[start..end])
+            .map_err(Error::Fs)?;
+        let final_component = end == path.len();
+        if (!final_component && typ != DIR) || (final_component && typ != FILE) {
+            return Err(Error::BadInstalledTree);
+        }
+        current = child;
+        start = end + 1;
+    }
+    Ok(current)
+}
+
 /// Receiver-verified authorization supplied by the exact policy service.
 /// This data is not itself authority: the caller must authenticate the
 /// service through a dedicated capability before constructing it. The
@@ -1580,6 +1847,94 @@ mod tests {
         )
         .unwrap();
         assert_eq!(checked.bundle_digest, receipt.bundle_digest);
+    }
+
+    #[test]
+    fn protected_candidate_lookup_reverifies_tree_and_resolves_exact_entry() {
+        let mut volume = mount(format_base(), None);
+        let (apps, staging) = roots(&mut volume);
+        let mut verifier = Workspace::new();
+        let mut install_scratch = InstallWorkspace::new();
+        let mut source = SliceSource {
+            bytes: VALID,
+            mutate_after: None,
+            payload_reads: 0,
+        };
+        let receipt = install_with_policy(
+            &mut volume,
+            &mut verifier,
+            &mut install_scratch,
+            &mut source,
+            &Chain::new(),
+            InstallTarget::new(apps, staging, 7),
+        )
+        .unwrap();
+
+        let first = next_installed_candidate(&mut volume, apps, &[0; 32], 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.application_id, receipt.application_id);
+        assert_eq!(first.version, receipt.version);
+        assert_eq!(
+            next_installed_candidate(&mut volume, apps, &first.application_id, first.version)
+                .unwrap(),
+            None
+        );
+
+        let claim = inspect_installed_candidate(
+            &mut volume,
+            &mut verifier,
+            &mut install_scratch,
+            apps,
+            &first.application_id,
+            first.version,
+        )
+        .unwrap();
+        assert_eq!(claim.application_id, receipt.application_id);
+        assert_eq!(claim.package_id, receipt.package_id);
+        assert_eq!(claim.version, receipt.version);
+        assert_eq!(claim.signer_id, receipt.signer_id);
+
+        let mut tree_scratch = RegistryScanWorkspace::new();
+        let verified = verify_installed_candidate(
+            &mut volume,
+            &mut verifier,
+            &mut install_scratch,
+            &mut tree_scratch,
+            apps,
+            &first.application_id,
+            first.version,
+            &ROOT_PUBLIC,
+        )
+        .unwrap();
+        let manifest = crate::manifest::Manifest::parse(&verified.manifest).unwrap();
+        assert_eq!(manifest.application_id(), &receipt.application_id);
+        assert_eq!(verified.signer_id, receipt.signer_id);
+        assert_eq!(verified.bundle_digest, receipt.bundle_digest);
+        assert_eq!(verified.executable_size, 18);
+        let mut executable = [0u8; 18];
+        assert_eq!(
+            volume
+                .read(verified.executable_object, 0, &mut executable)
+                .unwrap(),
+            executable.len()
+        );
+        assert_eq!(&executable, b"fixture-main-image");
+
+        let wrong_key = [0x55; 32];
+        assert!(
+            verify_installed_candidate(
+                &mut volume,
+                &mut verifier,
+                &mut install_scratch,
+                &mut tree_scratch,
+                apps,
+                &first.application_id,
+                first.version,
+                &wrong_key,
+            )
+            .is_err()
+        );
     }
 
     #[test]
