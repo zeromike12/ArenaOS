@@ -116,12 +116,69 @@ fn application_main(view: StartupView<'_>) -> ! {
         client::exit(145);
     }
     client::log(b"[phase13-helper] unknown signed helper ID refused without spawn\n");
-    let worker = app_client::spawn_helper(helper_id(b"org.arenaos.phase13worker"))
-        .unwrap_or_else(|_| client::exit(142));
-    if app_client::wait_helper(worker).unwrap_or_else(|_| client::exit(143)) != 43 {
-        client::exit(144);
+    if app_client::spawn_helper(helper_id(b"org.arenaos.phase13streamer")).is_ok()
+        || app_client::spawn_helper_streams(helper_id(b"org.arenaos.phase13sleeper")).is_ok()
+    {
+        client::exit(174);
     }
-    client::log(b"[phase13-helper] signed helper wait returned exact exit=43\n");
+    client::log(
+        b"[phase13-helper-stream] signed stream policy and explicit launch request must match\n",
+    );
+    let (stream_helper, helper_streams) =
+        app_client::spawn_helper_streams(helper_id(b"org.arenaos.phase13streamer"))
+            .unwrap_or_else(|_| client::exit(142));
+    let mut helper_stdin = helper_streams
+        .set()
+        .writer(Channel::Stdin)
+        .unwrap_or_else(|_| client::exit(143));
+    let mut helper_stdout = helper_streams
+        .set()
+        .reader(Channel::Stdout)
+        .unwrap_or_else(|_| client::exit(144));
+    if unsafe {
+        syscall2(
+            SYS_NOTIFY,
+            helper_streams.stream_cap_slot(),
+            arena_runtime::streams::STREAM_WAKE_BADGE,
+        )
+    } != STATUS_BAD_ARG
+    {
+        client::exit(175);
+    }
+    if app_client::wake_helper(stream_helper.wrapping_add(1)).is_ok() {
+        client::exit(176);
+    }
+    if helper_stdin.write(b"helper-input") != Ok(12) {
+        client::exit(165);
+    }
+    app_client::wake_helper(stream_helper).unwrap_or_else(|_| client::exit(166));
+    let mut helper_output = [0u8; 13];
+    let mut helper_output_len = 0;
+    while helper_output_len < helper_output.len() {
+        match helper_stdout.read(&mut helper_output[helper_output_len..]) {
+            Ok(0) => client::exit(167),
+            Ok(count) => helper_output_len += count,
+            Err(StreamError::WouldBlock) => {
+                app_client::idle(None).unwrap_or_else(|_| client::exit(168));
+            }
+            Err(_) => client::exit(169),
+        }
+    }
+    if &helper_output != b"helper-output" {
+        client::exit(170);
+    }
+    helper_stdin.close();
+    drop(helper_stdin);
+    if app_client::wait_helper(stream_helper).unwrap_or_else(|_| client::exit(171)) != 46 {
+        client::exit(172);
+    }
+    let mut eof = [0u8; 1];
+    if helper_stdout.read(&mut eof) != Ok(0) || !helper_stdout.writer_closed() {
+        client::exit(173);
+    }
+    drop(helper_stdout);
+    drop(helper_streams);
+    client::log(b"[phase13-helper-stream] owner woke child; exact stdin/stdout bytes transferred; EOF after reap\n");
 
     let sleeper = app_client::spawn_helper(helper_id(b"org.arenaos.phase13sleeper"))
         .unwrap_or_else(|_| client::exit(146));
@@ -137,18 +194,40 @@ fn application_main(view: StartupView<'_>) -> ! {
     app_client::terminate_helper(sleeper).unwrap_or_else(|_| client::exit(147));
     client::log(b"[phase13-helper] owner-authorized terminate/reap passed\n");
 
-    let crasher = app_client::spawn_helper(helper_id(b"org.arenaos.phase13crasher"))
-        .unwrap_or_else(|_| client::exit(148));
+    let (crasher, crasher_streams) =
+        app_client::spawn_helper_streams(helper_id(b"org.arenaos.phase13crasher"))
+            .unwrap_or_else(|_| client::exit(148));
+    let mut crasher_stdout = crasher_streams
+        .set()
+        .reader(Channel::Stdout)
+        .unwrap_or_else(|_| client::exit(174));
     if app_client::wait_helper(crasher).unwrap_or_else(|_| client::exit(149)) != 262 {
         client::exit(150);
     }
+    if crasher_stdout.read(&mut eof) != Ok(0) || !crasher_stdout.writer_closed() {
+        client::exit(175);
+    }
+    drop(crasher_stdout);
+    drop(crasher_streams);
     client::log(b"[phase13-helper] crashed helper status=262 observed and reaped\n");
+    client::log(b"[phase13-helper-stream] crashed child's output reached EOF after exact Process-cap reap\n");
 
-    let crasher_again = app_client::spawn_helper(helper_id(b"org.arenaos.phase13crasher"))
-        .unwrap_or_else(|_| client::exit(153));
+    let (crasher_again, crasher_again_streams) =
+        app_client::spawn_helper_streams(helper_id(b"org.arenaos.phase13crasher"))
+            .unwrap_or_else(|_| client::exit(153));
+    let mut crasher_again_stdout = crasher_again_streams
+        .set()
+        .reader(Channel::Stdout)
+        .unwrap_or_else(|_| client::exit(176));
     if app_client::wait_helper(crasher_again).unwrap_or_else(|_| client::exit(154)) != 262 {
         client::exit(155);
     }
+    if crasher_again_stdout.read(&mut eof) != Ok(0) || !crasher_again_stdout.writer_closed() {
+        client::exit(177);
+    }
+    drop(crasher_again_stdout);
+    drop(crasher_again_streams);
+    client::log(b"[phase13-helper-stream] crashed child's output reached EOF after exact Process-cap reap\n");
     client::log(b"[phase13-helper] retired private timer object reclaimed after reap\n");
 
     let window = Client::connect_v2(320, 180, "Phase13 Probe").unwrap_or_else(|_| client::exit(75));

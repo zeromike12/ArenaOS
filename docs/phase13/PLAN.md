@@ -99,7 +99,7 @@ The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
 | Scalable heap committed backing | retained for reuse after deallocation; exact VM region release or process teardown returns frames | ADR-0095/0096 |
 | Process exit status | stable full-width final status until reap; exact Process/READ required | syscall 61, ADR-0100 |
 | SharedRegion records / maps | 96 / 160 bounded live records; aggregate page budget remains 36,864 | ADR-0104; sized for 16 stream-enabled instances and 32 windows |
-| Native standard streams | one page per opted-in instance; three single-producer/single-consumer rings, 768 bytes each | ADR-0104 |
+| Native standard streams | one page per opted-in instance or explicitly streamed helper; three single-producer/single-consumer rings, 768 bytes each | ADR-0104/0105 |
 | Spawn grants / startup descriptors | at most 7 grants (including slot-0 startup cap) / 6 descriptors; 128 process capability slots and slot-127 accounting are unchanged | ADR-0104 |
 
 The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
@@ -134,8 +134,10 @@ exact Process cap, one attenuated Notification, no window or Desktop endpoint,
 and real timer-driven teardown. Signed helper execution and manager cleanup
 are guest-proved by ADR-0101. ADR-0104 and the registry T1 guest prove
 Startup ABI standard streams, focused keyboard stdin, output backpressure,
-partial transfer, EOF, and exact owner teardown. Persisted launcher
-favorites, helper-specific streams, user threads, synchronization, mixed-load
+partial transfer, EOF, and exact owner teardown. ADR-0105 extends the same
+bounded rings to allowlisted helpers, with a capability returned only after
+explicit request and owner-scoped wake through the authenticated manager.
+Persisted launcher favorites, user threads, synchronization, mixed-load
 pressure, and final qualification remain open. The
 dynamic Image envelope is a bounded executable staging mechanism; it is not
 process VM and does not imply PIE or ASLR support. See `PROGRESS.md` for
@@ -212,7 +214,10 @@ measured receipts.
   AppInstance stdin ring; app output reaches the bounded Desktop log sink;
   stream page, mappings, and caps retire with the exact ProcessGroup. Extend
   the same exact-region mechanism to explicitly allowlisted helper channels
-  without ambient inheritance.
+  without ambient inheritance. **Status:** ADR-0105 and the signed registry
+  guest prove one dedicated helper page, Startup ABI stream roles, owner-only
+  wake requests, real parent-to-helper stdin, helper stdout, refusal for a
+  non-stream helper, EOF, and exact wait/reap teardown.
 
 ### E. Process-wide VM, heap, threads, synchronization
 

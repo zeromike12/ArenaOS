@@ -352,6 +352,113 @@ pub struct NativeStreams {
     _claim: StandardAttachClaim,
 }
 
+/// Parent-side endpoint for one explicitly delegated helper stream set. The
+/// helper uses the normal stdin-reader/stdout-writer convention; the owning
+/// application writes stdin and reads the helper's output channels.
+pub struct HelperStreams {
+    set: StreamSet,
+    map_va: u64,
+    stream_cap_slot: u64,
+}
+
+impl HelperStreams {
+    /// Adopt the exact SharedRegion returned by the authenticated Desktop
+    /// helper service. The slot is consumed even when validation fails.
+    pub fn from_cap(stream_cap_slot: u64) -> Result<Self, Error> {
+        let owned_slot = stream_cap_slot;
+        let adopted = (|| {
+            use arena_startup_abi::startup::{
+                CAP_KIND_SHARED_REGION, RIGHT_COPY, RIGHT_DESTROY, RIGHT_READ, RIGHT_WRITE,
+            };
+
+            let stream = describe_capability(stream_cap_slot).map_err(Error::Kernel)?;
+            if stream[0] != u64::from(CAP_KIND_SHARED_REGION)
+                || stream[2] != u64::from(RIGHT_READ | RIGHT_WRITE | RIGHT_COPY | RIGHT_DESTROY)
+            {
+                return Err(Error::CapabilityMismatch);
+            }
+            // SAFETY: all syscall output buffers are live caller-owned arrays.
+            let pages = unsafe {
+                arena_lib::abi::syscall6(
+                    arena_lib::abi::SYS_SHARED_PAGES,
+                    owned_slot,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            };
+            if pages != 1 {
+                return Err(Error::RegionGeometry(pages));
+            }
+            // SAFETY: the exact validated SharedRegion cap grants RW mapping.
+            let map =
+                unsafe { arena_lib::abi::syscall2(arena_lib::abi::SYS_SHARED_MAP, owned_slot, 1) };
+            if map <= 0 {
+                return Err(Error::Kernel(map));
+            }
+            // SAFETY: `map` belongs to this exact validated one-page cap.
+            let set = match unsafe { StreamSet::attach(map as *mut u8, STREAM_PAGE_BYTES) } {
+                Ok(set) => set,
+                Err(error) => {
+                    // SAFETY: release only the mapping returned above.
+                    let _ = unsafe {
+                        arena_lib::abi::syscall6(
+                            arena_lib::abi::SYS_SHARED_UNMAP,
+                            map as u64,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                        )
+                    };
+                    return Err(error);
+                }
+            };
+            Ok(Self {
+                set,
+                map_va: map as u64,
+                stream_cap_slot: owned_slot,
+            })
+        })();
+        if adopted.is_err() {
+            destroy_capability(owned_slot);
+        }
+        adopted
+    }
+
+    pub fn set(&self) -> &StreamSet {
+        &self.set
+    }
+
+    pub fn stream_cap_slot(&self) -> u64 {
+        self.stream_cap_slot
+    }
+}
+
+impl Drop for HelperStreams {
+    fn drop(&mut self) {
+        if let Ok(mut stdin) = self.set.writer(Channel::Stdin) {
+            stdin.close();
+        }
+        for channel in [Channel::Stdout, Channel::Stderr] {
+            // The parent owns only the output consumer side. Closing it tells
+            // the helper producer that its peer has gone away; it must not
+            // mark the helper's writer as closed on the producer's behalf.
+            if let Ok(mut reader) = self.set.reader(channel) {
+                reader.close();
+            }
+        }
+        // SAFETY: this wrapper owns the only parent-side mapping and cap slots.
+        let _ = unsafe {
+            arena_lib::abi::syscall6(arena_lib::abi::SYS_SHARED_UNMAP, self.map_va, 0, 0, 0, 0, 0)
+        };
+        destroy_capability(self.stream_cap_slot);
+    }
+}
+
 impl NativeStreams {
     pub fn from_startup(view: &arena_startup_abi::startup::StartupView<'_>) -> Result<Self, Error> {
         use arena_startup_abi::startup as abi;
@@ -504,6 +611,11 @@ fn describe_capability(slot: u64) -> Result<[u64; 3], i64> {
     if status == 0 { Ok(words) } else { Err(status) }
 }
 
+fn destroy_capability(slot: u64) {
+    // SAFETY: this function is called only for cap slots adopted by runtime.
+    let _ = unsafe { arena_lib::abi::syscall1(arena_lib::abi::SYS_CAP_DESTROY, slot) };
+}
+
 impl Drop for NativeStreams {
     fn drop(&mut self) {
         // SAFETY: this wrapper owns exactly the mapping returned by
@@ -601,6 +713,31 @@ mod tests {
         let mut reader = set.reader(Channel::Stdin).unwrap();
         reader.close();
         assert_eq!(writer.write(b"peer died"), Err(Error::BrokenPipe));
+    }
+
+    #[test]
+    fn helper_parent_and_child_use_opposite_ring_endpoints() {
+        let (mut page, _owner) = make_page();
+        // Model two address spaces: each attaches its own process-local view
+        // to the same shared page, then claims opposite endpoints.
+        let parent = unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.unwrap();
+        let child = unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.unwrap();
+        let mut to_child = parent.writer(Channel::Stdin).unwrap();
+        let mut child_stdin = child.reader(Channel::Stdin).unwrap();
+        let mut child_stdout = child.writer(Channel::Stdout).unwrap();
+        let mut from_child = parent.reader(Channel::Stdout).unwrap();
+
+        assert_eq!(to_child.write(b"helper-input"), Ok(12));
+        let mut input = [0; 16];
+        assert_eq!(child_stdin.read(&mut input), Ok(12));
+        assert_eq!(&input[..12], b"helper-input");
+        assert_eq!(child_stdout.write(b"helper-output"), Ok(13));
+        let mut output = [0; 16];
+        assert_eq!(from_child.read(&mut output), Ok(13));
+        assert_eq!(&output[..13], b"helper-output");
+        child_stdout.close();
+        assert_eq!(from_child.read(&mut output), Ok(0));
+        assert!(from_child.writer_closed());
     }
 
     #[test]

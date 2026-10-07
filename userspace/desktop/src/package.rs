@@ -12,6 +12,7 @@ pub mod manifest;
 pub const MAX_CATALOG_APPS: usize = 64;
 pub const HELPER_FLAG_TIMER: u32 = 1;
 pub const HELPER_FLAG_OWNER_SIGNAL: u32 = 2;
+pub const HELPER_FLAG_STREAMS: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppEntry {
@@ -228,8 +229,11 @@ pub fn launch_installed_helper(
     request[32..].copy_from_slice(helper_id);
     let (image, reply) = launch_installed_request(PKG_OP_APP_HELPER_LAUNCH, request, pool)?;
     let flags = u32::from_le_bytes(reply[32..36].try_into().unwrap());
-    if flags & !(HELPER_FLAG_TIMER | HELPER_FLAG_OWNER_SIGNAL) != 0
+    if flags & !(HELPER_FLAG_TIMER | HELPER_FLAG_OWNER_SIGNAL | HELPER_FLAG_STREAMS) != 0
         || (flags & HELPER_FLAG_OWNER_SIGNAL != 0 && flags & HELPER_FLAG_TIMER == 0)
+        || (flags & HELPER_FLAG_STREAMS != 0
+            && flags & (HELPER_FLAG_TIMER | HELPER_FLAG_OWNER_SIGNAL)
+                != (HELPER_FLAG_TIMER | HELPER_FLAG_OWNER_SIGNAL))
     {
         unsafe { syscall1(SYS_CAP_DESTROY, image.capability) };
         return Err(PKG_CORRUPT);

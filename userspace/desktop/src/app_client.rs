@@ -172,6 +172,94 @@ pub fn spawn_helper(helper_id: [u8; 32]) -> Result<u32, i64> {
     }
 }
 
+/// Launch one signed helper with the AHL1 stream grant and receive its exact
+/// parent-side stream region.
+pub fn spawn_helper_streams(
+    helper_id: [u8; 32],
+) -> Result<(u32, arena_runtime::streams::HelperStreams), i64> {
+    let (reply_word, reply, stream_cap) =
+        exchange_with_reply_cap(Frame::SpawnHelperStreams { helper_id }, CAP_NONE)?;
+    let returned = match reply {
+        Frame::HelperStarted { handle } if u64::from(handle) == reply_word && handle != 0 => handle,
+        _ => {
+            unsafe { syscall1(SYS_CAP_DESTROY, stream_cap) };
+            return Err(STATUS_BAD_ARG);
+        }
+    };
+    let streams =
+        arena_runtime::streams::HelperStreams::from_cap(stream_cap).map_err(
+            |error| match error {
+                arena_runtime::streams::Error::Kernel(status) => status,
+                _ => STATUS_BAD_ARG,
+            },
+        )?;
+    Ok((returned, streams))
+}
+
+/// Ask the authenticated Desktop app manager to wake one stream-enabled
+/// helper owned by this AppInstance. The descriptive handle is checked only
+/// after the caller's badged service capability authenticates the owner.
+pub fn wake_helper(handle: u32) -> Result<(), i64> {
+    if handle == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    match exchange(Frame::WakeHelper { handle }, CAP_NONE)? {
+        (0, Frame::HelperWoken { handle: returned }) if returned == handle => Ok(()),
+        _ => Err(STATUS_BAD_ARG),
+    }
+}
+
+/// Checked IPC call that accepts exactly one explicitly returned capability.
+/// The ordinary `exchange` API continues to reject unexpected cap transfer.
+fn exchange_with_reply_cap(frame: Frame, cap: u64) -> Result<(u64, Frame, u64), i64> {
+    for attempt in 0..=IPC_BUSY_RETRIES {
+        let mut bytes = frame.encode().map_err(|_| STATUS_BAD_ARG)?;
+        let mut out = [0, 0, CAP_NONE];
+        let rc = unsafe {
+            syscall6(
+                SYS_IPC_CALL,
+                SERVICE_ENDPOINT,
+                0,
+                0,
+                cap,
+                out.as_mut_ptr() as u64,
+                bytes.as_mut_ptr() as u64,
+            )
+        };
+        if rc == STATUS_BUSY && attempt < IPC_BUSY_RETRIES {
+            if out[2] != CAP_NONE {
+                unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+                return Err(STATUS_BAD_ARG);
+            }
+            retry_after_busy(attempt)?;
+            continue;
+        }
+        if rc != 0 {
+            if out[2] != CAP_NONE {
+                unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+            }
+            return Err(rc);
+        }
+        if out[0] != 0 {
+            if out[2] != CAP_NONE {
+                unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+            }
+            return Err(out[0] as i64);
+        }
+        let decoded = match Frame::decode(&bytes) {
+            Ok(frame) if out[2] != CAP_NONE => frame,
+            _ => {
+                if out[2] != CAP_NONE {
+                    unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+                }
+                return Err(STATUS_BAD_ARG);
+            }
+        };
+        return Ok((out[1], decoded, out[2]));
+    }
+    Err(STATUS_BUSY)
+}
+
 /// Wait for a helper's exact Process-cap exit status. The Desktop polls
 /// without blocking its global event loop; this client waits between polls
 /// using its own explicitly held notification/timer authority.

@@ -7,8 +7,11 @@ use arena_lib::abi::{
     SYS_NOTIFICATION_CREATE, SYS_NOTIFY, SYS_THREAD_EXIT, SYS_TIMER_ARM, SYS_WAIT, syscall1,
     syscall2, syscall3, syscall6,
 };
-use arena_startup_abi::manifest::FLAG_HEADLESS;
-use arena_startup_abi::startup::{CAP_KIND_NOTIFICATION, StartupView};
+use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams};
+use arena_startup_abi::manifest::{FLAG_HEADLESS, FLAG_STANDARD_STREAMS};
+use arena_startup_abi::startup::{
+    CAP_KIND_NOTIFICATION, CAP_KIND_SHARED_REGION, CapabilityRole, StartupView,
+};
 
 const APPLICATION_ID: [u8; 32] = {
     let mut id = [0; 32];
@@ -30,10 +33,10 @@ const INSTALLED_APP_ID: [u8; 32] = {
     }
     id
 };
-const WORKER_ID: &[u8] = b"org.arenaos.phase13worker";
 const SLEEPER_ID: &[u8] = b"org.arenaos.phase13sleeper";
 const CRASHER_ID: &[u8] = b"org.arenaos.phase13crasher";
 const ORPHAN_ID: &[u8] = b"org.arenaos.phase13orphan";
+const STREAMER_ID: &[u8] = b"org.arenaos.phase13streamer";
 const COMPLETION_BADGE: u64 = 0x13A1;
 const HELPER_READY_BADGE: u64 = 0x13A2;
 
@@ -88,15 +91,21 @@ fn application_main(view: StartupView<'_>) {
 fn helper_main(view: StartupView<'_>) -> ! {
     let mut observed = [0u64; 3];
     let mut owner_signal = [0u64; 3];
-    let signal_parent = view.argument(1) == Some(SLEEPER_ID);
+    let streaming = view.flags() & FLAG_STANDARD_STREAMS != 0;
+    let signal_parent = view.argument(1) == Some(SLEEPER_ID) || streaming;
     if view.application_id() != &INSTALLED_APP_ID
         || view.argument(0) != Some(b"org.arenaos.phase13app")
-        || view.flags() != 1
+        || view.flags()
+            != if streaming {
+                1 | FLAG_STANDARD_STREAMS
+            } else {
+                1
+            }
         || view.instance_generation() == 0
-        || view.capability_count() != 1 + usize::from(signal_parent)
-        || view.stdin_descriptor().is_some()
-        || view.stdout_descriptor().is_some()
-        || view.stderr_descriptor().is_some()
+        || view.capability_count() != 1 + usize::from(signal_parent) + usize::from(streaming)
+        || (view.stdin_descriptor().is_some() != streaming)
+        || (view.stdout_descriptor().is_some() != streaming)
+        || (view.stderr_descriptor().is_some() != streaming)
         || view.capability(0).is_none_or(|descriptor| {
             descriptor.slot != 1
                 || descriptor.kind != CAP_KIND_NOTIFICATION
@@ -110,24 +119,37 @@ fn helper_main(view: StartupView<'_>) -> ! {
                 descriptor.slot != 2
                     || descriptor.kind != CAP_KIND_NOTIFICATION
                     || u64::from(descriptor.rights) != RIGHTS_WRITE
+                    || descriptor.role
+                        != if streaming {
+                            CapabilityRole::StreamWake
+                        } else {
+                            CapabilityRole::Other
+                        }
             }) || unsafe { syscall2(SYS_CAP_DESCRIBE, 2, owner_signal.as_mut_ptr() as u64) }
                 != 0
                 || owner_signal[0] != u64::from(CAP_KIND_NOTIFICATION)
                 || owner_signal[1] == observed[1]
                 || owner_signal[2] != RIGHTS_WRITE))
+        || (streaming
+            && view.capability(2).is_none_or(|descriptor| {
+                descriptor.slot != 3
+                    || descriptor.kind != CAP_KIND_SHARED_REGION
+                    || descriptor.rights != (RIGHTS_READ | RIGHTS_WRITE) as u32
+                    || descriptor.role != CapabilityRole::StandardStreamSet
+            }))
     {
         client::exit(73);
     }
     if unsafe { syscall6(SYS_NOTIFICATION_CREATE, 44, 10, 0, 0, 0, 0) } != STATUS_BAD_ARG
         || unsafe { syscall6(SYS_CAP_OCCUPIED, 10, 0, 0, 0, 0, 0) } != 0
         || (signal_parent && unsafe { syscall1(SYS_WAIT, 2) } != STATUS_BAD_ARG)
+        || (streaming && unsafe { syscall2(SYS_NOTIFY, 3, HELPER_READY_BADGE) } != STATUS_BAD_ARG)
     {
         client::exit(78);
     }
     client::log(b"[phase13-helper] no inherited notification factory; WRITE-only owner signal cannot wait\n");
     client::log(b"[phase13-helper] exact Startup ABI inventory: private timer Notification; optional owner signal is WRITE-only and a distinct object\n");
     match view.argument(1) {
-        Some(id) if id == WORKER_ID => helper_exit(43),
         Some(id) if id == SLEEPER_ID => wait_for_helper_timer(44, true),
         Some(id) if id == ORPHAN_ID => wait_for_helper_timer(45, false),
         Some(id) if id == CRASHER_ID => {
@@ -138,8 +160,42 @@ fn helper_main(view: StartupView<'_>) -> ! {
             // stable Process-cap status 0x100 + vector 6.
             unsafe { core::arch::asm!("ud2", options(noreturn, nostack)) }
         }
+        Some(id) if id == STREAMER_ID => stream_helper(view),
         _ => client::exit(74),
     }
+}
+
+fn stream_helper(view: StartupView<'_>) -> ! {
+    let streams = NativeStreams::from_startup(&view).unwrap_or_else(|_| client::exit(79));
+    let mut stdin = streams
+        .set()
+        .reader(Channel::Stdin)
+        .unwrap_or_else(|_| client::exit(80));
+    let mut stdout = streams
+        .set()
+        .writer(Channel::Stdout)
+        .unwrap_or_else(|_| client::exit(81));
+    let mut input = [0u8; 32];
+    loop {
+        match stdin.read(&mut input) {
+            Ok(count) if &input[..count] == b"helper-input" => break,
+            Ok(_) => client::exit(82),
+            Err(StreamError::WouldBlock) => {
+                if unsafe { syscall1(SYS_WAIT, 1) } < 0 {
+                    client::exit(83);
+                }
+            }
+            Err(_) => client::exit(84),
+        }
+    }
+    if stdout.write(b"helper-output") != Ok(13) {
+        client::exit(85);
+    }
+    stdout.close();
+    stdin.close();
+    streams.wake_broker().unwrap_or_else(|_| client::exit(86));
+    client::log(b"[phase13-helper-stream] child transferred stdin and stdout bytes over its exact stream set\n");
+    helper_exit(46)
 }
 
 fn wait_for_helper_timer(exit_status: u64, signal_parent: bool) -> ! {

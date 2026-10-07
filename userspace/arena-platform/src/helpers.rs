@@ -16,7 +16,10 @@ pub const FLAG_TIMER: u32 = 1;
 /// Give the child a separate WRITE-only cap on its AppInstance clock so it
 /// can notify its owner without consuming or waiting on the owner's events.
 pub const FLAG_OWNER_SIGNAL: u32 = 2;
-const KNOWN_FLAGS: u32 = FLAG_TIMER | FLAG_OWNER_SIGNAL;
+/// The helper may opt into one dedicated native standard-stream set. Desktop
+/// returns an exact SharedRegion cap to the parent only when requested.
+pub const FLAG_STREAMS: u32 = 4;
+const KNOWN_FLAGS: u32 = FLAG_TIMER | FLAG_OWNER_SIGNAL | FLAG_STREAMS;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -92,6 +95,8 @@ impl Allowlist {
             let flags = u32::from_le_bytes(record[80..84].try_into().map_err(|_| Error::Bounds)?);
             if flags & !KNOWN_FLAGS != 0
                 || (flags & FLAG_OWNER_SIGNAL != 0 && flags & FLAG_TIMER == 0)
+                || (flags & FLAG_STREAMS != 0
+                    && flags & (FLAG_TIMER | FLAG_OWNER_SIGNAL) != (FLAG_TIMER | FLAG_OWNER_SIGNAL))
                 || record[84..88] != [0; 4]
             {
                 return Err(Error::Flags);
@@ -157,6 +162,17 @@ mod tests {
     }
 
     #[test]
+    fn stream_helpers_require_both_private_wait_and_owner_wake_grants() {
+        let mut bytes = fixture();
+        let flags = FLAG_TIMER | FLAG_OWNER_SIGNAL | FLAG_STREAMS;
+        bytes[88..92].copy_from_slice(&flags.to_le_bytes());
+        let allowlist = Allowlist::parse(&bytes).unwrap();
+        let mut id = [0; ID_BYTES];
+        id[..11].copy_from_slice(b"com.tool.gc");
+        assert_eq!(allowlist.get(&id).unwrap().flags(), flags);
+    }
+
+    #[test]
     fn rejects_unknown_flags_noncanonical_paths_and_duplicates() {
         let mut bytes = fixture();
         bytes[88..92].copy_from_slice(&4u32.to_le_bytes());
@@ -164,6 +180,10 @@ mod tests {
 
         let mut bytes = fixture();
         bytes[88..92].copy_from_slice(&FLAG_OWNER_SIGNAL.to_le_bytes());
+        assert_eq!(Allowlist::parse(&bytes), Err(Error::Flags));
+
+        let mut bytes = fixture();
+        bytes[88..92].copy_from_slice(&FLAG_STREAMS.to_le_bytes());
         assert_eq!(Allowlist::parse(&bytes), Err(Error::Flags));
 
         let mut bytes = fixture();

@@ -174,12 +174,7 @@ fn audit_session_clocks() {
                 || package_endpoint[2] != RIGHTS_WRITE
                 || package_endpoint[1] == fs_endpoint[1]
                 || package_endpoint[1] == user_root[1]))
-        || notification_factory
-            != [
-                u64::from(CAP_KIND_NOTIFICATION_FACTORY),
-                0,
-                u64::from(RIGHTS_WRITE),
-            ]
+        || notification_factory != [u64::from(CAP_KIND_NOTIFICATION_FACTORY), 0, RIGHTS_WRITE]
         || frame_slot != 0
         || lent_slot != 0
     {
@@ -218,12 +213,16 @@ struct HelperMember {
     handle: u32,
     helper_id: [u8; 32],
     timer_slot: u8,
+    stream_cap: u64,
+    stream_va: u64,
     active: bool,
 }
 const EMPTY_HELPER: HelperMember = HelperMember {
     handle: 0,
     helper_id: [0; 32],
     timer_slot: u8::MAX,
+    stream_cap: CAP_NONE,
+    stream_va: 0,
     active: false,
 };
 const HELPERS_PER_INSTANCE: usize = APP_GROUP_PROCESSES - 1;
@@ -1318,15 +1317,14 @@ fn app_handles_type(index: usize, content_type: &[u8]) -> bool {
 fn content_type_for_name(name: &[u8; 32]) -> &'static [u8] {
     let end = name.iter().position(|byte| *byte == 0).unwrap_or(32);
     let name = &name[..end];
+    let plain = !name.contains(&b'.')
+        || (name.len() >= 4
+            && [b".txt".as_slice(), b".log".as_slice()]
+                .iter()
+                .any(|suffix| name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)));
     if name.len() >= 3 && name[name.len() - 3..].eq_ignore_ascii_case(b".md") {
         b"text/markdown"
-    } else if name.len() >= 4
-        && [b".txt".as_slice(), b".log".as_slice()]
-            .iter()
-            .any(|suffix| name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix))
-    {
-        b"text/plain"
-    } else if !name.contains(&b'.') {
+    } else if plain {
         b"text/plain"
     } else {
         b"application/octet-stream"
@@ -1861,11 +1859,10 @@ fn finish_app_group(instance: usize) {
     if !group.is_empty() {
         die(84)
     }
-    for member in unsafe { &mut SESSIONS[instance].helpers } {
-        if member.active && member.timer_slot != u8::MAX {
-            destroy(u64::from(member.timer_slot));
+    for slot in 0..HELPERS_PER_INSTANCE {
+        if unsafe { SESSIONS[instance].helpers[slot].active } {
+            retire_helper_member(instance, slot);
         }
-        *member = EMPTY_HELPER;
     }
     log(b"[desktop] AppInstance ProcessGroup teardown members=");
     log_number(members as u64);
@@ -2089,6 +2086,54 @@ fn retire_streams(session: Session) {
     destroy(session.stream_cap);
 }
 
+fn retire_helper_streams(member: HelperMember) {
+    if member.stream_cap == CAP_NONE {
+        return;
+    }
+    if member.stream_va != 0
+        && let Ok(streams) = unsafe {
+            arena_runtime::streams::StreamSet::attach(
+                member.stream_va as *mut u8,
+                arena_runtime::streams::STREAM_PAGE_BYTES,
+            )
+        }
+    {
+        for channel in [
+            arena_runtime::streams::Channel::Stdin,
+            arena_runtime::streams::Channel::Stdout,
+            arena_runtime::streams::Channel::Stderr,
+        ] {
+            if let Ok(mut writer) = streams.writer(channel) {
+                writer.close();
+            }
+            if let Ok(mut reader) = streams.reader(channel) {
+                reader.close();
+            }
+        }
+    }
+    if member.stream_va != 0
+        && unsafe { syscall6(SYS_SHARED_UNMAP, member.stream_va, 0, 0, 0, 0, 0) } != 0
+    {
+        die(86)
+    }
+    destroy(member.stream_cap);
+}
+
+fn retire_helper_member(instance: usize, slot: usize) {
+    if instance >= LIMIT || slot >= HELPERS_PER_INSTANCE {
+        die(83)
+    }
+    let member = unsafe { SESSIONS[instance].helpers[slot] };
+    if !member.active {
+        return;
+    }
+    retire_helper_streams(member);
+    if member.timer_slot != u8::MAX {
+        destroy(u64::from(member.timer_slot));
+    }
+    unsafe { SESSIONS[instance].helpers[slot] = EMPTY_HELPER };
+}
+
 fn spawn_child(instance: usize, image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
     if instance >= LIMIT {
         return Err(STATUS_BAD_ARG);
@@ -2119,15 +2164,25 @@ fn launch_helper_image_v2(
     instance: usize,
     image: arena_desktop::package::NativeHelper,
     helper_id: [u8; 32],
+    streams: Option<&PendingStream>,
 ) -> Result<(Handle, u8), i64> {
     use arena_startup_abi::startup as startup_abi;
 
     let known_flags = arena_desktop::package::HELPER_FLAG_TIMER
-        | arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL;
+        | arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL
+        | arena_desktop::package::HELPER_FLAG_STREAMS;
+    let stream_requested = streams.is_some();
     if instance >= LIMIT
         || image.flags & !known_flags != 0
         || (image.flags & arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL != 0
             && image.flags & arena_desktop::package::HELPER_FLAG_TIMER == 0)
+        || ((image.flags & arena_desktop::package::HELPER_FLAG_STREAMS != 0) != stream_requested)
+        || (stream_requested
+            && image.flags
+                & (arena_desktop::package::HELPER_FLAG_TIMER
+                    | arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL)
+                != (arena_desktop::package::HELPER_FLAG_TIMER
+                    | arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL))
         || !child_capacity_available(instance)
     {
         destroy(image.image.capability);
@@ -2175,30 +2230,59 @@ fn launch_helper_image_v2(
     let arguments: [&[u8]; 2] = [&session.application_id[..id_len], &helper_id[..helper_len]];
     let timer_granted = image.flags & arena_desktop::package::HELPER_FLAG_TIMER != 0;
     let owner_signal = image.flags & arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL != 0;
-    let descriptors = [
+    let mut descriptors = [
         startup_cap_descriptor(
             1,
             startup_abi::CAP_KIND_NOTIFICATION,
             RIGHTS_READ | RIGHTS_WRITE,
         ),
         startup_cap_descriptor(2, startup_abi::CAP_KIND_NOTIFICATION, RIGHTS_WRITE),
+        startup_cap_descriptor(
+            3,
+            startup_abi::CAP_KIND_SHARED_REGION,
+            RIGHTS_READ | RIGHTS_WRITE,
+        ),
     ];
-    let capability_count = usize::from(timer_granted) + usize::from(owner_signal);
-    let capabilities = &descriptors[..capability_count];
+    descriptors[1].role = if stream_requested {
+        startup_abi::CapabilityRole::StreamWake
+    } else {
+        startup_abi::CapabilityRole::Other
+    };
+    if stream_requested {
+        descriptors[2].role = startup_abi::CapabilityRole::StandardStreamSet;
+    }
+    let capability_count =
+        usize::from(timer_granted) + usize::from(owner_signal) + usize::from(stream_requested);
+    // Canonical AHL1 stream helpers require the timer and owner signal bits,
+    // so the fixed descriptor slots are [timer, owner wake, stream set].
+    let capabilities = if stream_requested {
+        &descriptors[..3]
+    } else {
+        &descriptors[..capability_count]
+    };
+    if !stream_requested && owner_signal && !timer_granted {
+        destroy(image.image.capability);
+        return Err(STATUS_BAD_ARG);
+    }
+    let stream_index = stream_requested.then_some(2);
     let spec = startup_abi::StartupSpec {
         application_id: &session.application_id,
         instance_slot: instance as u16,
         instance_generation: u64::from(session.badge),
         // Helper streams require an explicit AHL1 opt-in and endpoint grant;
         // the primary's standard-stream declaration is not ambient inheritance.
-        flags: session.app_flags & !arena_startup_abi::manifest::FLAG_STANDARD_STREAMS,
+        flags: if stream_requested {
+            session.app_flags | arena_startup_abi::manifest::FLAG_STANDARD_STREAMS
+        } else {
+            session.app_flags & !arena_startup_abi::manifest::FLAG_STANDARD_STREAMS
+        },
         arguments: &arguments,
         environment: &[],
         capabilities,
         cwd: None,
-        stdin: None,
-        stdout: None,
-        stderr: None,
+        stdin: stream_index,
+        stdout: stream_index,
+        stderr: stream_index,
         entry: image.image.entry,
         load_base: image.image.load_base,
         clock_us: arena_desktop::app_client::now(),
@@ -2268,11 +2352,8 @@ fn launch_helper_image_v2(
         }
         timer_slot = free_slot as u8;
     }
-    let mut grants = [
-        InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
-        InheritGrant::new(0, 0),
-        InheritGrant::new(0, 0),
-    ];
+    let mut grants =
+        [InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32); 4];
     let mut grant_count = 1;
     if timer_granted {
         grants[grant_count] = InheritGrant::new(timer_slot, (RIGHTS_READ | RIGHTS_WRITE) as u32);
@@ -2280,6 +2361,11 @@ fn launch_helper_image_v2(
     }
     if owner_signal {
         grants[grant_count] = InheritGrant::new(clock(instance) as u8, RIGHTS_WRITE as u32);
+        grant_count += 1;
+    }
+    if let Some(stream) = streams {
+        grants[grant_count] =
+            InheritGrant::new(stream.cap as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
         grant_count += 1;
     }
     let process = spawn_child(instance, image.image.capability, &grants[..grant_count]);
@@ -2296,7 +2382,11 @@ fn launch_helper_image_v2(
     }
 }
 
-fn spawn_installed_helper(instance: usize, helper_id: [u8; 32]) -> Result<u32, i64> {
+fn spawn_installed_helper(
+    instance: usize,
+    helper_id: [u8; 32],
+    request_streams: bool,
+) -> Result<u32, i64> {
     if instance >= LIMIT {
         return Err(STATUS_BAD_ARG);
     }
@@ -2313,6 +2403,22 @@ fn spawn_installed_helper(instance: usize, helper_id: [u8; 32]) -> Result<u32, i
     let helper =
         arena_desktop::package::launch_installed_helper(&session.application_id, &helper_id, POOL)
             .map_err(|error| error as i64)?;
+    let signed_streams = helper.flags & arena_desktop::package::HELPER_FLAG_STREAMS != 0;
+    if signed_streams != request_streams {
+        destroy(helper.image.capability);
+        return Err(STATUS_BAD_ARG);
+    }
+    let mut streams = if request_streams {
+        match PendingStream::create() {
+            Ok(streams) => Some(streams),
+            Err(status) => {
+                destroy(helper.image.capability);
+                return Err(status);
+            }
+        }
+    } else {
+        None
+    };
     let Some(helper_len) = helper_id.iter().position(|byte| *byte == 0) else {
         destroy(helper.image.capability);
         return Err(STATUS_BAD_ARG);
@@ -2321,13 +2427,20 @@ fn spawn_installed_helper(instance: usize, helper_id: [u8; 32]) -> Result<u32, i
         destroy(helper.image.capability);
         return Err(STATUS_BAD_ARG);
     }
-    let (handle, timer_slot) = launch_helper_image_v2(instance, helper, helper_id)?;
+    let (handle, timer_slot) =
+        launch_helper_image_v2(instance, helper, helper_id, streams.as_ref())?;
     let raw = handle.as_raw();
+    let (stream_cap, stream_va) = streams
+        .take()
+        .map(PendingStream::commit)
+        .unwrap_or((CAP_NONE, 0));
     unsafe {
         SESSIONS[instance].helpers[record] = HelperMember {
             handle: raw,
             helper_id,
             timer_slot,
+            stream_cap,
+            stream_va,
             active: true,
         };
     }
@@ -2357,6 +2470,18 @@ fn helper_record(instance: usize, raw: u32) -> Result<(usize, Handle), i64> {
     Ok((slot, Handle::from_raw(raw)))
 }
 
+fn stop_and_retire_helper(instance: usize, slot: usize, raw: u32) {
+    if instance >= LIMIT || slot >= HELPERS_PER_INSTANCE {
+        die(83)
+    }
+    let handle = Handle::from_raw(raw);
+    unsafe { (&mut *(&raw mut APP_GROUPS))[instance].as_mut() }
+        .unwrap_or_else(|| die(83))
+        .stop_and_reap(handle)
+        .unwrap_or_else(|_| die(83));
+    retire_helper_member(instance, slot);
+}
+
 fn wait_helper(instance: usize, raw: u32, bytes: &mut [u8; 64]) -> Result<u64, i64> {
     use arena_desktop::service_wire::Frame as S;
     let (slot, handle) = helper_record(instance, raw)?;
@@ -2370,11 +2495,7 @@ fn wait_helper(instance: usize, raw: u32, bytes: &mut [u8; 64]) -> Result<u64, i
         .reap_exited(handle)
         .map_err(|_| STATUS_BAD_ARG)?;
     let helper_id = unsafe { SESSIONS[instance].helpers[slot].helper_id };
-    let timer_slot = unsafe { SESSIONS[instance].helpers[slot].timer_slot };
-    if timer_slot != u8::MAX {
-        destroy(u64::from(timer_slot));
-    }
-    unsafe { SESSIONS[instance].helpers[slot] = EMPTY_HELPER };
+    retire_helper_member(instance, slot);
     *bytes = S::HelperExited {
         handle: raw,
         status,
@@ -2398,11 +2519,7 @@ fn terminate_helper(instance: usize, raw: u32, bytes: &mut [u8; 64]) -> Result<u
         .stop_and_reap(handle)
         .map_err(|_| STATUS_BAD_ARG)?;
     let helper_id = unsafe { SESSIONS[instance].helpers[slot].helper_id };
-    let timer_slot = unsafe { SESSIONS[instance].helpers[slot].timer_slot };
-    if timer_slot != u8::MAX {
-        destroy(u64::from(timer_slot));
-    }
-    unsafe { SESSIONS[instance].helpers[slot] = EMPTY_HELPER };
+    retire_helper_member(instance, slot);
     *bytes = S::HelperTerminated { handle: raw }
         .encode()
         .map_err(|_| STATUS_BAD_ARG)?;
@@ -2417,11 +2534,62 @@ fn helper_service(instance: usize, bytes: &mut [u8; 64]) -> Result<u64, i64> {
     use arena_desktop::service_wire::Frame as S;
     match S::decode(bytes).map_err(|_| STATUS_BAD_ARG)? {
         S::SpawnHelper { helper_id } => {
-            let handle = spawn_installed_helper(instance, helper_id)?;
+            let handle = spawn_installed_helper(instance, helper_id, false)?;
             *bytes = S::HelperStarted { handle }
                 .encode()
                 .map_err(|_| STATUS_BAD_ARG)?;
             Ok(u64::from(handle))
+        }
+        S::SpawnHelperStreams { helper_id } => {
+            let handle = spawn_installed_helper(instance, helper_id, true)?;
+            let (slot, _) = helper_record(instance, handle)?;
+            let stream_cap = unsafe { SESSIONS[instance].helpers[slot].stream_cap };
+            let Some(transfer_slot) = free_cap_slot() else {
+                stop_and_retire_helper(instance, slot, handle);
+                return Err(STATUS_BUSY);
+            };
+            if unsafe { REPLY_CAP } != CAP_NONE {
+                stop_and_retire_helper(instance, slot, handle);
+                return Err(STATUS_BUSY);
+            }
+            let copy = unsafe {
+                syscall3(
+                    SYS_CAP_COPY,
+                    stream_cap,
+                    transfer_slot,
+                    RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY,
+                )
+            };
+            if copy != 0 {
+                stop_and_retire_helper(instance, slot, handle);
+                return Err(copy);
+            }
+            unsafe { REPLY_CAP = transfer_slot };
+            *bytes = S::HelperStarted { handle }
+                .encode()
+                .map_err(|_| STATUS_BAD_ARG)?;
+            Ok(u64::from(handle))
+        }
+        S::WakeHelper { handle } => {
+            let (slot, process) = helper_record(instance, handle)?;
+            let member = unsafe { SESSIONS[instance].helpers[slot] };
+            if member.stream_cap == CAP_NONE || !child_live(instance, process) {
+                return Err(STATUS_BAD_ARG);
+            }
+            let rc = unsafe {
+                syscall2(
+                    SYS_NOTIFY,
+                    u64::from(member.timer_slot),
+                    arena_runtime::streams::STREAM_WAKE_BADGE,
+                )
+            };
+            if rc != 0 {
+                return Err(rc);
+            }
+            *bytes = S::HelperWoken { handle }
+                .encode()
+                .map_err(|_| STATUS_BAD_ARG)?;
+            Ok(0)
         }
         S::WaitHelper { handle } => wait_helper(instance, handle, bytes),
         S::TerminateHelper { handle } => terminate_helper(instance, handle, bytes),
@@ -5314,6 +5482,8 @@ extern "C" fn main() -> ! {
         ) && matches!(
             frame,
             arena_desktop::service_wire::Frame::SpawnHelper { .. }
+                | arena_desktop::service_wire::Frame::SpawnHelperStreams { .. }
+                | arena_desktop::service_wire::Frame::WakeHelper { .. }
                 | arena_desktop::service_wire::Frame::WaitHelper { .. }
                 | arena_desktop::service_wire::Frame::TerminateHelper { .. }
         ) {

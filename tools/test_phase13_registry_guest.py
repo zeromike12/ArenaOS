@@ -20,7 +20,7 @@ SOURCE = b"phase13.apb1"
 HEADLESS_SOURCE = b"zz-headless.apb1"
 APP_ID = b"org.arenaos.phase13app"
 HEADLESS_APP_ID = b"org.arenaos.zzheadless"
-HELPER_ID = b"org.arenaos.phase13worker"
+STREAMER_ID = b"org.arenaos.phase13streamer"
 SLEEPER_ID = b"org.arenaos.phase13sleeper"
 CRASHER_ID = b"org.arenaos.phase13crasher"
 ORPHAN_ID = b"org.arenaos.phase13orphan"
@@ -36,10 +36,14 @@ SERIAL_STREAM_STDERR = "[phase13-stream] stderr channel reached the broker"
 SERIAL_STREAM_STDIN = "[phase13-stream] stdin received exact native keyboard bytes"
 SERIAL_STREAM_STDOUT_EOF = "[desktop] native stream channel stdout reached EOF"
 SERIAL_STREAM_STDERR_EOF = "[desktop] native stream channel stderr reached EOF"
+SERIAL_HELPER_STREAM = "[phase13-helper-stream] owner woke child; exact stdin/stdout bytes transferred; EOF after reap"
+SERIAL_HELPER_CRASH_EOF = "[phase13-helper-stream] crashed child's output reached EOF after exact Process-cap reap"
+SERIAL_HELPER_STREAM_POLICY = "[phase13-helper-stream] signed stream policy and explicit launch request must match"
+SERIAL_HELPER_STREAM_CHILD = "[phase13-helper-stream] child transferred stdin and stdout bytes over its exact stream set"
 SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present"
 SERIAL_HEADLESS_EXIT = "[desktop] child Process-cap exit status=42"
 SERIAL_HELPER_EXIT = (
-    "[desktop] helper id=org.arenaos.phase13worker Process-cap exit status=43; owner-group reap=ok"
+    "[desktop] helper id=org.arenaos.phase13streamer Process-cap exit status=46; owner-group reap=ok"
 )
 SERIAL_CRASHER_EXIT = (
     "[desktop] helper id=org.arenaos.phase13crasher Process-cap exit status=262; owner-group reap=ok"
@@ -87,9 +91,9 @@ def app_bundle():
     helper = helper_crate / "target/x86_64-unknown-none/release/arena-phase13-headless"
     assert helper.is_file() and helper.stat().st_size < 256 * 1024
     helper_specs = [
-        (HELPER_ID, b"bin/worker", 1),
+        (STREAMER_ID, b"bin/streamer", 7),
         (SLEEPER_ID, b"bin/sleeper", 3),
-        (CRASHER_ID, b"bin/crasher", 1),
+        (CRASHER_ID, b"bin/crasher", 7),
         (ORPHAN_ID, b"bin/orphan", 1),
     ]
     helper_list = bytearray(8 + 88 * len(helper_specs))
@@ -543,13 +547,16 @@ def main():
     assert serial.count(SERIAL_HEADLESS) == 1
     assert serial.count("[phase13-headless] timer completed; process exiting for manager reap") == 1
     assert serial.count("[phase13-helper] unknown signed helper ID refused without spawn") == 3
+    assert serial.count(SERIAL_HELPER_STREAM_POLICY) == 3
+    assert serial.count(SERIAL_HELPER_STREAM_CHILD) == 3
     # Fifteen helper launches exceed the 13 dynamic notification slots left
     # after the fixed 32-session boot inventory; each wait/reap must retire its
     # private timer object before the next launch.
     assert serial.count("[phase13-helper] no inherited notification factory; WRITE-only owner signal cannot wait") == 15
     assert serial.count("[phase13-helper] exact Startup ABI inventory: private timer Notification") == 15
     assert serial.count("[phase13-helper] readiness badge sent through separate WRITE-only owner signal") == 3
-    assert serial.count("[phase13-helper] signed helper wait returned exact exit=43") == 3
+    assert serial.count(SERIAL_HELPER_STREAM) == 3
+    assert serial.count(SERIAL_HELPER_CRASH_EOF) == 6
     assert serial.count("[phase13-helper] owner-authorized terminate/reap passed") == 3
     assert serial.count("[phase13-helper] crashed helper status=262 observed and reaped") == 3
     assert serial.count("[phase13-helper] live helper left for AppInstance owner cleanup") == 3

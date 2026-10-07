@@ -151,4 +151,5 @@ What this constrains or enables later; what would trigger revisiting.
 | [0101](0101-signed-helper-allowlist.md) | Signed AHL1 helper allowlists, private timer authority, and AppInstance-owned ProcessGroup lifecycle | Accepted; signed guest exercises wait/reap, terminate, crash, and owner cleanup |
 | [0102](0102-native-thread-yield.md) | Native voluntary thread yield through the scheduler's existing yield path | Accepted; distinct from blocking and synchronization |
 | [0103](0103-desktop-manager-fail-stop.md) | Boot-root fail-stop policy when the trusted Desktop application manager exits | Accepted; avoids running orphaned app groups without exact owner state |
-| [0104](0104-native-byte-streams.md) | Native stdin/stdout/stderr over bounded SharedRegion rings and existing notification wake hints | Accepted; implementation and guest proof in progress |
+| [0104](0104-native-byte-streams.md) | Native stdin/stdout/stderr over bounded SharedRegion rings and existing notification wake hints | Accepted; installed-app T1 guest proof passed |
+| [0105](0105-helper-standard-streams.md) | Explicit AHL1 helper stream delegation and owner-scoped wake | Accepted; signed helper T1 guest proof passed |

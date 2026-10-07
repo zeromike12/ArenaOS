@@ -73,6 +73,11 @@ pub enum Frame {
     SpawnHelper {
         helper_id: [u8; 32],
     },
+    /// Launch an AHL1 helper that explicitly allows the parent to receive its
+    /// dedicated stream set. The reply transfers that one exact SharedRegion.
+    SpawnHelperStreams {
+        helper_id: [u8; 32],
+    },
     /// The manager-owned per-instance ProcessGroup handle (descriptive only).
     HelperStarted {
         handle: u32,
@@ -92,6 +97,13 @@ pub enum Frame {
         handle: u32,
     },
     HelperTerminated {
+        handle: u32,
+    },
+    /// Ask the authenticated owner service to wake one exact stream helper.
+    WakeHelper {
+        handle: u32,
+    },
+    HelperWoken {
         handle: u32,
     },
 }
@@ -243,10 +255,19 @@ impl Frame {
                 b[32..].copy_from_slice(&helper_id);
                 19
             }
+            Self::SpawnHelperStreams { helper_id } => {
+                if !identity_valid(&helper_id) {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&helper_id);
+                25
+            }
             Self::HelperStarted { handle }
             | Self::WaitHelper { handle }
             | Self::TerminateHelper { handle }
-            | Self::HelperTerminated { handle } => {
+            | Self::HelperTerminated { handle }
+            | Self::WakeHelper { handle }
+            | Self::HelperWoken { handle } => {
                 if handle == 0 {
                     return Err(Error::Invalid);
                 }
@@ -256,6 +277,8 @@ impl Frame {
                     Self::WaitHelper { .. } => 21,
                     Self::TerminateHelper { .. } => 23,
                     Self::HelperTerminated { .. } => 24,
+                    Self::WakeHelper { .. } => 26,
+                    Self::HelperWoken { .. } => 27,
                     _ => unreachable!(),
                 }
             }
@@ -330,6 +353,9 @@ impl Frame {
             },
             23 => Self::TerminateHelper { handle: cursor },
             24 => Self::HelperTerminated { handle: cursor },
+            25 => Self::SpawnHelperStreams { helper_id: name },
+            26 => Self::WakeHelper { handle: cursor },
+            27 => Self::HelperWoken { handle: cursor },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -390,6 +416,7 @@ mod tests {
                 name,
             },
             Frame::SpawnHelper { helper_id },
+            Frame::SpawnHelperStreams { helper_id },
             Frame::HelperStarted {
                 handle: 0x0001_0000,
             },
@@ -404,6 +431,12 @@ mod tests {
                 handle: 0x0001_0000,
             },
             Frame::HelperTerminated {
+                handle: 0x0001_0000,
+            },
+            Frame::WakeHelper {
+                handle: 0x0001_0000,
+            },
+            Frame::HelperWoken {
                 handle: 0x0001_0000,
             },
         ] {

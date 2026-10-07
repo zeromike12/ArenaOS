@@ -19,8 +19,8 @@
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
-| 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, stable process exit status, and signed helper lifecycle implemented | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. ADR-0101 guest-proves allowlisted helper Image resolution, explicit private timer and owner-signal grants, wait/reap, terminate, crash, and group cleanup. |
-| 13.4 streams | Standard streams implemented; T1 guest proof passed | ADR-0104 now has a one-page, three-ring SharedRegion, Startup ABI v2 opt-in and roles, exact WRITE-only Desktop wake hint, focused stdin, partial output drain, EOF, and owner teardown. The installed ELF proved a full 768-byte ring returns `WouldBlock`, resumed after Desktop drain, and delivered exact keyboard bytes. Helper-specific streams and mixed-pressure capacity remain. |
+| 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, stable process exit status, signed helper lifecycle, and helper stream delegation implemented | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. ADR-0101 guest-proves allowlisted helper Image resolution, explicit private timer and owner-signal grants, wait/reap, terminate, crash, and group cleanup. ADR-0105 extends this to a dedicated helper stream page, exact parent cap, and owner-scoped wake. |
+| 13.4 streams | App and helper standard streams implemented; T1 guest proof passed | ADR-0104 and ADR-0105 provide one-page, three-ring SharedRegions, Startup ABI v2 roles, focused keyboard stdin, output drain, partial transfer, EOF, peer closure, and exact owner teardown. The signed fixture proved parent-to-helper stdin, helper stdout, owner-mediated wake, non-stream helper refusal, invalid stream-handle refusal, and EOF after exact Process-cap reap. Mixed-pressure capacity remains. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
@@ -195,8 +195,8 @@ checkpoints.
 The current branch has since added multi-window ownership (ADR-0097), and the
 signed registry guest now also installs and launches a headless package as
 described in ADR-0098. The earlier checkpoint statement is retained as a dated
-status record; helper lifecycle, user threads, synchronization, pressure,
-favorites, and final qualification remain open.
+status record; persisted favorites, user threads, synchronization, pressure,
+and final qualification remain open.
 
 ### Process-owned user mapping inventory implementation
 
@@ -540,11 +540,11 @@ favorites, and final qualification remain open.
   since there is no independent exact-capability owner that can reconstruct
   its process groups. Per-boot Desktop monitoring is implemented; the
   deliberate manager-fault path is not crash-injected by the registry guest.
-- Kernel, Desktop, packaged, filesd, Phase-13 app and helper target checks
-  pass; `arena-platform` host tests pass 36/36. Its affected T3 regressions
-  and 20-boot preservation are recorded below. Byte streams, persisted
-  favorites, user threads, synchronization, mixed-load pressure, and final
-  qualification remain open.
+- At this earlier signed-helper preservation checkpoint, kernel, Desktop,
+  packaged, filesd, Phase-13 app and helper target checks passed, and
+  `arena-platform` host tests passed 36/36. Its affected T3 regressions and
+  20-boot preservation are recorded below. Byte streams and the later work
+  listed in the current-state table remained open at that checkpoint.
 
 ### Signed helper preservation T3
 
@@ -634,4 +634,56 @@ favorites, and final qualification remain open.
   `arena-platform` host tests passed 37/37, and kernel/Desktop/installed-app
   target checks passed. Helper-specific streams, persisted favorites, user
   threads, synchronization, 16-instance/32-window pressure, and final
+  qualification remain open at this checkpoint.
+
+### Signed helper streams T1
+
+- Added AHL1 `FLAG_STREAMS`; it is accepted only with the signed private timer
+  and owner-signal bits. A normal helper request and a stream-helper request
+  must exactly match the currently verified AHL1 declaration. The primary
+  cannot request a stream cap for an unknown or non-stream helper, and the
+  stream capability never comes from the helper ID by itself.
+- Desktop creates a fresh one-page SharedRegion for each streamed helper and
+  places the exact READ|WRITE stream cap in Startup ABI v2. The helper receives
+  standard stdin-reader/stdout-writer roles, a WRITE-only StreamWake role on
+  its own AppInstance clock, and its private READ|WRITE wait timer. Only after
+  verified spawn does the authenticated `SpawnHelperStreams` reply transfer
+  the dedicated stream region to the parent. The IPC reply uses the kernel's
+  required READ|WRITE|COPY|DESTROY cap for safe staging/cleanup; the helper's
+  inherited stream cap remains READ|WRITE. The parent has no helper Process
+  or timer cap. `WakeHelper` uses the parent's badged service endpoint and
+  generation-checked handle; Desktop rechecks exact membership and liveness,
+  then notifies only that helper's private timer.
+- The signed installed ELF rejected a stream launch request for the ordinary
+  sleeper and rejected launching the stream-enabled helper through the normal
+  helper request. It also showed that its SharedRegion cannot be passed to
+  `SYS_NOTIFY` and that a neighboring/stale handle cannot wake the child. It
+  wrote `helper-input` to the child's stdin, requested the exact owner wake,
+  received `helper-output` from stdout after the helper's owner-wake event,
+  reaped exact Process status 46, then observed EOF. AppInstance teardown
+  closes all helper stream directions, unmaps/destroys Desktop's owner cap,
+  and retires the private timer; the parent's mapping/cap also drops before
+  normal process exit in this fixture.
+- `python3 tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 / OVMF
+  2025.02 in 43.8 seconds. The signed APB1 fixture launched three streamed
+  helpers through Open With and All Applications; all three transferred exact
+  input/output bytes, proved the two launch-policy mismatch refusals, observed
+  EOF after reap, and returned ProcessGroup membership to its expected
+  baseline. The signed crash helper also opted into streams: six crash/relaunch
+  cycles across the three app runs returned status 262, and the parent observed
+  stdout EOF after every exact Process-cap reap before relaunching the helper.
+  Resource identity counts returned to `(15 process records, 15
+  processes, 2 regions, 470 pages, 4 maps, 46 caps)`; free-frame count ended
+  17 below the starting sample, matching the prior SharedRegion guest's
+  retained-frame pattern. A dedicated multi-helper pressure receipt remains
+  in workstream 13.12.
+- The first guest run caught an IPC transfer-rights issue: a READ|WRITE-only
+  copy cannot be staged by the checked IPC reply because the kernel requires
+  COPY, and that local cap cannot be cleaned up without DESTROY. Desktop now
+  creates a temporary READ|WRITE|COPY|DESTROY reply cap on the dedicated
+  stream page, and the child still receives only READ|WRITE. The rerun passed.
+- Targeted checks passed: `arena-platform` 38/38, `arena-runtime` 20/20,
+  Desktop 85/85, and Desktop/installed-app/helper release target checks.
+  Helper stream lifecycle is now T1 complete. Persisted favorites, user
+  threads, synchronization, mixed-load pressure, PIE scope, and final
   qualification remain open.
