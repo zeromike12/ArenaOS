@@ -11,8 +11,11 @@ ROOT=arena_env.REPO_ROOT;BUILD=arena_env.build_dir();LABEL='m10-service-death'
 SOURCE=ROOT/'userspace/desktop/src/bin/desktop.rs'
 # Phase 11.4: key frames carry press/release and modifiers (key_input).
 # Phase 11.8: the key arm also routes desktop-surface keys; same frame.
-NEEDLE=b'                            let a = state.key_input(code, pressed, mods);'
-MUTANT=b"                            if code == 113 && pressed { die(77) } let a = state.key_input(code, pressed, mods);"
+NEEDLE=(b'                                let a = app_action\n'
+        b'                                    .unwrap_or_else(|| state.key_input(code, pressed, mods));')
+MUTANT=(b'                                if code == 113 && pressed { die(77) }\n'
+        b'                                let a = app_action\n'
+        b'                                    .unwrap_or_else(|| state.key_input(code, pressed, mods));')
 def main():
     original=SOURCE.read_bytes();assert original.count(NEEDLE)==1
     esp=mtest.build(LABEL+'-base',desktop=True)

@@ -130,7 +130,7 @@ def cap_projection() -> None:
     assert 'pub const MAX_NOTIFS: usize = 64;' in ipc
     assert 'pub const MAX_WINDOWS: usize = 32;' in desktop_model
     assert 'pub const MAX_CAPS: usize = 32;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
-    assert 'pub const MAX_INHERIT: usize = 7;' in spawn
+    assert 'pub const MAX_INHERIT: usize = 8;' in spawn
     assert 'pub const MAX_GRANTS: usize = 5;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
     package=(ROOT/'userspace/servicemgr/src/package.rs').read_text()
     assert 'const GRANTS: [Request; 5]' in package
@@ -178,9 +178,10 @@ def cap_projection() -> None:
     assert max(prepared,commit,worker_peak) == 29 < 32
     spawn=(ROOT/'kernel/kernel/src/spawn.rs').read_text()
     # Phase 13's larger verified-image registry admits bounded concurrent
-    # native launch attempts; this Phase-8.5 manager projection still counts
-    # only its own four-child service schedule.
+    # native launch attempts; this historical manager projection separately
+    # preserves the low-32 steady-state schedule receipt.
     assert 'pub const MAX_DYNAMIC_CHILDREN: usize = 24;' in spawn
+    assert 'pub const MAX_DYNAMIC_CHILDREN: usize = 24;' in (ROOT/'userspace/abi.rs').read_text()
     multi_child=boot+resident+1+4
     assert multi_child==31 < 32
     # Packaged holds 5 inherited, an owned LENT buffer at slot8, one

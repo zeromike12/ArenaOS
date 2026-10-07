@@ -117,6 +117,10 @@ pub const CAP_KIND_SYNC_DOMAIN: u8 = 16;
 pub const CAP_KIND_SYNC_DOMAIN_FACTORY: u8 = 17;
 /// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
 pub const MAX_SPAWN_INHERIT: usize = 8;
+/// Bounded dynamic Image children, mirrored from spawn::MAX_DYNAMIC_CHILDREN.
+pub const MAX_DYNAMIC_CHILDREN: usize = 24;
+/// Bounded dynamic Image registry entries, mirrored from image_registry::SLOTS.
+pub const MAX_DYNAMIC_IMAGES: usize = 16;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;

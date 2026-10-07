@@ -24,6 +24,14 @@ const TIMEOUT_US: u64 = 2_000_000;
 // Diagnostic SELECT executes concurrent signed FS clients on a full
 // 32-object platter. The production readiness/restart budget is unchanged.
 const SELECT_CHILD_TIMEOUT_US: u64 = 15_000_000;
+// Process-list snapshots are large enough to exhaust this service's single
+// initial ring-3 stack when nested inside its signed-package control path.
+// Keep the bounded query buffers in the manager's writable image instead.
+static mut PROCESS_ROWS_QUERY: [u64; 128] = [0; 128];
+static mut PROCESS_ROWS_BEFORE: [u64; 128] = [0; 128];
+static mut PROCESS_ROWS_AFTER: [u64; 128] = [0; 128];
+static mut IMAGE_CAPS_BEFORE: [u64; CAP_SLOTS * 3] = [0; CAP_SLOTS * 3];
+static mut IMAGE_CAPS_AFTER: [u64; CAP_SLOTS * 3] = [0; CAP_SLOTS * 3];
 const K_IMAGE: Key = Key(26);
 const K_FS: Key = Key(27);
 const K_ENDPOINT: Key = Key(28);
@@ -148,45 +156,164 @@ fn observed_caps(label: &str) {
         o.crlf();
     });
 }
-/// Stronger Phase-10 replacement for the old single-child BUSY probe. The
-/// caller already holds one unretired child; fill the other three entries,
-/// let their real userspace run, then refuse the fifth without mutation.
-fn capacity_refuses(image: u64) -> Result<(), ()> {
-    const EXTRA: usize = 3;
+fn process_list(buffer: u64) -> Result<usize, ()> {
+    let count = unsafe { syscall2(SYS_PROC_LIST, buffer, 64) };
+    if !(0..=64).contains(&count) {
+        return Err(());
+    }
+    Ok(count as usize)
+}
+
+/// Take an exact inventory of all 128 manager cap slots without using the
+/// one-page service stack for the snapshot. Empty-slot describe must preserve
+/// its caller buffer, just like the stale-generation probes.
+fn cap_snapshot(destination: *mut u64) -> Result<(), ()> {
+    for slot in 0..CAP_SLOTS {
+        let descriptor = unsafe { destination.add(slot * 3) };
+        for word in 0..3 {
+            unsafe { core::ptr::write_volatile(descriptor.add(word), u64::MAX) };
+        }
+        let rc = unsafe { syscall2(SYS_CAP_DESCRIBE, slot as u64, descriptor as u64) };
+        if rc == -2 {
+            if (0..3)
+                .any(|word| unsafe { core::ptr::read_volatile(descriptor.add(word)) } != u64::MAX)
+            {
+                return Err(());
+            }
+        } else if rc != 0 {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+fn cap_snapshots_equal() -> bool {
+    unsafe {
+        core::slice::from_raw_parts(
+            core::ptr::addr_of!(IMAGE_CAPS_BEFORE).cast::<u64>(),
+            CAP_SLOTS * 3,
+        ) == core::slice::from_raw_parts(
+            core::ptr::addr_of!(IMAGE_CAPS_AFTER).cast::<u64>(),
+            CAP_SLOTS * 3,
+        )
+    }
+}
+
+fn retire_image_cap(image: ImageCap) -> bool {
+    let revoke_status =
+        unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, image.id, 0, 0, 0, 0) };
+    let drop_status = unsafe { syscall1(SYS_CAP_DESTROY, image.slot as u64) };
+    if revoke_status != 0 || drop_status != 0 {
+        log_line(|o| {
+            o.str("servicemgr: Image cleanup id=");
+            o.u64(image.id);
+            o.str(" slot=");
+            o.u64(image.slot as u64);
+            o.str(" revoke=");
+            o.u64(revoke_status as i64 as u64);
+            o.str(" drop=");
+            o.u64(drop_status as i64 as u64);
+            o.crlf();
+        });
+    }
+    revoke_status == 0 && drop_status == 0
+}
+
+fn discard_returned_image_cap(slot: u64) {
+    if slot >= CAP_SLOTS as u64 {
+        return;
+    }
+    let mut descriptor = [0u64; 3];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, slot, descriptor.as_mut_ptr() as u64) } == 0
+        && descriptor[0] == 1
+    {
+        let _ = unsafe {
+            syscall6(
+                SYS_IMAGE_REVOKE,
+                REGISTRAR as u64,
+                descriptor[1],
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+    }
+    let _ = unsafe { syscall1(SYS_CAP_DESTROY, slot) };
+}
+
+fn cleanup_image_table_refs() -> bool {
+    let entries = core::ptr::addr_of_mut!(IMAGE_TABLE_REFS).cast::<Option<ImageCap>>();
+    let mut clean = true;
+    for index in 0..MAX_DYNAMIC_IMAGES {
+        if let Some(image) = unsafe { core::ptr::read_volatile(entries.add(index)) } {
+            clean &= retire_image_cap(image);
+            unsafe { core::ptr::write_volatile(entries.add(index), None) };
+        }
+    }
+    clean
+}
+
+fn cleanup_launched_image_refs(second: ImageCap) -> bool {
+    let extras_clean = cleanup_image_table_refs();
+    if !extras_clean {
+        log("servicemgr: Image cleanup failed for full-table extras\r\n");
+    }
+    let second_clean = retire_image_cap(second);
+    if !second_clean {
+        log("servicemgr: Image cleanup failed for second Image cap\r\n");
+    }
+    extras_clean && second_clean
+}
+
+/// Fill the dynamic Image quota with real ring-3 children, then prove the next
+/// spawn refuses without changing the 128-slot cap table or 64-process table.
+fn capacity_refuses(image: u64, already_unretired: usize) -> Result<(), ()> {
+    let extra = MAX_DYNAMIC_CHILDREN
+        .checked_sub(already_unretired)
+        .filter(|count| *count > 0)
+        .ok_or(())?;
     const BADGE: u64 = 1 << 60;
-    // This is the fixed low32 child-handle/inventory window, not total
-    // capability occupancy (the late APB1 authority lives at slot127).
+    // This is the full native cap table. Historical manager receipts still
+    // count low32 separately; this proof must see children above that window.
     fn caps() -> usize {
-        (0..32)
+        (0..CAP_SLOTS)
             .filter(|s| {
                 let mut d = [0u64; 3];
-                (unsafe { syscall2(SYS_CAP_DESCRIBE, *s, d.as_mut_ptr() as u64) }) == 0
+                (unsafe { syscall2(SYS_CAP_DESCRIBE, *s as u64, d.as_mut_ptr() as u64) }) == 0
             })
             .count()
     }
-    fn processes() -> Result<([(u64, u64); 32], usize), ()> {
-        let mut rows = [(0u64, 0u64); 32];
-        let count = unsafe { syscall2(SYS_PROC_LIST, rows.as_mut_ptr() as u64, 32) };
-        if count < 0 {
-            return Err(());
-        }
-        Ok((rows, count as usize))
-    }
     let initial_caps = caps();
-    let mut children = [None; EXTRA];
+    let children = core::ptr::addr_of_mut!(CAPACITY_CHILDREN).cast::<Option<Child>>();
+    for index in 0..extra {
+        unsafe { core::ptr::write_volatile(children.add(index), None) };
+    }
     let mut failed = false;
     let grants = [(ENDPOINT as u64, RIGHTS_WRITE)];
-    for child in &mut children {
+    for index in 0..extra {
         let pid = unsafe { syscall5(SYS_SPAWN, image, grants.as_ptr() as u64, 1, CAP_NONE, 0) };
         if pid <= 0 {
+            log_line(|o| {
+                o.str("servicemgr: dynamic capacity spawn failed at extra=");
+                o.u64(index as u64);
+                o.str(" status=");
+                o.u64(pid as i64 as u64);
+                o.crlf();
+            });
             failed = true;
             break;
         }
         let slot = inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?;
-        *child = Some(Child {
-            pid: pid as u64,
-            slot,
-        });
+        unsafe {
+            core::ptr::write_volatile(
+                children.add(index),
+                Some(Child {
+                    pid: pid as u64,
+                    slot,
+                }),
+            )
+        };
     }
     let mut pending = 0u64;
     if !failed {
@@ -210,48 +337,86 @@ fn capacity_refuses(image: u64) -> Result<(), ()> {
     }
     if !failed {
         let resident_caps = caps();
-        if resident_caps >= 32 {
+        if resident_caps >= CAP_SLOTS {
             failed = true;
         } // refusal must have a free Process-cap slot
-        let before = processes()?;
-        let extra = unsafe { syscall5(SYS_SPAWN, image, grants.as_ptr() as u64, 1, CAP_NONE, 0) };
-        if extra != STATUS_BUSY {
+        let before_count = process_list(core::ptr::addr_of_mut!(PROCESS_ROWS_BEFORE) as u64)?;
+        let attempt = unsafe { syscall5(SYS_SPAWN, image, grants.as_ptr() as u64, 1, CAP_NONE, 0) };
+        if attempt != STATUS_BUSY {
             failed = true;
-            if extra > 0 {
-                let slot = inventory::child_handle(extra as u64, &SyscallProbe).map_err(|_| ())?;
+            if attempt > 0 {
+                let slot =
+                    inventory::child_handle(attempt as u64, &SyscallProbe).map_err(|_| ())?;
                 let _ = finish(Child {
-                    pid: extra as u64,
+                    pid: attempt as u64,
                     slot,
                 });
             }
         }
-        if caps() != resident_caps || processes()? != before {
+        let after_count = process_list(core::ptr::addr_of_mut!(PROCESS_ROWS_AFTER) as u64)?;
+        let processes_unchanged = before_count == after_count
+            && unsafe {
+                core::slice::from_raw_parts(
+                    core::ptr::addr_of!(PROCESS_ROWS_BEFORE).cast::<u64>(),
+                    before_count * 2,
+                ) == core::slice::from_raw_parts(
+                    core::ptr::addr_of!(PROCESS_ROWS_AFTER).cast::<u64>(),
+                    after_count * 2,
+                )
+            };
+        if caps() != resident_caps || !processes_unchanged {
             failed = true
         }
         let mut live = 0u64;
-        for child in children.iter().flatten() {
-            if alive(*child) == Ok(true) {
+        for index in 0..extra {
+            if let Some(child) = unsafe { core::ptr::read_volatile(children.add(index)) }
+                && alive(child) == Ok(true)
+            {
                 live += 1
             }
         }
         log_line(|o| {
-            o.str("servicemgr: multi-child capacity real extra children alive=");
+            o.str("servicemgr: dynamic capacity real extra children alive=");
             o.u64(live);
             o.str("; resident caps=");
             o.u64(resident_caps as u64);
-            o.str("; four unretired, fifth refused; caps/processes unchanged");
+            o.str("; unretired children=");
+            o.u64(MAX_DYNAMIC_CHILDREN as u64);
+            o.str("; next refused; caps/processes unchanged");
             o.crlf();
         });
     }
-    for child in children.into_iter().flatten() {
-        if finish(child).is_err() {
-            failed = true
+    for index in 0..extra {
+        if let Some(child) = unsafe { core::ptr::read_volatile(children.add(index)) } {
+            if finish(child).is_err() {
+                failed = true
+            }
         }
+    }
+    for index in 0..extra {
+        unsafe { core::ptr::write_volatile(children.add(index), None) };
     }
     if caps() != initial_caps {
         failed = true
     }
     if pending != 0 && unsafe { syscall2(SYS_NOTIFY, PRIVATE as u64, pending) } != 0 {
+        failed = true
+    }
+    if !failed {
+        let next = unsafe { syscall5(SYS_SPAWN, image, grants.as_ptr() as u64, 1, CAP_NONE, 0) };
+        if next <= 0 {
+            failed = true;
+        } else {
+            let child = Child {
+                pid: next as u64,
+                slot: inventory::child_handle(next as u64, &SyscallProbe).map_err(|_| ())?,
+            };
+            if finish(child).is_err() {
+                failed = true
+            }
+        }
+    }
+    if caps() != initial_caps {
         failed = true
     }
     if failed { Err(()) } else { Ok(()) }
@@ -260,6 +425,18 @@ fn capacity_refuses(image: u64) -> Result<(), ()> {
 #[derive(Clone, Copy)]
 struct Child {
     pid: u64,
+    slot: u8,
+}
+static mut CAPACITY_CHILDREN: [Option<Child>; MAX_DYNAMIC_CHILDREN] = [None; MAX_DYNAMIC_CHILDREN];
+#[derive(Clone, Copy)]
+struct ImageCap {
+    id: u64,
+    slot: u8,
+}
+static mut IMAGE_TABLE_REFS: [Option<ImageCap>; MAX_DYNAMIC_IMAGES] = [None; MAX_DYNAMIC_IMAGES];
+#[derive(Clone, Copy)]
+struct CapacityImage {
+    id: u64,
     slot: u8,
 }
 pub struct State {
@@ -358,16 +535,17 @@ fn alive(child: Child) -> Result<bool, ()> {
     if inventory::child_handle(child.pid, &SyscallProbe) != Ok(child.slot) {
         return Err(());
     }
-    let mut pairs = [0u64; 64];
-    let n = unsafe { syscall2(SYS_PROC_LIST, pairs.as_mut_ptr() as u64, 32) };
-    if !(0..=32).contains(&n) {
+    let n = process_list(core::ptr::addr_of_mut!(PROCESS_ROWS_QUERY) as u64)?;
+    if n > 64 {
         return Err(());
     }
-    pairs[..(n as usize) * 2]
-        .chunks_exact(2)
-        .find(|p| p[0] == child.pid)
-        .map(|p| p[1] != 0)
-        .ok_or(())
+    unsafe {
+        core::slice::from_raw_parts(core::ptr::addr_of!(PROCESS_ROWS_QUERY).cast::<u64>(), n * 2)
+    }
+    .chunks_exact(2)
+    .find(|p| p[0] == child.pid)
+    .map(|p| p[1] != 0)
+    .ok_or(())
 }
 fn finish(child: Child) -> Result<(), ()> {
     let live = alive(child)?;
@@ -1101,6 +1279,7 @@ impl State {
             }
             Ok((reply, msg))
         }
+        log("servicemgr: upgrade stage begin\r\n");
         fn expected_no_cap(r: &[u64; 3]) -> Result<(), ()> {
             if r[2] == CAP_NONE {
                 Ok(())
@@ -1136,30 +1315,38 @@ impl State {
         } else {
             None
         };
-        let (r, msg) = call(PKG_OP_QUERY, 0, &[0; 32])?;
+        log("servicemgr: upgrade stage old Image resolved\r\n");
+        let (r, msg) = call(PKG_OP_QUERY, 0, &[0; 32]).map_err(|_| {
+            log("servicemgr: upgrade stage QUERY IPC failed\r\n");
+        })?;
         expected_no_cap(&r)?;
         if r[0] != PKG_ELIGIBLE || r[1] != 8 || msg[..32] == [0; 32] {
             return Err(());
         }
         let mut digest = [0; 32];
         digest.copy_from_slice(&msg[..32]);
-        let (r, msg) = call(PKG_OP_INSTALL, 2, &digest)?;
+        log("servicemgr: upgrade stage QUERY verified\r\n");
+        let (r, msg) = call(PKG_OP_INSTALL, 2, &digest).map_err(|_| {
+            log("servicemgr: upgrade stage INSTALL IPC failed\r\n");
+        })?;
         expected_no_cap(&r)?;
         if r[0] != PKG_INSTALLED || r[1] != 2 || msg[..32] != digest || msg[32..] == [0; 32] {
             return Err(());
         }
         let mut installed = [0; 32];
         installed.copy_from_slice(&msg[32..]);
+        log("servicemgr: upgrade stage INSTALL verified\r\n");
         // On this boot v7 already owns one signed Image ID. Independently
-        // register the same verified selection into slot two and require a
-        // third request to refuse BUSY before minting any ID or cap. Retire
-        // only the temporary second ID; PREPARE then admits signed v8 next
-        // to the still-live old ID (and possibly its still-running child).
+        // register the same verified selection repeatedly until the bounded
+        // 16-entry native Image registry is full; a seventeenth request must
+        // refuse before minting any ID or cap. Retire every temporary ID
+        // before PREPARE admits signed v8 beside the still-live old ID.
         if let Some((first_id, _)) = old {
             let active = self.test_last_active.ok_or(())?;
             let (second, reply) = call(PKG_OP_LAUNCH, 3, &active)?;
             if second[0] != PKG_LAUNCH_READY
                 || second[2] == CAP_NONE
+                || second[2] >= CAP_SLOTS as u64
                 || second[1] & 255 != 3
                 || reply[32..] != active
             {
@@ -1177,16 +1364,162 @@ impl State {
             {
                 return Err(());
             }
+            log("servicemgr: upgrade stage second signed Image ready\r\n");
             observed_caps("two-live-images");
-            let (busy, empty) = call(PKG_OP_LAUNCH, 3, &active)?;
-            expected_no_cap(&busy)?;
-            if busy != [PKG_BUSY, 0, CAP_NONE] || empty != [0; 64] {
+            let second_image = ImageCap {
+                id: desc[1],
+                slot: second[2] as u8,
+            };
+            let table_refs = core::ptr::addr_of_mut!(IMAGE_TABLE_REFS).cast::<Option<ImageCap>>();
+            for index in 0..MAX_DYNAMIC_IMAGES {
+                unsafe { core::ptr::write_volatile(table_refs.add(index), None) };
+            }
+            let mut issued_ids = [0u64; MAX_DYNAMIC_IMAGES];
+            issued_ids[0] = first_id;
+            issued_ids[1] = second_image.id;
+            let mut fill_failed = false;
+            for image_index in 2..MAX_DYNAMIC_IMAGES {
+                let result = call(PKG_OP_LAUNCH, 3, &active);
+                let (image_reply, image_msg) = match result {
+                    Ok(value) => value,
+                    Err(()) => {
+                        fill_failed = true;
+                        break;
+                    }
+                };
+                if image_reply[2] == CAP_NONE || image_reply[2] >= CAP_SLOTS as u64 {
+                    if image_reply[2] != CAP_NONE {
+                        discard_returned_image_cap(image_reply[2]);
+                    }
+                    fill_failed = true;
+                    break;
+                }
+                let mut image_desc = [0u64; 3];
+                let described = unsafe {
+                    syscall2(
+                        SYS_CAP_DESCRIBE,
+                        image_reply[2],
+                        image_desc.as_mut_ptr() as u64,
+                    )
+                } == 0;
+                let unique = !issued_ids[..image_index].contains(&image_desc[1]);
+                if described && image_desc[0] == 1 && image_desc[1] >= 27 && !unique {
+                    let _ = unsafe { syscall1(SYS_CAP_DESTROY, image_reply[2]) };
+                    fill_failed = true;
+                    break;
+                }
+                let good = described
+                    && image_desc[0] == 1
+                    && image_desc[1] >= 27
+                    && image_desc[2] == RIGHTS_READ | RIGHTS_COPY | RIGHTS_DESTROY
+                    && image_reply[0] == PKG_LAUNCH_READY
+                    && image_reply[1] >> 8 == image_desc[1]
+                    && image_reply[1] & 255 == 3
+                    && image_msg[32..] == active
+                    && unique;
+                if described && image_desc[0] == 1 && image_desc[1] >= 27 {
+                    issued_ids[image_index] = image_desc[1];
+                    unsafe {
+                        core::ptr::write_volatile(
+                            table_refs.add(image_index - 2),
+                            Some(ImageCap {
+                                id: image_desc[1],
+                                slot: image_reply[2] as u8,
+                            }),
+                        )
+                    };
+                } else {
+                    discard_returned_image_cap(image_reply[2]);
+                    fill_failed = true;
+                    break;
+                }
+                if !good {
+                    fill_failed = true;
+                    break;
+                }
+            }
+            if fill_failed {
+                let _ = cleanup_launched_image_refs(second_image);
+                log("servicemgr: signed Image table fill failed before its bound\r\n");
                 return Err(());
             }
-            if unsafe { syscall3(SYS_CAP_COPY, second[2], 31, RIGHTS_READ | RIGHTS_DESTROY) } != 0
-                || unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, desc[1], 0, 0, 0, 0) } != 0
-                || unsafe { syscall1(SYS_CAP_DESTROY, second[2]) } != 0
+
+            let caps_before = core::ptr::addr_of_mut!(IMAGE_CAPS_BEFORE).cast::<u64>();
+            if cap_snapshot(caps_before).is_err() {
+                let _ = cleanup_launched_image_refs(second_image);
+                return Err(());
+            }
+            let process_count_before =
+                match process_list(core::ptr::addr_of_mut!(PROCESS_ROWS_BEFORE) as u64) {
+                    Ok(count) => count,
+                    Err(()) => {
+                        let _ = cleanup_launched_image_refs(second_image);
+                        return Err(());
+                    }
+                };
+            let (busy, empty) = match call(PKG_OP_LAUNCH, 3, &active) {
+                Ok(reply) => reply,
+                Err(()) => {
+                    let _ = cleanup_launched_image_refs(second_image);
+                    return Err(());
+                }
+            };
+            let busy_exact = busy == [PKG_BUSY, 0, CAP_NONE] && empty == [0; 64];
+            if busy[2] != CAP_NONE {
+                discard_returned_image_cap(busy[2]);
+            }
+            let caps_after = core::ptr::addr_of_mut!(IMAGE_CAPS_AFTER).cast::<u64>();
+            let cap_unchanged = cap_snapshot(caps_after).is_ok() && cap_snapshots_equal();
+            let process_count_after =
+                match process_list(core::ptr::addr_of_mut!(PROCESS_ROWS_AFTER) as u64) {
+                    Ok(count) => count,
+                    Err(()) => {
+                        let _ = cleanup_launched_image_refs(second_image);
+                        return Err(());
+                    }
+                };
+            let process_unchanged = process_count_before == process_count_after
+                && unsafe {
+                    core::slice::from_raw_parts(
+                        core::ptr::addr_of!(PROCESS_ROWS_BEFORE).cast::<u64>(),
+                        process_count_before * 2,
+                    ) == core::slice::from_raw_parts(
+                        core::ptr::addr_of!(PROCESS_ROWS_AFTER).cast::<u64>(),
+                        process_count_after * 2,
+                    )
+                };
+            if !busy_exact || !cap_unchanged || !process_unchanged {
+                let _ = cleanup_launched_image_refs(second_image);
+                log("servicemgr: 17th signed Image launch mutated authority or was not BUSY\r\n");
+                return Err(());
+            }
+            observed_caps("full-image-table");
+            if !cleanup_image_table_refs() {
+                let _ = retire_image_cap(second_image);
+                return Err(());
+            }
+
+            if unsafe { syscall3(SYS_CAP_COPY, second[2], 31, RIGHTS_READ | RIGHTS_DESTROY) } != 0 {
+                return Err(());
+            }
+            if unsafe {
+                syscall6(
+                    SYS_IMAGE_REVOKE,
+                    REGISTRAR as u64,
+                    second_image.id,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            } != 0
             {
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, second[2] as u64) };
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, 31) };
+                return Err(());
+            }
+            if unsafe { syscall1(SYS_CAP_DESTROY, second[2] as u64) } != 0 {
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, 31) };
                 return Err(());
             }
             let mut stale = [u64::MAX; 3];
@@ -1198,10 +1531,11 @@ impl State {
                 return Err(());
             }
             log(
-                "servicemgr: two concurrent signed Image IDs, BUSY third, stale copied bearer and monotonic slot reuse PASS\r\n",
+                "servicemgr: 16 signed Image IDs fill the verified registry; seventeenth is mutation-free BUSY, exact revoke frees slots, stale copied bearer refused PASS\r\n",
             );
         }
         let (r, msg) = call(PKG_OP_SELECT_PREPARE, 2, &installed)?;
+        log("servicemgr: upgrade stage PREPARE returned\r\n");
         expected_no_cap(&r)?;
         if r[0] != PKG_PREPARED
             || r[1] >> 8 == 0
@@ -1218,10 +1552,16 @@ impl State {
             // before revoking its ID and committing the new selection.
             if let Some(child) = self.test_old_child {
                 let grants = [(ENDPOINT as u64, RIGHTS_WRITE)];
-                if alive(child) != Ok(true)
-                    || capacity_refuses(old_slot).is_err()
-                    || finish(child).is_err()
-                {
+                if alive(child) != Ok(true) {
+                    log("servicemgr: live-upgrade failure: old Process not live\r\n");
+                    return Err(());
+                }
+                if capacity_refuses(old_slot, 1).is_err() {
+                    log("servicemgr: live-upgrade failure: capacity proof\r\n");
+                    return Err(());
+                }
+                if finish(child).is_err() {
+                    log("servicemgr: live-upgrade failure: old Process FINISH\r\n");
                     return Err(());
                 }
                 self.test_old_child = None;
@@ -1251,13 +1591,13 @@ impl State {
                         pid: pid as u64,
                         slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
                     };
-                    if capacity_refuses(old_slot).is_err() || finish(next).is_err() {
+                    if capacity_refuses(old_slot, 1).is_err() || finish(next).is_err() {
                         return Err(());
                     }
                 }
                 observed_caps("cycle-post");
                 log(
-                    "servicemgr: four repeated signed-child STOP/FINISH cycles and four-child capacity refusals PASS\r\n",
+                    "servicemgr: four repeated signed-child STOP/FINISH cycles and 24-child capacity refusals PASS\r\n",
                 );
             }
             let mut desc = [0; 3];
@@ -1553,7 +1893,24 @@ impl State {
             return;
         }
         observed_caps("baseline");
-        let result = self.select_fixture_inner(full_platter);
+        let result = match self.select_fixture_inner(full_platter) {
+            Ok(cap) => {
+                let bounded = capacity_refuses(cap.slot as u64, 0).is_ok();
+                let revoked =
+                    unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, cap.id, 0, 0, 0, 0) }
+                        == 0;
+                let dropped = unsafe { syscall1(SYS_CAP_DESTROY, cap.slot as u64) } == 0;
+                if bounded && revoked && dropped {
+                    log(
+                        "servicemgr: 24 dynamic children bounded; exact FINISH permits next spawn PASS\r\n",
+                    );
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            }
+            Err(()) => Err(()),
+        };
         log(if result.is_ok() {
             if full_platter {
                 "servicemgr: Phase 8.5 signed SELECT/LAUNCH/DEACTIVATE/reselect; ring-3 child reaped and Image IDs revoked\r\n"
@@ -1564,7 +1921,8 @@ impl State {
             "servicemgr: SELECTTEST refused: lifecycle receipt or Image invariant\r\n"
         });
     }
-    fn select_fixture_inner(&mut self, full_platter: bool) -> Result<(), ()> {
+    #[inline(never)]
+    fn select_fixture_inner(&mut self, full_platter: bool) -> Result<CapacityImage, ()> {
         fn call(op: u64, arg: u64, hash: &[u8; 32]) -> Result<([u64; 3], [u8; 64]), ()> {
             let mut msg = [0u8; MSG_BYTES];
             msg[..8].copy_from_slice(b"app.test");
@@ -1800,7 +2158,7 @@ impl State {
             pid: pid as u64,
             slot: inventory::child_handle(pid as u64, &SyscallProbe).map_err(|_| ())?,
         };
-        let mut bad = capacity_refuses(steady).is_err();
+        let mut bad = false;
         let timer = unsafe {
             syscall3(
                 SYS_TIMER_ARM,
@@ -1810,6 +2168,7 @@ impl State {
             )
         };
         if timer < 0 {
+            log("servicemgr: SELECTTEST child deadline timer unavailable\r\n");
             bad = true;
         }
         let mut seen = 0u64;
@@ -1817,6 +2176,7 @@ impl State {
             while seen & (MGR_BADGE_PKG_PROBE_EXIT | MGR_BADGE_PKG_PROBE_DEADLINE) == 0 {
                 let bits = unsafe { syscall1(SYS_WAIT, PRIVATE as u64) };
                 if bits < 0 {
+                    log("servicemgr: SELECTTEST child exit wait refused\r\n");
                     bad = true;
                     break;
                 }
@@ -1835,9 +2195,6 @@ impl State {
                 o.u64(u64::from(child_alive == Ok(false)));
                 o.crlf();
             });
-            bad = true;
-        }
-        if !bad && capacity_refuses(steady).is_err() {
             bad = true;
         }
         if finish(child).is_err() {
@@ -1902,17 +2259,9 @@ impl State {
                 }
             }
         }
-        if !bad {
-            log(
-                "servicemgr: four dynamic children bounded while live and exited-unreaped; FINISH permits next spawn PASS\r\n",
-            );
-        }
-        if unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, next_id, 0, 0, 0, 0) } != 0
-            || unsafe { syscall1(SYS_CAP_DESTROY, steady) } != 0
-        {
-            bad = true;
-        }
         if bad {
+            let _ = unsafe { syscall6(SYS_IMAGE_REVOKE, REGISTRAR as u64, next_id, 0, 0, 0, 0) };
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, steady) };
             return Err(());
         }
         // The old child and all old Image IDs were retired before disabling
@@ -1973,7 +2322,10 @@ impl State {
                 return Err(());
             }
         }
-        Ok(())
+        Ok(CapacityImage {
+            id: next_id,
+            slot: steady as u8,
+        })
     }
     /// Private admin channel only: never a package endpoint opcode or a
     /// forged shared wake. Manager owns the Process/DESTROY cap; client

@@ -64,17 +64,38 @@ def region(disk):
 
 
 def expected(afs1_files):
-    """The migration of exactly these AFS1 files."""
+    """The migration plus Desktop's canonical first-run dock preference."""
     # Phase 12 format-time infrastructure directories are present on every
     # freshly formatted AFS2 volume, whether or not a package was installed.
     tree = {'/': None, '/System': None, '/System/.apb1-staging': None,
             '/System/Applications': None, '/System/imported-afs1': None,
             '/System/afs1-import-complete': b'', '/Users': None, '/Users/user': None,
             '/Users/user/Desktop': None, '/Users/user/Documents': None, '/Users/user/.Trash': None}
+    tree['/Users/user/.arena-app-favorites'] = default_favorites()
     for name, data in afs1_files.items():
         where = '/Users/user/Documents/' if name.startswith(b'user-') else '/System/imported-afs1/'
         tree[where + name.decode()] = data
     return tree
+
+
+def default_favorites():
+    """AFAV v1 encoding of the six built-in descriptive default pins."""
+    application_ids = (
+        b'org.arenaos.terminal', b'org.arenaos.files', b'org.arenaos.editor',
+        b'org.arenaos.settings', b'org.arenaos.monitor', b'org.arenaos.gallery',
+    )
+    encoded = bytearray(16 + 8 * 32 + 8)
+    encoded[:4] = b'AFAV'
+    encoded[4] = 1
+    encoded[6:8] = len(application_ids).to_bytes(2, 'little')
+    for index, app_id in enumerate(application_ids):
+        start = 16 + index * 32
+        encoded[start:start + 32] = app_id.ljust(32, b'\0')
+    checksum = 0xCBF29CE484222325
+    for byte in encoded[:-8]:
+        checksum = ((checksum ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    encoded[-8:] = checksum.to_bytes(8, 'little')
+    return bytes(encoded)
 
 
 def mounted(disk):
@@ -83,9 +104,10 @@ def mounted(disk):
     return vol, afs2.walk(vol)
 
 
-def boot(label, esp, disk, kill=None, extra=(), ready=MARKER):
-    # Shut down only once filesd has reported its mount (or `ready`).
-    feed = [] if kill else [((ready, b'arena>'), 1, b'shutdown\r')]
+def boot(label, esp, disk, kill=None, extra=(), ready=b'[desktop] real desktop frame presented'):
+    # Finish Desktop's first-run AFS2 preferences/catalog initialization before
+    # requesting shutdown; `arena>` may appear while Desktop is still starting.
+    feed = [] if kill else [(ready, 1, b'shutdown\r')]
     return mtest.boot(label, esp, feed, disk, kill=kill, pointer=True, extra_args=list(extra))
 
 
@@ -114,6 +136,7 @@ def main():
             f'{len(AFS1) - users} system record(s)') in s, s[-3000:]
     assert 'wall clock from RTC' in s
     writes = s.count('storaged: BLKW4K')
+    import_writes = s[:s.index(DONE.decode())].count('storaged: BLKW4K')
     assert disk.read_bytes()[:AFS1_BYTES] == afs1_before, 'AFS1 mutated by the migration'
     vol, tree = mounted(disk)
     assert tree == expected(AFS1), sorted(tree)
@@ -132,8 +155,9 @@ def main():
     print('[m11-afs2] second boot mounts the committed volume with zero writes PASS', flush=True)
 
     # 3. Interrupted import at several points of its write sequence.
-    points = sorted({1, 2, 3, writes // 4, writes // 2, (writes * 3) // 4})
-    assert writes >= 16 and points[-1] < writes - 2, (writes, points)
+    points = sorted({1, 2, 3, import_writes // 4, import_writes // 2,
+                     (import_writes * 3) // 4})
+    assert import_writes >= 16 and points[-1] < import_writes - 2, (import_writes, points)
     for n in points:
         shutil.copyfile(pristine, disk)
         label = f'{LABEL}-crash-{n}'
@@ -152,9 +176,18 @@ def main():
         rc, s, _ = boot(f'{label}-recover', esp, disk)
         assert rc == 0 and DONE.decode() in s, s[-3000:]
         assert (INTERRUPTED in s) == (state != 'never committed'), (label, state)
-        assert mounted(disk)[1] == expected(AFS1)
+        actual = mounted(disk)[1]
+        wanted = expected(AFS1)
+        assert actual == wanted, (
+            label,
+            'AFS2 namespace mismatch',
+            {'missing': sorted(set(wanted) - set(actual)),
+             'extra': sorted(set(actual) - set(wanted)),
+             'changed': sorted(path for path in set(actual) & set(wanted)
+                               if actual[path] != wanted[path])},
+        )
         assert disk.read_bytes()[:AFS1_BYTES] == afs1_before
-        print(f'[m11-afs2] crash after BLKW4K #{n} (logged {logged}/{writes}): {state}; '
+        print(f'[m11-afs2] crash after BLKW4K #{n} (logged {logged}/{import_writes} import writes): {state}; '
               'next boot re-imported to the exact namespace PASS', flush=True)
 
     # 4. Fail closed: destroy both commit records of the committed volume.

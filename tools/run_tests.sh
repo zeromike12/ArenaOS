@@ -217,6 +217,39 @@ else
     echo "!! APB1 host or no_std target tests FAILED"
 fi
 
+# Phase 13 runtime ownership and installed-application integration. The
+# Desktop and service-manager host suites cover policy/record models; the
+# guest fixture below exercises real installed APB1 launch, windows, streams,
+# helper cleanup, VM, heap, threads, synchronization, and persistent state.
+echo "== Phase 13 Desktop and service-manager host/target suites"
+if (cd "$REPO_ROOT" && \
+    cargo fmt --manifest-path userspace/desktop/Cargo.toml -- --check && \
+    cargo test --manifest-path userspace/desktop/Cargo.toml --lib \
+        --target x86_64-unknown-linux-gnu --locked && \
+    cargo clippy --manifest-path userspace/desktop/Cargo.toml --lib \
+        --target x86_64-unknown-linux-gnu --locked -- -D warnings && \
+    rustfmt --check --edition 2024 userspace/servicemgr/src/package.rs \
+        userspace/servicemgr/src/inventory.rs && \
+    cargo test --manifest-path userspace/servicemgr/Cargo.toml --lib \
+        --target x86_64-unknown-linux-gnu --locked && \
+    cargo check --manifest-path userspace/servicemgr/Cargo.toml \
+        --target x86_64-unknown-none --locked); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! Phase 13 Desktop or service-manager host/target tests FAILED"
+fi
+
+echo "== Phase 13 real installed-application pressure guest"
+if (cd "$REPO_ROOT" && python3 tools/test_phase13_registry_guest.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! Phase 13 installed-application guest FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"

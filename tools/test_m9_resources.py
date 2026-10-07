@@ -47,13 +47,13 @@ def main():
     before, after = samples
     assert before[1:] == (16, 16) and after[1:] == (15, 15), samples
     assert after[0] > before[0] + 19, samples  # freed region plus PTEs/stack
-    assert re.search(r'compositor: live processes 15; .*shared 3/80, pages 507/36864, maps 6/128; free frames \d+', serial)
-    assert re.search(r'graphics original child 1 retired: .*shared 2/80 runs, 488/36864 pages, 4/128 maps; compositor caps Some\(\((?:7|8), 128\)\)', serial)
+    assert re.search(r'compositor: live processes 15; .*shared 3/96, pages 507/36864, maps 6/160; free frames \d+', serial)
+    assert re.search(r'graphics original child 1 retired: .*shared 2/96 runs, 488/36864 pages, 4/160 maps; compositor caps Some\(\((?:7|8), 128\)\)', serial)
     assert 'servicemgr: extended cap occupancy [32,127)=0' in serial
     assert 'servicemgr: reserved APB1 slot127 descriptor=0 kind=0 rights=0' in serial
     assert '[arena ERROR halt]' not in serial and 'PANIC' not in serial
     print(f'[m9-resources] guest Power high-water resident 16/16 then exact child retire 15/15; free frames {before[0]}->{after[0]}; '
-          'shared 3/80->2/80, 507->488 pages, 6->4 maps, compositor caps 10/128->7..8/128 PASS')
+          'shared 3/96->2/96, 507->488 pages, 6->4 maps, compositor caps 10/128->7..8/128 PASS')
 
 
 if __name__ == '__main__':

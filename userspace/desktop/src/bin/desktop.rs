@@ -4197,29 +4197,6 @@ fn retire_extra(extra_index: usize) {
     }
     unsafe { EXTRA_WINDOWS[extra_index] = EMPTY_EXTRA };
 }
-fn retire_primary_window(index: usize) {
-    let session = unsafe { SESSIONS[index] };
-    if session.handle == 0 {
-        return;
-    }
-    unsafe { (&mut *(&raw mut WM)).retire(session.handle) }.unwrap_or_else(|_| die(85));
-    unsafe {
-        let current = &mut *(&raw mut SESSIONS).cast::<Session>().add(index);
-        current.handle = 0;
-        current.title = [0; 32];
-        current.published = false;
-        current.close_pending = false;
-        current.ending = false;
-        current.content = 0;
-        current.regions = compose::Regions::NONE;
-        current.surface = (0, 0);
-        current.popup = NO_POPUP;
-        current.reveal = arena_ui::motion::Motion::fixed(arena_ui::metrics::TITLE_HEIGHT);
-        current.focus = arena_ui::motion::Motion::fixed(0);
-        current.reveal_last = arena_ui::metrics::TITLE_HEIGHT;
-        current.focus_last = 0;
-    }
-}
 fn retire(index: usize, _force: bool) {
     let s = unsafe { SESSIONS[index] };
     if s.id == 0 {
@@ -6013,7 +5990,12 @@ extern "C" fn main() -> ! {
                                 .position(|s| s.handle == handle)
                             {
                                 if unsafe { SESSIONS[i].close_pending } {
-                                    retire_primary_window(i)
+                                    // The application did not acknowledge its
+                                    // first close. A repeated close is the
+                                    // bounded forced-retirement path for the
+                                    // complete AppInstance, including helpers
+                                    // and its ProcessGroup.
+                                    retire(i, true)
                                 } else {
                                     let _ = unsafe {
                                         (&mut *(&raw mut WM))

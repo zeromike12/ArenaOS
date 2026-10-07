@@ -1533,6 +1533,12 @@ mod tests {
     #[test]
     fn exhausted_generations_refuse_before_publication() {
         let mut s = State::new(800, 600).unwrap();
+        s.next = u64::MAX;
+        assert_eq!(s.create(41, 448, 288), Err(Error::Exhausted));
+        assert_eq!(s.windows().count(), 0);
+        assert_eq!(s.next, u64::MAX);
+        assert_eq!(s.focused(), None);
+        s.next = 1;
         s.z = u64::MAX - 1;
         assert_eq!(s.create(42, 448, 288), Err(Error::Exhausted));
         assert_eq!(s.windows().count(), 0);

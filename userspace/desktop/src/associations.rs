@@ -39,6 +39,10 @@ impl Defaults {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn get(&self, content_type: &[u8]) -> Option<&[u8; APPLICATION_ID_BYTES]> {
         self.entries[..self.len]
             .iter()

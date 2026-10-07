@@ -32,6 +32,10 @@ def main() -> None:
     obj = declaration(cap, "#[derive(Clone, Copy, PartialEq, Eq)]\npub enum CapObj")
     item = declaration(cap, "#[derive(Clone, Copy, PartialEq, Eq)]\npub struct Cap")
     space = declaration(cap, "#[derive(Clone, Copy)]\npub struct CapSpace")
+    user_regions = re.search(r"pub const USER_REGIONS_MAX: usize = (\d+);", proc)
+    if user_regions is None:
+        raise ValueError("process-owned user mapping bound missing from source")
+    user_regions_decl = f"pub const USER_REGIONS_MAX: usize = {user_regions[1]};"
     process = declaration(proc, "#[derive(Clone, Copy)]\npub struct Process")
     # Only substitute the length parameter and its type use. All fields,
     # discriminants and Rust repr/alignment remain the production source.
@@ -40,7 +44,7 @@ def main() -> None:
     process = process.replace("pub struct Process {", "pub struct Process<const N: usize> {")
     process = process.replace("cap::CapSpace", "CapSpace<N>")
     source = "#![allow(dead_code)]\nuse std::mem::size_of;\n" + "\n".join(
-        (obj, item, space, process)) + """
+        (obj, item, space, user_regions_decl, process)) + """
 fn print_sizes<const N: usize>() {
     println!("{N}: CapSpace={} Process={} Option<Process>={} 32-table={}",
         size_of::<CapSpace<N>>(), size_of::<Process<N>>(),
@@ -76,7 +80,7 @@ pub static ARENA_CAP_LAYOUT: [usize; 22] = [
         target = Path(work) / "target.rs"
         ir = Path(work) / "target.ll"
         target.write_text("#![no_std]\n#![allow(dead_code)]\nuse core::mem::size_of;\n"
-                          + "\n".join((obj, item, space, process)) + sizes)
+                          + "\n".join((obj, item, space, user_regions_decl, process)) + sizes)
         subprocess.run(["rustc", "--crate-type=lib", "--edition=2024", "-O",
                         "--target=x86_64-unknown-none", "--emit=llvm-ir",
                         str(target), "-o", str(ir)], check=True)
@@ -100,20 +104,22 @@ pub static ARENA_CAP_LAYOUT: [usize; 22] = [
                 i += 1
         actual = struct.unpack("<22Q", data)
         # The historical 16/18/32/64 measurements remain in the first 18
-        # fields. ADR-0088's 128-slot CapSpace and 64-process table are the
-        # final four fields and are measured from the actual source structs.
-        expected = (16, 24, 400, 448, 448, 14336, 456, 504, 504,
-                    16128, 800, 848, 848, 27136, 1600, 1648, 1648, 52736,
-                    3200, 3248, 3248, 207872)
+        # fields. Phase 13 adds the process-owned user-region inventory to
+        # every process record; its exact bound is extracted from proc.rs.
+        # ADR-0088's 128-slot CapSpace and 64-process table remain the final
+        # four fields and are measured from the actual source structs.
+        expected = (16, 24, 400, 1744, 1744, 55808, 456, 1800, 1800,
+                    57600, 800, 2144, 2144, 68608, 1600, 2944, 2944, 94208,
+                    3200, 4544, 4544, 290816)
         if actual != expected:
             raise ValueError(f"on-target layout changed: {actual!r} != {expected!r}")
         if not re.search(r"pub const CAP_SLOTS: usize = 128;", cap):
             raise ValueError("production capability table is not the reviewed 128 slots")
         if not re.search(r"pub const MAX_PROCESSES: usize = 64;", proc):
             raise ValueError("production process table is not the reviewed 64 slots")
-        print("x86_64-unknown-none target cap layout: historical sizes unchanged; "
-              "CapSpace<128>=3200 B, Option<Process<128>>=3248 B, "
-              "64-process table=207872 B (ADR-0088) PASS")
+        print("x86_64-unknown-none target cap layout: CapSpace<128>=3200 B, "
+              "Option<Process<128>>=4544 B with 80 process-owned mapping bounds, "
+              "64-process table=290816 B (ADR-0088/0095) PASS")
 
         ipc = (ROOT / "kernel/kernel/src/ipc.rs").read_text()
         ipc_decls = [declaration(ipc, start) for start in (

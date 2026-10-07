@@ -24,7 +24,7 @@ def fixture(name,existing=False):
 def main():
     esp=mtest.build('m10-multi-red-base');efi=BUILD/'arena-boot.efi';artifacts={p:p.read_bytes() for p in (esp,efi)}
     sources={p:p.read_bytes() for p in (SPAWN,IPC)}
-    controls=[(SPAWN,b'pub const MAX_DYNAMIC_CHILDREN: usize = 4;',b'pub const MAX_DYNAMIC_CHILDREN: usize = 1;','quota'),
+    controls=[(SPAWN,b'pub const MAX_DYNAMIC_CHILDREN: usize = 24;',b'pub const MAX_DYNAMIC_CHILDREN: usize = 1;','quota'),
               (IPC,b'                if checked {',b'                if checked && false {','cancel')]
     try:
         for path,before,after,label in controls:

@@ -52,7 +52,7 @@ def main():
     assert rc == 0 and 'm7: RESULT PASS (2/2)' in serial
     assert re.search(
         r'graphics original child 1 retired: Process record, region refs, mappings and comparator cap conserved; '
-        r'shared 2/80 runs, 488/36864 pages, 4/128 maps; compositor caps Some\(\((?:7|8), 128\)\)',
+        r'shared 2/96 runs, 488/36864 pages, 4/160 maps; compositor caps Some\(\((?:7|8), 128\)\)',
         serial), 'root did not prove exact Process/region/map cleanup (one live A IPC landing may add a transient cap)'
     assert '[arena ERROR halt]' not in serial and 'PANIC' not in serial
     assert pixel('before', 200, 190) == (0x3d, 0xcf, 0x7a)

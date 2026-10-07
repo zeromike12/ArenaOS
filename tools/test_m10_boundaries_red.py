@@ -7,6 +7,7 @@ EFI/ESP/profile are restored even on failure; final GREEN boots those exact byte
 """
 import hashlib
 import traceback
+import subprocess
 from pathlib import Path
 import arena_env
 import mtest
@@ -47,17 +48,17 @@ CONTROLS=[
     # only ordinary Desktop application creation: changing the shared wrapper
     # also breaks boot-time servicemgr ProcessGroup proofs before this oracle
     # reaches the Desktop boundary.
-    (DESKTOP,b'let process = spawn_child(image, &grants[..grant_count]);',b'let process = spawn_child(CAP_SLOTS as u64, &grants[..grant_count]);','real-process-spawn',bounded,'terminal'),
-    (DESKTOP,b'    let result = if force && live {\n        group.stop_and_reap(handle)',b'    let result = if force && live {\n        Ok(())','process-retirement',None,'full-queue live client could not be forcibly closed'),
+    (DESKTOP,b'let process = spawn_child(i, image, &grants[..grant_count]);\n    // Parent-side seed references are transient; the exact child caps remain.',b'let process = spawn_child(CAP_SLOTS as usize, image, &grants[..grant_count]);\n    // Parent-side seed references are transient; the exact child caps remain.','real-process-spawn',bounded,'terminal'),
+    (DESKTOP,b'    finish_app_group(index);',b'    // TEST: omit ProcessGroup retirement','process-retirement',None,'full-queue live client could not be forcibly closed'),
     # Phase 11.6: slot 4 is the diagnostics pool or the /Users/user grant.
     (DESKTOP,V2_DIAGNOSTIC_TAIL,V2_DIAGNOSTIC_TAIL.replace(b'RIGHTS_READ as u32)',b'(RIGHTS_READ | RIGHTS_WRITE) as u32)',1),'readonly-diagnostic-grant',bounded,'monitor'),
-    (MODEL,b'self.find(handle).is_some_and(|w| w.backing == backing)',b'self.find(handle).is_some_and(|w| w.backing == backing || backing != 0)','owned-stale-surface',dynamic,'signed-'),
+    (MODEL,b'self.find(handle).is_some_and(|w| w.owner == owner)',b'self.find(handle).is_some_and(|w| w.owner == owner || owner != 0)','owned-stale-surface','host-model','transient_surfaces_are_owned_focused_stale_safe_and_menu_dismissal_consumes'),
     # Window creation (11.3 transients mint handles the same way).
-    (MODEL,b'.ok_or(Error::Full)?;\n        let handle = self.next;\n        let next = self.next.checked_add(1).ok_or(Error::Exhausted)?;',b'.ok_or(Error::Full)?;\n        let handle = self.next;\n        let next = self.next;','surface-generation-reuse',dynamic,'signed-'),
+    (MODEL,b'        let handle = self.next;\n        let next = self.next.checked_add(1).ok_or(Error::Exhausted)?;\n        let next_z = self.z.checked_add(1).ok_or(Error::Exhausted)?;',b'        let handle = self.next;\n        let next = self.next;\n        let next_z = self.z.checked_add(1).ok_or(Error::Exhausted)?;','surface-generation-reuse','host-model','exhausted_generations_refuse_before_publication'),
     # Damage composition reads each window's content through one closure;
     # the mutant serves the client's writable staging bytes instead.
     # Phase 11.3: composition reads each session's snapshot via snapshot_of.
-    (DESKTOP,b'|slot| snapshot_of(&sessions[slot])',b'|slot| { let s = &sessions[slot]; let w = unsafe { (&*(&raw const WM)).find(s.handle) }.unwrap_or_else(|| die(88)); (unsafe { core::slice::from_raw_parts((s.va as usize + PIXEL_OFFSET) as *const u32, w.width as usize * w.height as usize) }, snapshot_of(s).1) }','frame-publication',dynamic,'unpublished backing became visible'),
+    (DESKTOP,b'snapshot_of(&sessions[slot])',b'snapshot_at(sessions[slot].va)','frame-publication',dynamic,'unpublished backing became visible'),
     (DESKTOP,FULL_SESSION_ACCOUNTING,b'                            let full_sessions = false;','full-session-refusal-accounting',None,'33rd launch lacked refusal, exact cap-inventory'),
 ]
 def process_retirement_oracle(_esp=None):
@@ -65,10 +66,32 @@ def process_retirement_oracle(_esp=None):
     # full-queue live-client proof to exercise ProcessGroup::stop_and_reap.
     client_death.main()
 
+def guest_red_oracle(oracle, esp, expected):
+    try:
+        if hasattr(oracle,'main'):
+            oracle.main(esp)
+        else:
+            oracle(esp)
+    except (AssertionError,RuntimeError) as error:
+        raise AssertionError(expected) from error
+    raise RuntimeError('mutant survived the targeted guest oracle')
+
 def full_session_accounting_oracle(_esp=None):
     # M12's 33rd-launch test proves both refusal and separate exact resource
     # receipts; use that real workload for the Phase-12 capacity accounting.
     m12_scale.main()
+
+def host_model_red_oracle(test_name):
+    result=subprocess.run(
+        ['cargo','test','--manifest-path','Cargo.toml','--lib',
+         '--target','x86_64-unknown-linux-gnu',test_name],
+        cwd=ROOT/'userspace/desktop',capture_output=True,text=True,
+    )
+    output=result.stdout+result.stderr
+    failed_line=f'test model::tests::{test_name} ... FAILED'
+    if result.returncode != 0 and failed_line in output:
+        raise AssertionError(test_name)
+    raise RuntimeError(output[-3000:] or f'{test_name}: target model RED was not observed')
 
 def main():
     esp=mtest.build('m10-boundaries-red-base',desktop=True)
@@ -85,10 +108,15 @@ def main():
                 mutant=mtest.build('m10-'+label+'-mutant',desktop=True)
                 failed=False
                 try:
-                    if label=='process-retirement':
-                        process_retirement_oracle(mutant)
+                    if label in ('process-retirement','real-process-spawn'):
+                        if label=='process-retirement':
+                            guest_red_oracle(process_retirement_oracle,mutant,expectation)
+                        else:
+                            guest_red_oracle(oracle,mutant,expectation)
                     elif label=='full-session-refusal-accounting':
                         full_session_accounting_oracle(mutant)
+                    elif oracle=='host-model':
+                        host_model_red_oracle(expectation)
                     else:
                         oracle.main(mutant)
                 except (AssertionError,RuntimeError) as error:

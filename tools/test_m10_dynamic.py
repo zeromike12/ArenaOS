@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual signed dynamic Image receives own graphics, bounded four-child model."""
+"""Actual signed dynamic Image receives owned graphics and is revoked safely."""
 import hashlib
 import re
 import subprocess
@@ -37,6 +37,7 @@ def main(esp=None):
 
     def visible():
         d=Desktop(LABEL)
+        exercise=False
         try:
             i=d.serial().count('servicemgr: real signed Image delegated for broker-owned graphical spawn')-1
             x=70+i*26;y=60+i*24
@@ -46,20 +47,23 @@ def main(esp=None):
                 return a!=b and all(pixel(x+5+k*10,y+35+r*10)==(a if (k+r)%2==0 else b) for r in range(2) for k in range(6))
             d.shot(f'signed-{i}',checker)
             if i==3:
-                # Base two maps + three per session (ADR-0075).
+                # Phase 13 permits more than four live app processes; retain
+                # this regression's four signed children, then exercise them
+                # before revoking the installed launch record.
                 d.wait(lambda:samples(d)[-1][5]==2+4*3,'four signed children not fully mapped')
                 pre_refusal.append((samples(d)[-1],len(samples(d))))
-            return b'pkg graphics\r'
+                exercise=True
+            else:
+                return b'pkg graphics\r'
         finally:d.dispose()
+        if exercise:
+            return exercised()
     def exercised():
         d=Desktop(LABEL)
         try:
             __import__('time').sleep(.16) # settle the bounded open/focus transition
             full=d.shot('four-live')
-            d.wait(lambda:len(samples(d))>pre_refusal[0][1],'refusal snapshot missing')
-            assert samples(d)[-1]==pre_refusal[0][0],('fifth refusal mutated resources',pre_refusal[0][0],samples(d)[-1])
-            # A fifth dynamic app was refused even though two desktop slots
-            # remain. Its temporary backing must have rolled back completely.
+            assert samples(d)[-1]==pre_refusal[0][0],('four-live resource snapshot changed',pre_refusal[0][0],samples(d)[-1])
             assert d.serial().count('[desktop] real application spawned;')==4
             d.click(155,177)
             d.shot('signed-focus-settled',lambda p:crop(p,153,164,45,20)==crop(full,153,164,45,20))
@@ -143,9 +147,10 @@ def main(esp=None):
             # input and publication after its Image was revoked).
             d.shot('revoked-child-input',lambda p:crop(p,353,264,45,20)==owned[0]!=crop(before,353,264,45,20))
             # Dynamic and BootImage children share the twelve-session
-            # Phase-11 resource regression; the native dynamic quota stays
-            # four independently of Phase-12's 32-window Desktop envelope.
-            d.launch(0,'mixed-terminal',4);d.launch(3,'mixed-settings',5)
+            # Phase-11 resource regression. This fixture retains four signed
+            # Images; Phase 13 separately fills the 24-child manager bound.
+            d.q.command('input-send-event',events=[d.q._ev('f1',True),d.q._ev('f1',False)]);d.opened('mixed-terminal',4)
+            d.q.command('input-send-event',events=[d.q._ev('f4',True),d.q._ev('f4',False)]);d.opened('mixed-settings',5)
             shared,snapshot=map(int,re.search(r'session reservation shared/snapshot pages=(\d+)/(\d+)',d.serial()).groups())
             base=samples(d)[0]
             # Six sessions: shared + snapshot region each, three maps each.
@@ -159,7 +164,7 @@ def main(esp=None):
             # regression. M12 separately drives all 32 slots and the 33rd
             # mutation-free refusal.
             for k in range(6):
-                d.click(255+k*58,570)
+                d.q.command('input-send-event',events=[d.q._ev(f'f{k+1}',True),d.q._ev(f'f{k+1}',False)])
                 d.wait(lambda:d.serial().count('[desktop] real application spawned;')>=7+k,'mixed second-lane session not spawned')
             d.wait(lambda:samples(d)[-1][3:6]==(base[3]+24,base[4]+12*(shared+snapshot),base[5]+36),'twelve mixed sessions not fully mapped')
             d.settled('mixed-twelve',(0,26,800,500))
@@ -192,7 +197,7 @@ def main(esp=None):
         finally:d.dispose()
     feed=[((b'arena>',b'[desktop] real desktop frame presented',b'packaged READY',SETTLED.encode()),1,settled)]
     for n in range(1,5):feed.append((b'servicemgr: real signed Image delegated for broker-owned graphical spawn',n,visible))
-    feed.extend([(b'servicemgr: graphical Image launch bounded refusal',1,exercised),(b'servicemgr: revoked graphical Image cannot spawn again PASS',1,revoked)])
+    feed.append((b'servicemgr: revoked graphical Image cannot spawn again PASS',1,revoked))
     rc,s,_=mtest.boot(LABEL,esp,feed,disk,pointer=True,timeout_s=120)
     assert rc==0 and s.count('[desktop] real application spawned;')==12 and s.count('[desktop] application retired:')==12
     rows=receipts(s)

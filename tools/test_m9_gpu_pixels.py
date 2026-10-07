@@ -34,7 +34,7 @@ def main():
     assert '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' in serial
     assert '[displayprobe] ring3 MODE/cap-refusal/PRESENT 80x drain PASS' in serial
     assert 'displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS' in serial
-    assert re.search(r'displayd resources at parked boundary: shared 2/80 runs, 471/36864 pages, 2/128 maps; caps 6/128; free frames \d+; live processes \d+', serial)
+    assert re.search(r'displayd resources at parked boundary: shared 2/96 runs, 471/36864 pages, 2/160 maps; caps 6/128; free frames \d+; live processes \d+', serial)
     assert 'GOP handoff: unavailable or unsupported mode' in serial
     assert '[arena ERROR halt]' not in serial and 'PANIC' not in serial
     data = (arena_env.build_dir() / f'{LABEL}.ppm').read_bytes()
