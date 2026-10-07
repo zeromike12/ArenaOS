@@ -8,12 +8,22 @@ use arena_lib::abi::{
     syscall2, syscall3, syscall6,
 };
 use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams};
+use arena_runtime::sync::{Condvar, Mutex, SyncDomain};
 use arena_runtime::threads;
 use arena_startup_abi::manifest::{FLAG_HEADLESS, FLAG_STANDARD_STREAMS};
 use arena_startup_abi::startup::{
-    CAP_KIND_NOTIFICATION, CAP_KIND_SHARED_REGION, CapabilityRole, StartupView,
+    CAP_KIND_NOTIFICATION, CAP_KIND_SHARED_REGION, CAP_KIND_SYNC_DOMAIN, CapabilityRole,
+    StartupView,
 };
 use core::sync::atomic::{AtomicU64, Ordering};
+
+struct ParkedHelper {
+    mutex: Mutex<u64>,
+    condition: Condvar,
+    started: AtomicU64,
+}
+
+static mut PARKED_HELPER: core::mem::MaybeUninit<ParkedHelper> = core::mem::MaybeUninit::uninit();
 
 const APPLICATION_ID: [u8; 32] = {
     let mut id = [0; 32];
@@ -65,7 +75,7 @@ fn application_main(view: StartupView<'_>) {
         || view.argument(0) != Some(b"org.arenaos.zzheadless")
         || view.flags() & FLAG_HEADLESS == 0
         || view.instance_generation() == 0
-        || view.capability_count() != 1
+        || view.capability_count() != 2
         || view.stdin_descriptor().is_some()
         || view.stdout_descriptor().is_some()
         || view.stderr_descriptor().is_some()
@@ -77,11 +87,18 @@ fn application_main(view: StartupView<'_>) {
         || unsafe { syscall2(SYS_CAP_DESCRIBE, 1, observed.as_mut_ptr() as u64) } != 0
         || observed[0] != u64::from(CAP_KIND_NOTIFICATION)
         || observed[2] != (RIGHTS_READ | RIGHTS_WRITE)
+        || view.capability(1).is_none_or(|descriptor| {
+            descriptor.slot != 2
+                || descriptor.kind != CAP_KIND_SYNC_DOMAIN
+                || descriptor.rights != (RIGHTS_READ | RIGHTS_WRITE) as u32
+                || descriptor.role != CapabilityRole::SyncDomain
+        })
     {
         client::exit(71);
     }
+    let _sync_domain = SyncDomain::from_startup(&view).unwrap_or_else(|_| client::exit(71));
 
-    client::log(b"[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present\n");
+    client::log(b"[phase13-headless] Startup ABI v2 verified one attenuated Notification and one SyncDomain; no window caps present\n");
     let timer = unsafe { syscall3(SYS_TIMER_ARM, 1, COMPLETION_BADGE, 3_000_000) };
     if timer < 0 || unsafe { syscall1(SYS_WAIT, 1) } != COMPLETION_BADGE as i64 {
         client::exit(72);
@@ -104,7 +121,7 @@ fn helper_main(view: StartupView<'_>) -> ! {
                 1
             }
         || view.instance_generation() == 0
-        || view.capability_count() != 1 + usize::from(signal_parent) + usize::from(streaming)
+        || view.capability_count() != 2 + usize::from(signal_parent) + usize::from(streaming)
         || (view.stdin_descriptor().is_some() != streaming)
         || (view.stdout_descriptor().is_some() != streaming)
         || (view.stderr_descriptor().is_some() != streaming)
@@ -139,9 +156,18 @@ fn helper_main(view: StartupView<'_>) -> ! {
                     || descriptor.rights != (RIGHTS_READ | RIGHTS_WRITE) as u32
                     || descriptor.role != CapabilityRole::StandardStreamSet
             }))
+        || view
+            .capability(1 + usize::from(signal_parent) + usize::from(streaming))
+            .is_none_or(|descriptor| {
+                descriptor.slot as usize != 2 + usize::from(signal_parent) + usize::from(streaming)
+                    || descriptor.kind != CAP_KIND_SYNC_DOMAIN
+                    || descriptor.rights != (RIGHTS_READ | RIGHTS_WRITE) as u32
+                    || descriptor.role != CapabilityRole::SyncDomain
+            })
     {
         client::exit(73);
     }
+    let sync_domain = SyncDomain::from_startup(&view).unwrap_or_else(|_| client::exit(73));
     if unsafe { syscall6(SYS_NOTIFICATION_CREATE, 44, 10, 0, 0, 0, 0) } != STATUS_BAD_ARG
         || unsafe { syscall6(SYS_CAP_OCCUPIED, 10, 0, 0, 0, 0, 0) } != 0
         || (signal_parent && unsafe { syscall1(SYS_WAIT, 2) } != STATUS_BAD_ARG)
@@ -151,27 +177,8 @@ fn helper_main(view: StartupView<'_>) -> ! {
     }
     client::log(b"[phase13-helper] no inherited notification factory; WRITE-only owner signal cannot wait\n");
     client::log(b"[phase13-helper] exact Startup ABI inventory: private timer Notification; optional owner signal is WRITE-only and a distinct object\n");
-    if view.argument(1) == Some(SLEEPER_ID) {
-        let started = AtomicU64::new(0);
-        let worker = threads::spawn(live_helper_worker, &started as *const AtomicU64 as u64)
-            .unwrap_or_else(|_| client::exit(87));
-        for _ in 0..100_000 {
-            if started.load(Ordering::Acquire) == 1 {
-                break;
-            }
-            threads::yield_now().unwrap_or_else(|_| client::exit(88));
-        }
-        if started.load(Ordering::Acquire) != 1 || threads::count() != Ok(2) {
-            client::exit(89);
-        }
-        // Keep the thread live and its exact stack cap owned by this helper
-        // until the Desktop destroys the Process. Its worker has run in ring
-        // 3 and remains in the scheduler's Ready set at the readiness signal.
-        core::mem::forget(worker);
-        client::log(b"[phase13-headless] sleeper ran a live ring-3 worker before parent-authorized teardown\n");
-    }
     match view.argument(1) {
-        Some(id) if id == SLEEPER_ID => wait_for_helper_timer(44, true),
+        Some(id) if id == SLEEPER_ID => sleeper_with_parked_worker(sync_domain),
         Some(id) if id == ORPHAN_ID => wait_for_helper_timer(45, false),
         Some(id) if id == CRASHER_ID => {
             client::log(
@@ -186,16 +193,56 @@ fn helper_main(view: StartupView<'_>) -> ! {
     }
 }
 
-extern "C" fn live_helper_worker(started: u64) -> u64 {
-    // SAFETY: the helper's main thread owns this AtomicU64 on its mapped
-    // process stack and remains alive until the Desktop tears down the whole
-    // Process, including this user-created worker.
-    let started = unsafe { &*(started as *const AtomicU64) };
-    started.store(1, Ordering::Release);
-    loop {
-        if threads::yield_now().is_err() {
-            core::hint::spin_loop();
+fn sleeper_with_parked_worker(domain: SyncDomain) -> ! {
+    // SAFETY: this helper initializes its private image static once before
+    // starting the worker. The worker and main thread share the Process
+    // address space; Process teardown ends both before the image is reclaimed.
+    unsafe {
+        core::ptr::addr_of_mut!(PARKED_HELPER).write(core::mem::MaybeUninit::new(ParkedHelper {
+            mutex: Mutex::new(domain, 0).unwrap_or_else(|_| client::exit(87)),
+            condition: Condvar::new(domain).unwrap_or_else(|_| client::exit(87)),
+            started: AtomicU64::new(0),
+        }));
+    }
+    let fixture = core::ptr::addr_of!(PARKED_HELPER).cast::<ParkedHelper>();
+    let worker =
+        threads::spawn(live_helper_worker, fixture as u64).unwrap_or_else(|_| client::exit(87));
+    for _ in 0..100_000 {
+        // SAFETY: the fixture was initialized above and is process-static.
+        let ready = unsafe { (*fixture).started.load(Ordering::Acquire) == 1 };
+        let parked = domain
+            .info()
+            .is_ok_and(|info| info.parked_waiters == 1 && info.keys == 2);
+        if ready && parked {
+            break;
         }
+        threads::yield_now().unwrap_or_else(|_| client::exit(88));
+    }
+    // SAFETY: the helper static remains live until this Process is destroyed.
+    if unsafe { (*fixture).started.load(Ordering::Acquire) } != 1
+        || !domain
+            .info()
+            .is_ok_and(|info| info.parked_waiters == 1 && info.keys == 2)
+        || threads::count() != Ok(2)
+    {
+        client::exit(89);
+    }
+    core::mem::forget(worker);
+    client::log(b"[phase13-sync] sleeper has a parked ring-3 Condvar worker and two helper-owned keys before teardown\n");
+    wait_for_helper_timer(44, true)
+}
+
+extern "C" fn live_helper_worker(fixture: u64) -> u64 {
+    // SAFETY: the static fixture belongs to this Process and remains mapped
+    // until Process teardown kills this parked thread.
+    let fixture = unsafe { &*(fixture as *const ParkedHelper) };
+    let mut guard = fixture.mutex.lock().unwrap_or_else(|_| helper_exit(90));
+    fixture.started.store(1, Ordering::Release);
+    loop {
+        guard = fixture
+            .condition
+            .wait(guard)
+            .unwrap_or_else(|_| helper_exit(91));
     }
 }
 

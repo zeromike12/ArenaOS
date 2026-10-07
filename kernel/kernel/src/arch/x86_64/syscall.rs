@@ -209,6 +209,18 @@ pub const SYS_THREAD_JOIN: u64 = 65;
 pub const SYS_THREAD_DETACH: u64 = 66;
 /// Read the calling Process's live scheduler-thread count.
 pub const SYS_THREAD_COUNT: u64 = 67;
+/// ADR-0107: mint a Desktop-owned native synchronization domain.
+pub const SYS_SYNC_DOMAIN_CREATE: u64 = 68;
+/// ADR-0107: create/destroy a generation-checked wait key within a domain.
+pub const SYS_SYNC_KEY_CREATE: u64 = 69;
+pub const SYS_SYNC_KEY_DESTROY: u64 = 70;
+/// ADR-0107: read a wait key's sequence or park against an observed value.
+pub const SYS_SYNC_SEQUENCE: u64 = 71;
+pub const SYS_SYNC_WAIT: u64 = 72;
+/// ADR-0107: advance a wait key sequence and wake one/all registered threads.
+pub const SYS_SYNC_WAKE: u64 = 73;
+/// ADR-0107: current/high-water domain key and parked-waiter accounting.
+pub const SYS_SYNC_INFO: u64 = 74;
 /// Mint a Desktop-owned bounded Notification through its boot-issued factory.
 pub const SYS_NOTIFICATION_CREATE: u64 = 63;
 
@@ -255,6 +267,8 @@ pub const STATUS_CALLER_GONE: Status = -6;
 /// Phase 11.0 (ADR-0071): a per-process bound refused the request (for
 /// example a fifth armed timer) although the shared table may have room.
 pub const STATUS_QUOTA: Status = -7;
+/// ADR-0107: a bounded native synchronization wait reached its deadline.
+pub const STATUS_TIMEOUT: Status = -8;
 
 /// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
 /// so the m4 suite computes its expectation with the very function the
@@ -787,6 +801,15 @@ extern "C" fn syscall_dispatch(
         SYS_NOTIFICATION_CREATE if [a2, a3, a4, a5] == [0; 4] => {
             sys_notification_create(a0, a1) as u64
         }
+        SYS_SYNC_DOMAIN_CREATE if [a2, a3, a4, a5] == [0; 4] => {
+            sys_sync_domain_create(a0, a1) as u64
+        }
+        SYS_SYNC_KEY_CREATE if [a1, a2, a3, a4, a5] == [0; 5] => sys_sync_key_create(a0) as u64,
+        SYS_SYNC_KEY_DESTROY if [a2, a3, a4, a5] == [0; 4] => sys_sync_key_destroy(a0, a1) as u64,
+        SYS_SYNC_SEQUENCE if [a2, a3, a4, a5] == [0; 4] => sys_sync_sequence(a0, a1) as u64,
+        SYS_SYNC_WAIT if [a4, a5] == [0; 2] => sys_sync_wait(a0, a1, a2, a3) as u64,
+        SYS_SYNC_WAKE if [a3, a4, a5] == [0; 3] => sys_sync_wake(a0, a1, a2) as u64,
+        SYS_SYNC_INFO if [a2, a3, a4, a5] == [0; 4] => sys_sync_info(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1119,6 +1142,170 @@ fn sys_notification_create(factory_slot: u64, destination_slot: u64) -> Status {
         }
         STATUS_OK
     })
+}
+
+/// Mint a SyncDomain only through the trusted manager's factory. The manager
+/// keeps this owner cap and grants only READ|WRITE to each selected child.
+fn sys_sync_domain_create(factory_slot: u64, destination_slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if factory_slot >= crate::cap::CAP_SLOTS as u64
+        || destination_slot >= crate::cap::CAP_SLOTS as u64
+    {
+        return STATUS_BAD_ARG;
+    }
+    crate::sync::without_interrupts(|| {
+        let Ok(factory) = crate::cap::read(pid, factory_slot as usize) else {
+            return STATUS_BAD_ARG;
+        };
+        if !matches!(factory.obj, crate::cap::CapObj::SyncDomainFactory)
+            || factory.rights & crate::cap::RIGHTS_WRITE == 0
+            || crate::cap::slot_occupied(pid, destination_slot as usize) != Some(false)
+        {
+            return STATUS_BAD_ARG;
+        }
+        let Ok(domain) = crate::sync_domain::create_domain(pid) else {
+            return STATUS_QUOTA;
+        };
+        let owner = crate::cap::Cap {
+            obj: crate::cap::CapObj::SyncDomain {
+                id: domain.id,
+                generation: domain.generation,
+            },
+            rights: crate::cap::RIGHTS_READ
+                | crate::cap::RIGHTS_WRITE
+                | crate::cap::RIGHTS_COPY
+                | crate::cap::RIGHTS_DESTROY,
+        };
+        if crate::cap::issue(pid, destination_slot as usize, owner).is_err() {
+            let _ = crate::sync_domain::destroy_domain(pid, domain);
+            return STATUS_BUSY;
+        }
+        STATUS_OK
+    })
+}
+
+fn sync_domain_of(
+    pid: u64,
+    slot: u64,
+    rights: u32,
+) -> Result<crate::sync_domain::DomainRef, Status> {
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let cap = crate::cap::read(pid, slot as usize).map_err(|_| STATUS_BAD_ARG)?;
+    if cap.rights & rights != rights {
+        return Err(STATUS_BAD_ARG);
+    }
+    let crate::cap::CapObj::SyncDomain { id, generation } = cap.obj else {
+        return Err(STATUS_BAD_ARG);
+    };
+    Ok(crate::sync_domain::DomainRef { id, generation })
+}
+
+fn sync_status(error: crate::sync_domain::Error) -> Status {
+    error.status()
+}
+
+fn sys_sync_key_create(domain_slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let domain = match sync_domain_of(pid, domain_slot, crate::cap::RIGHTS_WRITE) {
+        Ok(domain) => domain,
+        Err(status) => return status,
+    };
+    match crate::sync_domain::create_key(domain, pid) {
+        Ok(token) => token as Status,
+        Err(error) => sync_status(error),
+    }
+}
+
+fn sys_sync_key_destroy(domain_slot: u64, key: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let domain = match sync_domain_of(pid, domain_slot, crate::cap::RIGHTS_WRITE) {
+        Ok(domain) => domain,
+        Err(status) => return status,
+    };
+    crate::sync_domain::destroy_key(pid, domain, key).map_or_else(sync_status, |_| STATUS_OK)
+}
+
+fn sys_sync_sequence(domain_slot: u64, key: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let domain = match sync_domain_of(pid, domain_slot, crate::cap::RIGHTS_READ) {
+        Ok(domain) => domain,
+        Err(status) => return status,
+    };
+    match crate::sync_domain::sequence(domain, key) {
+        Ok(sequence) if sequence <= i64::MAX as u64 => sequence as Status,
+        Ok(_) => STATUS_QUOTA,
+        Err(error) => sync_status(error),
+    }
+}
+
+fn sys_sync_wait(domain_slot: u64, key: u64, observed: u64, timeout_us: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let domain = match sync_domain_of(pid, domain_slot, crate::cap::RIGHTS_READ) {
+        Ok(domain) => domain,
+        Err(status) => return status,
+    };
+    crate::sync_domain::wait(pid, domain, key, observed, timeout_us)
+        .map_or_else(sync_status, |_| STATUS_OK)
+}
+
+fn sys_sync_wake(domain_slot: u64, key: u64, mode: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if !matches!(mode, 1 | 2) {
+        return STATUS_BAD_ARG;
+    }
+    let domain = match sync_domain_of(pid, domain_slot, crate::cap::RIGHTS_WRITE) {
+        Ok(domain) => domain,
+        Err(status) => return status,
+    };
+    crate::sync_domain::wake(domain, key, mode == 2)
+        .map_or_else(sync_status, |count| count as Status)
+}
+
+fn sys_sync_info(domain_slot: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_writable(out, 32) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let domain = match sync_domain_of(pid, domain_slot, crate::cap::RIGHTS_READ) {
+        Ok(domain) => domain,
+        Err(status) => return status,
+    };
+    let Ok(info) = crate::sync_domain::info(domain) else {
+        return STATUS_BAD_ARG;
+    };
+    let words = [
+        info.keys,
+        info.keys_high,
+        info.parked_waiters,
+        info.waiters_high,
+    ];
+    // SAFETY: `out..out+32` is a present writable user span in the current
+    // Process, and SYSRET's SFMASK keeps this copy non-preemptible.
+    unsafe {
+        super::stac();
+        let pointer = out as *mut u64;
+        for (index, word) in words.into_iter().enumerate() {
+            core::ptr::write_volatile(pointer.add(index), word);
+        }
+        super::clac();
+    }
+    STATUS_OK
 }
 
 /// The optional per-message transferred cap: `CAP_NONE` = none sent;
@@ -2932,6 +3119,13 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::OwnedNotification { nid } => (3, u64::from(nid)),
         crate::cap::CapObj::NotificationFactory => (15, 0),
+        crate::cap::CapObj::SyncDomain { id, generation }
+            if crate::sync_domain::info(crate::sync_domain::DomainRef { id, generation })
+                .is_ok() =>
+        {
+            (16, u64::from(id))
+        }
+        crate::cap::CapObj::SyncDomainFactory => (17, 0),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {
             (4, target)
         }

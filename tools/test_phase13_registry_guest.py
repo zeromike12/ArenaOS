@@ -31,6 +31,7 @@ SERIAL_WINDOW_FINAL = "[phase13-window] final surface retired; process exits cle
 SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
 SERIAL_THREADS = "[phase13-threads] four concurrent ring-3 threads shared heap and read-only VM; distinct FS.base TLS, quota, exact stack caps, join/detach, and cleanup passed"
+SERIAL_SYNC = "[phase13-sync] contended Mutex, multi-waiter Condvar wake-one/all, sequence-before-wait, Once contention, timeout, invalid-cap refusal, and key accounting passed"
 SERIAL_STREAM_FULL = "[phase13-stream] output full; extra write returned WouldBlock"
 SERIAL_STREAM_STDOUT = "[phase13-stream] stdout partial transfer reached the broker"
 SERIAL_STREAM_STDERR = "[phase13-stream] stderr channel reached the broker"
@@ -41,12 +42,12 @@ SERIAL_HELPER_STREAM = "[phase13-helper-stream] owner woke child; exact stdin/st
 SERIAL_HELPER_CRASH_EOF = "[phase13-helper-stream] crashed child's output reached EOF after exact Process-cap reap"
 SERIAL_HELPER_STREAM_POLICY = "[phase13-helper-stream] signed stream policy and explicit launch request must match"
 SERIAL_HELPER_STREAM_CHILD = "[phase13-helper-stream] child transferred stdin and stdout bytes over its exact stream set"
-SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present"
+SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification and one SyncDomain; no window caps present"
 SERIAL_HEADLESS_EXIT = "[desktop] child Process-cap exit status=42"
 SERIAL_HELPER_EXIT = (
     "[desktop] helper id=org.arenaos.phase13streamer Process-cap exit status=46; owner-group reap=ok"
 )
-SERIAL_HELPER_THREAD = "[phase13-headless] sleeper ran a live ring-3 worker before parent-authorized teardown"
+SERIAL_HELPER_THREAD = "[phase13-sync] helper process death reclaimed its key and parked waiter"
 SERIAL_CRASHER_EXIT = (
     "[desktop] helper id=org.arenaos.phase13crasher Process-cap exit status=262; owner-group reap=ok"
 )
@@ -291,6 +292,8 @@ def interaction(disk):
                "installed document handler did not pass its scalable heap proof")
         d.wait(lambda: d.serial().count(SERIAL_THREADS) == 1,
                "installed document handler did not pass its ring-3 user-thread proof")
+        d.wait(lambda: d.serial().count(SERIAL_SYNC) == 1,
+               "installed document handler did not pass its native synchronization proof")
         wait_stream_proof(d, 1)
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
                "Open With did not spawn the selected installed application")
@@ -328,6 +331,8 @@ def interaction(disk):
                "All Applications launch did not pass its scalable heap proof")
         d.wait(lambda: d.serial().count(SERIAL_THREADS) == 2,
                "All Applications launch did not pass its ring-3 user-thread proof")
+        d.wait(lambda: d.serial().count(SERIAL_SYNC) == 2,
+               "All Applications launch did not pass its native synchronization proof")
         wait_stream_proof(d, 2)
         d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 1,
                "installed app did not create three windows in its one process")
@@ -384,6 +389,8 @@ def interaction(disk):
                "pointer launch did not pass its scalable heap proof")
         d.wait(lambda: d.serial().count(SERIAL_THREADS) == 3,
                "pointer launch did not pass its ring-3 user-thread proof")
+        d.wait(lambda: d.serial().count(SERIAL_SYNC) == 3,
+               "pointer launch did not pass its native synchronization proof")
         wait_stream_proof(d, 3)
         d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 2,
                "second application instance did not create three windows in its one process", timeout_s=30)
@@ -416,7 +423,7 @@ def interaction(disk):
         both_windows_expected[3] += 14   # six windows plus two stream regions
         both_windows_expected[4] += 5642 # six bounded windows plus two stream pages
         both_windows_expected[5] += 22   # 18 window maps plus four stream mappings
-        both_windows_expected[6] += 6    # Process, file-lineage, and stream cap per instance
+        both_windows_expected[6] += 8    # Process, file-lineage, stream, and SyncDomain owner caps per instance
         d.wait(lambda: resource_counts(d)[1:] == tuple(both_windows_expected[1:]),
                "six ordinary windows did not reach their complete resource inventory")
         settled_inventory = resource_counts(d)
@@ -553,6 +560,7 @@ def main():
     assert serial.count(SERIAL_VM) == 3
     assert serial.count(SERIAL_HEAP) == 3
     assert serial.count(SERIAL_THREADS) == 3
+    assert serial.count(SERIAL_SYNC) == 3
     assert serial.count(SERIAL_HEADLESS) == 1
     assert serial.count("[phase13-headless] timer completed; process exiting for manager reap") == 1
     assert serial.count("[phase13-helper] unknown signed helper ID refused without spawn") == 3

@@ -42,6 +42,7 @@ pub mod shared;
 pub mod spawn;
 pub mod supervise;
 pub mod sync;
+pub mod sync_domain;
 pub mod tick;
 pub mod timekeeping;
 pub mod timer;

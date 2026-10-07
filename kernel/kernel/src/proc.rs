@@ -336,6 +336,15 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
     if timers > 0 {
         crate::log::log_info!("proc", "destroy pid {pid}: swept {timers} armed timer(s)");
     }
+    let sync_waiters = crate::sync_domain::release_waiters_by_process(pid);
+    let (sync_keys, sync_key_waiters) = crate::sync_domain::release_keys_by_process(pid);
+    let sync_domains = crate::sync_domain::release_by_owner(pid);
+    if sync_waiters > 0 || sync_keys > 0 || sync_key_waiters > 0 || sync_domains > 0 {
+        crate::log::log_info!(
+            "proc",
+            "destroy pid {pid}: cleared {sync_waiters} synchronization wait(s), retired {sync_keys} key(s) waking {sync_key_waiters} waiter(s), retired {sync_domains} owned domain waiter(s)"
+        );
+    }
     let (servers, waiters, calls) = crate::ipc::release_blocked_of(pid);
     let killed = crate::sched::kill_threads_of(pid);
     crate::sched::forget_user_threads_of(pid);

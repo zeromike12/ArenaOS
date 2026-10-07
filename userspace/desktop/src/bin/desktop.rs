@@ -47,6 +47,8 @@ const USER_ROOT: u64 = 20;
 const PACKAGE_ENDPOINT: u64 = 43;
 /// Narrow boot grant for creating helper-private notifications.
 const NOTIFICATION_FACTORY_SLOT: u64 = 44;
+/// Narrow boot grant for AppInstance-owned native synchronization domains.
+const SYNC_DOMAIN_FACTORY_SLOT: u64 = 45;
 const PIXEL_OFFSET: usize = 4096;
 const LIMIT: usize = wm::MAX_WINDOWS;
 /// A live application instance owns its own exact-capability process group.
@@ -141,6 +143,7 @@ fn audit_session_clocks() {
     };
     let package_endpoint = cap_slot_descriptor(PACKAGE_ENDPOINT as usize);
     let notification_factory = cap_slot_descriptor(NOTIFICATION_FACTORY_SLOT as usize);
+    let sync_domain_factory = cap_slot_descriptor(SYNC_DOMAIN_FACTORY_SLOT as usize);
     let frame_slot = unsafe {
         syscall6(
             SYS_CAP_OCCUPIED,
@@ -175,6 +178,7 @@ fn audit_session_clocks() {
                 || package_endpoint[1] == fs_endpoint[1]
                 || package_endpoint[1] == user_root[1]))
         || notification_factory != [u64::from(CAP_KIND_NOTIFICATION_FACTORY), 0, RIGHTS_WRITE]
+        || sync_domain_factory != [u64::from(CAP_KIND_SYNC_DOMAIN_FACTORY), 0, RIGHTS_WRITE]
         || frame_slot != 0
         || lent_slot != 0
     {
@@ -197,7 +201,7 @@ fn audit_session_clocks() {
         log(b"\n");
         die(96)
     }
-    log(b"[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); private notification factory slot44; scratch slots125/126 free\n");
+    log(b"[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); private notification factory slot44; synchronization domain factory slot45; scratch slots125/126 free\n");
 }
 /// Presentation state of a session's transient surface, valid only while
 /// the window policy still holds a popup with this handle.
@@ -236,6 +240,9 @@ const NO_POPUP: PopupState = PopupState {
 struct Session {
     id: u64,
     va: u64,
+    /// Desktop-owned SyncDomain cap slot explicitly delegated to this
+    /// AppInstance's processes with READ|WRITE only.
+    sync_slot: u8,
     stream_cap: u64,
     stream_va: u64,
     stream_faulted: bool,
@@ -336,6 +343,7 @@ const EMPTY_EXTRA: ExtraWindow = ExtraWindow {
 const EMPTY: Session = Session {
     id: 0,
     va: 0,
+    sync_slot: u8::MAX,
     stream_cap: CAP_NONE,
     stream_va: 0,
     stream_faulted: false,
@@ -2189,7 +2197,7 @@ fn launch_helper_image_v2(
         return Err(STATUS_BUSY);
     }
     let session = unsafe { SESSIONS[instance] };
-    if session.id == 0 || session.kind != 6 || session.badge == 0 {
+    if session.id == 0 || session.kind != 6 || session.badge == 0 || session.sync_slot == u8::MAX {
         destroy(image.image.capability);
         return Err(STATUS_BAD_ARG);
     }
@@ -2242,6 +2250,7 @@ fn launch_helper_image_v2(
             startup_abi::CAP_KIND_SHARED_REGION,
             RIGHTS_READ | RIGHTS_WRITE,
         ),
+        startup_cap_descriptor(4, 0, 0),
     ];
     descriptors[1].role = if stream_requested {
         startup_abi::CapabilityRole::StreamWake
@@ -2251,15 +2260,18 @@ fn launch_helper_image_v2(
     if stream_requested {
         descriptors[2].role = startup_abi::CapabilityRole::StandardStreamSet;
     }
-    let capability_count =
+    let mut capability_count =
         usize::from(timer_granted) + usize::from(owner_signal) + usize::from(stream_requested);
     // Canonical AHL1 stream helpers require the timer and owner signal bits,
     // so the fixed descriptor slots are [timer, owner wake, stream set].
-    let capabilities = if stream_requested {
-        &descriptors[..3]
-    } else {
-        &descriptors[..capability_count]
-    };
+    descriptors[capability_count] = startup_role_descriptor(
+        (capability_count + 1) as u16,
+        CapabilityRole::SyncDomain,
+        startup_abi::CAP_KIND_SYNC_DOMAIN,
+        RIGHTS_READ | RIGHTS_WRITE,
+    );
+    capability_count += 1;
+    let capabilities = &descriptors[..capability_count];
     if !stream_requested && owner_signal && !timer_granted {
         destroy(image.image.capability);
         return Err(STATUS_BAD_ARG);
@@ -2353,7 +2365,7 @@ fn launch_helper_image_v2(
         timer_slot = free_slot as u8;
     }
     let mut grants =
-        [InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32); 4];
+        [InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32); 5];
     let mut grant_count = 1;
     if timer_granted {
         grants[grant_count] = InheritGrant::new(timer_slot, (RIGHTS_READ | RIGHTS_WRITE) as u32);
@@ -2368,6 +2380,8 @@ fn launch_helper_image_v2(
             InheritGrant::new(stream.cap as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
         grant_count += 1;
     }
+    grants[grant_count] = InheritGrant::new(session.sync_slot, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+    grant_count += 1;
     let process = spawn_child(instance, image.image.capability, &grants[..grant_count]);
     destroy(startup_cap);
     destroy(image.image.capability);
@@ -2768,7 +2782,7 @@ fn launch_headless_image_v2(
         .filter(|slot| describe(*slot).is_none())
         .count();
     let wants_streams = app_flags & FLAG_STANDARD_STREAMS != 0;
-    if free < 3 + usize::from(wants_streams) {
+    if free < 4 + usize::from(wants_streams) {
         log_launch_refusal(b"headless-cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -2793,6 +2807,7 @@ fn launch_headless_image_v2(
         ),
         startup_cap_descriptor(2, 0, 0),
         startup_cap_descriptor(3, 0, 0),
+        startup_cap_descriptor(4, 0, 0),
     ];
     let mut descriptor_count = 1;
     let mut stdin = None;
@@ -2818,6 +2833,13 @@ fn launch_headless_image_v2(
         stdout = Some(stream_index);
         stderr = Some(stream_index);
     }
+    descriptors[descriptor_count] = startup_role_descriptor(
+        (descriptor_count + 1) as u16,
+        CapabilityRole::SyncDomain,
+        startup_abi::CAP_KIND_SYNC_DOMAIN,
+        RIGHTS_READ | RIGHTS_WRITE,
+    );
+    descriptor_count += 1;
     let spec = startup_abi::StartupSpec {
         application_id: &application_id,
         instance_slot: i as u16,
@@ -2880,6 +2902,7 @@ fn launch_headless_image_v2(
         InheritGrant::new(clock(i) as u8, clock_rights as u32),
         InheritGrant::new(0, 0),
         InheritGrant::new(0, 0),
+        InheritGrant::new(0, 0),
     ];
     let mut grant_count = 2;
     if let Some(stream) = streams.as_ref() {
@@ -2889,12 +2912,34 @@ fn launch_headless_image_v2(
         grants[grant_count] = InheritGrant::new(CLOCK as u8, RIGHTS_WRITE as u32);
         grant_count += 1;
     }
+    let Some(sync_slot) = free_cap_slot() else {
+        destroy(startup_cap);
+        return Err(STATUS_BUSY);
+    };
+    let create_sync = unsafe {
+        syscall6(
+            SYS_SYNC_DOMAIN_CREATE,
+            SYNC_DOMAIN_FACTORY_SLOT,
+            sync_slot,
+            0,
+            0,
+            0,
+            0,
+        )
+    };
+    if create_sync != 0 {
+        destroy(startup_cap);
+        return Err(create_sync);
+    }
+    grants[grant_count] = InheritGrant::new(sync_slot as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+    grant_count += 1;
     let process = spawn_child(i, image, &grants[..grant_count]);
     destroy(startup_cap);
     let process = match process {
         Ok(process) => process,
         Err(status) => {
             log_launch_refusal(b"headless-kernel-spawn", status);
+            destroy(sync_slot);
             return Err(status);
         }
     };
@@ -2910,6 +2955,7 @@ fn launch_headless_image_v2(
     let id = (1u64 << 63) | u64::from(generation);
     sessions[i] = Session {
         id,
+        sync_slot: sync_slot as u8,
         stream_cap,
         stream_va,
         process: Some(process),
@@ -3140,7 +3186,7 @@ fn launch_image_v2_for_app_with_document(
         .filter(|slot| describe(*slot).is_none())
         .count();
     let wants_streams = app_flags & FLAG_STANDARD_STREAMS != 0;
-    if free < 8 + usize::from(wants_streams) {
+    if free < 9 + usize::from(wants_streams) {
         log_launch_refusal(b"cap-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -3313,6 +3359,7 @@ fn launch_image_v2_for_app_with_document(
         startup_cap_descriptor(4, 0, 0),
         startup_cap_descriptor(5, 0, 0),
         startup_cap_descriptor(6, 0, 0),
+        startup_cap_descriptor(7, 0, 0),
     ];
     let mut descriptor_count = 3;
     if has_tail {
@@ -3354,6 +3401,13 @@ fn launch_image_v2_for_app_with_document(
         stdout = Some(stream_index);
         stderr = Some(stream_index);
     }
+    descriptors[descriptor_count] = startup_role_descriptor(
+        (descriptor_count + 1) as u16,
+        CapabilityRole::SyncDomain,
+        startup_abi::CAP_KIND_SYNC_DOMAIN,
+        RIGHTS_READ | RIGHTS_WRITE,
+    );
+    descriptor_count += 1;
     let spec = startup_abi::StartupSpec {
         application_id: &application_id,
         // The app-instance slot is the actual reserved 32-entry manager
@@ -3484,6 +3538,7 @@ fn launch_image_v2_for_app_with_document(
         InheritGrant::new(0, 0),
         InheritGrant::new(0, 0),
         InheritGrant::new(0, 0),
+        InheritGrant::new(0, 0),
     ];
     let mut grant_count = 4;
     if has_tail {
@@ -3497,6 +3552,43 @@ fn launch_image_v2_for_app_with_document(
         grants[grant_count] = InheritGrant::new(CLOCK as u8, RIGHTS_WRITE as u32);
         grant_count += 1;
     }
+    let Some(sync_slot) = free_cap_slot() else {
+        destroy(startup_cap);
+        destroy(badge_slot as u64);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(STATUS_BUSY);
+    };
+    let create_sync = unsafe {
+        syscall6(
+            SYS_SYNC_DOMAIN_CREATE,
+            SYNC_DOMAIN_FACTORY_SLOT,
+            sync_slot,
+            0,
+            0,
+            0,
+            0,
+        )
+    };
+    if create_sync != 0 {
+        destroy(startup_cap);
+        destroy(badge_slot as u64);
+        destroy(home);
+        revoke_files(files_head);
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(create_sync);
+    }
+    grants[grant_count] = InheritGrant::new(sync_slot as u8, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+    grant_count += 1;
     let process = spawn_child(i, image, &grants[..grant_count]);
     // Parent-side seed references are transient; the exact child caps remain.
     destroy(home);
@@ -3506,6 +3598,7 @@ fn launch_image_v2_for_app_with_document(
         Ok(process) => process,
         Err(status) => {
             log_launch_refusal(b"kernel-spawn", status);
+            destroy(sync_slot);
             revoke_files(files_head);
             unsafe {
                 syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
@@ -3523,6 +3616,7 @@ fn launch_image_v2_for_app_with_document(
     sessions[i] = Session {
         id,
         va: va as u64,
+        sync_slot: sync_slot as u8,
         stream_cap,
         stream_va,
         process: Some(process),
@@ -3899,6 +3993,9 @@ fn retire(index: usize, _force: bool) {
     drain_session_output(index, s);
     finish_app_group(index);
     retire_streams(s);
+    if s.sync_slot != u8::MAX {
+        destroy(u64::from(s.sync_slot));
+    }
     let mut extra_index = 0;
     while extra_index < EXTRA_LIMIT {
         let extra = unsafe { EXTRA_WINDOWS[extra_index] };

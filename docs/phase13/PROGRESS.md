@@ -23,7 +23,7 @@
 | 13.4 streams | App and helper standard streams implemented; T1 guest proof passed | ADR-0104 and ADR-0105 provide one-page, three-ring SharedRegions, Startup ABI v2 roles, focused keyboard stdin, output drain, partial transfer, EOF, peer closure, and exact owner teardown. The signed fixture proved parent-to-helper stdin, helper stdout, owner-mediated wake, non-stream helper refusal, invalid stream-handle refusal, and EOF after exact Process-cap reap. Mixed-pressure capacity remains. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads | Implemented; T1 guest proof and T3 preservation passed | ADR-0106 uses the existing process PML4/cap space, exact guarded VM stack caps, per-thread FS.base, same-process join/detach, and four created threads per process. The installed APB1 guest ran four concurrent ring-3 threads with shared heap/read-only VM, checked quota and stale IDs, joined/detached, and restored VM accounting. A killed helper also had a live user worker. The exact rebuilt EFI passed 20/20 fresh preservation boots. |
-| 13.7 native synchronization | Not started | Mutex/Condvar/Once design and wait/wake decision remain. |
+| 13.7 native synchronization | Implemented; T1 guest proof, M10 built-in launch regression, and 20/20 T3 preservation passed | ADR-0107 adds a Desktop-minted per-AppInstance SyncDomain, generation-checked keys, atomic sequence-and-park waits, bounded timeout, and process-owned key/waiter cleanup. The signed registry guest proves contended Mutex, Condvar wake-one/all, Once, sequence-before-wait, timeout, invalid capability refusal, helper teardown with a parked ring-3 waiter, and key/waiter reclamation. 20/20 clean T3 preservation boots passed on the corrected EFI. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
 | Final qualification | Not started | No source freeze, complete historical suite, 100-boot receipt, or extracted-archive witness yet. |
 
@@ -760,5 +760,78 @@ and final qualification remain open.
   and now also runs immediately after a join has made an exited target
   disposable. Thus the joined scheduler record and its kernel stack are
   returned before the join syscall resumes in ring 3.
-  Synchronization, user favorites, mixed-load pressure, PIE scope, and final
-  qualification remain open.
+  At this thread checkpoint, synchronization, user favorites, mixed-load
+  pressure, PIE scope, and final qualification remained open.
+
+
+### Native synchronization implementation and T1 guest proof
+
+- ADR-0107 implements a bounded kernel `SyncDomain` minted only through the
+  Desktop's write-only factory at slot 45. The Desktop owns one destroyable
+  domain cap per installed AppInstance and delegates only READ|WRITE to the
+  selected primary or explicitly launched signed helper. Domain/key numbers
+  remain descriptive; every operation resolves the exact held capability.
+- Added syscalls 68–74 for domain creation, key creation/destruction, sequence
+  reads, waits, wake-one/wake-all, and observable key/waiter counts. Bounds are
+  64 domains, 32 live keys per domain (2,048 globally), 64 parked waiters, and
+  one wait per scheduler thread. Relative timeout uses the existing 100 Hz tick
+  and refuses values above 24 hours. No Notification, IPC, POSIX, or Linux
+  semantics changed.
+- The kernel requires IF=0 for wait registration and blocking. `SYS_SYNC_WAIT`
+  enters with IF cleared by syscall SFMASK, so sequence comparison, waiter
+  insertion, and `try_block_current` cannot be separated by timer preemption.
+  Process teardown clears its own wait records and retires keys created by that
+  process; a delegated waiter on a retired key receives `STATUS_SERVICE_GONE`.
+  Domain-owner teardown invalidates keys and wakes delegated waiters.
+- `arena-runtime::sync` supplies a blocking Mutex, sequence-based Condvar with
+  notify-one/all and timeout, Once, and a lower-level sequence Event. Key RAII
+  destruction passes explicit zeros for all unused syscall registers. The first
+  guest attempts caught this exact-register requirement: `syscall3` left the
+  unused registers unspecified, so key destruction was refused. The corrected
+  six-register call returned per-domain key occupancy to zero.
+- `python3 tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 /
+  OVMF 2025.02 in 52.0 seconds. Three signed installed-app launches each
+  passed the synchronization proof. Four Condvar waiters were measured parked;
+  notify-one woke exactly one, notify-all woke the remaining three, and the
+  timed wait completed. A signed helper was killed while a ring-3 worker was
+  parked on a helper-created Condvar; teardown removed one wait record and two
+  keys, and the owning app observed zero remaining waiters/keys. The test also
+  passed six-window accounting, APB1/registry launch, document handoff, helper
+  streams, and clean shutdown.
+- The first green integration run exposed that the existing two-instance cap
+  oracle omitted the new per-instance SyncDomain owner cap. Its expected delta
+  now accounts for Process, file lineage, stream, and SyncDomain owner caps.
+  Startup ABI host tests pass 8/8; arena-platform passes 38/38; runtime passes
+  21/21; kernel, Desktop, runtime, app, and helper release checks pass. The
+  exact EFI used by the guest is recorded with the preservation receipt below.
+- The T3 preservation checkpoint is green and ready to preserve. Persisted
+  launcher favorites, mixed-load pressure, PIE scope, and final qualification
+  remain outstanding.
+
+
+### SyncDomain startup inventory regression and focused repair
+
+- The first T3 boot failed its historical graphical lifecycle proof: the
+  built-in Gallery process exited at startup stage 70. The exact startup
+  inventory in `desktop/src/bin/application.rs` still allowed only the
+  Phase-12 three/four-cap profile after the trusted Desktop appended the
+  explicit SyncDomain grant.
+- The first repair raised the accepted count and checked the appended
+  SyncDomain descriptor, but still interpreted descriptor 4 as an optional
+  tail when no tail existed. A diagnostic guest observed kind/count/descriptor
+  `5/4/(slot 4, role 8, kind 16, rights 3)`, confirming that slot 4 was the
+  valid SyncDomain descriptor. The profile now separates SyncDomain from the
+  optional kind-specific tail and checks the latter only when count 5 proves
+  it is present.
+- `tools/test_m10_desktop.py` now passes on the rebuilt image: real dock launch,
+  owned Gallery raster, keyboard response, title drag, close, relaunch, and
+  resource return all completed. The corrected EFI SHA-256 is
+  `9500b0d8bd11e35a522cc9f64fa39ed1229bfbadc28b3a4aae101eb03dab5e3a`.
+- After the focused M10 guest passed, `tools/stability_loop.sh 20` completed
+  20/20 fresh boots in 151 seconds with zero failures. Every boot passed the
+  complete historical guest verdicts, network wire fixtures, graphical
+  lifecycle receipt, and clean shutdown. `build/stability-receipt.txt` records
+  `9500b0d8bd11e35a522cc9f64fa39ed1229bfbadc28b3a4aae101eb03dab5e3a 20/20`.
+  Both failed prior attempts remain excluded from green evidence. This is the
+  green T3 synchronization/context-switch/teardown preservation checkpoint;
+  final Phase-13 qualification remains outstanding.

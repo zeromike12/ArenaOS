@@ -40,7 +40,7 @@ pub const MAX_IMAGES: usize = 24;
 /// profile may include endpoint, surface, clock, optional tail, stream page,
 /// and its write-only stream wake capability, plus the startup transport cap
 /// in slot 0.
-pub const MAX_INHERIT: usize = 7;
+pub const MAX_INHERIT: usize = 8;
 /// Spawn-record table bound (one record per spawned child until it is
 /// explicitly forgotten). ADR-0075: 14 boot processes plus twelve desktop
 /// sessions need 26; one per possible process (`MAX_PROCESSES`).

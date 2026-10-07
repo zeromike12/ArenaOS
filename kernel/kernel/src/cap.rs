@@ -106,6 +106,11 @@ pub enum CapObj {
     /// Narrow boot-issued authority to mint bounded, Desktop-owned
     /// notifications. WRITE is checked by SYS_NOTIFICATION_CREATE.
     NotificationFactory,
+    /// ADR-0107: generation-safe wait keys for native Mutex/Condvar/Once.
+    /// The domain cap itself is created by the trusted Desktop factory.
+    SyncDomain { id: u32, generation: u32 },
+    /// Narrow boot-issued authority to create Desktop-owned SyncDomains.
+    SyncDomainFactory,
     /// A registered executable image (ADR-0019): the thing `SYS_SPAWN`
     /// builds processes from. Rights: READ = may spawn from it. v1's
     /// registry is kernel-side and fixed; a filesystem-backed source
@@ -523,6 +528,13 @@ pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
         if let CapObj::OwnedNotification { nid } = cap.obj {
             crate::ipc::destroy_notification(nid)
                 .map_err(|_| "cap destroy: notification retirement refused")?;
+        }
+        if let CapObj::SyncDomain { id, generation } = cap.obj {
+            crate::sync_domain::destroy_domain(
+                pid,
+                crate::sync_domain::DomainRef { id, generation },
+            )
+            .map_err(|_| "cap destroy: synchronization domain retirement refused")?;
         }
         install(pid, slot, Cap::EMPTY)
     })

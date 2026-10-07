@@ -613,7 +613,7 @@ pub fn block_current() {
 /// Park the current thread only if the scheduler can run another thread.
 /// User-thread join uses this form so an impossible join returns a bounded
 /// busy status instead of tripping the kernel's IPC deadlock halt path.
-fn try_block_current() -> bool {
+pub(crate) fn try_block_current() -> bool {
     let kernel_side = without_interrupts(|| unsafe {
         let ks = crate::arch::x86_64::syscall::gs_is_kernel_side();
         if ks {

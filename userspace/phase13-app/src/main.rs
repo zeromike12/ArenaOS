@@ -11,11 +11,12 @@ use arena_desktop::{
     app_client,
     client::{self, Client},
     files::Files,
-    model::Event,
+    model::Event as WindowEvent,
 };
 use arena_lib::abi::{
     CAP_KIND_VM_REGION, RIGHTS_DESTROY, RIGHTS_READ, RIGHTS_WRITE, STATUS_BAD_ADDRESS,
     STATUS_BAD_ARG, STATUS_BUSY, STATUS_QUOTA, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_NOTIFY,
+    SYS_SYNC_KEY_CREATE, SYS_SYNC_KEY_DESTROY, SYS_SYNC_SEQUENCE, SYS_SYNC_WAIT, SYS_SYNC_WAKE,
     SYS_THREAD_CREATE, SYS_THREAD_DETACH, SYS_THREAD_JOIN, SYS_VM_COMMIT, SYS_VM_PROTECT,
     SYS_VM_RELEASE, SYS_WAIT, VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2,
     syscall6,
@@ -23,6 +24,7 @@ use arena_lib::abi::{
 use arena_runtime::capabilities::HeldCapability;
 use arena_runtime::heap::{HeapUsage, MAX_SCALABLE_HEAP_PAGES, PAGE_BYTES, ScalableHeap};
 use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams, STREAM_CAPACITY};
+use arena_runtime::sync::{Condvar, Event as SyncEvent, Mutex, Once, SyncDomain};
 use arena_runtime::threads::{self, Error as ThreadError, JoinHandle};
 use arena_runtime::tls;
 use arena_runtime::vm::{Protection, Region};
@@ -66,13 +68,18 @@ fn application_main(view: StartupView<'_>) -> ! {
     if view.application_id() != &APPLICATION_ID
         || view.argument_count() != 1
         || view.argument(0) != Some(b"org.arenaos.phase13app")
-        || view.capability_count() != if has_document { 6 } else { 5 }
+        || view.capability_count() != if has_document { 7 } else { 6 }
         || view.entry() != actual_entry
         || view.load_base() != 0x0020_0000
         || view.instance_generation() == 0
     {
         client::exit(71);
     }
+    let sync_domain = SyncDomain::from_startup(&view).unwrap_or_else(|_| client::exit(178));
+    let sync_slot = view
+        .capability_for_role(arena_startup_abi::startup::CapabilityRole::SyncDomain)
+        .unwrap_or_else(|| client::exit(178))
+        .slot;
     let (kind, dark, motion, path) = match app_client::startup() {
         Ok(startup) => startup,
         Err(error) => client::exit(80 + error.unsigned_abs() % 20),
@@ -116,6 +123,7 @@ fn application_main(view: StartupView<'_>) -> ! {
     verify_vm();
     verify_heap();
     verify_threads();
+    verify_sync(sync_domain, u64::from(sync_slot));
 
     let unknown = helper_id(b"org.arenaos.phase13unknown");
     if app_client::spawn_helper(unknown).is_ok() {
@@ -198,6 +206,11 @@ fn application_main(view: StartupView<'_>) -> ! {
         }
     }
     app_client::terminate_helper(sleeper).unwrap_or_else(|_| client::exit(147));
+    let sync_after_helper = sync_domain.info().unwrap_or_else(|_| client::exit(214));
+    if sync_after_helper.keys != 0 || sync_after_helper.parked_waiters != 0 {
+        client::exit(215);
+    }
+    client::log(b"[phase13-sync] helper process death reclaimed its key and parked waiter\n");
     client::log(b"[phase13-helper] owner-authorized terminate/reap passed\n");
 
     let (crasher, crasher_streams) =
@@ -324,7 +337,7 @@ fn application_main(view: StartupView<'_>) -> ! {
         loop {
             for index in 0..count {
                 if open[index]
-                    && let Some(Event::Close) = windows[index]
+                    && let Some(WindowEvent::Close) = windows[index]
                         .as_ref()
                         .unwrap_or_else(|| client::exit(139))
                         .poll()
@@ -741,6 +754,353 @@ fn verify_threads() {
     readonly.release().unwrap_or_else(|_| client::exit(213));
     drop(fixture);
     client::log(b"[phase13-threads] four concurrent ring-3 threads shared heap and read-only VM; distinct FS.base TLS, quota, exact stack caps, join/detach, and cleanup passed\n");
+}
+
+struct SyncMutexFixture {
+    mutex: Mutex<u64>,
+    entered: AtomicU64,
+    failures: AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+struct SyncArgument {
+    fixture: *const SyncMutexFixture,
+    ordinal: u64,
+}
+
+extern "C" fn mutex_worker(argument: u64) -> u64 {
+    // SAFETY: verify_sync keeps the fixture and its argument array alive
+    // until every worker has joined.
+    let argument = unsafe { (argument as *const SyncArgument).read_volatile() };
+    let fixture = unsafe { &*argument.fixture };
+    fixture.entered.fetch_add(1, Ordering::Release);
+    for _ in 0..24 {
+        let mut guard = match fixture.mutex.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                fixture.failures.fetch_add(1, Ordering::Relaxed);
+                return 0x1310_0000 + argument.ordinal;
+            }
+        };
+        *guard += 1;
+        if threads::yield_now().is_err() {
+            fixture.failures.fetch_add(1, Ordering::Relaxed);
+            return 0x1310_1000 + argument.ordinal;
+        }
+    }
+    argument.ordinal
+}
+
+struct OnceFixture {
+    once: Once,
+    entered: AtomicU64,
+    completed: AtomicU64,
+    initialized: AtomicU64,
+    failures: AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+struct OnceArgument {
+    fixture: *const OnceFixture,
+    ordinal: u64,
+}
+
+extern "C" fn once_worker(argument: u64) -> u64 {
+    // SAFETY: verify_sync joins every worker before dropping the fixture.
+    let argument = unsafe { (argument as *const OnceArgument).read_volatile() };
+    let fixture = unsafe { &*argument.fixture };
+    fixture.entered.fetch_add(1, Ordering::Release);
+    if fixture
+        .once
+        .call_once(|| {
+            fixture.initialized.fetch_add(1, Ordering::AcqRel);
+            for _ in 0..16 {
+                if threads::yield_now().is_err() {
+                    fixture.failures.fetch_add(1, Ordering::Relaxed);
+                    break;
+                }
+            }
+        })
+        .is_err()
+    {
+        fixture.failures.fetch_add(1, Ordering::Relaxed);
+        return 0x1320_0000 + argument.ordinal;
+    }
+    fixture.completed.fetch_add(1, Ordering::Release);
+    argument.ordinal
+}
+
+struct CondvarFixture {
+    mutex: Mutex<u64>,
+    condition: Condvar,
+    ready: AtomicU64,
+    completed: AtomicU64,
+    failures: AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+struct CondvarArgument {
+    fixture: *const CondvarFixture,
+    ordinal: u64,
+}
+
+extern "C" fn condvar_worker(argument: u64) -> u64 {
+    // SAFETY: verify_sync joins every worker before dropping the fixture.
+    let argument = unsafe { (argument as *const CondvarArgument).read_volatile() };
+    let fixture = unsafe { &*argument.fixture };
+    let mut guard = match fixture.mutex.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            fixture.failures.fetch_add(1, Ordering::Relaxed);
+            return 0x1330_0000 + argument.ordinal;
+        }
+    };
+    fixture.ready.fetch_add(1, Ordering::Release);
+    while *guard == 0 {
+        guard = match fixture.condition.wait(guard) {
+            Ok(guard) => guard,
+            Err(_) => {
+                fixture.failures.fetch_add(1, Ordering::Relaxed);
+                return 0x1330_1000 + argument.ordinal;
+            }
+        };
+    }
+    fixture.completed.fetch_add(1, Ordering::Release);
+    argument.ordinal
+}
+
+fn verify_sync(domain: SyncDomain, domain_slot: u64) {
+    let initial = domain.info().unwrap_or_else(|_| client::exit(216));
+    if initial.keys != 0 || initial.parked_waiters != 0 {
+        client::exit(217);
+    }
+    if unsafe { syscall6(SYS_SYNC_KEY_CREATE, 1, 0, 0, 0, 0, 0) } != STATUS_BAD_ARG
+        || unsafe { syscall6(SYS_SYNC_KEY_DESTROY, domain_slot, u64::MAX, 0, 0, 0, 0) }
+            != STATUS_BAD_ARG
+        || unsafe { syscall6(SYS_SYNC_SEQUENCE, domain_slot, u64::MAX, 0, 0, 0, 0) }
+            != STATUS_BAD_ARG
+        || unsafe { syscall6(SYS_SYNC_WAIT, domain_slot, u64::MAX, 1, 0, 0, 0) } != STATUS_BAD_ARG
+        || unsafe { syscall6(SYS_SYNC_WAKE, domain_slot, u64::MAX, 1, 0, 0, 0) } != STATUS_BAD_ARG
+    {
+        client::exit(218);
+    }
+
+    {
+        // A notification that races ahead of the wait is detected through
+        // the captured sequence rather than being lost as a transient badge.
+        let event = SyncEvent::new(domain).unwrap_or_else(|_| client::exit(219));
+        let observed = event.sequence().unwrap_or_else(|_| client::exit(220));
+        if event.signal_one() != Ok(0) || event.wait(observed, 0).is_err() {
+            client::exit(221);
+        }
+    }
+
+    {
+        let fixture = SyncMutexFixture {
+            mutex: Mutex::new(domain, 0).unwrap_or_else(|_| client::exit(222)),
+            entered: AtomicU64::new(0),
+            failures: AtomicU64::new(0),
+        };
+        let fixture_ptr = &fixture as *const SyncMutexFixture;
+        let mut arguments = [SyncArgument {
+            fixture: fixture_ptr,
+            ordinal: 0,
+        }; 4];
+        let mut handles: [Option<JoinHandle>; 4] = [None, None, None, None];
+        let held = fixture.mutex.lock().unwrap_or_else(|_| client::exit(223));
+        for index in 0..4 {
+            arguments[index].ordinal = index as u64;
+            arguments[index].fixture = fixture_ptr;
+            handles[index] = Some(
+                threads::spawn(
+                    mutex_worker,
+                    &arguments[index] as *const SyncArgument as u64,
+                )
+                .unwrap_or_else(|_| client::exit(224)),
+            );
+        }
+        let mut all_waiting = false;
+        for _ in 0..100_000 {
+            if fixture.entered.load(Ordering::Acquire) == 4
+                && domain.info().is_ok_and(|info| info.parked_waiters == 4)
+            {
+                all_waiting = true;
+                break;
+            }
+            threads::yield_now().unwrap_or_else(|_| client::exit(225));
+        }
+        if !all_waiting {
+            client::exit(226);
+        }
+        drop(held);
+        for (index, handle) in handles.iter_mut().enumerate() {
+            let result = handle
+                .take()
+                .unwrap_or_else(|| client::exit(227))
+                .join()
+                .unwrap_or_else(|_| client::exit(228));
+            if result.exit_status != index as u64 {
+                client::exit(229);
+            }
+        }
+        if *fixture.mutex.lock().unwrap_or_else(|_| client::exit(230)) != 4 * 24
+            || fixture.failures.load(Ordering::Relaxed) != 0
+            || !domain.info().is_ok_and(|info| info.parked_waiters == 0)
+        {
+            client::exit(231);
+        }
+    }
+
+    {
+        let fixture = OnceFixture {
+            once: Once::new(domain).unwrap_or_else(|_| client::exit(232)),
+            entered: AtomicU64::new(0),
+            completed: AtomicU64::new(0),
+            initialized: AtomicU64::new(0),
+            failures: AtomicU64::new(0),
+        };
+        let fixture_ptr = &fixture as *const OnceFixture;
+        let mut arguments = [OnceArgument {
+            fixture: fixture_ptr,
+            ordinal: 0,
+        }; 4];
+        let mut handles: [Option<JoinHandle>; 4] = [None, None, None, None];
+        for index in 0..4 {
+            arguments[index].ordinal = index as u64;
+            arguments[index].fixture = fixture_ptr;
+            handles[index] = Some(
+                threads::spawn(once_worker, &arguments[index] as *const OnceArgument as u64)
+                    .unwrap_or_else(|_| client::exit(233)),
+            );
+        }
+        for _ in 0..100_000 {
+            if fixture.completed.load(Ordering::Acquire) == 4 {
+                break;
+            }
+            threads::yield_now().unwrap_or_else(|_| client::exit(234));
+        }
+        if fixture.entered.load(Ordering::Acquire) != 4
+            || fixture.completed.load(Ordering::Acquire) != 4
+            || fixture.initialized.load(Ordering::Acquire) != 1
+            || fixture.failures.load(Ordering::Relaxed) != 0
+            || !fixture.once.is_complete()
+        {
+            client::exit(235);
+        }
+        for (index, handle) in handles.into_iter().enumerate() {
+            if handle
+                .unwrap_or_else(|| client::exit(236))
+                .join()
+                .unwrap_or_else(|_| client::exit(237))
+                .exit_status
+                != index as u64
+            {
+                client::exit(238);
+            }
+        }
+    }
+
+    {
+        let fixture = CondvarFixture {
+            mutex: Mutex::new(domain, 0).unwrap_or_else(|_| client::exit(239)),
+            condition: Condvar::new(domain).unwrap_or_else(|_| client::exit(240)),
+            ready: AtomicU64::new(0),
+            completed: AtomicU64::new(0),
+            failures: AtomicU64::new(0),
+        };
+        let fixture_ptr = &fixture as *const CondvarFixture;
+        let mut arguments = [CondvarArgument {
+            fixture: fixture_ptr,
+            ordinal: 0,
+        }; 4];
+        let mut handles: [Option<JoinHandle>; 4] = [None, None, None, None];
+        for index in 0..4 {
+            arguments[index].ordinal = index as u64;
+            arguments[index].fixture = fixture_ptr;
+            handles[index] = Some(
+                threads::spawn(
+                    condvar_worker,
+                    &arguments[index] as *const CondvarArgument as u64,
+                )
+                .unwrap_or_else(|_| client::exit(241)),
+            );
+        }
+        let mut all_waiting = false;
+        for _ in 0..100_000 {
+            if fixture.ready.load(Ordering::Acquire) == 4
+                && domain.info().is_ok_and(|info| info.parked_waiters == 4)
+            {
+                all_waiting = true;
+                break;
+            }
+            threads::yield_now().unwrap_or_else(|_| client::exit(242));
+        }
+        if !all_waiting {
+            client::exit(243);
+        }
+        {
+            let mut guard = fixture.mutex.lock().unwrap_or_else(|_| client::exit(244));
+            *guard = 1;
+            if fixture.condition.notify_one() != Ok(1) {
+                client::exit(245);
+            }
+        }
+        let mut one_woke = false;
+        for _ in 0..100_000 {
+            if fixture.completed.load(Ordering::Acquire) == 1
+                && domain.info().is_ok_and(|info| info.parked_waiters == 3)
+            {
+                one_woke = true;
+                break;
+            }
+            threads::yield_now().unwrap_or_else(|_| client::exit(246));
+        }
+        if !one_woke {
+            client::exit(247);
+        }
+        {
+            let mut guard = fixture.mutex.lock().unwrap_or_else(|_| client::exit(248));
+            *guard = 2;
+            if fixture.condition.notify_all() != Ok(3) {
+                client::exit(249);
+            }
+        }
+        for (index, handle) in handles.into_iter().enumerate() {
+            if handle
+                .unwrap_or_else(|| client::exit(250))
+                .join()
+                .unwrap_or_else(|_| client::exit(251))
+                .exit_status
+                != index as u64
+            {
+                client::exit(252);
+            }
+        }
+        if fixture.completed.load(Ordering::Acquire) != 4
+            || fixture.failures.load(Ordering::Relaxed) != 0
+            || !domain.info().is_ok_and(|info| info.parked_waiters == 0)
+        {
+            client::exit(253);
+        }
+    }
+
+    {
+        let mutex = Mutex::new(domain, ()).unwrap_or_else(|_| client::exit(254));
+        let condition = Condvar::new(domain).unwrap_or_else(|_| client::exit(255));
+        let guard = mutex.lock().unwrap_or_else(|_| client::exit(256));
+        let (guard, timed_out) = condition
+            .wait_timeout(guard, 100_000)
+            .unwrap_or_else(|_| client::exit(257));
+        if !timed_out {
+            client::exit(258);
+        }
+        drop(guard);
+    }
+    let clean = domain.info().unwrap_or_else(|_| client::exit(259));
+    if clean.keys != 0 || clean.parked_waiters != 0 || clean.keys_high < 2 {
+        client::exit(260);
+    }
+    client::log(b"[phase13-sync] contended Mutex, multi-waiter Condvar wake-one/all, sequence-before-wait, Once contention, timeout, invalid-cap refusal, and key accounting passed\n");
 }
 
 fn verify_heap() {

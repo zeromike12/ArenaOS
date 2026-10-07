@@ -71,6 +71,14 @@ pub const SYS_THREAD_JOIN: u64 = 65;
 pub const SYS_THREAD_DETACH: u64 = 66;
 /// Read the calling Process's live scheduler-thread count.
 pub const SYS_THREAD_COUNT: u64 = 67;
+/// ADR-0107: create a manager-owned capability-backed synchronization domain.
+pub const SYS_SYNC_DOMAIN_CREATE: u64 = 68;
+pub const SYS_SYNC_KEY_CREATE: u64 = 69;
+pub const SYS_SYNC_KEY_DESTROY: u64 = 70;
+pub const SYS_SYNC_SEQUENCE: u64 = 71;
+pub const SYS_SYNC_WAIT: u64 = 72;
+pub const SYS_SYNC_WAKE: u64 = 73;
+pub const SYS_SYNC_INFO: u64 = 74;
 pub const VM_PROT_READ: u64 = 1;
 pub const VM_PROT_WRITE: u64 = 2;
 pub const VM_PROT_EXEC: u64 = 4;
@@ -101,11 +109,17 @@ pub const CAP_KIND_PROCESS: u8 = 4;
 pub const CAP_KIND_VM_REGION: u8 = 14;
 /// Desktop-only authority to mint bounded owner notifications.
 pub const CAP_KIND_NOTIFICATION_FACTORY: u8 = 15;
+/// ADR-0107: explicit native condition-wait authority.
+pub const CAP_KIND_SYNC_DOMAIN: u8 = 16;
+/// Desktop-only factory for AppInstance-owned SyncDomains.
+pub const CAP_KIND_SYNC_DOMAIN_FACTORY: u8 = 17;
 /// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
-pub const MAX_SPAWN_INHERIT: usize = 7;
+pub const MAX_SPAWN_INHERIT: usize = 8;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
 pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;
+/// ADR-0107: native synchronization wait deadline expired.
+pub const STATUS_TIMEOUT: i64 = -8;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;

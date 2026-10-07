@@ -8,6 +8,7 @@ pub use arena_process::{handles, process};
 pub mod heap;
 pub mod startup;
 pub mod streams;
+pub mod sync;
 pub mod threads;
 pub mod tls;
 pub mod vm;

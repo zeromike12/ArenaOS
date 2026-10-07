@@ -101,9 +101,10 @@ The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
 | SharedRegion records / maps | 96 / 160 bounded live records; aggregate page budget remains 36,864 | ADR-0104; sized for 16 stream-enabled instances and 32 windows |
 | Native standard streams | one page per opted-in instance or explicitly streamed helper; three single-producer/single-consumer rings, 768 bytes each | ADR-0104/0105 |
 | User-created ring-3 threads | at most 4 additional threads per Process; 64 global scheduler slots unchanged | ADR-0106 |
+| Native synchronization | 64 capability-owned domains, 32 keys/domain and 2,048 global keys, 64 parked waiters | ADR-0107 |
 | User-thread stacks | one exact 16-page VmRegion per thread; one metadata/TLS page, one uncommitted guard, 14 committed RW/NX pages | ADR-0106 |
 | Thread lifecycle | same-process stable status join or detach; kernel stack and detached VmRegion cleanup after the thread is switched off | ADR-0106 |
-| Spawn grants / startup descriptors | at most 7 grants (including slot-0 startup cap) / 6 descriptors; 128 process capability slots and slot-127 accounting are unchanged | ADR-0104 |
+| Spawn grants / startup descriptors | at most 8 grants (including slot-0 startup cap) / 7 descriptors; 128 process capability slots and slot-127 accounting are unchanged | ADR-0104 |
 
 The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
 The Phase-13 application opts into ScalableHeap; no reserved capability slot
@@ -113,7 +114,8 @@ The live Desktop still holds at most 32 application Process sessions and the
 window policy still holds at most 32 total ordinary windows. One session can
 now own several windows; an additional window consumes one fresh SharedRegion,
 one private snapshot SharedRegion, two Desktop mappings, a child mapping, and
-one exact transferred cap while live. The extra-window record table is
+one exact transferred cap while live; the instance retains its own SyncDomain
+owner cap for native synchronization. The extra-window record table is
 bounded at 32, but the Window Manager remains the authoritative total limit.
 Process-owned user spans remain 80 per process and are shared by all its
 threads.
@@ -140,8 +142,8 @@ Startup ABI standard streams, focused keyboard stdin, output backpressure,
 partial transfer, EOF, and exact owner teardown. ADR-0105 extends the same
 bounded rings to allowlisted helpers, with a capability returned only after
 explicit request and owner-scoped wake through the authenticated manager.
-Persisted launcher favorites, user threads, synchronization, mixed-load
-pressure, and final qualification remain open. The
+Persisted launcher favorites, mixed-load pressure, PIE scope, and final
+qualification remain open. The
 dynamic Image envelope is a bounded executable staging mechanism; it is not
 process VM and does not imply PIE or ASLR support. See `PROGRESS.md` for
 measured receipts.
@@ -241,11 +243,12 @@ measured receipts.
   shared heap and RO VM, distinct FS.base TLS, exact stack-cap refusal, join,
   detach, and VM baseline return. A killed helper had a live user worker; its
   ProcessGroup cleanup returned to baseline. The exact EFI passed 20/20
-  fresh preservation boots after the user-thread implementation. Add native
-  Mutex, Condvar/wait-notify, and Once semantics without Linux futex behavior.
-  If these need a kernel wait
-  primitive, record why the existing notification, timer, and IPC bounds are
-  unsuitable before adding it.
+  fresh preservation boots after the user-thread implementation. Native
+  Mutex, Condvar/wait-notify, Once, timeout, and teardown now pass the signed
+  installed-app guest under ADR-0107. The kernel wait domain is justified by
+  the existing single-waiter Notification, one-shot timer, and process IPC
+  limits. Its T1 proof, built-in startup-profile regression, and 20/20 T3
+  preservation checkpoint pass.
 
 ### F. Qualification and handoff
 
@@ -272,5 +275,5 @@ measured receipts.
 | App/process/window lifecycle | compositor and Desktop; M10/M11; Phase-12 M12 32-session and resource tests |
 | Streams | stream model and real byte-transfer guest; IPC cancellation/server death; process teardown |
 | VM and heap | allocator/startup M12; scheduler; spawn/teardown; IPC; SharedRegion; M8.5/M9 resources |
-| Threads and synchronization | scheduler/context switching; TLS; mapping ownership; process death; IPC waits/notifications/timers; concurrent guest tests |
+| Threads and synchronization | scheduler/context switching; TLS; mapping ownership; process death; IPC waits/notifications/timers; native SyncDomain table and concurrent guest tests |
 | Final artifact or packaging only | exact EFI/archive build and independent extracted boot as applicable |

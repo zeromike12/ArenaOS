@@ -24,8 +24,8 @@ use arena_startup_abi::{
     manifest::FLAG_MULTI_INSTANCE,
     startup::{
         CAP_KIND_BADGED_ENDPOINT, CAP_KIND_MEMORY_POOL, CAP_KIND_NOTIFICATION,
-        CAP_KIND_SHARED_REGION, CapabilityDescriptor, CapabilityRole, RIGHT_COPY, RIGHT_DESTROY,
-        RIGHT_READ, RIGHT_WRITE, StartupView,
+        CAP_KIND_SHARED_REGION, CAP_KIND_SYNC_DOMAIN, CapabilityDescriptor, CapabilityRole,
+        RIGHT_COPY, RIGHT_DESTROY, RIGHT_READ, RIGHT_WRITE, StartupView,
     },
 };
 use arena_ui::metrics as m;
@@ -205,8 +205,8 @@ fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), 
         || view.argument_count() > 2
         || view.argument(0) != Some(&application_id[..id_len])
         || view.environment_count() != 2
-        || view.capability_count() < 3
-        || view.capability_count() > 4
+        || view.capability_count() < 4
+        || view.capability_count() > 5
         || view.cwd_descriptor().is_some()
         || view.stdin_descriptor().is_some()
         || view.stdout_descriptor().is_some()
@@ -276,19 +276,33 @@ fn startup_values(view: &StartupView<'_>) -> Result<(u8, bool, bool, [u8; 32]), 
     {
         return Err(-2);
     }
-    match (kind, view.capability_count(), view.capability(3)) {
-        (apps::MONITOR, 4, Some(cap))
+    let sync_descriptor = CapabilityDescriptor {
+        slot: view.capability_count() as u16,
+        role: CapabilityRole::SyncDomain,
+        kind: CAP_KIND_SYNC_DOMAIN,
+        rights: RIGHT_READ | RIGHT_WRITE,
+    };
+    if view.capability(view.capability_count() - 1) != Some(sync_descriptor) {
+        return Err(-2);
+    }
+    let optional_tail = if view.capability_count() == 5 {
+        view.capability(3)
+    } else {
+        None
+    };
+    match (kind, view.capability_count(), optional_tail) {
+        (apps::MONITOR, 5, Some(cap))
             if cap.slot == 4
                 && cap.role == CapabilityRole::Other
                 && cap.kind == CAP_KIND_MEMORY_POOL
                 && cap.rights == RIGHT_READ => {}
-        (apps::TERMINAL | apps::FILES | apps::EDITOR, 4, Some(cap))
+        (apps::TERMINAL | apps::FILES | apps::EDITOR, 5, Some(cap))
             if cap.slot == 4
                 && cap.role == CapabilityRole::Other
                 && cap.kind == CAP_KIND_BADGED_ENDPOINT
                 && cap.rights == (RIGHT_WRITE | RIGHT_COPY) => {}
-        (apps::TERMINAL | apps::FILES | apps::EDITOR, 3, None) => {}
-        (apps::SETTINGS | apps::GALLERY | 6, 3, None) => {}
+        (apps::TERMINAL | apps::FILES | apps::EDITOR, 4, None) => {}
+        (apps::SETTINGS | apps::GALLERY | 6, 4, None) => {}
         _ => return Err(-2),
     }
     Ok((kind, dark, motion, path))

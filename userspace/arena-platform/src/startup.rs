@@ -12,7 +12,7 @@ pub const HEADER_BYTES: usize = 128;
 pub const INSTANCE_SLOTS: usize = 32;
 pub const ARGUMENT_MAX: usize = 32;
 pub const ENVIRONMENT_MAX: usize = 32;
-pub const CAPABILITY_MAX: usize = 6;
+pub const CAPABILITY_MAX: usize = 7;
 pub const STRING_BYTES_MAX: usize = 3072;
 pub const CAPABILITY_DESCRIPTOR_BYTES: usize = 16;
 pub const STRING_DESCRIPTOR_BYTES: usize = 8;
@@ -34,6 +34,8 @@ pub const CAP_KIND_PROOF_TOKEN: u8 = 10;
 pub const CAP_KIND_UNTYPED: u8 = 11;
 pub const CAP_KIND_BADGED_ENDPOINT: u8 = 12;
 pub const CAP_KIND_RTC: u8 = 13;
+/// ADR-0107: explicit native synchronization wait authority.
+pub const CAP_KIND_SYNC_DOMAIN: u8 = 16;
 
 pub const RIGHT_READ: u32 = 1 << 0;
 pub const RIGHT_WRITE: u32 = 1 << 1;
@@ -92,6 +94,7 @@ pub enum CapabilityRole {
     Other = 5,
     StandardStreamSet = 6,
     StreamWake = 7,
+    SyncDomain = 8,
 }
 impl CapabilityRole {
     fn from_byte(value: u8) -> Option<Self> {
@@ -103,6 +106,7 @@ impl CapabilityRole {
             5 => Some(Self::Other),
             6 => Some(Self::StandardStreamSet),
             7 => Some(Self::StreamWake),
+            8 => Some(Self::SyncDomain),
             _ => None,
         }
     }
@@ -261,6 +265,12 @@ impl StartupView<'_> {
     pub fn capability(&self, index: usize) -> Option<CapabilityDescriptor> {
         (index < self.cap_count).then(|| self.capabilities[index])
     }
+    pub fn capability_for_role(&self, role: CapabilityRole) -> Option<CapabilityDescriptor> {
+        self.capabilities[..self.cap_count]
+            .iter()
+            .copied()
+            .find(|descriptor| descriptor.role == role)
+    }
     pub fn capability_matches(&self, index: usize, observed: [u64; 3]) -> bool {
         let Some(expected) = self.capability(index) else {
             return false;
@@ -379,9 +389,16 @@ pub fn parse(page: &[u8; BLOCK_BYTES]) -> Result<StartupView<'_>, Error> {
         validate_capabilities(page, caps_offset, cap_count, [cwd, stdin, stdout, stderr])?;
     let stream_set = role_descriptor(&capabilities, cap_count, CapabilityRole::StandardStreamSet);
     let stream_wake = role_descriptor(&capabilities, cap_count, CapabilityRole::StreamWake);
+    let sync_domain = role_descriptor(&capabilities, cap_count, CapabilityRole::SyncDomain);
     let streams_requested = flags & FLAG_STANDARD_STREAMS != 0;
     if streams_requested != stream_set.is_some() || streams_requested != stream_wake.is_some() {
         return Err(Error::InvalidRoleReference);
+    }
+    if sync_domain.is_some_and(|index| {
+        let descriptor = capabilities[usize::from(index)];
+        descriptor.kind != CAP_KIND_SYNC_DOMAIN || descriptor.rights != (RIGHT_READ | RIGHT_WRITE)
+    }) {
+        return Err(Error::InvalidCapability);
     }
     let mut arguments = [StringDescriptor::EMPTY; ARGUMENT_MAX];
     let mut environment = [StringDescriptor::EMPTY; ENVIRONMENT_MAX];
@@ -608,7 +625,7 @@ fn validate_capabilities(
     references: [Option<u16>; 4],
 ) -> Result<[CapabilityDescriptor; CAPABILITY_MAX], Error> {
     let mut capabilities = [EMPTY_CAPABILITY; CAPABILITY_MAX];
-    let mut found = [None; 6];
+    let mut found = [None; 7];
     for (index, output) in capabilities.iter_mut().enumerate().take(cap_count) {
         let at = caps_offset + index * CAPABILITY_DESCRIPTOR_BYTES;
         let descriptor = read_capability(page, caps_offset, index)?;
@@ -635,6 +652,12 @@ fn validate_capabilities(
         {
             return Err(Error::InvalidCapability);
         }
+        if descriptor.role == CapabilityRole::SyncDomain
+            && (descriptor.kind != CAP_KIND_SYNC_DOMAIN
+                || descriptor.rights != (RIGHT_READ | RIGHT_WRITE))
+        {
+            return Err(Error::InvalidCapability);
+        }
         if page[at + 8..at + CAPABILITY_DESCRIPTOR_BYTES]
             .iter()
             .any(|byte| *byte != 0)
@@ -649,6 +672,7 @@ fn validate_capabilities(
             CapabilityRole::Other => None,
             CapabilityRole::StandardStreamSet => Some(4),
             CapabilityRole::StreamWake => Some(5),
+            CapabilityRole::SyncDomain => Some(6),
         };
         if let Some(role_index) = role_index
             && found[role_index].replace(index as u16).is_some()
@@ -714,7 +738,7 @@ fn read_capability(
 }
 
 fn valid_cap_kind(kind: u8) -> bool {
-    (CAP_KIND_IMAGE..=CAP_KIND_RTC).contains(&kind)
+    (CAP_KIND_IMAGE..=CAP_KIND_RTC).contains(&kind) || kind == CAP_KIND_SYNC_DOMAIN
 }
 
 fn valid_application_id(id: &[u8; ID_BYTES]) -> bool {
@@ -904,6 +928,48 @@ mod tests {
             parse(&split_reference),
             Err(Error::InvalidRoleReference)
         ));
+    }
+
+    #[test]
+    fn sync_domain_role_requires_exact_read_write_authority_and_is_unique() {
+        let args: [&[u8]; 1] = [b"com.arena.editor"];
+        let env: [&[u8]; 0] = [];
+        let domain = CapabilityDescriptor {
+            slot: 1,
+            role: CapabilityRole::SyncDomain,
+            kind: CAP_KIND_SYNC_DOMAIN,
+            rights: RIGHT_READ | RIGHT_WRITE,
+        };
+        let caps = [domain];
+        let mut spec = sample_spec(&args, &env, &caps);
+        spec.cwd = None;
+        let mut page = [0; BLOCK_BYTES];
+        encode(&spec, &mut page).unwrap();
+        let view = parse(&page).unwrap();
+        assert_eq!(
+            view.capability_for_role(CapabilityRole::SyncDomain),
+            Some(domain)
+        );
+
+        let mut wrong_rights = page;
+        put_u32(&mut wrong_rights, HEADER_BYTES + 4, RIGHT_READ);
+        assert!(matches!(
+            parse(&wrong_rights),
+            Err(Error::InvalidCapability)
+        ));
+
+        let mut wrong_kind = page;
+        wrong_kind[HEADER_BYTES + 3] = CAP_KIND_NOTIFICATION;
+        assert!(matches!(parse(&wrong_kind), Err(Error::InvalidCapability)));
+
+        let duplicate = [domain, CapabilityDescriptor { slot: 2, ..domain }];
+        let mut duplicate_spec = sample_spec(&args, &env, &duplicate);
+        duplicate_spec.cwd = None;
+        let mut duplicate_page = [0; BLOCK_BYTES];
+        assert_eq!(
+            encode(&duplicate_spec, &mut duplicate_page),
+            Err(Error::InvalidCapability)
+        );
     }
 
     #[test]

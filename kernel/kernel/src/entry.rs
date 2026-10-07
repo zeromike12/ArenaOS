@@ -373,6 +373,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     if let Err(e) = crate::timer::init() {
         crate::halt::halt_machine(e);
     }
+    if let Err(e) = crate::sync_domain::init() {
+        crate::halt::halt_machine(e);
+    }
     crate::timer::log_ready();
     if !crate::m6::run_suite() {
         crate::halt::halt_machine("milestone 6 suite failed");
@@ -2714,6 +2717,18 @@ fn start_boot_desktop(
         44,
         Cap {
             obj: CapObj::NotificationFactory,
+            rights: W,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // Slot 45 is the Desktop-only authority to create AppInstance-owned
+    // native synchronization domains; children receive only an exact
+    // READ|WRITE domain grant from the manager.
+    crate::cap::issue(
+        comp,
+        45,
+        Cap {
+            obj: CapObj::SyncDomainFactory,
             rights: W,
         },
     )
