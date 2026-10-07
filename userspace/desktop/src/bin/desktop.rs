@@ -48,6 +48,10 @@ const USER_ROOT: u64 = 20;
 const PACKAGE_ENDPOINT: u64 = 43;
 const PIXEL_OFFSET: usize = 4096;
 const LIMIT: usize = wm::MAX_WINDOWS;
+/// A live application instance owns its own exact-capability process group.
+/// Four members matches the reusable ArenaOS lifecycle model and leaves room
+/// for the primary plus explicitly authorized helpers.
+const APP_GROUP_PROCESSES: usize = 4;
 /// Window presentation records are separate from process sessions. The WM
 /// remains the total-window bound; this table can hold all ordinary windows
 /// beyond one primary window per process.
@@ -587,7 +591,12 @@ static mut ASSOCIATION_DEFAULTS: arena_desktop::associations::Defaults =
 static mut NEXT_SESSION_BADGE: u32 = 1;
 /// The desktop owns every application Process cap through this generation-safe
 /// group; Session stores only a local handle, never a PID or raw cap slot.
-static mut CHILDREN: Option<ProcessGroup<ChildProcess, LIMIT>> = None;
+/// AppInstance slot -> its ProcessGroup. The slot is descriptive routing only;
+/// operations still use the generation-checked group handle and held Process
+/// cap. Keeping groups per instance prevents one app from consuming or
+/// reaping another app's members.
+static mut APP_GROUPS: [Option<ProcessGroup<ChildProcess, APP_GROUP_PROCESSES>>; LIMIT] =
+    [const { None }; LIMIT];
 static mut WM: State = match State::new(800, 600) {
     Ok(s) => s,
     Err(_) => panic!("constant geometry"),
@@ -1698,43 +1707,22 @@ fn destroy(slot: u64) {
         }
     }
 }
-fn child_capacity_available() -> bool {
-    unsafe { (&*(&raw const CHILDREN)).as_ref() }.is_some_and(ProcessGroup::can_spawn)
+fn child_capacity_available(instance: usize) -> bool {
+    if instance >= LIMIT {
+        return false;
+    }
+    unsafe { (&*(&raw const APP_GROUPS))[instance].as_ref() }.is_none_or(ProcessGroup::can_spawn)
 }
-fn child_live(handle: Handle) -> bool {
-    unsafe { (&*(&raw const CHILDREN)).as_ref() }
+fn child_live(instance: usize, handle: Handle) -> bool {
+    unsafe { (&*(&raw const APP_GROUPS))[instance].as_ref() }
         .unwrap_or_else(|| die(83))
         .is_live(handle)
         .unwrap_or_else(|_| die(83))
 }
-fn finish_child(handle: Handle, force: bool) {
-    let group = unsafe { (&mut *(&raw mut CHILDREN)).as_mut() }.unwrap_or_else(|| die(84));
-    // A forced close can race an application's own exit after Close was
-    // delivered. Select the kernel finish mode from the exact held Process
-    // capability's current state so mode 1 never targets an already-dead child.
-    let live = group.is_live(handle).unwrap_or_else(|_| die(84));
-    let result = if force && live {
-        group.stop_and_reap(handle)
-    } else {
-        group.reap_exited(handle)
-    };
-    result.unwrap_or_else(|_| die(84));
-}
-fn spawn_child(image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
-    if image >= CAP_SLOTS as u64 {
-        return Err(-2);
-    }
-    let group = unsafe { (&mut *(&raw mut CHILDREN)).as_mut() }.unwrap_or_else(|| die(83));
-    match group.spawn(|| {
-        ChildProcess::spawn(
-            image as u8,
-            grants,
-            Some(ExitSignal {
-                notification_slot: CLOCK as u8,
-                badge: BADGE_EXIT,
-            }),
-        )
-    }) {
+fn finish_spawn_result(
+    outcome: Result<Handle, GroupSpawnError<SpawnError, ChildProcess>>,
+) -> Result<Handle, i64> {
+    match outcome {
         Ok(handle) => Ok(handle),
         Err(GroupSpawnError::Full) => Err(STATUS_BUSY),
         Err(GroupSpawnError::Spawn(SpawnError::Kernel(status))) => Err(status),
@@ -1749,6 +1737,38 @@ fn spawn_child(image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
             Err(STATUS_BUSY)
         }
     }
+}
+fn finish_app_group(instance: usize) {
+    let group =
+        unsafe { (&mut *(&raw mut APP_GROUPS))[instance].as_mut() }.unwrap_or_else(|| die(84));
+    // An AppInstance owns all its processes. Retiring it always finishes every
+    // exact Process cap in the group before releasing the group record.
+    group.stop_all().unwrap_or_else(|_| die(84));
+}
+fn spawn_child(instance: usize, image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
+    if instance >= LIMIT {
+        return Err(STATUS_BAD_ARG);
+    }
+    if image >= CAP_SLOTS as u64 {
+        return Err(-2);
+    }
+    let spawn = || {
+        ChildProcess::spawn(
+            image as u8,
+            grants,
+            Some(ExitSignal {
+                notification_slot: CLOCK as u8,
+                badge: BADGE_EXIT,
+            }),
+        )
+    };
+    if let Some(group) = unsafe { (&mut *(&raw mut APP_GROUPS))[instance].as_mut() } {
+        return finish_spawn_result(group.spawn(spawn));
+    }
+    let mut group = ProcessGroup::<ChildProcess, APP_GROUP_PROCESSES>::new();
+    let handle = finish_spawn_result(group.spawn(spawn))?;
+    unsafe { (*(&raw mut APP_GROUPS))[instance] = Some(group) };
+    Ok(handle)
 }
 fn display(frame: arena_compositor_model::wire::Frame, cap: u64) -> ([u64; 3], [u8; 64]) {
     let mut b = [0; 64];
@@ -1913,7 +1933,7 @@ fn launch_headless_image_v2(
         log_launch_refusal(b"headless-instance-table", STATUS_BUSY);
         return Err(STATUS_BUSY);
     };
-    if i >= startup_abi::INSTANCE_SLOTS || !child_capacity_available() {
+    if i >= startup_abi::INSTANCE_SLOTS || !child_capacity_available(i) {
         log_launch_refusal(b"headless-process-group", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -2003,7 +2023,7 @@ fn launch_headless_image_v2(
         InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
         InheritGrant::new(clock(i) as u8, clock_rights as u32),
     ];
-    let process = spawn_child(image, &grants);
+    let process = spawn_child(i, image, &grants);
     destroy(startup_cap);
     let process = match process {
         Ok(process) => process,
@@ -2218,7 +2238,7 @@ fn launch_image_v2_for_app_with_document(
         log_launch_refusal(b"startup-instance-slots", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
-    if !child_capacity_available() {
+    if !child_capacity_available(i) {
         log_launch_refusal(b"process-group", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -2530,7 +2550,7 @@ fn launch_image_v2_for_app_with_document(
         tail,
     ];
     let grant_count = if has_tail { 5 } else { 4 };
-    let process = spawn_child(image, &grants[..grant_count]);
+    let process = spawn_child(i, image, &grants[..grant_count]);
     // Parent-side seed references are transient; the exact child caps remain.
     destroy(home);
     destroy(startup_cap);
@@ -2592,7 +2612,7 @@ fn launch_image_legacy_with_document(
         log_launch_refusal(b"session-table", STATUS_BUSY);
         return Err(STATUS_BUSY);
     };
-    if !child_capacity_available() {
+    if !child_capacity_available(i) {
         log_launch_refusal(b"process-group", STATUS_BUSY);
         return Err(STATUS_BUSY);
     }
@@ -2703,7 +2723,7 @@ fn launch_image_legacy_with_document(
     } else {
         4
     };
-    let process = spawn_child(image, &spec[..grant_count]);
+    let process = spawn_child(i, image, &spec[..grant_count]);
     // The child holds its own copy; the broker never keeps the grant.
     destroy(home);
     let process = match process {
@@ -2917,12 +2937,12 @@ fn retire_primary_window(index: usize) {
         current.focus_last = 0;
     }
 }
-fn retire(index: usize, force: bool) {
+fn retire(index: usize, _force: bool) {
     let s = unsafe { SESSIONS[index] };
     if s.id == 0 {
         return;
     }
-    finish_child(s.process.unwrap_or_else(|| die(84)), force);
+    finish_app_group(index);
     let mut extra_index = 0;
     while extra_index < EXTRA_LIMIT {
         let extra = unsafe { EXTRA_WINDOWS[extra_index] };
@@ -2958,6 +2978,7 @@ fn retire(index: usize, force: bool) {
     let _ = unsafe { syscall1(SYS_TRY_WAIT, clock(index)) };
     unsafe {
         SESSIONS[index] = EMPTY;
+        APP_GROUPS[index] = None;
         WOKEN[index] = false;
     }
     log(b"[desktop] application retired: kind=");
@@ -2968,7 +2989,7 @@ fn sweep() -> bool {
     let mut changed = false;
     let now = arena_desktop::app_client::now();
     for (i, s) in unsafe { *(&raw const SESSIONS) }.into_iter().enumerate() {
-        if s.id != 0 && !child_live(s.process.unwrap_or_else(|| die(83))) {
+        if s.id != 0 && !child_live(i, s.process.unwrap_or_else(|| die(83))) {
             if !s.ending && s.handle != 0 {
                 unsafe {
                     SESSIONS[i].ending = true;
@@ -3948,7 +3969,6 @@ fn reply(status: u64, result: u64, bytes: &[u8; 64]) {
 }
 arena_desktop::entry!(main, 64 * 1024);
 extern "C" fn main() -> ! {
-    unsafe { *(&raw mut CHILDREN) = Some(ProcessGroup::new()) };
     let (mode, b) = display(arena_compositor_model::wire::Frame::Mode, CAP_NONE);
     let w = (mode[1] & 0xffff_ffff) as usize;
     let h = (mode[1] >> 32) as usize;
@@ -4121,7 +4141,9 @@ extern "C" fn main() -> ! {
             let badges: [u32; LIMIT] = core::array::from_fn(|index| sessions[index].badge);
             let selected =
                 arena_desktop::session_auth::select_live_badge(&badges, badge, |index| {
-                    sessions[index].process.is_some_and(child_live)
+                    sessions[index]
+                        .process
+                        .is_some_and(|handle| child_live(index, handle))
                 });
             if let Ok(Some(i)) = selected {
                 authenticated_session = Some(i);
@@ -4482,7 +4504,10 @@ extern "C" fn main() -> ! {
         } else if let Some([7, id, rights]) = description {
             if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                 .iter()
-                .position(|s| s.id == id && s.process.is_some_and(child_live))
+                .enumerate()
+                .position(|(index, s)| {
+                    s.id == id && s.process.is_some_and(|handle| child_live(index, handle))
+                })
             {
                 if rights & RIGHTS_DESTROY != 0 {
                     match service(i, rights, &mut bytes) {
@@ -4502,7 +4527,10 @@ extern "C" fn main() -> ! {
             {
                 if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                     .iter()
-                    .position(|s| s.id == id && s.process.is_some_and(child_live))
+                    .enumerate()
+                    .position(|(index, s)| {
+                        s.id == id && s.process.is_some_and(|handle| child_live(index, handle))
+                    })
                 {
                     if arena_desktop::service_wire::Frame::decode(&bytes)
                         == Ok(arena_desktop::service_wire::Frame::Bootstrap)

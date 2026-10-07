@@ -19,7 +19,7 @@
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
-| 13.3 windows, helpers, lifecycle | Multi-window and headless primary launch implemented; helper/AppInstance separation remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. Guest proves three windows per process, two concurrent windowed instances, and one windowless headless instance; allowlisted helpers and distinct multi-process AppInstance ownership remain. |
+| 13.3 windows, helpers, lifecycle | Multi-window/headless launch and per-instance ProcessGroups implemented; helper execution/status remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. Guest proves three windows per process, two concurrent windowed instances, one windowless headless instance, and 32-session group-slot reuse; signed helper allowlisting and process exit status remain. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
@@ -412,6 +412,35 @@ pressure, favorites, and final qualification remain open.
 - The headless launch adds no new kernel bound and leaves the Phase-12 low-32
   manager accounting, exact 128-slot cap table, and observable slot-127
   authority unchanged. This source checkpoint is ready to preserve; helper
-  processes, a production multi-process AppInstance table, streams, user
+  processes, full AppInstance lifecycle, streams, user
   threads, synchronization, launcher favorites, mixed-load pressure, and
   final qualification remain outstanding.
+
+### Per-AppInstance ProcessGroup T2
+
+- Replaced Desktop's single global child group with one bounded
+  `ProcessGroup<ChildProcess, 4>` per occupied app-instance/session slot.
+  Primary launch stores its generation-safe group handle in that owner's row;
+  all liveness and teardown use the group's held Process capabilities. App
+  retirement drains the complete group before releasing the row, so future
+  helpers cannot be orphaned when the primary exits. Session indices and
+  application IDs remain descriptive routing only.
+- Desktop library tests passed 84/84. The desktop binary check passed, and
+  targeted Clippy passed with the repository's existing
+  `len_without_is_empty` and `if_same_then_else` allowances. The signed APB1
+  guest passed: two instances with three windows each, read-only document
+  handoff, one headless instance, and exact teardown. The 32-session scale
+  guest passed with the 33rd launch refused without mutation and full cleanup.
+- Scale receipt `(free frames, records, processes, SharedRegions, pages,
+  maps, caps)`: baseline `(114256,15,15,2,470,4,45)`, full
+  `(78309,47,47,66,30550,110,109)`, half-close
+  `(96244,31,31,34,15510,58,77)`, reused-full
+  `(78308,47,47,66,30550,111,109)`, final
+  `(114179,15,15,2,470,4,45)`. The 77 retained page-table frames match the
+  existing scale behavior; all identity-bearing counts returned to baseline.
+- `tools/stability_loop.sh 10` passed 10/10 clean M1-M12 boots in 75 seconds,
+  zero failures, for EFI SHA-256
+  `c09a41221750958922861712236db5e459bd07739f170ff857cb86fcaa8ecd7e`.
+  This checkpoint is preserved in commit `af9946f`; helpers, streams, user
+  threads, synchronization, launcher favorites, mixed-load pressure, and
+  final qualification remain open.

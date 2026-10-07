@@ -116,8 +116,8 @@ read-only File capability. ADR-0097 and the signed APB1 T1 guest now prove
 three independently backed ordinary windows under one process and two such
 instances at once. ADR-0098 adds a signed installed headless launch with an
 exact Process cap, one attenuated Notification, no window or Desktop endpoint,
-and real timer-driven teardown. Persisted launcher favorites, distinct
-multi-process AppInstance ownership, helper processes, streams, user threads,
+and real timer-driven teardown. Persisted launcher favorites, helper
+processes, streams, user threads,
 synchronization, mixed-load pressure, and final qualification remain open. The
 dynamic Image envelope is a bounded executable staging mechanism; it is not
 process VM and does not imply PIE or ASLR support. See `PROGRESS.md` for
@@ -153,17 +153,23 @@ measured receipts.
 ### C. Instance, process, and window lifecycle
 
 - Connect `AppInstanceTable`, exact Process-capability groups, and a separate
-  window set to production broker state.
+  window set to production broker state. **Status:** each occupied Desktop
+  app-instance slot owns a separate four-member `ProcessGroup`; generation-
+  safe group handles wrap exact Process caps, and retirement drains the whole
+  group before clearing its owner slot (ADR-0099). The reusable
+  `AppInstanceTable`/`WindowSet` remains a host-side model; the Desktop session
+  record still needs a complete multi-process instance lifecycle.
 - Give each ordinary window independent surface, compositor, damage,
   publication, close/state, and accounting ownership; prove one app owns at
   least three simultaneous windows. **Status:** window-level production
   ownership and the three-window installed APB1 guest proof pass (ADR-0097);
-  the broker's larger `AppInstance`/multi-process model remains open.
+  per-instance ProcessGroup ownership is guest-regressed (ADR-0099); explicit
+  helper launch and lifecycle remain open.
 - **Status:** a signed headless primary launch with explicit attenuated
   Notification authority and exact Process-cap wait/reap is implemented and
-  guest-proved (ADR-0098). Add allowlisted helpers with explicit grants, child
-  status, terminate policy, crash handling, instance-group cleanup, and
-  manager-death policy.
+  guest-proved (ADR-0098). Add signed allowlisted helpers with explicit
+  grants, child status, terminate policy, crash handling, and manager-death
+  policy.
 
 ### D. Streams
 
