@@ -29,7 +29,9 @@ def main():
         SOURCE.write_bytes(original.replace(NEEDLE,MUTANT,1))
         mutant=mtest.build(LABEL+'-mutant',desktop=True)
         rc,s,_=mtest.boot(LABEL,mutant,[((b'[desktop] real desktop frame presented',b'arena>'),1,killed)],arena_env.make_scratch_disk(),pointer=True)
-        assert rc!=0 and '[arena ERROR halt]' in s and 'graphics: original boot service died; IPC failed; fail-closed, no restart' in s
+        # QEMU returns zero for the guest's requested UEFI shutdown. The
+        # fatal marker and manager-death reason are the lifecycle evidence.
+        assert '[arena ERROR halt]' in s and 'desktop: trusted application manager died; fail-stop to retire all session authority' in s
         assert re.search(r'destroy pid \d+: 1 in-flight call\(s\) answered STATUS_SERVICE_GONE',s),s[-2000:]
         assert s.count('[desktop] real desktop frame presented')==1
     finally:

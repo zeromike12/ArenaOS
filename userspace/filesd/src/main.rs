@@ -19,7 +19,7 @@
 #![no_main]
 #![allow(static_mut_refs, clippy::deref_addrof)]
 
-use arena_afs2::{self as afs, BLOCK, Device, Error as E, SECTOR, Volume};
+use arena_afs2::{self as afs, Device, Error as E, Volume, BLOCK, SECTOR};
 use arena_platform_core::{
     bundle::{self as apb1_bundle, FileKind},
     bundle::{BundleClaim, Error as BundleError, SourceError, Workspace},
@@ -611,11 +611,14 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
             let Some((applications_root, _)) = (unsafe { APB1_ROOTS }) else {
                 return reply(S_OFFLINE, 0);
             };
-            let verified = apb1_install::verify_installed_candidate_with_catalog(
-                unsafe { &mut *(&raw mut VOL) },
+            let mut verify_scratch = apb1_install::InstalledVerificationScratch::new(
                 unsafe { &mut *(&raw mut APB1_VERIFIER) },
                 unsafe { &mut *(&raw mut APB1_INSTALL_WORKSPACE) },
                 unsafe { &mut *(&raw mut APB1_TREE_WORKSPACE) },
+            );
+            let verified = apb1_install::verify_installed_candidate_with_catalog(
+                unsafe { &mut *(&raw mut VOL) },
+                &mut verify_scratch,
                 applications_root,
                 &application_id,
                 version,

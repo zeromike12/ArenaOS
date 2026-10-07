@@ -105,6 +105,29 @@ pub struct VerifiedPayloadFile {
     object: u64,
 }
 
+/// Caller-owned scratch for receiver-side verification of an installed
+/// candidate. Keep these large workspaces in static/runtime-managed memory,
+/// not on the initial service stack.
+pub struct InstalledVerificationScratch<'a> {
+    verifier: &'a mut Workspace,
+    install: &'a mut InstallWorkspace,
+    tree: &'a mut RegistryScanWorkspace,
+}
+
+impl<'a> InstalledVerificationScratch<'a> {
+    pub fn new(
+        verifier: &'a mut Workspace,
+        install: &'a mut InstallWorkspace,
+        tree: &'a mut RegistryScanWorkspace,
+    ) -> Self {
+        Self {
+            verifier,
+            install,
+            tree,
+        }
+    }
+}
+
 impl VerifiedPayloadFile {
     pub const EMPTY: Self = Self {
         path: [0; 96],
@@ -263,9 +286,7 @@ pub fn inspect_installed_candidate<D: Device>(
 /// for it after this succeeds.
 pub fn verify_installed_candidate<D: Device>(
     volume: &mut Volume<D>,
-    verifier: &mut Workspace,
-    install_scratch: &mut InstallWorkspace,
-    tree_scratch: &mut RegistryScanWorkspace,
+    scratch: &mut InstalledVerificationScratch<'_>,
     applications_root: u64,
     application_id: &[u8; 32],
     version: u64,
@@ -273,9 +294,7 @@ pub fn verify_installed_candidate<D: Device>(
 ) -> Result<VerifiedInstalledApp, Error> {
     verify_installed_candidate_inner(
         volume,
-        verifier,
-        install_scratch,
-        tree_scratch,
+        scratch,
         applications_root,
         application_id,
         version,
@@ -290,9 +309,7 @@ pub fn verify_installed_candidate<D: Device>(
 /// exact tree before publication.
 pub fn verify_installed_candidate_with_catalog<D: Device>(
     volume: &mut Volume<D>,
-    verifier: &mut Workspace,
-    install_scratch: &mut InstallWorkspace,
-    tree_scratch: &mut RegistryScanWorkspace,
+    scratch: &mut InstalledVerificationScratch<'_>,
     applications_root: u64,
     application_id: &[u8; 32],
     version: u64,
@@ -301,9 +318,7 @@ pub fn verify_installed_candidate_with_catalog<D: Device>(
 ) -> Result<VerifiedInstalledApp, Error> {
     verify_installed_candidate_inner(
         volume,
-        verifier,
-        install_scratch,
-        tree_scratch,
+        scratch,
         applications_root,
         application_id,
         version,
@@ -314,21 +329,20 @@ pub fn verify_installed_candidate_with_catalog<D: Device>(
 
 fn verify_installed_candidate_inner<D: Device>(
     volume: &mut Volume<D>,
-    verifier: &mut Workspace,
-    install_scratch: &mut InstallWorkspace,
-    tree_scratch: &mut RegistryScanWorkspace,
+    scratch: &mut InstalledVerificationScratch<'_>,
     applications_root: u64,
     application_id: &[u8; 32],
     version: u64,
     trusted_key: &[u8; 32],
-    mut catalog: Option<&mut [VerifiedPayloadFile; MAX_FILES]>,
+    catalog: Option<&mut [VerifiedPayloadFile; MAX_FILES]>,
 ) -> Result<VerifiedInstalledApp, Error> {
     let candidate = lookup_installed_candidate(volume, applications_root, application_id, version)?;
-    let info = read_installed_record(volume, install_scratch, candidate.directory)?;
+    let info = read_installed_record(volume, scratch.install, candidate.directory)?;
     let verified = {
         let mut source =
-            installed_source(volume, candidate.directory, &install_scratch.record, info);
-        let verified = verifier
+            installed_source(volume, candidate.directory, &scratch.install.record, info);
+        let verified = scratch
+            .verifier
             .verify(&mut source, trusted_key)
             .map_err(Error::Bundle)?;
         if verified.manifest().application_id() != application_id
@@ -343,7 +357,7 @@ fn verify_installed_candidate_inner<D: Device>(
         candidate.directory,
         info.record_len,
         &verified,
-        tree_scratch,
+        scratch.tree,
     )?;
     let manifest = *verified.manifest();
     let manifest_bytes = manifest.encode();
@@ -355,9 +369,9 @@ fn verify_installed_candidate_inner<D: Device>(
     if executable_stat.typ != FILE {
         return Err(Error::BadInstalledTree);
     }
-    if let Some(catalog) = catalog.as_deref_mut() {
+    if let Some(catalog) = catalog {
         catalog.fill(VerifiedPayloadFile::EMPTY);
-        for index in 0..verified.file_count() {
+        for (index, output) in catalog.iter_mut().enumerate().take(verified.file_count()) {
             let entry = verified.file(index).ok_or(Error::BadInstalledTree)?;
             let object = lookup_bundle_file(volume, candidate.directory, entry.path())?;
             let stat = volume.stat(object).map_err(Error::Fs)?;
@@ -366,7 +380,7 @@ fn verify_installed_candidate_inner<D: Device>(
             }
             let mut path = [0u8; 96];
             path[..entry.path().len()].copy_from_slice(entry.path());
-            catalog[index] = VerifiedPayloadFile {
+            *output = VerifiedPayloadFile {
                 path,
                 path_len: entry.path().len() as u8,
                 kind: entry.kind(),
@@ -2011,11 +2025,14 @@ mod tests {
         assert_eq!(claim.signer_id, receipt.signer_id);
 
         let mut tree_scratch = RegistryScanWorkspace::new();
-        let verified = verify_installed_candidate(
-            &mut volume,
+        let mut verify_scratch = InstalledVerificationScratch::new(
             &mut verifier,
             &mut install_scratch,
             &mut tree_scratch,
+        );
+        let verified = verify_installed_candidate(
+            &mut volume,
+            &mut verify_scratch,
             apps,
             &first.application_id,
             first.version,
@@ -2039,9 +2056,7 @@ mod tests {
         let mut payload_catalog = [VerifiedPayloadFile::EMPTY; MAX_FILES];
         let catalogued = verify_installed_candidate_with_catalog(
             &mut volume,
-            &mut verifier,
-            &mut install_scratch,
-            &mut tree_scratch,
+            &mut verify_scratch,
             apps,
             &first.application_id,
             first.version,
@@ -2069,9 +2084,7 @@ mod tests {
         assert!(
             verify_installed_candidate(
                 &mut volume,
-                &mut verifier,
-                &mut install_scratch,
-                &mut tree_scratch,
+                &mut verify_scratch,
                 apps,
                 &first.application_id,
                 first.version,
