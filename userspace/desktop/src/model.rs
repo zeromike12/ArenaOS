@@ -149,7 +149,11 @@ impl Popup {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Window {
     pub handle: u64,
+    /// Unique surface object key, used only to prevent one backing being
+    /// published as multiple windows.
     pub backing: u64,
+    /// Authenticated application-session owner for all of its windows.
+    pub owner: u64,
     pub x: i32,
     pub y: i32,
     pub width: u16,
@@ -342,17 +346,17 @@ impl State {
     pub fn find(&self, handle: u64) -> Option<&Window> {
         self.windows().find(|w| w.handle == handle)
     }
-    pub fn owned(&self, backing: u64, handle: u64) -> bool {
-        self.find(handle).is_some_and(|w| w.backing == backing)
+    pub fn owned(&self, owner: u64, handle: u64) -> bool {
+        self.find(handle).is_some_and(|w| w.owner == owner)
     }
     /// The live transient surface `handle` and the window that owns it.
     pub fn find_popup(&self, handle: u64) -> Option<(&Window, Popup)> {
         self.windows()
             .find_map(|w| w.popup.filter(|p| p.handle == handle).map(|p| (w, p)))
     }
-    pub fn popup_owned(&self, backing: u64, handle: u64) -> bool {
+    pub fn popup_owned(&self, owner: u64, handle: u64) -> bool {
         self.find_popup(handle)
-            .is_some_and(|(w, _)| w.backing == backing)
+            .is_some_and(|(w, _)| w.owner == owner)
     }
     fn slot(&self, handle: u64) -> Result<usize, Error> {
         self.windows
@@ -361,8 +365,22 @@ impl State {
             .ok_or(Error::Stale)
     }
     pub fn create(&mut self, backing: u64, width: u16, height: u16) -> Result<u64, Error> {
+        self.create_owned(backing, backing, width, height)
+    }
+
+    /// Create another independently backed window for one existing
+    /// application owner. Surface identity is unique per window; owner
+    /// identity is shared by all windows in the same application session.
+    pub fn create_owned(
+        &mut self,
+        owner: u64,
+        backing: u64,
+        width: u16,
+        height: u16,
+    ) -> Result<u64, Error> {
         let (max_w, max_h) = self.max_surface();
-        if backing == 0
+        if owner == 0
+            || backing == 0
             || self.windows().any(|w| w.backing == backing)
             || width < MIN_WIDTH
             || height < MIN_HEIGHT
@@ -388,6 +406,7 @@ impl State {
         self.windows[i] = Some(Window {
             handle,
             backing,
+            owner,
             x: (m::WINDOW_START_X + column + lane * m::CASCADE_X)
                 .min(self.screen.0 - m::VISIBLE_TITLE_WIDTH),
             y: (m::WINDOW_START_Y + lane * m::CASCADE_Y)
@@ -853,7 +872,7 @@ impl State {
     /// Most recently used minimized window whose backing satisfies `pick`.
     pub fn minimized_window(&self, pick: impl Fn(u64) -> bool) -> Option<u64> {
         self.windows()
-            .filter(|w| w.minimized && pick(w.backing))
+            .filter(|w| w.minimized && pick(w.owner))
             .max_by_key(|w| w.z)
             .map(|w| w.handle)
     }
@@ -1379,6 +1398,35 @@ fn grab_handle(g: Grab) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_owner_has_multiple_independently_stateful_windows() {
+        let mut state = State::new(800, 600).unwrap();
+        let first = state.create_owned(9, 101, 160, 120).unwrap();
+        let second = state.create_owned(9, 102, 180, 140).unwrap();
+        let third = state.create_owned(9, 103, 200, 160).unwrap();
+        assert!(state.owned(9, first));
+        assert!(state.owned(9, second));
+        assert!(state.owned(9, third));
+        assert!(!state.owned(10, second));
+        assert_ne!(
+            state.find(first).unwrap().backing,
+            state.find(second).unwrap().backing
+        );
+        assert_eq!(
+            (
+                state.find(second).unwrap().width,
+                state.find(second).unwrap().height
+            ),
+            (180, 140)
+        );
+        state.minimize(second).unwrap();
+        assert!(state.find(first).is_some_and(|window| !window.minimized));
+        assert!(state.find(second).is_some_and(|window| window.minimized));
+        assert_eq!(state.minimized_window(|owner| owner == 9), Some(second));
+        state.retire(second).unwrap();
+        assert!(state.find(first).is_some() && state.find(third).is_some());
+    }
     #[test]
     fn desktop_keyboard_launch_cycle_close_preserves_ordinary_key_focus() {
         let mut s = State::new(800, 600).unwrap();

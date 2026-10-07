@@ -53,8 +53,8 @@ class Desktop:
             if predicate(data):return data
             time.sleep(.04)
         raise AssertionError(f'missing graphical state {name}')
-    def wait(self,predicate,description):
-        end=time.monotonic()+10
+    def wait(self,predicate,description,timeout_s=10):
+        end=time.monotonic()+timeout_s
         while time.monotonic()<end:
             if predicate():return
             time.sleep(.04)

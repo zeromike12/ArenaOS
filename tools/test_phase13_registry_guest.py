@@ -19,6 +19,9 @@ BASE = arena_env.AFS2_BASE_SECTOR * 512
 SOURCE = b"phase13.apb1"
 APP_ID = b"org.arenaos.phase13app"
 SERIAL_APPS = "[phase13-installed-app] ABI-v2 startup verified; real window published"
+SERIAL_MULTIWINDOW = "[phase13-multiwindow] one process owns three separately backed ordinary windows"
+SERIAL_WINDOW_RETIRED = "[phase13-window] DestroyWindow retired one surface; process and siblings remain live"
+SERIAL_WINDOW_FINAL = "[phase13-window] final surface retired; process exits cleanly"
 SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
 COUNTERS = re.compile(
@@ -91,6 +94,26 @@ def checkerboard_pixels(ppm, x, y):
     data = crop(ppm, x, y, 300, 160)
     colors = {data[i:i + 3] for i in range(0, len(data), 3)}
     return len(colors) >= 2
+
+
+def pixel(ppm, x, y):
+    offset = (y * 800 + x) * 3
+    return ppm[offset:offset + 3]
+
+
+def marker_set(ppm, points):
+    expected = [
+        bytes((0xE0, 0x40, 0x20)),
+        bytes((0xF0, 0xD0, 0x20)),
+        bytes((0x20, 0xD0, 0x80)),
+    ]
+    return [pixel(ppm, x, y) for x, y in points] == expected
+
+
+def resource_counts(d):
+    rows = COUNTERS.findall(d.serial())
+    assert rows, "native resource receipt is missing"
+    return tuple(map(int, rows[-1]))
 
 
 def interaction(disk):
@@ -194,10 +217,18 @@ def interaction(disk):
                "All Applications launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 2,
                "All Applications launch did not pass its scalable heap proof")
+        d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 1,
+               "installed app did not create three windows in its one process")
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
                "installed launch did not add one live application process")
-        first = d.shot("installed-window-one", lambda p: checkerboard_pixels(p, 82, 130))
+        first_points = ((78, 100), (104, 124), (130, 148))
+        first = d.shot(
+            "installed-window-one",
+            lambda p: checkerboard_pixels(p, 82, 130) and marker_set(p, first_points),
+        )
         assert checkerboard_pixels(first, 82, 130), "the installed ELF did not publish its owned checkerboard surface"
+        assert marker_set(first, first_points), \
+            "one installed Process did not publish three distinct compositor-owned window surfaces"
 
         # Search filters the same verified registry; a pointer selection
         # launches the multi-instance app a second time.
@@ -208,27 +239,69 @@ def interaction(disk):
         assert crop(searched, 194, 150, 400, 28) != crop(empty_query, 194, 150, 400, 28)
         # The filtered catalog has one row; this click is a pointer launch.
         d.click(250, 220)
-        d.wait(lambda: d.serial().count(SERIAL_APPS) == 2, "search result pointer launch did not create the second app process")
+        d.wait(lambda: d.serial().count(SERIAL_APPS) == 2,
+               "search result pointer launch did not create the second app process", timeout_s=30)
         d.wait(lambda: d.serial().count(SERIAL_VM) == 3,
                "pointer launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 3,
                "pointer launch did not pass its scalable heap proof")
+        d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 2,
+               "second application instance did not create three windows in its one process", timeout_s=30)
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 2,
                "second installed app launch did not add its process")
-        both = d.shot("installed-window-two", lambda p: checkerboard_pixels(p, 108, 154))
+        second_points = ((156, 172), (182, 196), (208, 220))
+        both = d.shot(
+            "installed-window-two",
+            lambda p: checkerboard_pixels(p, 108, 154) and marker_set(p, second_points),
+        )
         assert checkerboard_pixels(both, 82, 130) and checkerboard_pixels(both, 108, 154), \
             "two separate application instances did not own visible windows"
+        assert marker_set(both, second_points), \
+            "the second process did not publish its three independently backed surfaces"
 
-        d.click(378, 70)
-        d.wait(lambda: d.serial().count("[desktop] application retired:") >= 1,
-               "closing the first installed window did not reap its ProcessGroup")
-        d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
-               "first close did not reduce process resources by one")
-        d.click(404, 94)
-        d.wait(lambda: d.serial().count("[desktop] application retired:") >= 2,
-               "closing the second installed window did not reap its ProcessGroup")
-        d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[1:] == baseline[1:],
-               "installed app close-all did not return identity resources to baseline")
+        retired_apps = d.serial().count("[desktop] application retired:")
+
+        def close_extra(x, y, retired_count):
+            before = resource_counts(d)
+            d.click(x, y)
+            d.wait(lambda: d.serial().count(SERIAL_WINDOW_RETIRED) >= retired_count,
+                   "DestroyWindow did not leave the process and sibling windows live")
+            expected = list(before)
+            expected[3] -= 2  # exact surface and private snapshot regions
+            expected[4] -= 940  # their bounded shared pages
+            expected[5] -= 3  # broker/client surface maps and broker snapshot map
+            d.wait(lambda: resource_counts(d)[2:] == tuple(expected[2:]),
+                   "closing one window did not release exactly its owned resources")
+            return resource_counts(d)
+
+        # Close only the first instance's top window. Its process and two
+        # siblings must remain live, while the second instance is untouched.
+        first_after_one = close_extra(430, 118, 1)
+        assert first_after_one[2] == baseline[2] + 2
+        first_remaining = ((78, 100), (104, 124))
+        after_one = d.shot(
+            "first-instance-one-window-closed",
+            lambda p: [pixel(p, *point) for point in first_remaining]
+            == [bytes((0xE0, 0x40, 0x20)), bytes((0xF0, 0xD0, 0x20))]
+            and pixel(p, 130, 148) != bytes((0x20, 0xD0, 0x80))
+            and marker_set(p, second_points),
+        )
+        assert marker_set(after_one, second_points)
+
+        close_extra(402, 98, 2)
+        d.click(376, 74)
+        d.wait(lambda: d.serial().count("[desktop] application retired:") == retired_apps + 1,
+               "closing the first instance's final window did not reap its process")
+        d.wait(lambda: resource_counts(d)[2] == baseline[2] + 1,
+               "first AppInstance teardown did not leave only the second process")
+
+        close_extra(506, 194, 3)
+        close_extra(480, 170, 4)
+        d.click(454, 146)
+        d.wait(lambda: d.serial().count("[desktop] application retired:") == retired_apps + 2,
+               "closing the second instance's final window did not reap its process")
+        d.wait(lambda: resource_counts(d)[1:] == baseline[1:],
+               "independent window teardown did not return identity resources to baseline")
         d.shot("installed-windows-closed")
         return b"shutdown\r"
     finally:
@@ -261,6 +334,7 @@ def main():
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     assert rc == 0, serial[-5000:]
     assert serial.count(SERIAL_APPS) == 2
+    assert serial.count(SERIAL_MULTIWINDOW) == 2
     assert serial.count(SERIAL_VM) == 3
     assert serial.count(SERIAL_HEAP) == 3
     assert "[phase13-app] exact read-only document capability verified" in serial
@@ -270,7 +344,8 @@ def main():
     assert not afs1.audit(disk)
     print(
         f"[{LABEL}] verified APB1 install -> registry -> keyboard/search/pointer launch of the signed native ELF; "
-        f"two owned windows/processes, exact ProcessGroup teardown to baseline; clean shutdown in {elapsed:.1f}s PASS",
+        f"two instances with three windows each, individual DestroyWindow while siblings stay live, "
+        f"exact resource teardown to baseline; clean shutdown in {elapsed:.1f}s PASS",
         flush=True,
     )
 

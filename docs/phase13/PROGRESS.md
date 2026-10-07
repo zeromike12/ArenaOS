@@ -19,9 +19,9 @@
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
-| 13.3 windows, helpers, lifecycle | Not started | Production session couples one Process child to one ordinary window. `AppInstanceTable`, `ProcessGroup`, and `WindowSet` are foundations; group/helper and multi-window production policy is absent. |
+| 13.3 windows, helpers, lifecycle | Multi-window implemented; helper/AppInstance separation remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. Signed APB1 guest proves three windows per process and two simultaneous instances; helpers and distinct multi-process AppInstance ownership remain. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
-| 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. Startup, scale, runtime host, installed-app guest, and 20/20 fresh boots pass. Commit/push this checkpoint, then continue. |
+| 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
 | Final qualification | Not started | No source freeze, complete historical suite, 100-boot receipt, or extracted-archive witness yet. |
@@ -186,9 +186,10 @@ the source-frozen final qualification.
   refresh's large stack-local table and led to moving bounded association
   arrays into static registry storage; the corrected guest boot is green.
 
-This remains a feature checkpoint. Favorites/dock composition, multi-window
-AppInstances, helper lifecycle, streams, user threads, synchronization,
-pressure, and final qualification remain open.
+At this registry/association checkpoint, favorites/dock composition,
+multi-window ownership, helper lifecycle, streams, user threads,
+synchronization, pressure, and final qualification were still open; later
+subsections record the subsequent VM/heap and multi-window checkpoints.
 
 ### Process-owned user mapping inventory implementation
 
@@ -272,5 +273,73 @@ pressure, and final qualification remain open.
 - Rebuilt the exact EFI with SHA-256
   287794b6d397982fb1d080b2a1e8a722541d4ef8b31ca4d00c300098db963d82 and ran
   tools/stability_loop.sh 20: 20/20 fresh boots passed with zero failures in
-  148 seconds. The receipt binds the boot set to that exact EFI. The current
-  source is ready for its preservation commit and push.
+  148 seconds. The receipt binds the boot set to that exact EFI. That VM/heap
+  implementation was preserved in its checkpoint before multi-window work
+  continued.
+
+### Multiple independently backed windows per process T1
+
+- ADR-0097 separates the compositor's authenticated window owner from its
+  unique SharedRegion backing key. ABI-v2 `Create` still creates the primary
+  surface; `CreateAdditional` asks the same badge-authenticated endpoint for
+  a fresh bounded SharedRegion, broker-private snapshot, compositor handle,
+  and independently owned publication state. Desktop returns the exact
+  surface cap in the checked reply with rights limited to that object. The
+  original startup capability inventory is unchanged.
+- `DestroyWindow` retires one surface while keeping its process and sibling
+  windows alive. Extra surface maps/snapshots are dropped on owner close or
+  after the exact Process is reaped. Closing a primary window leaves the
+  process-level shared backing and private snapshot available for a later
+  window. The desktop remains bounded at 32 total ordinary windows; this work
+  adds no kernel or startup resource limits.
+- Each window has independent title, raster dimensions, damage generation,
+  publication regions, transient surface, close state, focus/reveal animation,
+  minimize/maximize policy, compositor slot, and snapshot. The client adapter
+  keeps the original session backing for endpoint authentication and file I/O
+  while using the returned exact cap only for an additional window surface.
+- The compositor backing-key space is 64 entries (32 primary-session keys
+  plus 32 additional-surface keys), while the Window Manager still admits at
+  most 32 live windows total. Damage comparison now covers both key ranges.
+  The initial guest race found that an extra window could be rendered before
+  first publication and then remain blank because later damage ignored slots
+  32–63. The host suite now checks high-slot first publication and partial
+  damage against full-frame composition.
+- `cargo test --manifest-path userspace/desktop/Cargo.toml --lib` passed
+  84/84. `cargo check --manifest-path userspace/desktop/Cargo.toml --bin
+  desktop --target x86_64-unknown-none` and the signed Phase-13 ELF release
+  build passed.
+- `tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 / OVMF 2025.02.
+  The signed installed ELF created three ordinary windows in one process and
+  published three different guest-visible surface markers; a second process
+  did the same concurrently. The existing document Open With, read-only file
+  cap, VM and heap assertions passed. The fixture closed windows one at a time:
+  after each additional window closed, its process and sibling windows stayed
+  live, with exactly two SharedRegions, 940 pages, and three maps reclaimed.
+  Closing each last window then reaped its process; process, region, page, map,
+  and cap identity counts returned to the boot baseline. The green guest took
+  9.9 seconds after image build.
+- An initial resource-close attempt caught a reply-cap cleanup issue: the
+  temporary transferred surface cap needs DESTROY so Desktop can drop its own
+  copy after the checked reply, and the receiver needs it to release that
+  exact extra surface. The cap cannot select or operate on another window.
+  After fixing rights, individual window close and full process teardown
+  returned all identity counts to baseline.
+
+### Multiple-window preservation T2
+
+- `cargo test --manifest-path userspace/desktop/Cargo.toml --lib`: 84/84.
+- `tools/test_m10_desktop.py`: dock launch, owned raster, keyboard/theme,
+  drag, close, and relaunch passed.
+- `tools/test_m12_scale.py`: 32 live ordinary sessions passed with a
+  mutation-free 33rd refusal, 16-close/16-reuse, and full cleanup. It observed
+  77 retained page-table frames; all process, SharedRegion, page, map, and cap
+  identity counts returned to the Phase-12 baseline. The full guest run took
+  180.1 seconds. At the refused 33rd launch, the exact inventory was 47
+  processes, 66 regions, 30,550 pages, 112 maps, and 110 occupied cap slots;
+  the same 77 page-table frames remained after complete teardown.
+- The source was rebuilt into EFI SHA-256
+  `1d77db78d33fe22b5c40f1758bd3c71b46c830a21f18a6e47c94b81b976c3c2a`.
+  `tools/stability_loop.sh 10` passed 10/10 clean boots, zero failures, in 76
+  seconds. Its receipt contains the same EFI SHA-256 and `10/10`.
+- `git diff --check` passed. This T2 evidence is ready to be preserved as the
+  next branch checkpoint.

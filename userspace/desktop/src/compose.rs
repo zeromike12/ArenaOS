@@ -15,6 +15,10 @@ use arena_gfxkit::{Canvas, Rect};
 use arena_ui::{components as c, metrics as m, theme::Theme};
 
 pub const MAX_WINDOWS: usize = crate::model::MAX_WINDOWS;
+/// Session and per-window backing keys share one compositor damage namespace.
+/// Active ordinary windows remain bounded by `MAX_WINDOWS`; an application
+/// may use the second half for independently backed windows.
+pub const MAX_WINDOW_SLOTS: usize = MAX_WINDOWS * 2;
 /// Published regions remembered per window between two presented frames.
 pub const REGIONS_MAX: usize = 8;
 
@@ -349,7 +353,7 @@ pub fn damage(prev: &Scene, next: &Scene, out: &mut Damage) {
         out.full();
         return;
     }
-    for slot in 0..MAX_WINDOWS {
+    for slot in 0..MAX_WINDOW_SLOTS {
         let (pa, pb) = (prev.by_slot(slot), next.by_slot(slot));
         match (pa, pb) {
             (None, None) => {}
@@ -603,8 +607,8 @@ mod tests {
 
     /// Published main and transient rasters of every slot (main rasters
     /// are WW*WH; the surface size decides the stride actually used).
-    fn contents(generations: &[u64; MAX_WINDOWS]) -> Vec<(Vec<u32>, Vec<u32>)> {
-        (0..MAX_WINDOWS)
+    fn contents(generations: &[u64; MAX_WINDOW_SLOTS]) -> Vec<(Vec<u32>, Vec<u32>)> {
+        (0..MAX_WINDOW_SLOTS)
             .map(|slot| {
                 (
                     raster(slot, generations[slot], WW * WH),
@@ -663,7 +667,7 @@ mod tests {
     #[test]
     fn damage_composition_matches_full_redraw() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-        let mut generations = [0u64; MAX_WINDOWS];
+        let mut generations = [0u64; MAX_WINDOW_SLOTS];
         let mut rasters = contents(&generations);
         let mut scene = Scene::EMPTY;
         scene.shell.pointer = (300, 200);
@@ -1094,5 +1098,92 @@ mod tests {
             });
         }
         assert!(d.rects().len() <= Damage::CAP);
+    }
+
+    #[test]
+    fn additional_surface_publication_and_partial_damage_are_composed() {
+        let slot = MAX_WINDOWS + 3;
+        let mut previous = Scene::EMPTY;
+        previous.windows[0] = Some(WindowScene {
+            slot,
+            handle: 91,
+            x: 100,
+            y: 100,
+            width: WW as u16,
+            height: WH as u16,
+            reveal: WH as i32,
+            focus: 0,
+            content: 0,
+            regions: Regions::NONE,
+            published: false,
+            title: [b'W'; 32],
+            surface: (WW as u16, WH as u16),
+            popup: None,
+            controls: c::Controls {
+                minimize: true,
+                maximize: true,
+                maximized: false,
+                hover: 0,
+            },
+        });
+        previous.count = 1;
+        previous.shell.open = 1;
+
+        let mut next = previous;
+        let window = next.windows[0].as_mut().unwrap();
+        window.published = true;
+        window.content = 1;
+        window.regions.mark_full();
+
+        let generations = [0u64; MAX_WINDOW_SLOTS];
+        let mut rasters = contents(&generations);
+        let marker = 40 * WW + 8;
+        rasters[slot].0[marker] = 0x0020_d080;
+        let old_pixels = full(&previous, &rasters);
+        let new_pixels = full(&next, &rasters);
+        let mut incremental = old_pixels;
+        let mut damaged = Damage::new(W, H);
+        damage(&previous, &next, &mut damaged);
+        assert!(!damaged.is_empty(), "high backing slots must be tracked");
+        {
+            let mut canvas = Canvas::new(&mut incremental, W, H, W).unwrap();
+            for rect in damaged.rects() {
+                canvas.set_clip(*rect);
+                compose(
+                    &mut canvas,
+                    &next,
+                    |s| (&rasters[s].0, &rasters[s].1),
+                    arena_ui::theme::palette(next.dark),
+                );
+            }
+        }
+        assert_eq!(incremental, new_pixels, "initial high-slot publication");
+        assert_eq!(incremental[(140 * W) + 108], 0x0020_d080);
+
+        let mut published = next;
+        published.windows[0].as_mut().unwrap().regions = Regions::NONE;
+        let mut changed = published;
+        let window = changed.windows[0].as_mut().unwrap();
+        window.content += 1;
+        window.regions.add([8, 40, 1, 1]);
+        rasters[slot].0[marker] = 0x00f0_d020;
+        let updated_pixels = full(&changed, &rasters);
+        let mut incremental = full(&published, &rasters);
+        let mut damaged = Damage::new(W, H);
+        damage(&published, &changed, &mut damaged);
+        assert_eq!(damaged.pixels(), 1, "high-slot partial damage stays local");
+        {
+            let mut canvas = Canvas::new(&mut incremental, W, H, W).unwrap();
+            for rect in damaged.rects() {
+                canvas.set_clip(*rect);
+                compose(
+                    &mut canvas,
+                    &changed,
+                    |s| (&rasters[s].0, &rasters[s].1),
+                    arena_ui::theme::palette(changed.dark),
+                );
+            }
+        }
+        assert_eq!(incremental, updated_pixels, "high-slot partial publication");
     }
 }

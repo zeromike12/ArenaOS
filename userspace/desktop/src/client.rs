@@ -24,7 +24,13 @@ pub struct Client {
     pub width: usize,
     pub height: usize,
     endpoint: u64,
+    /// Capability used to authenticate every request from this process.
+    /// Additional windows have a distinct surface cap but share this control
+    /// backing with the primary ABI-v2 session window.
+    control_backing: u64,
     backing: u64,
+    control_io: *mut u8,
+    control_pages: usize,
     /// Pages of the session reservation (ADR-0075): the I/O page, the main
     /// surface, `TRANSIENT_PAGES` of transient surface, then `FILE_PAGES`.
     pages: usize,
@@ -42,7 +48,12 @@ pub struct Transient {
     pub width: usize,
     pub height: usize,
 }
-fn exchange_at(endpoint: u64, backing: u64, frame: Frame) -> Result<([u64; 3], Frame), i64> {
+fn exchange_at_with_cap(
+    endpoint: u64,
+    backing: u64,
+    frame: Frame,
+    allow_cap: bool,
+) -> Result<([u64; 3], Frame), i64> {
     for attempt in 0..=crate::app_client::IPC_BUSY_RETRIES {
         let mut bytes = frame.encode().map_err(|_| -2)?;
         let mut out = [0, 0, CAP_NONE];
@@ -58,7 +69,7 @@ fn exchange_at(endpoint: u64, backing: u64, frame: Frame) -> Result<([u64; 3], F
                 bytes.as_mut_ptr() as u64,
             )
         };
-        if out[2] != CAP_NONE {
+        if out[2] != CAP_NONE && !allow_cap {
             // SAFETY: drop only the newly landed reply cap, including malformed replies.
             let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
             return Err(-2);
@@ -68,18 +79,39 @@ fn exchange_at(endpoint: u64, backing: u64, frame: Frame) -> Result<([u64; 3], F
             continue;
         }
         if rc != 0 {
+            if out[2] != CAP_NONE {
+                // SAFETY: a failed IPC call cannot retain an unexpected cap.
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+            }
             return Err(rc);
         }
         if out[0] != 0 {
+            if out[2] != CAP_NONE {
+                // SAFETY: malformed replies do not retain their transferred cap.
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+            }
             return Err(-2);
         }
-        return Ok((out, Frame::decode(&bytes).map_err(|_| -2)?));
+        let decoded = match Frame::decode(&bytes) {
+            Ok(frame) => frame,
+            Err(_) => {
+                if out[2] != CAP_NONE {
+                    // SAFETY: reject and release a cap attached to malformed bytes.
+                    let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
+                }
+                return Err(-2);
+            }
+        };
+        return Ok((out, decoded));
     }
     Err(STATUS_BUSY)
 }
+fn exchange_at(endpoint: u64, backing: u64, frame: Frame) -> Result<([u64; 3], Frame), i64> {
+    exchange_at_with_cap(endpoint, backing, frame, false)
+}
 impl Client {
     fn exchange(&self, frame: Frame) -> Result<([u64; 3], Frame), i64> {
-        exchange_at(self.endpoint, self.backing, frame)
+        exchange_at(self.endpoint, self.control_backing, frame)
     }
     /// Exact capability slot used for this client's surface reservation.
     pub fn backing_slot(&self) -> u64 {
@@ -171,14 +203,124 @@ impl Client {
             width,
             height,
             endpoint,
+            control_backing: backing,
             backing,
+            control_io: va as *mut u8,
+            control_pages: bound[1] as usize,
             pages: bound[1] as usize,
         })
     }
+    /// Create another ordinary window owned by this application process. The
+    /// broker returns a fresh per-window SharedRegion capability; this method
+    /// never accepts a caller-selected handle or surface identity.
+    pub fn create_window(&self, width: usize, height: usize, title: &str) -> Result<Self, i64> {
+        if width < 80
+            || height < 60
+            || width > usize::from(SURFACE_MAX_WIDTH)
+            || height > usize::from(SURFACE_MAX_HEIGHT)
+            || title.is_empty()
+            || title.len() > 32
+            || !title.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
+        {
+            return Err(-2);
+        }
+        let request = Frame::CreateAdditional {
+            width: width as u16,
+            height: height as u16,
+        };
+        let (reply, echo) =
+            exchange_at_with_cap(self.endpoint, self.control_backing, request, true)?;
+        if echo != request || reply[1] == 0 || reply[2] == CAP_NONE {
+            if reply[2] != CAP_NONE {
+                // SAFETY: dispose of a cap attached to an invalid create reply.
+                let _ = unsafe { syscall1(SYS_CAP_DESTROY, reply[2]) };
+            }
+            return Err(-2);
+        }
+        let backing = reply[2];
+        let mut bound = [0; 2];
+        // SAFETY: the returned exact cap gates its own size query.
+        let rc = unsafe {
+            syscall6(
+                SYS_SHARED_INFO,
+                backing,
+                bound.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if rc != 0 || bound[0] == 0 || bound[1] * 4096 < (PIXEL_OFFSET + width * height * 4) as u64
+        {
+            // SAFETY: discard the exact returned window capability.
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, backing) };
+            return Err(-2);
+        }
+        // SAFETY: map the newly received SharedRegion using its held authority.
+        let va = unsafe { syscall2(SYS_SHARED_MAP, backing, 1) };
+        if va <= 0 {
+            // SAFETY: no mapping was installed on failure.
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, backing) };
+            return Err(va);
+        }
+        let mut text = [0; 32];
+        text[..title.len()].copy_from_slice(title.as_bytes());
+        let metadata = Frame::Title {
+            handle: reply[1],
+            text,
+        };
+        let title_result = self.exchange(metadata);
+        if !matches!(title_result, Ok((_, reply)) if reply == metadata) {
+            // SAFETY: release only this newly created window's map/cap.
+            let _ = unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) };
+            let _ = unsafe { syscall1(SYS_CAP_DESTROY, backing) };
+            return Err(-2);
+        }
+        Ok(Self {
+            handle: reply[1],
+            pixels: (va as usize + PIXEL_OFFSET) as *mut u32,
+            io: va as *mut u8,
+            appearance: core::cell::Cell::new(2),
+            more: core::cell::Cell::new(false),
+            width,
+            height,
+            endpoint: self.endpoint,
+            control_backing: self.control_backing,
+            backing,
+            control_io: self.control_io,
+            control_pages: self.control_pages,
+            pages: bound[1] as usize,
+        })
+    }
+    /// Close this ordinary window while keeping the process and sibling
+    /// windows alive. Extra surface mappings and their exact caps are dropped
+    /// after the broker acknowledges retirement.
+    pub fn close_window(&self) -> Result<(), i64> {
+        let frame = Frame::DestroyWindow {
+            handle: self.handle,
+        };
+        if self.exchange(frame)?.1 != frame {
+            return Err(-2);
+        }
+        if self.backing != self.control_backing {
+            // SAFETY: this client owns the map and received surface cap.
+            let rc = unsafe { syscall6(SYS_SHARED_UNMAP, self.io as u64, 0, 0, 0, 0, 0) };
+            if rc != 0 {
+                return Err(rc);
+            }
+            // SAFETY: retire only the capability returned for this window.
+            let rc = unsafe { syscall1(SYS_CAP_DESTROY, self.backing) };
+            if rc != 0 {
+                return Err(rc);
+            }
+        }
+        Ok(())
+    }
     /// Page index (within the region) and address of the filesd I/O page.
     pub fn file_page(&self) -> (u64, u64) {
-        let page = self.pages - FILE_PAGES;
-        (page as u64, self.io as u64)
+        let page = self.control_pages - FILE_PAGES;
+        (page as u64, self.control_io as u64)
     }
     /// Main-surface pixels the reservation holds (the largest surface the
     /// window policy can configure fits in it).

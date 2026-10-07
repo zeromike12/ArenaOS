@@ -46,6 +46,12 @@ pub enum Frame {
         width: u16,
         height: u16,
     },
+    /// Create an additional independently backed ordinary window, including
+    /// when this process currently has no primary window.
+    CreateAdditional {
+        width: u16,
+        height: u16,
+    },
     Damage {
         handle: u64,
         rects: DamageRects,
@@ -90,6 +96,10 @@ pub enum Frame {
     Dismiss {
         handle: u64,
     },
+    /// Close one ordinary window without retiring its application process.
+    DestroyWindow {
+        handle: u64,
+    },
 }
 fn surface_size(width: u16, height: u16) -> bool {
     (MIN_WIDTH..=MAX_W).contains(&width) && (MIN_HEIGHT..=MAX_H).contains(&height)
@@ -107,6 +117,14 @@ impl Frame {
                 b[24..26].copy_from_slice(&width.to_le_bytes());
                 b[26..28].copy_from_slice(&height.to_le_bytes());
                 (1, 0)
+            }
+            Self::CreateAdditional { width, height } => {
+                if !surface_size(width, height) {
+                    return Err(Error::Invalid);
+                }
+                b[24..26].copy_from_slice(&width.to_le_bytes());
+                b[26..28].copy_from_slice(&height.to_le_bytes());
+                (12, 0)
             }
             Self::Damage { handle, rects } => {
                 if !rects.valid() {
@@ -256,8 +274,9 @@ impl Frame {
                 (9, handle)
             }
             Self::Dismiss { handle } => (10, handle),
+            Self::DestroyWindow { handle } => (11, handle),
         };
-        if op != 1 && handle == 0 {
+        if !matches!(op, 1 | 12) && handle == 0 {
             return Err(Error::Invalid);
         }
         b[5] = op;
@@ -275,6 +294,7 @@ impl Frame {
         let y = i32::from_le_bytes(b[20..24].try_into().map_err(|_| Error::Invalid)?);
         let f = match b[5] {
             1 => Self::Create { width, height },
+            12 => Self::CreateAdditional { width, height },
             2 => {
                 let mut rects = DamageRects::FULL;
                 rects.n = b[16];
@@ -347,6 +367,7 @@ impl Frame {
                 height,
             },
             10 => Self::Dismiss { handle },
+            11 => Self::DestroyWindow { handle },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -366,6 +387,10 @@ mod tests {
             Frame::Create {
                 width: 448,
                 height: 288,
+            },
+            Frame::CreateAdditional {
+                width: 320,
+                height: 180,
             },
             Frame::Damage {
                 handle: 9,
@@ -450,6 +475,7 @@ mod tests {
                 height: 200,
             },
             Frame::Dismiss { handle: 12 },
+            Frame::DestroyWindow { handle: 12 },
         ] {
             let b = f.encode().unwrap();
             assert_eq!(Frame::decode(&b), Ok(f));

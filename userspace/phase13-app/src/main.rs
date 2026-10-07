@@ -98,32 +98,97 @@ fn application_main(view: StartupView<'_>) -> ! {
         }
         client::log(b"[phase13-app] exact read-only document capability verified\n");
     }
+    let mut windows: [Option<Client>; 3] = [None, None, None];
+    windows[0] = Some(window);
+    let count = if has_document { 1 } else { 3 };
+    if count == 3 {
+        let first = windows[0].as_ref().unwrap_or_else(|| client::exit(135));
+        let second = first
+            .create_window(320, 180, "Phase13 Second")
+            .unwrap_or_else(|_| client::exit(136));
+        let third = first
+            .create_window(320, 180, "Phase13 Third")
+            .unwrap_or_else(|_| client::exit(137));
+        windows[1] = Some(second);
+        windows[2] = Some(third);
+    }
+    for (index, window) in windows.iter().take(count).enumerate() {
+        paint(window.as_ref().unwrap_or_else(|| client::exit(138)), index);
+    }
+    if !has_document {
+        client::log(b"[phase13-installed-app] ABI-v2 startup verified; real window published\n");
+        client::log(
+            b"[phase13-multiwindow] one process owns three separately backed ordinary windows\n",
+        );
+    }
+
+    let mut open = [true, count == 3, count == 3];
+    loop {
+        app_client::idle(None).unwrap_or_else(|_| client::exit(77));
+        let mut close_windows = [false; 3];
+        loop {
+            for index in 0..count {
+                if open[index]
+                    && let Some(Event::Close) = windows[index]
+                        .as_ref()
+                        .unwrap_or_else(|| client::exit(139))
+                        .poll()
+                        .unwrap_or_else(|_| client::exit(78))
+                {
+                    close_windows[index] = true;
+                }
+            }
+            let more = (0..count).any(|index| {
+                open[index]
+                    && windows[index]
+                        .as_ref()
+                        .is_some_and(|window| window.more.get())
+            });
+            if !more {
+                break;
+            }
+        }
+        for index in 0..count {
+            if open[index] && close_windows[index] {
+                windows[index]
+                    .as_ref()
+                    .unwrap_or_else(|| client::exit(140))
+                    .close_window()
+                    .unwrap_or_else(|_| client::exit(141));
+                open[index] = false;
+                if open[..count].iter().any(|live| *live) {
+                    client::log(
+                        b"[phase13-window] DestroyWindow retired one surface; process and siblings remain live\n",
+                    );
+                } else {
+                    client::log(b"[phase13-window] final surface retired; process exits cleanly\n");
+                }
+            }
+        }
+        if !open[..count].iter().any(|live| *live) {
+            client::exit(42);
+        }
+    }
+}
+
+fn paint(window: &Client, index: usize) {
+    let marker = [0x00e04020, 0x00f0d020, 0x0020d080][index.min(2)];
     for y in 0..window.height {
         for x in 0..window.width {
-            let color = if (x / 32 + y / 24) & 1 == 0 {
+            // The compositor places the client raster underneath its title
+            // chrome, so the unique guest-proof marker sits below that band.
+            let color = if x < 24 && (32..56).contains(&y) {
+                marker
+            } else if (x / 32 + y / 24) & 1 == 0 {
                 0x0028_6c9c
             } else {
                 0x003b_9168
             };
+            // SAFETY: every pixel lies inside this window's mapped surface.
             unsafe { window.pixels.add(y * window.width + x).write(color) };
         }
     }
     window.damage().unwrap_or_else(|_| client::exit(76));
-    if !has_document {
-        client::log(b"[phase13-installed-app] ABI-v2 startup verified; real window published\n");
-    }
-
-    loop {
-        app_client::idle(None).unwrap_or_else(|_| client::exit(77));
-        loop {
-            if let Some(Event::Close) = window.poll().unwrap_or_else(|_| client::exit(78)) {
-                client::exit(42);
-            }
-            if !window.more.get() {
-                break;
-            }
-        }
-    }
 }
 
 fn verify_heap() {

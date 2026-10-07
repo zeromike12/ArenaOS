@@ -91,6 +91,15 @@ The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
 The Phase-13 application opts into ScalableHeap; no reserved capability slot
 is borrowed as a transient frame holder.
 
+The live Desktop still holds at most 32 application Process sessions and the
+window policy still holds at most 32 total ordinary windows. One session can
+now own several windows; an additional window consumes one fresh SharedRegion,
+one private snapshot SharedRegion, two Desktop mappings, a child mapping, and
+one exact transferred cap while live. The extra-window record table is
+bounded at 32, but the Window Manager remains the authoritative total limit.
+Process-owned user spans remain 80 per process and are shared by all its
+threads.
+
 The initial audit above describes the branch at its starting SHA. The first
 implementation checkpoint now integrates protected installed APB1 enumeration
 and re-verification through filesd, the packaged receiver-policy catalog, an
@@ -100,16 +109,16 @@ ELF twice through keyboard/search and pointer selection, observed two ABI-v2
 processes and compositor windows, and returned identity resource counts to
 baseline after close. See `PROGRESS.md` and ADR-0093 for measured details.
 
-The initial launcher checkpoint is now extended with registry-backed
-associations and an AFS2-persisted Open With flow. Its T1 guest proof verifies
-that a saved default creates no authority and that an explicitly selected
-installed handler receives the exact read-only File capability. Remaining
-work includes launcher favorites/dock behavior, true multi-window instances,
-helper lifecycle, byte streams, user threads,
-synchronization, mixed-load pressure, and final qualification. The dynamic
-Image envelope is a bounded executable staging mechanism; it is not process
-VM and does not imply PIE or ASLR support. See `PROGRESS.md` for measured
-receipts.
+The launcher has registry-backed associations and an AFS2-persisted Open With
+flow. Its T1 guest proof verifies that a saved default creates no authority
+and that an explicitly selected installed handler receives the exact
+read-only File capability. ADR-0097 and the signed APB1 T1 guest now prove
+three independently backed ordinary windows under one process and two such
+instances at once. Persisted launcher favorites, distinct multi-process
+AppInstance ownership, helpers, streams, user threads, synchronization,
+mixed-load pressure, and final qualification remain open. The dynamic Image
+envelope is a bounded executable staging mechanism; it is not process VM and
+does not imply PIE or ASLR support. See `PROGRESS.md` for measured receipts.
 
 ## Work plan
 
@@ -144,7 +153,9 @@ receipts.
   window set to production broker state.
 - Give each ordinary window independent surface, compositor, damage,
   publication, close/state, and accounting ownership; prove one app owns at
-  least three simultaneous windows.
+  least three simultaneous windows. **Status:** window-level production
+  ownership and the three-window installed APB1 guest proof pass (ADR-0097);
+  the broker's larger `AppInstance`/multi-process model remains open.
 - Add headless primary instances and allowlisted helpers with explicit grants,
   wait/reap/terminate policy, status, crash handling, and manager-death cleanup.
 
@@ -159,10 +170,11 @@ receipts.
 
 - Specify process-owned mapping metadata and minimal reserve/map/release/protect
   operations, including atomic admission, W^X, guard pages, device-memory
-  rejection, accounting, and teardown. **Status:** syscall pointer-validation
-  spans now belong to Process (ADR-0094); explicit reservation and mapping
-  operations remain. M12 startup, 32-session, and installed-app guest
-  regressions passed, followed by 20/20 clean boots on the exact rebuilt EFI.
+  rejection, accounting, and teardown. **Status:** process-owned pointer
+  validation and exact-cap VM reserve/commit/protect/release/query are
+  implemented (ADR-0094/0095). M12 startup, 32-session, and installed-app
+  guest regressions passed, followed by 20/20 clean boots on that checkpoint's
+  exact EFI.
 - Replace the 32-page heap ceiling with lazy, bounded, fallible process VM
   backing and observable allocator/page accounting.
 - Only after process-wide mapping ownership is implemented, add real user

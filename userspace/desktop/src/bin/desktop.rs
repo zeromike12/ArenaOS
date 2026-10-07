@@ -48,6 +48,10 @@ const USER_ROOT: u64 = 20;
 const PACKAGE_ENDPOINT: u64 = 43;
 const PIXEL_OFFSET: usize = 4096;
 const LIMIT: usize = wm::MAX_WINDOWS;
+/// Window presentation records are separate from process sessions. The WM
+/// remains the total-window bound; this table can hold all ordinary windows
+/// beyond one primary window per process.
+const EXTRA_LIMIT: usize = wm::MAX_WINDOWS;
 const _: () = assert!(LIMIT == arena_desktop::apps::STARTUP_INSTANCE_SLOTS);
 /// Session clocks and exact-cap scans follow the shared kernel ABI width.
 /// Pages of one bounded transient surface (ADR-0075); the final pages of a
@@ -251,6 +255,47 @@ struct Session {
     /// A File capability offered by this exact authenticated session.
     offered_file: u64,
 }
+#[derive(Clone, Copy)]
+struct ExtraWindow {
+    owner_session: usize,
+    handle: u64,
+    /// Full descriptive SharedRegion generation, used only as a unique
+    /// surface key in the compositor model.
+    backing_id: u64,
+    va: u64,
+    snapshot: u64,
+    title: [u8; 32],
+    published: bool,
+    surface: (u16, u16),
+    content: u64,
+    regions: compose::Regions,
+    popup: PopupState,
+    close_pending: bool,
+    ending: bool,
+    reveal: arena_ui::motion::Motion,
+    focus: arena_ui::motion::Motion,
+    reveal_last: i32,
+    focus_last: i32,
+}
+const EMPTY_EXTRA: ExtraWindow = ExtraWindow {
+    owner_session: usize::MAX,
+    handle: 0,
+    backing_id: 0,
+    va: 0,
+    snapshot: 0,
+    title: [0; 32],
+    published: false,
+    surface: (0, 0),
+    content: 0,
+    regions: compose::Regions::NONE,
+    popup: NO_POPUP,
+    close_pending: false,
+    ending: false,
+    reveal: arena_ui::motion::Motion::fixed(arena_ui::metrics::TITLE_HEIGHT),
+    focus: arena_ui::motion::Motion::fixed(0),
+    reveal_last: arena_ui::metrics::TITLE_HEIGHT,
+    focus_last: 0,
+};
 const EMPTY: Session = Session {
     id: 0,
     va: 0,
@@ -332,6 +377,9 @@ fn next_deadline(now: u64) -> u64 {
     if sessions
         .iter()
         .any(|s| s.id != 0 && (s.reveal.active(now) || s.focus.active(now) || s.ending))
+        || unsafe { &*(&raw const EXTRA_WINDOWS) }
+            .iter()
+            .any(|w| w.handle != 0 && (w.reveal.active(now) || w.focus.active(now) || w.ending))
     {
         due = due.min(now + arena_ui::motion::FRAME_US);
     }
@@ -348,10 +396,15 @@ fn wake_clients() {
     let state = unsafe { &*(&raw const WM) };
     let all = unsafe { core::mem::replace(&mut *(&raw mut WAKE_ALL), false) };
     for (i, s) in unsafe { &*(&raw const SESSIONS) }.iter().enumerate() {
-        if s.handle == 0 || s.kind > 6 || unsafe { WOKEN[i] } {
+        let extra_pending = unsafe { &*(&raw const EXTRA_WINDOWS) }
+            .iter()
+            .any(|w| w.handle != 0 && w.owner_session == i && state.pending(w.handle));
+        if (s.handle == 0 && !extra_pending) || s.kind > 6 || unsafe { WOKEN[i] } {
             continue;
         }
-        if (all || state.pending(s.handle)) && unsafe { syscall2(SYS_NOTIFY, clock(i), 1) } == 0 {
+        if (all || (s.handle != 0 && state.pending(s.handle)) || extra_pending)
+            && unsafe { syscall2(SYS_NOTIFY, clock(i), 1) } == 0
+        {
             unsafe { WOKEN[i] = true };
             if perf::ENABLED && unsafe { KEY_AT != 0 && !KEY_POLLED && KEY_NOTIFIED == 0 } {
                 probe(P_KEY2NOTIFY, unsafe { KEY_AT });
@@ -459,21 +512,32 @@ fn perf_report() {
 // Private broker memory: each session's snapshot region is mapped only by
 // the broker; clients never map or receive it. Only an authenticated Damage
 // or Resize request publishes into it.
-fn snapshot_of(s: &Session) -> (&'static [u32], &'static [u32]) {
+fn snapshot_at(snapshot: u64) -> (&'static [u32], &'static [u32]) {
     let r = unsafe { RESERVE };
-    if s.snapshot == 0 {
+    if snapshot == 0 {
         return (&[], &[]);
     }
     let main = (r.surface_pages * 1024) as usize;
     unsafe {
         (
-            core::slice::from_raw_parts(s.snapshot as *const u32, main),
+            core::slice::from_raw_parts(snapshot as *const u32, main),
             core::slice::from_raw_parts(
-                (s.snapshot + r.surface_pages * 4096) as *const u32,
+                (snapshot + r.surface_pages * 4096) as *const u32,
                 (TRANSIENT_PAGES * 1024) as usize,
             ),
         )
     }
+}
+fn snapshot_of(s: &Session) -> (&'static [u32], &'static [u32]) {
+    snapshot_at(s.snapshot)
+}
+fn snapshot_extra(s: &ExtraWindow) -> (&'static [u32], &'static [u32]) {
+    snapshot_at(s.snapshot)
+}
+fn extra_index(handle: u64) -> Option<usize> {
+    unsafe { &*(&raw const EXTRA_WINDOWS) }
+        .iter()
+        .position(|window| window.handle == handle)
 }
 /// Copy exactly the declared rectangles of a `stride`-wide raster from the
 /// client's shared staging memory into the private snapshot. The sender is
@@ -495,6 +559,7 @@ fn publish_rects(src: u64, dst: u64, stride: usize, rects: &[[u16; 4]]) {
     }
 }
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
+static mut EXTRA_WINDOWS: [ExtraWindow; EXTRA_LIMIT] = [EMPTY_EXTRA; EXTRA_LIMIT];
 const ALL_APPS_CAPACITY: usize = 6 + arena_desktop::package::MAX_CATALOG_APPS;
 static mut INSTALLED_APPS: [Option<arena_desktop::package::AppEntry>; ALL_APPS_CAPACITY] =
     [None; ALL_APPS_CAPACITY];
@@ -1621,8 +1686,16 @@ fn log_capacity_refusal_inventory(before: CapInventory, resources_before: Resour
     }
 }
 fn destroy(slot: u64) {
-    if slot != CAP_NONE && unsafe { syscall1(SYS_CAP_DESTROY, slot) } != 0 {
-        die(80)
+    if slot != CAP_NONE {
+        let rc = unsafe { syscall1(SYS_CAP_DESTROY, slot) };
+        if rc != 0 {
+            log(b"[desktop] cap destroy failed slot/status=");
+            log_number(slot);
+            log(b"/");
+            log_number(rc as u64);
+            log(b"\n");
+            die(80)
+        }
     }
 }
 fn child_capacity_available() -> bool {
@@ -2523,18 +2596,186 @@ fn restore_minimized(kind: u8) -> bool {
     });
     pick.is_some_and(|h| state.activate(h).is_ok())
 }
+fn free_cap_slot() -> Option<u64> {
+    (0..CAP_SLOTS as u64).find(|slot| describe(*slot).is_none())
+}
+/// Allocate one independently backed ordinary window for an already
+/// authenticated application session. The broker keeps only its mapping;
+/// the exact read/write/copy cap is transferred in the checked IPC reply.
+fn create_extra_window(
+    state: &mut State,
+    owner_index: usize,
+    owner_id: u64,
+    width: u16,
+    height: u16,
+) -> Result<u64, i64> {
+    let extra_index = unsafe { &*(&raw const EXTRA_WINDOWS) }
+        .iter()
+        .position(|window| window.handle == 0)
+        .ok_or(STATUS_BUSY)?;
+    let reserve = unsafe { RESERVE };
+    if u64::from(width) * u64::from(height) > reserve.surface_pages * 1024 {
+        return Err(-2);
+    }
+    let mut region_out = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            reserve.shared_pages,
+            region_out.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    if rc != 0 {
+        return Err(rc);
+    }
+    let region = region_out[0];
+    let backing_id = region_out[1];
+    let va = unsafe { syscall2(SYS_SHARED_MAP, region, 1) };
+    if va <= 0 {
+        destroy(region);
+        return Err(va);
+    }
+    let mut snapshot_out = [0; 3];
+    let rc = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            reserve.snapshot_pages,
+            snapshot_out.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    if rc != 0 {
+        unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) };
+        destroy(region);
+        return Err(rc);
+    }
+    let snapshot = unsafe { syscall2(SYS_SHARED_MAP, snapshot_out[0], 1) };
+    destroy(snapshot_out[0]);
+    if snapshot <= 0 {
+        unsafe { syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0) };
+        destroy(region);
+        return Err(snapshot);
+    }
+    let Some(transfer_slot) = free_cap_slot() else {
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        destroy(region);
+        return Err(STATUS_BUSY);
+    };
+    // DESTROY is scoped to dropping this newly created window cap. It is
+    // needed both for the broker's checked-reply copy cleanup and for the
+    // owner to release the independently held surface explicitly.
+    let rights = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
+    let rc = unsafe { syscall3(SYS_CAP_COPY, region, transfer_slot, rights) };
+    destroy(region);
+    if rc != 0 {
+        unsafe {
+            syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+            syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+        }
+        return Err(rc);
+    }
+    let handle = match state.create_owned(owner_id, backing_id, width, height) {
+        Ok(handle) => handle,
+        Err(_) => {
+            destroy(transfer_slot);
+            unsafe {
+                syscall6(SYS_SHARED_UNMAP, va as u64, 0, 0, 0, 0, 0);
+                syscall6(SYS_SHARED_UNMAP, snapshot as u64, 0, 0, 0, 0, 0);
+            }
+            return Err(-2);
+        }
+    };
+    let now = arena_desktop::app_client::now();
+    let mut window = EMPTY_EXTRA;
+    window.owner_session = owner_index;
+    window.handle = handle;
+    window.backing_id = backing_id;
+    window.va = va as u64;
+    window.snapshot = snapshot as u64;
+    window.surface = (width, height);
+    window.reveal.retarget(
+        i32::from(height),
+        now,
+        if unsafe { PREFS.motion } {
+            arena_ui::motion::OPEN_US
+        } else {
+            0
+        },
+        arena_ui::motion::Easing::Smooth,
+    );
+    unsafe {
+        EXTRA_WINDOWS[extra_index] = window;
+        REPLY_CAP = transfer_slot;
+    }
+    Ok(handle)
+}
+fn retire_extra(extra_index: usize) {
+    let window = unsafe { EXTRA_WINDOWS[extra_index] };
+    if window.handle == 0 {
+        return;
+    }
+    unsafe { (&mut *(&raw mut WM)).retire(window.handle) }.unwrap_or_else(|_| die(85));
+    if unsafe { syscall6(SYS_SHARED_UNMAP, window.va, 0, 0, 0, 0, 0) } != 0
+        || unsafe { syscall6(SYS_SHARED_UNMAP, window.snapshot, 0, 0, 0, 0, 0) } != 0
+    {
+        die(86)
+    }
+    unsafe { EXTRA_WINDOWS[extra_index] = EMPTY_EXTRA };
+}
+fn retire_primary_window(index: usize) {
+    let session = unsafe { SESSIONS[index] };
+    if session.handle == 0 {
+        return;
+    }
+    unsafe { (&mut *(&raw mut WM)).retire(session.handle) }.unwrap_or_else(|_| die(85));
+    unsafe {
+        let current = &mut *(&raw mut SESSIONS).cast::<Session>().add(index);
+        current.handle = 0;
+        current.title = [0; 32];
+        current.published = false;
+        current.close_pending = false;
+        current.ending = false;
+        current.content = 0;
+        current.regions = compose::Regions::NONE;
+        current.surface = (0, 0);
+        current.popup = NO_POPUP;
+        current.reveal = arena_ui::motion::Motion::fixed(arena_ui::metrics::TITLE_HEIGHT);
+        current.focus = arena_ui::motion::Motion::fixed(0);
+        current.reveal_last = arena_ui::metrics::TITLE_HEIGHT;
+        current.focus_last = 0;
+    }
+}
 fn retire(index: usize, force: bool) {
     let s = unsafe { SESSIONS[index] };
     if s.id == 0 {
         return;
     }
     finish_child(s.process.unwrap_or_else(|| die(84)), force);
+    let mut extra_index = 0;
+    while extra_index < EXTRA_LIMIT {
+        let extra = unsafe { EXTRA_WINDOWS[extra_index] };
+        if extra.handle != 0 && extra.owner_session == index {
+            retire_extra(extra_index);
+        }
+        extra_index += 1;
+    }
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
     }
-    if unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0
-        || unsafe { syscall6(SYS_SHARED_UNMAP, s.snapshot, 0, 0, 0, 0, 0) } != 0
-    {
+    if unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0 {
+        die(86)
+    }
+    if s.snapshot != 0 && unsafe { syscall6(SYS_SHARED_UNMAP, s.snapshot, 0, 0, 0, 0, 0) } != 0 {
         die(86)
     }
     if unsafe { (*(&raw const CHOOSER)).as_ref() }.is_some_and(|c| c.session == index) {
@@ -2635,6 +2876,40 @@ fn animate() -> bool {
         s.reveal_last = reveal;
         s.focus_last = focus;
     }
+    for w in unsafe { &mut *(&raw mut EXTRA_WINDOWS) }
+        .iter_mut()
+        .filter(|window| window.handle != 0)
+    {
+        let target = if state.focused() == Some(w.handle) {
+            65536
+        } else {
+            0
+        };
+        if w.focus.target() != target {
+            w.focus.retarget(
+                target,
+                now,
+                if unsafe { PREFS.motion } {
+                    arena_ui::motion::FOCUS_US
+                } else {
+                    0
+                },
+                arena_ui::motion::Easing::Smooth,
+            );
+            changed = true;
+        }
+        if !unsafe { PREFS.motion } {
+            w.reveal
+                .retarget(w.reveal.target(), now, 0, arena_ui::motion::Easing::Linear);
+            w.focus
+                .retarget(target, now, 0, arena_ui::motion::Easing::Linear);
+        }
+        let reveal = w.reveal.sample(now);
+        let focus = w.focus.sample(now);
+        changed |= reveal != w.reveal_last || focus != w.focus_last;
+        w.reveal_last = reveal;
+        w.focus_last = focus;
+    }
     changed
 }
 static mut LAST_SCENE: Option<Scene> = None;
@@ -2643,6 +2918,10 @@ fn clear_regions() {
     for s in unsafe { &mut *(&raw mut SESSIONS) } {
         s.regions = compose::Regions::NONE;
         s.popup.regions = compose::Regions::NONE;
+    }
+    for w in unsafe { &mut *(&raw mut EXTRA_WINDOWS) } {
+        w.regions = compose::Regions::NONE;
+        w.popup.regions = compose::Regions::NONE;
     }
 }
 
@@ -3080,7 +3359,8 @@ fn applications_pointer(x: i32, y: i32, buttons: u8, w: i32, h: i32) -> Option<A
 fn scene(now: u64) -> Scene {
     let state = unsafe { &*(&raw const WM) };
     let sessions = unsafe { &*(&raw const SESSIONS) };
-    let mut order = [0usize; LIMIT];
+    let extras = unsafe { &*(&raw const EXTRA_WINDOWS) };
+    let mut order = [0usize; LIMIT + EXTRA_LIMIT];
     let mut n = 0;
     for (i, s) in sessions.iter().enumerate() {
         // Minimized windows are not drawn (the dock shows them).
@@ -3089,40 +3369,80 @@ fn scene(now: u64) -> Scene {
             n += 1
         }
     }
-    order[..n].sort_unstable_by_key(|i| state.find(sessions[*i].handle).map(|w| w.z).unwrap_or(0));
+    for (i, w) in extras.iter().enumerate() {
+        if w.handle != 0 && state.find(w.handle).is_some_and(|window| !window.minimized) {
+            order[n] = LIMIT + i;
+            n += 1;
+        }
+    }
+    order[..n].sort_unstable_by_key(|slot| {
+        let handle = if *slot < LIMIT {
+            sessions[*slot].handle
+        } else {
+            extras[*slot - LIMIT].handle
+        };
+        state.find(handle).map(|window| window.z).unwrap_or(0)
+    });
     let mut scene = Scene::EMPTY;
-    for (k, index) in order[..n].iter().enumerate() {
-        let s = sessions[*index];
-        let window = state.find(s.handle).unwrap_or_else(|| die(88));
+    for (k, slot) in order[..n].iter().copied().enumerate() {
+        let (handle, title, reveal, focus, content, regions, published, surface, popup) =
+            if slot < LIMIT {
+                let s = sessions[slot];
+                (
+                    s.handle,
+                    s.title,
+                    s.reveal.sample(now),
+                    s.focus.sample(now),
+                    s.content,
+                    s.regions,
+                    s.published,
+                    s.surface,
+                    s.popup,
+                )
+            } else {
+                let w = extras[slot - LIMIT];
+                (
+                    w.handle,
+                    w.title,
+                    w.reveal.sample(now),
+                    w.focus.sample(now),
+                    w.content,
+                    w.regions,
+                    w.published,
+                    w.surface,
+                    w.popup,
+                )
+            };
+        let window = state.find(handle).unwrap_or_else(|| die(88));
         scene.windows[k] = Some(WindowScene {
-            slot: *index,
-            handle: s.handle,
+            slot,
+            handle,
             x: window.x,
             y: window.y,
             width: window.width,
             height: window.height,
-            reveal: s.reveal.sample(now).clamp(0, i32::from(window.height)),
-            focus: s.focus.sample(now),
-            content: s.content,
-            regions: s.regions,
-            published: s.published,
-            title: s.title,
-            surface: s.surface,
+            reveal: reveal.clamp(0, i32::from(window.height)),
+            focus,
+            content,
+            regions,
+            published,
+            title,
+            surface,
             popup: window.popup.map(|p| {
-                let live = s.popup.handle == p.handle;
+                let live = popup.handle == p.handle;
                 PopupScene {
                     handle: p.handle,
                     x: p.x,
                     y: p.y,
                     width: p.width,
                     height: p.height,
-                    content: if live { s.popup.content } else { 0 },
+                    content: if live { popup.content } else { 0 },
                     regions: if live {
-                        s.popup.regions
+                        popup.regions
                     } else {
                         compose::Regions::NONE
                     },
-                    published: live && s.popup.published,
+                    published: live && popup.published,
                 }
             }),
             controls: arena_ui::components::Controls {
@@ -3130,7 +3450,7 @@ fn scene(now: u64) -> Scene {
                 maximize: window.resizable,
                 maximized: window.restore.is_some() && window.placement == wm::Placement::Maximized,
                 hover: match state.hover {
-                    Some((h, b)) if h == s.handle => b as u8,
+                    Some((h, b)) if h == handle => b as u8,
                     _ => 0,
                 },
             },
@@ -3143,10 +3463,20 @@ fn scene(now: u64) -> Scene {
     for s in sessions.iter().filter(|s| s.id != 0) {
         if s.kind < 6 {
             running[s.kind as usize] += 1;
-            if state.find(s.handle).is_some_and(|w| w.minimized) {
+            let mut any = false;
+            let mut all_minimized = true;
+            for window in state.windows().filter(|window| window.owner == s.id) {
+                any = true;
+                all_minimized &= window.minimized;
+            }
+            if any && all_minimized {
                 minimized[s.kind as usize] += 1;
             }
-            if Some(s.handle) == state.focused() {
+            if state
+                .focused()
+                .and_then(|handle| state.find(handle))
+                .is_some_and(|window| window.owner == s.id)
+            {
                 active = Some(s.kind);
             }
         }
@@ -3162,6 +3492,11 @@ fn scene(now: u64) -> Scene {
             if let Some(s) = sessions.iter().find(|s| s.handle == *handle) {
                 sw.titles[row] = s.title;
                 sw.kinds[row] = s.kind.min(6);
+            } else if let Some(w) = extras.iter().find(|w| w.handle == *handle) {
+                if let Some(owner) = sessions.get(w.owner_session) {
+                    sw.titles[row] = w.title;
+                    sw.kinds[row] = owner.kind.min(6);
+                }
             }
         }
         sw
@@ -3213,10 +3548,22 @@ fn render(ram: u64, w: usize, h: usize, scanout: u64) {
     let pixels = unsafe { core::slice::from_raw_parts_mut(ram as *mut u32, w * h) };
     let mut c = Canvas::new(pixels, w, h, w).unwrap_or_else(|_| die(87));
     let sessions = unsafe { &*(&raw const SESSIONS) };
+    let extras = unsafe { &*(&raw const EXTRA_WINDOWS) };
     let theme = arena_ui::theme::palette(next.dark);
     for rect in damage.rects() {
         c.set_clip(*rect);
-        compose::compose(&mut c, &next, |slot| snapshot_of(&sessions[slot]), theme);
+        compose::compose(
+            &mut c,
+            &next,
+            |slot| {
+                if slot < LIMIT {
+                    snapshot_of(&sessions[slot])
+                } else {
+                    snapshot_extra(&extras[slot - LIMIT])
+                }
+            },
+            theme,
+        );
     }
     probe(P_COMPOSE, started);
     let phase = perf_now();
@@ -3873,7 +4220,7 @@ extern "C" fn main() -> ! {
                                 .position(|s| s.handle == handle)
                             {
                                 if unsafe { SESSIONS[i].close_pending } {
-                                    retire(i, true)
+                                    retire_primary_window(i)
                                 } else {
                                     let _ = unsafe {
                                         (&mut *(&raw mut WM))
@@ -3882,6 +4229,17 @@ extern "C" fn main() -> ! {
                                     unsafe {
                                         SESSIONS[i].close_pending = true;
                                     }
+                                }
+                            } else if let Some(wi) = extra_index(handle) {
+                                let owner = unsafe { EXTRA_WINDOWS[wi].owner_session };
+                                if unsafe { EXTRA_WINDOWS[wi].close_pending } {
+                                    retire(owner, true)
+                                } else {
+                                    let _ = unsafe {
+                                        (&mut *(&raw mut WM))
+                                            .send(handle, arena_desktop::model::Event::Close)
+                                    };
+                                    unsafe { EXTRA_WINDOWS[wi].close_pending = true };
                                 }
                             }
                             dirty = true;
@@ -4034,7 +4392,7 @@ extern "C" fn main() -> ! {
                                     s.handle = handle;
                                     s.surface = (width, height);
                                     s.reveal.retarget(
-                                        height as i32,
+                                        i32::from(height),
                                         arena_desktop::app_client::now(),
                                         if unsafe { PREFS.motion } {
                                             arena_ui::motion::OPEN_US
@@ -4048,89 +4406,203 @@ extern "C" fn main() -> ! {
                                     defer_render = true;
                                 }
                             }
+                            Frame::CreateAdditional { width, height }
+                                if u64::from(width) * u64::from(height)
+                                    <= unsafe { RESERVE.surface_pages } * 1024 =>
+                            {
+                                match create_extra_window(state, i, id, width, height) {
+                                    Ok(handle) => {
+                                        result = handle;
+                                        status = 0;
+                                        defer_render = true;
+                                    }
+                                    Err(error) => status = error as u64,
+                                }
+                            }
                             Frame::Title { handle, text } if state.owned(id, handle) => {
-                                s.title = text;
-                                status = 0;
-                                if s.published {
-                                    dirty = true;
-                                } else {
-                                    defer_render = true;
+                                if s.handle == handle {
+                                    s.title = text;
+                                    if s.published {
+                                        dirty = true;
+                                    } else {
+                                        defer_render = true;
+                                    }
+                                    status = 0;
+                                } else if let Some(wi) = extra_index(handle)
+                                    && unsafe { EXTRA_WINDOWS[wi].owner_session == i }
+                                {
+                                    unsafe { EXTRA_WINDOWS[wi].title = text };
+                                    if unsafe { EXTRA_WINDOWS[wi].published } {
+                                        dirty = true;
+                                    } else {
+                                        defer_render = true;
+                                    }
+                                    status = 0;
                                 }
                             }
                             Frame::Damage { handle, rects } if state.owned(id, handle) => {
-                                let copy_started = perf_now();
-                                if perf::ENABLED && unsafe { KEY_AT } != 0 {
-                                    probe(P_KEY2DAMAGE, unsafe { KEY_AT });
-                                    unsafe {
-                                        KEY_FRAME = core::mem::replace(&mut *(&raw mut KEY_AT), 0)
-                                    };
-                                }
-                                let (ww, wh) = (usize::from(s.surface.0), usize::from(s.surface.1));
-                                // Every declared rectangle must lie inside this
-                                // session's published surface; otherwise nothing
-                                // is published at all.
-                                let inside = rects.rects().iter().all(|&[x, y, w, h]| {
-                                    x as usize + w as usize <= ww && y as usize + h as usize <= wh
-                                });
-                                if inside {
-                                    let full = [[0, 0, ww as u16, wh as u16]];
-                                    let list = if rects.n == 0 {
-                                        &full[..]
-                                    } else {
-                                        rects.rects()
-                                    };
-                                    publish_rects(s.va + PIXEL_OFFSET as u64, s.snapshot, ww, list);
-                                    if rects.n == 0 || !s.published {
-                                        s.regions.mark_full();
-                                    } else {
-                                        for r in rects.rects() {
-                                            s.regions.add(*r);
-                                        }
+                                let extra = if s.handle != handle {
+                                    extra_index(handle).filter(|wi| unsafe {
+                                        EXTRA_WINDOWS[*wi].owner_session == i
+                                    })
+                                } else {
+                                    None
+                                };
+                                if s.handle == handle || extra.is_some() {
+                                    let copy_started = perf_now();
+                                    if perf::ENABLED && unsafe { KEY_AT } != 0 {
+                                        probe(P_KEY2DAMAGE, unsafe { KEY_AT });
+                                        unsafe {
+                                            KEY_FRAME =
+                                                core::mem::replace(&mut *(&raw mut KEY_AT), 0)
+                                        };
                                     }
-                                    s.published = true;
-                                    s.content = s.content.wrapping_add(1);
-                                    probe(P_DAMAGE, copy_started);
-                                    status = 0;
-                                    dirty = true;
+                                    let (ww, wh, source, snapshot, was_published) =
+                                        if let Some(wi) = extra {
+                                            let window = unsafe { EXTRA_WINDOWS[wi] };
+                                            (
+                                                usize::from(window.surface.0),
+                                                usize::from(window.surface.1),
+                                                window.va + PIXEL_OFFSET as u64,
+                                                window.snapshot,
+                                                window.published,
+                                            )
+                                        } else {
+                                            (
+                                                usize::from(s.surface.0),
+                                                usize::from(s.surface.1),
+                                                s.va + PIXEL_OFFSET as u64,
+                                                s.snapshot,
+                                                s.published,
+                                            )
+                                        };
+                                    // Every declared rectangle must lie inside this
+                                    // session's published surface; otherwise nothing
+                                    // is published at all.
+                                    let inside = rects.rects().iter().all(|&[x, y, w, h]| {
+                                        x as usize + w as usize <= ww
+                                            && y as usize + h as usize <= wh
+                                    });
+                                    if inside {
+                                        let full = [[0, 0, ww as u16, wh as u16]];
+                                        let list = if rects.n == 0 {
+                                            &full[..]
+                                        } else {
+                                            rects.rects()
+                                        };
+                                        publish_rects(source, snapshot, ww, list);
+                                        if let Some(wi) = extra {
+                                            let window = unsafe {
+                                                &mut *(&raw mut EXTRA_WINDOWS)
+                                                    .cast::<ExtraWindow>()
+                                                    .add(wi)
+                                            };
+                                            if rects.n == 0 || !was_published {
+                                                window.regions.mark_full();
+                                            } else {
+                                                for r in rects.rects() {
+                                                    window.regions.add(*r);
+                                                }
+                                            }
+                                            window.published = true;
+                                            window.content = window.content.wrapping_add(1);
+                                        } else {
+                                            if rects.n == 0 || !was_published {
+                                                s.regions.mark_full();
+                                            } else {
+                                                for r in rects.rects() {
+                                                    s.regions.add(*r);
+                                                }
+                                            }
+                                            s.published = true;
+                                            s.content = s.content.wrapping_add(1);
+                                        }
+                                        probe(P_DAMAGE, copy_started);
+                                        status = 0;
+                                        dirty = true;
+                                    }
                                 }
                             }
                             // Publication of the session's own transient surface.
-                            Frame::Damage { handle, rects }
-                                if state.popup_owned(id, handle) && s.popup.handle == handle =>
-                            {
-                                let (_, p) = state.find_popup(handle).unwrap_or_else(|| die(88));
-                                let (pw, ph) = (usize::from(p.width), usize::from(p.height));
-                                let inside = rects.rects().iter().all(|&[x, y, w, h]| {
-                                    x as usize + w as usize <= pw && y as usize + h as usize <= ph
-                                });
-                                if inside {
-                                    let reserve = unsafe { RESERVE };
-                                    let full = [[0, 0, pw as u16, ph as u16]];
-                                    let list = if rects.n == 0 {
-                                        &full[..]
-                                    } else {
-                                        rects.rects()
-                                    };
-                                    publish_rects(
-                                        s.va + (reserve.shared_pages
-                                            - TRANSIENT_PAGES
-                                            - FILE_PAGES)
-                                            * 4096,
-                                        s.snapshot + reserve.surface_pages * 4096,
-                                        pw,
-                                        list,
-                                    );
-                                    if rects.n == 0 || !s.popup.published {
-                                        s.popup.regions.mark_full();
-                                    } else {
-                                        for r in rects.rects() {
-                                            s.popup.regions.add(*r);
+                            Frame::Damage { handle, rects } if state.popup_owned(id, handle) => {
+                                let (parent, p) =
+                                    state.find_popup(handle).unwrap_or_else(|| die(88));
+                                let parent_handle = parent.handle;
+                                let extra = if s.handle != parent_handle {
+                                    extra_index(parent_handle).filter(|wi| unsafe {
+                                        EXTRA_WINDOWS[*wi].owner_session == i
+                                    })
+                                } else {
+                                    None
+                                };
+                                let popup_state = if s.handle == parent_handle {
+                                    s.popup
+                                } else if let Some(wi) = extra {
+                                    unsafe { EXTRA_WINDOWS[wi].popup }
+                                } else {
+                                    NO_POPUP
+                                };
+                                if popup_state.handle == handle {
+                                    let (pw, ph) = (usize::from(p.width), usize::from(p.height));
+                                    let inside = rects.rects().iter().all(|&[x, y, w, h]| {
+                                        x as usize + w as usize <= pw
+                                            && y as usize + h as usize <= ph
+                                    });
+                                    if inside {
+                                        let reserve = unsafe { RESERVE };
+                                        let full = [[0, 0, pw as u16, ph as u16]];
+                                        let list = if rects.n == 0 {
+                                            &full[..]
+                                        } else {
+                                            rects.rects()
+                                        };
+                                        publish_rects(
+                                            (if let Some(wi) = extra {
+                                                unsafe { EXTRA_WINDOWS[wi].va }
+                                            } else {
+                                                s.va
+                                            }) + (reserve.shared_pages
+                                                - TRANSIENT_PAGES
+                                                - FILE_PAGES)
+                                                * 4096,
+                                            (if let Some(wi) = extra {
+                                                unsafe { EXTRA_WINDOWS[wi].snapshot }
+                                            } else {
+                                                s.snapshot
+                                            }) + reserve.surface_pages * 4096,
+                                            pw,
+                                            list,
+                                        );
+                                        if let Some(wi) = extra {
+                                            let popup = unsafe {
+                                                &mut *(&raw mut EXTRA_WINDOWS)
+                                                    .cast::<ExtraWindow>()
+                                                    .add(wi)
+                                            };
+                                            if rects.n == 0 || !popup.popup.published {
+                                                popup.popup.regions.mark_full();
+                                            } else {
+                                                for r in rects.rects() {
+                                                    popup.popup.regions.add(*r);
+                                                }
+                                            }
+                                            popup.popup.published = true;
+                                            popup.popup.content =
+                                                popup.popup.content.wrapping_add(1);
+                                        } else {
+                                            if rects.n == 0 || !s.popup.published {
+                                                s.popup.regions.mark_full();
+                                            } else {
+                                                for r in rects.rects() {
+                                                    s.popup.regions.add(*r);
+                                                }
+                                            }
+                                            s.popup.published = true;
+                                            s.popup.content = s.popup.content.wrapping_add(1);
                                         }
+                                        status = 0;
+                                        dirty = true;
                                     }
-                                    s.popup.published = true;
-                                    s.popup.content = s.popup.content.wrapping_add(1);
-                                    status = 0;
-                                    dirty = true;
                                 }
                             }
                             // The client publishes its whole surface at exactly
@@ -4142,18 +4614,47 @@ extern "C" fn main() -> ! {
                             } if state.owned(id, handle) => {
                                 let window = state.find(handle).unwrap_or_else(|| die(88));
                                 if (width, height) == (window.width, window.height) {
-                                    publish_rects(
-                                        s.va + PIXEL_OFFSET as u64,
-                                        s.snapshot,
-                                        usize::from(width),
-                                        &[[0, 0, width, height]],
-                                    );
-                                    s.surface = (width, height);
-                                    s.regions.mark_full();
-                                    s.published = true;
-                                    s.content = s.content.wrapping_add(1);
-                                    status = 0;
-                                    dirty = true;
+                                    let extra = if s.handle != handle {
+                                        extra_index(handle).filter(|wi| unsafe {
+                                            EXTRA_WINDOWS[*wi].owner_session == i
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                    if s.handle == handle || extra.is_some() {
+                                        publish_rects(
+                                            (if let Some(wi) = extra {
+                                                unsafe { EXTRA_WINDOWS[wi].va }
+                                            } else {
+                                                s.va
+                                            }) + PIXEL_OFFSET as u64,
+                                            if let Some(wi) = extra {
+                                                unsafe { EXTRA_WINDOWS[wi].snapshot }
+                                            } else {
+                                                s.snapshot
+                                            },
+                                            usize::from(width),
+                                            &[[0, 0, width, height]],
+                                        );
+                                        if let Some(wi) = extra {
+                                            let window = unsafe {
+                                                &mut *(&raw mut EXTRA_WINDOWS)
+                                                    .cast::<ExtraWindow>()
+                                                    .add(wi)
+                                            };
+                                            window.surface = (width, height);
+                                            window.regions.mark_full();
+                                            window.published = true;
+                                            window.content = window.content.wrapping_add(1);
+                                        } else {
+                                            s.surface = (width, height);
+                                            s.regions.mark_full();
+                                            s.published = true;
+                                            s.content = s.content.wrapping_add(1);
+                                        }
+                                        status = 0;
+                                        dirty = true;
+                                    }
                                 }
                             }
                             Frame::Resizable {
@@ -4176,20 +4677,49 @@ extern "C" fn main() -> ! {
                                 if let Ok(popup) =
                                     state.open_popup(id, handle, kind, x, y, width, height)
                                 {
-                                    s.popup = PopupState {
-                                        handle: popup,
-                                        ..NO_POPUP
+                                    let extra = if s.handle != handle {
+                                        extra_index(handle).filter(|wi| unsafe {
+                                            EXTRA_WINDOWS[*wi].owner_session == i
+                                        })
+                                    } else {
+                                        None
                                     };
-                                    result = popup;
-                                    status = 0;
-                                    dirty = true;
+                                    if s.handle == handle {
+                                        s.popup = PopupState {
+                                            handle: popup,
+                                            ..NO_POPUP
+                                        };
+                                        result = popup;
+                                        status = 0;
+                                        dirty = true;
+                                    } else if let Some(wi) = extra {
+                                        unsafe {
+                                            EXTRA_WINDOWS[wi].popup = PopupState {
+                                                handle: popup,
+                                                ..NO_POPUP
+                                            }
+                                        };
+                                        result = popup;
+                                        status = 0;
+                                        dirty = true;
+                                    }
                                 }
                             }
                             Frame::Dismiss { handle } if state.popup_owned(id, handle) => {
+                                let parent_handle =
+                                    state.find_popup(handle).unwrap_or_else(|| die(88)).0.handle;
                                 if state.close_popup(id, handle).is_ok() {
-                                    s.popup = NO_POPUP;
-                                    status = 0;
-                                    dirty = true;
+                                    if s.handle == parent_handle {
+                                        s.popup = NO_POPUP;
+                                        status = 0;
+                                        dirty = true;
+                                    } else if let Some(wi) = extra_index(parent_handle)
+                                        && unsafe { EXTRA_WINDOWS[wi].owner_session == i }
+                                    {
+                                        unsafe { EXTRA_WINDOWS[wi].popup = NO_POPUP };
+                                        status = 0;
+                                        dirty = true;
+                                    }
                                 }
                             }
                             Frame::Poll { handle } if state.owned(id, handle) => {
@@ -4218,8 +4748,56 @@ extern "C" fn main() -> ! {
                                 }
                             }
                             Frame::CancelClose { handle } if state.owned(id, handle) => {
-                                s.close_pending = false;
-                                status = 0;
+                                if s.handle == handle {
+                                    s.close_pending = false;
+                                    status = 0;
+                                } else if let Some(wi) = extra_index(handle)
+                                    && unsafe { EXTRA_WINDOWS[wi].owner_session == i }
+                                {
+                                    unsafe { EXTRA_WINDOWS[wi].close_pending = false };
+                                    status = 0;
+                                }
+                            }
+                            Frame::DestroyWindow { handle } if state.owned(id, handle) => {
+                                if s.handle == handle {
+                                    state.retire(handle).unwrap_or_else(|_| die(85));
+                                    s.handle = 0;
+                                    s.title = [0; 32];
+                                    s.published = false;
+                                    s.close_pending = false;
+                                    s.ending = false;
+                                    s.content = 0;
+                                    s.regions = compose::Regions::NONE;
+                                    s.surface = (0, 0);
+                                    s.popup = NO_POPUP;
+                                    status = 0;
+                                    dirty = true;
+                                } else if let Some(wi) = extra_index(handle)
+                                    && unsafe { EXTRA_WINDOWS[wi].owner_session == i }
+                                {
+                                    state.retire(handle).unwrap_or_else(|_| die(85));
+                                    let window = unsafe { EXTRA_WINDOWS[wi] };
+                                    if unsafe {
+                                        syscall6(SYS_SHARED_UNMAP, window.va, 0, 0, 0, 0, 0)
+                                    } != 0
+                                        || unsafe {
+                                            syscall6(
+                                                SYS_SHARED_UNMAP,
+                                                window.snapshot,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                            )
+                                        } != 0
+                                    {
+                                        die(86)
+                                    }
+                                    unsafe { EXTRA_WINDOWS[wi] = EMPTY_EXTRA };
+                                    status = 0;
+                                    dirty = true;
+                                }
                             }
                             _ => {}
                         }
