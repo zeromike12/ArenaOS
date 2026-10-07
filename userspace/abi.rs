@@ -59,6 +59,10 @@ pub const SYS_VM_RELEASE: u64 = 59;
 pub const SYS_VM_QUERY: u64 = 60;
 /// ADR-0100: held Process/READ reports stable `[exited, status]` state.
 pub const SYS_PROC_STATUS: u64 = 61;
+/// Voluntarily reschedule this native user thread without blocking.
+pub const SYS_THREAD_YIELD: u64 = 62;
+/// Mint one Desktop-owned Notification into an exact empty cap slot.
+pub const SYS_NOTIFICATION_CREATE: u64 = 63;
 pub const VM_PROT_READ: u64 = 1;
 pub const VM_PROT_WRITE: u64 = 2;
 pub const VM_PROT_EXEC: u64 = 4;
@@ -87,6 +91,8 @@ pub const CAP_SLOTS: usize = 128;
 pub const CAP_KIND_PROCESS: u8 = 4;
 /// ADR-0095: process-owned native VM reservation capability.
 pub const CAP_KIND_VM_REGION: u8 = 14;
+/// Desktop-only authority to mint bounded owner notifications.
+pub const CAP_KIND_NOTIFICATION_FACTORY: u8 = 15;
 /// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
 pub const MAX_SPAWN_INHERIT: usize = 5;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
@@ -320,6 +326,9 @@ pub const PKG_OP_APP_METADATA: u64 = 13;
 pub const PKG_OP_APP_LAUNCH: u64 = 14;
 /// Read one bounded identity/label row from a specific catalog generation.
 pub const PKG_OP_APP_ENTRY: u64 = 15;
+/// Resolve one signed AHL1 helper declaration from an installed APB1 app and
+/// return the exact verified Image capability through a bounded staging region.
+pub const PKG_OP_APP_HELPER_LAUNCH: u64 = 16;
 pub const NATIVE_IMAGE_BYTES_MAX: usize = 256 * 1024;
 pub const PKG_INSTALLED: u64 = 4;
 pub const PKG_PREPARED: u64 = 5;

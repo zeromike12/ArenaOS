@@ -16,7 +16,7 @@ use arena_desktop::{
 use arena_lib::abi::{
     CAP_KIND_VM_REGION, RIGHTS_DESTROY, RIGHTS_READ, RIGHTS_WRITE, STATUS_BAD_ADDRESS,
     STATUS_BAD_ARG, STATUS_BUSY, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_VM_COMMIT, SYS_VM_PROTECT,
-    VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2, syscall6,
+    SYS_WAIT, VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2, syscall6,
 };
 use arena_runtime::capabilities::HeldCapability;
 use arena_runtime::heap::{HeapUsage, MAX_SCALABLE_HEAP_PAGES, PAGE_BYTES, ScalableHeap};
@@ -73,6 +73,46 @@ fn application_main(view: StartupView<'_>) -> ! {
     app_client::audit(kind, view.instance_generation()).unwrap_or_else(|_| client::exit(74));
     verify_vm();
     verify_heap();
+
+    let unknown = helper_id(b"org.arenaos.phase13unknown");
+    if app_client::spawn_helper(unknown).is_ok() {
+        client::exit(145);
+    }
+    client::log(b"[phase13-helper] unknown signed helper ID refused without spawn\n");
+    let worker = app_client::spawn_helper(helper_id(b"org.arenaos.phase13worker"))
+        .unwrap_or_else(|_| client::exit(142));
+    if app_client::wait_helper(worker).unwrap_or_else(|_| client::exit(143)) != 43 {
+        client::exit(144);
+    }
+    client::log(b"[phase13-helper] signed helper wait returned exact exit=43\n");
+
+    let sleeper = app_client::spawn_helper(helper_id(b"org.arenaos.phase13sleeper"))
+        .unwrap_or_else(|_| client::exit(146));
+    loop {
+        let badge = unsafe { syscall1(SYS_WAIT, 3) };
+        if badge < 0 {
+            client::exit(152);
+        }
+        if badge as u64 & 0x13A2 == 0x13A2 {
+            break;
+        }
+    }
+    app_client::terminate_helper(sleeper).unwrap_or_else(|_| client::exit(147));
+    client::log(b"[phase13-helper] owner-authorized terminate/reap passed\n");
+
+    let crasher = app_client::spawn_helper(helper_id(b"org.arenaos.phase13crasher"))
+        .unwrap_or_else(|_| client::exit(148));
+    if app_client::wait_helper(crasher).unwrap_or_else(|_| client::exit(149)) != 262 {
+        client::exit(150);
+    }
+    client::log(b"[phase13-helper] crashed helper status=262 observed and reaped\n");
+
+    let crasher_again = app_client::spawn_helper(helper_id(b"org.arenaos.phase13crasher"))
+        .unwrap_or_else(|_| client::exit(153));
+    if app_client::wait_helper(crasher_again).unwrap_or_else(|_| client::exit(154)) != 262 {
+        client::exit(155);
+    }
+    client::log(b"[phase13-helper] retired private timer object reclaimed after reap\n");
 
     let window = Client::connect_v2(320, 180, "Phase13 Probe").unwrap_or_else(|_| client::exit(75));
     if has_document {
@@ -166,9 +206,20 @@ fn application_main(view: StartupView<'_>) -> ! {
             }
         }
         if !open[..count].iter().any(|live| *live) {
+            app_client::spawn_helper(helper_id(b"org.arenaos.phase13orphan"))
+                .unwrap_or_else(|_| client::exit(151));
+            client::log(b"[phase13-helper] live helper left for AppInstance owner cleanup\n");
             client::exit(42);
         }
     }
+}
+
+fn helper_id(name: &[u8]) -> [u8; 32] {
+    let mut id = [0u8; 32];
+    if name.len() < id.len() {
+        id[..name.len()].copy_from_slice(name);
+    }
+    id
 }
 
 fn paint(window: &Client, index: usize) {

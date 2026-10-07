@@ -20,6 +20,10 @@ SOURCE = b"phase13.apb1"
 HEADLESS_SOURCE = b"zz-headless.apb1"
 APP_ID = b"org.arenaos.phase13app"
 HEADLESS_APP_ID = b"org.arenaos.zzheadless"
+HELPER_ID = b"org.arenaos.phase13worker"
+SLEEPER_ID = b"org.arenaos.phase13sleeper"
+CRASHER_ID = b"org.arenaos.phase13crasher"
+ORPHAN_ID = b"org.arenaos.phase13orphan"
 SERIAL_APPS = "[phase13-installed-app] ABI-v2 startup verified; real window published"
 SERIAL_MULTIWINDOW = "[phase13-multiwindow] one process owns three separately backed ordinary windows"
 SERIAL_WINDOW_RETIRED = "[phase13-window] DestroyWindow retired one surface; process and siblings remain live"
@@ -28,10 +32,21 @@ SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
 SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present"
 SERIAL_HEADLESS_EXIT = "[desktop] child Process-cap exit status=42"
+SERIAL_HELPER_EXIT = (
+    "[desktop] helper id=org.arenaos.phase13worker Process-cap exit status=43; owner-group reap=ok"
+)
+SERIAL_CRASHER_EXIT = (
+    "[desktop] helper id=org.arenaos.phase13crasher Process-cap exit status=262; owner-group reap=ok"
+)
 COUNTERS = re.compile(
     r"measured frames/records/processes/regions/pages/maps/caps="
     r"(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n"
 )
+
+
+def pixel(image, x, y):
+    offset = (y * 800 + x) * 3
+    return tuple(image[offset:offset + 3])
 
 
 def tree(disk):
@@ -56,6 +71,30 @@ def app_bundle():
     )
     executable = crate / "target/x86_64-unknown-none/release/arena-phase13-installed-app"
     assert executable.is_file() and executable.stat().st_size < 256 * 1024
+    helper_crate = root / "userspace/phase13-headless"
+    subprocess.run(
+        ["cargo", "build", "--release"],
+        cwd=helper_crate,
+        env=arena_env.rust_env(),
+        check=True,
+    )
+    helper = helper_crate / "target/x86_64-unknown-none/release/arena-phase13-headless"
+    assert helper.is_file() and helper.stat().st_size < 256 * 1024
+    helper_specs = [
+        (HELPER_ID, b"bin/worker", 1),
+        (SLEEPER_ID, b"bin/sleeper", 3),
+        (CRASHER_ID, b"bin/crasher", 1),
+        (ORPHAN_ID, b"bin/orphan", 1),
+    ]
+    helper_list = bytearray(8 + 88 * len(helper_specs))
+    helper_list[:4] = b"AHL1"
+    helper_list[4] = 1
+    helper_list[5] = len(helper_specs)
+    for index, (helper_id, helper_path, flags) in enumerate(helper_specs):
+        start = 8 + index * 88
+        helper_list[start:start + len(helper_id)] = helper_id
+        helper_list[start + 32:start + 32 + len(helper_path)] = helper_path
+        helper_list[start + 80:start + 84] = flags.to_bytes(4, "little")
     manifest = apb1_format.make_manifest(
         app_id=APP_ID,
         package_id=b"org.arena.editor",
@@ -69,7 +108,11 @@ def app_bundle():
         height=180,
         associations=(b"text/plain",),
     )
-    return apb1_format.build_bundle([(1, b"bin/probe", executable.read_bytes())], manifest=manifest)
+    files = [(1, b"bin/probe", executable.read_bytes())]
+    files.extend((1, path, helper.read_bytes()) for _, path, _ in helper_specs)
+    files.append((2, b"META-INF/arena.helpers", bytes(helper_list)))
+    files.sort(key=lambda record: record[1])
+    return apb1_format.build_bundle(files, manifest=manifest)
 
 
 def headless_bundle():
@@ -267,11 +310,24 @@ def interaction(disk):
 
         # Search filters the same verified registry; a pointer selection
         # launches the multi-instance app a second time.
-        d.click(120, 12)
-        empty_query = d.shot("all-apps-empty-query")
-        d.q.type_text("phase13", gap_s=0.025)
-        searched = d.shot("all-apps-search", lambda p: crop(p, 194, 150, 400, 28) != crop(empty_query, 194, 150, 400, 28))
-        assert crop(searched, 194, 150, 400, 28) != crop(empty_query, 194, 150, 400, 28)
+        before_search = d.shot("all-apps-before-search")
+        d.click(94, 12)
+        empty_query = d.shot(
+            "all-apps-empty-query",
+            lambda p: min(pixel(p, 600, 180)) > 240
+            and pixel(p, 600, 180) != pixel(before_search, 600, 180),
+        )
+        d.q.type_text("phase13", gap_s=0.04)
+        searched = d.shot(
+            "all-apps-search",
+            lambda p: sum(
+                1
+                for i in range(0, len(crop(p, 186, 232, 60, 20)), 3)
+                if max(crop(p, 186, 232, 60, 20)[i:i + 3]) < 180
+            ) == 0,
+        )
+        assert pixel(searched, 600, 180) == pixel(empty_query, 600, 180), \
+            "All Applications search surface disappeared while filtering"
         # The filtered catalog has one row; this click is a pointer launch.
         d.click(250, 220)
         try:
@@ -453,8 +509,23 @@ def main():
     assert serial.count(SERIAL_HEAP) == 3
     assert serial.count(SERIAL_HEADLESS) == 1
     assert serial.count("[phase13-headless] timer completed; process exiting for manager reap") == 1
+    assert serial.count("[phase13-helper] unknown signed helper ID refused without spawn") == 3
+    # Fifteen helper launches exceed the 13 dynamic notification slots left
+    # after the fixed 32-session boot inventory; each wait/reap must retire its
+    # private timer object before the next launch.
+    assert serial.count("[phase13-helper] no inherited notification factory; WRITE-only owner signal cannot wait") == 15
+    assert serial.count("[phase13-helper] exact Startup ABI inventory: private timer Notification") == 15
+    assert serial.count("[phase13-helper] readiness badge sent through separate WRITE-only owner signal") == 3
+    assert serial.count("[phase13-helper] signed helper wait returned exact exit=43") == 3
+    assert serial.count("[phase13-helper] owner-authorized terminate/reap passed") == 3
+    assert serial.count("[phase13-helper] crashed helper status=262 observed and reaped") == 3
+    assert serial.count("[phase13-helper] live helper left for AppInstance owner cleanup") == 3
+    assert serial.count(SERIAL_HELPER_EXIT) == 3
+    assert serial.count(SERIAL_CRASHER_EXIT) == 6
+    assert serial.count("[phase13-helper] retired private timer object reclaimed after reap") == 3
+    assert serial.count("[desktop] AppInstance ProcessGroup teardown members=2; final members=0") == 3
     # The read-only Open With launch, both ordinary instances, and the
-    # headless helper each exit with the fixture's exact status 42.
+    # headless app each exit with the fixture's exact status 42.
     assert serial.count(SERIAL_HEADLESS_EXIT) == 4
     assert "[phase13-app] exact read-only document capability verified" in serial
     assert "[desktop] installed application registry unavailable" not in serial

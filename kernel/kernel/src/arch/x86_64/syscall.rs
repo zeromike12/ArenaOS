@@ -199,6 +199,10 @@ pub const SYS_VM_RELEASE: u64 = 59;
 pub const SYS_VM_QUERY: u64 = 60;
 /// ADR-0100: stable child exit state through a held Process/READ cap.
 pub const SYS_PROC_STATUS: u64 = 61;
+/// Voluntarily yield the running user thread to the bounded round-robin queue.
+pub const SYS_THREAD_YIELD: u64 = 62;
+/// Mint a Desktop-owned bounded Notification through its boot-issued factory.
+pub const SYS_NOTIFICATION_CREATE: u64 = 63;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -737,6 +741,13 @@ extern "C" fn syscall_dispatch(
         SYS_VM_RELEASE if [a1, a2, a3, a4, a5] == [0; 5] => sys_vm_release(a0) as u64,
         SYS_VM_QUERY if [a2, a3, a4, a5] == [0; 4] => sys_vm_query(a0, a1) as u64,
         SYS_PROC_STATUS if [a2, a3, a4, a5] == [0; 4] => sys_proc_status(a0, a1) as u64,
+        SYS_THREAD_YIELD => {
+            crate::sched::yield_now();
+            STATUS_OK as u64
+        }
+        SYS_NOTIFICATION_CREATE if [a2, a3, a4, a5] == [0; 4] => {
+            sys_notification_create(a0, a1) as u64
+        }
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1013,9 +1024,52 @@ fn notification_of(pid: u64, slot: u64, right: u32) -> Result<u32, Status> {
         return Err(STATUS_BAD_ARG);
     }
     match c.obj {
-        crate::cap::CapObj::Notification { nid } => Ok(nid),
+        crate::cap::CapObj::Notification { nid }
+        | crate::cap::CapObj::OwnedNotification { nid } => Ok(nid),
         _ => Err(STATUS_BAD_ARG),
     }
+}
+
+/// SYS_NOTIFICATION_CREATE(factory slot, destination slot): mint a fresh
+/// owner capability in one exact empty slot. The factory carries WRITE only;
+/// the new object has READ/WRITE for use, COPY for explicit child delegation,
+/// and DESTROY for owner teardown. The global IPC notification table remains
+/// the resource bound.
+fn sys_notification_create(factory_slot: u64, destination_slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if factory_slot >= crate::cap::CAP_SLOTS as u64
+        || destination_slot >= crate::cap::CAP_SLOTS as u64
+    {
+        return STATUS_BAD_ARG;
+    }
+    crate::sync::without_interrupts(|| {
+        let Ok(factory) = crate::cap::read(pid, factory_slot as usize) else {
+            return STATUS_BAD_ARG;
+        };
+        if !matches!(factory.obj, crate::cap::CapObj::NotificationFactory)
+            || factory.rights & crate::cap::RIGHTS_WRITE == 0
+            || crate::cap::slot_occupied(pid, destination_slot as usize) != Some(false)
+        {
+            return STATUS_BAD_ARG;
+        }
+        let Ok(nid) = crate::ipc::create_notification() else {
+            return STATUS_BUSY;
+        };
+        let owner = crate::cap::Cap {
+            obj: crate::cap::CapObj::OwnedNotification { nid },
+            rights: crate::cap::RIGHTS_READ
+                | crate::cap::RIGHTS_WRITE
+                | crate::cap::RIGHTS_COPY
+                | crate::cap::RIGHTS_DESTROY,
+        };
+        if crate::cap::issue(pid, destination_slot as usize, owner).is_err() {
+            let _ = crate::ipc::destroy_notification(nid);
+            return STATUS_BUSY;
+        }
+        STATUS_OK
+    })
 }
 
 /// The optional per-message transferred cap: `CAP_NONE` = none sent;
@@ -2806,6 +2860,8 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
             (12, u64::from(eid))
         }
         crate::cap::CapObj::Notification { nid } => (3, u64::from(nid)),
+        crate::cap::CapObj::OwnedNotification { nid } => (3, u64::from(nid)),
+        crate::cap::CapObj::NotificationFactory => (15, 0),
         crate::cap::CapObj::Process { pid: target } if crate::proc::pml4_of(target).is_some() => {
             (4, target)
         }

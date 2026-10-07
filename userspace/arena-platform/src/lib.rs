@@ -14,6 +14,7 @@
 extern crate std;
 
 pub mod bundle;
+pub mod helpers;
 pub mod install;
 pub mod lifecycle;
 pub mod manifest;

@@ -46,6 +46,8 @@ const V2_BADGE_RIGHTS: u64 = RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY;
 const USER_ROOT: u64 = 20;
 /// Direct, write-only endpoint to the receiver-verified package service (ADR-0091).
 const PACKAGE_ENDPOINT: u64 = 43;
+/// Narrow boot grant for creating helper-private notifications.
+const NOTIFICATION_FACTORY_SLOT: u64 = 44;
 const PIXEL_OFFSET: usize = 4096;
 const LIMIT: usize = wm::MAX_WINDOWS;
 /// A live application instance owns its own exact-capability process group.
@@ -138,6 +140,7 @@ fn audit_session_clocks() {
         die(96)
     };
     let package_endpoint = cap_slot_descriptor(PACKAGE_ENDPOINT as usize);
+    let notification_factory = cap_slot_descriptor(NOTIFICATION_FACTORY_SLOT as usize);
     let frame_slot = unsafe {
         syscall6(
             SYS_CAP_OCCUPIED,
@@ -171,6 +174,12 @@ fn audit_session_clocks() {
                 || package_endpoint[2] != RIGHTS_WRITE
                 || package_endpoint[1] == fs_endpoint[1]
                 || package_endpoint[1] == user_root[1]))
+        || notification_factory
+            != [
+                u64::from(CAP_KIND_NOTIFICATION_FACTORY),
+                0,
+                u64::from(RIGHTS_WRITE),
+            ]
         || frame_slot != 0
         || lent_slot != 0
     {
@@ -193,7 +202,7 @@ fn audit_session_clocks() {
         log(b"\n");
         die(96)
     }
-    log(b"[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); scratch slots125/126 free\n");
+    log(b"[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); private notification factory slot44; scratch slots125/126 free\n");
 }
 /// Presentation state of a session's transient surface, valid only while
 /// the window policy still holds a popup with this handle.
@@ -204,6 +213,20 @@ struct PopupState {
     content: u64,
     regions: compose::Regions,
 }
+#[derive(Clone, Copy)]
+struct HelperMember {
+    handle: u32,
+    helper_id: [u8; 32],
+    timer_slot: u8,
+    active: bool,
+}
+const EMPTY_HELPER: HelperMember = HelperMember {
+    handle: 0,
+    helper_id: [0; 32],
+    timer_slot: u8::MAX,
+    active: false,
+};
+const HELPERS_PER_INSTANCE: usize = APP_GROUP_PROCESSES - 1;
 const NO_POPUP: PopupState = PopupState {
     handle: 0,
     published: false,
@@ -222,6 +245,10 @@ struct Session {
     /// Descriptive identity for registry-backed active-instance indicators;
     /// the held Process capability remains the only process authority.
     application_id: [u8; 32],
+    /// Exact package startup flags retained for explicitly launched helpers.
+    app_flags: u32,
+    /// Helpers are process-group members but have no window session.
+    helpers: [HelperMember; HELPERS_PER_INSTANCE],
     scope: u8,
     /// Rights formerly carried by the attenuated function SharedRegion cap;
     /// now trusted session policy used only after kernel badge validation.
@@ -309,6 +336,8 @@ const EMPTY: Session = Session {
     published: false,
     kind: 5,
     application_id: [0; 32],
+    app_flags: 0,
+    helpers: [EMPTY_HELPER; HELPERS_PER_INSTANCE],
     scope: 0,
     function_rights: 0,
     badge: 0,
@@ -1748,9 +1777,22 @@ fn finish_spawn_result(
 fn finish_app_group(instance: usize) {
     let group =
         unsafe { (&mut *(&raw mut APP_GROUPS))[instance].as_mut() }.unwrap_or_else(|| die(84));
+    let members = group.len();
     // An AppInstance owns all its processes. Retiring it always finishes every
     // exact Process cap in the group before releasing the group record.
     group.stop_all().unwrap_or_else(|_| die(84));
+    if !group.is_empty() {
+        die(84)
+    }
+    for member in unsafe { &mut SESSIONS[instance].helpers } {
+        if member.active && member.timer_slot != u8::MAX {
+            destroy(u64::from(member.timer_slot));
+        }
+        *member = EMPTY_HELPER;
+    }
+    log(b"[desktop] AppInstance ProcessGroup teardown members=");
+    log_number(members as u64);
+    log(b"; final members=0\n");
 }
 fn spawn_child(instance: usize, image: u64, grants: &[InheritGrant]) -> Result<Handle, i64> {
     if instance >= LIMIT {
@@ -1776,6 +1818,318 @@ fn spawn_child(instance: usize, image: u64, grants: &[InheritGrant]) -> Result<H
     let handle = finish_spawn_result(group.spawn(spawn))?;
     unsafe { (*(&raw mut APP_GROUPS))[instance] = Some(group) };
     Ok(handle)
+}
+
+fn launch_helper_image_v2(
+    instance: usize,
+    image: arena_desktop::package::NativeHelper,
+    helper_id: [u8; 32],
+) -> Result<(Handle, u8), i64> {
+    use arena_startup_abi::startup as startup_abi;
+
+    let known_flags = arena_desktop::package::HELPER_FLAG_TIMER
+        | arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL;
+    if instance >= LIMIT
+        || image.flags & !known_flags != 0
+        || (image.flags & arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL != 0
+            && image.flags & arena_desktop::package::HELPER_FLAG_TIMER == 0)
+        || !child_capacity_available(instance)
+    {
+        destroy(image.image.capability);
+        return Err(STATUS_BUSY);
+    }
+    let session = unsafe { SESSIONS[instance] };
+    if session.id == 0 || session.kind != 6 || session.badge == 0 {
+        destroy(image.image.capability);
+        return Err(STATUS_BAD_ARG);
+    }
+    let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image.image.capability, 0, 0, 0, 0, 0) };
+    if ready != 0 {
+        destroy(image.image.capability);
+        return Err(ready);
+    }
+    let needed = if image.flags & arena_desktop::package::HELPER_FLAG_TIMER != 0 {
+        3
+    } else {
+        2
+    };
+    let free = (0..CAP_SLOTS as u64)
+        .filter(|slot| unsafe { syscall6(SYS_CAP_OCCUPIED, *slot, 0, 0, 0, 0, 0) } == 0)
+        .count();
+    if free < needed {
+        destroy(image.image.capability);
+        return Err(STATUS_BUSY);
+    }
+    let Some(id_len) = session
+        .application_id
+        .iter()
+        .position(|byte| *byte == 0)
+        .filter(|length| *length != 0 && *length < 32)
+    else {
+        destroy(image.image.capability);
+        return Err(STATUS_BAD_ARG);
+    };
+    let Some(helper_len) = helper_id
+        .iter()
+        .position(|byte| *byte == 0)
+        .filter(|length| *length != 0 && *length < 32)
+    else {
+        destroy(image.image.capability);
+        return Err(STATUS_BAD_ARG);
+    };
+    let arguments: [&[u8]; 2] = [&session.application_id[..id_len], &helper_id[..helper_len]];
+    let timer_granted = image.flags & arena_desktop::package::HELPER_FLAG_TIMER != 0;
+    let owner_signal = image.flags & arena_desktop::package::HELPER_FLAG_OWNER_SIGNAL != 0;
+    let descriptors = [
+        startup_cap_descriptor(
+            1,
+            startup_abi::CAP_KIND_NOTIFICATION,
+            RIGHTS_READ | RIGHTS_WRITE,
+        ),
+        startup_cap_descriptor(2, startup_abi::CAP_KIND_NOTIFICATION, RIGHTS_WRITE),
+    ];
+    let capability_count = usize::from(timer_granted) + usize::from(owner_signal);
+    let capabilities = &descriptors[..capability_count];
+    let spec = startup_abi::StartupSpec {
+        application_id: &session.application_id,
+        instance_slot: instance as u16,
+        instance_generation: u64::from(session.badge),
+        flags: session.app_flags,
+        arguments: &arguments,
+        environment: &[],
+        capabilities,
+        cwd: None,
+        stdin: None,
+        stdout: None,
+        stderr: None,
+        entry: image.image.entry,
+        load_base: image.image.load_base,
+        clock_us: arena_desktop::app_client::now(),
+    };
+    let mut startup_page = [0u8; startup_abi::BLOCK_BYTES];
+    if startup_abi::encode(&spec, &mut startup_page).is_err() {
+        destroy(image.image.capability);
+        return Err(STATUS_BAD_ARG);
+    }
+    let mut startup_out = [0u64; 3];
+    let status = unsafe {
+        syscall6(
+            SYS_SHARED_CREATE,
+            POOL,
+            1,
+            startup_out.as_mut_ptr() as u64,
+            0,
+            0,
+            0,
+        )
+    };
+    if status != 0 {
+        destroy(image.image.capability);
+        return Err(status);
+    }
+    let startup_cap = startup_out[0];
+    let startup_va = unsafe { syscall2(SYS_SHARED_MAP, startup_cap, 1) };
+    if startup_va <= 0 {
+        destroy(startup_cap);
+        destroy(image.image.capability);
+        return Err(startup_va);
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            startup_page.as_ptr(),
+            startup_va as *mut u8,
+            startup_abi::BLOCK_BYTES,
+        );
+    }
+    if unsafe { syscall6(SYS_SHARED_UNMAP, startup_va as u64, 0, 0, 0, 0, 0) } != 0 {
+        die(86)
+    }
+    let mut timer_slot = u8::MAX;
+    if timer_granted {
+        let Some(free_slot) = (45..125)
+            .find(|slot| unsafe { syscall6(SYS_CAP_OCCUPIED, *slot as u64, 0, 0, 0, 0, 0) } == 0)
+        else {
+            destroy(startup_cap);
+            destroy(image.image.capability);
+            return Err(STATUS_BUSY);
+        };
+        let status = unsafe {
+            syscall6(
+                SYS_NOTIFICATION_CREATE,
+                NOTIFICATION_FACTORY_SLOT,
+                free_slot as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if status != 0 {
+            destroy(startup_cap);
+            destroy(image.image.capability);
+            return Err(status);
+        }
+        timer_slot = free_slot as u8;
+    }
+    let mut grants = [
+        InheritGrant::new(startup_cap as u8, (RIGHTS_READ | RIGHTS_DESTROY) as u32),
+        InheritGrant::new(0, 0),
+        InheritGrant::new(0, 0),
+    ];
+    let mut grant_count = 1;
+    if timer_granted {
+        grants[grant_count] = InheritGrant::new(timer_slot, (RIGHTS_READ | RIGHTS_WRITE) as u32);
+        grant_count = 2;
+    }
+    if owner_signal {
+        grants[grant_count] = InheritGrant::new(clock(instance) as u8, RIGHTS_WRITE as u32);
+        grant_count += 1;
+    }
+    let process = spawn_child(instance, image.image.capability, &grants[..grant_count]);
+    destroy(startup_cap);
+    destroy(image.image.capability);
+    match process {
+        Ok(handle) => Ok((handle, timer_slot)),
+        Err(status) => {
+            if timer_slot != u8::MAX {
+                destroy(u64::from(timer_slot));
+            }
+            Err(status)
+        }
+    }
+}
+
+fn spawn_installed_helper(instance: usize, helper_id: [u8; 32]) -> Result<u32, i64> {
+    if instance >= LIMIT {
+        return Err(STATUS_BAD_ARG);
+    }
+    let session = unsafe { SESSIONS[instance] };
+    if session.id == 0 || session.kind != 6 || session.badge == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let Some(record) = session.helpers.iter().position(|member| !member.active) else {
+        return Err(STATUS_BUSY);
+    };
+    if !child_capacity_available(instance) {
+        return Err(STATUS_BUSY);
+    }
+    let helper =
+        arena_desktop::package::launch_installed_helper(&session.application_id, &helper_id, POOL)
+            .map_err(|error| error as i64)?;
+    let Some(helper_len) = helper_id.iter().position(|byte| *byte == 0) else {
+        destroy(helper.image.capability);
+        return Err(STATUS_BAD_ARG);
+    };
+    if helper_len == 0 || helper_len >= 32 {
+        destroy(helper.image.capability);
+        return Err(STATUS_BAD_ARG);
+    }
+    let (handle, timer_slot) = launch_helper_image_v2(instance, helper, helper_id)?;
+    let raw = handle.as_raw();
+    unsafe {
+        SESSIONS[instance].helpers[record] = HelperMember {
+            handle: raw,
+            helper_id,
+            timer_slot,
+            active: true,
+        };
+    }
+    log(b"[desktop] signed helper id=");
+    log(&helper_id[..helper_len]);
+    log(b" spawned in owning ProcessGroup handle=");
+    log_number(u64::from(raw));
+    log(b"\n");
+    Ok(raw)
+}
+
+fn helper_record(instance: usize, raw: u32) -> Result<(usize, Handle), i64> {
+    if instance >= LIMIT {
+        return Err(STATUS_BAD_ARG);
+    }
+    let session = unsafe { *(&raw const SESSIONS).cast::<Session>().add(instance) };
+    if session.id == 0 || raw == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let Some(slot) = session
+        .helpers
+        .iter()
+        .position(|member| member.active && member.handle == raw)
+    else {
+        return Err(STATUS_BAD_ARG);
+    };
+    Ok((slot, Handle::from_raw(raw)))
+}
+
+fn wait_helper(instance: usize, raw: u32, bytes: &mut [u8; 64]) -> Result<u64, i64> {
+    use arena_desktop::service_wire::Frame as S;
+    let (slot, handle) = helper_record(instance, raw)?;
+    let group =
+        unsafe { (&*(&raw const APP_GROUPS))[instance].as_ref() }.ok_or(STATUS_SERVICE_GONE)?;
+    let Some(status) = group.exit_status(handle).map_err(|_| STATUS_BAD_ARG)? else {
+        return Err(STATUS_BUSY);
+    };
+    unsafe { (&mut *(&raw mut APP_GROUPS))[instance].as_mut() }
+        .ok_or(STATUS_SERVICE_GONE)?
+        .reap_exited(handle)
+        .map_err(|_| STATUS_BAD_ARG)?;
+    let helper_id = unsafe { SESSIONS[instance].helpers[slot].helper_id };
+    let timer_slot = unsafe { SESSIONS[instance].helpers[slot].timer_slot };
+    if timer_slot != u8::MAX {
+        destroy(u64::from(timer_slot));
+    }
+    unsafe { SESSIONS[instance].helpers[slot] = EMPTY_HELPER };
+    *bytes = S::HelperExited {
+        handle: raw,
+        status,
+    }
+    .encode()
+    .map_err(|_| STATUS_BAD_ARG)?;
+    log(b"[desktop] helper id=");
+    let helper_len = helper_id.iter().position(|byte| *byte == 0).unwrap_or(32);
+    log(&helper_id[..helper_len]);
+    log(b" Process-cap exit status=");
+    log_number(status);
+    log(b"; owner-group reap=ok\n");
+    Ok(status)
+}
+
+fn terminate_helper(instance: usize, raw: u32, bytes: &mut [u8; 64]) -> Result<u64, i64> {
+    use arena_desktop::service_wire::Frame as S;
+    let (slot, handle) = helper_record(instance, raw)?;
+    unsafe { (&mut *(&raw mut APP_GROUPS))[instance].as_mut() }
+        .ok_or(STATUS_SERVICE_GONE)?
+        .stop_and_reap(handle)
+        .map_err(|_| STATUS_BAD_ARG)?;
+    let helper_id = unsafe { SESSIONS[instance].helpers[slot].helper_id };
+    let timer_slot = unsafe { SESSIONS[instance].helpers[slot].timer_slot };
+    if timer_slot != u8::MAX {
+        destroy(u64::from(timer_slot));
+    }
+    unsafe { SESSIONS[instance].helpers[slot] = EMPTY_HELPER };
+    *bytes = S::HelperTerminated { handle: raw }
+        .encode()
+        .map_err(|_| STATUS_BAD_ARG)?;
+    log(b"[desktop] helper id=");
+    let helper_len = helper_id.iter().position(|byte| *byte == 0).unwrap_or(32);
+    log(&helper_id[..helper_len]);
+    log(b" Process-cap terminate/reap=ok\n");
+    Ok(0)
+}
+
+fn helper_service(instance: usize, bytes: &mut [u8; 64]) -> Result<u64, i64> {
+    use arena_desktop::service_wire::Frame as S;
+    match S::decode(bytes).map_err(|_| STATUS_BAD_ARG)? {
+        S::SpawnHelper { helper_id } => {
+            let handle = spawn_installed_helper(instance, helper_id)?;
+            *bytes = S::HelperStarted { handle }
+                .encode()
+                .map_err(|_| STATUS_BAD_ARG)?;
+            Ok(u64::from(handle))
+        }
+        S::WaitHelper { handle } => wait_helper(instance, handle, bytes),
+        S::TerminateHelper { handle } => terminate_helper(instance, handle, bytes),
+        _ => Err(STATUS_BAD_ARG),
+    }
 }
 fn display(frame: arena_compositor_model::wire::Frame, cap: u64) -> ([u64; 3], [u8; 64]) {
     let mut b = [0; 64];
@@ -1886,11 +2240,6 @@ fn launch_installed_application(
         destroy(image.capability);
         return launched;
     }
-    let flags = if app_flags & manifest::FLAG_MULTI_INSTANCE != 0 {
-        FLAG_MULTI_INSTANCE
-    } else {
-        0
-    };
     let launched = launch_image_v2_for_app_with_document(
         image.capability,
         6,
@@ -1903,7 +2252,7 @@ fn launch_installed_application(
         *application_id,
         image.entry,
         image.load_base,
-        flags,
+        app_flags,
         read_only,
     );
     destroy(image.capability);
@@ -2050,6 +2399,7 @@ fn launch_headless_image_v2(
         process: Some(process),
         kind: 6,
         application_id,
+        app_flags,
         badge: 0,
         ..EMPTY
     };
@@ -2582,6 +2932,7 @@ fn launch_image_v2_for_app_with_document(
         process: Some(process),
         kind,
         application_id,
+        app_flags,
         scope,
         function_rights,
         badge,
@@ -4513,6 +4864,30 @@ extern "C" fn main() -> ! {
                 }
                 landed = CAP_NONE;
                 status = 0;
+            }
+        } else if let (Some(index), Ok(frame)) = (
+            authenticated_session,
+            arena_desktop::service_wire::Frame::decode(&bytes),
+        ) && matches!(
+            frame,
+            arena_desktop::service_wire::Frame::SpawnHelper { .. }
+                | arena_desktop::service_wire::Frame::WaitHelper { .. }
+                | arena_desktop::service_wire::Frame::TerminateHelper { .. }
+        ) {
+            let session = unsafe { SESSIONS[index] };
+            if landed == CAP_NONE
+                && session.kind == 6
+                && description == Some([7, session.id, session.function_rights])
+            {
+                match helper_service(index, &mut bytes) {
+                    Ok(value) => {
+                        status = 0;
+                        result = value;
+                    }
+                    Err(error) => status = error as u64,
+                }
+            } else {
+                status = STATUS_BAD_ARG as u64;
             }
         } else if let Some([7, id, rights]) = description {
             if let Some(i) = unsafe { &*(&raw const SESSIONS) }

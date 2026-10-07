@@ -82,12 +82,54 @@ pub struct VerifiedInstalledApp {
     pub bundle_digest: [u8; 32],
     pub(crate) executable_object: u64,
     pub executable_size: u64,
+    pub file_count: usize,
 }
 impl VerifiedInstalledApp {
     /// AFS2-local selector for the exact file just verified. It is descriptive
     /// state for the owning filesd and does not authorize filesystem access.
     pub fn executable_object(&self) -> u64 {
         self.executable_object
+    }
+}
+
+/// One exact payload selector retained by filesd after full receiver-side
+/// signature, payload hash, and installed-tree verification. The AFS2 object
+/// remains private to filesd; callers select it only through the verified
+/// path and token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedPayloadFile {
+    path: [u8; 96],
+    path_len: u8,
+    kind: crate::bundle::FileKind,
+    size: u64,
+    object: u64,
+}
+
+impl VerifiedPayloadFile {
+    pub const EMPTY: Self = Self {
+        path: [0; 96],
+        path_len: 0,
+        kind: crate::bundle::FileKind::Resource,
+        size: 0,
+        object: 0,
+    };
+
+    pub fn path(&self) -> &[u8] {
+        &self.path[..self.path_len as usize]
+    }
+
+    pub const fn kind(&self) -> crate::bundle::FileKind {
+        self.kind
+    }
+
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// AFS2-local selector; it grants no authority and belongs only to the
+    /// filesd instance that verified this catalog.
+    pub const fn object_selector(&self) -> u64 {
+        self.object
     }
 }
 
@@ -229,6 +271,58 @@ pub fn verify_installed_candidate<D: Device>(
     version: u64,
     trusted_key: &[u8; 32],
 ) -> Result<VerifiedInstalledApp, Error> {
+    verify_installed_candidate_inner(
+        volume,
+        verifier,
+        install_scratch,
+        tree_scratch,
+        applications_root,
+        application_id,
+        version,
+        trusted_key,
+        None,
+    )
+}
+
+/// Verify one installed APB1 version and optionally return the complete
+/// fixed-size payload selector table for the owning filesd. Every selector is
+/// derived from the verified signed file table and is checked against the
+/// exact tree before publication.
+pub fn verify_installed_candidate_with_catalog<D: Device>(
+    volume: &mut Volume<D>,
+    verifier: &mut Workspace,
+    install_scratch: &mut InstallWorkspace,
+    tree_scratch: &mut RegistryScanWorkspace,
+    applications_root: u64,
+    application_id: &[u8; 32],
+    version: u64,
+    trusted_key: &[u8; 32],
+    catalog: &mut [VerifiedPayloadFile; MAX_FILES],
+) -> Result<VerifiedInstalledApp, Error> {
+    verify_installed_candidate_inner(
+        volume,
+        verifier,
+        install_scratch,
+        tree_scratch,
+        applications_root,
+        application_id,
+        version,
+        trusted_key,
+        Some(catalog),
+    )
+}
+
+fn verify_installed_candidate_inner<D: Device>(
+    volume: &mut Volume<D>,
+    verifier: &mut Workspace,
+    install_scratch: &mut InstallWorkspace,
+    tree_scratch: &mut RegistryScanWorkspace,
+    applications_root: u64,
+    application_id: &[u8; 32],
+    version: u64,
+    trusted_key: &[u8; 32],
+    mut catalog: Option<&mut [VerifiedPayloadFile; MAX_FILES]>,
+) -> Result<VerifiedInstalledApp, Error> {
     let candidate = lookup_installed_candidate(volume, applications_root, application_id, version)?;
     let info = read_installed_record(volume, install_scratch, candidate.directory)?;
     let verified = {
@@ -261,12 +355,33 @@ pub fn verify_installed_candidate<D: Device>(
     if executable_stat.typ != FILE {
         return Err(Error::BadInstalledTree);
     }
+    if let Some(catalog) = catalog.as_deref_mut() {
+        catalog.fill(VerifiedPayloadFile::EMPTY);
+        for index in 0..verified.file_count() {
+            let entry = verified.file(index).ok_or(Error::BadInstalledTree)?;
+            let object = lookup_bundle_file(volume, candidate.directory, entry.path())?;
+            let stat = volume.stat(object).map_err(Error::Fs)?;
+            if stat.typ != FILE || stat.size != entry.size() {
+                return Err(Error::BadInstalledTree);
+            }
+            let mut path = [0u8; 96];
+            path[..entry.path().len()].copy_from_slice(entry.path());
+            catalog[index] = VerifiedPayloadFile {
+                path,
+                path_len: entry.path().len() as u8,
+                kind: entry.kind(),
+                size: entry.size(),
+                object,
+            };
+        }
+    }
     Ok(VerifiedInstalledApp {
         manifest: manifest_bytes,
         signer_id,
         bundle_digest,
         executable_object,
         executable_size: executable_stat.size,
+        file_count: verified.file_count(),
     })
 }
 
@@ -1920,6 +2035,35 @@ mod tests {
             executable.len()
         );
         assert_eq!(&executable, b"fixture-main-image");
+
+        let mut payload_catalog = [VerifiedPayloadFile::EMPTY; MAX_FILES];
+        let catalogued = verify_installed_candidate_with_catalog(
+            &mut volume,
+            &mut verifier,
+            &mut install_scratch,
+            &mut tree_scratch,
+            apps,
+            &first.application_id,
+            first.version,
+            &ROOT_PUBLIC,
+            &mut payload_catalog,
+        )
+        .unwrap();
+        assert_eq!(catalogued.file_count, 3);
+        assert_eq!(payload_catalog[0].path(), b"bin/editor");
+        assert_eq!(
+            payload_catalog[0].kind(),
+            crate::bundle::FileKind::Executable
+        );
+        assert_eq!(payload_catalog[0].size(), 18);
+        assert_eq!(payload_catalog[1].path(), b"bin/helper");
+        assert_eq!(
+            payload_catalog[1].kind(),
+            crate::bundle::FileKind::Executable
+        );
+        assert_eq!(payload_catalog[2].path(), b"icons/editor.bin");
+        assert_eq!(payload_catalog[2].kind(), crate::bundle::FileKind::Resource);
+        assert!(payload_catalog[3].path().is_empty());
 
         let wrong_key = [0x55; 32];
         assert!(

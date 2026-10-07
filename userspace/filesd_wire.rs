@@ -62,6 +62,10 @@ pub const CALL_APB1_READ_VERIFIED_METADATA: u64 = 0x4150_4231_0000_0007;
 /// Copy one executable chunk from the verified installed entry into a lent
 /// SharedRegion page. The cap remains temporary and is never inherited.
 pub const CALL_APB1_READ_VERIFIED_EXECUTABLE: u64 = 0x4150_4231_0000_0008;
+/// Copy a chunk from one exact path in the current verified signed payload
+/// catalog into a lent SharedRegion. Message bytes carry token, offset, and a
+/// canonical relative path of at most 47 bytes.
+pub const CALL_APB1_READ_VERIFIED_FILE: u64 = 0x4150_4231_0000_0009;
 pub const CALL_APB1_ABI_V1: u64 = 1;
 /// filesd's internal APB1 capability record (ADR-0091), index 2/generation 1.
 pub const APB1_INSTALL_BADGE: u32 = 2 | (1 << 16);

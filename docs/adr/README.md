@@ -148,3 +148,6 @@ What this constrains or enables later; what would trigger revisiting.
 | [0098](0098-headless-installed-application-launch.md) | Headless signed APB1 launch with no Desktop endpoint or surface authority | Accepted; signed installed-app timer/wait guest proof and Process-cap reap passed |
 | [0099](0099-desktop-app-instance-process-groups.md) | Each Desktop AppInstance owns a separate bounded ProcessGroup of exact Process caps | Accepted; signed APB1 and 32-session scale regressions plus 10/10 clean boots passed |
 | [0100](0100-process-cap-exit-status.md) | Stable process exit status through the exact Process/READ capability | Accepted; M8 authority controls and signed APB1/headless lifecycle guest pass |
+| [0101](0101-signed-helper-allowlist.md) | Signed AHL1 helper allowlists, private timer authority, and AppInstance-owned ProcessGroup lifecycle | Accepted; signed guest exercises wait/reap, terminate, crash, and owner cleanup |
+| [0102](0102-native-thread-yield.md) | Native voluntary thread yield through the scheduler's existing yield path | Accepted; distinct from blocking and synchronization |
+| [0103](0103-desktop-manager-fail-stop.md) | Boot-root fail-stop policy when the trusted Desktop application manager exits | Accepted; avoids running orphaned app groups without exact owner state |

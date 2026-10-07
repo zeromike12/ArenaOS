@@ -10,6 +10,8 @@ use crate::abi::*;
 pub mod manifest;
 
 pub const MAX_CATALOG_APPS: usize = 64;
+pub const HELPER_FLAG_TIMER: u32 = 1;
+pub const HELPER_FLAG_OWNER_SIGNAL: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppEntry {
@@ -40,6 +42,12 @@ pub struct NativeImage {
     pub entry: u64,
     pub load_base: u64,
     pub bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeHelper {
+    pub image: NativeImage,
+    pub flags: u32,
 }
 
 fn endpoint_ready() -> bool {
@@ -201,6 +209,39 @@ pub fn app_associations(
 /// Ask packaged to re-resolve and freshly verify the current installed
 /// version, then receive only its exact immutable Image capability.
 pub fn launch_installed(application_id: &[u8; 32], pool: u64) -> Result<NativeImage, u64> {
+    let mut request = [0u8; 64];
+    request[..32].copy_from_slice(application_id);
+    launch_installed_request(PKG_OP_APP_LAUNCH, request, pool).map(|(image, _)| image)
+}
+
+/// Ask packaged to resolve one signed AHL1 helper from the currently verified
+/// installed APB1 application. The returned flags only describe the explicit
+/// capability grants Desktop must prepare; the exact Image cap authorizes
+/// execution.
+pub fn launch_installed_helper(
+    application_id: &[u8; 32],
+    helper_id: &[u8; 32],
+    pool: u64,
+) -> Result<NativeHelper, u64> {
+    let mut request = [0u8; 64];
+    request[..32].copy_from_slice(application_id);
+    request[32..].copy_from_slice(helper_id);
+    let (image, reply) = launch_installed_request(PKG_OP_APP_HELPER_LAUNCH, request, pool)?;
+    let flags = u32::from_le_bytes(reply[32..36].try_into().unwrap());
+    if flags & !(HELPER_FLAG_TIMER | HELPER_FLAG_OWNER_SIGNAL) != 0
+        || (flags & HELPER_FLAG_OWNER_SIGNAL != 0 && flags & HELPER_FLAG_TIMER == 0)
+    {
+        unsafe { syscall1(SYS_CAP_DESTROY, image.capability) };
+        return Err(PKG_CORRUPT);
+    }
+    Ok(NativeHelper { image, flags })
+}
+
+fn launch_installed_request(
+    operation: u64,
+    mut request: [u8; 64],
+    pool: u64,
+) -> Result<(NativeImage, [u8; 64]), u64> {
     if !endpoint_ready() {
         return Err(PKG_OFFLINE);
     }
@@ -220,14 +261,12 @@ pub fn launch_installed(application_id: &[u8; 32], pool: u64) -> Result<NativeIm
         return Err(status as u64);
     }
     let staging_cap = staging[0];
-    let mut request = [0u8; 64];
-    request[..32].copy_from_slice(application_id);
     let mut reply = [0u64, 0, CAP_NONE];
     let transport = unsafe {
         syscall6(
             SYS_IPC_CALL,
             ENDPOINT_SLOT,
-            PKG_OP_APP_LAUNCH,
+            operation,
             0,
             staging_cap,
             reply.as_mut_ptr() as u64,
@@ -261,12 +300,15 @@ pub fn launch_installed(application_id: &[u8; 32], pool: u64) -> Result<NativeIm
         let _ = unsafe { syscall1(SYS_CAP_DESTROY, image) };
         return Err(PKG_CORRUPT);
     }
-    Ok(NativeImage {
-        capability: image,
-        entry: info[0],
-        load_base: info[1],
-        bytes: info[2],
-    })
+    Ok((
+        NativeImage {
+            capability: image,
+            entry: info[0],
+            load_base: info[1],
+            bytes: info[2],
+        },
+        request,
+    ))
 }
 
 /// Submit an exact filesd File capability to packaged. The broker retains its

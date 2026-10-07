@@ -21,11 +21,13 @@
 
 use arena_afs2::{self as afs, BLOCK, Device, Error as E, SECTOR, Volume};
 use arena_platform_core::{
+    bundle::{self as apb1_bundle, FileKind},
     bundle::{BundleClaim, Error as BundleError, SourceError, Workspace},
     install::{
         self as apb1_install, CleanupWorkspace, Error as InstallError, InstallAuthorization,
-        InstallTarget, InstallWorkspace, RegistryScanWorkspace,
+        InstallTarget, InstallWorkspace, RegistryScanWorkspace, VerifiedPayloadFile,
     },
+    manifest,
 };
 use core::panic::PanicInfo;
 
@@ -169,6 +171,7 @@ struct VerifiedInstalledState {
     manifest: [u8; 512],
     executable_object: u64,
     executable_size: u64,
+    file_count: usize,
 }
 impl VerifiedInstalledState {
     const EMPTY: Self = Self {
@@ -177,9 +180,12 @@ impl VerifiedInstalledState {
         manifest: [0; 512],
         executable_object: 0,
         executable_size: 0,
+        file_count: 0,
     };
 }
 static mut APB1_VERIFIED: VerifiedInstalledState = VerifiedInstalledState::EMPTY;
+static mut APB1_PAYLOADS: [VerifiedPayloadFile; apb1_bundle::MAX_FILES] =
+    [VerifiedPayloadFile::EMPTY; apb1_bundle::MAX_FILES];
 static mut APB1_VERIFY_GENERATION: u64 = 0;
 
 // ---- wall time (ADR-0076 "Time": data, never authority) -------------------
@@ -506,6 +512,7 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
         wire::CALL_APB1_VERIFY_INSTALLED
             | wire::CALL_APB1_READ_VERIFIED_METADATA
             | wire::CALL_APB1_READ_VERIFIED_EXECUTABLE
+            | wire::CALL_APB1_READ_VERIFIED_FILE
     );
     if !versioned_install_call && version != wire::CALL_APB1_ABI_V1 {
         return reply(S_INVAL, 0);
@@ -604,7 +611,7 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
             let Some((applications_root, _)) = (unsafe { APB1_ROOTS }) else {
                 return reply(S_OFFLINE, 0);
             };
-            let verified = apb1_install::verify_installed_candidate(
+            let verified = apb1_install::verify_installed_candidate_with_catalog(
                 unsafe { &mut *(&raw mut VOL) },
                 unsafe { &mut *(&raw mut APB1_VERIFIER) },
                 unsafe { &mut *(&raw mut APB1_INSTALL_WORKSPACE) },
@@ -613,11 +620,13 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
                 &application_id,
                 version,
                 &trusted_key,
+                unsafe { &mut *(&raw mut APB1_PAYLOADS) },
             );
             let verified = match verified {
                 Ok(verified) => verified,
                 Err(error) => {
                     unsafe { APB1_VERIFIED = VerifiedInstalledState::EMPTY };
+                    unsafe { (&mut *(&raw mut APB1_PAYLOADS)).fill(VerifiedPayloadFile::EMPTY) };
                     return reply(apb1_install_status(error), 0);
                 }
             };
@@ -635,6 +644,7 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
                     manifest: verified.manifest,
                     executable_object: verified.executable_object(),
                     executable_size: verified.executable_size,
+                    file_count: verified.file_count,
                 };
             }
             let mut result = reply(S_OK, verified.executable_size);
@@ -728,6 +738,103 @@ fn handle_apb1(call: u64, version: u64, badge: u32, landed: u64, bytes: &[u8; BY
             }
             return match read {
                 Ok(read) if read == amount => reply(S_OK, amount as u64),
+                Ok(_) => reply(S_CORRUPT, 0),
+                Err(error) => reply(status(error), 0),
+            };
+        }
+        wire::CALL_APB1_READ_VERIFIED_FILE => {
+            if version == 0 || landed == CAP_NONE {
+                return reply(S_INVAL, 0);
+            }
+            let token = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+            let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+            let path_field: &[u8; 48] = bytes[16..64].try_into().unwrap();
+            let Some(path_end) = path_field.iter().position(|&byte| byte == 0) else {
+                return reply(S_INVAL, 0);
+            };
+            if path_end == 0
+                || path_field[path_end..].iter().any(|&byte| byte != 0)
+                || !manifest::valid_relative_path(&path_field[..path_end])
+            {
+                return reply(S_INVAL, 0);
+            }
+            let verified = unsafe { APB1_VERIFIED };
+            if token == 0
+                || token != verified.token
+                || version != verified.version
+                || !offset.is_multiple_of(PAGE as u64)
+            {
+                return reply(S_DENIED, 0);
+            }
+            let payloads = unsafe { &*(&raw const APB1_PAYLOADS) };
+            let Some(payload) = payloads[..verified.file_count]
+                .iter()
+                .find(|file| file.path() == &path_field[..path_end])
+            else {
+                return reply(S_DENIED, 0);
+            };
+            if offset >= payload.size() {
+                return reply(S_DENIED, 0);
+            }
+            let mut desc = [0u64; 3];
+            if unsafe { syscall2(SYS_CAP_DESCRIBE, landed, desc.as_mut_ptr() as u64) } != 0
+                || desc[0] != 7
+                || desc[2] & RIGHTS_WRITE == 0
+            {
+                return reply(S_DENIED, 0);
+            }
+            let mut shared_info = [0u64; 2];
+            if unsafe {
+                syscall6(
+                    SYS_SHARED_INFO,
+                    landed,
+                    shared_info.as_mut_ptr() as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            } != 0
+                || shared_info[0] != desc[1]
+            {
+                return reply(S_DENIED, 0);
+            }
+            let amount = (payload.size() - offset).min(PAGE as u64) as usize;
+            let Some(end) = offset.checked_add(amount as u64) else {
+                return reply(S_INVAL, 0);
+            };
+            if end > shared_info[1].saturating_mul(PAGE as u64) {
+                return reply(S_DENIED, 0);
+            }
+            let mapped = unsafe { syscall2(SYS_SHARED_MAP, landed, 1) };
+            if mapped <= 0 {
+                return reply(S_FULL, 0);
+            }
+            let read = unsafe {
+                (&mut *(&raw mut VOL)).read(
+                    payload.object_selector(),
+                    offset,
+                    core::slice::from_raw_parts_mut(
+                        (mapped as *mut u8).add(offset as usize),
+                        amount,
+                    ),
+                )
+            };
+            let unmapped = unsafe { syscall6(SYS_SHARED_UNMAP, mapped as u64, 0, 0, 0, 0, 0) };
+            if unmapped != 0 {
+                log(b"filesd: fatal: APB1 payload scratch unmap refused\n");
+                exit(73);
+            }
+            return match read {
+                Ok(read) if read == amount => {
+                    let mut result = reply(S_OK, payload.size());
+                    result.bytes[0] = match payload.kind() {
+                        FileKind::Executable => 1,
+                        FileKind::Resource => 2,
+                    };
+                    result.bytes[1] = 1;
+                    result
+                }
                 Ok(_) => reply(S_CORRUPT, 0),
                 Err(error) => reply(status(error), 0),
             };
@@ -1604,6 +1711,7 @@ extern "C" fn main() -> ! {
                 | wire::CALL_APB1_VERIFY_INSTALLED
                 | wire::CALL_APB1_READ_VERIFIED_METADATA
                 | wire::CALL_APB1_READ_VERIFIED_EXECUTABLE
+                | wire::CALL_APB1_READ_VERIFIED_FILE
         ) {
             handle_apb1(call, version, badge, landed, &msg)
         } else if call != 0 || version != 0 {

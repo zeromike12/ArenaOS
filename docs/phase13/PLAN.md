@@ -64,6 +64,17 @@ raise them until an end-to-end budget justifies each change.
 | Installed app catalog | 64 descriptive records; production boot integration absent | `arena-platform::registry` |
 | Native byte streams | not implemented | startup ABI stream roles are reserved but absent |
 
+The notification pool remains exactly 64. The full 32-session boot inventory
+uses 51, leaving at most 13 dynamic Notification objects at runtime. Helper
+timer requests consume this existing bound and are refused when it is full;
+the manager retains one owner cap per live helper timer and retires it only
+after that helper's exact Process cap is reaped.
+
+The helper fixture performs 15 sequential signed helper launches, including
+crash/reap and AppInstance cleanup. It therefore creates more private timer
+objects over the test than the 13-object dynamic headroom and proves the
+objects are reclaimed as each exact Process capability is retired.
+
 The process owns the PML4 and capability space, but syscall user-range records
 are currently held on each scheduler thread. `SYS_MAP_MEMORY` installs owned
 RAM as writable/NX or MMIO as uncached/NX and appends to the calling thread's
@@ -164,14 +175,21 @@ measured receipts.
   publication, close/state, and accounting ownership; prove one app owns at
   least three simultaneous windows. **Status:** window-level production
   ownership and the three-window installed APB1 guest proof pass (ADR-0097);
-  per-instance ProcessGroup ownership is guest-regressed (ADR-0099); explicit
-  helper launch and lifecycle remain open.
+  per-instance ProcessGroup ownership is guest-regressed (ADR-0099). Signed
+  AHL1 helper resolution, exact Image launch, private timer notifications,
+  owner-signal attenuation, wait/reap, terminate, fault status, and group
+  cleanup are implemented and guest-proved (ADR-0101).
 - **Status:** a signed headless primary launch with explicit attenuated
   Notification authority and exact Process-cap wait/reap is implemented and
   guest-proved (ADR-0098). Stable final exit status is queryable and waitable
-  through the member's exact Process capability (ADR-0100). Add signed
-  allowlisted helpers with explicit grants, terminate policy, crash handling,
-  and manager-death policy.
+  through the member's exact Process capability (ADR-0100). Signed AHL1
+  allowlisted helpers receive a fresh READ|WRITE timer Notification and an
+  optional distinct WRITE-only AppInstance signal. Fifteen real helper
+  launches on the 13-object dynamic notification budget prove reuse after
+  wait/reap and teardown; an orphan helper is stopped with its AppInstance.
+  Unknown helper IDs and attempts to use the un-inherited factory are refused.
+  The boot root fail-stops if Desktop dies, because no independent authority
+  can reconstruct the exact groups (ADR-0103).
 
 ### D. Streams
 

@@ -501,3 +501,77 @@ pressure, favorites, and final qualification remain open.
   status. Signed helper allowlisting, byte streams, persisted launcher
   favorites, user threads, synchronization, mixed-load pressure, and Phase-13
   final qualification remain open.
+
+### Signed helper processes and private notification authority
+
+- Added signed `META-INF/arena.helpers` AHL1 records. `packaged` resolves each
+  helper path only through the currently receiver-verified APB1 catalog and
+  returns the exact dynamic Image cap. AHL1 allows four canonical IDs, each
+  with an exact signed executable path and explicit capability flags.
+- Desktop authenticates the request through the owning AppInstance endpoint,
+  retains each helper's exact Process cap in that instance's bounded group,
+  and builds a fresh ABI-v2 startup block. Helpers receive no parent cap
+  table, Desktop endpoint, filesystem root, or document capability. The
+  owner-signal flag grants WRITE only on the AppInstance Notification; the
+  fixture verifies the helper cannot wait on that object.
+- The first guest proof exposed a real single-waiter collision: sharing the
+  AppInstance Notification as both helper timer and owner event allowed the
+  child to compete with the primary process for the one waiter. The fix adds
+  Desktop-only slot 44 `NotificationFactory` authority, kernel syscall 63,
+  and factory-minted owner Notifications with exact destroy-on-`CAP_DESTROY`
+  behavior. Helpers receive READ|WRITE on a fresh private timer object;
+  Desktop keeps the destroy cap and retires it after ProcessGroup reap. The
+  optional AppInstance signal is a separate WRITE-only cap. Notification and
+  timer global limits remain 64 and 32.
+- The real signed APB1 guest passes install, registry resolution, UI launch,
+  three ordinary windows per app, helper wait with exact status 43, owner
+  termination, #UD crash status 262, and orphan helper cleanup. It launches
+  15 helpers while only 13 notification objects are available beyond the
+  fixed 32-session inventory; all 15 succeed because reaped helpers return
+  their private notification objects. The guest also proves unknown helper
+  IDs cannot launch, helper processes cannot mint through the absent factory,
+  the timer and owner-signal are distinct object IDs, and WRITE-only owner
+  signal cannot wait. The signed fixture's identity-bearing resource counts
+  return to baseline and shutdown is clean (QEMU 10.0.11, OVMF 2025.02).
+- ADR-0102 records the no-authority voluntary scheduler yield syscall added
+  during the initial shared-event investigation. ADR-0103 specifies the
+  current manager-failure policy: the boot root fail-stops if Desktop dies,
+  since there is no independent exact-capability owner that can reconstruct
+  its process groups. Per-boot Desktop monitoring is implemented; the
+  deliberate manager-fault path is not crash-injected by the registry guest.
+- Kernel, Desktop, packaged, filesd, Phase-13 app and helper target checks
+  pass; `arena-platform` host tests pass 36/36. Its affected T3 regressions
+  and 20-boot preservation are recorded below. Byte streams, persisted
+  favorites, user threads, synchronization, mixed-load pressure, and final
+  qualification remain open.
+
+### Signed helper preservation T3
+
+- `tools/test_m8_lifecycle.py` passed the full-device fixture plus no-device
+  and RNG-only boot controls. Exact Process-cap finish, protected/foreign/
+  forged/stale refusals, and surviving production service checks passed.
+- `tools/test_m12_startup.py` passed 7/7 startup ABI cases and the same-boot
+  M1-M7 and M11 regression sets. `tools/test_m12_scale.py` passed 32 live
+  sessions, mutation-free 33rd refusal, 16-close/16-reuse, unique-clock and
+  exact Process-cap audits. Counts `(free frames, records, processes,
+  SharedRegions, pages, maps, caps)` were baseline
+  `(114236,15,15,2,470,4,46)`, full
+  `(78289,47,47,66,30550,110,110)`, half
+  `(96224,31,31,34,15510,58,78)`, reused-full
+  `(78288,47,47,66,30550,112,110)`, final
+  `(114159,15,15,2,470,4,46)`. Identity-bearing resources returned to
+  baseline; the 77 retained page-table frames match the existing scale
+  behavior. Desktop's additional factory cap accounts for the cap-count
+  increase from the previous checkpoint; low-32 manager accounting is
+  unchanged.
+- The final signed installed-app registry/helper guest passed with 15 helper
+  launches on the 13-object dynamic notification headroom, capability
+  refusals, distinct private timer and owner signal, helper wait/terminate/
+  crash/orphan cleanup, multi-window apps, and clean shutdown.
+- `tools/stability_loop.sh 20` passed 20/20 fresh full-suite boots in 153
+  seconds, with zero failures, bound to EFI SHA-256
+  `d4066e9f088d0bd648212fe67813eba4955ef2d5c962a5579044c7da750d61d1`.
+- This is a green T3 preservation checkpoint for signed helper lifecycle and
+  notification-capability retirement. Byte streams, persisted favorites,
+  user threads, synchronization, mixed-load pressure, and final qualification
+  remain open.

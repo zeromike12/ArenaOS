@@ -248,7 +248,7 @@ pub(crate) fn valid_bundle_path<const N: usize>(raw: &[u8; N], empty: bool) -> b
     valid_relative_path(&raw[..end])
 }
 
-pub(crate) fn valid_relative_path(path: &[u8]) -> bool {
+pub fn valid_relative_path(path: &[u8]) -> bool {
     if path.is_empty() || path.len() > 95 || path[0] == b'/' || path[path.len() - 1] == b'/' {
         return false;
     }

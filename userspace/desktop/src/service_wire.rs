@@ -69,6 +69,31 @@ pub enum Frame {
         read_only: bool,
         name: [u8; 32],
     },
+    /// Request one helper ID declared in the signed installed AHL1 resource.
+    SpawnHelper {
+        helper_id: [u8; 32],
+    },
+    /// The manager-owned per-instance ProcessGroup handle (descriptive only).
+    HelperStarted {
+        handle: u32,
+    },
+    /// Poll an owner-scoped helper until it exits; the native client waits
+    /// outside the Desktop event loop while this request is pending.
+    WaitHelper {
+        handle: u32,
+    },
+    /// Final status from the exact Process cap, followed by manager reap.
+    HelperExited {
+        handle: u32,
+        status: u64,
+    },
+    /// Stop and reap one helper owned by this authenticated AppInstance.
+    TerminateHelper {
+        handle: u32,
+    },
+    HelperTerminated {
+        handle: u32,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -87,6 +112,17 @@ fn printable(name: &[u8; 32]) -> bool {
     n < 32
         && name[..n].iter().all(|b| (0x20..0x7f).contains(b))
         && name[n..].iter().all(|b| *b == 0)
+}
+fn identity_valid(id: &[u8; 32]) -> bool {
+    let Some(end) = id.iter().position(|byte| *byte == 0) else {
+        return false;
+    };
+    (1..=31).contains(&end)
+        && id[end..].iter().all(|byte| *byte == 0)
+        && (id[0].is_ascii_lowercase() || id[0].is_ascii_digit())
+        && id[..end].iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
 }
 impl Frame {
     pub fn encode(self) -> Result<[u8; BYTES], Error> {
@@ -200,6 +236,37 @@ impl Frame {
                     18
                 }
             }
+            Self::SpawnHelper { helper_id } => {
+                if !identity_valid(&helper_id) {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&helper_id);
+                19
+            }
+            Self::HelperStarted { handle }
+            | Self::WaitHelper { handle }
+            | Self::TerminateHelper { handle }
+            | Self::HelperTerminated { handle } => {
+                if handle == 0 {
+                    return Err(Error::Invalid);
+                }
+                b[12..16].copy_from_slice(&handle.to_le_bytes());
+                match self {
+                    Self::HelperStarted { .. } => 20,
+                    Self::WaitHelper { .. } => 21,
+                    Self::TerminateHelper { .. } => 23,
+                    Self::HelperTerminated { .. } => 24,
+                    _ => unreachable!(),
+                }
+            }
+            Self::HelperExited { handle, status } => {
+                if handle == 0 {
+                    return Err(Error::Invalid);
+                }
+                b[12..16].copy_from_slice(&handle.to_le_bytes());
+                b[16..24].copy_from_slice(&status.to_le_bytes());
+                22
+            }
         };
         Ok(b)
     }
@@ -254,6 +321,15 @@ impl Frame {
             },
             17 => Self::OpenDocument { name },
             18 => Self::OpenWith { name },
+            19 => Self::SpawnHelper { helper_id: name },
+            20 => Self::HelperStarted { handle: cursor },
+            21 => Self::WaitHelper { handle: cursor },
+            22 => Self::HelperExited {
+                handle: cursor,
+                status: u64::from_le_bytes(b[16..24].try_into().map_err(|_| Error::Invalid)?),
+            },
+            23 => Self::TerminateHelper { handle: cursor },
+            24 => Self::HelperTerminated { handle: cursor },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -269,6 +345,8 @@ mod tests {
     fn canonical_metadata_and_operations_do_not_accept_reserved_or_names_as_authority() {
         let mut name = [0; 32];
         name[..9].copy_from_slice(b"user-note");
+        let mut helper_id = [0; 32];
+        helper_id[..11].copy_from_slice(b"com.tool.gc");
         for f in [
             Frame::Bootstrap,
             Frame::Started {
@@ -311,6 +389,23 @@ mod tests {
                 read_only: true,
                 name,
             },
+            Frame::SpawnHelper { helper_id },
+            Frame::HelperStarted {
+                handle: 0x0001_0000,
+            },
+            Frame::WaitHelper {
+                handle: 0x0001_0000,
+            },
+            Frame::HelperExited {
+                handle: 0x0001_0000,
+                status: 42,
+            },
+            Frame::TerminateHelper {
+                handle: 0x0001_0000,
+            },
+            Frame::HelperTerminated {
+                handle: 0x0001_0000,
+            },
         ] {
             let b = f.encode().unwrap();
             assert_eq!(Frame::decode(&b), Ok(f));
@@ -337,6 +432,16 @@ mod tests {
             .is_err()
         );
         assert!(Frame::Put { name, length: 4097 }.encode().is_err());
+        let mut bad_helper = name;
+        bad_helper[4] = b'/';
+        assert!(
+            Frame::SpawnHelper {
+                helper_id: bad_helper
+            }
+            .encode()
+            .is_err()
+        );
+        assert!(Frame::WaitHelper { handle: 0 }.encode().is_err());
         let mut bad = name;
         bad[1] = b'/';
         assert!(Frame::Read { name: bad }.encode().is_err());

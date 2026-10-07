@@ -157,6 +157,58 @@ pub fn startup() -> Result<(u8, bool, bool, [u8; 32]), i64> {
         _ => Err(-2),
     }
 }
+
+/// Request one helper declared by the installed application's signed AHL1
+/// resource. The returned value is an opaque per-instance process-group
+/// handle, never a PID or Process capability.
+pub fn spawn_helper(helper_id: [u8; 32]) -> Result<u32, i64> {
+    match exchange(Frame::SpawnHelper { helper_id }, CAP_NONE)? {
+        (handle, Frame::HelperStarted { handle: returned })
+            if handle == u64::from(returned) && returned != 0 =>
+        {
+            Ok(returned)
+        }
+        _ => Err(-2),
+    }
+}
+
+/// Wait for a helper's exact Process-cap exit status. The Desktop polls
+/// without blocking its global event loop; this client waits between polls
+/// using its own explicitly held notification/timer authority.
+pub fn wait_helper(handle: u32) -> Result<u64, i64> {
+    if handle == 0 {
+        return Err(-2);
+    }
+    loop {
+        match exchange(Frame::WaitHelper { handle }, CAP_NONE) {
+            Ok((
+                status,
+                Frame::HelperExited {
+                    handle: returned,
+                    status: returned_status,
+                },
+            )) if returned == handle && status == returned_status => return Ok(status),
+            Err(error) if error == STATUS_BUSY => {
+                idle(Some(now().saturating_add(10_000)))?;
+            }
+            Ok(_) => return Err(-2),
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Stop and reap a helper owned by this AppInstance. The handle is checked
+/// against the caller's badge-bound group by Desktop before any Process
+/// operation occurs.
+pub fn terminate_helper(handle: u32) -> Result<(), i64> {
+    if handle == 0 {
+        return Err(-2);
+    }
+    match exchange(Frame::TerminateHelper { handle }, CAP_NONE)? {
+        (0, Frame::HelperTerminated { handle: returned }) if returned == handle => Ok(()),
+        _ => Err(-2),
+    }
+}
 /// Sleep until the broker signals queued events on this client's private
 /// clock, or until `deadline` (monotonic microseconds) when the client has
 /// time-driven work (Monitor sampling). A client with nothing scheduled

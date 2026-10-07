@@ -6,6 +6,7 @@ use arena_lib::fs::Client;
 use arena_packaged::package::{self, Chain, Error, History, PACKAGE_MAX, VERIFY_SCRATCH};
 use arena_phase84_crypto_audit::sha256;
 use arena_platform_core::{
+    helpers::{self as helper_manifest, Allowlist},
     manifest::Manifest,
     registry::{AppDefinition, AppRegistry, MAX_APPLICATIONS},
 };
@@ -1103,7 +1104,7 @@ fn verify_installed_candidate(
     buf: &mut Buffers,
     application_id: &[u8; 32],
     version: u64,
-) -> Result<(AppDefinition, [u8; 32], u64), u64> {
+) -> Result<(AppDefinition, [u8; 32], u64, u64), u64> {
     let (package_id, signer_id) = inspect_installed_claim(application_id, version)?;
     let state = scan(va, buf, &package_id)?;
     let key = package::apb1_select_key(&state.chain, &package_id, &signer_id, version)
@@ -1158,6 +1159,7 @@ fn verify_installed_candidate(
         AppDefinition::from_receiver_verified_install(manifest, signer_id, digest),
         digest,
         verified[1],
+        token,
     ))
 }
 
@@ -1208,7 +1210,7 @@ fn rebuild_installed_registry(va: u64, buf: &mut Buffers) -> Result<usize, u64> 
             return Err(CORRUPT);
         }
         match verify_installed_candidate(va, buf, &application_id, version) {
-            Ok((definition, _digest, _size)) => {
+            Ok((definition, _digest, _size, _token)) => {
                 let candidate = unsafe { &mut *(&raw mut APP_CANDIDATE) };
                 if let Some(current) = candidate.get(&application_id).copied() {
                     if current.manifest().package_id() != definition.manifest().package_id() {
@@ -1324,7 +1326,7 @@ fn launch_installed_application(
         return (PKG_STALE, 0);
     };
     let version = catalogued.version();
-    let (verified, digest, executable_size) =
+    let (verified, digest, executable_size, _verify_token) =
         match verify_installed_candidate(va, buf, application_id, version) {
             Ok(verified) => verified,
             Err(error) => {
@@ -1477,6 +1479,186 @@ fn launch_installed_application(
     match result {
         Ok((image_id, _image_info)) => {
             answer[..32].copy_from_slice(&digest);
+            *reply_cap = PROVISIONAL;
+            (PKG_LAUNCH_READY, u64::from(image_id))
+        }
+        Err(error) => {
+            if let Some(image_id) = registered {
+                revoke_provisional_image(image_id);
+            }
+            (error, 0)
+        }
+    }
+}
+
+/// Copy one exact signed payload path to the lent staging region. filesd
+/// matches the path against the immutable catalog produced by the current
+/// APB1 verification token; a package path never selects an AFS2 object.
+fn read_verified_payload_file(
+    token: u64,
+    version: u64,
+    path: &[u8],
+    offset: u64,
+    staging_slot: u64,
+) -> Result<(u64, u8), u64> {
+    if token == 0
+        || path.is_empty()
+        || path.len() > 47
+        || !arena_platform_core::manifest::valid_relative_path(path)
+    {
+        return Err(BAD_FORMAT);
+    }
+    let mut request = [0u8; MSG_BYTES];
+    request[..8].copy_from_slice(&token.to_le_bytes());
+    request[8..16].copy_from_slice(&offset.to_le_bytes());
+    request[16..16 + path.len()].copy_from_slice(path);
+    let out = filesd_installed_call(
+        filesd_wire::CALL_APB1_READ_VERIFIED_FILE,
+        version,
+        staging_slot,
+        &mut request,
+    )?;
+    if out[0] != filesd_wire::S_OK || out[1] == 0 || request[1] != 1 {
+        return Err(filesd_apb1_status(out[0]));
+    }
+    let kind = request[0];
+    if !matches!(kind, 1 | 2) {
+        return Err(CORRUPT);
+    }
+    Ok((out[1], kind))
+}
+
+/// Resolve and register one helper from a currently eligible signed APB1
+/// installation. The helper ID selects one AHL1 descriptor; only the exact
+/// registered Image cap is returned to Desktop.
+fn launch_installed_helper(
+    va: u64,
+    buf: &mut Buffers,
+    application_id: &[u8; 32],
+    helper_id: &[u8; 32],
+    staging_slot: u64,
+    pending: &Pending,
+    answer: &mut [u8; MSG_BYTES],
+    reply_cap: &mut u64,
+) -> (u64, u64) {
+    if pending.token != 0 {
+        return (PKG_BUSY, 0);
+    }
+    if !package::canonical_id(application_id) || !package::canonical_id(helper_id) {
+        return (BAD_FORMAT, 0);
+    }
+    if let Err(error) = rebuild_installed_registry(va, buf) {
+        return (error, 0);
+    }
+    let Some(catalogued) = (unsafe { &*(&raw const APP_REGISTRY) })
+        .get(application_id)
+        .copied()
+    else {
+        return (PKG_STALE, 0);
+    };
+    let version = catalogued.version();
+    let (verified, digest, _main_size, token) =
+        match verify_installed_candidate(va, buf, application_id, version) {
+            Ok(verified) => verified,
+            Err(error) => return (error, 0),
+        };
+    if verified.version() != catalogued.version()
+        || verified.signer_id() != catalogued.signer_id()
+        || verified.bundle_digest() != catalogued.bundle_digest()
+    {
+        return (PKG_STALE, 0);
+    }
+
+    let mut cap_desc = [0u64; 3];
+    let mut shared_info = [0u64; 2];
+    if unsafe { syscall2(SYS_CAP_DESCRIBE, staging_slot, cap_desc.as_mut_ptr() as u64) } != 0
+        || cap_desc[0] != 7
+        || cap_desc[2] & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
+            != RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY
+        || unsafe {
+            syscall6(
+                SYS_SHARED_INFO,
+                staging_slot,
+                shared_info.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        } != 0
+        || shared_info[0] != cap_desc[1]
+        || shared_info[1] != (NATIVE_IMAGE_BYTES_MAX / 4096) as u64
+    {
+        return (DENY, 0);
+    }
+    let mapped = unsafe { syscall2(SYS_SHARED_MAP, staging_slot, 1) };
+    if mapped <= 0 {
+        return (PKG_BUSY, 0);
+    }
+
+    let mut registered: Option<u32> = None;
+    let result = (|| -> Result<(u32, u32), u64> {
+        let (allowlist_size, allowlist_kind) = read_verified_payload_file(
+            token,
+            version,
+            helper_manifest::RESOURCE_PATH,
+            0,
+            staging_slot,
+        )?;
+        if allowlist_kind != 2
+            || !(helper_manifest::HEADER_BYTES as u64..=helper_manifest::MAX_BYTES as u64)
+                .contains(&allowlist_size)
+        {
+            return Err(CORRUPT);
+        }
+        let allowlist = Allowlist::parse(unsafe {
+            core::slice::from_raw_parts(mapped as *const u8, allowlist_size as usize)
+        })
+        .map_err(|_| CORRUPT)?;
+        let descriptor = allowlist.get(helper_id).ok_or(PKG_STALE)?;
+        let path = descriptor.path();
+        let (executable_size, kind) =
+            read_verified_payload_file(token, version, path, 0, staging_slot)?;
+        if kind != 1 || !(1..=NATIVE_IMAGE_BYTES_MAX as u64).contains(&executable_size) {
+            return Err(CORRUPT);
+        }
+        let mut offset = executable_size.min(4096);
+        while offset < executable_size {
+            let (next_size, next_kind) =
+                read_verified_payload_file(token, version, path, offset, staging_slot)?;
+            if next_size != executable_size || next_kind != 1 {
+                return Err(CORRUPT);
+            }
+            offset = offset.saturating_add(4096);
+        }
+        let image_id = register_native_image(mapped as u64, executable_size as usize)?;
+        registered = Some(image_id);
+        let mut image_info = [0u64; 3];
+        let info_status = unsafe {
+            syscall6(
+                SYS_IMAGE_INFO,
+                PROVISIONAL,
+                image_info.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if info_status != 0 || image_info[0] < image_info[1] || image_info[2] != executable_size {
+            return Err(CORRUPT);
+        }
+        Ok((image_id, descriptor.flags()))
+    })();
+
+    unsafe { core::ptr::write_bytes(mapped as *mut u8, 0, NATIVE_IMAGE_BYTES_MAX) };
+    if unsafe { syscall6(SYS_SHARED_UNMAP, mapped as u64, 0, 0, 0, 0, 0) } != 0 {
+        fail("installed helper staging unmap refused");
+    }
+    match result {
+        Ok((image_id, flags)) => {
+            answer[..32].copy_from_slice(&digest);
+            answer[32..36].copy_from_slice(&flags.to_le_bytes());
             *reply_cap = PROVISIONAL;
             (PKG_LAUNCH_READY, u64::from(image_id))
         }
@@ -2281,12 +2463,16 @@ pub extern "C" fn start_on_private_stack() -> ! {
                 let _ = take_diagnostic(landed, LIFECYCLE);
             }
             apb1_source
-        } else if op == PKG_OP_APP_LAUNCH {
+        } else if matches!(op, PKG_OP_APP_LAUNCH | PKG_OP_APP_HELPER_LAUNCH) {
             let mut d = [0u64; 3];
             app_staging = landed != CAP_NONE
                 && arg == 0
-                && req[32..].iter().all(|&byte| byte == 0)
                 && package::canonical_id(&req[..32])
+                && if op == PKG_OP_APP_LAUNCH {
+                    req[32..].iter().all(|&byte| byte == 0)
+                } else {
+                    package::canonical_id(&req[32..])
+                }
                 && unsafe { syscall2(SYS_CAP_DESCRIBE, landed, d.as_mut_ptr() as u64) } == 0
                 && d[0] == 7
                 && d[2] & (RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY)
@@ -2361,6 +2547,25 @@ pub extern "C" fn start_on_private_stack() -> ! {
                     va as u64,
                     buf,
                     &application_id,
+                    landed,
+                    &pending,
+                    &mut reply,
+                    &mut reply_cap,
+                )
+            }
+        } else if op == PKG_OP_APP_HELPER_LAUNCH {
+            if !app_staging {
+                (DENY, 0)
+            } else {
+                let mut application_id = [0u8; 32];
+                application_id.copy_from_slice(&req[..32]);
+                let mut helper_id = [0u8; 32];
+                helper_id.copy_from_slice(&req[32..]);
+                launch_installed_helper(
+                    va as u64,
+                    buf,
+                    &application_id,
+                    &helper_id,
                     landed,
                     &pending,
                     &mut reply,

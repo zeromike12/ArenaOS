@@ -1039,6 +1039,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         // rather than leave inputd blocked or advertise stale windows as
         // usable after either original boot-root graphics service died.
         if let Some(ref mut g) = graphics {
+            if let Some(manager) = g.desktop {
+                if crate::sched::proc_live_threads(manager) == 0 {
+                    crate::proc::destroy(manager).unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::spawn::forget(manager).unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::halt::halt_machine(
+                        "desktop: trusted application manager died; fail-stop to retire all session authority",
+                    );
+                }
+            }
             for pid in [g.compositor, g.display] {
                 if crate::sched::proc_live_threads(pid) == 0 {
                     crate::proc::destroy(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
@@ -1213,6 +1222,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 struct GraphicsRuntime {
     display: u64,
     compositor: u64,
+    /// The userspace application manager. Its failure is machine-fatal until
+    /// an independently supervised recovery authority exists.
+    desktop: Option<u64>,
     clients: [u64; 2],
     regions: [u32; 2],
     exited: [bool; 2],
@@ -1567,6 +1579,7 @@ fn start_boot_compositor(
     GraphicsRuntime {
         display: display_pid,
         compositor: comp,
+        desktop: None,
         clients: [a, b],
         regions: region_ids,
         exited: [false; 2],
@@ -2692,6 +2705,19 @@ fn start_boot_desktop(
         )
         .unwrap_or_else(|e| crate::halt::halt_machine(e));
     }
+    // Slot 44 is the Desktop-only mint authority for private helper timer
+    // notifications. It is WRITE-only and non-copyable; children receive an
+    // exact owner-created Notification cap only when their signed AHL1 entry
+    // requests it.
+    crate::cap::issue(
+        comp,
+        44,
+        Cap {
+            obj: CapObj::NotificationFactory,
+            rights: W,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
     crate::cap::consume(comp, 3).unwrap_or_else(|e| crate::halt::halt_machine(e));
     crate::cap::issue(
         comp,
@@ -2735,6 +2761,7 @@ fn start_boot_desktop(
     GraphicsRuntime {
         display,
         compositor: comp,
+        desktop: Some(comp),
         clients: [0; 2],
         regions: [0; 2],
         exited: [false; 2],

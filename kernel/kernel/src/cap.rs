@@ -99,6 +99,13 @@ pub enum CapObj {
     /// A badged, merged notification flag word (ADR-0018, ARCHITECTURE
     /// §7.2). Rights: WRITE = notify, READ = wait.
     Notification { nid: u32 },
+    /// A notification minted through the Desktop's private notification
+    /// factory. Its DESTROY right retires the object as well as the cap;
+    /// ordinary Notification capabilities remain non-owning references.
+    OwnedNotification { nid: u32 },
+    /// Narrow boot-issued authority to mint bounded, Desktop-owned
+    /// notifications. WRITE is checked by SYS_NOTIFICATION_CREATE.
+    NotificationFactory,
     /// A registered executable image (ADR-0019): the thing `SYS_SPAWN`
     /// builds processes from. Rights: READ = may spawn from it. v1's
     /// registry is kernel-side and fixed; a filesystem-backed source
@@ -512,6 +519,10 @@ pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
         }
         if let CapObj::VmRegion { id } = cap.obj {
             crate::vm::release(pid, id).map_err(|_| "cap destroy: VM region release refused")?;
+        }
+        if let CapObj::OwnedNotification { nid } = cap.obj {
+            crate::ipc::destroy_notification(nid)
+                .map_err(|_| "cap destroy: notification retirement refused")?;
         }
         install(pid, slot, Cap::EMPTY)
     })
