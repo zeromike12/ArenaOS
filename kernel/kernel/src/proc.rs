@@ -52,6 +52,9 @@ pub struct Process {
     /// process's LAST live thread exits (spawn protocol, ADR-0019).
     /// `nid == u32::MAX` = none registered.
     exit_notif: (u32, u64),
+    /// Status of the thread that ended the process. Stable until the process
+    /// record is reaped, unlike the diagnostic thread-exit ring.
+    exit_status: Option<u64>,
 }
 
 /// The process table. Slots are `Option<Process>`; occupancy is the only
@@ -92,6 +95,7 @@ pub fn create(name: &'static str) -> Result<u64, &'static str> {
                 caps: cap::CapSpace::new(),
                 user_regions: [(0, 0); USER_REGIONS_MAX],
                 exit_notif: (u32::MAX, 0),
+                exit_status: None,
             });
             CREATED_TOTAL.fetch_add(1, Ordering::Relaxed);
             Ok(id)
@@ -216,6 +220,39 @@ pub fn exit_notif_of(pid: u64) -> Option<(u32, u64)> {
                 .find(|p| p.id == pid)
                 .and_then(|p| (p.exit_notif.0 != u32::MAX).then_some(p.exit_notif))
         }
+    })
+}
+
+/// Record the final thread's status on the owning Process record. The caller
+/// must have established that the current thread is the process's last live
+/// thread. Process-cap readers may observe the result until exact reap.
+pub fn record_exit_status(pid: u64, status: u64) -> Result<(), &'static str> {
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("record exit status: no such process");
+        };
+        if process.exit_status.is_some() {
+            return Err("record exit status: final status already recorded");
+        }
+        process.exit_status = Some(status);
+        Ok(())
+    })
+}
+
+/// Read stable process exit state. `None` means the process record is absent;
+/// `Some(None)` means it is still running; `Some(Some(code))` means its final
+/// thread exited with `code`.
+pub fn exit_status(pid: u64) -> Option<Option<u64>> {
+    without_interrupts(|| unsafe {
+        (*PROCESSES.get())
+            .iter()
+            .flatten()
+            .find(|process| process.id == pid)
+            .map(|process| process.exit_status)
     })
 }
 

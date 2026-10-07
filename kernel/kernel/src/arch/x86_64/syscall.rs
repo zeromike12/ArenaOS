@@ -197,6 +197,8 @@ pub const SYS_VM_COMMIT: u64 = 57;
 pub const SYS_VM_PROTECT: u64 = 58;
 pub const SYS_VM_RELEASE: u64 = 59;
 pub const SYS_VM_QUERY: u64 = 60;
+/// ADR-0100: stable child exit state through a held Process/READ cap.
+pub const SYS_PROC_STATUS: u64 = 61;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -734,6 +736,7 @@ extern "C" fn syscall_dispatch(
         SYS_VM_PROTECT if [a4, a5] == [0; 2] => sys_vm_protect(a0, a1, a2, a3) as u64,
         SYS_VM_RELEASE if [a1, a2, a3, a4, a5] == [0; 5] => sys_vm_release(a0) as u64,
         SYS_VM_QUERY if [a2, a3, a4, a5] == [0; 4] => sys_vm_query(a0, a1) as u64,
+        SYS_PROC_STATUS if [a2, a3, a4, a5] == [0; 4] => sys_proc_status(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -802,6 +805,7 @@ fn sys_thread_exit(status: u64) -> ! {
     manager_check_last_thread(); // before even recording the exit status
     let id = crate::sched::current_thread_id();
     record_exit(id, status);
+    record_process_status_if_last(status);
     notify_last_thread_exit();
     // This syscall diverges: the stub's exit-side `swapgs` never runs.
     // Restore the canonical user-side GS state HERE (GS.base = 0,
@@ -849,13 +853,24 @@ fn notify_last_thread_exit() {
     }
 }
 
+fn record_process_status_if_last(status: u64) {
+    if let Some(pid) = crate::sched::current_proc_id()
+        && crate::sched::proc_live_threads(pid) == 1
+        && let Err(error) = crate::proc::record_exit_status(pid, status)
+    {
+        crate::halt::halt_machine(error);
+    }
+}
+
 /// A genuine ring-3 CPU fault kills ONLY the faulting process thread.
 /// The parent receives its ordinary child-exit notification; its held
 /// Process cap must still authorize teardown, including failing a
 /// client IPC already delivered to this server. Called IF=0 from IDT.
 pub(crate) fn exit_on_user_fault(vector: u64) -> ! {
     manager_check_last_thread();
-    record_exit(crate::sched::current_thread_id(), 0x100 + vector);
+    let status = 0x100 + vector;
+    record_exit(crate::sched::current_thread_id(), status);
+    record_process_status_if_last(status);
     notify_last_thread_exit();
     // The driver supervisor cannot destroy a process in its own live
     // CR3 here. Mark the last faulting thread's driver for deferred
@@ -2599,6 +2614,49 @@ fn sys_proc_live(slot: u64) -> Status {
         return STATUS_BAD_ARG;
     }
     i64::from(crate::sched::proc_live_threads(target) != 0)
+}
+
+/// SYS_PROC_STATUS(slot, out[2]): Process/READ returns `[exited, status]`.
+/// `exited == 0` means the process still has work to run; `exited == 1`
+/// carries the final thread's full u64 status. The result lives in the Process
+/// record until Process-cap reap, so it cannot be evicted by diagnostic
+/// thread-exit traffic. PIDs and thread IDs are never accepted here.
+fn sys_proc_status(slot: u64, out: u64) -> Status {
+    let Some(caller) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(caller, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::Process { pid: target } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_writable(out, 16) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Some(exit_status) = crate::proc::exit_status(target) else {
+        return STATUS_BAD_ARG;
+    };
+    let result = match exit_status {
+        None => [0, 0],
+        Some(status) => [1, status],
+    };
+    // SAFETY: the complete output pair is mapped USER+writable in the current
+    // process and IF=0 prevents same-process mapping mutation during copy-out.
+    unsafe {
+        super::stac();
+        let words = out as *mut u64;
+        core::ptr::write_volatile(words, result[0]);
+        core::ptr::write_volatile(words.add(1), result[1]);
+        super::clac();
+    }
+    STATUS_OK
 }
 
 /// SYS_SHARED_INFO(region_slot, out[2], zero, zero, zero, zero):

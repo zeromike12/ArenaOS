@@ -86,6 +86,7 @@ The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
 | Scalable application heap | 4,096 pages (16 MiB) reserved lazily; physical frames committed on allocation | arena-runtime::heap, ADR-0096 |
 | Scalable heap alignment | ordinary block alignment 16 bytes; page-run alignment up to 2 MiB | ADR-0096 |
 | Scalable heap committed backing | retained for reuse after deallocation; exact VM region release or process teardown returns frames | ADR-0095/0096 |
+| Process exit status | stable full-width final status until reap; exact Process/READ required | syscall 61, ADR-0100 |
 
 The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
 The Phase-13 application opts into ScalableHeap; no reserved capability slot
@@ -167,9 +168,10 @@ measured receipts.
   helper launch and lifecycle remain open.
 - **Status:** a signed headless primary launch with explicit attenuated
   Notification authority and exact Process-cap wait/reap is implemented and
-  guest-proved (ADR-0098). Add signed allowlisted helpers with explicit
-  grants, child status, terminate policy, crash handling, and manager-death
-  policy.
+  guest-proved (ADR-0098). Stable final exit status is queryable and waitable
+  through the member's exact Process capability (ADR-0100). Add signed
+  allowlisted helpers with explicit grants, terminate policy, crash handling,
+  and manager-death policy.
 
 ### D. Streams
 

@@ -147,3 +147,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0097](0097-multiple-ordinary-windows-per-application-session.md) | Multiple independently backed ordinary windows per badge-authenticated application session | Accepted; three-window signed APB1 guest proof and teardown passed |
 | [0098](0098-headless-installed-application-launch.md) | Headless signed APB1 launch with no Desktop endpoint or surface authority | Accepted; signed installed-app timer/wait guest proof and Process-cap reap passed |
 | [0099](0099-desktop-app-instance-process-groups.md) | Each Desktop AppInstance owns a separate bounded ProcessGroup of exact Process caps | Accepted; signed APB1 and 32-session scale regressions plus 10/10 clean boots passed |
+| [0100](0100-process-cap-exit-status.md) | Stable process exit status through the exact Process/READ capability | Accepted; M8 authority controls and signed APB1/headless lifecycle guest pass |

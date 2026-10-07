@@ -1719,6 +1719,13 @@ fn child_live(instance: usize, handle: Handle) -> bool {
         .is_live(handle)
         .unwrap_or_else(|_| die(83))
 }
+fn child_exit_status(instance: usize, handle: Handle) -> u64 {
+    unsafe { (&*(&raw const APP_GROUPS))[instance].as_ref() }
+        .unwrap_or_else(|| die(83))
+        .exit_status(handle)
+        .unwrap_or_else(|_| die(83))
+        .unwrap_or_else(|| die(83))
+}
 fn finish_spawn_result(
     outcome: Result<Handle, GroupSpawnError<SpawnError, ChildProcess>>,
 ) -> Result<Handle, i64> {
@@ -2990,6 +2997,12 @@ fn sweep() -> bool {
     let now = arena_desktop::app_client::now();
     for (i, s) in unsafe { *(&raw const SESSIONS) }.into_iter().enumerate() {
         if s.id != 0 && !child_live(i, s.process.unwrap_or_else(|| die(83))) {
+            if !s.ending {
+                let status = child_exit_status(i, s.process.unwrap_or_else(|| die(83)));
+                log(b"[desktop] child Process-cap exit status=");
+                log_number(status);
+                log(b"\n");
+            }
             if !s.ending && s.handle != 0 {
                 unsafe {
                     SESSIONS[i].ending = true;

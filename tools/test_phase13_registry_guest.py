@@ -27,6 +27,7 @@ SERIAL_WINDOW_FINAL = "[phase13-window] final surface retired; process exits cle
 SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
 SERIAL_HEADLESS = "[phase13-headless] Startup ABI v2 verified one attenuated Notification; no window caps present"
+SERIAL_HEADLESS_EXIT = "[desktop] child Process-cap exit status=42"
 COUNTERS = re.compile(
     r"measured frames/records/processes/regions/pages/maps/caps="
     r"(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n"
@@ -273,8 +274,20 @@ def interaction(disk):
         assert crop(searched, 194, 150, 400, 28) != crop(empty_query, 194, 150, 400, 28)
         # The filtered catalog has one row; this click is a pointer launch.
         d.click(250, 220)
-        d.wait(lambda: d.serial().count(SERIAL_APPS) == 2,
-               "search result pointer launch did not create the second app process", timeout_s=30)
+        try:
+            d.wait(lambda: d.serial().count(SERIAL_APPS) == 2,
+                   "search result pointer launch did not create the second app process", timeout_s=30)
+        except AssertionError:
+            registers = d.q.command(
+                "human-monitor-command", **{"command-line": "info registers"}
+            )
+            threads = d.q.command(
+                "human-monitor-command", **{"command-line": "info cpus"}
+            )
+            (arena_env.build_dir() / "phase13-registry-qmp-failure.txt").write_text(
+                f"registers={registers}\nthreads={threads}\nserial-tail={d.serial()[-8000:]}\n"
+            )
+            raise
         d.wait(lambda: d.serial().count(SERIAL_VM) == 3,
                "pointer launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 3,
@@ -293,6 +306,23 @@ def interaction(disk):
         assert marker_set(both, second_points), \
             "the second process did not publish its three independently backed surfaces"
 
+        # Window publication and the Desktop's measurement line are separate
+        # event-loop observations. Wait for the complete six-window resource
+        # inventory before taking the baseline for an individual close.
+        both_windows_expected = list(baseline)
+        both_windows_expected[1] += 2    # Process records
+        both_windows_expected[2] += 2    # live processes
+        both_windows_expected[3] += 12   # six windows, two regions each
+        both_windows_expected[4] += 5640 # six bounded 940-page windows
+        both_windows_expected[5] += 18   # three maps per ordinary window
+        both_windows_expected[6] += 4    # one Process cap per instance
+        d.wait(lambda: resource_counts(d)[1:] == tuple(both_windows_expected[1:]),
+               "six ordinary windows did not reach their complete resource inventory")
+        settled_inventory = resource_counts(d)
+        time.sleep(0.2)
+        assert resource_counts(d) == settled_inventory, \
+            "six-window resource inventory changed after it was considered settled"
+
         retired_apps = d.serial().count("[desktop] application retired:")
 
         def close_extra(x, y, retired_count):
@@ -304,8 +334,14 @@ def interaction(disk):
             expected[3] -= 2  # exact surface and private snapshot regions
             expected[4] -= 940  # their bounded shared pages
             expected[5] -= 3  # broker/client surface maps and broker snapshot map
-            d.wait(lambda: resource_counts(d)[2:] == tuple(expected[2:]),
-                   "closing one window did not release exactly its owned resources")
+            try:
+                d.wait(lambda: resource_counts(d)[2:] == tuple(expected[2:]),
+                       "closing one window did not release exactly its owned resources")
+            except AssertionError as error:
+                raise AssertionError(
+                    f"{error}; before={tuple(before)} expected={tuple(expected)} "
+                    f"actual={resource_counts(d)}"
+                ) from error
             return resource_counts(d)
 
         # Close only the first instance's top window. Its process and two
@@ -355,6 +391,7 @@ def interaction(disk):
         # the Desktop session endpoint/surface/document capabilities.
         headless_before = resource_counts(d)
         retired_before_headless = d.serial().count("[desktop] application retired:")
+        exit_status_before_headless = d.serial().count(SERIAL_HEADLESS_EXIT)
         background = d.shot("before-headless-launch")
         d.click(120, 12)
         d.q.type_text("runtime", gap_s=0.025)
@@ -371,6 +408,8 @@ def interaction(disk):
             "headless application created visible window content"
         d.wait(lambda: "[phase13-headless] timer completed; process exiting for manager reap" in d.serial(),
                "headless process did not finish its real timer wait")
+        d.wait(lambda: d.serial().count(SERIAL_HEADLESS_EXIT) == exit_status_before_headless + 1,
+               "Desktop did not observe the exact exit=42 through the Process cap")
         d.wait(lambda: d.serial().count("[desktop] application retired:") == retired_before_headless + 1,
                "Desktop did not reap the exited headless process")
         d.wait(lambda: resource_counts(d)[1:] == baseline[1:],
@@ -414,6 +453,9 @@ def main():
     assert serial.count(SERIAL_HEAP) == 3
     assert serial.count(SERIAL_HEADLESS) == 1
     assert serial.count("[phase13-headless] timer completed; process exiting for manager reap") == 1
+    # The read-only Open With launch, both ordinary instances, and the
+    # headless helper each exit with the fixture's exact status 42.
+    assert serial.count(SERIAL_HEADLESS_EXIT) == 4
     assert "[phase13-app] exact read-only document capability verified" in serial
     assert "[desktop] installed application registry unavailable" not in serial
     assert "[desktop] application retired:" in serial

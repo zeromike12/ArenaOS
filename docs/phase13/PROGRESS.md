@@ -19,7 +19,7 @@
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
-| 13.3 windows, helpers, lifecycle | Multi-window/headless launch and per-instance ProcessGroups implemented; helper execution/status remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. Guest proves three windows per process, two concurrent windowed instances, one windowless headless instance, and 32-session group-slot reuse; signed helper allowlisting and process exit status remain. |
+| 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, and stable process exit status implemented; signed helper execution remains | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. Guest proves three windows per process, two concurrent windowed instances, one windowless headless instance with status 42, and 32-session group-slot reuse; signed helper allowlisting remains. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
@@ -443,4 +443,61 @@ pressure, favorites, and final qualification remain open.
   `c09a41221750958922861712236db5e459bd07739f170ff857cb86fcaa8ecd7e`.
   This checkpoint is preserved in commit `af9946f`; helpers, streams, user
   threads, synchronization, launcher favorites, mixed-load pressure, and
+  final qualification remain open.
+
+### Process-cap exit status T1
+
+- Added ADR-0100 and syscall 61, `SYS_PROC_STATUS`. The kernel records the
+  final thread's full `u64` status once in the Process record, makes it
+  readable only through a live exact Process/READ cap, and drops the record at
+  reap. Output pointers must be present and writable. A final user fault is
+  reported as `0x100 + vector`; status zero is a normal successful exit.
+- `arena-process::ChildProcess` and `ProcessGroup` expose member-scoped status
+  and a wait helper that treats notification wakes only as hints, rechecking
+  the held Process cap after each wake. Desktop logs the primary status before
+  group cleanup. This is lifecycle data, not a readiness proof; ADR-0049's
+  separately authenticated protocol-result requirement remains.
+- The M8 guest passed live/running status, foreign read-only Process
+  observation, wrong-kind and out-of-range refusals, invalid output pointer,
+  exact child status 42, and stale-cap refusal after reap. The signed APB1
+  registry guest passed on QEMU 10.0.11 / OVMF 2025.02 with document handoff,
+  two instances owning three independent windows each, window-by-window
+  teardown, headless timer exit status 42, and identity-resource counts back
+  at baseline.
+- The first updated registry oracle assumed the generic `status=42` line
+  appeared only for the headless app. The guest correctly emitted the same
+  status for the document launch and both windowed instances. The oracle now
+  checks the per-headless-launch increment and exactly four total status
+  receipts for the four fixture processes; the complete guest then passed.
+- Kernel target check, arena-process host tests (8/8), Desktop and Shell target
+  checks passed. The M8 and Phase-13 registry guests passed. Process-record
+  and final-thread exit code changed, so the affected T3 regression set and
+  20 clean boots are recorded below before preservation.
+
+### Process-cap exit status preservation T3
+
+- `python3 tools/test_m12_startup.py` passed 7/7 M12 checks plus M1–M7 and
+  M11 in the same boot, including five startup refusals, Process-cap child
+  wait/reap, exact TLS/heap behavior, and teardown accounting.
+- `python3 tools/test_m12_scale.py` passed 32 live sessions, a mutation-free
+  33rd refusal, 16-close/16-reuse, and exact identity-resource teardown. Its
+  `(free frames, process records, processes, SharedRegions, pages, maps, caps)`
+  were baseline `(114255,15,15,2,470,4,45)`, full
+  `(78308,47,47,66,30550,111,109)`, half
+  `(96243,31,31,34,15510,58,77)`, reused-full
+  `(78307,47,47,66,30550,112,109)`, and final
+  `(114178,15,15,2,470,4,45)`. Process, region, page, map, and cap counts
+  returned to baseline. The 77-frame decrease is retained page-table memory,
+  matching the existing scale behavior.
+- The signed installed registry guest and `tools/test_m8_lifecycle.py` both
+  passed. `arena-process` passed 8/8 host tests, Desktop passed 84/84 host
+  tests, targeted Desktop Clippy passed, kernel target check passed, and the
+  Shell target check passed with its existing dead-code warnings.
+- `tools/build.sh --image` rebuilt the exact source as EFI SHA-256
+  `b5de1d636f0542ca059a5687adf4740641e10fb32f843e80145de4b720c6e27a`.
+  `tools/stability_loop.sh 20` passed 20/20 fresh full-suite boots with zero
+  failures in 154 seconds; the receipt binds all 20 boots to that EFI hash.
+- This is a green T3 preservation checkpoint for stable Process-cap exit
+  status. Signed helper allowlisting, byte streams, persisted launcher
+  favorites, user threads, synchronization, mixed-load pressure, and Phase-13
   final qualification remain open.

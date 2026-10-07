@@ -8,8 +8,8 @@
 
 use arena_lib::abi::{
     CAP_KIND_PROCESS, CAP_NONE, CAP_SLOTS, MAX_SPAWN_INHERIT, RIGHTS_ALL, RIGHTS_DESTROY,
-    RIGHTS_READ, SYS_CAP_DESCRIBE, SYS_CAP_OCCUPIED, SYS_PROC_FINISH, SYS_PROC_LIVE, SYS_SPAWN,
-    syscall1, syscall2, syscall5, syscall6,
+    RIGHTS_READ, SYS_CAP_DESCRIBE, SYS_CAP_OCCUPIED, SYS_PROC_FINISH, SYS_PROC_LIVE,
+    SYS_PROC_STATUS, SYS_SPAWN, SYS_WAIT, syscall1, syscall2, syscall5, syscall6,
 };
 
 use crate::handles::{Error as HandleError, Handle, HandleTable, InsertError};
@@ -153,6 +153,35 @@ impl ChildProcess {
         }
     }
 
+    /// Query the process record's stable final status through this exact
+    /// Process/READ cap. `None` means at least one thread remains live;
+    /// `Some(code)` remains available until this wrapper reaps the child.
+    pub fn exit_status(&self) -> Result<Option<u64>, i64> {
+        if !self.active {
+            return Err(-1);
+        }
+        let mut result = [0u64; 2];
+        let status = unsafe {
+            syscall6(
+                SYS_PROC_STATUS,
+                u64::from(self.cap_slot),
+                result.as_mut_ptr() as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
+        if status != 0 {
+            return Err(status);
+        }
+        match result[0] {
+            0 => Ok(None),
+            1 => Ok(Some(result[1])),
+            _ => Err(-1),
+        }
+    }
+
     /// Reap an exited child or explicitly stop a live child, as selected by
     /// `mode`. On syscall refusal the wrapper remains active and retryable.
     pub fn finish(&mut self, mode: FinishMode) -> Result<(), i64> {
@@ -204,6 +233,9 @@ fn find_process_capability(pid: u64) -> Result<u8, SpawnError> {
 pub trait ChildLifecycle {
     fn is_active(&self) -> bool;
     fn is_live(&self) -> Result<bool, i64>;
+    fn exit_status(&self) -> Result<Option<u64>, i64> {
+        Ok(None)
+    }
     fn finish(&mut self, mode: FinishMode) -> Result<(), i64>;
 }
 
@@ -214,6 +246,10 @@ impl ChildLifecycle for ChildProcess {
 
     fn is_live(&self) -> Result<bool, i64> {
         ChildProcess::is_live(self)
+    }
+
+    fn exit_status(&self) -> Result<Option<u64>, i64> {
+        ChildProcess::exit_status(self)
     }
 
     fn finish(&mut self, mode: FinishMode) -> Result<(), i64> {
@@ -288,6 +324,36 @@ impl<T, const N: usize> ProcessGroup<T, N> {
             .map_err(GroupError::Process)
     }
 
+    pub fn exit_status(&self, handle: Handle) -> Result<Option<u64>, GroupError>
+    where
+        T: ChildLifecycle,
+    {
+        self.members
+            .get(handle)
+            .map_err(GroupError::Handle)?
+            .exit_status()
+            .map_err(GroupError::Process)
+    }
+
+    /// Wait until this member exits, using the caller's explicitly held
+    /// Notification/READ slot. A shared notification may wake for another
+    /// child or event; the held Process cap remains the authority, so status
+    /// is rechecked after every wake.
+    pub fn wait(&self, handle: Handle, notification_slot: u8) -> Result<u64, GroupError>
+    where
+        T: ChildLifecycle,
+    {
+        loop {
+            if let Some(status) = self.exit_status(handle)? {
+                return Ok(status);
+            }
+            let wake = unsafe { syscall1(SYS_WAIT, u64::from(notification_slot)) };
+            if wake < 0 {
+                return Err(GroupError::Process(wake));
+            }
+        }
+    }
+
     pub fn reap_exited(&mut self, handle: Handle) -> Result<(), GroupError>
     where
         T: ChildLifecycle,
@@ -357,6 +423,7 @@ mod tests {
     struct FakeChild {
         active: bool,
         live: bool,
+        exit_status: Option<u64>,
         last_finish: Rc<Cell<Option<FinishMode>>>,
         fail_finish: bool,
     }
@@ -370,6 +437,10 @@ mod tests {
             Ok(self.live)
         }
 
+        fn exit_status(&self) -> Result<Option<u64>, i64> {
+            Ok(self.exit_status)
+        }
+
         fn finish(&mut self, mode: FinishMode) -> Result<(), i64> {
             if self.fail_finish {
                 return Err(-3);
@@ -381,16 +452,39 @@ mod tests {
     }
 
     fn fake(live: bool) -> (FakeChild, Rc<Cell<Option<FinishMode>>>) {
+        fake_with_status(live, (!live).then_some(0))
+    }
+
+    fn fake_with_status(
+        live: bool,
+        exit_status: Option<u64>,
+    ) -> (FakeChild, Rc<Cell<Option<FinishMode>>>) {
         let last_finish = Rc::new(Cell::new(None));
         (
             FakeChild {
                 active: true,
                 live,
+                exit_status,
                 last_finish: last_finish.clone(),
                 fail_finish: false,
             },
             last_finish,
         )
+    }
+
+    #[test]
+    fn group_exit_status_is_member_scoped_and_preserves_full_u64() {
+        let mut group = ProcessGroup::<FakeChild, 2>::new();
+        let (running, _) = fake(true);
+        let (exited, _) = fake_with_status(false, Some(u64::MAX));
+        let running_handle = group.spawn(|| Ok::<_, ()>(running)).unwrap();
+        let exited_handle = group.spawn(|| Ok::<_, ()>(exited)).unwrap();
+        assert_eq!(group.exit_status(running_handle), Ok(None));
+        assert_eq!(group.exit_status(exited_handle), Ok(Some(u64::MAX)));
+        assert!(matches!(
+            group.exit_status(Handle::from_raw(u32::MAX)),
+            Err(GroupError::Handle(_))
+        ));
     }
 
     #[test]

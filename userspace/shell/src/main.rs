@@ -679,6 +679,12 @@ fn finish_refused(slot: u64) -> bool {
     true
 }
 
+/// SYS_PROC_STATUS has six-register ABI slots. Always zero its reserved tail;
+/// syscall2 intentionally leaves registers 2–5 unspecified.
+fn process_status_query(slot: u64, out: u64) -> i64 {
+    unsafe { syscall6(SYS_PROC_STATUS, slot, out, 0, 0, 0, 0) }
+}
+
 fn lifetest() {
     let mut client = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, client.as_mut_ptr() as u64) } != 0 {
@@ -758,6 +764,22 @@ fn lifetest() {
         }
     }
     write_str("m8: lifetest held DESTROY refused for self/manager/netd/rngd\r\n");
+    let mut process_status = [u64::MAX; 2];
+    if process_status_query(SLOT_LIFE_SELF, process_status.as_mut_ptr() as u64) != 0
+        || process_status != [0, 0]
+        || process_status_query(SLOT_LIFE_FOREIGN, process_status.as_mut_ptr() as u64) != 0
+        || process_status != [0, 0]
+        || process_status_query(SLOT_STACK, process_status.as_mut_ptr() as u64) != STATUS_BAD_ARG
+        || process_status_query(CAP_SLOTS as u64, process_status.as_mut_ptr() as u64)
+            != STATUS_BAD_ARG
+        || process_status_query(SLOT_LIFE_SELF, 0) != STATUS_BAD_ADDRESS
+    {
+        write_str("m8: lifetest FAIL (Process status cap/right/pointer boundary)\r\n");
+        return;
+    }
+    write_str(
+        "m8: lifetest Process/READ status live state and wrong-cap/pointer refusals passed\r\n",
+    );
     if !finish_refused(SLOT_LIFE_FOREIGN)
         || !finish_refused(SLOT_STACK)
         || !finish_refused(SLOT_POWER)
@@ -785,9 +807,12 @@ fn lifetest() {
     }
     let badge = unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) };
     let mut desc = [0u64; 3];
+    process_status = [u64::MAX; 2];
     if badge != SPAWN_BADGE as i64
         || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_LIFE_CHILD, desc.as_mut_ptr() as u64) } != 0
         || desc != [4, child as u64, RIGHTS_READ | RIGHTS_DESTROY]
+        || process_status_query(SLOT_LIFE_CHILD, process_status.as_mut_ptr() as u64) != 0
+        || process_status != [1, 42]
         || unsafe { syscall2(SYS_PROC_FINISH, SLOT_LIFE_CHILD, 1) } != STATUS_BUSY
         || unsafe { syscall2(SYS_PROC_FINISH, SLOT_LIFE_CHILD, 0) } != 0
         || !finish_refused(SLOT_LIFE_CHILD)
@@ -795,6 +820,11 @@ fn lifetest() {
         write_str("m8: lifetest FAIL (live-only mode, positive reap or stale slot)\r\n");
         return;
     }
+    if process_status_query(SLOT_LIFE_CHILD, process_status.as_mut_ptr() as u64) != STATUS_BAD_ARG {
+        write_str("m8: lifetest FAIL (stale Process status cap remained usable)\r\n");
+        return;
+    }
+    write_str("m8: lifetest status Process/READ reported exact child exit=42; stale refused\r\n");
     write_str("m8: lifetest child reaped by held cap; dead mode-1 and stale both refused\r\n");
     // Resolve a different slirp address after the refusals: the first
     // gateway resolve cannot make this a cache hit. The same endpoint

@@ -57,6 +57,8 @@ pub const SYS_VM_COMMIT: u64 = 57;
 pub const SYS_VM_PROTECT: u64 = 58;
 pub const SYS_VM_RELEASE: u64 = 59;
 pub const SYS_VM_QUERY: u64 = 60;
+/// ADR-0100: held Process/READ reports stable `[exited, status]` state.
+pub const SYS_PROC_STATUS: u64 = 61;
 pub const VM_PROT_READ: u64 = 1;
 pub const VM_PROT_WRITE: u64 = 2;
 pub const VM_PROT_EXEC: u64 = 4;
