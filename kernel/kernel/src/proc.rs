@@ -25,6 +25,11 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// heap-backed object story matures.
 pub const MAX_PROCESSES: usize = 64;
 
+/// Bounded page-granular user spans owned by one process address space.
+/// The Phase-12 bound remains unchanged while range ownership moves from
+/// scheduler threads to their process.
+pub const USER_REGIONS_MAX: usize = 80;
+
 /// A live process: identity, the address space it owns, and its
 /// capability space (ADR-0014 §5 anchor: process = address space +
 /// capability space; the ADR-0015 half lives inline so both die with
@@ -39,6 +44,10 @@ pub struct Process {
     pub pml4_phys: u64,
     /// Capability slots — see [`crate::cap`] for every operation.
     pub caps: cap::CapSpace,
+    /// User-pointer validation spans for this address space. Every thread in
+    /// the process observes the same regions; kernel-only test contexts keep
+    /// their separate scheduler-local range list.
+    user_regions: [(u64, u64); USER_REGIONS_MAX],
     /// Registered exit notification `(nid, badge)` — fired when this
     /// process's LAST live thread exits (spawn protocol, ADR-0019).
     /// `nid == u32::MAX` = none registered.
@@ -81,11 +90,97 @@ pub fn create(name: &'static str) -> Result<u64, &'static str> {
                 name,
                 pml4_phys: pml4,
                 caps: cap::CapSpace::new(),
+                user_regions: [(0, 0); USER_REGIONS_MAX],
                 exit_notif: (u32::MAX, 0),
             });
             CREATED_TOTAL.fetch_add(1, Ordering::Relaxed);
             Ok(id)
         }
+    })
+}
+
+/// Snapshot the process-owned user spans for syscall pointer validation.
+pub fn user_regions(pid: u64) -> Option<[(u64, u64); USER_REGIONS_MAX]> {
+    without_interrupts(|| unsafe {
+        (*PROCESSES.get())
+            .iter()
+            .flatten()
+            .find(|process| process.id == pid)
+            .map(|process| process.user_regions)
+    })
+}
+
+/// Replace a process's initial image/stack map inventory before entering
+/// user mode. Failed admission leaves the old table unchanged.
+pub fn set_user_regions(pid: u64, regions: &[(u64, u64)]) -> Result<(), &'static str> {
+    if regions.len() > USER_REGIONS_MAX {
+        return Err("too many process user regions");
+    }
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("set user regions: no such process");
+        };
+        process.user_regions = [(0, 0); USER_REGIONS_MAX];
+        process.user_regions[..regions.len()].copy_from_slice(regions);
+        Ok(())
+    })
+}
+
+/// Add one address-space span after the caller has preflighted its PTEs.
+pub fn append_user_region(pid: u64, lo: u64, hi: u64) -> Result<(), &'static str> {
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("append region: no such process");
+        };
+        for &(start, end) in &process.user_regions {
+            if start == 0 && end == 0 {
+                continue;
+            }
+            if lo < end && start < hi {
+                return Err("append region: overlaps a registered region");
+            }
+        }
+        let Some(slot) = process
+            .user_regions
+            .iter_mut()
+            .find(|region| **region == (0, 0))
+        else {
+            return Err("append region: process user-region table is full");
+        };
+        *slot = (lo, hi);
+        Ok(())
+    })
+}
+
+/// Forget exactly one process-owned span after the VM registry and PTEs have
+/// both verified the unmap. Other threads immediately observe the released
+/// hole because this table belongs to the address space.
+pub fn remove_user_region(pid: u64, lo: u64, hi: u64) -> Result<(), &'static str> {
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("remove region: no such process");
+        };
+        let Some(region) = process
+            .user_regions
+            .iter_mut()
+            .find(|region| **region == (lo, hi))
+        else {
+            return Err("remove region: exact process span absent");
+        };
+        *region = (0, 0);
+        Ok(())
     })
 }
 

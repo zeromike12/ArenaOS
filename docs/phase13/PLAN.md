@@ -141,7 +141,10 @@ receipts.
 
 - Specify process-owned mapping metadata and minimal reserve/map/release/protect
   operations, including atomic admission, W^X, guard pages, device-memory
-  rejection, accounting, and teardown.
+  rejection, accounting, and teardown. **Status:** syscall pointer-validation
+  spans now belong to Process (ADR-0094); explicit reservation and mapping
+  operations remain. M12 startup, 32-session, and installed-app guest
+  regressions passed, followed by 20/20 clean boots on the exact rebuilt EFI.
 - Replace the 32-page heap ceiling with lazy, bounded, fallible process VM
   backing and observable allocator/page accounting.
 - Only after process-wide mapping ownership is implemented, add real user

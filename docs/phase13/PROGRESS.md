@@ -21,7 +21,7 @@
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
 | 13.3 windows, helpers, lifecycle | Not started | Production session couples one Process child to one ordinary window. `AppInstanceTable`, `ProcessGroup`, and `WindowSet` are foundations; group/helper and multi-window production policy is absent. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
-| 13.5 VM and heap | Not started | 32-page heap uses writable/NX owned frames through slot 63; mapping tracking is per scheduler thread and ordinary map release/protection is absent. |
+| 13.5 VM and heap | Process-wide map validation ownership implemented; T3 preservation passed | The 80-span table now lives with Process and is shared by all threads; kernel pointer checks, `SYS_MAP_MEMORY`, and SharedRegion map/unmap use it. Reserve/commit/release/protect APIs and scalable heap remain. |
 | 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base is saved per scheduler thread; mapping validation is per thread. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
 | Final qualification | Not started | No source implementation or guest evidence yet. |
@@ -187,5 +187,34 @@ the source-frozen final qualification.
   arrays into static registry storage; the corrected guest boot is green.
 
 This remains a feature checkpoint. Favorites/dock composition, multi-window
-AppInstances, helper lifecycle, streams, process-wide VM, scalable heap, user
-threads, synchronization, pressure, and final qualification remain open.
+AppInstances, helper lifecycle, streams, native VM operations, scalable heap,
+user threads, synchronization, pressure, and final qualification remain open.
+
+### Process-owned user mapping inventory implementation
+
+- Added the unchanged 80-entry page-span inventory to each `Process` and
+  removed that table from every scheduler thread. The bounded 80-entry
+  scheduler-local table remains only for kernel-owned ring-3 self-tests that
+  have no Process object; it is one shared table, not 80 entries per kernel
+  thread.
+- `current_user_regions`, initial image/stack registration, append, and exact
+  removal now resolve to the current Process for every production ring-3
+  thread. Syscall buffer validation and existing owned-frame/SharedRegion
+  mapping paths therefore share address-space metadata. Process teardown
+  discards the inventory with its Process record and continues to reclaim PTEs
+  and SharedRegion pins through the existing teardown owners.
+- No resource limit or syscall number changed. The fixed range-record array
+  storage is moved from the 64 scheduler slots to the 64 process slots; the
+  80-span per-owner budget is unchanged. This is the first half of 13.8 only:
+  native reservations, lazy commitment, private release/protection, guard
+  ranges, and mapping accounting still need implementation.
+- Added ADR-0094 to record the ownership change and its single-core atomicity
+  condition. Kernel target check passed. `test_m12_startup.py` passed 7/7 M12
+  checks plus M1–M7 and M11; `test_m12_scale.py` passed 32 live sessions,
+  mutation-free refusal, 16-close/16-reuse, and full teardown; the Phase-13
+  installed registry/association guest passed after this kernel change.
+- Rebuilt the exact EFI (`SHA-256 256a03461bf1eb6f2c85595f9ff347fd42dd7272e7328d7b1f27088a02bbf515`)
+  and ran `tools/stability_loop.sh 20`: 20/20 fresh boots passed, zero
+  failures, in 149 seconds. The 32-session run observed 77 retained page-table
+  frames after all app sessions closed; processes, regions, pages, maps, and
+  caps returned to the documented baseline.

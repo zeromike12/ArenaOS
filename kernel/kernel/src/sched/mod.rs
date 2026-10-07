@@ -56,14 +56,9 @@ const THREAD_STACK_BYTES: u64 = (THREAD_STACK_FRAMES * 4096) as u64;
 /// Bottom-of-stack canary ("ARENASTK"), checked on every switch-away.
 const STACK_CANARY: u64 = 0x4152_454E_4153_544B;
 
-/// Per-thread user regions the syscall dispatcher validates against
-/// (code / data / stack / driver windows — ADR-0014). ADR-0021 raised the
-/// original four slots for VirtIO windows; ADR-0075 raised that to 40 for
-/// the scanout plus 24 regions across twelve Desktop sessions. ADR-0089
-/// raises the bounded table to 80: 64 per-session broker maps plus the
-/// seven startup regions observed in the 32-session guest topology, leaving
-/// nine slots. The fixed per-thread cost is 1,280 bytes.
-pub const USER_REGIONS_MAX: usize = 80;
+/// Bounded page-granular process map inventory. The Phase-12 limit remains
+/// 80 spans; only its owner changes from a scheduler thread to its Process.
+pub const USER_REGIONS_MAX: usize = crate::proc::USER_REGIONS_MAX;
 const MSR_FS_BASE: u32 = 0xC000_0100;
 
 /// M3.1 stacks come from the direct map's first 2 GiB (ADR-0008); a frame
@@ -114,12 +109,6 @@ pub struct KThread {
     /// `swapgs` mechanism; this value is saved/restored only at scheduler
     /// boundaries and starts at zero for every thread.
     fs_base: u64,
-    /// Registered user-memory regions ((lo, hi) page-granular pairs;
-    /// (0,0) = slot unused) — the syscall dispatcher validates every
-    /// user pointer against exactly these (ADR-0014). Kernel-only
-    /// threads leave them zeroed, so any user-pointer syscall from them
-    /// is rejected.
-    regions: [(u64, u64); USER_REGIONS_MAX],
 }
 
 /// Fixed-capacity FIFO of slot indices (one CPU's round-robin ready ring).
@@ -212,6 +201,10 @@ impl CpuSched {
 }
 
 static THREADS: SyncCell<[Option<KThread>; MAX_THREADS]> = SyncCell::new([None; MAX_THREADS]);
+/// A single legacy range set for kernel-owned ring-3 self-tests. Production
+/// userspace always resolves ranges through its process record.
+static KERNEL_USER_REGIONS: SyncCell<[(u64, u64); USER_REGIONS_MAX]> =
+    SyncCell::new([(0, 0); USER_REGIONS_MAX]);
 /// Saved RSP per slot (the switch's save-slot target; raw access by
 /// design — a pointer into here crosses the switch, a borrow must not).
 static CTX: SyncCell<[u64; MAX_THREADS]> = SyncCell::new([0; MAX_THREADS]);
@@ -264,12 +257,12 @@ pub fn init() -> Result<(), &'static str> {
             cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
             proc_id: 0,
             fs_base: 0,
-            regions: [(0, 0); USER_REGIONS_MAX],
         });
         // SAFETY: same discipline; fresh scheduler, known values.
         unsafe {
             *CPUS.get() = [CpuSched::new(); MAX_CPUS];
             *NEXT_ID.get() = 1;
+            *KERNEL_USER_REGIONS.get() = [(0, 0); USER_REGIONS_MAX];
         }
         Ok(())
     })
@@ -368,7 +361,6 @@ fn spawn_inner(
                 cr3,
                 proc_id,
                 fs_base: 0,
-                regions: [(0, 0); USER_REGIONS_MAX],
             });
             (*CTX.get())[idx] = rsp0;
             let cpu = &mut (*CPUS.get())[this_cpu()];
@@ -1036,59 +1028,54 @@ pub fn current_thread_id() -> u64 {
     })
 }
 
-/// The current thread's registered user regions (copy-out; zeros in the
-/// unused slots). The syscall dispatcher validates user pointers against
-/// exactly this table.
+/// The current process's registered user regions (copy-out; zeros in the
+/// unused slots). Kernel-owned ring-3 test contexts use their legacy local
+/// table because they have no process address-space owner.
 pub fn current_user_regions() -> [(u64, u64); USER_REGIONS_MAX] {
+    if let Some(pid) = current_proc_id() {
+        return crate::proc::user_regions(pid).unwrap_or([(0, 0); USER_REGIONS_MAX]);
+    }
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
-        unsafe {
-            let cur = (*CPUS.get())[this_cpu()].current;
-            (*THREADS.get())[cur]
-                .expect("current thread vanished")
-                .regions
-        }
+        unsafe { *KERNEL_USER_REGIONS.get() }
     })
 }
 
-/// Register the current thread's user regions (page-granular `(lo, hi)`
-/// pairs, at most [`USER_REGIONS_MAX`], zeros fill the rest). Call with
-/// IF=0 before `enter_user` (or at process-thread creation).
+/// Register the initial image/stack spans for the current process. The
+/// process record is the source of truth for all of its threads. Kernel
+/// self-test contexts with no Process use the legacy scheduler-local table.
 pub fn set_current_user_regions(regions: &[(u64, u64)]) -> Result<(), &'static str> {
     if regions.len() > USER_REGIONS_MAX {
         return Err("too many user regions");
     }
+    if let Some(pid) = current_proc_id() {
+        return crate::proc::set_user_regions(pid, regions);
+    }
     without_interrupts(|| {
-        // SAFETY: single writer under IF=0; as_mut() — expect-assign on a
-        // Copy place would write to a temporary (CODING-CONVENTIONS).
+        // SAFETY: single writer under IF=0.
         unsafe {
-            let cur = (*CPUS.get())[this_cpu()].current;
-            let t = (*THREADS.get())[cur]
-                .as_mut()
-                .expect("current thread vanished");
-            t.regions = [(0, 0); USER_REGIONS_MAX];
+            let regions_out = &mut *KERNEL_USER_REGIONS.get();
+            *regions_out = [(0, 0); USER_REGIONS_MAX];
             for (i, r) in regions.iter().enumerate() {
-                t.regions[i] = *r;
+                regions_out[i] = *r;
             }
         }
         Ok(())
     })
 }
 
-/// Append one region to the CURRENT thread's user-region table — the
-/// SYS_MAP_MEMORY registration path (ADR-0021: self-mapped windows join
-/// the same table the syscall dispatcher validates user pointers
-/// against). Fails when the table is full or the span overlaps a
-/// registered region.
+/// Append one span to the current address space's pointer-validation table —
+/// used by private and SharedRegion maps. Kernel-only ring-3 test contexts
+/// retain local registration. Fails atomically when full or overlapping.
 pub fn append_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> {
+    if let Some(pid) = current_proc_id() {
+        return crate::proc::append_user_region(pid, lo, hi);
+    }
     without_interrupts(|| {
         // SAFETY: single writer under IF=0.
         unsafe {
-            let cur = (*CPUS.get())[this_cpu()].current;
-            let t = (*THREADS.get())[cur]
-                .as_mut()
-                .expect("current thread vanished");
-            for r in t.regions.iter() {
+            let regions = &mut *KERNEL_USER_REGIONS.get();
+            for r in regions.iter() {
                 if r.0 == 0 && r.1 == 0 {
                     continue;
                 }
@@ -1096,7 +1083,7 @@ pub fn append_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> 
                     return Err("append region: overlaps a registered region");
                 }
             }
-            let Some(slot) = t.regions.iter_mut().find(|r| r.0 == 0 && r.1 == 0) else {
+            let Some(slot) = regions.iter_mut().find(|r| r.0 == 0 && r.1 == 0) else {
                 return Err("append region: user-region table is full");
             };
             *slot = (lo, hi);
@@ -1105,19 +1092,18 @@ pub fn append_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> 
     })
 }
 
-/// Forget *only* an exactly matched current-thread mapped region after
-/// SYS_SHARED_UNMAP has validated its registry record and removed the PTEs.
-/// The hole becomes reusable; all other spans (ELF, stack, MMIO, private
-/// windows) remain registered. IF=0 holds across preflight and mutation.
+/// Forget only an exactly matched address-space mapping after SYS_SHARED_UNMAP
+/// has validated its registry record and removed the PTEs. All threads in a
+/// process immediately observe the same released hole.
 pub fn remove_current_user_region(lo: u64, hi: u64) -> Result<(), &'static str> {
+    if let Some(pid) = current_proc_id() {
+        return crate::proc::remove_user_region(pid, lo, hi);
+    }
     without_interrupts(|| {
         // SAFETY: single writer, with exactly one expected `(lo, hi)`.
         unsafe {
-            let cur = (*CPUS.get())[this_cpu()].current;
-            let t = (*THREADS.get())[cur]
-                .as_mut()
-                .expect("current thread vanished");
-            let Some(r) = t.regions.iter_mut().find(|r| **r == (lo, hi)) else {
+            let regions = &mut *KERNEL_USER_REGIONS.get();
+            let Some(r) = regions.iter_mut().find(|r| **r == (lo, hi)) else {
                 return Err("remove region: exact span absent");
             };
             *r = (0, 0);

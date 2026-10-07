@@ -539,8 +539,8 @@ pub unsafe fn init() -> Result<(), &'static str> {
 /// Ring 0, IF=0, syscall MSRs initialized ([`init`]), the current thread
 /// owns a kernel stack (the stub's scratch/RSP0 pair is reprogrammed here
 /// defensively as well), `rip` and `user_rsp` canonical and inside the
-/// thread's registered user regions (`sched::set_current_user_regions` —
-/// the dispatcher validates syscall buffers against exactly those), and
+/// process's registered user regions (`sched::set_current_user_regions` —
+/// every thread validates syscall buffers against the same process map), and
 /// the pages backing both are mapped U/S in the live address space.
 pub unsafe fn enter_user(rip: u64, user_rsp: u64) -> ! {
     // Defensive re-program of the ring-3→ring-0 stack pair for THIS
@@ -1911,11 +1911,9 @@ fn sys_map_memory(a0: u64, a1: u64) -> Status {
     }
 
     // The kernel-chosen VA: first stride-aligned window overlapping
-    // neither a registered region nor a live page-table leaf. Runs at
-    // IF=0 (the stub's SFMASK guarantee), so scan → map → register is
-    // one non-preemptible decision for this thread; two threads of one
-    // process scanning on different CPUs is a documented v1 limitation
-    // (ADR-0021 — driver processes are single-threaded).
+    // neither a process-registered span nor a live page-table leaf. Runs
+    // at IF=0 (the stub's SFMASK guarantee), so scan → map → register is
+    // one non-preemptible address-space decision on this single-core ABI.
     let regions = crate::sched::current_user_regions();
     let mut va = MMAP_BASE;
     let chosen = loop {
@@ -2840,9 +2838,10 @@ fn sys_prove_done() -> u64 {
 }
 
 /// Page-granular validation of `[buf, buf+len)` against the calling
-/// thread's registered user regions: every 4 KiB page the span touches
+/// process's registered user regions: every 4 KiB page the span touches
 /// must lie entirely inside one region (spans crossing holes are
-/// rejected, not faulted — ADR-0014).
+/// rejected, not faulted — ADR-0014). Kernel-owned self-test contexts use
+/// the single kernel-test range table.
 fn user_range_ok(buf: u64, len: u64) -> bool {
     let regions = crate::sched::current_user_regions();
     let end = match buf.checked_add(len) {
