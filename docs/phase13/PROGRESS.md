@@ -22,7 +22,8 @@
 | 13.3 windows, helpers, lifecycle | Multi-window/headless launch, per-instance groups, stable process exit status, signed helper lifecycle, and helper stream delegation implemented | ADR-0097 gives each additional window its own SharedRegion, snapshot, compositor and publication state under one authenticated process session. ADR-0098 adds signed headless Image launch with explicit caps and Process-cap reap. ADR-0099 gives every live Desktop app instance its own four-member `ProcessGroup`, with exact group teardown. ADR-0100 adds stable final status through exact Process/READ authority. ADR-0101 guest-proves allowlisted helper Image resolution, explicit private timer and owner-signal grants, wait/reap, terminate, crash, and group cleanup. ADR-0105 extends this to a dedicated helper stream page, exact parent cap, and owner-scoped wake. |
 | 13.4 streams | App and helper standard streams implemented; T1 guest proof passed | ADR-0104 and ADR-0105 provide one-page, three-ring SharedRegions, Startup ABI v2 roles, focused keyboard stdin, output drain, partial transfer, EOF, peer closure, and exact owner teardown. The signed fixture proved parent-to-helper stdin, helper stdout, owner-mediated wake, non-stream helper refusal, invalid stream-handle refusal, and EOF after exact Process-cap reap. Mixed-pressure capacity remains. |
 | 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. The prior implementation checkpoint is preserved at `7097eb5`; later Phase-13 work continues on this branch. |
-| 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
+| 13.6 user threads | Implemented; T1 guest proof and T3 preservation passed | ADR-0106 uses the existing process PML4/cap space, exact guarded VM stack caps, per-thread FS.base, same-process join/detach, and four created threads per process. The installed APB1 guest ran four concurrent ring-3 threads with shared heap/read-only VM, checked quota and stale IDs, joined/detached, and restored VM accounting. A killed helper also had a live user worker. The exact rebuilt EFI passed 20/20 fresh preservation boots. |
+| 13.7 native synchronization | Not started | Mutex/Condvar/Once design and wait/wake decision remain. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
 | Final qualification | Not started | No source freeze, complete historical suite, 100-boot receipt, or extracted-archive witness yet. |
 
@@ -189,8 +190,8 @@ the source-frozen final qualification.
 At this registry/association checkpoint, favorites/dock composition,
 multi-window ownership, helper lifecycle, streams, user threads,
 synchronization, pressure, and final qualification were still open; later
-subsections record the subsequent VM/heap, multi-window, helper, and stream
-checkpoints.
+subsections record the subsequent VM/heap, multi-window, helper, stream, and
+user-thread checkpoints.
 
 The current branch has since added multi-window ownership (ADR-0097), and the
 signed registry guest now also installs and launches a headless package as
@@ -686,4 +687,78 @@ and final qualification remain open.
   Desktop 85/85, and Desktop/installed-app/helper release target checks.
   Helper stream lifecycle is now T1 complete. Persisted favorites, user
   threads, synchronization, mixed-load pressure, PIE scope, and final
+  qualification remain open.
+
+### Native user-thread implementation and T1 guest proof
+
+- Re-audited the scheduler, `Process`, spawn path, process-owned user spans,
+  VM region registry, syscall buffer validation, and FS.base switch path before
+  implementation. `KThread` already carries one CR3/process ID and FS.base;
+  `Process` owns the 80-entry user map, and every syscall validates against
+  that same process table. `plan_switch` already programs TSS RSP0 and restores
+  FS.base per scheduler thread. The missing production mechanism is a second
+  ring-3 entry frame plus stack and join lifecycle.
+- ADR-0106 keeps the global scheduler bound at 64, the per-process VM bound at
+  8, the process user-span bound at 80, and cap-table width at exactly 128.
+  It bounds user-created threads to four per process. Each thread gets a
+  96 KiB scheduler kernel stack and an explicit VM reservation with an
+  uncommitted guard page, stack pages, start record, and distinct TLS block.
+  The exact VM stack cap is the authority to create/release that stack; entry,
+  stack offsets, and thread IDs remain descriptive and are validated/scoped.
+- Added the additive calls `SYS_THREAD_CREATE`, `SYS_THREAD_JOIN`,
+  `SYS_THREAD_DETACH`, and `SYS_THREAD_COUNT` at 64–67. Creation requires an
+  exact non-copyable VmRegion cap, an executable read-only entry, fully
+  committed RW/NX stack pages, an uncommitted internal guard page, and a
+  separate writable/NX TLS block. Thread IDs stay process-scoped descriptors;
+  no caps are copied. Existing bounds remain unchanged: 64 scheduler slots,
+  four created threads per process, eight VM regions per process, 128 global
+  regions, 80 process-owned pointer spans, and 128 capability slots.
+- The runtime reserves 16 pages per created thread: one TLS/start page, one
+  uncommitted internal guard, and 14 committed user-stack pages (56 KiB).
+  Each thread also uses the existing 96 KiB kernel stack and has its own
+  16-byte FS:0 TCB. The exact VM stack cap stays live until join or detached
+  exit cleanup. Dropping a runtime JoinHandle requests detach; it does not
+  implicitly release user memory.
+- Fixed two lifecycle details found during implementation. The scheduler now
+  defers freeing a Zombie's kernel stack until execution has switched off it,
+  then reaps after context return or on a fresh thread trampoline. Cooperative
+  yield normalizes the syscall GS pair before selecting a first-run user
+  thread, and restores the suspended caller's side on resume. VM release now
+  returns `STATUS_BUSY` for an active user stack while leaving its cap and
+  mappings intact. A dying thread also releases any join claims it held on
+  siblings.
+- `python3 tools/test_phase13_registry_guest.py` passed after the thread
+  integration. Across its three real installed-app launches, each app created
+  four ring-3 threads, waited until all four were live, verified distinct
+  FS.base TLS blocks, updated a shared heap AtomicU64, read one shared RO VM
+  page, checked the per-process quota, refused active-stack release and
+  crossed stack-cap requests, joined stable exit/TLS results, detached one
+  worker, and returned global VM regions/committed pages to their pre-thread
+  values. The test also killed each sleeper helper after its own ring-3 worker
+  started, then reaped the owning ProcessGroup to its existing resource
+  baseline.
+- That guest first found that `SYS_VM_RELEASE` collapsed the active-stack
+  refusal into `STATUS_BAD_ARG`; it now reports the typed `STATUS_BUSY` while
+  preserving the region. Earlier in the same bring-up, the historic reaper
+  path was found to free the currently executing Zombie kernel stack before
+  the assembly switch completed. The repaired post-switch cleanup retained
+  old resource-exact tests and prevents stack reuse during the switch.
+- Targeted checks passed: kernel/runtime/app/headless target checks,
+  `arena-runtime` host tests 21/21, runtime and app/headless Clippy, and the
+  signed registry guest with three application launches. After the final join
+  reclamation change, the registry guest passed again in 45.8 seconds. The
+  exact EFI SHA-256 was
+  `f19c8de7c06d11f6f61da5c3b70e7fa722da56dd4d1f5cf3411438162dcb744d`.
+- `tools/stability_loop.sh 20` passed 20/20 clean boots with zero failures in
+  153 seconds. The run exercised the full historical M1–M12 suite, Desktop
+  lifecycle and pixel proof, manager restart, actual keyboard input, wire
+  fixtures, and clean shutdown with fresh NVRAM on every boot. Its receipt
+  SHA-256 is
+  `f19c8de7c06d11f6f61da5c3b70e7fa722da56dd4d1f5cf3411438162dcb744d 20/20`.
+  This closes the T3 scheduler/context-switch/teardown preservation checkpoint.
+- The `plan_switch` reaper remains conservative about active kernel stacks,
+  and now also runs immediately after a join has made an exited target
+  disposable. Thus the joined scheduler record and its kernel stack are
+  returned before the join syscall resumes in ring 3.
+  Synchronization, user favorites, mixed-load pressure, PIE scope, and final
   qualification remain open.

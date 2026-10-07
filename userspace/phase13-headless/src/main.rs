@@ -8,10 +8,12 @@ use arena_lib::abi::{
     syscall2, syscall3, syscall6,
 };
 use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams};
+use arena_runtime::threads;
 use arena_startup_abi::manifest::{FLAG_HEADLESS, FLAG_STANDARD_STREAMS};
 use arena_startup_abi::startup::{
     CAP_KIND_NOTIFICATION, CAP_KIND_SHARED_REGION, CapabilityRole, StartupView,
 };
+use core::sync::atomic::{AtomicU64, Ordering};
 
 const APPLICATION_ID: [u8; 32] = {
     let mut id = [0; 32];
@@ -149,6 +151,25 @@ fn helper_main(view: StartupView<'_>) -> ! {
     }
     client::log(b"[phase13-helper] no inherited notification factory; WRITE-only owner signal cannot wait\n");
     client::log(b"[phase13-helper] exact Startup ABI inventory: private timer Notification; optional owner signal is WRITE-only and a distinct object\n");
+    if view.argument(1) == Some(SLEEPER_ID) {
+        let started = AtomicU64::new(0);
+        let worker = threads::spawn(live_helper_worker, &started as *const AtomicU64 as u64)
+            .unwrap_or_else(|_| client::exit(87));
+        for _ in 0..100_000 {
+            if started.load(Ordering::Acquire) == 1 {
+                break;
+            }
+            threads::yield_now().unwrap_or_else(|_| client::exit(88));
+        }
+        if started.load(Ordering::Acquire) != 1 || threads::count() != Ok(2) {
+            client::exit(89);
+        }
+        // Keep the thread live and its exact stack cap owned by this helper
+        // until the Desktop destroys the Process. Its worker has run in ring
+        // 3 and remains in the scheduler's Ready set at the readiness signal.
+        core::mem::forget(worker);
+        client::log(b"[phase13-headless] sleeper ran a live ring-3 worker before parent-authorized teardown\n");
+    }
     match view.argument(1) {
         Some(id) if id == SLEEPER_ID => wait_for_helper_timer(44, true),
         Some(id) if id == ORPHAN_ID => wait_for_helper_timer(45, false),
@@ -162,6 +183,19 @@ fn helper_main(view: StartupView<'_>) -> ! {
         }
         Some(id) if id == STREAMER_ID => stream_helper(view),
         _ => client::exit(74),
+    }
+}
+
+extern "C" fn live_helper_worker(started: u64) -> u64 {
+    // SAFETY: the helper's main thread owns this AtomicU64 on its mapped
+    // process stack and remains alive until the Desktop tears down the whole
+    // Process, including this user-created worker.
+    let started = unsafe { &*(started as *const AtomicU64) };
+    started.store(1, Ordering::Release);
+    loop {
+        if threads::yield_now().is_err() {
+            core::hint::spin_loop();
+        }
     }
 }
 

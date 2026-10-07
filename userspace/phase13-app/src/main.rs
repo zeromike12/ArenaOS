@@ -15,15 +15,20 @@ use arena_desktop::{
 };
 use arena_lib::abi::{
     CAP_KIND_VM_REGION, RIGHTS_DESTROY, RIGHTS_READ, RIGHTS_WRITE, STATUS_BAD_ADDRESS,
-    STATUS_BAD_ARG, STATUS_BUSY, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_NOTIFY, SYS_VM_COMMIT,
-    SYS_VM_PROTECT, SYS_WAIT, VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2,
+    STATUS_BAD_ARG, STATUS_BUSY, STATUS_QUOTA, SYS_CAP_DESCRIBE, SYS_CAP_DESTROY, SYS_NOTIFY,
+    SYS_THREAD_CREATE, SYS_THREAD_DETACH, SYS_THREAD_JOIN, SYS_VM_COMMIT, SYS_VM_PROTECT,
+    SYS_VM_RELEASE, SYS_WAIT, VM_PROT_EXEC, VM_PROT_READ, VM_PROT_WRITE, syscall1, syscall2,
     syscall6,
 };
 use arena_runtime::capabilities::HeldCapability;
 use arena_runtime::heap::{HeapUsage, MAX_SCALABLE_HEAP_PAGES, PAGE_BYTES, ScalableHeap};
 use arena_runtime::streams::{Channel, Error as StreamError, NativeStreams, STREAM_CAPACITY};
+use arena_runtime::threads::{self, Error as ThreadError, JoinHandle};
+use arena_runtime::tls;
+use arena_runtime::vm::{Protection, Region};
 use arena_startup_abi::startup::StartupView;
 use core::alloc::Layout;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 #[global_allocator]
 static APPLICATION_HEAP: ScalableHeap = ScalableHeap::new();
@@ -110,6 +115,7 @@ fn application_main(view: StartupView<'_>) -> ! {
     verify_stream_output(&streams, &mut stdout, &mut stderr);
     verify_vm();
     verify_heap();
+    verify_threads();
 
     let unknown = helper_id(b"org.arenaos.phase13unknown");
     if app_client::spawn_helper(unknown).is_ok() {
@@ -488,6 +494,253 @@ fn paint(window: &Client, index: usize) {
         }
     }
     window.damage().unwrap_or_else(|_| client::exit(76));
+}
+
+struct ThreadFixture {
+    ready: AtomicU64,
+    release: AtomicU64,
+    heap_updates: AtomicU64,
+    failures: AtomicU64,
+    readonly_address: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ThreadArgument {
+    fixture: *const ThreadFixture,
+    ordinal: u64,
+}
+
+extern "C" fn thread_worker(argument: u64) -> u64 {
+    // SAFETY: verify_threads keeps both the shared heap object and argument
+    // array alive until every created thread has been joined or detached.
+    let argument = unsafe { (argument as *const ThreadArgument).read_volatile() };
+    let fixture = unsafe { &*argument.fixture };
+    let Some(tcb) = tls::current() else {
+        fixture.failures.fetch_add(1, Ordering::Relaxed);
+        return 0x1300_0000 + argument.ordinal;
+    };
+    // Each thread writes only its own FS:8 TCB word. The parent reads it
+    // after join, when the kernel has published this thread's exit status.
+    unsafe {
+        core::ptr::addr_of_mut!((*tcb.as_ptr()).application_word)
+            .write_volatile(0xA13E_0000 + argument.ordinal);
+    }
+    fixture.ready.fetch_add(1, Ordering::Release);
+    while fixture.release.load(Ordering::Acquire) == 0 {
+        if threads::yield_now().is_err() {
+            fixture.failures.fetch_add(1, Ordering::Relaxed);
+            return 0x1300_1000 + argument.ordinal;
+        }
+    }
+    let readonly = unsafe { (fixture.readonly_address as *const u64).read_volatile() };
+    if readonly != 0xA13E_1300_0000_000D {
+        fixture.failures.fetch_add(1, Ordering::Relaxed);
+    }
+    for _ in 0..64 {
+        fixture.heap_updates.fetch_add(1, Ordering::AcqRel);
+        if threads::yield_now().is_err() {
+            fixture.failures.fetch_add(1, Ordering::Relaxed);
+            return 0x1300_2000 + argument.ordinal;
+        }
+    }
+    0xA13E_0000 + argument.ordinal
+}
+
+fn verify_threads() {
+    let readonly = Region::reserve(1).unwrap_or_else(|_| client::exit(178));
+    readonly
+        .commit(0, 1, Protection::READ_WRITE)
+        .unwrap_or_else(|_| client::exit(179));
+    let readonly_value = 0xA13E_1300_0000_000D;
+    unsafe { (readonly.base() as *mut u64).write_volatile(readonly_value) };
+    readonly
+        .protect(0, 1, Protection::READ_ONLY)
+        .unwrap_or_else(|_| client::exit(180));
+
+    let fixture = alloc::boxed::Box::new(ThreadFixture {
+        ready: AtomicU64::new(0),
+        release: AtomicU64::new(0),
+        heap_updates: AtomicU64::new(0),
+        failures: AtomicU64::new(0),
+        readonly_address: readonly.base(),
+    });
+    let fixture_ptr = &*fixture as *const ThreadFixture;
+    let mut arguments = [ThreadArgument {
+        fixture: fixture_ptr,
+        ordinal: 0,
+    }; 5];
+    for (ordinal, argument) in arguments.iter_mut().enumerate() {
+        argument.ordinal = ordinal as u64;
+    }
+
+    let vm_before = readonly.query().unwrap_or_else(|_| client::exit(181));
+    let mut handles: [Option<JoinHandle>; 4] = [None, None, None, None];
+    for index in 0..4 {
+        let arg = &arguments[index] as *const ThreadArgument as u64;
+        let handle = threads::spawn(thread_worker, arg).unwrap_or_else(|error| match error {
+            ThreadError::Status(STATUS_QUOTA) => client::exit(182),
+            _ => client::exit(183),
+        });
+        if handles[..index]
+            .iter()
+            .flatten()
+            .any(|existing| existing.tls_base() == handle.tls_base())
+        {
+            client::exit(184);
+        }
+        handles[index] = Some(handle);
+    }
+    let live_vm = readonly.query().unwrap_or_else(|_| client::exit(185));
+    if live_vm.global_regions != vm_before.global_regions + 4
+        || live_vm.global_committed_pages != vm_before.global_committed_pages + 60
+    {
+        client::exit(186);
+    }
+    let quota = threads::spawn(thread_worker, &arguments[4] as *const ThreadArgument as u64);
+    if !matches!(quota, Err(ThreadError::Status(STATUS_QUOTA))) {
+        client::exit(187);
+    }
+    let mut ready = false;
+    for _ in 0..100_000 {
+        if fixture.ready.load(Ordering::Acquire) == 4 {
+            ready = true;
+            break;
+        }
+        threads::yield_now().unwrap_or_else(|_| client::exit(188));
+    }
+    if !ready || threads::count() != Ok(5) {
+        client::exit(189);
+    }
+
+    let first = handles[0].as_ref().unwrap_or_else(|| client::exit(190));
+    let first_slot = first.stack_cap_slot().unwrap_or_else(|| client::exit(191));
+    let first_base = first.tls_base();
+    let stack_low = first_base + 2 * PAGE_BYTES as u64;
+    let stack_top = first_base + 16 * PAGE_BYTES as u64;
+    if unsafe { syscall6(SYS_VM_RELEASE, u64::from(first_slot), 0, 0, 0, 0, 0) } != STATUS_BUSY {
+        client::exit(192);
+    }
+    let invalid_entry = unsafe {
+        syscall6(
+            SYS_THREAD_CREATE,
+            first_base,
+            0,
+            u64::from(first_slot),
+            stack_low,
+            stack_top,
+            first_base,
+        )
+    };
+    if invalid_entry != STATUS_BAD_ADDRESS {
+        client::exit(193);
+    }
+    let second = handles[1].as_ref().unwrap_or_else(|| client::exit(194));
+    let second_slot = second.stack_cap_slot().unwrap_or_else(|| client::exit(195));
+    if first_slot == second_slot {
+        client::exit(196);
+    }
+    let crossed_stack = unsafe {
+        syscall6(
+            SYS_THREAD_CREATE,
+            thread_worker as *const () as u64,
+            &arguments[4] as *const ThreadArgument as u64,
+            u64::from(second_slot),
+            stack_low,
+            stack_top,
+            first_base,
+        )
+    };
+    if crossed_stack != STATUS_BAD_ADDRESS {
+        client::exit(197);
+    }
+    let mut bogus_status = 0u64;
+    if unsafe {
+        syscall6(
+            SYS_THREAD_JOIN,
+            u64::MAX,
+            &mut bogus_status as *mut u64 as u64,
+            0,
+            0,
+            0,
+            0,
+        )
+    } != STATUS_BAD_ARG
+        || unsafe { syscall6(SYS_THREAD_DETACH, u64::MAX, 0, 0, 0, 0, 0) } != STATUS_BAD_ARG
+    {
+        client::exit(198);
+    }
+
+    fixture.release.store(1, Ordering::Release);
+    for (index, handle_slot) in handles.iter_mut().enumerate() {
+        let handle = handle_slot.take().unwrap_or_else(|| client::exit(199));
+        let id = handle.id();
+        let expected = 0xA13E_0000 + index as u64;
+        let outcome = handle.join().unwrap_or_else(|_| client::exit(200));
+        if outcome.exit_status != expected || outcome.application_word != expected {
+            client::exit(201);
+        }
+        if unsafe {
+            syscall6(
+                SYS_THREAD_JOIN,
+                id,
+                &mut bogus_status as *mut u64 as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        } != STATUS_BAD_ARG
+        {
+            client::exit(202);
+        }
+    }
+    if threads::count() != Ok(1)
+        || fixture.heap_updates.load(Ordering::Acquire) != 4 * 64
+        || fixture.failures.load(Ordering::Relaxed) != 0
+    {
+        client::exit(203);
+    }
+    threads::yield_now().unwrap_or_else(|_| client::exit(204));
+    let joined_vm = readonly.query().unwrap_or_else(|_| client::exit(205));
+    if joined_vm.global_regions != vm_before.global_regions
+        || joined_vm.global_committed_pages != vm_before.global_committed_pages
+    {
+        client::exit(206);
+    }
+
+    fixture.ready.store(0, Ordering::Release);
+    fixture.release.store(0, Ordering::Release);
+    let detached = threads::spawn(thread_worker, &arguments[4] as *const ThreadArgument as u64)
+        .unwrap_or_else(|_| client::exit(207));
+    for _ in 0..100_000 {
+        if fixture.ready.load(Ordering::Acquire) == 1 {
+            break;
+        }
+        threads::yield_now().unwrap_or_else(|_| client::exit(208));
+    }
+    if fixture.ready.load(Ordering::Acquire) != 1 {
+        client::exit(209);
+    }
+    drop(detached);
+    fixture.release.store(1, Ordering::Release);
+    let mut detached_clean = false;
+    for _ in 0..100_000 {
+        threads::yield_now().unwrap_or_else(|_| client::exit(210));
+        let current = readonly.query().unwrap_or_else(|_| client::exit(211));
+        if threads::count() == Ok(1)
+            && current.global_regions == vm_before.global_regions
+            && current.global_committed_pages == vm_before.global_committed_pages
+        {
+            detached_clean = true;
+            break;
+        }
+    }
+    if !detached_clean || fixture.failures.load(Ordering::Relaxed) != 0 {
+        client::exit(212);
+    }
+    readonly.release().unwrap_or_else(|_| client::exit(213));
+    drop(fixture);
+    client::log(b"[phase13-threads] four concurrent ring-3 threads shared heap and read-only VM; distinct FS.base TLS, quota, exact stack caps, join/detach, and cleanup passed\n");
 }
 
 fn verify_heap() {

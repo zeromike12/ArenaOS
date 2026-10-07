@@ -24,6 +24,13 @@ impl ThreadControlBlock {
             application_word: 0,
         }
     }
+
+    /// Initialize the self pointer for a TCB that will be used as FS.base by
+    /// a different thread. The block must stay mapped and writable while
+    /// that thread can execute with this TLS base.
+    pub(crate) fn initialize(&mut self) {
+        self.self_pointer = self as *mut Self as usize;
+    }
 }
 
 impl Default for ThreadControlBlock {
@@ -44,7 +51,7 @@ pub unsafe fn install(block: NonNull<ThreadControlBlock>) -> Result<(), i64> {
     // SAFETY: the caller promises this is a live, uniquely owned TCB. The
     // kernel independently validates the mapping and permissions before the
     // MSR is changed.
-    unsafe { core::ptr::addr_of_mut!((*block.as_ptr()).self_pointer).write(base) };
+    unsafe { (*block.as_ptr()).initialize() };
     // SYS_TLS_SET is a one-argument call with all reserved registers zero.
     // SAFETY: the kernel treats `base` as data and validates its exact user PTE.
     let status = unsafe { syscall6(SYS_TLS_SET, base as u64, 0, 0, 0, 0, 0) };

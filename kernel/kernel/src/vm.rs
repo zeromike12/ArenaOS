@@ -401,6 +401,9 @@ pub fn release(pid: u64, id: u32) -> Result<(), VmError> {
             };
             registry.regions[index]
         };
+        if crate::sched::stack_region_in_use(pid, id) {
+            return Err(VmError::Busy);
+        }
         let (lo, hi) = region_bounds(region.base, region.pages).ok_or(VmError::BadAddress)?;
         let ranges = crate::proc::user_regions(pid).ok_or(VmError::BadArgument)?;
         if !ranges.contains(&(lo, hi)) {
@@ -466,6 +469,64 @@ pub fn forget_process(pid: u64) {
 
 pub fn live(pid: u64, id: u32) -> bool {
     without_interrupts(|| unsafe { find_region(&*REGISTRY.get(), pid, id).is_some() })
+}
+
+/// Validate a ring-3 thread stack inside the exact process VM reservation.
+/// Page zero is RW/NX metadata/TLS, the next page is an internal guard, and
+/// `[stack_low, stack_top)` is fully committed RW/NX with the outer VM guard
+/// immediately above `stack_top`.
+pub fn user_thread_stack(pid: u64, id: u32, stack_low: u64, stack_top: u64) -> Option<u64> {
+    without_interrupts(|| {
+        let region = unsafe {
+            let registry = &*REGISTRY.get();
+            registry.regions[find_region(registry, pid, id)?]
+        };
+        let region_end = region
+            .base
+            .checked_add(u64::from(region.pages).checked_mul(paging::PAGE)?)?;
+        if stack_low < region.base.checked_add(2 * paging::PAGE)?
+            || stack_top != region_end
+            || stack_low >= stack_top
+            || !stack_low.is_multiple_of(paging::PAGE)
+            || !stack_top.is_multiple_of(paging::PAGE)
+            || stack_top - stack_low < 2 * paging::PAGE
+            || crate::sched::user_stack_overlaps(pid, id, stack_low, stack_top)
+        {
+            return None;
+        }
+        let root = crate::proc::pml4_of(pid)?;
+        let metadata_page = region.base;
+        if !is_committed(&region, 0)
+            || !user_rw_nx_leaf(root, metadata_page)
+            || unsafe { paging::user_pte_flags(root, stack_low - paging::PAGE) }.is_some()
+        {
+            return None;
+        }
+        let first = u32::try_from((stack_low - region.base) / paging::PAGE).ok()?;
+        let end = region.pages;
+        if (first..end).any(|page| !is_committed(&region, page)) {
+            return None;
+        }
+        for page in first..end {
+            if !user_rw_nx_leaf(root, region.base + u64::from(page) * paging::PAGE) {
+                return None;
+            }
+        }
+        if unsafe { paging::user_pte_flags(root, stack_top) }.is_some() {
+            return None;
+        }
+        Some(region.base)
+    })
+}
+
+fn user_rw_nx_leaf(root: u64, va: u64) -> bool {
+    let Some(flags) = (unsafe { paging::user_pte_flags(root, va) }) else {
+        return false;
+    };
+    let required = paging::PTE_PRESENT | paging::PTE_USER | paging::PTE_WRITE | paging::PTE_NX;
+    flags & required == required
+        && flags & (paging::PTE_PCD | paging::PTE_PWT) == 0
+        && !crate::shared::is_backing(flags & 0x000F_FFFF_FFFF_F000)
 }
 
 /// `[base, capacity pages, region committed pages, global committed pages,

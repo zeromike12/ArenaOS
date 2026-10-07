@@ -44,6 +44,9 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// ready rings are sized to match, and `spawn` fails cleanly at the cap —
 /// a boundary the churn test exercises on purpose.
 pub const MAX_THREADS: usize = 64;
+/// Bound on user-created threads retained by one Process. The initial image
+/// thread is not counted.
+pub const MAX_USER_THREADS_PER_PROCESS: usize = 4;
 
 /// Per-CPU scheduler structures exist for `MAX_CPUS` CPUs; execution is
 /// BSP-only until SMP lands (M5) — see [`this_cpu`].
@@ -109,6 +112,40 @@ pub struct KThread {
     /// `swapgs` mechanism; this value is saved/restored only at scheduler
     /// boundaries and starts at zero for every thread.
     fs_base: u64,
+    /// Present only for user-created ring-3 threads. All fields were checked
+    /// against the caller's exact VM region capability before enqueue.
+    user_start: Option<UserStart>,
+    user_exit_status: Option<u64>,
+    /// Scheduler ID of the one thread currently waiting to join this thread.
+    join_waiter: u64,
+    /// Joined records can be freed; detached records release their exact
+    /// user-stack VM capability after the thread is no longer on that stack.
+    joined: bool,
+    detached: bool,
+}
+
+#[derive(Clone, Copy)]
+struct UserStart {
+    entry: u64,
+    argument: u64,
+    user_rsp: u64,
+    fs_base: u64,
+    stack_low: u64,
+    stack_top: u64,
+    stack_region_id: u32,
+    stack_cap_slot: u8,
+}
+
+#[derive(Clone, Copy)]
+pub struct UserThreadStart {
+    pub entry: u64,
+    pub argument: u64,
+    pub user_rsp: u64,
+    pub fs_base: u64,
+    pub stack_low: u64,
+    pub stack_top: u64,
+    pub stack_region_id: u32,
+    pub stack_cap_slot: u8,
 }
 
 /// Fixed-capacity FIFO of slot indices (one CPU's round-robin ready ring).
@@ -257,6 +294,11 @@ pub fn init() -> Result<(), &'static str> {
             cr3: crate::arch::x86_64::paging::kernel_cr3_phys(),
             proc_id: 0,
             fs_base: 0,
+            user_start: None,
+            user_exit_status: None,
+            join_waiter: 0,
+            joined: true,
+            detached: false,
         });
         // SAFETY: same discipline; fresh scheduler, known values.
         unsafe {
@@ -278,6 +320,7 @@ pub fn spawn(name: &'static str, entry: fn(usize), arg: usize) -> Result<u64, &'
         arg,
         crate::arch::x86_64::paging::kernel_cr3_phys(),
         0,
+        None,
     )
 }
 
@@ -296,7 +339,7 @@ pub fn spawn_with_cr3(
     if cr3_phys == 0 || cr3_phys % crate::arch::x86_64::paging::PAGE != 0 {
         return Err("spawn_with_cr3: not a valid PML4 root");
     }
-    spawn_inner(name, entry, arg, cr3_phys, 0)
+    spawn_inner(name, entry, arg, cr3_phys, 0, None)
 }
 
 /// Spawn a thread that belongs to process `pid`: the address space is
@@ -310,7 +353,54 @@ pub fn spawn_in_proc(
     pid: u64,
 ) -> Result<u64, &'static str> {
     let cr3 = crate::proc::pml4_of(pid).ok_or("spawn_in_proc: no such process")?;
-    spawn_inner(name, entry, arg, cr3, pid)
+    spawn_inner(name, entry, arg, cr3, pid, None)
+}
+
+/// Enqueue a new ring-3 execution context in an existing Process. Its PML4,
+/// pointer map, and capability space remain process-owned and shared.
+pub fn spawn_user_in_proc(pid: u64, start: UserThreadStart) -> Result<u64, &'static str> {
+    let cr3 = crate::proc::pml4_of(pid).ok_or("user thread: no such process")?;
+    let user_start = UserStart {
+        entry: start.entry,
+        argument: start.argument,
+        user_rsp: start.user_rsp,
+        fs_base: start.fs_base,
+        stack_low: start.stack_low,
+        stack_top: start.stack_top,
+        stack_region_id: start.stack_region_id,
+        stack_cap_slot: start.stack_cap_slot,
+    };
+    spawn_inner(
+        "user-thread",
+        user_thread_entry,
+        0,
+        cr3,
+        pid,
+        Some(user_start),
+    )
+}
+
+/// First kernel-side instruction of a newly created user thread. The
+/// scheduler has already installed its Process CR3, TSS RSP0, and FS.base.
+fn user_thread_entry(_: usize) {
+    // This newly selected kernel stack is distinct from the outgoing Zombie
+    // stack, so the handoff that first starts a ring-3 thread may retire it.
+    without_interrupts(reap);
+    let start = without_interrupts(|| unsafe {
+        let current = (*CPUS.get())[this_cpu()].current;
+        (*THREADS.get())[current]
+            .and_then(|thread| thread.user_start)
+            .unwrap_or_else(|| crate::halt::halt_machine("user thread start record missing"))
+    });
+    // SAFETY: SYS_THREAD_CREATE validated the exact executable entry, stack,
+    // FS.base, and Process-owned pointer range before this thread was queued.
+    unsafe {
+        crate::arch::x86_64::syscall::enter_user_with_arg(
+            start.entry,
+            start.user_rsp,
+            start.argument,
+        )
+    }
 }
 
 fn spawn_inner(
@@ -319,9 +409,22 @@ fn spawn_inner(
     arg: usize,
     cr3: u64,
     proc_id: u64,
+    user_start: Option<UserStart>,
 ) -> Result<u64, &'static str> {
     without_interrupts(|| {
         reap();
+        if user_start.is_some() {
+            let count = unsafe {
+                (*THREADS.get())
+                    .iter()
+                    .flatten()
+                    .filter(|thread| thread.proc_id == proc_id && thread.user_start.is_some())
+                    .count()
+            };
+            if count >= MAX_USER_THREADS_PER_PROCESS {
+                return Err("user thread quota reached for process");
+            }
+        }
         // SAFETY: single writer under IF=0.
         let (idx, id) = unsafe {
             let threads = &mut *THREADS.get();
@@ -329,7 +432,13 @@ fn spawn_inner(
                 return Err("thread table full (MAX_THREADS)");
             };
             let id = *NEXT_ID.get();
-            *NEXT_ID.get() = id + 1;
+            if id == 0 || id > i64::MAX as u64 {
+                return Err("thread ID space exhausted");
+            }
+            let Some(next_id) = id.checked_add(1) else {
+                return Err("thread ID space exhausted");
+            };
+            *NEXT_ID.get() = next_id;
             (idx, id)
         };
         let Some(phys) = crate::frames::alloc_contiguous(THREAD_STACK_FRAMES) else {
@@ -360,7 +469,12 @@ fn spawn_inner(
                 stack_frames: THREAD_STACK_FRAMES,
                 cr3,
                 proc_id,
-                fs_base: 0,
+                fs_base: user_start.map_or(0, |start| start.fs_base),
+                user_start,
+                user_exit_status: None,
+                join_waiter: 0,
+                joined: user_start.is_none(),
+                detached: false,
             });
             (*CTX.get())[idx] = rsp0;
             let cpu = &mut (*CPUS.get())[this_cpu()];
@@ -392,6 +506,17 @@ fn spawn_inner(
 /// resumed (or immediately if the ready ring is empty — spinning on an
 /// empty ring would starve the very thread asking others to run).
 pub fn yield_now() {
+    // A user syscall reaches this path with the syscall stub's GS pair
+    // flipped to the kernel side. A newly selected user thread must enter
+    // with canonical GS state, while this thread needs its original side
+    // restored when it resumes.
+    let kernel_side = without_interrupts(|| unsafe {
+        let side = crate::arch::x86_64::syscall::gs_is_kernel_side();
+        if side {
+            crate::arch::x86_64::syscall::gs_to_canonical_side();
+        }
+        side
+    });
     without_interrupts(|| {
         let Some(plan) = plan_switch(true) else {
             return;
@@ -403,7 +528,15 @@ pub fn yield_now() {
         // state. This call resumes the incoming thread and suspends us
         // until our own frame is switched back to.
         unsafe { context::switch_context(plan.save, plan.restore) };
+        // The outgoing Zombie is safe to reclaim only after this context
+        // has moved off its kernel stack.
+        reap();
     });
+    if kernel_side {
+        without_interrupts(|| unsafe {
+            crate::arch::x86_64::syscall::gs_to_kernel_side();
+        });
+    }
 }
 
 /// Park the current thread: it leaves the ready ring in [`State::Blocked`]
@@ -463,6 +596,7 @@ pub fn block_current() {
         // The resume happens when a waker's ring entry brings this thread
         // back; its saved frame (this stack) is intact by construction.
         unsafe { context::switch_context(plan.save, plan.restore) };
+        reap();
     });
     // Resumed: put the GS pair back on the side this thread blocked on
     // BEFORE any code that assumes it (the stub's teardown swapgs runs
@@ -474,6 +608,63 @@ pub fn block_current() {
             unsafe { crate::arch::x86_64::syscall::gs_to_kernel_side() };
         });
     }
+}
+
+/// Park the current thread only if the scheduler can run another thread.
+/// User-thread join uses this form so an impossible join returns a bounded
+/// busy status instead of tripping the kernel's IPC deadlock halt path.
+fn try_block_current() -> bool {
+    let kernel_side = without_interrupts(|| unsafe {
+        let ks = crate::arch::x86_64::syscall::gs_is_kernel_side();
+        if ks {
+            crate::arch::x86_64::syscall::gs_to_canonical_side();
+        }
+        ks
+    });
+    let plan = without_interrupts(|| {
+        check_canary_current();
+        let current = unsafe { (*CPUS.get())[this_cpu()].current };
+        unsafe {
+            (*THREADS.get())[current]
+                .as_mut()
+                .expect("current thread vanished")
+                .state = State::Blocked;
+        }
+        match plan_switch(false) {
+            Some(plan) => Some(plan),
+            None => {
+                // No runnable peer can complete the join. Restore the exact
+                // pre-call scheduler state before returning STATUS_BUSY.
+                unsafe {
+                    (*THREADS.get())[current]
+                        .as_mut()
+                        .expect("current thread vanished")
+                        .state = State::Running;
+                }
+                None
+            }
+        }
+    });
+    let Some(plan) = plan else {
+        if kernel_side {
+            without_interrupts(|| unsafe {
+                crate::arch::x86_64::syscall::gs_to_kernel_side();
+            });
+        }
+        return false;
+    };
+    SWITCH_COUNT.fetch_add(1, Ordering::Relaxed);
+    // SAFETY: `plan_switch` ended all scheduler borrows, IF=0, both kernel
+    // stacks remain allocated, and the incoming address space has a shared
+    // kernel half.
+    unsafe { context::switch_context(plan.save, plan.restore) };
+    without_interrupts(reap);
+    if kernel_side {
+        without_interrupts(|| unsafe {
+            crate::arch::x86_64::syscall::gs_to_kernel_side();
+        });
+    }
+    true
 }
 
 /// True when this CPU's ready ring holds any entry. Entries of threads
@@ -642,6 +833,211 @@ pub fn proc_live_threads(pid: u64) -> usize {
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserThreadError {
+    BadArgument,
+    Busy,
+}
+
+/// True while a user thread may still execute on or return to this VM stack.
+/// Joinable zombies keep the reservation until their status/TLS is joined;
+/// detached zombies no longer use it and are reaped by the scheduler.
+pub fn stack_region_in_use(pid: u64, region_id: u32) -> bool {
+    without_interrupts(|| unsafe {
+        (*THREADS.get()).iter().flatten().any(|thread| {
+            thread.proc_id == pid
+                && thread.user_start.is_some_and(|start| {
+                    start.stack_region_id == region_id
+                        && !thread.joined
+                        && !(thread.state == State::Zombie && thread.detached)
+                })
+        })
+    })
+}
+
+/// Refuse overlapping live or joinable user stacks in the same exact VM
+/// region. Numeric stack bounds are checked descriptors, not authority.
+pub fn user_stack_overlaps(pid: u64, region_id: u32, low: u64, top: u64) -> bool {
+    without_interrupts(|| unsafe {
+        (*THREADS.get()).iter().flatten().any(|thread| {
+            if thread.proc_id != pid || thread.joined {
+                return false;
+            }
+            let Some(start) = thread.user_start else {
+                return false;
+            };
+            start.stack_region_id == region_id
+                && !(thread.state == State::Zombie && thread.detached)
+                && low < start.stack_top
+                && start.stack_low < top
+        })
+    })
+}
+
+/// Record the exit value for the current user-created thread and return its
+/// one registered joiner, if any. The caller wakes it before switching away.
+pub fn finish_current_user_thread(status: u64) -> Option<u64> {
+    without_interrupts(|| unsafe {
+        let current = (*CPUS.get())[this_cpu()].current;
+        let (pid, id) = (*THREADS.get())[current].map(|thread| (thread.proc_id, thread.id))?;
+        // A dying thread may itself be waiting in SYS_THREAD_JOIN. Release
+        // those claims so a surviving sibling can collect the same target.
+        for thread in (*THREADS.get()).iter_mut().flatten() {
+            if thread.proc_id == pid && thread.join_waiter == id {
+                thread.join_waiter = 0;
+            }
+        }
+        let thread = (*THREADS.get())[current].as_mut()?;
+        thread.user_start?;
+        thread.user_exit_status = Some(status);
+        (thread.join_waiter != 0).then_some(thread.join_waiter)
+    })
+}
+
+/// Wait for a same-Process user thread to exit. Registration and parking are
+/// atomic on ArenaOS's current single CPU; a second joiner is refused. The
+/// returned status is not consumed until [`complete_user_thread_join`] runs
+/// after the caller's output buffer has been revalidated and written.
+pub fn wait_user_thread(pid: u64, target_id: u64) -> Result<u64, UserThreadError> {
+    let caller_id = current_thread_id();
+    if target_id == caller_id || target_id == 0 {
+        return Err(UserThreadError::BadArgument);
+    }
+    loop {
+        enum Decision {
+            Exited(u64),
+            Park,
+        }
+        let decision = without_interrupts(|| unsafe {
+            let threads = &mut *THREADS.get();
+            let Some(target_slot) = threads.iter().position(|slot| {
+                matches!(slot, Some(thread) if thread.id == target_id
+                    && thread.proc_id == pid && thread.user_start.is_some())
+            }) else {
+                return Err(UserThreadError::BadArgument);
+            };
+            let target = threads[target_slot].as_mut().expect("target located above");
+            if target.joined || target.detached {
+                return Err(UserThreadError::BadArgument);
+            }
+            if target.join_waiter != 0 && target.join_waiter != caller_id {
+                return Err(UserThreadError::Busy);
+            }
+            target.join_waiter = caller_id;
+            if target.state == State::Zombie {
+                return target
+                    .user_exit_status
+                    .map(Decision::Exited)
+                    .ok_or(UserThreadError::Busy);
+            }
+            Ok(Decision::Park)
+        })?;
+        match decision {
+            Decision::Exited(status) => return Ok(status),
+            Decision::Park if try_block_current() => {}
+            Decision::Park => {
+                cancel_user_thread_join(pid, target_id, caller_id);
+                return Err(UserThreadError::Busy);
+            }
+        }
+    }
+}
+
+/// Commit a completed join after its status was safely copied to user memory.
+pub fn complete_user_thread_join(
+    pid: u64,
+    target_id: u64,
+    caller_id: u64,
+) -> Result<(), UserThreadError> {
+    let result = without_interrupts(|| unsafe {
+        let threads = &mut *THREADS.get();
+        let Some(slot) = threads.iter().position(|entry| {
+            matches!(entry, Some(thread) if thread.id == target_id
+                && thread.proc_id == pid && thread.user_start.is_some())
+        }) else {
+            return Err(UserThreadError::BadArgument);
+        };
+        let thread = threads[slot].as_mut().expect("target located above");
+        if thread.join_waiter != caller_id || thread.state != State::Zombie {
+            return Err(UserThreadError::Busy);
+        }
+        thread.joined = true;
+        thread.join_waiter = 0;
+        if thread.stack_frames == 0 {
+            threads[slot] = None;
+        }
+        Ok(())
+    });
+    if result.is_ok() {
+        // The joiner is now executing on its own stack and the target is a
+        // Zombie, so both its kernel stack and scheduler record are safe to
+        // reclaim before SYS_THREAD_JOIN returns to ring 3.
+        without_interrupts(reap);
+    }
+    result
+}
+
+/// Release a join claim if the caller's output span became unavailable while
+/// it was parked. The thread's exit status remains joinable by another call.
+pub fn cancel_user_thread_join(pid: u64, target_id: u64, caller_id: u64) {
+    without_interrupts(|| unsafe {
+        if let Some(thread) = (*THREADS.get())
+            .iter_mut()
+            .flatten()
+            .find(|thread| thread.id == target_id && thread.proc_id == pid)
+            && thread.join_waiter == caller_id
+        {
+            thread.join_waiter = 0;
+        }
+    });
+}
+
+/// Detach one user thread in the caller's Process. The kernel owns automatic
+/// stack-region release after a detached target has left its user stack.
+pub fn detach_user_thread(pid: u64, target_id: u64) -> Result<(), UserThreadError> {
+    if target_id == 0 || target_id == current_thread_id() {
+        return Err(UserThreadError::BadArgument);
+    }
+    let result = without_interrupts(|| unsafe {
+        let threads = &mut *THREADS.get();
+        let Some(slot) = threads.iter().position(|entry| {
+            matches!(entry, Some(thread) if thread.id == target_id
+                && thread.proc_id == pid && thread.user_start.is_some())
+        }) else {
+            return Err(UserThreadError::BadArgument);
+        };
+        let thread = threads[slot].as_mut().expect("target located above");
+        if thread.joined || thread.detached {
+            return Err(UserThreadError::BadArgument);
+        }
+        if thread.join_waiter != 0 {
+            return Err(UserThreadError::Busy);
+        }
+        thread.detached = true;
+        Ok(())
+    });
+    if result.is_ok() {
+        // If the thread had already exited, this retires its VM cap now. For
+        // a live target the scheduler reaper performs that step after exit.
+        without_interrupts(reap);
+    }
+    result
+}
+
+/// Clear exited user-thread records when their owning Process is torn down.
+/// The process VM walk, rather than per-stack cap release, owns this case.
+pub fn forget_user_threads_of(pid: u64) {
+    without_interrupts(|| unsafe {
+        for thread in (*THREADS.get()).iter_mut().flatten() {
+            if thread.proc_id == pid && thread.user_start.is_some() {
+                thread.joined = true;
+                thread.detached = false;
+                thread.join_waiter = 0;
+            }
+        }
+    });
+}
+
 /// The process the current thread belongs to (`None` for kernel threads,
 /// which have no capability space — IPC syscalls from them are refused).
 pub fn current_proc_id() -> Option<u64> {
@@ -696,6 +1092,9 @@ pub fn proc_id_of(tid: u64) -> Option<u64> {
 /// Trampoline target (ADR-0012): runs the current thread's entry, then
 /// exits. Never returns — `exit_now` switches away for good.
 pub extern "C" fn thread_main() -> ! {
+    // This newly selected kernel stack is distinct from the outgoing Zombie
+    // stack, so the handoff that first starts this thread may retire it now.
+    without_interrupts(reap);
     // Copy the (immutable while Running) entry info out; no borrow stays
     // live across the entry call, which may itself yield.
     let (entry, arg) = without_interrupts(|| {
@@ -849,38 +1248,101 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
     }
 }
 
-/// Free exited threads: final canary check, stack frames back to the
-/// allocator, slot cleared. Called at the top of every decision phase —
-/// a thread cannot free the stack it is running on (ADR-0012).
+/// Reclaim exited threads after checking their final canary. A kernel stack
+/// is returned only after execution has switched off it (ADR-0012); detached
+/// user stacks and joined scheduler slots are retired here as well.
 fn reap() {
-    // SAFETY: single writer under IF=0.
+    let mut detached = [(usize::MAX, 0u64, 0u64, 0u32, 0u8); MAX_THREADS];
+    let mut detached_count = 0usize;
+    // SAFETY: single writer under IF=0. Detached stack caps are collected
+    // here and destroyed only after the THREADS borrow has ended, because
+    // VM release checks the scheduler's stack ownership inventory.
     unsafe {
+        // A thread marks itself Zombie immediately before switching away.
+        // Its stack is still the live Rust/assembly stack until that switch
+        // completes, so defer the current slot until a later scheduler pass.
+        let current = (*CPUS.get())[this_cpu()].current;
         let threads = &mut *THREADS.get();
-        for slot in threads.iter_mut() {
-            let Some(t) = slot else { continue };
-            if t.state != State::Zombie {
+        for (index, slot) in threads.iter_mut().enumerate() {
+            if index == current {
                 continue;
             }
-            if t.stack_frames > 0 {
-                let canary = *(t.stack_base.wrapping_add(KERNEL_OFFSET) as *const u64);
+            let Some(thread) = slot else { continue };
+            if thread.state != State::Zombie {
+                continue;
+            }
+            if thread.stack_frames > 0 {
+                let canary = *(thread.stack_base.wrapping_add(KERNEL_OFFSET) as *const u64);
                 if canary != STACK_CANARY {
                     error!(
                         "sched",
                         "stack canary corrupt at reap: thread {} '{}' base={:#x} canary={:#x}",
-                        t.id,
-                        t.name,
-                        t.stack_base,
+                        thread.id,
+                        thread.name,
+                        thread.stack_base,
                         canary
                     );
                     crate::halt::halt_machine("kernel stack overflow (canary at reap)");
                 }
-                if let Err(e) = crate::frames::free_contiguous(t.stack_base, t.stack_frames) {
-                    error!("sched", "stack free failed for thread {}: {}", t.id, e);
+                if let Err(error) =
+                    crate::frames::free_contiguous(thread.stack_base, thread.stack_frames)
+                {
+                    error!(
+                        "sched",
+                        "stack free failed for thread {}: {}", thread.id, error
+                    );
                     crate::halt::halt_machine("thread stack free failed");
                 }
+                thread.stack_frames = 0;
             }
-            *slot = None;
+
+            let Some(start) = thread.user_start else {
+                *slot = None;
+                continue;
+            };
+            if thread.joined {
+                *slot = None;
+            } else if thread.detached {
+                detached[detached_count] = (
+                    index,
+                    thread.id,
+                    thread.proc_id,
+                    start.stack_region_id,
+                    start.stack_cap_slot,
+                );
+                detached_count += 1;
+            }
+            // A normal exited joinable user thread keeps its stable status
+            // and VM stack until the exact same-process join completes.
         }
+    }
+
+    for &(index, thread_id, pid, region_id, cap_slot) in &detached[..detached_count] {
+        if crate::proc::pml4_of(pid).is_none() {
+            // Process teardown already reclaimed the entire user half and
+            // dropped its capspace; only the kernel scheduler record remains.
+            unsafe { (*THREADS.get())[index] = None };
+            continue;
+        }
+        let cap_matches = crate::cap::read(pid, usize::from(cap_slot))
+            .is_ok_and(|cap| cap.obj == crate::cap::CapObj::VmRegion { id: region_id });
+        if cap_matches {
+            if let Err(error) = crate::cap::destroy(pid, usize::from(cap_slot)) {
+                error!(
+                    "sched",
+                    "detached thread {} stack-region cleanup failed: {}", thread_id, error
+                );
+                crate::halt::halt_machine("detached user-thread stack cleanup failed");
+            }
+        } else if crate::vm::live(pid, region_id) {
+            error!(
+                "sched",
+                "detached thread {} lost exact stack cap while its VM region remains live",
+                thread_id
+            );
+            crate::halt::halt_machine("detached user-thread stack authority mismatch");
+        }
+        unsafe { (*THREADS.get())[index] = None };
     }
 }
 

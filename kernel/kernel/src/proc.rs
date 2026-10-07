@@ -338,6 +338,7 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
     }
     let (servers, waiters, calls) = crate::ipc::release_blocked_of(pid);
     let killed = crate::sched::kill_threads_of(pid);
+    crate::sched::forget_user_threads_of(pid);
     if killed > 0 || calls > 0 {
         crate::log::log_info!(
             "proc",

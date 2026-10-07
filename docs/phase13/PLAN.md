@@ -100,6 +100,9 @@ The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
 | Process exit status | stable full-width final status until reap; exact Process/READ required | syscall 61, ADR-0100 |
 | SharedRegion records / maps | 96 / 160 bounded live records; aggregate page budget remains 36,864 | ADR-0104; sized for 16 stream-enabled instances and 32 windows |
 | Native standard streams | one page per opted-in instance or explicitly streamed helper; three single-producer/single-consumer rings, 768 bytes each | ADR-0104/0105 |
+| User-created ring-3 threads | at most 4 additional threads per Process; 64 global scheduler slots unchanged | ADR-0106 |
+| User-thread stacks | one exact 16-page VmRegion per thread; one metadata/TLS page, one uncommitted guard, 14 committed RW/NX pages | ADR-0106 |
+| Thread lifecycle | same-process stable status join or detach; kernel stack and detached VmRegion cleanup after the thread is switched off | ADR-0106 |
 | Spawn grants / startup descriptors | at most 7 grants (including slot-0 startup cap) / 6 descriptors; 128 process capability slots and slot-127 accounting are unchanged | ADR-0104 |
 
 The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
@@ -232,8 +235,17 @@ measured receipts.
   backing and observable allocator/page accounting.
 - Only after process-wide mapping ownership is implemented, add real user
   threads with explicit guarded stacks, per-thread FS.base TLS, join/exit, and
-  bounded process cleanup. Add native Mutex, Condvar/wait-notify, and Once
-  semantics without Linux futex behavior.
+  bounded process cleanup. **Status:** implemented under ADR-0106, with the
+  preservation checkpoint passed. Four
+  concurrent user workers ran in each of three installed-app launches with
+  shared heap and RO VM, distinct FS.base TLS, exact stack-cap refusal, join,
+  detach, and VM baseline return. A killed helper had a live user worker; its
+  ProcessGroup cleanup returned to baseline. The exact EFI passed 20/20
+  fresh preservation boots after the user-thread implementation. Add native
+  Mutex, Condvar/wait-notify, and Once semantics without Linux futex behavior.
+  If these need a kernel wait
+  primitive, record why the existing notification, timer, and IPC bounds are
+  unsuitable before adding it.
 
 ### F. Qualification and handoff
 

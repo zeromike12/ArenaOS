@@ -30,6 +30,7 @@ SERIAL_WINDOW_RETIRED = "[phase13-window] DestroyWindow retired one surface; pro
 SERIAL_WINDOW_FINAL = "[phase13-window] final surface retired; process exits cleanly"
 SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
 SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
+SERIAL_THREADS = "[phase13-threads] four concurrent ring-3 threads shared heap and read-only VM; distinct FS.base TLS, quota, exact stack caps, join/detach, and cleanup passed"
 SERIAL_STREAM_FULL = "[phase13-stream] output full; extra write returned WouldBlock"
 SERIAL_STREAM_STDOUT = "[phase13-stream] stdout partial transfer reached the broker"
 SERIAL_STREAM_STDERR = "[phase13-stream] stderr channel reached the broker"
@@ -45,6 +46,7 @@ SERIAL_HEADLESS_EXIT = "[desktop] child Process-cap exit status=42"
 SERIAL_HELPER_EXIT = (
     "[desktop] helper id=org.arenaos.phase13streamer Process-cap exit status=46; owner-group reap=ok"
 )
+SERIAL_HELPER_THREAD = "[phase13-headless] sleeper ran a live ring-3 worker before parent-authorized teardown"
 SERIAL_CRASHER_EXIT = (
     "[desktop] helper id=org.arenaos.phase13crasher Process-cap exit status=262; owner-group reap=ok"
 )
@@ -287,6 +289,8 @@ def interaction(disk):
                "installed document handler did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 1,
                "installed document handler did not pass its scalable heap proof")
+        d.wait(lambda: d.serial().count(SERIAL_THREADS) == 1,
+               "installed document handler did not pass its ring-3 user-thread proof")
         wait_stream_proof(d, 1)
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
                "Open With did not spawn the selected installed application")
@@ -322,6 +326,8 @@ def interaction(disk):
                "All Applications launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 2,
                "All Applications launch did not pass its scalable heap proof")
+        d.wait(lambda: d.serial().count(SERIAL_THREADS) == 2,
+               "All Applications launch did not pass its ring-3 user-thread proof")
         wait_stream_proof(d, 2)
         d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 1,
                "installed app did not create three windows in its one process")
@@ -376,6 +382,8 @@ def interaction(disk):
                "pointer launch did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 3,
                "pointer launch did not pass its scalable heap proof")
+        d.wait(lambda: d.serial().count(SERIAL_THREADS) == 3,
+               "pointer launch did not pass its ring-3 user-thread proof")
         wait_stream_proof(d, 3)
         d.wait(lambda: d.serial().count(SERIAL_MULTIWINDOW) == 2,
                "second application instance did not create three windows in its one process", timeout_s=30)
@@ -544,6 +552,7 @@ def main():
     assert serial.count(SERIAL_MULTIWINDOW) == 2
     assert serial.count(SERIAL_VM) == 3
     assert serial.count(SERIAL_HEAP) == 3
+    assert serial.count(SERIAL_THREADS) == 3
     assert serial.count(SERIAL_HEADLESS) == 1
     assert serial.count("[phase13-headless] timer completed; process exiting for manager reap") == 1
     assert serial.count("[phase13-helper] unknown signed helper ID refused without spawn") == 3
@@ -558,6 +567,7 @@ def main():
     assert serial.count(SERIAL_HELPER_STREAM) == 3
     assert serial.count(SERIAL_HELPER_CRASH_EOF) == 6
     assert serial.count("[phase13-helper] owner-authorized terminate/reap passed") == 3
+    assert serial.count(SERIAL_HELPER_THREAD) == 3
     assert serial.count("[phase13-helper] crashed helper status=262 observed and reaped") == 3
     assert serial.count("[phase13-helper] live helper left for AppInstance owner cleanup") == 3
     assert serial.count(SERIAL_HELPER_EXIT) == 3

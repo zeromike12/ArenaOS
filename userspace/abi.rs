@@ -63,6 +63,14 @@ pub const SYS_PROC_STATUS: u64 = 61;
 pub const SYS_THREAD_YIELD: u64 = 62;
 /// Mint one Desktop-owned Notification into an exact empty cap slot.
 pub const SYS_NOTIFICATION_CREATE: u64 = 63;
+/// ADR-0106: create a ring-3 thread in the caller's existing Process.
+pub const SYS_THREAD_CREATE: u64 = 64;
+/// ADR-0106: wait for and collect same-Process user-thread exit status.
+pub const SYS_THREAD_JOIN: u64 = 65;
+/// ADR-0106: detach a same-Process user thread for kernel stack cleanup.
+pub const SYS_THREAD_DETACH: u64 = 66;
+/// Read the calling Process's live scheduler-thread count.
+pub const SYS_THREAD_COUNT: u64 = 67;
 pub const VM_PROT_READ: u64 = 1;
 pub const VM_PROT_WRITE: u64 = 2;
 pub const VM_PROT_EXEC: u64 = 4;

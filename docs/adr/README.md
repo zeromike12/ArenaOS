@@ -153,3 +153,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0103](0103-desktop-manager-fail-stop.md) | Boot-root fail-stop policy when the trusted Desktop application manager exits | Accepted; avoids running orphaned app groups without exact owner state |
 | [0104](0104-native-byte-streams.md) | Native stdin/stdout/stderr over bounded SharedRegion rings and existing notification wake hints | Accepted; installed-app T1 guest proof passed |
 | [0105](0105-helper-standard-streams.md) | Explicit AHL1 helper stream delegation and owner-scoped wake | Accepted; signed helper T1 guest proof passed |
+| [0106](0106-native-user-threads.md) | Native process-owned ring-3 threads, guarded VM stacks, per-thread FS.base TLS, join and detach | Accepted for implementation; guest proof pending |

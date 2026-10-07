@@ -201,6 +201,14 @@ pub const SYS_VM_QUERY: u64 = 60;
 pub const SYS_PROC_STATUS: u64 = 61;
 /// Voluntarily yield the running user thread to the bounded round-robin queue.
 pub const SYS_THREAD_YIELD: u64 = 62;
+/// ADR-0106: create a same-process ring-3 thread with an exact VM stack cap.
+pub const SYS_THREAD_CREATE: u64 = 64;
+/// ADR-0106: wait for and collect one same-process user thread's exit status.
+pub const SYS_THREAD_JOIN: u64 = 65;
+/// ADR-0106: detach one same-process user thread for kernel stack cleanup.
+pub const SYS_THREAD_DETACH: u64 = 66;
+/// Read the calling Process's live scheduler-thread count.
+pub const SYS_THREAD_COUNT: u64 = 67;
 /// Mint a Desktop-owned bounded Notification through its boot-issued factory.
 pub const SYS_NOTIFICATION_CREATE: u64 = 63;
 
@@ -555,6 +563,17 @@ pub unsafe fn init() -> Result<(), &'static str> {
 /// every thread validates syscall buffers against the same process map), and
 /// the pages backing both are mapped U/S in the live address space.
 pub unsafe fn enter_user(rip: u64, user_rsp: u64) -> ! {
+    // SAFETY: this first image thread receives no native thread argument.
+    unsafe { enter_user_with_arg(rip, user_rsp, 0) }
+}
+
+/// Start a user thread with the native x86-64 first argument in RDI. All
+/// other general registers are cleared after the iretq frame is staged.
+///
+/// # Safety
+/// The caller must satisfy [`enter_user`]'s address-space and stack contract
+/// and keep `argument` meaningful for the user entry's declared ABI.
+pub unsafe fn enter_user_with_arg(rip: u64, user_rsp: u64, argument: u64) -> ! {
     // Defensive re-program of the ring-3→ring-0 stack pair for THIS
     // thread (plan_switch already did it at switch-in; enter_user is the
     // last gate before user mode and refuses to trust ordering).
@@ -577,12 +596,28 @@ pub unsafe fn enter_user(rip: u64, user_rsp: u64) -> ! {
             "push {rfl}",
             "push {cs}",
             "push {urip}",
+            "mov rdi, {uarg}",
+            "xor eax, eax",
+            "xor ebx, ebx",
+            "xor ecx, ecx",
+            "xor edx, edx",
+            "xor esi, esi",
+            "xor ebp, ebp",
+            "xor r8d, r8d",
+            "xor r9d, r9d",
+            "xor r10d, r10d",
+            "xor r11d, r11d",
+            "xor r12d, r12d",
+            "xor r13d, r13d",
+            "xor r14d, r14d",
+            "xor r15d, r15d",
             "iretq",
             ss = in(reg) gdt::USER_DATA_SELECTOR_RPL3 as u64,
             ursp = in(reg) user_rsp,
             rfl = in(reg) USER_RFLAGS,
             cs = in(reg) gdt::USER_CODE_SELECTOR_RPL3 as u64,
             urip = in(reg) rip,
+            uarg = in(reg) argument,
             options(noreturn),
         );
     }
@@ -745,6 +780,10 @@ extern "C" fn syscall_dispatch(
             crate::sched::yield_now();
             STATUS_OK as u64
         }
+        SYS_THREAD_CREATE => sys_thread_create(a0, a1, a2, a3, a4, a5) as u64,
+        SYS_THREAD_JOIN if [a2, a3, a4, a5] == [0; 4] => sys_thread_join(a0, a1) as u64,
+        SYS_THREAD_DETACH if [a1, a2, a3, a4, a5] == [0; 5] => sys_thread_detach(a0) as u64,
+        SYS_THREAD_COUNT if [a0, a1, a2, a3, a4, a5] == [0; 6] => sys_thread_count() as u64,
         SYS_NOTIFICATION_CREATE if [a2, a3, a4, a5] == [0; 4] => {
             sys_notification_create(a0, a1) as u64
         }
@@ -813,6 +852,11 @@ fn sys_thread_exit(status: u64) -> ! {
     unsafe {
         (*STATS.get()).exit_calls += 1;
     }
+    if let Some(joiner) = crate::sched::finish_current_user_thread(status)
+        && crate::sched::wake(joiner).is_err()
+    {
+        crate::halt::halt_machine("user-thread joiner wake failed");
+    }
     manager_check_last_thread(); // before even recording the exit status
     let id = crate::sched::current_thread_id();
     record_exit(id, status);
@@ -880,6 +924,11 @@ fn record_process_status_if_last(status: u64) {
 pub(crate) fn exit_on_user_fault(vector: u64) -> ! {
     manager_check_last_thread();
     let status = 0x100 + vector;
+    if let Some(joiner) = crate::sched::finish_current_user_thread(status)
+        && crate::sched::wake(joiner).is_err()
+    {
+        crate::halt::halt_machine("faulted user-thread joiner wake failed");
+    }
     record_exit(crate::sched::current_thread_id(), status);
     record_process_status_if_last(status);
     notify_last_thread_exit();
@@ -2169,7 +2218,28 @@ fn sys_vm_protect(slot: u64, offset: u64, pages: u64, protection: u64) -> Status
 
 /// SYS_VM_RELEASE(cap slot): the exact held cap authorizes unmap/free.
 fn sys_vm_release(slot: u64) -> Status {
-    sys_cap_destroy(slot)
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::VmRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_DESTROY == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if crate::sched::stack_region_in_use(pid, id) {
+        return STATUS_BUSY;
+    }
+    match crate::cap::destroy(pid, slot as usize) {
+        Ok(()) => STATUS_OK,
+        Err(_) => STATUS_BAD_ARG,
+    }
 }
 
 /// SYS_VM_QUERY(cap slot, out[6]): exact-cap description and committed-page
@@ -3238,6 +3308,173 @@ fn sys_tls_set(base: u64) -> Status {
     } else {
         STATUS_BAD_ARG
     }
+}
+
+/// SYS_THREAD_CREATE(entry, argument, stack-cap-slot, stack-low, stack-top,
+/// fs-base): create a second ring-3 execution context in the same Process.
+fn sys_thread_create(
+    entry: u64,
+    argument: u64,
+    stack_cap_slot: u64,
+    stack_low: u64,
+    stack_top: u64,
+    fs_base: u64,
+) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if stack_cap_slot >= crate::cap::CAP_SLOTS as u64
+        || !user_executable_address(pid, entry)
+        || !user_tls_address(pid, fs_base)
+    {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Ok(stack_cap) = crate::cap::read(pid, stack_cap_slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::VmRegion { id } = stack_cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    let required_rights =
+        crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_DESTROY;
+    if stack_cap.rights & required_rights != required_rights
+        || stack_cap.rights & crate::cap::RIGHTS_COPY != 0
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Some(region_base) = crate::vm::user_thread_stack(pid, id, stack_low, stack_top) else {
+        return STATUS_BAD_ADDRESS;
+    };
+    if fs_base < region_base
+        || fs_base
+            .checked_add(16)
+            .is_none_or(|end| end > region_base + 4096)
+    {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Some(user_rsp) = stack_top.checked_sub(8) else {
+        return STATUS_BAD_ADDRESS;
+    };
+    match crate::sched::spawn_user_in_proc(
+        pid,
+        crate::sched::UserThreadStart {
+            entry,
+            argument,
+            user_rsp,
+            fs_base,
+            stack_low,
+            stack_top,
+            stack_region_id: id,
+            stack_cap_slot: stack_cap_slot as u8,
+        },
+    ) {
+        Ok(thread_id) => Status::try_from(thread_id).unwrap_or(STATUS_BUSY),
+        Err("user thread quota reached for process") => STATUS_QUOTA,
+        Err(_) => STATUS_BUSY,
+    }
+}
+
+fn user_executable_address(pid: u64, address: u64) -> bool {
+    if address == 0 || address >= 0x0000_8000_0000_0000 {
+        return false;
+    }
+    let page = address & !0xFFF;
+    let Some(page_end) = page.checked_add(4096) else {
+        return false;
+    };
+    if !crate::proc::user_regions(pid).is_some_and(|regions| {
+        regions
+            .iter()
+            .any(|&(low, high)| low != 0 && page >= low && page_end <= high)
+    }) {
+        return false;
+    }
+    let Some(root) = crate::proc::pml4_of(pid) else {
+        return false;
+    };
+    let Some(flags) = (unsafe { crate::arch::x86_64::paging::user_pte_flags(root, page) }) else {
+        return false;
+    };
+    let required = crate::arch::x86_64::paging::PTE_PRESENT | crate::arch::x86_64::paging::PTE_USER;
+    flags & required == required
+        && flags & crate::arch::x86_64::paging::PTE_NX == 0
+        && flags & crate::arch::x86_64::paging::PTE_WRITE == 0
+        && flags & (crate::arch::x86_64::paging::PTE_PCD | crate::arch::x86_64::paging::PTE_PWT)
+            == 0
+        && !crate::shared::is_backing(flags & 0x000F_FFFF_FFFF_F000)
+}
+
+fn user_tls_address(pid: u64, base: u64) -> bool {
+    if base == 0 || !base.is_multiple_of(16) || !user_range_writable(base, 16) {
+        return false;
+    }
+    let Some(root) = crate::proc::pml4_of(pid) else {
+        return false;
+    };
+    let Some(flags) = (unsafe { crate::arch::x86_64::paging::user_pte_flags(root, base & !0xFFF) })
+    else {
+        return false;
+    };
+    let required = crate::arch::x86_64::paging::PTE_PRESENT
+        | crate::arch::x86_64::paging::PTE_USER
+        | crate::arch::x86_64::paging::PTE_WRITE
+        | crate::arch::x86_64::paging::PTE_NX;
+    flags & required == required
+        && flags & (crate::arch::x86_64::paging::PTE_PCD | crate::arch::x86_64::paging::PTE_PWT)
+            == 0
+        && !crate::shared::is_backing(flags & 0x000F_FFFF_FFFF_F000)
+}
+
+/// SYS_THREAD_JOIN(id, out_status): wait only for a user thread in this
+/// Process, then consume its stable exit status after a revalidated copyout.
+fn sys_thread_join(thread_id: u64, out_status: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_writable(out_status, 8) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let caller = crate::sched::current_thread_id();
+    let status = match crate::sched::wait_user_thread(pid, thread_id) {
+        Ok(status) => status,
+        Err(crate::sched::UserThreadError::BadArgument) => return STATUS_BAD_ARG,
+        Err(crate::sched::UserThreadError::Busy) => return STATUS_BUSY,
+    };
+    if !user_range_writable(out_status, 8) {
+        crate::sched::cancel_user_thread_join(pid, thread_id, caller);
+        return STATUS_BAD_ADDRESS;
+    }
+    // SAFETY: the exact user output word is currently mapped RW in this
+    // process; the syscall runs IF=0 and brackets the copy with STAC/CLAC.
+    unsafe {
+        super::stac();
+        core::ptr::write_unaligned(out_status as *mut u64, status);
+        super::clac();
+    }
+    match crate::sched::complete_user_thread_join(pid, thread_id, caller) {
+        Ok(()) => STATUS_OK,
+        Err(crate::sched::UserThreadError::BadArgument) => STATUS_BAD_ARG,
+        Err(crate::sched::UserThreadError::Busy) => STATUS_BUSY,
+    }
+}
+
+/// SYS_THREAD_DETACH(id): leave exact stack-cap cleanup to the scheduler.
+fn sys_thread_detach(thread_id: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::sched::detach_user_thread(pid, thread_id) {
+        Ok(()) => STATUS_OK,
+        Err(crate::sched::UserThreadError::BadArgument) => STATUS_BAD_ARG,
+        Err(crate::sched::UserThreadError::Busy) => STATUS_BUSY,
+    }
+}
+
+fn sys_thread_count() -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    crate::sched::proc_live_threads(pid) as Status
 }
 
 fn sys_endpoint_badge(server: u64, slot: u64) -> Status {
