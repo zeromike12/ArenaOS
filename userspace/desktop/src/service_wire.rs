@@ -36,6 +36,14 @@ pub enum Frame {
         kind: u8,
         path: [u8; 32],
     },
+    /// Offer one exact read-only File cap to the registry-selected handler.
+    OpenDocument {
+        name: [u8; 32],
+    },
+    /// Ask the user to choose a handler for this exact read-only File cap.
+    OpenWith {
+        name: [u8; 32],
+    },
     LaunchImage,
     Display,
     Create {
@@ -181,6 +189,17 @@ impl Frame {
             }
             Self::Offer => 14,
             Self::TakeGrant => 15,
+            Self::OpenDocument { name } | Self::OpenWith { name } => {
+                if !printable(&name) || name[0] == 0 {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&name);
+                if matches!(self, Self::OpenDocument { .. }) {
+                    17
+                } else {
+                    18
+                }
+            }
         };
         Ok(b)
     }
@@ -233,6 +252,8 @@ impl Frame {
                 read_only: b[9] == 1,
                 name,
             },
+            17 => Self::OpenDocument { name },
+            18 => Self::OpenWith { name },
             _ => return Err(Error::Invalid),
         };
         if f.encode()?.as_slice() != b {
@@ -275,6 +296,8 @@ mod tests {
                 path: [0; 32],
             },
             Frame::LaunchImage,
+            Frame::OpenDocument { name },
+            Frame::OpenWith { name },
             Frame::Display,
             Frame::Choose {
                 save: true,

@@ -18,8 +18,11 @@ use arena_ui::widgets::{self as w, Grid, List, ScrollHit};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
     None,
-    /// Offer this file's capability to a new Editor.
-    OpenInEditor(Path),
+    /// Offer this exact file to the current handler or the Open With chooser.
+    OpenDocument {
+        path: Path,
+        open_with: bool,
+    },
     /// Open the context menu (its items: `Controller::menu_items`).
     Menu {
         x: i32,
@@ -31,7 +34,7 @@ pub enum Effect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cmd {
     Open,
-    OpenWithEditor,
+    OpenWith,
     Rename,
     Copy,
     Cut,
@@ -49,7 +52,7 @@ pub enum Cmd {
 
 const ITEM_MENU: [(&str, Cmd); 7] = [
     ("Open", Cmd::Open),
-    ("Open With Editor", Cmd::OpenWithEditor),
+    ("Open With…", Cmd::OpenWith),
     ("Rename", Cmd::Rename),
     ("Copy", Cmd::Copy),
     ("Cut", Cmd::Cut),
@@ -617,7 +620,7 @@ impl Controller {
                     return self.open(s, i, false);
                 }
             }
-            Cmd::OpenWithEditor => {
+            Cmd::OpenWith => {
                 if let Some(i) = first {
                     return self.open(s, i, true);
                 }
@@ -694,12 +697,18 @@ impl Controller {
                 }
             });
             return match opened.flatten() {
-                Some(p) => Effect::OpenInEditor(p),
+                Some(p) => Effect::OpenDocument {
+                    path: p,
+                    open_with: true,
+                },
                 None => Effect::None,
             };
         }
         match self.run(|c| c.ex.open(s, i)) {
-            Some(Outcome::OpenInEditor(p)) => Effect::OpenInEditor(p),
+            Some(Outcome::OpenInEditor(p)) => Effect::OpenDocument {
+                path: p,
+                open_with: with_editor,
+            },
             _ => Effect::None,
         }
     }
@@ -940,14 +949,17 @@ mod tests {
         c.pointer(&mut m, x, y, 0, 5_000_100);
         assert_eq!(
             c.pointer(&mut m, x, y, 1, 5_300_000),
-            Effect::OpenInEditor(Path::of(b"Documents/notes.txt"))
+            Effect::OpenDocument {
+                path: Path::of(b"Documents/notes.txt"),
+                open_with: false,
+            }
         );
         c.pointer(&mut m, x, y, 0, 5_300_100);
         let p = index(&c, "photo.png");
         c.ex.selection.click(p, false, false);
         assert_eq!(c.key(&mut m, 13, false, 0), Effect::None);
         assert_eq!(c.ex.status, "NO APPLICATION CAN OPEN THIS FILE");
-        assert_eq!(c.command(&mut m, Cmd::OpenWithEditor), Effect::None);
+        assert_eq!(c.command(&mut m, Cmd::OpenWith), Effect::None);
         assert_eq!(c.ex.status, "THE EDITOR OPENS TEXT UP TO 4096 BYTES");
     }
 
@@ -1049,7 +1061,7 @@ mod tests {
             &labels[..n],
             [
                 "Open",
-                "Open With Editor",
+                "Open With…",
                 "Rename",
                 "Copy",
                 "Cut",

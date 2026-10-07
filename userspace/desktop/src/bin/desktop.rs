@@ -248,6 +248,8 @@ struct Session {
     grant_title: [u8; 32],
     grant_save: bool,
     grant_read_only: bool,
+    /// A File capability offered by this exact authenticated session.
+    offered_file: u64,
 }
 const EMPTY: Session = Session {
     id: 0,
@@ -280,6 +282,7 @@ const EMPTY: Session = Session {
     grant_title: [0; 32],
     grant_save: false,
     grant_read_only: false,
+    offered_file: CAP_NONE,
 };
 static mut PREFS: arena_desktop::preferences::Preferences =
     arena_desktop::preferences::Preferences {
@@ -289,8 +292,6 @@ static mut PREFS: arena_desktop::preferences::Preferences =
 static mut FILES: Option<arena_desktop::fs_backend::Fs> = None;
 /// The broker's own filesd session (None = AFS2 offline or absent).
 static mut AFS2: Option<arena_desktop::files::Files> = None;
-/// A file capability offered for the next Editor launch (ADR-0077).
-static mut OFFER: u64 = CAP_NONE;
 /// Rights an application gets on a document it opened or saved.
 const R_DOC: u8 = arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE;
 static mut UPTIME_SECOND: u64 = 0;
@@ -497,14 +498,25 @@ static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
 const ALL_APPS_CAPACITY: usize = 6 + arena_desktop::package::MAX_CATALOG_APPS;
 static mut INSTALLED_APPS: [Option<arena_desktop::package::AppEntry>; ALL_APPS_CAPACITY] =
     [None; ALL_APPS_CAPACITY];
+static mut INSTALLED_ASSOCIATIONS: [[[u8; 32]; 8]; ALL_APPS_CAPACITY] =
+    [[[0; 32]; 8]; ALL_APPS_CAPACITY];
+static mut INSTALLED_ASSOCIATION_COUNTS: [u8; ALL_APPS_CAPACITY] = [0; ALL_APPS_CAPACITY];
 static mut INSTALLED_APP_COUNT: usize = 0;
 static mut ALL_APPS_OPEN: bool = false;
+static mut ALL_APPS_OPEN_WITH: bool = false;
 static mut ALL_APPS_UNAVAILABLE: bool = false;
 static mut ALL_APPS_QUERY: [u8; 32] = [0; 32];
 static mut ALL_APPS_QUERY_LEN: usize = 0;
 static mut ALL_APPS_SELECTED: usize = 0;
 static mut ALL_APPS_TOP: usize = 0;
 static mut ALL_APPS_BUTTONS: u8 = 0;
+static mut OPEN_WITH_DOCUMENT: u64 = CAP_NONE;
+static mut OPEN_WITH_OWNER: usize = usize::MAX;
+static mut OPEN_WITH_TYPE: [u8; 32] = [0; 32];
+static mut OPEN_WITH_TITLE: [u8; 32] = [0; 32];
+static mut OPEN_WITH_READ_ONLY: bool = false;
+static mut ASSOCIATION_DEFAULTS: arena_desktop::associations::Defaults =
+    arena_desktop::associations::Defaults::new();
 /// Badges are unique for this Desktop endpoint lifetime. Zero remains the
 /// kernel's plain-endpoint marker; exhaustion refuses rather than wrapping.
 static mut NEXT_SESSION_BADGE: u32 = 1;
@@ -1038,6 +1050,248 @@ fn start_afs2() {
         }
     }
 }
+
+const ASSOCIATION_FILE: &[u8] = b".arena-app-associations";
+
+fn load_association_defaults() {
+    let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+        return;
+    };
+    let Ok((file, _)) = files.walk(
+        USER_ROOT,
+        ASSOCIATION_FILE,
+        arena_desktop::filesd_wire::R_READ,
+    ) else {
+        return;
+    };
+    let mut bytes = [0u8; arena_desktop::associations::BYTES];
+    if let Ok(record) = files.read_all(file, &mut bytes)
+        && let Some(defaults) = arena_desktop::associations::Defaults::decode(record)
+    {
+        unsafe { ASSOCIATION_DEFAULTS = defaults };
+        log(b"[desktop] AFS2 application handler defaults loaded\n");
+    }
+    files.release(file);
+}
+
+fn save_association_defaults() -> Result<(), u64> {
+    let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+        return Err(arena_desktop::filesd_wire::S_OFFLINE);
+    };
+    let file = match files.walk(
+        USER_ROOT,
+        ASSOCIATION_FILE,
+        arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE,
+    ) {
+        Ok((file, _)) => file,
+        Err(arena_desktop::filesd_wire::S_NOENT) => {
+            files.create(USER_ROOT, ASSOCIATION_FILE)?;
+            files
+                .walk(
+                    USER_ROOT,
+                    ASSOCIATION_FILE,
+                    arena_desktop::filesd_wire::R_READ | arena_desktop::filesd_wire::R_WRITE,
+                )?
+                .0
+        }
+        Err(error) => return Err(error),
+    };
+    let bytes = unsafe { &*(&raw const ASSOCIATION_DEFAULTS) }.encode();
+    let result = files.write_all(file, &bytes);
+    files.release(file);
+    result
+}
+
+fn builtin_associations(
+    kind: usize,
+) -> (
+    [[u8; arena_desktop::package::manifest::CONTENT_TYPE_BYTES];
+        arena_desktop::package::manifest::MAX_ASSOCIATIONS],
+    u8,
+) {
+    let mut associations = [[0; arena_desktop::package::manifest::CONTENT_TYPE_BYTES];
+        arena_desktop::package::manifest::MAX_ASSOCIATIONS];
+    if kind == arena_desktop::apps::EDITOR as usize {
+        associations[0][..10].copy_from_slice(b"text/plain");
+        associations[1][..13].copy_from_slice(b"text/markdown");
+    }
+    let count = if kind == arena_desktop::apps::EDITOR as usize {
+        2
+    } else {
+        0
+    };
+    (associations, count)
+}
+
+fn app_handles_type(index: usize, content_type: &[u8]) -> bool {
+    let counts = unsafe { &*(&raw const INSTALLED_ASSOCIATION_COUNTS) };
+    let associations = unsafe { &*(&raw const INSTALLED_ASSOCIATIONS) };
+    associations[index][..usize::from(counts[index])]
+        .iter()
+        .any(|field| {
+            field.iter().position(|byte| *byte == 0).is_some_and(|end| {
+                field[..end] == *content_type && field[end..].iter().all(|byte| *byte == 0)
+            })
+        })
+}
+
+fn content_type_for_name(name: &[u8; 32]) -> &'static [u8] {
+    let end = name.iter().position(|byte| *byte == 0).unwrap_or(32);
+    let name = &name[..end];
+    if name.len() >= 3 && name[name.len() - 3..].eq_ignore_ascii_case(b".md") {
+        b"text/markdown"
+    } else if name.len() >= 4
+        && [b".txt".as_slice(), b".log".as_slice()]
+            .iter()
+            .any(|suffix| name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix))
+    {
+        b"text/plain"
+    } else if !name.contains(&b'.') {
+        b"text/plain"
+    } else {
+        b"application/octet-stream"
+    }
+}
+
+fn any_handler(content_type: &[u8]) -> bool {
+    unsafe { &*(&raw const INSTALLED_APPS) }
+        .iter()
+        .take(unsafe { INSTALLED_APP_COUNT })
+        .enumerate()
+        .any(|(index, entry)| entry.is_some() && app_handles_type(index, content_type))
+}
+
+fn handler_index(application_id: &[u8; 32], content_type: &[u8]) -> Option<usize> {
+    unsafe { &*(&raw const INSTALLED_APPS) }
+        .iter()
+        .take(unsafe { INSTALLED_APP_COUNT })
+        .position(|entry| entry.is_some_and(|entry| entry.application_id == *application_id))
+        .filter(|index| app_handles_type(*index, content_type))
+}
+
+fn handler_count(content_type: &[u8]) -> usize {
+    unsafe { &*(&raw const INSTALLED_APPS) }
+        .iter()
+        .take(unsafe { INSTALLED_APP_COUNT })
+        .enumerate()
+        .filter(|(index, entry)| entry.is_some() && app_handles_type(*index, content_type))
+        .count()
+}
+
+fn open_document_with_registry(
+    document: u64,
+    title: [u8; 32],
+    force_chooser: bool,
+    owner: usize,
+    read_only: bool,
+) {
+    if document == CAP_NONE {
+        return;
+    }
+    if unsafe { OPEN_WITH_DOCUMENT != CAP_NONE } {
+        release_file_cap(document);
+        desk_notice("FINISH THE CURRENT OPEN WITH REQUEST FIRST");
+        return;
+    }
+    let content_type = content_type_for_name(&title);
+    if !any_handler(content_type) {
+        release_file_cap(document);
+        desk_notice("NO INSTALLED APPLICATION CAN OPEN THIS FILE");
+        return;
+    }
+    if !force_chooser {
+        let default = unsafe { &*(&raw const ASSOCIATION_DEFAULTS) }
+            .get(content_type)
+            .copied()
+            .and_then(|id| handler_index(&id, content_type));
+        if let Some(index) = default {
+            let _ = launch_registry_entry_with_title(index, document, title, read_only);
+            return;
+        }
+        if handler_count(content_type) == 1 {
+            let index = unsafe { &*(&raw const INSTALLED_APPS) }
+                .iter()
+                .take(unsafe { INSTALLED_APP_COUNT })
+                .enumerate()
+                .position(|(index, entry)| entry.is_some() && app_handles_type(index, content_type))
+                .unwrap_or(0);
+            let _ = launch_registry_entry_with_title(index, document, title, read_only);
+            return;
+        }
+    }
+    unsafe { OPEN_WITH_TITLE = title };
+    open_with_document(document, owner, title, read_only);
+}
+
+fn launch_registry_entry_with_title(
+    index: usize,
+    document: u64,
+    title: [u8; 32],
+    read_only: bool,
+) -> Result<(), i64> {
+    let app = unsafe { (&*(&raw const INSTALLED_APPS))[index] }.ok_or(PKG_STALE as i64)?;
+    let result = if app.builtin_kind != u8::MAX {
+        launch_with_document(app.builtin_kind, title, document, read_only)
+    } else {
+        launch_installed_application(&app.application_id, app.flags, document, read_only)
+    };
+    release_file_cap(document);
+    if result.is_err() {
+        desk_notice("APPLICATION LAUNCH REFUSED");
+    }
+    result
+}
+
+fn save_selected_handler_default() {
+    if !unsafe { ALL_APPS_OPEN_WITH } {
+        return;
+    }
+    let Some(index) = filtered_application_index(unsafe { ALL_APPS_SELECTED }) else {
+        return;
+    };
+    let entry = unsafe { (&*(&raw const INSTALLED_APPS))[index] }.unwrap_or_else(|| die(97));
+    let content_type = unsafe { &*(&raw const OPEN_WITH_TYPE) };
+    let len = content_type
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(32);
+    let prior = unsafe { &*(&raw const ASSOCIATION_DEFAULTS) }.encode();
+    if unsafe { &mut *(&raw mut ASSOCIATION_DEFAULTS) }
+        .set(&content_type[..len], &entry.application_id)
+        .is_err()
+    {
+        desk_notice("HANDLER DEFAULT LIMIT REACHED");
+        return;
+    }
+    if save_association_defaults().is_ok() {
+        desk_notice("DEFAULT APPLICATION SAVED");
+        log(b"[desktop] AFS2 application handler default saved; no File cap granted\n");
+    } else {
+        if let Some(restored) = arena_desktop::associations::Defaults::decode(&prior) {
+            unsafe { ASSOCIATION_DEFAULTS = restored };
+        }
+        desk_notice("COULD NOT SAVE HANDLER DEFAULT");
+    }
+}
+
+fn prune_association_defaults() {
+    let entries = unsafe { &*(&raw const INSTALLED_APPS) };
+    let count = unsafe { INSTALLED_APP_COUNT };
+    let removed = unsafe { &mut *(&raw mut ASSOCIATION_DEFAULTS) }.retain(|content_type, id| {
+        entries
+            .iter()
+            .take(count)
+            .enumerate()
+            .any(|(index, entry)| {
+                entry.is_some_and(|entry| entry.application_id == *id)
+                    && app_handles_type(index, content_type)
+            })
+    });
+    if removed > 0 {
+        let _ = save_association_defaults();
+        log(b"[desktop] removed stale application handler defaults\n");
+    }
+}
 // ---- the desktop surface (Phase 11.8) ---------------------------------------
 //
 // /Users/user/Desktop as icons on the background, resolved through the
@@ -1133,6 +1387,7 @@ fn desk_effect(e: arena_desktop::desk::Effect) {
                             log(b"[desktop] APB1 installed; signed version=");
                             log_number(receipt.version);
                             log(b" (no launch authority implied)\n");
+                            let _ = refresh_installed_applications();
                             desk_notice("APPLICATION INSTALLED");
                         }
                         Err(status) if status == PKG_OFFLINE => {
@@ -1167,11 +1422,26 @@ fn desk_effect(e: arena_desktop::desk::Effect) {
                             b'?'
                         };
                     }
-                    let r = launch(2, title, doc);
-                    files.release(doc);
-                    if r.is_err() {
-                        desk_notice("LAUNCH REFUSED / DESKTOP CAPACITY");
+                    open_document_with_registry(doc, title, false, usize::MAX, false);
+                }
+                Err(_) => desk_notice("THE FILE COULD NOT BE OPENED"),
+            }
+        }
+        Effect::OpenWithDocument(p) => {
+            let Some(files) = (unsafe { *(&raw const AFS2) }) else {
+                return;
+            };
+            match files.walk(USER_ROOT, p.bytes(), arena_desktop::filesd_wire::R_READ) {
+                Ok((doc, _)) => {
+                    let mut title = [0u8; 32];
+                    for (t, c) in title.iter_mut().zip(p.name()) {
+                        *t = if c.is_ascii_graphic() || *c == b' ' {
+                            *c
+                        } else {
+                            b'?'
+                        };
                     }
+                    open_document_with_registry(doc, title, true, usize::MAX, true);
                 }
                 Err(_) => desk_notice("THE FILE COULD NOT BE OPENED"),
             }
@@ -1428,6 +1698,15 @@ fn display(frame: arena_compositor_model::wire::Frame, cap: u64) -> ([u64; 3], [
     (o, b)
 }
 fn launch(kind: u8, path: [u8; 32], document: u64) -> Result<(), i64> {
+    launch_with_document(kind, path, document, false)
+}
+
+fn launch_with_document(
+    kind: u8,
+    path: [u8; 32],
+    document: u64,
+    read_only: bool,
+) -> Result<(), i64> {
     use arena_desktop::scope;
     // `path` is a title only (ADR-0077): printable, never authority.
     let n = path.iter().position(|b| *b == 0).unwrap_or(32);
@@ -1453,7 +1732,7 @@ fn launch(kind: u8, path: [u8; 32], document: u64) -> Result<(), i64> {
         1 => 1 << 2,
         _ => 0,
     };
-    launch_image(
+    launch_image_with_document(
         APPLICATION,
         kind,
         scope,
@@ -1462,13 +1741,19 @@ fn launch(kind: u8, path: [u8; 32], document: u64) -> Result<(), i64> {
         kind == 4,
         launch_targets,
         document,
+        read_only,
     )
 }
 
 /// Launch a descriptive installed-catalog selection through packaged's
 /// fresh receiver-side revalidation. The registry row and app ID never enter
 /// SYS_SPAWN as authority; the exact returned Image capability does.
-fn launch_installed_application(application_id: &[u8; 32], app_flags: u32) -> Result<(), i64> {
+fn launch_installed_application(
+    application_id: &[u8; 32],
+    app_flags: u32,
+    document: u64,
+    read_only: bool,
+) -> Result<(), i64> {
     use arena_desktop::package::manifest;
     if app_flags & manifest::FLAG_HEADLESS != 0 {
         return Err(STATUS_BUSY);
@@ -1478,6 +1763,9 @@ fn launch_installed_application(application_id: &[u8; 32], app_flags: u32) -> Re
             .iter()
             .find(|session| session.id != 0 && session.application_id == *application_id);
         if let Some(session) = existing {
+            if document != CAP_NONE {
+                return Err(STATUS_BUSY);
+            }
             if session.handle != 0 {
                 let _ = unsafe { (&mut *(&raw mut WM)).activate(session.handle) };
             }
@@ -1491,7 +1779,7 @@ fn launch_installed_application(application_id: &[u8; 32], app_flags: u32) -> Re
     } else {
         0
     };
-    let launched = launch_image_v2_for_app(
+    let launched = launch_image_v2_for_app_with_document(
         image.capability,
         6,
         0,
@@ -1499,11 +1787,12 @@ fn launch_installed_application(application_id: &[u8; 32], app_flags: u32) -> Re
         [0; 32],
         false,
         0,
-        CAP_NONE,
+        document,
         *application_id,
         image.entry,
         image.load_base,
         flags,
+        read_only,
     );
     destroy(image.capability);
     launched
@@ -1512,7 +1801,7 @@ fn launch_installed_application(application_id: &[u8; 32], app_flags: u32) -> Re
 /// The session's filesd lineage head and, for the terminal and Files, its
 /// /Users/user capability (ADR-0077). Other kinds get file capabilities
 /// only through the chooser.
-fn file_grants(kind: u8, document: u64) -> (u64, u64) {
+fn file_grants(kind: u8, document: u64, read_only: bool) -> (u64, u64) {
     let Some(files) = (unsafe { &*(&raw const AFS2) }) else {
         return (CAP_NONE, CAP_NONE);
     };
@@ -1521,8 +1810,20 @@ fn file_grants(kind: u8, document: u64) -> (u64, u64) {
     };
     // An Editor opened on a document: a capability for exactly that file,
     // no more than the offered one, in the new session's lineage.
-    if kind == 2 && document != CAP_NONE {
-        return match files.open_in(document, R_DOC, head) {
+    if matches!(kind, 2 | 6) && document != CAP_NONE {
+        let rights = if read_only {
+            arena_desktop::filesd_wire::R_READ
+        } else {
+            R_DOC
+        };
+        let opened = files.open_in(document, rights, head).or_else(|_| {
+            if read_only {
+                Err(arena_desktop::filesd_wire::S_DENIED)
+            } else {
+                files.open_in(document, arena_desktop::filesd_wire::R_READ, head)
+            }
+        });
+        return match opened {
             Ok((doc, _)) => (head, doc),
             Err(_) => (head, CAP_NONE),
         };
@@ -1556,8 +1857,33 @@ fn launch_image(
     launch_targets: u8,
     document: u64,
 ) -> Result<(), i64> {
+    launch_image_with_document(
+        image,
+        kind,
+        scope,
+        function_rights,
+        path,
+        diagnostics,
+        launch_targets,
+        document,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn launch_image_with_document(
+    image: u64,
+    kind: u8,
+    scope: u8,
+    function_rights: u64,
+    path: [u8; 32],
+    diagnostics: bool,
+    launch_targets: u8,
+    document: u64,
+    read_only: bool,
+) -> Result<(), i64> {
     if kind < 6 {
-        launch_image_v2(
+        launch_image_v2_with_document(
             image,
             kind,
             scope,
@@ -1566,9 +1892,10 @@ fn launch_image(
             diagnostics,
             launch_targets,
             document,
+            read_only,
         )
     } else {
-        launch_image_legacy(
+        launch_image_legacy_with_document(
             image,
             kind,
             scope,
@@ -1577,6 +1904,7 @@ fn launch_image(
             diagnostics,
             launch_targets,
             document,
+            read_only,
         )
     }
 }
@@ -1589,7 +1917,7 @@ fn startup_cap_descriptor(slot: u16, kind: u8, rights: u64) -> CapabilityDescrip
     }
 }
 #[allow(clippy::too_many_arguments)]
-fn launch_image_v2(
+fn launch_image_v2_with_document(
     image: u64,
     kind: u8,
     scope: u8,
@@ -1598,11 +1926,12 @@ fn launch_image_v2(
     diagnostics: bool,
     launch_targets: u8,
     document: u64,
+    read_only: bool,
 ) -> Result<(), i64> {
     if kind >= 6 {
         return Err(-2);
     }
-    launch_image_v2_for_app(
+    launch_image_v2_for_app_with_document(
         image,
         kind,
         scope,
@@ -1615,11 +1944,12 @@ fn launch_image_v2(
         arena_desktop::apps::APPLICATION_ENTRY,
         arena_desktop::apps::APPLICATION_LOAD_BASE,
         FLAG_MULTI_INSTANCE,
+        read_only,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn launch_image_v2_for_app(
+fn launch_image_v2_for_app_with_document(
     image: u64,
     kind: u8,
     scope: u8,
@@ -1632,6 +1962,7 @@ fn launch_image_v2_for_app(
     entry: u64,
     load_base: u64,
     app_flags: u32,
+    document_read_only: bool,
 ) -> Result<(), i64> {
     use arena_startup_abi::startup as startup_abi;
 
@@ -1735,7 +2066,7 @@ fn launch_image_v2_for_app(
         return Err(snapshot);
     }
 
-    let (files_head, home) = file_grants(kind, document);
+    let (files_head, home) = file_grants(kind, document, document_read_only);
     unsafe { syscall1(SYS_TRY_WAIT, clock(i)) };
     let clock_rights = if kind == 1 {
         RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY
@@ -2003,7 +2334,7 @@ fn launch_image_v2_for_app(
     Ok(())
 }
 #[allow(clippy::too_many_arguments)]
-fn launch_image_legacy(
+fn launch_image_legacy_with_document(
     image: u64,
     kind: u8,
     scope: u8,
@@ -2012,6 +2343,7 @@ fn launch_image_legacy(
     diagnostics: bool,
     launch_targets: u8,
     document: u64,
+    document_read_only: bool,
 ) -> Result<(), i64> {
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
     if ready != 0 {
@@ -2103,7 +2435,7 @@ fn launch_image_legacy(
     // Distinct inherited function reference to the exact fresh region. Its
     // marker rights do not enlarge the session's provisioned function scope.
     // Child slot 4: diagnostics (Monitor) or the /Users/user grant.
-    let (files_head, home) = file_grants(kind, document);
+    let (files_head, home) = file_grants(kind, document, document_read_only);
     // A previous session's pending bits never reach this one.
     unsafe {
         syscall1(SYS_TRY_WAIT, clock(i));
@@ -2208,7 +2540,17 @@ fn retire(index: usize, force: bool) {
     if unsafe { (*(&raw const CHOOSER)).as_ref() }.is_some_and(|c| c.session == index) {
         chooser_close();
     }
+    if unsafe { OPEN_WITH_OWNER == index && OPEN_WITH_DOCUMENT != CAP_NONE } {
+        close_all_applications();
+    }
     destroy(s.grant);
+    if s.offered_file != CAP_NONE {
+        if let Some(files) = unsafe { &*(&raw const AFS2) } {
+            files.release(s.offered_file);
+        } else {
+            destroy(s.offered_file);
+        }
+    }
     revoke_files(s.files_head);
     let _ = unsafe { syscall1(SYS_TRY_WAIT, clock(index)) };
     unsafe {
@@ -2304,88 +2646,115 @@ fn clear_regions() {
     }
 }
 
-fn refresh_installed_applications() -> Result<(), u64> {
-    let mut base: [Option<arena_desktop::package::AppEntry>; ALL_APPS_CAPACITY] =
-        [None; ALL_APPS_CAPACITY];
+fn reset_installed_applications() {
+    unsafe {
+        for index in 0..ALL_APPS_CAPACITY {
+            INSTALLED_APPS[index] = None;
+            INSTALLED_ASSOCIATIONS[index] = [[0; 32]; 8];
+            INSTALLED_ASSOCIATION_COUNTS[index] = 0;
+        }
+        INSTALLED_APP_COUNT = 0;
+    }
     for kind in 0..6 {
         let mut display_name = [0u8; 32];
         let name = arena_desktop::apps::TITLES[kind].as_bytes();
         display_name[..name.len()].copy_from_slice(name);
-        base[kind] = Some(arena_desktop::package::AppEntry {
-            application_id: arena_desktop::apps::APPLICATION_IDS[kind],
-            display_name,
-            flags: arena_desktop::package::manifest::FLAG_MULTI_INSTANCE,
-            builtin_kind: kind as u8,
-        });
+        let (associations, association_count) = builtin_associations(kind);
+        unsafe {
+            INSTALLED_APPS[kind] = Some(arena_desktop::package::AppEntry {
+                application_id: arena_desktop::apps::APPLICATION_IDS[kind],
+                display_name,
+                flags: arena_desktop::package::manifest::FLAG_MULTI_INSTANCE,
+                builtin_kind: kind as u8,
+            });
+            INSTALLED_ASSOCIATIONS[kind] = associations;
+            INSTALLED_ASSOCIATION_COUNTS[kind] = association_count;
+        }
     }
+    unsafe { INSTALLED_APP_COUNT = 6 };
+}
+
+fn refresh_installed_applications() -> Result<(), u64> {
+    reset_installed_applications();
     for _ in 0..2 {
         let (count, epoch) = match arena_desktop::package::app_catalog_count() {
             Ok(catalog) => catalog,
             Err(error) => {
-                unsafe {
-                    INSTALLED_APPS = base;
-                    INSTALLED_APP_COUNT = 6;
-                    ALL_APPS_UNAVAILABLE = true;
-                }
+                reset_installed_applications();
+                unsafe { ALL_APPS_UNAVAILABLE = true };
                 return Err(error);
             }
         };
-        let mut entries = base;
+        reset_installed_applications();
         let mut retry = false;
         for index in 0..count {
             match arena_desktop::package::app_catalog_entry(index, epoch) {
                 Ok(entry) => {
-                    if entries[..6]
+                    if unsafe { &*(&raw const INSTALLED_APPS) }[..6]
                         .iter()
                         .flatten()
                         .any(|prior| prior.application_id == entry.application_id)
                     {
-                        unsafe {
-                            INSTALLED_APPS = base;
-                            INSTALLED_APP_COUNT = 6;
-                            ALL_APPS_UNAVAILABLE = true;
-                        }
+                        reset_installed_applications();
+                        unsafe { ALL_APPS_UNAVAILABLE = true };
                         return Err(PKG_CORRUPT);
                     }
-                    entries[6 + index] = Some(entry);
+                    let (associations, association_count) =
+                        match arena_desktop::package::app_associations(
+                            index,
+                            &entry.application_id,
+                            entry.flags,
+                        ) {
+                            Ok(metadata) => metadata,
+                            Err(PKG_STALE) => {
+                                retry = true;
+                                break;
+                            }
+                            Err(error) => {
+                                reset_installed_applications();
+                                unsafe { ALL_APPS_UNAVAILABLE = true };
+                                return Err(error);
+                            }
+                        };
+                    unsafe {
+                        INSTALLED_APPS[6 + index] = Some(entry);
+                        INSTALLED_ASSOCIATIONS[6 + index] = associations;
+                        INSTALLED_ASSOCIATION_COUNTS[6 + index] = association_count as u8;
+                    }
                 }
                 Err(PKG_STALE) => {
                     retry = true;
                     break;
                 }
                 Err(error) => {
-                    unsafe {
-                        INSTALLED_APPS = base;
-                        INSTALLED_APP_COUNT = 6;
-                        ALL_APPS_UNAVAILABLE = true;
-                    }
+                    reset_installed_applications();
+                    unsafe { ALL_APPS_UNAVAILABLE = true };
                     return Err(error);
                 }
             }
         }
         if retry {
+            reset_installed_applications();
             continue;
         }
         unsafe {
-            INSTALLED_APPS = entries;
             INSTALLED_APP_COUNT = 6 + count;
             ALL_APPS_UNAVAILABLE = false;
             ALL_APPS_SELECTED = 0;
             ALL_APPS_TOP = 0;
         }
+        prune_association_defaults();
         return Ok(());
     }
-    unsafe {
-        INSTALLED_APPS = base;
-        INSTALLED_APP_COUNT = 6;
-        ALL_APPS_UNAVAILABLE = true;
-    }
+    reset_installed_applications();
+    unsafe { ALL_APPS_UNAVAILABLE = true };
     Err(PKG_STALE)
 }
 
 fn open_all_applications() {
     unsafe {
         ALL_APPS_OPEN = true;
+        ALL_APPS_OPEN_WITH = false;
         core::ptr::write_bytes(&raw mut ALL_APPS_QUERY, 0, 1);
         ALL_APPS_QUERY_LEN = 0;
         ALL_APPS_SELECTED = 0;
@@ -2399,8 +2768,64 @@ fn open_all_applications() {
     }
 }
 
+fn open_with_document(document: u64, owner: usize, title: [u8; 32], read_only: bool) {
+    if document == CAP_NONE {
+        return;
+    }
+    if unsafe { OPEN_WITH_DOCUMENT != CAP_NONE } {
+        release_file_cap(document);
+        return;
+    }
+    let content_type = content_type_for_name(&title);
+    if !any_handler(content_type) {
+        release_file_cap(document);
+        desk_notice("NO INSTALLED APPLICATION CAN OPEN THIS FILE");
+        return;
+    }
+    unsafe {
+        OPEN_WITH_DOCUMENT = document;
+        OPEN_WITH_OWNER = owner;
+        OPEN_WITH_TYPE = [0; 32];
+        OPEN_WITH_TYPE[..content_type.len()].copy_from_slice(content_type);
+        OPEN_WITH_TITLE = title;
+        OPEN_WITH_READ_ONLY = read_only;
+        ALL_APPS_OPEN = true;
+        ALL_APPS_OPEN_WITH = true;
+        ALL_APPS_QUERY = [0; 32];
+        ALL_APPS_QUERY_LEN = 0;
+        ALL_APPS_SELECTED = 0;
+        ALL_APPS_TOP = 0;
+    }
+}
+
 fn close_all_applications() {
-    unsafe { ALL_APPS_OPEN = false };
+    let document = unsafe {
+        ALL_APPS_OPEN = false;
+        ALL_APPS_OPEN_WITH = false;
+        OPEN_WITH_OWNER = usize::MAX;
+        core::mem::replace(&mut *(&raw mut OPEN_WITH_DOCUMENT), CAP_NONE)
+    };
+    release_file_cap(document);
+}
+
+fn take_open_with_document() -> u64 {
+    unsafe {
+        ALL_APPS_OPEN = false;
+        ALL_APPS_OPEN_WITH = false;
+        OPEN_WITH_OWNER = usize::MAX;
+        core::mem::replace(&mut *(&raw mut OPEN_WITH_DOCUMENT), CAP_NONE)
+    }
+}
+
+fn release_file_cap(cap: u64) {
+    if cap == CAP_NONE {
+        return;
+    }
+    if let Some(files) = unsafe { &*(&raw const AFS2) } {
+        files.release(cap);
+    } else {
+        destroy(cap);
+    }
 }
 
 fn query_matches(name: &[u8; 32], query: &[u8], query_len: usize) -> bool {
@@ -2427,10 +2852,19 @@ fn filtered_application_index(ordinal: usize) -> Option<usize> {
     let count = unsafe { INSTALLED_APP_COUNT };
     let query = unsafe { &*(&raw const ALL_APPS_QUERY) };
     let query_len = unsafe { ALL_APPS_QUERY_LEN };
+    let open_with = unsafe { ALL_APPS_OPEN_WITH };
+    let content_type = unsafe { &*(&raw const OPEN_WITH_TYPE) };
+    let content_type_len = content_type
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(32);
     let mut matched = 0usize;
     for (index, entry) in entries.iter().take(count).enumerate() {
         let Some(entry) = entry else { continue };
         if query_matches(&entry.display_name, query, query_len) {
+            if open_with && !app_handles_type(index, &content_type[..content_type_len]) {
+                continue;
+            }
             if matched == ordinal {
                 return Some(index);
             }
@@ -2445,11 +2879,20 @@ fn filtered_application_count() -> usize {
     let count = unsafe { INSTALLED_APP_COUNT };
     let query = unsafe { &*(&raw const ALL_APPS_QUERY) };
     let query_len = unsafe { ALL_APPS_QUERY_LEN };
+    let open_with = unsafe { ALL_APPS_OPEN_WITH };
+    let content_type = unsafe { &*(&raw const OPEN_WITH_TYPE) };
+    let content_type_len = content_type
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(32);
     entries
         .iter()
         .take(count)
-        .flatten()
-        .filter(|entry| query_matches(&entry.display_name, query, query_len))
+        .enumerate()
+        .filter(|(index, entry)| {
+            entry.is_some_and(|entry| query_matches(&entry.display_name, query, query_len))
+                && (!open_with || app_handles_type(*index, &content_type[..content_type_len]))
+        })
         .count()
 }
 
@@ -2483,6 +2926,7 @@ fn applications_view() -> Option<arena_desktop::shell::ApplicationsView> {
         query: unsafe { *(&raw const ALL_APPS_QUERY) },
         query_len: unsafe { ALL_APPS_QUERY_LEN as u8 },
         unavailable: unsafe { ALL_APPS_UNAVAILABLE },
+        open_with: unsafe { ALL_APPS_OPEN_WITH },
     };
     for row in 0..APPLICATION_ROWS {
         let Some(index) = filtered_application_index(top + row) else {
@@ -2552,6 +2996,10 @@ fn applications_key(code: u16, pressed: bool, mods: u8) -> Option<Action> {
         13 => filtered_application_index(unsafe { ALL_APPS_SELECTED })
             .map(launcher_action)
             .or(Some(Action::Changed)),
+        value if value == u16::from(b'd') || value == u16::from(b'D') => {
+            save_selected_handler_default();
+            Some(Action::Changed)
+        }
         258 => {
             move_application_selection(-1);
             Some(Action::Changed)
@@ -2616,7 +3064,9 @@ fn applications_pointer(x: i32, y: i32, buttons: u8, w: i32, h: i32) -> Option<A
                 let ordinal = unsafe { ALL_APPS_TOP } + row;
                 if let Some(index) = filtered_application_index(ordinal) {
                     unsafe { ALL_APPS_SELECTED = ordinal };
-                    close_all_applications();
+                    if !unsafe { ALL_APPS_OPEN_WITH } {
+                        close_all_applications();
+                    }
                     return Some(launcher_action(index));
                 }
             }
@@ -2935,9 +3385,11 @@ fn service(index: usize, rights: u64, bytes: &mut [u8; 64]) -> Result<u64, i64> 
             if !scope::can_launch(session.launch_targets, kind) {
                 return Err(-2);
             }
-            // An offered file capability opens in the Editor only when it
-            // belongs to the requesting session's own lineage.
-            let offer = unsafe { core::mem::replace(&mut *(&raw mut OFFER), CAP_NONE) };
+            // Offers are stored on their authenticated Desktop session, so a
+            // second app cannot race a launch and consume another app's File.
+            let offer = unsafe {
+                core::mem::replace(&mut (*(&raw mut SESSIONS))[index].offered_file, CAP_NONE)
+            };
             let document = match unsafe { &*(&raw const AFS2) } {
                 Some(f)
                     if offer != CAP_NONE
@@ -3056,6 +3508,12 @@ extern "C" fn main() -> ! {
         FILES = Some(fs);
     }
     start_afs2();
+    load_association_defaults();
+    if let Err(error) = refresh_installed_applications() {
+        log(b"[desktop] installed application registry unavailable at boot status=");
+        log_number(error);
+        log(b"\n");
+    }
     unsafe { SHARED_CAP_BASELINE = held_cap_kind_count(7) };
     desk_load(w as i32, h as i32);
 
@@ -3148,6 +3606,7 @@ extern "C" fn main() -> ! {
         let mut result = 0;
         let mut badge_rejected = false;
         let mut badge_bootstrap = false;
+        let mut authenticated_session = None;
         if badge != 0 {
             let sessions = unsafe { &*(&raw const SESSIONS) };
             let badges: [u32; LIMIT] = core::array::from_fn(|index| sessions[index].badge);
@@ -3156,6 +3615,7 @@ extern "C" fn main() -> ! {
                     sessions[index].process.is_some_and(child_live)
                 });
             if let Ok(Some(i)) = selected {
+                authenticated_session = Some(i);
                 let session = unsafe { SESSIONS[i] };
                 match (
                     description,
@@ -3193,6 +3653,16 @@ extern "C" fn main() -> ! {
                             && describe(USER_ROOT).is_some_and(|root| root[1] == id)
                             && rights & (RIGHTS_WRITE | RIGHTS_COPY)
                                 == (RIGHTS_WRITE | RIGHTS_COPY) => {}
+                    (
+                        Some([12, id, rights]),
+                        Ok(
+                            arena_desktop::service_wire::Frame::OpenDocument { .. }
+                            | arena_desktop::service_wire::Frame::OpenWith { .. },
+                        ),
+                    ) if session.kind == 1
+                        && describe(USER_ROOT).is_some_and(|root| root[1] == id)
+                        && rights & (RIGHTS_WRITE | RIGHTS_COPY)
+                            == (RIGHTS_WRITE | RIGHTS_COPY) => {}
                     _ => badge_rejected = true,
                 }
             } else {
@@ -3339,7 +3809,11 @@ extern "C" fn main() -> ! {
                         }
                     };
                     match action {
-                        Action::Launch(kind) if kind < 6 && restore_minimized(kind as u8) => {
+                        Action::Launch(kind)
+                            if kind < 6
+                                && !unsafe { ALL_APPS_OPEN_WITH }
+                                && restore_minimized(kind as u8) =>
+                        {
                             dirty = true;
                         }
                         Action::Launch(selection) => {
@@ -3347,7 +3821,15 @@ extern "C" fn main() -> ! {
                                 unsafe { (&*(&raw const SESSIONS)).iter().all(|s| s.id != 0) };
                             let before = full_sessions
                                 .then(|| (cap_inventory_snapshot(), observe_receipt()));
-                            let result = if selection < 6 {
+                            let open_with = unsafe { ALL_APPS_OPEN_WITH };
+                            let result = if open_with {
+                                let document = take_open_with_document();
+                                let title = unsafe { *(&raw const OPEN_WITH_TITLE) };
+                                let read_only = unsafe { OPEN_WITH_READ_ONLY };
+                                launch_registry_entry_with_title(
+                                    selection, document, title, read_only,
+                                )
+                            } else if selection < 6 {
                                 close_all_applications();
                                 launch(selection as u8, [0; 32], CAP_NONE)
                             } else {
@@ -3360,6 +3842,8 @@ extern "C" fn main() -> ! {
                                             launch_installed_application(
                                                 &app.application_id,
                                                 app.flags,
+                                                CAP_NONE,
+                                                false,
                                             )
                                         }
                                     }
@@ -3428,23 +3912,53 @@ extern "C" fn main() -> ! {
                 }
                 Err(e) => status = e as u64,
             }
+        } else if let (Some(index), Some([12, _, _]), Ok(frame)) = (
+            authenticated_session,
+            description,
+            arena_desktop::service_wire::Frame::decode(&bytes),
+        ) {
+            let session = unsafe { SESSIONS[index] };
+            let offered = match frame {
+                arena_desktop::service_wire::Frame::OpenDocument { name } if session.kind == 1 => {
+                    Some((name, false, false))
+                }
+                arena_desktop::service_wire::Frame::OpenWith { name } if session.kind == 1 => {
+                    Some((name, true, true))
+                }
+                _ => None,
+            };
+            if let Some((name, force_chooser, read_only)) = offered
+                && session.files_head != CAP_NONE
+                && unsafe { &*(&raw const AFS2) }
+                    .is_some_and(|files| files.same_lineage(session.files_head, landed))
+            {
+                open_document_with_registry(landed, name, force_chooser, index, read_only);
+                landed = CAP_NONE;
+                status = 0;
+                dirty = true;
+            }
         } else if description
             .is_some_and(|d| d[0] == 12 && describe(USER_ROOT).is_some_and(|r| r[1] == d[1]))
             && arena_desktop::service_wire::Frame::decode(&bytes)
                 == Ok(arena_desktop::service_wire::Frame::Offer)
         {
-            // Keep the offered filesd capability for the next launch; it
-            // is used only for the session whose lineage holds it.
-            let old = unsafe { core::mem::replace(&mut *(&raw mut OFFER), landed) };
-            if old != CAP_NONE {
-                if let Some(f) = unsafe { &*(&raw const AFS2) } {
-                    f.release(old);
-                } else {
-                    destroy(old);
+            // Legacy Offer frames are bound to their authenticated Files
+            // session and cannot replace another session's pending File.
+            if let Some(index) = authenticated_session
+                && unsafe { SESSIONS[index].kind == 1 }
+                && unsafe { &*(&raw const AFS2) }.is_some_and(|files| {
+                    files.same_lineage(unsafe { SESSIONS[index].files_head }, landed)
+                })
+            {
+                let old = unsafe {
+                    core::mem::replace(&mut (*(&raw mut SESSIONS))[index].offered_file, landed)
+                };
+                if old != CAP_NONE {
+                    release_file_cap(old);
                 }
+                landed = CAP_NONE;
+                status = 0;
             }
-            landed = CAP_NONE;
-            status = 0;
         } else if let Some([7, id, rights]) = description {
             if let Some(i) = unsafe { &*(&raw const SESSIONS) }
                 .iter()

@@ -14,6 +14,7 @@ pub mod client;
 
 pub mod input_wire;
 
+pub mod associations;
 pub mod fs_backend;
 pub mod preferences;
 pub mod scope;

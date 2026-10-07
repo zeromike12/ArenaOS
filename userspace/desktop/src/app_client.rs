@@ -75,6 +75,21 @@ pub fn offer(cap: u64) -> Result<(), i64> {
     }
     r
 }
+/// Ask the broker to dispatch this exact File capability using the current
+/// application registry. The app retains no copy after the request. Open
+/// With makes the transferred cap read-only at the target boundary.
+pub fn open_document(name: [u8; 32], cap: u64, open_with: bool) -> Result<(), i64> {
+    let frame = if open_with {
+        Frame::OpenWith { name }
+    } else {
+        Frame::OpenDocument { name }
+    };
+    let result = exchange(frame, cap).map(|_| ());
+    unsafe {
+        syscall1(SYS_CAP_DESTROY, cap);
+    }
+    result
+}
 /// What the trusted chooser granted.
 pub struct Grant {
     /// The capability slot (this process's own copy).

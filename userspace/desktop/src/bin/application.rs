@@ -429,15 +429,21 @@ impl App {
         match e {
             Effect::None => Ok(()),
             Effect::Menu { x, y } => self.open_menu(x, y, client),
-            Effect::OpenInEditor(p) => {
-                // A capability for exactly this file, offered to the broker
-                // and re-granted in the new Editor's lineage; the name is
-                // only its title.
+            Effect::OpenDocument { path: p, open_with } => {
+                // The broker resolves the current handler from signed
+                // registry metadata. Open With is a read-only explicit offer.
                 let fs = self.fs()?;
                 let (f, _) = fs
-                    .walk(self.home, p.bytes(), fw::R_READ | fw::R_WRITE)
+                    .walk(
+                        self.home,
+                        p.bytes(),
+                        if open_with {
+                            fw::R_READ
+                        } else {
+                            fw::R_READ | fw::R_WRITE
+                        },
+                    )
                     .map_err(fserr)?;
-                service::offer(f)?;
                 let mut title = [0u8; 32];
                 for (t, b) in title.iter_mut().zip(p.name()) {
                     *t = if b.is_ascii_graphic() || *b == b' ' {
@@ -446,8 +452,12 @@ impl App {
                         b'?'
                     };
                 }
-                launch(apps::EDITOR, title)?;
-                self.files.ex.status = "OPENED IN EDITOR";
+                service::open_document(title, f, open_with)?;
+                self.files.ex.status = if open_with {
+                    "CHOOSE AN APPLICATION"
+                } else {
+                    "OPENED WITH CURRENT HANDLER"
+                };
                 Ok(())
             }
         }

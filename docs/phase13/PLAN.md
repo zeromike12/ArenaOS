@@ -82,12 +82,16 @@ ELF twice through keyboard/search and pointer selection, observed two ABI-v2
 processes and compositor windows, and returned identity resource counts to
 baseline after close. See `PROGRESS.md` and ADR-0093 for measured details.
 
-The checkpoint does not complete launcher favorites/dock behavior,
-associations/Open With, true multi-window instances, helper lifecycle,
-byte-streams, process-wide VM, scalable heap, user threads, synchronization,
-mixed-load pressure, or final qualification. The dynamic Image envelope is a
-bounded executable staging mechanism; it is not process VM and does not imply
-PIE or ASLR support.
+The initial launcher checkpoint is now extended with registry-backed
+associations and an AFS2-persisted Open With flow. Its T1 guest proof verifies
+that a saved default creates no authority and that an explicitly selected
+installed handler receives the exact read-only File capability. Remaining
+work includes launcher favorites/dock behavior, true multi-window instances,
+helper lifecycle, byte streams, process-wide VM, scalable heap, user threads,
+synchronization, mixed-load pressure, and final qualification. The dynamic
+Image envelope is a bounded executable staging mechanism; it is not process
+VM and does not imply PIE or ASLR support. See `PROGRESS.md` for measured
+receipts.
 
 ## Work plan
 
@@ -112,6 +116,9 @@ PIE or ASLR support.
 - Replace Editor-only open behavior with content-type handler lookup, persisted
   defaults, and Open With. Only the broker may explicitly lend the selected
   exact File capability; cancellation or metadata selection grants nothing.
+  **Status:** handler filtering, persisted defaults, cancel cleanup, and
+  exact read-only installed-app handoff are implemented and guest-proved;
+  built-in Editor behavior remains available through its declared types.
 
 ### C. Instance, process, and window lifecycle
 

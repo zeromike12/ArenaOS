@@ -18,7 +18,7 @@
 | Toolchain and guest environment | Ready | Debian 13, unprivileged UID 1000, no sudo/root. Installed Rust 1.97.0 plus rustfmt/Clippy and `x86_64-unknown-none`/`x86_64-unknown-uefi` targets with official rustup under `/tmp`; extracted signed Debian snapshot QEMU 10.0.11 and OVMF 2025.02 under `/tmp`. `tools/dev-env/env.sh` and normal repository build tooling remain in use. |
 | 13.1 installed registry and launch | Implemented; T1 guest proof passed | ADR-0092 trust split is wired through filesd, packaged, and Desktop. Boot rebuilds from protected installed APB1 state; launch re-verifies current receiver policy/tree and creates an exact bounded Image capability. See the T1 receipt below. |
 | 13.2 launcher | Initial All Applications implementation; T1 guest proof passed | Registry-backed list, search, keyboard selection, pointer launch, and live-instance indication work for a real installed app. Persisted favorites and active-app dock composition remain. |
-| 13.2 associations and Open With | Not started | Desktop still uses the historical Editor-specific document path; defaults and Open With are not persisted or registry-backed. |
+| 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
 | 13.3 windows, helpers, lifecycle | Not started | Production session couples one Process child to one ordinary window. `AppInstanceTable`, `ProcessGroup`, and `WindowSet` are foundations; group/helper and multi-window production policy is absent. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
 | 13.5 VM and heap | Not started | 32-page heap uses writable/NX owned frames through slot 63; mapping tracking is per scheduler thread and ordinary map release/protection is absent. |
@@ -142,3 +142,50 @@ the source-frozen final qualification.
   packaged release builds and rustfmt checks, `test_m12_startup.py` (7/7 plus
   M1–M7 and M11 markers), and the real APB1 install/registry/launch guest above.
   This is a feature checkpoint; the full historical suite has not been run.
+
+### Registry-backed associations and exact document handoff T1
+
+- Desktop loads bounded signed association declarations from the current
+  verified packaged catalog and keeps them separate from compact app identity
+  records. The six built-in applications have explicit built-in declarations;
+  installed associations come from the signed APB1 manifest.
+- Files and the Desktop icon menu offer Open With. The Open With surface is the
+  existing All Applications UI filtered to handlers for the inferred content
+  type. `D` saves the selected handler ID in a canonical, checksummed
+  `.arena-app-associations` record under `/Users/user` in AFS2. Defaults are
+  pruned when the installed catalog no longer contains the selected handler.
+  A default only chooses a descriptive registry record; it creates no process
+  and grants no File capability.
+- The exact selected File capability remains in the Desktop until handler
+  selection. Cancel closes the chooser and releases it. Explicit Open With
+  opens the source as a read-only filesd capability and launches the selected
+  built-in or freshly reverified installed image through ABI v2. Filesd enforces
+  the read-only grant even though the kernel service endpoint capability can
+  invoke its read/write operation set. The startup ABI audit confirms that the
+  selected app receives the expected File cap and no wider filesystem root.
+- `python3 tools/test_phase13_registry_guest.py` passed on QEMU 10.0.11 / OVMF
+  2025.02. The real Desktop menu opened the chooser; Escape returned process,
+  region, map, and capability identity counts to the pre-request baseline. The
+  test then searched for the signed installed handler and saved it as the
+  `text/plain` default. Saving changed no identity-bearing count and did not
+  launch an app. A second explicit selection launched the real installed ELF;
+  the guest app read the exact `z-associated.txt` contents, verified write
+  refusal, and the host confirmed the document bytes remained unchanged.
+- In this run, boot identity counts were `(process records, processes,
+  SharedRegions, region pages, maps, caps) = (15, 15, 2, 470, 4, 45)`. The
+  canceled chooser returned to those exact counts. The document app ran at
+  `(16, 16, 4, 1410, 8, 47)` while active and closed to `(15, 15, 2, 470, 4,
+  45)`; four fewer free frames remained than the observed boot sample. The
+  subsequent two-window launch/close sequence also returned identity counts to
+  `(15, 15, 2, 470, 4, 45)`. The guest log is `build/serial-phase13-registry.log`.
+- `cargo test --target x86_64-unknown-linux-gnu --lib` in Desktop passed
+  82/82, including association codec, canonical corruption refusal, stale
+  handler pruning, and explicit path-only Open With effects. Desktop and the
+  Phase-13 application release builds passed; Python fixture compilation and
+  `git diff --check` passed. The first guest attempt found the registry
+  refresh's large stack-local table and led to moving bounded association
+  arrays into static registry storage; the corrected guest boot is green.
+
+This remains a feature checkpoint. Favorites/dock composition, multi-window
+AppInstances, helper lifecycle, streams, process-wide VM, scalable heap, user
+threads, synchronization, pressure, and final qualification remain open.

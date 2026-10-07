@@ -171,6 +171,33 @@ pub fn app_manifest(index: usize) -> Result<manifest::Manifest, u64> {
     manifest::Manifest::parse(&bytes).map_err(|_| PKG_CORRUPT)
 }
 
+/// Retrieve the signed content-type declarations used by handler filtering.
+/// They are descriptive preferences only; each launch still resolves through
+/// packaged's fresh verifier and an exact Image capability.
+pub fn app_associations(
+    index: usize,
+    expected_application_id: &[u8; 32],
+    expected_flags: u32,
+) -> Result<
+    (
+        [[u8; manifest::CONTENT_TYPE_BYTES]; manifest::MAX_ASSOCIATIONS],
+        usize,
+    ),
+    u64,
+> {
+    let app_manifest = app_manifest(index)?;
+    if app_manifest.application_id() != expected_application_id
+        || app_manifest.flags() != expected_flags
+    {
+        return Err(PKG_STALE);
+    }
+    let mut associations = [[0u8; manifest::CONTENT_TYPE_BYTES]; manifest::MAX_ASSOCIATIONS];
+    for (destination, source) in associations.iter_mut().zip(app_manifest.associations()) {
+        *destination = *source;
+    }
+    Ok((associations, app_manifest.associations().len()))
+}
+
 /// Ask packaged to re-resolve and freshly verify the current installed
 /// version, then receive only its exact immutable Image capability.
 pub fn launch_installed(application_id: &[u8; 32], pool: u64) -> Result<NativeImage, u64> {

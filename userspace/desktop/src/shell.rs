@@ -102,6 +102,8 @@ pub struct ApplicationsView {
     pub query: [u8; 32],
     pub query_len: u8,
     pub unavailable: bool,
+    /// This catalog surface is choosing a document handler.
+    pub open_with: bool,
 }
 
 /// Rows of the chooser list shown at once.
@@ -875,7 +877,11 @@ fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h
         canvas,
         x0 + m::L,
         y0 + 10,
-        "ALL APPLICATIONS",
+        if apps.open_with {
+            "OPEN WITH"
+        } else {
+            "ALL APPLICATIONS"
+        },
         Style::Caption,
         t.muted,
     );
@@ -975,7 +981,11 @@ fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h
             canvas,
             x0 + m::L,
             y0 + height - 18,
-            "Type to search  /  ↑ ↓ move  /  Enter launch  /  Esc close",
+            if apps.open_with {
+                "Type to search  /  ↑ ↓ move  /  Enter open  /  D default  /  Esc cancel"
+            } else {
+                "Type to search  /  ↑ ↓ move  /  Enter launch  /  Esc close"
+            },
             Style::Caption,
             t.muted,
         );
@@ -984,7 +994,11 @@ fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h
             canvas,
             x0 + m::L,
             y0 + height - 18,
-            "Type to search  /  Enter launch  /  Esc close",
+            if apps.open_with {
+                "Enter open  /  D set default  /  Esc cancel"
+            } else {
+                "Type to search  /  Enter launch  /  Esc close"
+            },
             Style::Caption,
             t.muted,
         );

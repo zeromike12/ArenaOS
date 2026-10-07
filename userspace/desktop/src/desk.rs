@@ -289,6 +289,8 @@ pub enum Effect {
     OpenFolder(Path),
     /// Open this text file in an Editor (the broker grants it).
     OpenDocument(Path),
+    /// Show the registry-backed Open With chooser for this selected file.
+    OpenWithDocument(Path),
     /// Submit this user-selected bundle through the trusted installer broker.
     InstallBundle(Path),
     /// Nothing opens this kind.
@@ -310,12 +312,17 @@ enum Press {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cmd {
     Open,
+    OpenWith,
     Trash,
     NewFolder,
     NewDocument,
     Arrange,
 }
-const ICON_MENU: [(&str, Cmd); 2] = [("Open", Cmd::Open), ("Move to Trash", Cmd::Trash)];
+const ICON_MENU: [(&str, Cmd); 3] = [
+    ("Open", Cmd::Open),
+    ("Open With…", Cmd::OpenWith),
+    ("Move to Trash", Cmd::Trash),
+];
 const DESK_MENU: [(&str, Cmd); 3] = [
     ("New Folder", Cmd::NewFolder),
     ("New Document", Cmd::NewDocument),
@@ -693,6 +700,11 @@ impl Desk {
                     return self.open(s, i);
                 }
             }
+            Cmd::OpenWith => {
+                if let Some(i) = self.ex.selection.first() {
+                    return self.open_with(s, i);
+                }
+            }
             Cmd::Trash => {
                 if self.ex.selection.count() > 0 {
                     let _ = self.ex.delete(s);
@@ -746,6 +758,21 @@ impl Desk {
         let mut head = [0u8; 512];
         match s.read(path.bytes(), 0, &mut head) {
             Ok(n) if sniff_text(&head[..n]) => Effect::OpenDocument(path),
+            _ => Effect::NoApplication,
+        }
+    }
+
+    fn open_with(&mut self, s: &mut impl Store, i: usize) -> Effect {
+        let item = *self.ex.at(i);
+        if item.dir || item.size > 4096 || kind_of(item.name(), false) != Kind::Text {
+            return Effect::NoApplication;
+        }
+        let Ok(path) = Path::of(FOLDER).child(item.name()) else {
+            return Effect::None;
+        };
+        let mut head = [0u8; 512];
+        match s.read(path.bytes(), 0, &mut head) {
+            Ok(n) if sniff_text(&head[..n]) => Effect::OpenWithDocument(path),
             _ => Effect::NoApplication,
         }
     }
@@ -816,6 +843,26 @@ mod tests {
         let mut d = Box::new(Desk::new());
         d.load(&mut m).unwrap();
         (d, m)
+    }
+
+    #[test]
+    fn desktop_open_with_emits_only_the_selected_document_path() {
+        let (mut desk, mut mem) = setup();
+        let (x, y, _) = center(&desk, "readme");
+        assert_eq!(desk.pointer(&mut mem, x, y, 2, false, 1), Effect::None);
+        let menu = desk.view.menu.unwrap();
+        assert_eq!(menu.items[..3], ["Open", "Open With…", "Move to Trash"]);
+        assert_eq!(
+            desk.pointer(
+                &mut mem,
+                menu.x + 20,
+                menu.y + 4 + MENU_ITEM + 5,
+                1,
+                false,
+                2
+            ),
+            Effect::OpenWithDocument(Path::of(b"Desktop/readme"))
+        );
     }
     fn center(d: &Desk, name: &str) -> (i32, i32, usize) {
         let i = (0..usize::from(d.view.count))
@@ -948,7 +995,7 @@ mod tests {
         d.pointer(&mut m, r.x + 20, r.y + 4 + 5, 0, false, 30_000_000);
         assert!(m.get("Desktop/New Folder").is_some());
         assert_eq!(d.view.menu, None);
-        // Icon menu: Move to Trash, with a restore record.
+        // Icon menu: Open, Open With and Move to Trash, with a restore record.
         let (rx, ry, _) = center(&d, "readme");
         d.pointer(&mut m, rx, ry, 2, false, 40_000_000);
         d.pointer(&mut m, rx, ry, 0, false, 40_000_000);
@@ -956,7 +1003,7 @@ mod tests {
         d.pointer(
             &mut m,
             r.x + 20,
-            r.y + 4 + MENU_ITEM + 5,
+            r.y + 4 + 2 * MENU_ITEM + 5,
             1,
             false,
             40_000_000,
@@ -964,7 +1011,7 @@ mod tests {
         d.pointer(
             &mut m,
             r.x + 20,
-            r.y + 4 + MENU_ITEM + 5,
+            r.y + 4 + 2 * MENU_ITEM + 5,
             0,
             false,
             40_000_000,

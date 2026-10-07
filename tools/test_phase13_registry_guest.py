@@ -68,6 +68,8 @@ def seed_bundle(disk, bundle):
     desktop = volume.resolve("/Users/user/Desktop")
     source = volume.create(desktop, SOURCE, 1)
     volume.write(source, 0, bundle, 1)
+    document = volume.create(desktop, b"z-associated.txt", 1)
+    volume.write(document, 0, b"Phase 13 associated document\n", 1)
     with disk.open("r+b") as f:
         f.seek(BASE)
         f.write(volume.image())
@@ -75,6 +77,12 @@ def seed_bundle(disk, bundle):
 
 def send_key(d, qcode):
     d.q.command("input-send-event", events=[d.q._ev(qcode, True), d.q._ev(qcode, False)])
+
+
+def right_click(d, x, y):
+    d.point(x, y)
+    d.q.command("input-send-event", events=[{"type": "btn", "data": {"button": "right", "down": True}}])
+    d.q.command("input-send-event", events=[{"type": "btn", "data": {"button": "right", "down": False}}])
 
 
 def checkerboard_pixels(ppm, x, y):
@@ -101,6 +109,58 @@ def interaction(disk):
         installed = tree(disk)
         assert f"/System/Applications/{APP_ID.decode()}/13/bin/probe" in installed
         assert installed[f"/Users/user/Desktop/{SOURCE.decode()}"]
+
+        # The second Desktop icon is a text document. Open With is an explicit
+        # File-cap offer; cancelling must create no process and grant no cap.
+        desktop_before_menu = d.shot("desktop-before-open-with-menu")
+        right_click(d, 52, 132)
+        menu = d.shot(
+            "desktop-document-menu",
+            lambda p: crop(p, 100, 160, 120, 24)
+            != crop(desktop_before_menu, 100, 160, 120, 24),
+        )
+        d.click(72, 172)
+        chooser = d.shot(
+            "open-with-cancel-surface",
+            lambda p: crop(p, 224, 120, 392, 356)
+            != crop(desktop_before_menu, 224, 120, 392, 356),
+        )
+        assert crop(chooser, 205, 130, 150, 18) != bytes(150 * 18 * 3)
+        send_key(d, "esc")
+        d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[1:] == baseline[1:],
+               "cancelled Open With left process or capability authority behind")
+        assert "[phase13-app] exact read-only document capability verified" not in d.serial()
+
+        # Save a handler default without launching it, then explicitly choose
+        # the installed package and prove it received only a read-only File cap.
+        desktop_before_menu = d.shot("desktop-before-open-with-default")
+        right_click(d, 52, 132)
+        d.shot(
+            "desktop-document-menu-default",
+            lambda p: crop(p, 100, 160, 120, 24)
+            != crop(desktop_before_menu, 100, 160, 120, 24),
+        )
+        d.click(72, 172)
+        d.q.type_text("phase13", gap_s=0.025)
+        before_default = tuple(map(int, COUNTERS.findall(d.serial())[-1]))
+        send_key(d, "d")
+        d.wait(lambda: "[desktop] AFS2 application handler default saved" in d.serial(),
+               "handler default was not durably saved in AFS2")
+        assert tuple(map(int, COUNTERS.findall(d.serial())[-1]))[1:] == before_default[1:], \
+            "changing a handler default changed process or capability authority"
+        association_file = tree(disk)["/Users/user/.arena-app-associations"]
+        assert association_file[:4] == b"ASOC" and APP_ID in association_file, \
+            "handler default was not persisted in the protected user AFS2 namespace"
+        send_key(d, "ret")
+        d.wait(lambda: "[phase13-app] exact read-only document capability verified" in d.serial(),
+               "selected installed handler did not read the exact document read-only")
+        d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
+               "Open With did not spawn the selected installed application")
+        assert tree(disk)[f"/Users/user/Desktop/z-associated.txt"] == b"Phase 13 associated document\n", \
+            "read-only Open With modified the source document"
+        d.click(378, 70)
+        d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[1:] == baseline[1:],
+               "read-only document application did not teardown to baseline")
 
         # The real All Applications bar control opens the receiver-verified
         # catalog. Seven Down events select the seventh row (six built-ins,
@@ -187,6 +247,7 @@ def main():
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     assert rc == 0, serial[-5000:]
     assert serial.count(SERIAL_APPS) == 2
+    assert "[phase13-app] exact read-only document capability verified" in serial
     assert "[desktop] installed application registry unavailable" not in serial
     assert "[desktop] application retired:" in serial
     assert "[app] abnormal exit stage" not in serial
