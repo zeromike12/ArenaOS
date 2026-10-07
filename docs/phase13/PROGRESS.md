@@ -341,5 +341,7 @@ subsections record the subsequent VM/heap and multi-window checkpoints.
   `1d77db78d33fe22b5c40f1758bd3c71b46c830a21f18a6e47c94b81b976c3c2a`.
   `tools/stability_loop.sh 10` passed 10/10 clean boots, zero failures, in 76
   seconds. Its receipt contains the same EFI SHA-256 and `10/10`.
-- `git diff --check` passed. This T2 evidence is ready to be preserved as the
-  next branch checkpoint.
+- `git diff --check` passed. The multi-window T2 checkpoint was committed as
+  `3fbdc50` and pushed to `origin/arena/phase13-native-app-maturity`; the
+  working tree was clean before this receipt update. Development continues on
+  the same branch.
