@@ -45,3 +45,4 @@ pub mod sync;
 pub mod tick;
 pub mod timekeeping;
 pub mod timer;
+pub mod vm;

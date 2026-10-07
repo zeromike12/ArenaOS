@@ -412,6 +412,47 @@ pub unsafe fn map_user_page_4k(
     Ok(())
 }
 
+/// Change the leaf permissions of one present user page without changing its
+/// physical backing. The caller must preflight the complete operation before
+/// invoking this for a range.
+///
+/// # Safety
+/// Ring 0, IF=0, `root` is reachable, `va` is aligned, and the current process
+/// owns the present user leaf at this address.
+pub unsafe fn protect_user_page_4k(
+    root: u64,
+    va: u64,
+    writable: bool,
+    exec: bool,
+) -> Result<(), &'static str> {
+    if !va.is_multiple_of(PAGE) || va >= 0x0000_8000_0000_0000 {
+        return Err("user protect: invalid address");
+    }
+    if writable && exec {
+        return Err("user protect: W^X violation (writable+exec)");
+    }
+    // SAFETY: caller contract; find_pte walks the owned page tables.
+    unsafe {
+        let pte = find_pte(root, va).ok_or("user protect: missing leaf")?;
+        let old = *pte;
+        if old & (PTE_PRESENT | PTE_USER) != (PTE_PRESENT | PTE_USER) {
+            return Err("user protect: leaf is not a present user page");
+        }
+        let mut flags = old & ADDR_MASK | PTE_PRESENT | PTE_USER;
+        if writable {
+            flags |= PTE_WRITE;
+        }
+        if !exec {
+            flags |= PTE_NX;
+        }
+        *pte = flags;
+        if root == (super::read_cr3() & ADDR_MASK) {
+            super::invlpg(va);
+        }
+    }
+    Ok(())
+}
+
 /// [`map_user_page_4k`] for DEVICE REGISTER windows (ADR-0021): forces
 /// the uncached cache type (PCD|PWT — WB-cached MMIO returns stale
 /// reads and swallows writes) and forces NX (device memory is never
@@ -621,6 +662,46 @@ pub unsafe fn unmap_shared_user_page(root: u64, va: u64) -> Option<u64> {
         super::invlpg(va);
         Some(old & ADDR_MASK)
     }
+}
+
+/// Remove one present user leaf and return its physical frame. This does not
+/// free that frame; the exact mapping owner must do so after whole-range
+/// preflight. Unlike the SharedRegion helper, this is for process-owned
+/// private VM pages.
+///
+/// # Safety
+/// Ring 0, IF=0, `root` is current CR3, `va` is aligned, and the caller has
+/// verified the exact private VM reservation owns this leaf.
+pub unsafe fn unmap_owned_user_page_4k(root: u64, va: u64) -> Option<u64> {
+    unsafe {
+        let pte = find_pte(root, va)?;
+        let old = *pte;
+        if old & (PTE_PRESENT | PTE_USER) != (PTE_PRESENT | PTE_USER) {
+            return None;
+        }
+        *pte = 0;
+        super::invlpg(va);
+        Some(old & ADDR_MASK)
+    }
+}
+
+/// Conservative number of intermediate page-table frames needed to map a
+/// fresh 4-KiB user range. Existing tables are intentionally not subtracted;
+/// callers can reserve this many free frames before invoking the mapper.
+pub fn page_table_frames_worst(va: u64, pages: u64) -> Option<u64> {
+    if !va.is_multiple_of(PAGE) || pages == 0 || va >= 0x0000_8000_0000_0000 {
+        return None;
+    }
+    let span = pages.checked_mul(PAGE)?;
+    let end = va.checked_add(span)?;
+    if end > 0x0000_8000_0000_0000 {
+        return None;
+    }
+    let last = end - 1;
+    let pml4_tables = (last >> 39) - (va >> 39) + 1;
+    let pd_tables = (last >> 30) - (va >> 30) + 1;
+    let pt_tables = (last >> 21) - (va >> 21) + 1;
+    pml4_tables.checked_add(pd_tables)?.checked_add(pt_tables)
 }
 
 /// Read the live 4 KiB user PTE for `va` under `pml4_phys`: `None` when

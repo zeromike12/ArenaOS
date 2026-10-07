@@ -21,10 +21,10 @@
 | 13.2 associations and Open With | Implemented; focused host and T1 guest proof passed | Signed content-type metadata filters handlers; user defaults persist in AFS2. Desktop offers only the selected File capability after an explicit choice. See the receipt below. |
 | 13.3 windows, helpers, lifecycle | Not started | Production session couples one Process child to one ordinary window. `AppInstanceTable`, `ProcessGroup`, and `WindowSet` are foundations; group/helper and multi-window production policy is absent. |
 | 13.4 streams | Not started | ABI-v2 reserves stream roles; no native stream object or endpoint exists. |
-| 13.5 VM and heap | Process-wide map validation ownership implemented; T3 preservation passed | The 80-span table now lives with Process and is shared by all threads; kernel pointer checks, `SYS_MAP_MEMORY`, and SharedRegion map/unmap use it. Reserve/commit/release/protect APIs and scalable heap remain. |
-| 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base is saved per scheduler thread; mapping validation is per thread. |
+| 13.5 VM and heap | Implemented; T1 and targeted historical regressions passed; T3 preservation passed | ADR-0095 adds exact-cap process VM reserve/commit/protect/release/query, guard pages, zeroed lazy backing, W^X, and kernel accounting. ADR-0096 adds a lazy 16 MiB ScalableHeap while preserving the Phase-12 32-page BoundedHeap. Startup, scale, runtime host, installed-app guest, and 20/20 fresh boots pass. Commit/push this checkpoint, then continue. |
+| 13.6 user threads and synchronization | Not started | Scheduler supports kernel-managed threads, but no ring-3 thread creation ABI exists. FS.base and kernel execution state are saved per scheduler thread; syscall mapping validation is shared through Process. |
 | 13.7 pressure and PIE | Not started | Existing ELF validator is static ET_EXEC-only; dynamic Image registry is 2 entries × 4 KiB. Resource pressure and ASLR scope need an ADR and guest evidence. |
-| Final qualification | Not started | No source implementation or guest evidence yet. |
+| Final qualification | Not started | No source freeze, complete historical suite, 100-boot receipt, or extracted-archive witness yet. |
 
 ## Baseline evidence before implementation
 
@@ -187,8 +187,8 @@ the source-frozen final qualification.
   arrays into static registry storage; the corrected guest boot is green.
 
 This remains a feature checkpoint. Favorites/dock composition, multi-window
-AppInstances, helper lifecycle, streams, native VM operations, scalable heap,
-user threads, synchronization, pressure, and final qualification remain open.
+AppInstances, helper lifecycle, streams, user threads, synchronization,
+pressure, and final qualification remain open.
 
 ### Process-owned user mapping inventory implementation
 
@@ -218,3 +218,59 @@ user threads, synchronization, pressure, and final qualification remain open.
   failures, in 149 seconds. The 32-session run observed 77 retained page-table
   frames after all app sessions closed; processes, regions, pages, maps, and
   caps returned to the documented baseline.
+
+### Process-owned VM and scalable heap T1
+
+- ADR-0095 adds a process-owned VM registry. Exact non-copyable VmRegion caps
+  authorize guarded reserve, zeroed lazy commit, read-only/read-execute/read-
+  write protect, exact release, and query. Admission is bounded at 128 regions
+  globally, eight per process, 4,096 pages per region, 8,192 committed pages
+  per process, 32,768 globally, and 64 pages per commit/protect operation.
+  Region records are descriptive; cap possession authorizes every operation.
+- The process-owned 80-span validation table is shared by all its threads.
+  Pointer checks require a present USER PTE for every touched page and WRITE
+  on syscall output buffers. This makes uncommitted pages, guards, read-only
+  pages, read-execute pages, MMIO, and released ranges fail closed as syscall
+  buffers.
+- ADR-0096 adds ScalableHeap alongside the unchanged Phase-12 BoundedHeap.
+  Each Phase-13 app reserves 16 MiB of virtual capacity only on first
+  allocation; reservation allocates no backing frames. Small allocations
+  reuse and coalesce within pages. Large and over-aligned allocations use
+  reusable page runs with alignment up to 2 MiB. One VM commit call is limited
+  to 64 pages. Freed backing stays committed for reuse and returns at exact
+  region release or process teardown. Fixed per-process allocator metadata is
+  28,688 bytes; the heap does not commit its full virtual limit.
+- The real ring-3 VM proof reserves four pages, verifies both guards and an
+  uncommitted page fail pointer validation, commits two zeroed pages, checks
+  per-region/global accounting, refuses duplicate commit and a wrong-kind cap,
+  reads data with RO and RX protections, rejects syscall output to protected
+  pages, refuses W+X, restores RW with data preserved, releases the exact cap,
+  rejects the stale cap and stale pointer, and observes committed/region totals
+  return to the prior value.
+- The same verified installed APB1 ELF is built with ScalableHeap as its Rust
+  global allocator. Three real launches (explicit Open With, keyboard search,
+  and pointer selection) reserve 16 MiB, commit 65 pages for a 256 KiB Vec,
+  touch each page, drop/reallocate the same run, allocate at 64 KiB alignment,
+  refuse an oversized request through try_reserve_exact, and close cleanly.
+  Query reports 65 committed heap pages rather than the 4,096-page virtual
+  capacity. The pre-heap to active-heap serial sample consumes 68 free frames
+  across the VM/heap proof, including page-table overhead; process, regions,
+  pages, maps, and caps return to identity baseline on teardown.
+- The arena-runtime host suite passed 14/14 tests. Targeted Clippy passed with
+  warnings denied for arena-runtime and the installed app. Release builds
+  passed. The installed-registry guest passed on QEMU 10.0.11 / OVMF 2025.02
+  with two simultaneous app instances and exact ProcessGroup teardown.
+- test_m12_startup.py passed 7/7 M12 controls plus M1-M7 and M11. The current
+  kernel test_m12_scale.py passed 32 live sessions, mutation-free 33rd
+  refusal, 16-close/16-reuse, and full teardown in 169.6 seconds. It observed
+  77 retained page-table frames; process, SharedRegion, page, map, and cap
+  counts returned to baseline.
+- Code review found that protection invalidation compared a process root to
+  the boot kernel root, which could leave a stale writable TLB entry. The
+  kernel now compares with the actual CR3 before invalidating the changed VA.
+  The installed-app VM/heap guest passed after this correction.
+- Rebuilt the exact EFI with SHA-256
+  287794b6d397982fb1d080b2a1e8a722541d4ef8b31ca4d00c300098db963d82 and ran
+  tools/stability_loop.sh 20: 20/20 fresh boots passed with zero failures in
+  148 seconds. The receipt binds the boot set to that exact EFI. The current
+  source is ready for its preservation commit and push.

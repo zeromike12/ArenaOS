@@ -34,6 +34,7 @@ name = "arena-phase13-installed-app"
 version = "0.1.0"
 dependencies = [
  "arena-desktop",
+ "arena-lib",
  "arena-runtime",
  "arena-startup-abi",
 ]

@@ -8,3 +8,4 @@ pub use arena_process::{handles, process};
 pub mod heap;
 pub mod startup;
 pub mod tls;
+pub mod vm;

@@ -5,6 +5,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+arena-lib = { path = "../arena-lib" }
 arena-desktop = { path = "../desktop" }
 arena-runtime = { path = "../arena-runtime" }
 arena-startup-abi = { path = "../arena-startup-abi" }

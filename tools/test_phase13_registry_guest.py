@@ -19,6 +19,8 @@ BASE = arena_env.AFS2_BASE_SECTOR * 512
 SOURCE = b"phase13.apb1"
 APP_ID = b"org.arenaos.phase13app"
 SERIAL_APPS = "[phase13-installed-app] ABI-v2 startup verified; real window published"
+SERIAL_VM = "[phase13-vm] guarded reserve, lazy commit, RW/RO/RX protection, W^X refusal, exact release/accounting passed"
+SERIAL_HEAP = "[phase13-heap] lazy 16 MiB VM heap, 256 KiB Vec, 64-page commit batches, reuse, 64 KiB alignment, fallible OOM passed"
 COUNTERS = re.compile(
     r"measured frames/records/processes/regions/pages/maps/caps="
     r"(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)\r?\n"
@@ -154,6 +156,10 @@ def interaction(disk):
         send_key(d, "ret")
         d.wait(lambda: "[phase13-app] exact read-only document capability verified" in d.serial(),
                "selected installed handler did not read the exact document read-only")
+        d.wait(lambda: d.serial().count(SERIAL_VM) == 1,
+               "installed document handler did not pass its ring-3 VM mechanism proof")
+        d.wait(lambda: d.serial().count(SERIAL_HEAP) == 1,
+               "installed document handler did not pass its scalable heap proof")
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
                "Open With did not spawn the selected installed application")
         assert tree(disk)[f"/Users/user/Desktop/z-associated.txt"] == b"Phase 13 associated document\n", \
@@ -184,6 +190,10 @@ def interaction(disk):
             )
         send_key(d, "ret")
         d.wait(lambda: d.serial().count(SERIAL_APPS) == 1, "All Applications keyboard launch did not run the installed ELF")
+        d.wait(lambda: d.serial().count(SERIAL_VM) == 2,
+               "All Applications launch did not pass its ring-3 VM mechanism proof")
+        d.wait(lambda: d.serial().count(SERIAL_HEAP) == 2,
+               "All Applications launch did not pass its scalable heap proof")
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 1,
                "installed launch did not add one live application process")
         first = d.shot("installed-window-one", lambda p: checkerboard_pixels(p, 82, 130))
@@ -199,6 +209,10 @@ def interaction(disk):
         # The filtered catalog has one row; this click is a pointer launch.
         d.click(250, 220)
         d.wait(lambda: d.serial().count(SERIAL_APPS) == 2, "search result pointer launch did not create the second app process")
+        d.wait(lambda: d.serial().count(SERIAL_VM) == 3,
+               "pointer launch did not pass its ring-3 VM mechanism proof")
+        d.wait(lambda: d.serial().count(SERIAL_HEAP) == 3,
+               "pointer launch did not pass its scalable heap proof")
         d.wait(lambda: tuple(map(int, COUNTERS.findall(d.serial())[-1]))[2] == baseline[2] + 2,
                "second installed app launch did not add its process")
         both = d.shot("installed-window-two", lambda p: checkerboard_pixels(p, 108, 154))
@@ -247,6 +261,8 @@ def main():
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     assert rc == 0, serial[-5000:]
     assert serial.count(SERIAL_APPS) == 2
+    assert serial.count(SERIAL_VM) == 3
+    assert serial.count(SERIAL_HEAP) == 3
     assert "[phase13-app] exact read-only document capability verified" in serial
     assert "[desktop] installed application registry unavailable" not in serial
     assert "[desktop] application retired:" in serial

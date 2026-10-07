@@ -191,6 +191,12 @@ pub const SYS_TLS_SET: u64 = 53;
 pub const SYS_CAP_OCCUPIED: u64 = 54;
 /// ADR-0093: entry/load base/byte length from a held exact dynamic Image.
 pub const SYS_IMAGE_INFO: u64 = 55;
+/// ADR-0095: process-owned reserve/commit/protect/release/query VM operations.
+pub const SYS_VM_RESERVE: u64 = 56;
+pub const SYS_VM_COMMIT: u64 = 57;
+pub const SYS_VM_PROTECT: u64 = 58;
+pub const SYS_VM_RELEASE: u64 = 59;
+pub const SYS_VM_QUERY: u64 = 60;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -723,6 +729,11 @@ extern "C" fn syscall_dispatch(
         SYS_TLS_SET if [a1, a2, a3, a4, a5] == [0; 5] => sys_tls_set(a0) as u64,
         SYS_CAP_OCCUPIED if [a1, a2, a3, a4, a5] == [0; 5] => sys_cap_occupied(a0) as u64,
         SYS_IMAGE_INFO if [a2, a3, a4, a5] == [0; 4] => sys_image_info(a0, a1) as u64,
+        SYS_VM_RESERVE if [a2, a3, a4, a5] == [0; 4] => sys_vm_reserve(a0, a1) as u64,
+        SYS_VM_COMMIT if [a4, a5] == [0; 2] => sys_vm_commit(a0, a1, a2, a3) as u64,
+        SYS_VM_PROTECT if [a4, a5] == [0; 2] => sys_vm_protect(a0, a1, a2, a3) as u64,
+        SYS_VM_RELEASE if [a1, a2, a3, a4, a5] == [0; 5] => sys_vm_release(a0) as u64,
+        SYS_VM_QUERY if [a2, a3, a4, a5] == [0; 4] => sys_vm_query(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -938,11 +949,11 @@ fn sys_ipc_recv_badged(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> Status {
     let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
         return STATUS_BAD_ARG;
     };
-    if !user_range_ok(a1, 32) {
+    if !user_range_writable(a1, 32) {
         return STATUS_BAD_ADDRESS;
     }
     let has_msg = a2 != 0;
-    if has_msg && !user_range_ok(a2, crate::ipc::MSG_BYTES as u64) {
+    if has_msg && !user_range_writable(a2, crate::ipc::MSG_BYTES as u64) {
         return STATUS_BAD_ADDRESS;
     }
     match crate::ipc::recv_badged(pid, eid, a3 == 1) {
@@ -1074,14 +1085,14 @@ fn sys_ipc_call(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> Status 
     let Ok(send_cap) = send_cap_of(pid, a3) else {
         return STATUS_BAD_ARG;
     };
-    if !user_range_ok(a4, IPC_BUF_BYTES) {
+    if !user_range_writable(a4, IPC_BUF_BYTES) {
         return STATUS_BAD_ADDRESS;
     }
     // IPC v1.1: optional inline message; the buffer is IN/OUT —
     // snapshotted now (caller context), reply written on resume (same
     // context: `ipc::call` blocks and wakes THIS thread).
     let has_msg = a5 != 0;
-    if has_msg && !user_range_ok(a5, crate::ipc::MSG_BYTES as u64) {
+    if has_msg && !user_range_writable(a5, crate::ipc::MSG_BYTES as u64) {
         return STATUS_BAD_ADDRESS;
     }
     let msg = if has_msg {
@@ -1122,13 +1133,13 @@ fn sys_ipc_receive(a0: u64, a1: u64, a2: u64, blocking: bool) -> Status {
     let Ok(eid) = endpoint_of(pid, a0, crate::cap::RIGHTS_READ) else {
         return STATUS_BAD_ARG;
     };
-    if !user_range_ok(a1, IPC_BUF_BYTES) {
+    if !user_range_writable(a1, IPC_BUF_BYTES) {
         return STATUS_BAD_ADDRESS;
     }
     // IPC v1.1: optional inline-message out buffer. Validated BEFORE
     // blocking so a bad pointer fails fast with a typed status.
     let has_msg = a2 != 0;
-    if has_msg && !user_range_ok(a2, crate::ipc::MSG_BYTES as u64) {
+    if has_msg && !user_range_writable(a2, crate::ipc::MSG_BYTES as u64) {
         return STATUS_BAD_ADDRESS;
     }
     let result = if blocking {
@@ -1309,7 +1320,7 @@ fn sys_image_info(image_slot: u64, out: u64) -> Status {
     if image_slot >= crate::cap::CAP_SLOTS as u64 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(out, 24) {
+    if !user_range_writable(out, 24) {
         return STATUS_BAD_ADDRESS;
     }
     let Ok(cap) = crate::cap::read(pid, image_slot as usize) else {
@@ -1506,7 +1517,7 @@ fn sys_console_read(a0: u64, a1: u64) -> Status {
     if a1 == 0 || a1 > crate::console::LINE_MAX as u64 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(a0, a1) {
+    if !user_range_writable(a0, a1) {
         return STATUS_BAD_ADDRESS;
     }
     let mut line = [0u8; crate::console::LINE_MAX];
@@ -1537,7 +1548,7 @@ fn sys_proc_list(a0: u64, a1: u64) -> Status {
     if a1 == 0 || a1 > crate::proc::MAX_PROCESSES as u64 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(a0, a1 * 16) {
+    if !user_range_writable(a0, a1 * 16) {
         return STATUS_BAD_ADDRESS;
     }
     let mut pairs = [(0u64, 0usize); crate::proc::MAX_PROCESSES];
@@ -1718,7 +1729,7 @@ fn sys_console_pull(a0: u64, a1: u64, a2: u64) -> Status {
         return 0; // the capability probe, mirroring `SYS_CONSOLE_PUSH`
     }
     let n = core::cmp::min(a2, CONSOLE_PULL_MAX) as usize;
-    if !user_range_ok(a1, n as u64) {
+    if !user_range_writable(a1, n as u64) {
         return STATUS_BAD_ADDRESS;
     }
     let mut buf = [0u8; CONSOLE_PULL_MAX as usize];
@@ -1996,6 +2007,139 @@ fn sys_map_memory(a0: u64, a1: u64) -> Status {
     chosen as Status
 }
 
+fn vm_status(error: crate::vm::VmError) -> Status {
+    match error {
+        crate::vm::VmError::BadArgument => STATUS_BAD_ARG,
+        crate::vm::VmError::Quota => STATUS_QUOTA,
+        crate::vm::VmError::Busy => STATUS_BUSY,
+        crate::vm::VmError::BadAddress => STATUS_BAD_ADDRESS,
+    }
+}
+
+/// SYS_VM_RESERVE(pages, out[3]): `[cap slot, base VA, capacity pages]`.
+/// The reservation is process-local, lazy, and has one inaccessible guard
+/// page on each side.
+fn sys_vm_reserve(pages: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(pages) = u32::try_from(pages) else {
+        return STATUS_BAD_ARG;
+    };
+    if !user_range_writable(out, 24) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let reservation = match crate::vm::reserve(pid, pages) {
+        Ok(reservation) => reservation,
+        Err(error) => return vm_status(error),
+    };
+    // SAFETY: the output span was checked as present, writable user memory;
+    // the syscall runs with IF=0 and STAC brackets the user write.
+    unsafe {
+        super::stac();
+        let dst = out as *mut u64;
+        core::ptr::write_unaligned(dst, reservation.cap_slot as u64);
+        core::ptr::write_unaligned(dst.add(1), reservation.base);
+        core::ptr::write_unaligned(dst.add(2), u64::from(reservation.pages));
+        super::clac();
+    }
+    STATUS_OK
+}
+
+/// SYS_VM_COMMIT(cap slot, offset pages, pages, protection).
+fn sys_vm_commit(slot: u64, offset: u64, pages: u64, protection: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::VmRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_WRITE == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let (Ok(offset), Ok(pages)) = (u32::try_from(offset), u32::try_from(pages)) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::vm::commit(pid, id, offset, pages, protection) {
+        Ok(()) => STATUS_OK,
+        Err(error) => vm_status(error),
+    }
+}
+
+/// SYS_VM_PROTECT(cap slot, offset pages, pages, protection).
+fn sys_vm_protect(slot: u64, offset: u64, pages: u64, protection: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::VmRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_WRITE == 0 {
+        return STATUS_BAD_ARG;
+    }
+    let (Ok(offset), Ok(pages)) = (u32::try_from(offset), u32::try_from(pages)) else {
+        return STATUS_BAD_ARG;
+    };
+    match crate::vm::protect(pid, id, offset, pages, protection) {
+        Ok(()) => STATUS_OK,
+        Err(error) => vm_status(error),
+    }
+}
+
+/// SYS_VM_RELEASE(cap slot): the exact held cap authorizes unmap/free.
+fn sys_vm_release(slot: u64) -> Status {
+    sys_cap_destroy(slot)
+}
+
+/// SYS_VM_QUERY(cap slot, out[6]): exact-cap description and committed-page
+/// accounting. Numeric IDs and returned VAs remain descriptive.
+fn sys_vm_query(slot: u64, out: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(cap) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::VmRegion { id } = cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if cap.rights & crate::cap::RIGHTS_READ == 0 {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_writable(out, 48) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let Some(values) = crate::vm::query(pid, id) else {
+        return STATUS_BAD_ARG;
+    };
+    // SAFETY: output span was checked present+writable and STAC enables the
+    // bounded user copy while this syscall runs with IF=0.
+    unsafe {
+        super::stac();
+        let dst = out as *mut u64;
+        for (index, value) in values.into_iter().enumerate() {
+            core::ptr::write_unaligned(dst.add(index), value);
+        }
+        super::clac();
+    }
+    STATUS_OK
+}
+
 // ---- block-service substrate handlers (M5.2, ADR-0022) ----------------------
 
 /// Number of u64 words `SYS_DEV_INFO` writes (the layout is frozen in
@@ -2090,7 +2234,7 @@ fn sys_dev_info(a0: u64, a1: u64) -> Status {
     let Some(pid) = crate::sched::current_proc_id() else {
         return STATUS_BAD_ARG; // kernel threads have no cap space
     };
-    if !user_range_ok(a1, DEV_INFO_WORDS * 8) {
+    if !user_range_writable(a1, DEV_INFO_WORDS * 8) {
         return STATUS_BAD_ADDRESS;
     }
     let Ok((v, bar, f)) = virtio_for_caller(pid, a0, crate::cap::RIGHTS_READ) else {
@@ -2212,7 +2356,7 @@ fn sys_display_info(slot: u64, output: u64) -> Status {
     {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(output, 40) {
+    if !user_range_writable(output, 40) {
         return STATUS_BAD_ADDRESS;
     }
     // SAFETY: validated caller-owned 40-byte region, five plain scalars;
@@ -2258,7 +2402,7 @@ fn sys_shared_create(pool: u64, pages: u64, out: u64) -> Status {
     {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(out, 24) {
+    if !user_range_writable(out, 24) {
         return STATUS_BAD_ADDRESS;
     }
     // All bounded capacity checks precede physical allocation. No staged
@@ -2481,7 +2625,7 @@ fn sys_shared_info(slot: u64, out: u64, reserved: [u64; 4]) -> Status {
     let Some((_, pages)) = crate::shared::backing(id) else {
         return STATUS_BAD_ARG;
     };
-    if !user_range_ok(out, 16) {
+    if !user_range_writable(out, 16) {
         return STATUS_BAD_ADDRESS;
     }
     // SAFETY: one IF=0 owner-context write to a prevalidated 16-byte span;
@@ -2523,7 +2667,7 @@ fn sys_shared_phys(region: u64, dma: u64, out: u64) -> Status {
     let Some((phys, pages)) = crate::shared::backing(id) else {
         return STATUS_BAD_ARG;
     };
-    if !user_range_ok(out, 24) {
+    if !user_range_writable(out, 24) {
         return STATUS_BAD_ADDRESS;
     }
     // SAFETY: prevalidated caller output and two independent held caps.
@@ -2570,7 +2714,7 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
     if a0 >= crate::cap::CAP_SLOTS as u64 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(a1, 24) {
+    if !user_range_writable(a1, 24) {
         return STATUS_BAD_ADDRESS;
     }
     let Ok(cap) = crate::cap::read(pid, a0 as usize) else {
@@ -2592,6 +2736,7 @@ fn sys_cap_describe(a0: u64, a1: u64) -> Status {
         // Held one-frame LENT type/geometry; no physical address is exposed.
         crate::cap::CapObj::Untyped { owned: false, .. } => (11, 1),
         crate::cap::CapObj::MemoryPool => (8, 0),
+        crate::cap::CapObj::VmRegion { id } if crate::vm::live(pid, id) => (14, u64::from(id)),
         crate::cap::CapObj::Rtc => (13, 0),
         crate::cap::CapObj::SharedDma => (9, 0),
         crate::cap::CapObj::ProofToken { id } if id != 0 => (10, id),
@@ -2701,7 +2846,7 @@ fn sys_resource_snapshot(a0: u64, a1: u64) -> Status {
     if !matches!(c.obj, crate::cap::CapObj::Power) || c.rights & crate::cap::RIGHTS_WRITE == 0 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(a1, 24) {
+    if !user_range_writable(a1, 24) {
         return STATUS_BAD_ADDRESS;
     }
     let counts = crate::sync::without_interrupts(|| {
@@ -2736,7 +2881,7 @@ fn sys_observe(slot: u64, out: u64) -> Status {
     if cap.obj != crate::cap::CapObj::MemoryPool || cap.rights & crate::cap::RIGHTS_READ == 0 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(out, 9 * 8) {
+    if !user_range_writable(out, 9 * 8) {
         return STATUS_BAD_ADDRESS;
     }
     let (regions, pages, maps) = crate::shared::usage_snapshot();
@@ -2843,18 +2988,39 @@ fn sys_prove_done() -> u64 {
 /// rejected, not faulted — ADR-0014). Kernel-owned self-test contexts use
 /// the single kernel-test range table.
 fn user_range_ok(buf: u64, len: u64) -> bool {
+    user_range_with_access(buf, len, false)
+}
+
+fn user_range_writable(buf: u64, len: u64) -> bool {
+    user_range_with_access(buf, len, true)
+}
+
+fn user_range_with_access(buf: u64, len: u64, writable: bool) -> bool {
     let regions = crate::sched::current_user_regions();
     let end = match buf.checked_add(len) {
         Some(e) => e,
         None => return false,
     };
+    // The current thread may be in a kernel-owned ring-3 self-test context
+    // whose mappings live in the dedicated kernel view, or in a production
+    // Process root. Read the actual CR3 so both contexts validate against the
+    // address space whose pointers the syscall will touch.
+    let root = crate::arch::x86_64::read_cr3() & 0x000F_FFFF_FFFF_F000;
     let mut page = buf & !0xFFF;
     while page < end {
         let page_end = page + 4096;
         let ok = regions
             .iter()
             .any(|&(lo, hi)| lo != 0 && page >= lo && page_end <= hi);
-        if !ok {
+        // Registered ranges include lazy VM reservations, so a range-table
+        // hit alone is not enough: every syscall buffer page must currently
+        // be present and user-accessible. Output buffers also need WRITE.
+        let mapped = unsafe { crate::arch::x86_64::paging::user_pte_flags(root, page) }
+            .is_some_and(|flags| {
+                flags & crate::arch::x86_64::paging::PTE_USER != 0
+                    && (!writable || flags & crate::arch::x86_64::paging::PTE_WRITE != 0)
+            });
+        if !ok || !mapped {
             return false;
         }
         page = page_end;
@@ -2877,7 +3043,7 @@ fn sys_rtc_read(slot: u64, out: u64) -> Status {
     if cap.obj != crate::cap::CapObj::Rtc || cap.rights & crate::cap::RIGHTS_READ == 0 {
         return STATUS_BAD_ARG;
     }
-    if !user_range_ok(out, 8) {
+    if !user_range_writable(out, 8) {
         return STATUS_BAD_ADDRESS;
     }
     let Some(seconds) = crate::rtc::read_unix_seconds() else {
@@ -2930,7 +3096,7 @@ fn sys_tls_set(base: u64) -> Status {
             STATUS_BAD_ARG
         };
     }
-    if !base.is_multiple_of(16) || !user_range_ok(base, 8) {
+    if !base.is_multiple_of(16) || !user_range_writable(base, 8) {
         return STATUS_BAD_ARG;
     }
     let Some(pid) = crate::sched::current_proc_id() else {

@@ -25,6 +25,9 @@ use arena_lib::abi::{SYS_ALLOC_FRAME, SYS_CAP_DESTROY, SYS_MAP_MEMORY, syscall1,
 
 pub const PAGE_BYTES: usize = 4096;
 pub const MAX_HEAP_PAGES: usize = 32;
+/// Maximum virtual capacity reserved by the scalable process heap (16 MiB).
+/// Physical frames remain lazy and are committed only as allocations need them.
+pub const MAX_SCALABLE_HEAP_PAGES: usize = 4096;
 pub const MAX_ALLOCATION_BYTES: usize = PAGE_BYTES - HEADER_BYTES;
 pub const HEAP_CAP_SLOT: u64 = 63;
 
@@ -193,6 +196,396 @@ unsafe impl GlobalAlloc for BoundedHeap {
     unsafe fn dealloc(&self, allocation: *mut u8, _layout: Layout) {
         let _guard = self.lock();
         // SAFETY: upheld by GlobalAlloc's caller contract.
+        unsafe { (&mut *self.state.get()).deallocate(allocation) };
+    }
+}
+
+const PAGE_UNCOMMITTED: u8 = 0;
+const PAGE_FREE_COMMITTED: u8 = 1;
+const PAGE_SMALL: u8 = 2;
+const PAGE_LARGE_START: u8 = 3;
+const PAGE_LARGE_CONT: u8 = 4;
+const LARGE_HEADER_MAGIC: u64 = 0x4152_454E_4131_3348;
+const MAX_LARGE_ALIGNMENT: usize = 2 * 1024 * 1024;
+const MAX_VM_COMMIT_PAGES: usize = 64;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LargeHeader {
+    magic: u64,
+    payload_offset: u32,
+    pages: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeapUsage {
+    pub reserved_pages: u32,
+    pub committed_pages: u32,
+    pub small_pages: u32,
+    pub large_pages: u32,
+}
+
+struct ScalableState {
+    base: usize,
+    capacity: usize,
+    page_kind: [u8; MAX_SCALABLE_HEAP_PAGES],
+    page_head: [u16; MAX_SCALABLE_HEAP_PAGES],
+    page_aux: [u32; MAX_SCALABLE_HEAP_PAGES],
+}
+
+impl ScalableState {
+    const fn new() -> Self {
+        Self {
+            base: 0,
+            capacity: 0,
+            page_kind: [PAGE_UNCOMMITTED; MAX_SCALABLE_HEAP_PAGES],
+            page_head: [0; MAX_SCALABLE_HEAP_PAGES],
+            page_aux: [0; MAX_SCALABLE_HEAP_PAGES],
+        }
+    }
+
+    fn configure(&mut self, base: usize, capacity: usize) -> bool {
+        if base == 0
+            || !base.is_multiple_of(PAGE_BYTES)
+            || capacity == 0
+            || capacity > MAX_SCALABLE_HEAP_PAGES
+            || self.capacity != 0
+        {
+            return false;
+        }
+        self.base = base;
+        self.capacity = capacity;
+        true
+    }
+
+    /// # Safety
+    /// The base must be configured, and commit must map and zero each page on
+    /// success.
+    unsafe fn allocate(
+        &mut self,
+        layout: Layout,
+        mut commit: impl FnMut(usize, usize) -> bool,
+    ) -> *mut u8 {
+        if self.capacity == 0 {
+            return ptr::null_mut();
+        }
+        if layout.align() <= ALIGNMENT
+            && let Some(needed) = block_size(layout)
+        {
+            for index in 0..self.capacity {
+                if self.page_kind[index] != PAGE_SMALL {
+                    continue;
+                }
+                let base = self.base + index * PAGE_BYTES;
+                // SAFETY: PAGE_SMALL pages were committed and initialized.
+                match unsafe { allocate_from_page(base, needed) } {
+                    Ok(Some(allocation)) => return allocation,
+                    Ok(None) => {}
+                    Err(()) => return ptr::null_mut(),
+                }
+            }
+            for index in 0..self.capacity {
+                if self.page_kind[index] != PAGE_UNCOMMITTED
+                    && self.page_kind[index] != PAGE_FREE_COMMITTED
+                {
+                    continue;
+                }
+                if self.page_kind[index] == PAGE_UNCOMMITTED {
+                    if !commit(index, 1) {
+                        return ptr::null_mut();
+                    }
+                    self.page_kind[index] = PAGE_FREE_COMMITTED;
+                }
+                let base = self.base + index * PAGE_BYTES;
+                // SAFETY: this page is committed, zeroed, and wholly free.
+                unsafe { initialize_page(base) };
+                self.page_kind[index] = PAGE_SMALL;
+                self.page_head[index] = index as u16 + 1;
+                // SAFETY: a fresh page has one free 4 KiB block.
+                return match unsafe { allocate_from_page(base, needed) } {
+                    Ok(Some(allocation)) => allocation,
+                    Ok(None) | Err(()) => ptr::null_mut(),
+                };
+            }
+            return ptr::null_mut();
+        }
+
+        let alignment = layout.align();
+        if alignment > MAX_LARGE_ALIGNMENT {
+            return ptr::null_mut();
+        }
+        let requested = layout.size().max(1);
+        let Some(worst_bytes) = requested
+            .checked_add(core::mem::size_of::<LargeHeader>())
+            .and_then(|bytes| bytes.checked_add(alignment - 1))
+        else {
+            return ptr::null_mut();
+        };
+        let worst_pages = worst_bytes.div_ceil(PAGE_BYTES);
+        if worst_pages == 0 || worst_pages > self.capacity {
+            return ptr::null_mut();
+        }
+
+        for start in 0..=self.capacity - worst_pages {
+            if !(start..start + worst_pages).all(|index| {
+                self.page_kind[index] == PAGE_UNCOMMITTED
+                    || self.page_kind[index] == PAGE_FREE_COMMITTED
+            }) {
+                continue;
+            }
+            let allocation_base = self.base + start * PAGE_BYTES;
+            let Some(payload_unaligned) =
+                allocation_base.checked_add(core::mem::size_of::<LargeHeader>())
+            else {
+                return ptr::null_mut();
+            };
+            let Some(payload) = payload_unaligned.checked_add(alignment - 1) else {
+                return ptr::null_mut();
+            };
+            let payload = payload & !(alignment - 1);
+            let Some(end) = payload.checked_add(requested) else {
+                return ptr::null_mut();
+            };
+            let pages = (end - allocation_base).div_ceil(PAGE_BYTES);
+            if pages == 0 || pages > worst_pages {
+                return ptr::null_mut();
+            }
+            if !self.ensure_committed(start, pages, &mut commit) {
+                return ptr::null_mut();
+            }
+            let payload_offset = payload - allocation_base;
+            // SAFETY: first page is committed RW; the header precedes payload.
+            unsafe {
+                (allocation_base as *mut LargeHeader).write(LargeHeader {
+                    magic: LARGE_HEADER_MAGIC,
+                    payload_offset: payload_offset as u32,
+                    pages: pages as u32,
+                });
+            }
+            for index in start..start + pages {
+                self.page_kind[index] = if index == start {
+                    PAGE_LARGE_START
+                } else {
+                    PAGE_LARGE_CONT
+                };
+                self.page_head[index] = start as u16 + 1;
+                self.page_aux[index] = if index == start { pages as u32 } else { 0 };
+            }
+            return payload as *mut u8;
+        }
+        ptr::null_mut()
+    }
+
+    fn ensure_committed(
+        &mut self,
+        start: usize,
+        pages: usize,
+        commit: &mut impl FnMut(usize, usize) -> bool,
+    ) -> bool {
+        let end = start + pages;
+        let mut index = start;
+        while index < end {
+            if self.page_kind[index] != PAGE_UNCOMMITTED {
+                index += 1;
+                continue;
+            }
+            let run_start = index;
+            while index < end && self.page_kind[index] == PAGE_UNCOMMITTED {
+                index += 1;
+            }
+            let mut committed = 0;
+            while committed < index - run_start {
+                let count = (index - run_start - committed).min(MAX_VM_COMMIT_PAGES);
+                if !commit(run_start + committed, count) {
+                    return false;
+                }
+                self.page_kind[run_start + committed..run_start + committed + count]
+                    .fill(PAGE_FREE_COMMITTED);
+                committed += count;
+            }
+        }
+        true
+    }
+
+    /// # Safety
+    /// allocation must be null or a live pointer returned by allocate.
+    unsafe fn deallocate(&mut self, allocation: *mut u8) {
+        if allocation.is_null() || self.capacity == 0 {
+            return;
+        }
+        let address = allocation as usize;
+        let Some(end) = self.base.checked_add(self.capacity * PAGE_BYTES) else {
+            return;
+        };
+        if address < self.base || address >= end {
+            return;
+        }
+        let page = (address - self.base) / PAGE_BYTES;
+        match self.page_kind[page] {
+            PAGE_SMALL => {
+                let base = self.base + page * PAGE_BYTES;
+                if address < base + HEADER_BYTES {
+                    return;
+                }
+                // SAFETY: page is a committed small-allocation page.
+                unsafe { free_in_page(base, address - base - HEADER_BYTES) };
+            }
+            PAGE_LARGE_START | PAGE_LARGE_CONT => {
+                let Some(start) = self.page_head[page].checked_sub(1).map(usize::from) else {
+                    return;
+                };
+                if start >= self.capacity || self.page_kind[start] != PAGE_LARGE_START {
+                    return;
+                }
+                let base = self.base + start * PAGE_BYTES;
+                // SAFETY: start is an allocator-owned committed page.
+                let header = unsafe { (base as *const LargeHeader).read() };
+                if header.magic != LARGE_HEADER_MAGIC
+                    || address != base + header.payload_offset as usize
+                    || header.pages == 0
+                    || start + header.pages as usize > self.capacity
+                    || self.page_aux[start] != header.pages
+                {
+                    return;
+                }
+                for index in start..start + header.pages as usize {
+                    let expected = if index == start {
+                        PAGE_LARGE_START
+                    } else {
+                        PAGE_LARGE_CONT
+                    };
+                    if self.page_head[index] != start as u16 + 1
+                        || self.page_kind[index] != expected
+                    {
+                        return;
+                    }
+                }
+                for index in start..start + header.pages as usize {
+                    self.page_kind[index] = PAGE_FREE_COMMITTED;
+                    self.page_head[index] = 0;
+                    self.page_aux[index] = 0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn usage(&self, query: crate::vm::Query) -> HeapUsage {
+        HeapUsage {
+            reserved_pages: query.capacity_pages,
+            committed_pages: query.committed_pages,
+            small_pages: self.page_kind[..self.capacity]
+                .iter()
+                .filter(|&&kind| kind == PAGE_SMALL)
+                .count() as u32,
+            large_pages: self.page_kind[..self.capacity]
+                .iter()
+                .filter(|&&kind| kind == PAGE_LARGE_START || kind == PAGE_LARGE_CONT)
+                .count() as u32,
+        }
+    }
+}
+
+/// Lazy, process-wide allocator backed by one guarded native VM reservation.
+/// Small blocks share pages; larger or over-aligned allocations use page runs.
+pub struct ScalableHeap {
+    held: AtomicBool,
+    state: UnsafeCell<ScalableState>,
+    region: UnsafeCell<Option<crate::vm::Region>>,
+}
+
+// SAFETY: the heap lock protects metadata, VM operations, and block headers
+// across all user threads sharing this process allocator.
+unsafe impl Sync for ScalableHeap {}
+
+impl ScalableHeap {
+    pub const fn new() -> Self {
+        Self {
+            held: AtomicBool::new(false),
+            state: UnsafeCell::new(ScalableState::new()),
+            region: UnsafeCell::new(None),
+        }
+    }
+
+    fn lock(&self) -> HeapGuard<'_> {
+        while self
+            .held
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        HeapGuard(&self.held)
+    }
+
+    /// Return VM-backed accounting without forcing the reservation to exist.
+    pub fn query(&self) -> Result<HeapUsage, crate::vm::Error> {
+        let _guard = self.lock();
+        // SAFETY: protected by held; the region is only created by alloc.
+        let region = unsafe { &*self.region.get() };
+        let Some(region) = region.as_ref() else {
+            return Ok(HeapUsage::default());
+        };
+        let query = region.query()?;
+        // SAFETY: protected by held; query describes this region.
+        let state = unsafe { &*self.state.get() };
+        Ok(state.usage(query))
+    }
+}
+
+impl Default for ScalableHeap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+unsafe impl GlobalAlloc for ScalableHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let _guard = self.lock();
+        // SAFETY: the lock serializes the paired region and allocator state.
+        let region_slot = unsafe { &mut *self.region.get() };
+        if region_slot.is_none() {
+            let Ok(region) = crate::vm::Region::reserve(MAX_SCALABLE_HEAP_PAGES as u32) else {
+                return ptr::null_mut();
+            };
+            // SAFETY: the reservation is fresh, aligned, and bounded.
+            if !unsafe {
+                (&mut *self.state.get()).configure(region.base() as usize, region.pages() as usize)
+            } {
+                let _ = region.release();
+                return ptr::null_mut();
+            }
+            *region_slot = Some(region);
+        }
+        let Some(region) = region_slot.as_ref() else {
+            return ptr::null_mut();
+        };
+        // SAFETY: region and allocator state are protected by held.
+        unsafe {
+            (&mut *self.state.get()).allocate(layout, |start, pages| {
+                let mut committed = 0;
+                while committed < pages {
+                    let count = (pages - committed).min(MAX_VM_COMMIT_PAGES);
+                    if region
+                        .commit(
+                            (start + committed) as u32,
+                            count as u32,
+                            crate::vm::Protection::READ_WRITE,
+                        )
+                        .is_err()
+                    {
+                        return false;
+                    }
+                    committed += count;
+                }
+                true
+            })
+        }
+    }
+
+    unsafe fn dealloc(&self, allocation: *mut u8, _layout: Layout) {
+        let _guard = self.lock();
+        // SAFETY: upheld by GlobalAlloc's caller contract; state is locked.
         unsafe { (&mut *self.state.get()).deallocate(allocation) };
     }
 }
@@ -509,5 +902,82 @@ mod tests {
         );
         assert!(!provider_called);
         assert_eq!(state.page_count, 0);
+    }
+
+    #[test]
+    fn scalable_heap_commits_lazily_aligns_reuses_and_refuses_oom() {
+        const TEST_PAGES: usize = 80;
+        let mut pages = [TestPage::filled(0xA5); TEST_PAGES];
+        let base = pages[0].0.as_mut_ptr() as usize;
+        let mut state = ScalableState::new();
+        assert!(state.configure(base, TEST_PAGES));
+        let mut committed = [false; TEST_PAGES];
+        let mut commit_calls = 0;
+
+        let large_layout = Layout::from_size_align(256 * 1024, 16).unwrap();
+        let large = unsafe {
+            state.allocate(large_layout, |start, count| {
+                assert!(count <= MAX_VM_COMMIT_PAGES);
+                assert!((start..start + count).all(|page| !committed[page]));
+                committed[start..start + count].fill(true);
+                ptr::write_bytes(
+                    (base + start * PAGE_BYTES) as *mut u8,
+                    0,
+                    count * PAGE_BYTES,
+                );
+                commit_calls += 1;
+                true
+            })
+        };
+        assert!(!large.is_null());
+        assert_eq!((large as usize) & 15, 0);
+        assert_eq!(commit_calls, 2, "large commits are split at 64 pages");
+        assert_eq!(committed.iter().filter(|&&value| value).count(), 65);
+        unsafe {
+            large.write(0x31);
+            large.add(256 * 1024 - 1).write(0x79);
+            assert_eq!(large.read(), 0x31);
+            assert_eq!(large.add(256 * 1024 - 1).read(), 0x79);
+            state.deallocate(large);
+        }
+        assert!(
+            state.page_kind[..65]
+                .iter()
+                .all(|&kind| kind == PAGE_FREE_COMMITTED)
+        );
+        let reused = unsafe {
+            state.allocate(large_layout, |_, _| {
+                panic!("committed pages must be reused")
+            })
+        };
+        assert_eq!(reused, large);
+        unsafe { state.deallocate(reused) };
+
+        let aligned_layout = Layout::from_size_align(24, 64 * 1024).unwrap();
+        let aligned = unsafe {
+            state.allocate(aligned_layout, |start, count| {
+                committed[start..start + count].fill(true);
+                ptr::write_bytes(
+                    (base + start * PAGE_BYTES) as *mut u8,
+                    0,
+                    count * PAGE_BYTES,
+                );
+                true
+            })
+        };
+        assert!(!aligned.is_null());
+        assert_eq!((aligned as usize) & (64 * 1024 - 1), 0);
+        unsafe { state.deallocate(aligned) };
+
+        let before_kinds = state.page_kind;
+        let too_large =
+            Layout::from_size_align(MAX_SCALABLE_HEAP_PAGES * PAGE_BYTES + 1, 16).unwrap();
+        let refusal = unsafe {
+            state.allocate(too_large, |_, _| {
+                panic!("oversize OOM must not commit pages")
+            })
+        };
+        assert!(refusal.is_null());
+        assert_eq!(state.page_kind, before_kinds);
     }
 }

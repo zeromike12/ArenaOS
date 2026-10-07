@@ -51,6 +51,15 @@ pub const SYS_OBSERVE: u64 = 44;
 pub const SYS_SPAWN_CHECK: u64 = 45;
 /// ADR-0093: query validated startup metadata from a held dynamic Image cap.
 pub const SYS_IMAGE_INFO: u64 = 55;
+/// ADR-0095: process-owned native VM reservation and mapping operations.
+pub const SYS_VM_RESERVE: u64 = 56;
+pub const SYS_VM_COMMIT: u64 = 57;
+pub const SYS_VM_PROTECT: u64 = 58;
+pub const SYS_VM_RELEASE: u64 = 59;
+pub const SYS_VM_QUERY: u64 = 60;
+pub const VM_PROT_READ: u64 = 1;
+pub const VM_PROT_WRITE: u64 = 2;
+pub const VM_PROT_EXEC: u64 = 4;
 /// ADR-0071: endpoint READ + notification READ|WRITE; a CALL queued while
 /// no server is parked in RECV ORs `badge` into the bound notification.
 pub const SYS_ENDPOINT_BIND: u64 = 46;
@@ -74,6 +83,8 @@ pub const SYS_CAP_OCCUPIED: u64 = 54;
 pub const CAP_SLOTS: usize = 128;
 /// Startup ABI and capability-inventory kind for a held Process cap.
 pub const CAP_KIND_PROCESS: u8 = 4;
+/// ADR-0095: process-owned native VM reservation capability.
+pub const CAP_KIND_VM_REGION: u8 = 14;
 /// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
 pub const MAX_SPAWN_INHERIT: usize = 5;
 /// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
@@ -161,6 +172,9 @@ pub const MGR_BADGE_PKG_EXIT: u64 = 1 << 18;
 /// revalidates and forwards the held BadgedEndpoint after packaged READY.
 pub const MGR_BADGE_APB1_INSTALL_AUTH: u64 = 1 << 22;
 /// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
+pub const STATUS_BAD_CALL: i64 = -1;
+pub const STATUS_BAD_ARG: i64 = -2;
+pub const STATUS_BAD_ADDRESS: i64 = -3;
 pub const STATUS_BUSY: i64 = -4;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------

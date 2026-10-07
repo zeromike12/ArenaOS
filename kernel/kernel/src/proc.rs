@@ -326,6 +326,9 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             }
             let freed = paging::destroy_user_half(p.pml4_phys) as u64;
             frames::free(p.pml4_phys).map_err(|_| "destroy: root frame free rejected")?;
+            // The user-half walk above already reclaimed VM backing pages.
+            // Forget only its accounting metadata so no frame is freed twice.
+            crate::vm::forget_process(pid);
             // A dying capspace drops every Image reference, including
             // inherited and IPC-landed copies, before releasing its slot.
             p.caps.each_cap(crate::image_registry::drop_cap);

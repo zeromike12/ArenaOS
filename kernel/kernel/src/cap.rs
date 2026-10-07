@@ -113,6 +113,9 @@ pub enum CapObj {
     SharedRegion { id: u32 },
     /// Grants allocation (WRITE); never grants physical access by itself.
     MemoryPool,
+    /// ADR-0095: a process-owned native VM reservation. The generation-safe
+    /// ID is meaningful only through this exact non-copyable capability.
+    VmRegion { id: u32 },
     /// Phase 11.5: read-only CMOS wall clock (READ = `SYS_RTC_READ`). Wall
     /// time stamps file times; it is data, never authority.
     Rtc,
@@ -506,6 +509,9 @@ pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
         // cleared: the loud refusal beats a silent leak.
         if let CapObj::Untyped { phys, owned: true } = cap.obj {
             crate::frames::free(phys).map_err(|_| "cap destroy: untyped frame free refused")?;
+        }
+        if let CapObj::VmRegion { id } = cap.obj {
+            crate::vm::release(pid, id).map_err(|_| "cap destroy: VM region release refused")?;
         }
         install(pid, slot, Cap::EMPTY)
     })

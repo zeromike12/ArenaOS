@@ -25,6 +25,8 @@ pub const CAP_KIND_IMAGE_REGISTRAR: u8 = 5;
 pub const CAP_KIND_BOOT_IMAGE: u8 = 6;
 pub const CAP_KIND_SHARED_REGION: u8 = 7;
 pub const CAP_KIND_MEMORY_POOL: u8 = 8;
+/// ADR-0095: process-owned native VM reservation capability.
+pub const CAP_KIND_VM_REGION: u8 = 14;
 pub const CAP_KIND_SHARED_DMA: u8 = 9;
 pub const CAP_KIND_PROOF_TOKEN: u8 = 10;
 pub const CAP_KIND_UNTYPED: u8 = 11;

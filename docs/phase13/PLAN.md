@@ -71,7 +71,25 @@ region table. Ordinary mapped pages have no release/protection operation;
 process teardown reclaims the address space. This mapping model cannot safely
 support multiple user threads sharing heap and syscall buffers.
 
-## Implementation status after the first T1 checkpoint
+## Current implementation state
+
+## Current native resource additions
+
+The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
+
+| Resource | Current bound / behavior | Source |
+|---|---:|---|
+| Process-owned VM regions | 128 global; 8 per process; 4,096 pages (16 MiB) per region | kernel::vm, ADR-0095 |
+| Committed native VM pages | 8,192 per process; 32,768 global | kernel::vm |
+| Commit/protect operation | at most 64 pages; refusal leaves its PTE and accounting set unchanged | kernel::vm |
+| Process user spans | 80 per process, shared by all its threads; each VM region occupies one span including both guards | ADR-0094/0095 |
+| Scalable application heap | 4,096 pages (16 MiB) reserved lazily; physical frames committed on allocation | arena-runtime::heap, ADR-0096 |
+| Scalable heap alignment | ordinary block alignment 16 bytes; page-run alignment up to 2 MiB | ADR-0096 |
+| Scalable heap committed backing | retained for reuse after deallocation; exact VM region release or process teardown returns frames | ADR-0095/0096 |
+
+The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
+The Phase-13 application opts into ScalableHeap; no reserved capability slot
+is borrowed as a transient frame holder.
 
 The initial audit above describes the branch at its starting SHA. The first
 implementation checkpoint now integrates protected installed APB1 enumeration
@@ -87,7 +105,7 @@ associations and an AFS2-persisted Open With flow. Its T1 guest proof verifies
 that a saved default creates no authority and that an explicitly selected
 installed handler receives the exact read-only File capability. Remaining
 work includes launcher favorites/dock behavior, true multi-window instances,
-helper lifecycle, byte streams, process-wide VM, scalable heap, user threads,
+helper lifecycle, byte streams, user threads,
 synchronization, mixed-load pressure, and final qualification. The dynamic
 Image envelope is a bounded executable staging mechanism; it is not process
 VM and does not imply PIE or ASLR support. See `PROGRESS.md` for measured

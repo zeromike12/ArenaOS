@@ -142,3 +142,5 @@ What this constrains or enables later; what would trigger revisiting.
 | [0092](0092-installed-application-registry-and-launch-authority.md) | Boot-integrated APB1 registry and exact verified Image launch authority | Accepted; registry launch and teardown guest-qualified, full negative controls pending |
 | [0093](0093-bounded-native-image-envelope.md) | Bounded native Image storage, load-page, and dynamic child envelope | Accepted for Phase 13; install/launch guest passes, full refusal matrix pending |
 | [0094](0094-process-owned-user-mapping-inventory.md) | Process-owned mapping validation shared by all address-space threads | Accepted; M12 startup, 32-session, installed-app guests and 20/20 boots passed |
+| [0095](0095-process-owned-native-vm.md) | Guarded process-owned native VM regions with exact-cap commit, protect, query, and release | Accepted; ring-3 VM proof and 20/20 fresh boots passed |
+| [0096](0096-scalable-native-heap.md) | Lazy 16 MiB native application heap backed by process-owned VM | Accepted; host allocator tests and signed installed-app guest proof passed |
