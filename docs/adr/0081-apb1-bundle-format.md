@@ -83,7 +83,7 @@ non-weak-key, strict Ed25519 verifier. A fingerprint is not a trust decision.
 | 40 | 32 | package ID, same rule |
 | 72 | 32 | display label: 1..31 printable ASCII bytes, NUL then zero padding |
 | 104 | 8 | application version, nonzero |
-| 112 | 4 | flags; only bit 0 multi-instance, bit 1 background, bit 2 headless |
+| 112 | 4 | flags; bits 0..4 are defined: multi-instance, background, headless, standard-stream request, native-sync request |
 | 116 | 4 | requested-capability hints; only bits 0 document-read, 1 document-write, 2 network-client, 3 persistent-background |
 | 120 | 64 | entry path, 1..63 bytes then NUL/zero padding |
 | 184 | 64 | optional icon path, either all zero or 1..63 bytes then NUL/zero padding |
@@ -95,7 +95,11 @@ non-weak-key, strict Ed25519 verifier. A fingerprint is not a trust decision.
 A non-headless window is 80..=1024 by 60..=768. A headless manifest may use
 exactly 0×0 and must have the headless flag. Request bits and app flags are
 metadata only: they never create capabilities, authorize launch, confer a
-filesystem lineage, or trigger background execution. Unknown bits refuse.
+filesystem lineage, or trigger background execution. Phase 13 defines bit 3
+as a request for the trusted launcher to offer native standard streams and
+bit 4 as a request for a per-instance native synchronization domain. The
+launcher still checks current receiver policy and explicitly mints those
+capabilities. Unknown bits refuse.
 
 ### File table (144 bytes per row)
 
@@ -142,6 +146,8 @@ objects) to prevent a source-swap/time-of-check gap.
 ## Consequences
 
 - APKG v1 bytes, limits, public-key policy, and tests are untouched.
+- APB1 v1's Phase-13 manifest extension defines two additional request hints;
+  older Phase-12 receivers that reject those unknown bits remain fail-closed.
 - APB1 decoding can be bounded and no-alloc; the 64-entry table determines a
   fixed metadata cap, and each payload read is at most 4 KiB.
 - Host independent vectors include a valid three-file bundle, a 32 KiB

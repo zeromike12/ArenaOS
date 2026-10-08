@@ -70,7 +70,7 @@ def type_historical_input_fixture(sock: Path, serial: Path) -> None:
 
 
 def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE10',
-         after=None, launches: int = 2) -> None:
+         after=None, launches: int = 2, retirements: int | None = None) -> None:
     sha = verified_inputs(qualified)
     with tempfile.TemporaryDirectory(prefix='arena-phase10-extracted-') as tmp:
         work = Path(tmp)
@@ -139,7 +139,8 @@ def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE1
                     # ADR-0075: twelve desktop clocks; the table is still exactly full.
                     or 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' not in text
                     or text.count('[desktop] real application spawned;') != launches
-                    or text.count('[desktop] application retired:') != launches
+                    or text.count('[desktop] application retired:') !=
+                       (launches if retirements is None else retirements)
                     or 'halting via UEFI ResetSystem(shutdown)' not in text
                     or dns_log.read_text().count('DNS_FIXTURE_QUERY ') != 3
                     or 'TCP_FIXTURE_PASS request=arena-tcp bytes=200 eof=True' not in tcp_log.read_text()

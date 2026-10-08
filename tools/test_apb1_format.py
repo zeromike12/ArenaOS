@@ -55,6 +55,39 @@ class TestApb1Reference(unittest.TestCase):
         self.assertEqual(parsed.bundle_digest, hashlib.sha256(valid).digest())
         self.assertEqual(parsed.payload_offset, len(parsed.metadata) + 64)
 
+    def test_phase13_stream_and_sync_manifest_hints_are_known_but_unknown_bits_refuse(self):
+        declared = apb.make_manifest(
+            app_id=b"org.arenaos.phase13app",
+            package_id=b"org.arena.editor",
+            display_name=b"Phase13 Probe",
+            version=13,
+            flags=0x1F,
+            requested=0,
+            entry=b"bin/probe",
+            icon=b"",
+            width=320,
+            height=180,
+            associations=(b"text/plain",),
+        )
+        bundle = apb.build_bundle([(1, b"bin/probe", b"native image")], manifest=declared)
+        self.assertEqual(apb.parse_bundle(bundle).metadata[HEADER_FLAGS_OFFSET:HEADER_FLAGS_OFFSET + 4],
+                         (0x1F).to_bytes(4, "little"))
+        unknown = apb.make_manifest(
+            app_id=b"org.arenaos.phase13app",
+            package_id=b"org.arena.editor",
+            display_name=b"Phase13 Probe",
+            version=13,
+            flags=0x20,
+            requested=0,
+            entry=b"bin/probe",
+            icon=b"",
+            width=320,
+            height=180,
+            associations=(b"text/plain",),
+        )
+        with self.assertRaisesRegex(apb.Refusal, "reserved manifest bits"):
+            apb.parse_bundle(apb.build_bundle([(1, b"bin/probe", b"native image")], manifest=unknown))
+
     def test_signed_hostile_metadata_controls_refuse(self):
         for name in ("traversal.apb1", "duplicate.apb1", "prefix-conflict.apb1",
                      "noncanonical.apb1", "reserved-record.apb1",
@@ -143,6 +176,7 @@ class TestApb1Reference(unittest.TestCase):
 # File table begins after the 64-byte header and 512-byte manifest. The first
 # row's five reserved bytes begin at its byte 3.
 HEADER_RESERVED_OFFSET = apb.HEADER_BYTES + apb.MANIFEST_BYTES + 3
+HEADER_FLAGS_OFFSET = apb.HEADER_BYTES + 112
 
 
 if __name__ == "__main__":

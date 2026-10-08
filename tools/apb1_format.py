@@ -25,6 +25,9 @@ MAX_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_METADATA_BYTES = HEADER_BYTES + MANIFEST_BYTES + MAX_FILES * RECORD_BYTES
 MAX_SIGNED_BYTES = len(DOMAIN) + MAX_METADATA_BYTES
 CHUNK_BYTES = 4096
+# Phase 13 adds signed stream/synchronization request hints in bits 3 and 4.
+# These bits remain descriptive; launch policy mints the actual capabilities.
+KNOWN_APP_FLAGS = 0x1F
 RFC_SEED = bytes.fromhex(
     "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 )
@@ -216,7 +219,7 @@ def _parse_manifest(data: bytes) -> tuple[bytes, bytes, bytes, int, int, int, by
     entry_field, icon_field = data[120:184], data[184:248]
     width, height = int.from_bytes(data[248:250], "little"), int.from_bytes(data[250:252], "little")
     assoc_count = int.from_bytes(data[252:256], "little")
-    if version == 0 or flags & ~7 or requests & ~15:
+    if version == 0 or flags & ~KNOWN_APP_FLAGS or requests & ~15:
         raise Refusal("reserved manifest bits")
     if (width, height) == (0, 0):
         if not flags & 4:
