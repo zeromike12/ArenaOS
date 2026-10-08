@@ -136,8 +136,8 @@ The full targeted M12 guest was rerun and passed: its filesystem setup
 completed, all 32 Desktop sessions started, session 33 was refused without
 resource mutation, 16 sessions were closed and reused, and final counts
 returned exactly to baseline. It took 259.1 seconds and is recorded in
-`build/m12-scale-afterfix.log` and `build/serial-m12-scale.log`. The full suite
-must confirm this case again before release qualification. T2 then passed
+`build/m12-scale-afterfix.log` and `build/serial-m12-scale.log`. The corrected
+full-suite run also completed M12 scale successfully. T2 then passed
 10/10 clean boots in 98 seconds and T3 passed 25/25 in 249 seconds on EFI
 SHA-256 `418c63acbf9eee0eadb6dd8de21e860bddd5e868d612028d7e93cb45e8d1ff2f`.
 Each boot had the same complete nine-suite PASS set, orderly UEFI shutdown,
@@ -146,6 +146,20 @@ application lifecycle checks. The M5 filesystem self-test also completed on
 each boot. Receipts and logs are `build/phase14-stability-t2-receipt.txt`,
 `build/phase14-stability-t3-receipt.txt`, and their matching `*-t2.log` and
 `*-t3.log` files.
+
+The canonical 119-group run completed 118 groups and exposed one historical
+M9 mutation-test harness race. `test_m9_client_death_red.py` sent its QMP `x`
+from a separate typist as soon as window B painted, before the kernel's
+initial compositor live-client check completed. The guest correctly failed
+closed at that earlier startup guard, so the intended post-startup copied-
+region timeout was never reached; its screenshot assertion also read a stale
+PPM left by an earlier run. The production implementation and restored QMP
+pixel/uncover test passed. The control now captures the focused surface and
+sends `x` in one marker-paced callback, captures a fresh post-exit frame during
+the bounded retirement window, and requires the kernel's compositor-ready log
+before accepting the red result. The targeted control now passes its real
+stale-pixel/deadline red check and restored production green check. A fresh
+complete 119-group run remains pending.
 
 After those changes, `tools/test_phase14_pie_guest.py` again installed and ran
 the signed application twice and returned exit 42 with exact process/Image
