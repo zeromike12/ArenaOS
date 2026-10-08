@@ -26,12 +26,27 @@ guest path, QEMU/EDK2 as used by `tools/mtest.py`.
 python3 experiments/c-runtime/run.py build                 # both compilers (gcc, clang via zig)
 python3 experiments/c-runtime/run.py audit                 # STATIC: loader rules, no SSE/x87, TLS symbols
 python3 experiments/c-runtime/run.py abi                   # STATIC: C ABI numbers vs userspace/abi.rs
-python3 experiments/c-runtime/run.py host                  # HOST-ONLY: 42 checks, ASan+UBSan
+python3 experiments/c-runtime/run.py host                  # HOST-ONLY: 598 checks, ASan+UBSan (C1 count)
 python3 experiments/c-runtime/run.py --cc gcc guest        # GUEST: scratch tree, boot, probe
 python3 experiments/c-runtime/run.py --cc gcc guest --baseline   # GUEST control, unpatched tree
 ```
 
 Each subcommand runs once per invocation. `--cc` can repeat (`--cc gcc --cc clang`).
+
+### C1 native application (current)
+
+```
+cd experiments/c-runtime
+python3 run.py build
+python3 guest_native.py --cc clang --runs 5   # GUEST: signed native app + stream-less negative package
+python3 guest_native.py --cc gcc --runs 5     # GUEST
+```
+
+`guest_native.py` judges each run with exact verdicts: the nine group lines, the
+RESULT line, and the exit order `[58, 57]`. It writes
+`build/guest-native/bundle-identity.json` and `summary-<cc>.json`. The app is
+`app/c_native_app.c`; the C1 runtime is in `src/`. The RFC 8032 fixture is
+test-only. See `docs/compat/C1-FINAL-REPORT.md` for results and hashes.
 
 Outputs go to `experiments/c-runtime/build/` (git-ignored by the repo's
 `build/` rule). `build/summary.json` holds the last run's verdicts;
