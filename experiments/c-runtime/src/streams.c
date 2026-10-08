@@ -218,7 +218,7 @@ int arena_stdio_init(void) {
         return 0;
     }
     const arena_startup_t *s = arena_startup();
-    if (!s->present || (s->flags & ARENA_ARST_FLAG_STANDARD_STREAMS) == 0 ||
+    if (s == NULL || !s->present || (s->flags & ARENA_ARST_FLAG_STANDARD_STREAMS) == 0 ||
         s->stream_set == ARENA_ARST_NONE || s->stream_wake == ARENA_ARST_NONE) {
         return ARENA_E_NO_STREAMS;
     }

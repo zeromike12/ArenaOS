@@ -498,6 +498,18 @@ void arena_vm_host_reset(void);
 
 /* Commit refusal in a running process: a request that needs uncommitted
  * space must be refused, and nothing already live may change. */
+/* C1.1: a process without a stream grant must fail stdio setup cleanly with
+ * ARENA_E_NO_STREAMS and never touch a stream ring. The host startup stub
+ * returns no record at all, which is the "no grant" case. */
+static void test_stdio_missing_grant(void) {
+    int rc = arena_stdio_init();
+    CHECK(rc == ARENA_E_NO_STREAMS, "missing stream grant: stdio_init returns ARENA_E_NO_STREAMS (got %d)", rc);
+    long w = arena_stream_write_some(1, "x", 1);
+    CHECK(w < 0, "missing stream grant: stdout write is refused, not silently accepted (got %ld)", w);
+    long r = arena_stream_read_some(0, (char[1]){0}, 1);
+    CHECK(r < 0, "missing stream grant: stdin read is refused (got %ld)", r);
+}
+
 static void test_vm_commit_refusal(void) {
     struct arena_heap_stats b0, end;
     arena_heap_stats(&b0);
@@ -624,6 +636,7 @@ int main(int argc, char **argv) {
     test_allocator_contract();
     test_allocator_stress();
     test_allocator_hardening();
+    test_stdio_missing_grant();
     test_vm_commit_refusal();
     test_vm_reserve_refusal();
     test_ring_wrap();
