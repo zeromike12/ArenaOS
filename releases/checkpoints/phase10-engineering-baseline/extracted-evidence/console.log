@@ -1,0 +1,168 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: failed to load Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x2,0x0): Not Found
+BdsDxe: loading Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+contest: hello from ArenaOS
+consoled: console mode — the port is a second console (serial stays the kernel's own)
+[arena INFO  sched] thread_main(proc): id=189 entry=ffffffff9cbbe280 arg=7 cr3=1b9000
+servicemgr: ring-3 boot (Phase 8.0 bounded-restart substrate)
+servicemgr: live caps image17 netd=3 stack=7 rngd=4
+[arena INFO  sched] spawn(proc): id=191 slot=10 entry=ffffffff9cbbe280 cr3=20f000
+[arena INFO  sched] thread_main(proc): id=190 entry=ffffffff9cbbe280 arg=8 cr3=1d3000
+[arena INFO  m8] manager-owned dependency probe pid 95: netd/W rngd/W private-notification/W audited, no privileged extras
+[arena INFO  sched] thread_main(proc): id=191 entry=ffffffff9cbbe280 arg=9 cr3=20f000
+configd: SET refused without receiving-service authority
+storaged: READ  sector 0 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
+configd: SET refused without receiving-service authority
+depcheck: production driver poison opcodes refused without marker
+configd: SET refused without receiving-service authority
+storaged: READ  sector 1 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+depcheck: netd MAC answered
+[arena INFO  syscall] map_memory: pid 95 window va=0x40000000 pages=1 writable=true mmio=false
+configd: SET refused without receiving-service authority
+storaged: READ  sector 2 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
+configd: SET refused without receiving-service authority
+rngd: GET 64 bytes buf 0x000000000021f000 → device wrote 64 (completion #1)
+depcheck: rngd device completed 64 varied bytes
+configd: SET refused without receiving-service authority
+servicemgr: active netd MAC and rngd entropy probes passed; worker reaped
+servicemgr: policy validated from live caps and ready drivers
+[arena INFO  sched] spawn(proc): id=192 slot=10 entry=ffffffff9cbbe280 cr3=20f000
+storaged: READ  sector 21 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
+[arena INFO  sched] thread_main(proc): id=192 entry=ffffffff9cbbe280 arg=9 cr3=20f000
+netstackd: starting — ArenaOS network stack service (M7.1, ADR-0030)
+[arena INFO  syscall] map_memory: pid 96 window va=0x40000000 pages=1 writable=true mmio=false
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 22 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
+rngd: GET 64 bytes buf 0x0000000000226000 → device wrote 64 (completion #2)
+configd: SET refused without receiving-service authority
+netstackd: drew 8 unguessable UDP handles from rngd — possession of one IS the authority to use its port
+netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted
+netstackd: UDP checksum self-test PASSED 4/4 — outgoing nonzero and valid, incoming valid/nonzero accepted, corruption counted, IPv4 zero-checksum accepted
+netstackd: ready — ARP over IPv4 for 52:54:00:12:34:56, cache 8 entries, TTL 30s; netd stays L2
+storaged: READ  sector 23 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #6, used idx 6)
+servicemgr: production netstackd READY pid 96
+[arena INFO  sched] spawn(proc): id=193 slot=11 entry=ffffffff9cbbe280 cr3=229000
+[arena INFO  sched] spawn(proc): id=194 slot=12 entry=ffffffff9cbbe280 cr3=23b000
+configd: SET refused without receiving-service authority
+[arena INFO  sched] thread_main(proc): id=193 entry=ffffffff9cbbe280 arg=10 cr3=229000
+permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty
+[arena INFO  syscall] map_memory: pid 97 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=194 entry=ffffffff9cbbe280 arg=11 cr3=23b000
+configd: SET refused without receiving-service authority
+storaged: READ  sector 24 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #7, used idx 7)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 25 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #8, used idx 8)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 26 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #9, used idx 9)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 27 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #10, used idx 10)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 28 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
+configd: SET refused without receiving-service authority
+configread: SET absent/wrong-kind refused x20 by receiver
+storaged: READ  sector 1 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #12, used idx 12)
+fsd: reclaimed 8 superseded metadata sector(s) from commit seq 2
+fsd: mounted AFS1 — commit seq 3, objtab@21, bitmap@25, 16384 sectors, 16363 free, 1 file(s)
+permissiond: validated durable policy generation 0 DENY
+configd: READ UNSET
+configread: READ UNSET
+servicemgr: permission PING result + exit before deadline; worker reaped
+servicemgr: permissiond READY (validated durable decision; bearer table fresh)
+[arena INFO  sched] spawn(proc): id=195 slot=12 entry=ffffffff9cbbe280 cr3=23b000
+servicemgr: permission app SPAWNED (not grant/approval)
+[arena INFO  sched] spawn(proc): id=196 slot=13 entry=ffffffff9cbbe280 cr3=24e000
+[arena INFO  sched] spawn(proc): id=197 slot=14 entry=ffffffff9cbbe280 cr3=27b000
+[arena INFO  sched] thread_main(proc): id=195 entry=ffffffff9cbbe280 arg=11 cr3=23b000
+permapp: REQUEST arena.txt READ (not authority)
+permapp: audited ONLY mediator WRITE|COPY, 31 other cap slots empty
+[arena INFO  sched] thread_main(proc): id=196 entry=ffffffff9cbbe280 arg=12 cr3=24e000
+[arena INFO  syscall] map_memory: pid 100 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=197 entry=ffffffff9cbbe280 arg=13 cr3=27b000
+configd: READ UNSET
+configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)
+[arena INFO  kernel] configread: boot-root reader reaped; no update authority delegated
+[arena INFO  sched] spawn(proc): id=198 slot=9 entry=ffffffff9cbbe280 cr3=1d3000
+packaged: observed initial cap occupancy 6
+
+packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified
+[arena INFO  sched] thread_main(proc): id=198 entry=ffffffff9cbbe280 arg=8 cr3=1d3000
+servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)
+permapp: endpoint-only ALLOW/DENY/REVOKE refused by receiver
+configup: SKIP (no trusted test intent; no SET)
+[arena INFO  kernel] configup: boot-root updater reaped; marker never delegated to shell
+[arena INFO  sched] spawn(proc): id=199 slot=9 entry=ffffffff9cbbe280 cr3=1d3000
+[arena INFO  kernel] displayd spawned: pid 103; GOP=true virtio-gpu=false; sole framebuffer/BAR holder
+[arena INFO  sched] thread_main(proc): id=199 entry=ffffffff9cbbe280 arg=8 cr3=1d3000
+[displayd] GPU fallback reason: no covering modern GPU BAR cap
+[displayd] SharedRegion guest authority/zero/copy/mapping PASS
+[displayd] diagnostic shared region fully unmapped
+[arena INFO  syscall] map_memory: pid 103 window va=0x40200000 pages=469 writable=true mmio=true
+[displayd] ring3 GOP pixels ready (staged font v2)
+[arena INFO  kernel] displayd resources at parked boundary: shared 1/8 runs, 469/2048 pages, 1/32 maps; caps 5/32; free frames 114516; live processes 13
+[arena INFO  sched] spawn(proc): id=200 slot=14 entry=ffffffff9cbbe280 cr3=283000
+[arena INFO  sched] thread_main(proc): id=200 entry=ffffffff9cbbe280 arg=13 cr3=283000
+permapp: malformed version/duplicate/rights/op refused by receiver x4
+permapp: ACQUIRE denied (no approval)
+servicemgr: permission app reaped through held Process cap
+[displayprobe] ring3 MODE/cap-refusal/PRESENT 80x drain PASS
+[arena INFO  m9] displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS
+[arena INFO  sched] spawn(proc): id=201 slot=12 entry=ffffffff9cbbe280 cr3=23b000
+[arena INFO  m10] desktop broker spawned with explicit delegated grants; application Process/region ownership remains userspace
+[arena INFO  sched] spawn(proc): id=202 slot=14 entry=ffffffff9cbbe280 cr3=75d000
+[arena INFO  m10] late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image
+[arena INFO  kernel] shell spawned: pid 106 (caps: 0=Power/W 1=Image0/R 2=Notif13/RW 3=Endpoint1/W) — the console is live; type 'help'
+[arena INFO  m8] lifecycle protected refs shell=106 manager=93 netd=89 rngd=90; foreign placeholder READ-only
+[arena INFO  kernel] servicemgr: full fixture notification budget 25/25; twenty-sixth refused
+[arena INFO  m8] manager-owned netstackd pid 96: five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded
+[arena INFO  m8] lifecycle read-only foreign Process reference installed pid 96 slot 14
+[arena INFO  sched] thread_main(proc): id=201 entry=ffffffff9cbbe280 arg=11 cr3=23b000
+[arena INFO  sched] thread_main(proc): id=202 entry=ffffffff9cbbe280 arg=13 cr3=75d000
+ArenaOS shell v0.10 (M4.6 + M5.3/5.4 + M6.5, ADR-0020/0023/0028) — serial, keyboard, or console port.
+arena> [arena INFO  syscall] map_memory: pid 105 window va=0x40200000 pages=1 writable=true mmio=false
+[desktop] real desktop frame presented; gallery launcher available
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113719/14/14/1/469/2/16
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113719/14/14/1/469/2/16
+[desktop] measured broker cap high-water=17
+[arena INFO  sched] spawn(proc): id=203 slot=15 entry=ffffffff9cbbe280 cr3=7fb000
+[desktop] measured broker cap high-water=19
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=203 entry=ffffffff9cbbe280 arg=14 cr3=7fb000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113564/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113564/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113564/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113570/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113570/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113570/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113718/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=204 slot=15 entry=ffffffff9cbbe280 cr3=7fb000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=204 entry=ffffffff9cbbe280 arg=14 cr3=7fb000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113564/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113564/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113564/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113562/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113570/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113570/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113570/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113718/14/14/1/469/2/16

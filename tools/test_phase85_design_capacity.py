@@ -94,28 +94,80 @@ def disk_measure() -> tuple[int, int]:
     return used,free
 
 
+def _function_body(source: str, signature: str) -> str:
+    start = source.index(signature)
+    opening = source.index('{', start)
+    depth = 1
+    end = opening + 1
+    while depth:
+        if source[end] == '{':
+            depth += 1
+        elif source[end] == '}':
+            depth -= 1
+        end += 1
+    return source[opening + 1:end - 1]
+
+
 def cap_projection() -> None:
     entry=(ROOT/'kernel/kernel/src/entry.rs').read_text()
     literal=entry.split('let all = [',1)[1].split('];',1)[0]
     assert literal.count('Cap {') == 20 and 'let root = [' in entry  # root[0..2] + 20 = 22
-    assert 'pub const CAP_SLOTS: usize = 32;' in (ROOT/'kernel/kernel/src/cap.rs').read_text()
-    assert 'pub const MAX_INHERIT: usize = 5;' in (ROOT/'kernel/kernel/src/spawn.rs').read_text()
+    # Phase 12 ADR-0088 raises only the source-tree fixed budgets required by
+    # 32 real desktop sessions. The old manager's private 32-cap manifest bound
+    # remains an independent policy limit; the schedules below still fit it.
+    caps = (ROOT/'kernel/kernel/src/cap.rs').read_text()
+    processes = (ROOT/'kernel/kernel/src/proc.rs').read_text()
+    spawn = (ROOT/'kernel/kernel/src/spawn.rs').read_text()
+    shared = (ROOT/'kernel/kernel/src/shared.rs').read_text()
+    ipc = (ROOT/'kernel/kernel/src/ipc.rs').read_text()
+    desktop_model = (ROOT/'userspace/desktop/src/model.rs').read_text()
+    assert 'pub const CAP_SLOTS: usize = 128;' in caps
+    assert 'pub const MAX_PROCESSES: usize = 64;' in processes
+    assert 'pub const MAX_SPAWN_RECS: usize = 64;' in spawn
+    assert 'pub const MAX_REGIONS: usize = 96;' in shared
+    assert 'pub const TOTAL_PAGES: u32 = 36864;' in shared
+    assert 'pub const MAX_MAPS: usize = 160;' in shared
+    assert 'pub const MAX_NOTIFS: usize = 64;' in ipc
+    assert 'pub const MAX_WINDOWS: usize = 32;' in desktop_model
+    assert 'pub const MAX_CAPS: usize = 32;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
+    assert 'pub const MAX_INHERIT: usize = 8;' in spawn
     assert 'pub const MAX_GRANTS: usize = 5;' in (ROOT/'userspace/servicemgr/src/manifest.rs').read_text()
     package=(ROOT/'userspace/servicemgr/src/package.rs').read_text()
     assert 'const GRANTS: [Request; 5]' in package
     packaged=(ROOT/'userspace/packaged/src/main.rs').read_text()
     assert 'const BUFFER: u64 = 7;' in packaged and 'const LENT: u64 = 8;' in packaged
-    assert 'pub const MAX_PROCESSES: usize = 32;' in (ROOT/'kernel/kernel/src/proc.rs').read_text()
-    ipc=(ROOT/'kernel/kernel/src/ipc.rs').read_text()
-    # ADR-0056 adds exactly two disjoint graphics endpoints without
-    # disturbing the ten Phase-8.5 endpoint slots or raising CAP_SLOTS.
-    assert 'pub const MAX_ENDPOINTS: usize = 12;' in ipc
-    assert 'pub const MAX_NOTIFS: usize = 18;' in ipc  # accepted marker is actually allocated.
+    # Desktop preserves Phase-10's filesystem endpoint at slot 13 and the
+    # filesd lineage at slot 20 while extending its private clocks to 32.
+    import re
+    entry = (ROOT/'kernel/kernel/src/entry.rs').read_text()
+    desktop_bin = (ROOT/'userspace/desktop/src/bin/desktop.rs').read_text()
+    kernel_clock = _function_body(entry, 'const fn desktop_clock_slot(index: usize) -> usize')
+    desktop_clock = _function_body(desktop_bin, 'fn clock(i: usize) -> u64')
+    compact = lambda text: re.sub(r'\s+', '', text)
+    assert compact(kernel_clock) == (
+        'ifindex<6{7+index}elseifindex<12{8+index}elseifindex<21{9+index}else{11+index}')
+    assert compact(desktop_clock) == (
+        'ifi<6{7+iasu64}elseifi<12{8+iasu64}elseifi<21{9+iasu64}else{11+iasu64}')
+    clock_slots = [7+i if i < 6 else 8+i if i < 12 else 9+i if i < 21 else 11+i
+                   for i in range(32)]
+    assert clock_slots == (list(range(7, 13)) + list(range(14, 20))
+                           + list(range(21, 30)) + list(range(32, 43)))
+    assert len(set(clock_slots)) == 32
+    assert not set(clock_slots).intersection({13, 20, 30, 31})
+    assert 'app_clock_nids = [0u32; 32]' in entry
+    assert 'obj: CapObj::Endpoint { eid: fs_eid }' in entry and '        13,' in entry
+    assert '        20,' in entry  # `/Users/user` lineage remains reserved
+    fs_backend=(ROOT/'userspace/desktop/src/fs_backend.rs').read_text()
+    assert 'pub const FILE_FRAME_SLOT: u64 = 125;' in fs_backend
+    assert 'pub const FILE_FRAME_LENT_SLOT: u64 = 126;' in fs_backend
+    assert 'syscall1(SYS_ALLOC_FRAME, FILE_FRAME_SLOT)' in fs_backend
+    assert 'syscall3(SYS_CAP_COPY,FILE_FRAME_SLOT,FILE_FRAME_LENT_SLOT,RIGHTS_ALL,)' in compact(fs_backend)
+    assert 'pub const MAX_ENDPOINTS: usize = 16;' in ipc
     # Source-anchored upper schedule: actual manager 22 literal boot caps,
     # including registrar and lifecycle-admin marker. Conservatively
     # include four other resident Process handles (stack/broker/app/package).
     boot=22; resident=4
-    # Serialized one dynamic child + Image; at most one readiness worker,
+    # This historical serialized schedule uses one dynamic child + Image; at most one readiness worker,
     # but no worker overlaps SELECT/COMMIT. No Image is transferred until
     # OLD child and its held Process cap have been finished.
     active=boot+resident+1+1
@@ -124,6 +176,14 @@ def cap_projection() -> None:
     commit=after_reap+2  # landed transitional Image + attenuated READ|DESTROY
     worker_peak=active+1
     assert max(prepared,commit,worker_peak) == 29 < 32
+    spawn=(ROOT/'kernel/kernel/src/spawn.rs').read_text()
+    # Phase 13's larger verified-image registry admits bounded concurrent
+    # native launch attempts; this historical manager projection separately
+    # preserves the low-32 steady-state schedule receipt.
+    assert 'pub const MAX_DYNAMIC_CHILDREN: usize = 24;' in spawn
+    assert 'pub const MAX_DYNAMIC_CHILDREN: usize = 24;' in (ROOT/'userspace/abi.rs').read_text()
+    multi_child=boot+resident+1+4
+    assert multi_child==31 < 32
     # Packaged holds 5 inherited, an owned LENT buffer at slot8, one
     # landed marker and one provisional Image: 8. Slot7 is consumed by map.
     packaged_peak=5+1+1+1
@@ -131,7 +191,7 @@ def cap_projection() -> None:
     print(f'host cap schedule projection (NOT guest high-water): manager '
           f'boot={boot}, resident={boot+resident}, old-child/PREPARE={prepared}, '
           f'COMMIT={commit}, worker-separated bound={worker_peak}/32; '
-          f'packaged <= {packaged_peak}/32; one dynamic child maximum')
+          f'packaged <= {packaged_peak}/32; four-child steady schedule <= {multi_child}/32 (guest capacity proof separate)')
 
 if __name__ == '__main__':
     disk_measure()

@@ -7,8 +7,9 @@ use crate::sched;
 use crate::sync::{SyncCell, without_interrupts};
 
 pub const FIRST: u32 = 27;
-pub const SLOTS: usize = 2;
-pub const MAX_BYTES: usize = 4096;
+pub const SLOTS: usize = 16;
+pub const MAX_BYTES: usize = 256 * 1024;
+pub const MAX_LOAD_PAGES: u64 = 128;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
     Free,
@@ -21,6 +22,8 @@ struct Entry {
     state: State,
     id: u32,
     len: usize,
+    entry: u64,
+    load_base: u64,
     refs: u32,
     pins: u32,
 }
@@ -30,6 +33,8 @@ impl Entry {
         state: State::Free,
         id: 0,
         len: 0,
+        entry: 0,
+        load_base: 0,
         refs: 0,
         pins: 0,
     };
@@ -38,6 +43,8 @@ impl Entry {
         self.state = State::Free;
         self.id = 0;
         self.len = 0;
+        self.entry = 0;
+        self.load_base = 0;
         self.refs = 0;
         self.pins = 0;
     }
@@ -74,7 +81,7 @@ pub fn manager_death_check(pid: u64) {
 }
 
 static REG: SyncCell<Registry> = SyncCell::new(Registry {
-    entries: [Entry::EMPTY, Entry::EMPTY],
+    entries: [const { Entry::EMPTY }; SLOTS],
     next_id: FIRST as u64,
 });
 
@@ -130,43 +137,80 @@ pub fn validate_reserved(idx: usize) -> bool {
         if e.state != State::Reserved {
             return false;
         }
-        let Ok(parsed) = elf::validate(&e.bytes[..e.len]) else {
-            return false;
+        let parsed = match elf::validate(&e.bytes[..e.len]) {
+            Ok(parsed) => parsed,
+            Err(reason) => {
+                crate::log_error!("image", "dynamic Image ELF refused: {reason}");
+                return false;
+            }
         };
         if parsed.nsegs == 0 || parsed.nsegs + 1 > sched::USER_REGIONS_MAX {
+            crate::log_error!("image", "dynamic Image region-count preflight refused");
             return false;
         }
         let mut pages = 0u64;
         let mut top = 0u64;
+        let mut load_base = u64::MAX;
         for seg in parsed.segs[..parsed.nsegs].iter() {
             let Some(end) = seg.vaddr.checked_add(seg.memsz) else {
+                crate::log_error!("image", "dynamic Image segment-end overflow");
                 return false;
             };
             let Some(round) = end.checked_add(4095).map(|v| v & !4095) else {
+                crate::log_error!("image", "dynamic Image segment rounding overflow");
                 return false;
             };
             let Some(span) = round.checked_sub(seg.vaddr) else {
+                crate::log_error!("image", "dynamic Image segment span underflow");
                 return false;
             };
             if span % 4096 != 0 {
+                crate::log_error!("image", "dynamic Image segment span is not page aligned");
                 return false;
             }
             let Some(sum) = pages.checked_add(span / 4096) else {
+                crate::log_error!("image", "dynamic Image page-count overflow");
                 return false;
             };
-            if sum > 16 {
+            if sum > MAX_LOAD_PAGES {
+                crate::log_error!("image", "dynamic Image exceeds load-page budget");
                 return false;
             }
             pages = sum;
             top = top.max(end);
+            load_base = load_base.min(seg.vaddr & !4095);
         }
         let Some(stack) = top.checked_add(4095).map(|v| v & !4095) else {
+            crate::log_error!("image", "dynamic Image stack rounding overflow");
             return false;
         };
         let Some(stack_end) = stack.checked_add(4096) else {
+            crate::log_error!("image", "dynamic Image stack-end overflow");
             return false;
         };
-        stack_end <= 0x0000_8000_0000_0000
+        if stack_end > 0x0000_8000_0000_0000 || load_base == u64::MAX {
+            crate::log_error!(
+                "image",
+                "dynamic Image stack or load-base preflight refused"
+            );
+            return false;
+        }
+        let e = &mut (*REG.get()).entries[idx];
+        e.entry = parsed.entry;
+        e.load_base = load_base;
+        true
+    })
+}
+
+/// Metadata from the exact live Image capability. This is descriptive loader
+/// state; possessing the Image cap remains the only spawn authority.
+pub fn info(id: u32) -> Option<(u64, u64, u64)> {
+    without_interrupts(|| unsafe {
+        let entry = (*REG.get())
+            .entries
+            .iter()
+            .find(|e| e.state == State::Live && e.id == id)?;
+        Some((entry.entry, entry.load_base, entry.len as u64))
     })
 }
 

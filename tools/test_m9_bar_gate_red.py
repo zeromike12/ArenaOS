@@ -24,7 +24,7 @@ MUTANT = b'if phys == base && pages != 0) // RED ONLY: ignore BAR extent'
 
 def build(path: Path):
     with path.open('w') as out:
-        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,
+        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
                        stdout=out, stderr=subprocess.STDOUT, check=True)
 
 

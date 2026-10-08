@@ -66,6 +66,72 @@ fn encode(rgb: u32, fmt: u64) -> u32 {
 /// The IPC cap itself, not a wire handle or claimed PID, designates the
 /// only scanout this display owns. The full, never-reused generation and
 /// checked region extent come from two independent held-cap queries.
+/// The rectangle lies inside a `w` x `h` mode.
+fn inside(x: i32, y: i32, rw: u16, rh: u16, w: u64, h: u64) -> bool {
+    x >= 0
+        && y >= 0
+        && u64::from(x as u32)
+            .checked_add(u64::from(rw))
+            .is_some_and(|end| end <= w)
+        && u64::from(y as u32)
+            .checked_add(u64::from(rh))
+            .is_some_and(|end| end <= h)
+}
+
+/// Copy one validated rectangle of the pinned scanout RAM to the display.
+#[allow(clippy::too_many_arguments)]
+fn present(
+    device: &mut Option<gpu::Gpu>,
+    gop_fb: *mut u32,
+    ram: i64,
+    pitch: u64,
+    fmt: u64,
+    x: u32,
+    y: u32,
+    rw: u16,
+    rh: u16,
+) {
+    let rect = arena_gpu2d_wire::Rect {
+        x,
+        y,
+        width: u32::from(rw),
+        height: u32::from(rh),
+    };
+    if let Some(gpu) = device {
+        if let Err(reason) = gpu.refresh(rect) {
+            write_log(b"[displayd] GPU PRESENT failed closed: ");
+            write_log(reason.as_bytes());
+            write_log(b"\n");
+            exit(103)
+        }
+        return;
+    }
+    if gop_fb.is_null() {
+        exit(103)
+    }
+    let src = ram as *const u32;
+    for row in y as usize..(y as usize + rh as usize) {
+        let start = row * pitch as usize + x as usize;
+        if fmt != 0 {
+            // Identity format: one row copy. SAFETY: the validated rectangle
+            // lies in both the pinned scanout RAM and the mapped GOP
+            // framebuffer; raw pointers create no Rust alias, and the only
+            // writer (the compositor) is blocked in this synchronous call.
+            unsafe {
+                core::ptr::copy_nonoverlapping(src.add(start), gop_fb.add(start), rw as usize)
+            }
+            continue;
+        }
+        for at in start..start + rw as usize {
+            // SAFETY: as above; swizzled formats need a per-pixel encode.
+            unsafe {
+                let color = core::ptr::read_volatile(src.add(at));
+                core::ptr::write_volatile(gop_fb.add(at), encode(color, fmt));
+            }
+        }
+    }
+}
+
 fn landed_scanout(landed: u64, owned: u64, id: u64, pages: u64) -> bool {
     if landed == CAP_NONE || landed == owned {
         return false;
@@ -391,49 +457,45 @@ pub extern "C" fn _start() -> ! {
                 }
                 Ok(Frame::Present { x, y, w: rw, h: rh })
                     if landed_scanout(msg[2], scanout[0], scanout[1], pages)
-                        && x >= 0
-                        && y >= 0
-                        && u64::from(x as u32)
-                            .checked_add(u64::from(rw))
-                            .is_some_and(|end| end <= w)
-                        && u64::from(y as u32)
-                            .checked_add(u64::from(rh))
-                            .is_some_and(|end| end <= h) =>
+                        && inside(x, y, rw, rh, w, h) =>
                 {
-                    let rect = arena_gpu2d_wire::Rect {
-                        x: x as u32,
-                        y: y as u32,
-                        width: u32::from(rw),
-                        height: u32::from(rh),
-                    };
-                    if let Some(ref mut gpu) = device {
-                        if let Err(reason) = gpu.refresh(rect) {
-                            write_log(b"[displayd] GPU PRESENT failed closed: ");
-                            write_log(reason.as_bytes());
-                            write_log(b"\n");
-                            exit(103)
-                        }
-                    } else {
-                        if gop_fb.is_null() {
-                            exit(103)
-                        }
-                        let src = ram as *const u32;
-                        for row in y as usize..(y as usize + rh as usize) {
-                            for col in x as usize..(x as usize + rw as usize) {
-                                let at = row * pitch as usize + col;
-                                // SAFETY: validated rectangle and scanout
-                                // byte span, pinned RAM and mapped GOP MMIO.
-                                // Raw volatile reads tolerate other process
-                                // mappings without creating a Rust alias.
-                                unsafe {
-                                    let color = core::ptr::read_volatile(src.add(at));
-                                    core::ptr::write_volatile(gop_fb.add(at), encode(color, fmt));
-                                }
-                            }
-                        }
-                    }
+                    present(
+                        &mut device,
+                        gop_fb,
+                        ram,
+                        pitch,
+                        fmt,
+                        x as u32,
+                        y as u32,
+                        rw,
+                        rh,
+                    );
                     status = IPC_OK;
                     echo = Frame::Present { x, y, w: rw, h: rh };
+                }
+                // Phase 11: several rectangles in one call. Every one is
+                // checked before any pixel moves (fail closed, whole).
+                Ok(Frame::PresentRects { n, rects })
+                    if landed_scanout(msg[2], scanout[0], scanout[1], pages)
+                        && rects[..usize::from(n)].iter().all(|&[x, y, rw, rh]| {
+                            inside(i32::from(x), i32::from(y), rw, rh, w, h)
+                        }) =>
+                {
+                    for &[x, y, rw, rh] in &rects[..usize::from(n)] {
+                        present(
+                            &mut device,
+                            gop_fb,
+                            ram,
+                            pitch,
+                            fmt,
+                            u32::from(x),
+                            u32::from(y),
+                            rw,
+                            rh,
+                        );
+                    }
+                    status = IPC_OK;
+                    echo = Frame::PresentRects { n, rects };
                 }
                 _ => (),
             }

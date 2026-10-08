@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """ADR-0052: real ring-3 cleanup of an unexpected IPC-landed reply cap.
 
-The isolated faultd server answers forty linked-library calls with an inert
-READ-only Notification cap. Its two independent normal-mode faulttest
-clients prove typed refusal, no describable landing, exact cap occupancy,
-no fixed-table exhaustion and a later ordinary no-cap PING. The original
-M6.5 death/restart proof still has to complete on the same boot.
+The isolated faultd server answers more than the current capability-space
+width of linked-library calls with an inert READ-only Notification cap. Its
+two independent normal-mode faulttest clients prove typed refusal, no
+describable landing, exact cap occupancy, no fixed-table exhaustion and a
+later ordinary no-cap PING. The original M6.5 death/restart proof still has
+to complete on the same boot.
 """
 from pathlib import Path
 import sys
@@ -14,8 +15,8 @@ import arena_env  # noqa: E402
 import mtest  # noqa: E402
 
 LABEL = 'm83-returned-cap'
-PASS = ('m83: returncap PASS (40 real reply caps rejected and discarded; '
-        'slot 2 empty, occupancy 2/32 exact; ordinary no-cap PING unchanged)')
+PASS = ('m83: returncap PASS (136 real reply caps rejected and discarded; '
+        'slot 2 empty, occupancy 2/128 exact; ordinary no-cap PING unchanged)')
 
 
 def main():

@@ -15,18 +15,25 @@ pub(super) fn fs(op: u64, w1: u64, cap: u64, msg: &mut [u8; MSG_BYTES]) -> Resul
         FS_OP_LS => client.list(w1, msg),
         FS_OP_OPEN | FS_OP_CREATE => {
             let len = msg.iter().position(|&b| b == 0).unwrap_or(MSG_BYTES);
-            if op == FS_OP_OPEN { client.open(&msg[..len]) }
-            else { client.create(&msg[..len]) }
+            if op == FS_OP_OPEN {
+                client.open(&msg[..len])
+            } else {
+                client.create(&msg[..len])
+            }
         }
         FS_OP_READ | FS_OP_WRITE => {
             let len = u64::from_le_bytes(msg[..8].try_into().unwrap());
             let (fh, offset) = (w1 & 0xff, w1 >> 8);
-            if op == FS_OP_READ { client.read(fh, offset, cap, len) }
-            else { client.write(fh, offset, cap, len) }
+            if op == FS_OP_READ {
+                client.read(fh, offset, cap, len)
+            } else {
+                client.write(fh, offset, cap, len)
+            }
         }
         FS_OP_CLOSE => client.close(w1),
         _ => return Err(PERM_IO),
-    }.map_err(|_| PERM_IO)?;
+    }
+    .map_err(|_| PERM_IO)?;
     if result.status != FS_OK {
         return Err(match result.status {
             FS_ERR_CORRUPT => PERM_CORRUPT,
@@ -52,15 +59,23 @@ pub(super) fn scan(va: u64) -> Result<record::Recovery, u64> {
         }
         let n = u32::from_le_bytes(entry[12..16].try_into().unwrap()) as usize;
         let size = u64::from_le_bytes(entry[4..12].try_into().unwrap());
-        if next <= cursor || next > 32 || n == 0 || n >= FS_NAME_MAX
-            || r[1] >= 32 || u64::from(next) != r[1] + 1
-        { return Err(PERM_CORRUPT); }
+        if next <= cursor
+            || next > 32
+            || n == 0
+            || n >= FS_NAME_MAX
+            || r[1] >= 32
+            || u64::from(next) != r[1] + 1
+        {
+            return Err(PERM_CORRUPT);
+        }
         let name = &entry[16..16 + n];
         if name.starts_with(b"perm8-") {
             if size == 0 {
                 state.ingest(name, size, None).map_err(|_| PERM_CORRUPT)?;
             } else {
-                if size != 512 { return Err(PERM_CORRUPT); }
+                if size != 512 {
+                    return Err(PERM_CORRUPT);
+                }
                 let mut arg = [0; MSG_BYTES];
                 arg[..n].copy_from_slice(name);
                 let fh = fs(FS_OP_OPEN, 0, CAP_NONE, &mut arg)?[1];
@@ -69,10 +84,14 @@ pub(super) fn scan(va: u64) -> Result<record::Recovery, u64> {
                 let read = fs(FS_OP_READ, fs_rw_w1(fh, 0), BUFFER_LENT, &mut arg);
                 let mut close = [0; MSG_BYTES];
                 let closed = fs(FS_OP_CLOSE, fh, CAP_NONE, &mut close);
-                if read?.get(1) != Some(&512) || closed.is_err() { return Err(PERM_IO); }
+                if read?.get(1) != Some(&512) || closed.is_err() {
+                    return Err(PERM_IO);
+                }
                 let mut raw = [0u8; 512];
                 unsafe { core::ptr::copy_nonoverlapping(va as *const u8, raw.as_mut_ptr(), 512) };
-                state.ingest(name, size, Some(&raw)).map_err(|_| PERM_CORRUPT)?;
+                state
+                    .ingest(name, size, Some(&raw))
+                    .map_err(|_| PERM_CORRUPT)?;
             }
         }
         cursor = next;
@@ -81,7 +100,9 @@ pub(super) fn scan(va: u64) -> Result<record::Recovery, u64> {
 }
 
 pub(super) fn allowed(state: &record::Recovery) -> bool {
-    state.current.is_some_and(|r| r.bytes() == record::decision(true))
+    state
+        .current
+        .is_some_and(|r| r.bytes() == record::decision(true))
 }
 
 /// On success returns the durable generation (no-op uses the existing one).
@@ -119,10 +140,16 @@ pub(super) fn update(va: u64, requested: bool, started: &mut bool) -> Result<u64
     }
     let mut close = [0; MSG_BYTES];
     let closed = fs(FS_OP_CLOSE, fh, CAP_NONE, &mut close);
-    if written?.get(1) != Some(&512) || closed.is_err() { return Err(PERM_IO); }
+    if written?.get(1) != Some(&512) || closed.is_err() {
+        return Err(PERM_IO);
+    }
     log_line(|o| o.str("permissiond: POLICY CLOSE completed"));
     let after = scan(va)?;
-    if after.pending.is_some() || after.current.is_none_or(|r| r.sequence() != seq || r.bytes() != payload) {
+    if after.pending.is_some()
+        || after
+            .current
+            .is_none_or(|r| r.sequence() != seq || r.bytes() != payload)
+    {
         return Err(PERM_CORRUPT);
     }
     log_line(|o| o.str("permissiond: POLICY exact committed decision verified before reply"));

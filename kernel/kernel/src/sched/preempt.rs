@@ -132,6 +132,9 @@ pub extern "C" fn on_timer_tick() {
     // until switched back; returning from it unwinds up through the tick
     // handler and stub into the interrupted body (ADR-0013).
     unsafe { context::switch_context(plan.save, plan.restore) };
+    // If another thread exited while this interrupt frame was suspended,
+    // reclaim its stack now that execution is back on this thread's stack.
+    super::reap();
 }
 
 /// Append to the capped transition log; overflow beyond the cap only

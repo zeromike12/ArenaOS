@@ -36,22 +36,24 @@ use crate::sync::{SyncCell, without_interrupts};
 /// rust-lld payload image and the shell); the bound exists so `img_id`
 /// is always a checked index, never a trust.
 pub const MAX_IMAGES: usize = 24;
-/// Most handles one spawn may inherit (the spec arrives in registers +
-/// a small user buffer; four is plenty for a supervisor demo and every
-/// excess is a typed refusal).
-pub const MAX_INHERIT: usize = 5;
+/// Bounded explicit authority grants per child. The Phase-13 installed app
+/// profile may include endpoint, surface, clock, optional tail, stream page,
+/// and its write-only stream wake capability, plus the startup transport cap
+/// in slot 0.
+pub const MAX_INHERIT: usize = 8;
 /// Spawn-record table bound (one record per spawned child until it is
-/// explicitly forgotten).
-pub const MAX_SPAWN_RECS: usize = 20;
+/// explicitly forgotten). ADR-0075: 14 boot processes plus twelve desktop
+/// sessions need 26; one per possible process (`MAX_PROCESSES`).
+pub const MAX_SPAWN_RECS: usize = 64;
 /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
 pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
 /// Separate from ALL Image IDs, including future dynamic u32 values.
-pub const MAX_BOOT_IMAGES: u32 = 6;
+pub const MAX_BOOT_IMAGES: u32 = 11;
 pub fn boot_image_live(index: u32) -> bool {
     index < MAX_BOOT_IMAGES && boot_image_bytes(index).is_some()
 }
 
-fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
+pub(crate) fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
     match index {
         0 => Some(include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -76,6 +78,28 @@ fn boot_image_bytes(index: u32) -> Option<&'static [u8]> {
         5 => Some(include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../phase9-work/target/x86_64-unknown-none/release/arena-window-b"
+        ))),
+        6 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/desktop/target/x86_64-unknown-none/release/desktop"
+        ))),
+        7 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/desktop/target/x86_64-unknown-none/release/gallery"
+        ))),
+        8 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/desktop/target/x86_64-unknown-none/release/application"
+        ))),
+        // Phase 11.5: the AFS2 file service (ADR-0076/0077).
+        9 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/filesd/target/x86_64-unknown-none/release/filesd"
+        ))),
+        // ADR-0083 independent ABI-v2 entry/capability proof image.
+        10 => Some(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../userspace/arena-runtime/target/x86_64-unknown-none/release/arena-startup-proof"
         ))),
         _ => None,
     }
@@ -176,6 +200,16 @@ static RECORDS: SyncCell<[SpawnRec; MAX_SPAWN_RECS]> = SyncCell::new([EMPTY_REC;
 static LOADER_OWNER: SyncCell<Option<u32>> = SyncCell::new(None);
 pub fn loader_pin_count(id: u32) -> u32 {
     without_interrupts(|| unsafe { u32::from(*LOADER_OWNER.get() == Some(id)) })
+}
+pub const MAX_DYNAMIC_CHILDREN: usize = 24;
+pub fn dynamic_children_full() -> bool {
+    without_interrupts(|| unsafe {
+        (*RECORDS.get())
+            .iter()
+            .filter(|r| r.live && r.dynamic_img_id.is_some())
+            .count()
+            >= MAX_DYNAMIC_CHILDREN
+    })
 }
 pub fn unretired_dynamic_child() -> bool {
     without_interrupts(|| unsafe {
@@ -337,12 +371,18 @@ fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
     // SAFETY: single writer under IF=0.
     let idx = without_interrupts(|| unsafe {
         let recs = &mut *RECORDS.get();
-        // ADR-0055: one UNRETIRED dynamic child system-wide. Even a child
-        // whose last thread has exited retains its record and blocks a new
+        // ADR-0064: four UNRETIRED dynamic children system-wide. Even a child
+        // whose last thread has exited retains its record and counts toward a new
         // dynamic spawn until the Process-cap finish path calls `forget`.
         // This IF=0 scan happens BEFORE record, process, frame or Process
         // cap reservation; boot/embedded spawns do not consume the bound.
-        if dynamic && recs.iter().any(|r| r.live && r.dynamic_img_id.is_some()) {
+        if dynamic
+            && recs
+                .iter()
+                .filter(|r| r.live && r.dynamic_img_id.is_some())
+                .count()
+                >= MAX_DYNAMIC_CHILDREN
+        {
             return None;
         }
         let Some(i) = recs.iter().position(|r| !r.live) else {

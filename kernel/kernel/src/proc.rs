@@ -23,7 +23,12 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// Process-table bound. Fixed capacity, no dynamic growth — the same
 /// discipline as the thread table (MAX_THREADS); both revisit when the
 /// heap-backed object story matures.
-pub const MAX_PROCESSES: usize = 32;
+pub const MAX_PROCESSES: usize = 64;
+
+/// Bounded page-granular user spans owned by one process address space.
+/// The Phase-12 bound remains unchanged while range ownership moves from
+/// scheduler threads to their process.
+pub const USER_REGIONS_MAX: usize = 80;
 
 /// A live process: identity, the address space it owns, and its
 /// capability space (ADR-0014 §5 anchor: process = address space +
@@ -39,10 +44,17 @@ pub struct Process {
     pub pml4_phys: u64,
     /// Capability slots — see [`crate::cap`] for every operation.
     pub caps: cap::CapSpace,
+    /// User-pointer validation spans for this address space. Every thread in
+    /// the process observes the same regions; kernel-only test contexts keep
+    /// their separate scheduler-local range list.
+    user_regions: [(u64, u64); USER_REGIONS_MAX],
     /// Registered exit notification `(nid, badge)` — fired when this
     /// process's LAST live thread exits (spawn protocol, ADR-0019).
     /// `nid == u32::MAX` = none registered.
     exit_notif: (u32, u64),
+    /// Status of the thread that ended the process. Stable until the process
+    /// record is reaped, unlike the diagnostic thread-exit ring.
+    exit_status: Option<u64>,
 }
 
 /// The process table. Slots are `Option<Process>`; occupancy is the only
@@ -81,11 +93,98 @@ pub fn create(name: &'static str) -> Result<u64, &'static str> {
                 name,
                 pml4_phys: pml4,
                 caps: cap::CapSpace::new(),
+                user_regions: [(0, 0); USER_REGIONS_MAX],
                 exit_notif: (u32::MAX, 0),
+                exit_status: None,
             });
             CREATED_TOTAL.fetch_add(1, Ordering::Relaxed);
             Ok(id)
         }
+    })
+}
+
+/// Snapshot the process-owned user spans for syscall pointer validation.
+pub fn user_regions(pid: u64) -> Option<[(u64, u64); USER_REGIONS_MAX]> {
+    without_interrupts(|| unsafe {
+        (*PROCESSES.get())
+            .iter()
+            .flatten()
+            .find(|process| process.id == pid)
+            .map(|process| process.user_regions)
+    })
+}
+
+/// Replace a process's initial image/stack map inventory before entering
+/// user mode. Failed admission leaves the old table unchanged.
+pub fn set_user_regions(pid: u64, regions: &[(u64, u64)]) -> Result<(), &'static str> {
+    if regions.len() > USER_REGIONS_MAX {
+        return Err("too many process user regions");
+    }
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("set user regions: no such process");
+        };
+        process.user_regions = [(0, 0); USER_REGIONS_MAX];
+        process.user_regions[..regions.len()].copy_from_slice(regions);
+        Ok(())
+    })
+}
+
+/// Add one address-space span after the caller has preflighted its PTEs.
+pub fn append_user_region(pid: u64, lo: u64, hi: u64) -> Result<(), &'static str> {
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("append region: no such process");
+        };
+        for &(start, end) in &process.user_regions {
+            if start == 0 && end == 0 {
+                continue;
+            }
+            if lo < end && start < hi {
+                return Err("append region: overlaps a registered region");
+            }
+        }
+        let Some(slot) = process
+            .user_regions
+            .iter_mut()
+            .find(|region| **region == (0, 0))
+        else {
+            return Err("append region: process user-region table is full");
+        };
+        *slot = (lo, hi);
+        Ok(())
+    })
+}
+
+/// Forget exactly one process-owned span after the VM registry and PTEs have
+/// both verified the unmap. Other threads immediately observe the released
+/// hole because this table belongs to the address space.
+pub fn remove_user_region(pid: u64, lo: u64, hi: u64) -> Result<(), &'static str> {
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("remove region: no such process");
+        };
+        let Some(region) = process
+            .user_regions
+            .iter_mut()
+            .find(|region| **region == (lo, hi))
+        else {
+            return Err("remove region: exact process span absent");
+        };
+        *region = (0, 0);
+        Ok(())
     })
 }
 
@@ -121,6 +220,39 @@ pub fn exit_notif_of(pid: u64) -> Option<(u32, u64)> {
                 .find(|p| p.id == pid)
                 .and_then(|p| (p.exit_notif.0 != u32::MAX).then_some(p.exit_notif))
         }
+    })
+}
+
+/// Record the final thread's status on the owning Process record. The caller
+/// must have established that the current thread is the process's last live
+/// thread. Process-cap readers may observe the result until exact reap.
+pub fn record_exit_status(pid: u64, status: u64) -> Result<(), &'static str> {
+    without_interrupts(|| unsafe {
+        let Some(process) = (*PROCESSES.get())
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id == pid)
+        else {
+            return Err("record exit status: no such process");
+        };
+        if process.exit_status.is_some() {
+            return Err("record exit status: final status already recorded");
+        }
+        process.exit_status = Some(status);
+        Ok(())
+    })
+}
+
+/// Read stable process exit state. `None` means the process record is absent;
+/// `Some(None)` means it is still running; `Some(Some(code))` means its final
+/// thread exited with `code`.
+pub fn exit_status(pid: u64) -> Option<Option<u64>> {
+    without_interrupts(|| unsafe {
+        (*PROCESSES.get())
+            .iter()
+            .flatten()
+            .find(|process| process.id == pid)
+            .map(|process| process.exit_status)
     })
 }
 
@@ -204,8 +336,18 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
     if timers > 0 {
         crate::log::log_info!("proc", "destroy pid {pid}: swept {timers} armed timer(s)");
     }
+    let sync_waiters = crate::sync_domain::release_waiters_by_process(pid);
+    let (sync_keys, sync_key_waiters) = crate::sync_domain::release_keys_by_process(pid);
+    let sync_domains = crate::sync_domain::release_by_owner(pid);
+    if sync_waiters > 0 || sync_keys > 0 || sync_key_waiters > 0 || sync_domains > 0 {
+        crate::log::log_info!(
+            "proc",
+            "destroy pid {pid}: cleared {sync_waiters} synchronization wait(s), retired {sync_keys} key(s) waking {sync_key_waiters} waiter(s), retired {sync_domains} owned domain waiter(s)"
+        );
+    }
     let (servers, waiters, calls) = crate::ipc::release_blocked_of(pid);
     let killed = crate::sched::kill_threads_of(pid);
+    crate::sched::forget_user_threads_of(pid);
     if killed > 0 || calls > 0 {
         crate::log::log_info!(
             "proc",
@@ -231,6 +373,9 @@ pub fn destroy(pid: u64) -> Result<u64, &'static str> {
             }
             let freed = paging::destroy_user_half(p.pml4_phys) as u64;
             frames::free(p.pml4_phys).map_err(|_| "destroy: root frame free rejected")?;
+            // The user-half walk above already reclaimed VM backing pages.
+            // Forget only its accounting metadata so no frame is freed twice.
+            crate::vm::forget_process(pid);
             // A dying capspace drops every Image reference, including
             // inherited and IPC-landed copies, before releasing its slot.
             p.caps.each_cap(crate::image_registry::drop_cap);

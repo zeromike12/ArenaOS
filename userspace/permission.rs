@@ -33,22 +33,29 @@ pub const REQUEST_BYTES: usize = 8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppRequest {
     pub version: u8,
-    pub scope: u8,      // 1 = arena.txt
-    pub operation: u8,  // 1 = READ
-    pub rights: u8,     // 1 = READ, never WRITE
+    pub scope: u8,     // 1 = arena.txt
+    pub operation: u8, // 1 = READ
+    pub rights: u8,    // 1 = READ, never WRITE
 }
 pub const ARENA_READ: AppRequest = AppRequest {
-    version: 1, scope: 1, operation: 1, rights: 1,
+    version: 1,
+    scope: 1,
+    operation: 1,
+    rights: 1,
 };
 // byte 2 is the bounded operation count; bytes 5..8 are reserved.
 // A duplicate second operation or a serialized decision cannot fit v1.
 pub const READ_REQUEST: [u8; REQUEST_BYTES] = [1, 1, 1, 1, 1, 0, 0, 0];
 pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
-    if req != ARENA_READ { return Err(Error::InvalidInput); }
+    if req != ARENA_READ {
+        return Err(Error::InvalidInput);
+    }
     Ok(READ_REQUEST)
 }
 pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
-    if raw != READ_REQUEST { return Err(Error::InvalidInput); }
+    if raw != READ_REQUEST {
+        return Err(Error::InvalidInput);
+    }
     Ok(ARENA_READ)
 }
 
@@ -85,10 +92,11 @@ fn hash(data: &[u8]) -> u64 {
 /// Only one fixed scope (arena.txt READ) and DENY=0/ALLOW=1. No
 /// cap, bearer, image-id or source-slot number can be serialized.
 pub fn valid_decision(bytes: &[u8]) -> bool {
-    bytes.len() == 4 && bytes[0] == 1 && bytes[1] == 1
-        && bytes[2] <= 1 && bytes[3] == 0
+    bytes.len() == 4 && bytes[0] == 1 && bytes[1] == 1 && bytes[2] <= 1 && bytes[3] == 0
 }
-pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+pub fn decision(allow: bool) -> [u8; 4] {
+    [1, 1, u8::from(allow), 0]
+}
 
 /// Build the exact fixed-size record in a caller-owned 512-byte buffer.
 /// `fill(0)` also canonicalizes every unused field before checksumming.
@@ -121,8 +129,10 @@ pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
         return Err(Error::Corrupt);
     }
     let length = u16::from_le_bytes([raw[24], raw[25]]) as usize;
-    if length != 4 || !valid_decision(&raw[32..36])
-        || raw[32 + length..CHECKSUM_OFF].iter().any(|&b| b != 0) {
+    if length != 4
+        || !valid_decision(&raw[32..36])
+        || raw[32 + length..CHECKSUM_OFF].iter().any(|&b| b != 0)
+    {
         return Err(Error::Corrupt);
     }
     let mut checksum = [0u8; 8];
@@ -262,17 +272,43 @@ mod tests {
         let mut extra = READ_REQUEST.to_vec();
         extra.push(0);
         assert_eq!(decode_request(&extra), Err(Error::InvalidInput));
-        for (index, bad) in [(0, 2), (1, 2), (2, 0), (2, 2),
-                             (3, 3), (4, 2), (5, 1), (6, 1), (7, 1)] {
+        for (index, bad) in [
+            (0, 2),
+            (1, 2),
+            (2, 0),
+            (2, 2),
+            (3, 3),
+            (4, 2),
+            (5, 1),
+            (6, 1),
+            (7, 1),
+        ] {
             let mut bytes = READ_REQUEST;
             bytes[index] = bad;
-            assert_eq!(decode_request(&bytes), Err(Error::InvalidInput),
-                       "bad request field {index}");
+            assert_eq!(
+                decode_request(&bytes),
+                Err(Error::InvalidInput),
+                "bad request field {index}"
+            );
         }
-        for malformed in [AppRequest { version: 2, ..ARENA_READ },
-                          AppRequest { scope: 2, ..ARENA_READ },
-                          AppRequest { operation: 2, ..ARENA_READ },
-                          AppRequest { rights: 3, ..ARENA_READ }] {
+        for malformed in [
+            AppRequest {
+                version: 2,
+                ..ARENA_READ
+            },
+            AppRequest {
+                scope: 2,
+                ..ARENA_READ
+            },
+            AppRequest {
+                operation: 2,
+                ..ARENA_READ
+            },
+            AppRequest {
+                rights: 3,
+                ..ARENA_READ
+            },
+        ] {
             assert_eq!(encode_request(malformed), Err(Error::InvalidInput));
         }
         let mut duplicate = READ_REQUEST;
@@ -285,12 +321,24 @@ mod tests {
         let x = sector(1, true);
         assert_eq!(decode(1, &x).unwrap().bytes(), decision(true));
         // Independently packed Python reference (tools/permission_record.py).
-        assert_eq!(u64::from_le_bytes(x[504..].try_into().unwrap()), 0x0bbf_8fb9_1fb5_b0cf);
-        assert_eq!(u64::from_le_bytes(sector(2, false)[504..].try_into().unwrap()), 0xc49a_8488_15f4_b4ad);
+        assert_eq!(
+            u64::from_le_bytes(x[504..].try_into().unwrap()),
+            0x0bbf_8fb9_1fb5_b0cf
+        );
+        assert_eq!(
+            u64::from_le_bytes(sector(2, false)[504..].try_into().unwrap()),
+            0xc49a_8488_15f4_b4ad
+        );
         assert!(x[36..504].iter().all(|b| *b == 0));
         assert_eq!(name(1).unwrap(), *b"perm8-01");
-        for payload in [&[1, 2, 1, 0][..], &[2, 1, 1, 0], &[1, 1, 2, 0],
-                        &[1, 1, 1, 1], &[1, 1, 1], &[1, 1, 1, 0, 0]] {
+        for payload in [
+            &[1, 2, 1, 0][..],
+            &[2, 1, 1, 0],
+            &[1, 1, 2, 0],
+            &[1, 1, 1, 1],
+            &[1, 1, 1],
+            &[1, 1, 1, 0, 0],
+        ] {
             assert_eq!(encode(1, payload, &mut [0; 512]), Err(Error::InvalidInput));
         }
         for offset in [0, 8, 12, 16, 24, 26, 32, 33, 34, 35, 36, 503] {
@@ -305,8 +353,7 @@ mod tests {
     fn poisoned_scan_never_falls_back_to_allow() {
         let old = sector(1, true);
         let deny = sector(2, false);
-        for (filename, raw) in [(&b"perm8-03"[..], &deny),
-                                (&b"perm8-02"[..], &old)] {
+        for (filename, raw) in [(&b"perm8-03"[..], &deny), (&b"perm8-02"[..], &old)] {
             let mut s = Scan::new();
             s.ingest(b"perm8-01", 512, Some(&old)).unwrap();
             assert!(s.ingest(filename, 512, Some(raw)).is_err());
@@ -320,7 +367,10 @@ mod tests {
         assert_eq!(recovered.next(), Some(2));
         for n in 1..=8 {
             let mut s = Scan::new();
-            for i in 1..=n { s.ingest(&name(i).unwrap(), 512, Some(&sector(i, i % 2 == 0))).unwrap(); }
+            for i in 1..=n {
+                s.ingest(&name(i).unwrap(), 512, Some(&sector(i, i % 2 == 0)))
+                    .unwrap();
+            }
             let r = s.finish().unwrap();
             assert_eq!(r.next(), (n < 8).then_some(n + 1));
         }

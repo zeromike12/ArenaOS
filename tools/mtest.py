@@ -85,14 +85,24 @@ def semantic_exit_rc(rc: int | None, serial: str, label: str) -> int | None:
     return rc
 
 
-def build(label: str) -> Path:
+def build(label: str, desktop: bool = False) -> Path:
     print(f"[{label}] building kernel image + ESP ...")
-    subprocess.run(
-        ["bash", str(arena_env.REPO_ROOT / "tools/build.sh"), "--image"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    env=os.environ.copy()
+    if desktop:env.pop('ARENA_GRAPHICS_FIXTURE',None)
+    else:env['ARENA_GRAPHICS_FIXTURE']='phase9'
+    try:
+        subprocess.run(
+            ["bash", str(arena_env.REPO_ROOT / "tools/build.sh"), "--image"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    except subprocess.CalledProcessError as error:
+        log = arena_env.build_dir() / f"{label}-build.log"
+        log.write_text((error.stdout or "") + (error.stderr or ""))
+        print(f"[{label}] build failed; diagnostics: {log}", file=sys.stderr)
+        raise
     esp = arena_env.REPO_ROOT / "build/arena-esp.img"
     assert esp.exists(), "build.sh did not produce the ESP image"
     return esp
@@ -233,12 +243,14 @@ def run_qemu(label: str, esp: Path,
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
             "-cpu", "qemu64,+nx,+smep,+smap",
-            # Prefer the ESP boot drive to the raw scratch virtio device on
-            # each freshly seeded OVMF NVRAM boot.
-            "-boot", "order=c",
+            # Boot the ESP first. OVMF ignores "-boot order"; only bootindex
+            # reaches its BootOrder, and without it BDS first tries the raw
+            # scratch virtio disk, the point where every pre-kernel firmware
+            # stall was observed (docs/phase10/DESKTOP-MATURITY.md §8).
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
-            "-drive", f"format=raw,file={esp}",
+            "-drive", f"if=none,id=esp0,format=raw,file={esp}",
+            "-device", "ide-hd,drive=esp0,bus=ide.0,bootindex=0",
         ]
         # Milestone-5 fixture (ADR-0021): fresh scratch disk attached as
         # virtio-blk-pci — the kernel's bus-0 scan must find it.
@@ -375,6 +387,8 @@ def boot(label: str, esp: Path,
          kill: tuple[bytes, int, float] | None = None,
          timeout_s: int = TIMEOUT_S,
          video: str = "default",
+         pointer: bool = False,
+         extra_args: list[str] | None = None,
          ) -> tuple[int | None, str, float]:
     """One QEMU boot against an EXPLICIT scratch-disk path (M5.4).
 
@@ -408,12 +422,14 @@ def boot(label: str, esp: Path,
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
             "-cpu", "qemu64,+nx,+smep,+smap",
-            # Prefer the ESP boot drive to the raw scratch virtio device on
-            # each freshly seeded OVMF NVRAM boot.
-            "-boot", "order=c",
+            # Boot the ESP first. OVMF ignores "-boot order"; only bootindex
+            # reaches its BootOrder, and without it BDS first tries the raw
+            # scratch virtio disk, the point where every pre-kernel firmware
+            # stall was observed (docs/phase10/DESKTOP-MATURITY.md §8).
             "-drive", f"if=pflash,format=raw,readonly=on,file={arena_env.ovmf_code()}",
             "-drive", f"if=pflash,format=raw,file={vars_img}",
-            "-drive", f"format=raw,file={esp}",
+            "-drive", f"if=none,id=esp0,format=raw,file={esp}",
+            "-device", "ide-hd,drive=esp0,bus=ide.0,bootindex=0",
             "-drive", f"file={scratch},format=raw,if=none,id=scr0",
             "-device", "virtio-blk-pci,drive=scr0",
             # M6 fixtures (ADR-0024/0025): the slirp NIC and the entropy
@@ -422,19 +438,23 @@ def boot(label: str, esp: Path,
             *arena_env.net_args(),
             *arena_env.rng_args(),
             *arena_env.input_args(),
+            *(["-device", "virtio-tablet-pci"] if pointer else []),
             *arena_env.console_args(vcon_sock),
             *arena_env.qmp_args(qmp_sock),
-            *(["-vga", "none"] if video in ("none", "gpu", "gpu-big") else []),
+            *(["-vga", "none"] if video in ("none", "gpu", "gpu640", "gpu-big") else []),
             *(["-device", "virtio-gpu-pci,xres=800,yres=600"] if video in ("gpu", "gpu+std") else []),
+            *(["-device", "virtio-gpu-pci,xres=640,yres=480"] if video == "gpu640" else []),
             *(["-device", "virtio-gpu-pci"] if video == "gpu-big" else []),
             "-display", "none",
             "-chardev", "stdio,id=con0,signal=off",
             "-serial", "chardev:con0",
             "-no-reboot",
+            *(extra_args or []),
         ]
     )
     t0 = time.monotonic()
     killed = False
+    feeder_errors: list[Exception] = []
     # QEMU's stderr is KEPT, not discarded. When the emulator refuses to
     # start — a bad device argument, a socket already bound, a missing
     # file — it says so on stderr and exits in a tenth of a second with
@@ -484,6 +504,10 @@ def boot(label: str, esp: Path,
                         proc.stdin.write(payload() if callable(payload) else payload)
                         proc.stdin.flush()
                     except (BrokenPipeError, OSError):
+                        return
+                    except Exception as error:
+                        feeder_errors.append(error)
+                        proc.terminate()
                         return
                     sent += 1
                     if sent == len(feed):
@@ -539,6 +563,8 @@ def boot(label: str, esp: Path,
     peer_thread.join(timeout=2)
     dns_stop.set()
     dns_thread.join(timeout=2)
+    if feeder_errors:
+        raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
     if killed:
         rc = None
     dt = time.monotonic() - t0

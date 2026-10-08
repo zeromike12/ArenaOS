@@ -40,6 +40,92 @@ pub const SYS_SHARED_INFO: u64 = 39;
 pub const SYS_SHARED_UNMAP: u64 = 40;
 /// ADR-0060: query liveness only through a held Process/READ cap.
 pub const SYS_PROC_LIVE: u64 = 41;
+/// READ endpoint authority; empty queue returns BUSY without parking.
+pub const SYS_IPC_TRY_RECV: u64 = 42;
+/// Same endpoint authority and buffers as REPLY; consumes cancelled-request
+/// tombstone and returns CALLER_GONE without staging reply references.
+pub const SYS_IPC_REPLY_CHECKED: u64 = 43;
+/// MemoryPool/READ-gated nine scalar resource counts; reserved args zero.
+pub const SYS_OBSERVE: u64 = 44;
+/// Read-only executable/capacity preflight; not a reservation or a spawn.
+pub const SYS_SPAWN_CHECK: u64 = 45;
+/// ADR-0093: query validated startup metadata from a held dynamic Image cap.
+pub const SYS_IMAGE_INFO: u64 = 55;
+/// ADR-0095: process-owned native VM reservation and mapping operations.
+pub const SYS_VM_RESERVE: u64 = 56;
+pub const SYS_VM_COMMIT: u64 = 57;
+pub const SYS_VM_PROTECT: u64 = 58;
+pub const SYS_VM_RELEASE: u64 = 59;
+pub const SYS_VM_QUERY: u64 = 60;
+/// ADR-0100: held Process/READ reports stable `[exited, status]` state.
+pub const SYS_PROC_STATUS: u64 = 61;
+/// Voluntarily reschedule this native user thread without blocking.
+pub const SYS_THREAD_YIELD: u64 = 62;
+/// Mint one Desktop-owned Notification into an exact empty cap slot.
+pub const SYS_NOTIFICATION_CREATE: u64 = 63;
+/// ADR-0106: create a ring-3 thread in the caller's existing Process.
+pub const SYS_THREAD_CREATE: u64 = 64;
+/// ADR-0106: wait for and collect same-Process user-thread exit status.
+pub const SYS_THREAD_JOIN: u64 = 65;
+/// ADR-0106: detach a same-Process user thread for kernel stack cleanup.
+pub const SYS_THREAD_DETACH: u64 = 66;
+/// Read the calling Process's live scheduler-thread count.
+pub const SYS_THREAD_COUNT: u64 = 67;
+/// ADR-0107: create a manager-owned capability-backed synchronization domain.
+pub const SYS_SYNC_DOMAIN_CREATE: u64 = 68;
+pub const SYS_SYNC_KEY_CREATE: u64 = 69;
+pub const SYS_SYNC_KEY_DESTROY: u64 = 70;
+pub const SYS_SYNC_SEQUENCE: u64 = 71;
+pub const SYS_SYNC_WAIT: u64 = 72;
+pub const SYS_SYNC_WAKE: u64 = 73;
+pub const SYS_SYNC_INFO: u64 = 74;
+/// Aggregate native thread, IPC, timer, VM and synchronization occupancy.
+pub const SYS_RESOURCE_DETAIL: u64 = 75;
+pub const VM_PROT_READ: u64 = 1;
+pub const VM_PROT_WRITE: u64 = 2;
+pub const VM_PROT_EXEC: u64 = 4;
+/// ADR-0071: endpoint READ + notification READ|WRITE; a CALL queued while
+/// no server is parked in RECV ORs `badge` into the bound notification.
+pub const SYS_ENDPOINT_BIND: u64 = 46;
+pub const SYS_ENDPOINT_UNBIND: u64 = 47;
+/// ADR-0074: (endpoint READ slot, badge != 0, rights ⊆ WRITE|COPY) → new slot.
+pub const SYS_ENDPOINT_MINT: u64 = 48;
+/// ADR-0074: (endpoint READ slot, out[4]: w0 w1 landed badge, msg, blocking, 0).
+pub const SYS_IPC_RECV_BADGED: u64 = 49;
+/// Phase 11.5: wall seconds since 1970 through a held Rtc cap, or
+/// STATUS_BUSY = unknown.
+pub const SYS_RTC_READ: u64 = 50;
+/// Phase 11.5: the badge of a landed badged cap, for the endpoint's own
+/// server only.
+pub const SYS_ENDPOINT_BADGE: u64 = 51;
+pub const SYS_SHARED_PAGES: u64 = 52;
+/// ADR-0085: set the current native user thread's validated FS.base.
+pub const SYS_TLS_SET: u64 = 53;
+/// ADR-0086: read only whether one caller-owned capability slot is occupied.
+pub const SYS_CAP_OCCUPIED: u64 = 54;
+/// Phase-12 cap-space width, mirrored from kernel::cap::CAP_SLOTS (ADR-0088).
+pub const CAP_SLOTS: usize = 128;
+/// Startup ABI and capability-inventory kind for a held Process cap.
+pub const CAP_KIND_PROCESS: u8 = 4;
+/// ADR-0095: process-owned native VM reservation capability.
+pub const CAP_KIND_VM_REGION: u8 = 14;
+/// Desktop-only authority to mint bounded owner notifications.
+pub const CAP_KIND_NOTIFICATION_FACTORY: u8 = 15;
+/// ADR-0107: explicit native condition-wait authority.
+pub const CAP_KIND_SYNC_DOMAIN: u8 = 16;
+/// Desktop-only factory for AppInstance-owned SyncDomains.
+pub const CAP_KIND_SYNC_DOMAIN_FACTORY: u8 = 17;
+/// Existing SYS_SPAWN inheritance limit, mirrored from spawn::MAX_INHERIT.
+pub const MAX_SPAWN_INHERIT: usize = 8;
+/// Bounded dynamic Image children, mirrored from spawn::MAX_DYNAMIC_CHILDREN.
+pub const MAX_DYNAMIC_CHILDREN: usize = 24;
+/// Bounded dynamic Image registry entries, mirrored from image_registry::SLOTS.
+pub const MAX_DYNAMIC_IMAGES: usize = 16;
+/// ADR-0071: a per-process bound refused (e.g. a fifth armed timer).
+pub const STATUS_QUOTA: i64 = -7;
+pub const STATUS_CALLER_GONE: i64 = -6;
+/// ADR-0107: native synchronization wait deadline expired.
+pub const STATUS_TIMEOUT: i64 = -8;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;
@@ -97,6 +183,8 @@ pub const MGR_BADGE_ADMIN_PKG_DEATHFAULT: u64 = 1 << 18;
 pub const MGR_BADGE_ADMIN_PKG_MAXIMAL_SELECT: u64 = 1 << 14;
 pub const MGR_BADGE_ADMIN_PKG_INSTALL_TWO: u64 = 1 << 16;
 pub const MGR_BADGE_ADMIN_PKG_FOURTH: u64 = 1 << 17;
+pub const MGR_BADGE_ADMIN_PKG_GRAPHICS: u64 = 1 << 20;
+pub const MGR_BADGE_ADMIN_PKG_GRAPHICS_REVOKE: u64 = 1 << 21;
 /// Stack startup acknowledgement on its existing backoff notification.
 pub const MGR_BADGE_STACK_READY: u64 = 1 << 20;
 /// Manager's own bounded backoff timer on the event channel.
@@ -116,7 +204,13 @@ pub const MGR_BADGE_PKG_PROBE_OK: u64 = 1 << 15;
 pub const MGR_BADGE_PKG_PROBE_EXIT: u64 = 1 << 16;
 pub const MGR_BADGE_PKG_PROBE_DEADLINE: u64 = 1 << 17;
 pub const MGR_BADGE_PKG_EXIT: u64 = 1 << 18;
+/// ADR-0091 slot-127 install-authority arrival; only a wake hint, manager
+/// revalidates and forwards the held BadgedEndpoint after packaged READY.
+pub const MGR_BADGE_APB1_INSTALL_AUTH: u64 = 1 << 22;
 /// Kernel STATUS_BUSY; a spoofed exit hint cannot reap a live child.
+pub const STATUS_BAD_CALL: i64 = -1;
+pub const STATUS_BAD_ARG: i64 = -2;
+pub const STATUS_BAD_ADDRESS: i64 = -3;
 pub const STATUS_BUSY: i64 = -4;
 
 // ---- cap/IPC constants (mirror kernel cap.rs / ipc.rs) ----------------------
@@ -205,6 +299,11 @@ pub const OP_WRITE: u64 = 1;
 /// parked threads must never be destroyed out from under them).
 pub const OP_SHUTDOWN: u64 = 2;
 pub const SECTOR_BYTES: usize = 512;
+/// Phase 11.5 (ADR-0076): one request moves a whole 4 KiB frame (8 sectors
+/// starting at `sector`); the buffer offset must be 0. Additive: sector ops
+/// and their log lines are unchanged.
+pub const OP_READ_BLOCK: u64 = 3;
+pub const OP_WRITE_BLOCK: u64 = 4;
 /// Every lent buffer frame is one 4 KiB page (Untyped cap granularity).
 pub const BLOCK_FRAME_BYTES: u64 = 4096;
 
@@ -240,6 +339,25 @@ pub const PKG_OP_SELECT_COMMIT: u64 = 6;
 pub const PKG_OP_DEACTIVATE: u64 = 7;
 pub const PKG_OP_LAUNCH: u64 = 8;
 pub const PKG_OP_ABORT: u64 = 9;
+/// Phase 12: trusted Desktop submits one exact filesd File capability;
+/// packaged performs current APKG v1 policy selection before filesd installs.
+pub const PKG_OP_APB1_INSTALL: u64 = 10;
+/// One-time manager-to-packaged transfer after the five-cap receiver is READY.
+pub const PKG_OP_INSTALL_AUTH_HANDOFF: u64 = 11;
+/// Rebuild the verified installed APB1 catalog and return its entry count.
+pub const PKG_OP_APP_COUNT: u64 = 12;
+/// Read one fixed 64-byte chunk of a descriptive catalog manifest.
+pub const PKG_OP_APP_METADATA: u64 = 13;
+/// Resolve an app ID through the current verified catalog and return an exact
+/// Image capability. The caller lends one SharedRegion page for executable
+/// staging; that region is consumed only as a temporary byte buffer.
+pub const PKG_OP_APP_LAUNCH: u64 = 14;
+/// Read one bounded identity/label row from a specific catalog generation.
+pub const PKG_OP_APP_ENTRY: u64 = 15;
+/// Resolve one signed AHL1 helper declaration from an installed APB1 app and
+/// return the exact verified Image capability through a bounded staging region.
+pub const PKG_OP_APP_HELPER_LAUNCH: u64 = 16;
+pub const NATIVE_IMAGE_BYTES_MAX: usize = 256 * 1024;
 pub const PKG_INSTALLED: u64 = 4;
 pub const PKG_PREPARED: u64 = 5;
 pub const PKG_ACTIVE: u64 = 6;
@@ -344,6 +462,9 @@ pub const FS_OP_CLOSE: u64 = 5;
 pub const FS_OP_LS: u64 = 6;
 pub const FS_OP_SHUTDOWN: u64 = 7;
 pub const FS_OP_UNLINK: u64 = 8;
+/// Complete named CoW create/replace, len 0..4096 in word1, padded name
+/// in msg64, LENT Untyped/READ frame when len!=0. No open handle result.
+pub const FS_OP_PUT: u64 = 9;
 
 pub const FS_OK: u64 = 0;
 pub const FS_ERR_NOT_FOUND: u64 = (-1i64) as u64;

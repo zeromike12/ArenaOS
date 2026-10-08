@@ -283,8 +283,8 @@ fn t4_pattern(id: usize, slot: usize) -> u64 {
         .rotate_left(slot as u32 & 63)
 }
 
-/// Recursion ≈ 200 frames × ~64 B ≈ 13 KiB — real depth on a 32 KiB
-/// stack, verified against an iterative model by the test.
+/// Recursion ≈ 200 frames × ~64 B ≈ 13 KiB — real depth on the 96 KiB
+/// kernel stack, verified against an iterative model by the test.
 fn t4_deep(n: u32) -> u64 {
     let local = [n as u64; 4];
     if n == 0 {

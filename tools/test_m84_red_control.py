@@ -24,7 +24,7 @@ NEEDLE=b'} else if op != PKG_OP_QUERY && !marked {'
 MUTANT=b'} else if op != PKG_OP_QUERY && !marked && false {'
 
 def build():
-    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
                    capture_output=True,text=True)
 
 def boot(label,esp,disk):

@@ -22,9 +22,13 @@ ESP=ROOT/'build/arena-esp.img'
 NEEDLE=b'            crate::image_registry::add_cap(staged);\n            crate::shared::add_cap(staged);\n            slot.reply_cap = staged;'
 MUTANT=b'            // RED ONLY: intentionally omitted production Image reply-cap credit.\n            crate::shared::add_cap(staged);\n            slot.reply_cap = staged;'
 
-def run_fixture(log):
+def run_fixture(log,existing=False):
+    command=[sys.executable,str(ROOT/'tools/test_m85_select.py')]
+    if existing:
+        program='import sys;sys.path.insert(0,'+repr(str(ROOT/'tools'))+');from pathlib import Path;import test_m85_select;test_m85_select.main(Path('+repr(str(ESP))+'))'
+        command=[sys.executable,'-c',program]
     with log.open('w') as f:
-        proc=subprocess.run([sys.executable,str(ROOT/'tools/test_m85_select.py')],
+        proc=subprocess.run(command,
             cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
     serial=(arena_env.build_dir()/'serial-m85-select-select.log').read_text(errors='replace')
     (arena_env.build_dir()/f'{log.stem}-serial.log').write_text(serial)
@@ -33,9 +37,9 @@ def run_fixture(log):
 def main():
     original=SOURCE.read_bytes()
     assert original.count(NEEDLE)==1 and MUTANT not in original
-    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
         stdout=(arena_env.build_dir()/'m85-ref-hook-build.log').open('w'))
-    originals={p:p.read_bytes() for p in (EFI,ESP)}
+    originals={p:p.read_bytes() for p in (EFI,ESP,arena_env.build_dir()/'graphics-profile.txt')}
     source_hash=hashlib.sha256(original).digest()
     red=False
     try:
@@ -48,14 +52,14 @@ def main():
         # Build the unmodified production hook before restoring the exact
         # source-bound image, even when the red test did not behave as hoped.
         try:
-            subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,check=True,
+            subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
                 stdout=(arena_env.build_dir()/'m85-ref-hook-restored-build.log').open('w'))
         finally:
             for path, data in originals.items(): path.write_bytes(data)
         assert SOURCE.read_bytes()==original and hashlib.sha256(SOURCE.read_bytes()).digest()==source_hash
         assert all(path.read_bytes()==data for path,data in originals.items()), 'mutant EFI escaped'
     try:
-        green_rc,green_s=run_fixture(arena_env.build_dir()/'m85-ref-hook-green.log')
+        green_rc,green_s=run_fixture(arena_env.build_dir()/'m85-ref-hook-green.log',existing=True)
         green=(green_rc==0 and 'servicemgr: Phase 8.5 signed SELECT/LAUNCH/DEACTIVATE/reselect' in green_s
                and '[arena ERROR halt]' not in green_s)
     finally:

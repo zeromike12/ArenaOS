@@ -1,0 +1,3011 @@
+QUALIFICATION SOURCE COMMIT: 11a45c34deae9a7a539a99fd7d3d6ea196ea6025
+QUALIFICATION SOURCE CLEAN: yes
+======================================================================
+== host-side unit tests (arena-heap: cargo test --lib)
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_heap-9c860bc7eac3920c)
+
+running 12 tests
+test tests::alignment_requests ... ok
+test tests::core_guards_off ... ok
+test tests::core_guards_on ... ok
+test tests::double_free_rejected ... ok
+test tests::foreign_and_interior_pointers_rejected ... ok
+test tests::growth_and_exhaustion ... ok
+test tests::red_zones_catch_overflow_and_underflow ... ok
+test tests::many_small_then_coalesce ... ok
+test tests::release_chunks_resets_and_regrows ... ok
+test tests::release_chunks_refuses_nonempty_heap - should panic ... ok
+test tests::zero_size_and_oversize_rejected ... ok
+test tests::stress_lcg_alloc_free_with_reference_model ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+======================================================================
+== host-side unit tests (arena-sync: cargo test --lib)
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_sync-b414257b95d72f0d)
+
+running 6 tests
+test tests::lock_guard_gives_exclusive_value_access ... ok
+test tests::owner_token_tracks_acquirer_across_threads ... ok
+test tests::protects_handoff_of_non_sync_data ... ok
+test tests::recursive_acquire_panics_in_debug_builds - should panic ... ok
+test tests::try_lock_is_none_while_held_and_some_after_drop ... ok
+test tests::mutual_exclusion_under_four_parallel_threads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+== host-side DNS parser tests
+
+running 2 tests
+test tests::bounded_names ... ok
+test tests::compressed_answer_and_negative_space ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side TCP wire/timeout policy tests
+
+running 3 tests
+test tests::no_early_or_unbounded_retransmission ... ok
+test tests::syn_options_and_header_bounds ... ok
+test tests::valid_odd_payload_and_corruption ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side networking API contract tests
+
+running 5 tests
+test ipc::tests::status_transport_and_capability_are_distinct ... ok
+test address_wire_layout_dns_and_local_validation ... ok
+test malformed_replies_are_not_silently_truncated ... ok
+test tcp_async_bearer_state_and_revocation ... ok
+test udp_chunk_offsets_sender_identity_and_bearer_lifecycle ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host and no_std target Phase 8.3 userspace client libraries
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (userspace/arena-lib/target/x86_64-unknown-linux-gnu/debug/deps/arena_lib-625db13177203621)
+
+running 2 tests
+test ipc::tests::status_transport_and_capability_are_distinct ... ok
+test fs::tests::exact_wire_and_no_hidden_retry ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+== host-side service manifest and inventory policy tests
+
+running 14 tests
+test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
+test inventory::tests::missing_or_unsupported_authority_fails_closed ... ok
+test inventory::tests::observed_authority_goes_directly_to_policy_without_manifest_minting ... ok
+test inventory::tests::reads_live_cap_metadata_not_manifest_words ... ok
+test manifest::tests::attenuated_grants_and_actual_source_slots ... ok
+test manifest::tests::dependencies_must_be_present_ready_and_acyclic ... ok
+test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
+test manifest::tests::rights_may_never_be_broadened_or_quietly_clamped ... ok
+test manifest::tests::topological_order_and_duplicate_policy ... ok
+test readiness::tests::late_coalesced_ready_is_still_too_late ... ok
+test readiness::tests::requires_both_independent_driver_signals ... ok
+test readiness::tests::timeout_unknown_badge_and_invalid_masks_fail_closed ... ok
+test restart::tests::exact_child_and_bounded_restart_budget ... ok
+test restart::tests::invalid_policy_and_premature_ready_refused ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side Phase 8.1 config record and AFS1 integrity-limit probes
+
+running 4 tests
+test tests::malformed_namespace_and_read_failures ... ok
+test tests::pending_contiguous_and_exhausted ... ok
+test tests::python_reference_vectors_and_roundtrip ... ok
+test tests::visible_corruption_never_falls_back_to_old ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.003s
+
+OK
+ADR-0046 probe PASS: corrupted newer AFS1 commit silently selects older valid metadata
+A config service given only fsd's namespace cannot distinguish this from no newer commit.
+== host-side Phase 8.2 immutable permission decision record
+
+running 3 tests
+test tests::fixed_scope_and_no_authority_in_record ... ok
+test tests::request_is_bounded_and_cannot_encode_authority_or_approval ... ok
+test tests::poisoned_scan_never_falls_back_to_allow ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+POLICY RECORD: PASS (independent vectors, malformed decisions/names, full scan, eight-generation bound)
+== host and no_std target cap/IPC layout audit
+CapObj=16 Cap=24
+16: CapSpace=400 Process=448 Option<Process>=448 32-table=14336
+18: CapSpace=456 Process=504 Option<Process>=504 32-table=16128
+32: CapSpace=800 Process=848 Option<Process>=848 32-table=27136
+x86_64-unknown-none target cap layout: identical to host, all 14 fields PASS
+x86_64-unknown-none IPC: CallSlot=240 historical Endpoint<4>=976; production Endpoint<8>=1936 Notif=24; 12 endpoints=23232 B, 25 notifications=600 B PASS
+ADR-0051/0053 FS and package diagnostics: 15->17 notifications +48 B; ADR-0055 lifecycle marker: 17->18 +24 B; ADR-0062/0065 desktop clocks: 18->25 +168 B PASS
+== host-independent Phase 8.5 AINS/AACT records and no_std compile
+Phase 8.5 AINS/AACT accepted wire: 6 independent SHA-256 vectors, 4-generation admission, prefix/corruption/chain/encode refusal PASS (host codec only; no AFS1 CREATE or guest proof)
+======================================================================
+== running test_m1.py
+======================================================================
+[test-m1] building kernel image + ESP ...
+[test-m1] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m1] PASS: no kernel panic on serial
+[test-m1] PASS: self-test 'serial_loopback' 
+[test-m1] PASS: self-test 'cpu_long_mode' 
+[test-m1] PASS: self-test 'cpuid_sane' 
+[test-m1] PASS: self-test 'gdt_installed' 
+[test-m1] PASS: self-test 'idt_installed' 
+[test-m1] PASS: self-test 'memory_map' 
+[test-m1] PASS: self-test 'wide_math' 
+[test-m1] PASS: self-test 'timer_irq_absorbed' 
+[test-m1] PASS: milestone RESULT line present
+[test-m1] PASS: RESULT is PASS (8/8)
+[test-m1] PASS: RESULT covers all 8 expected tests (got 8)
+[test-m1] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[test-m1] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[test-m1] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[test-m1] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[test-m1] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[test-m1] PASS: prior-milestone regression: m7 RESULT PASS (2/2) in this boot
+[test-m1] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m1] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.3s)
+[test-m1] ==============================================
+[test-m1] MILESTONE M1: PASS  (serial: build/serial-m1.log)
+======================================================================
+== running test_m10_apps.py
+======================================================================
+[m10-apps] building kernel image + ESP ...
+[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline=(113706, 14, 14, 1, 469, 2, 16) peak=(112764, 20, 20, 7, 1231, 14, 28) transient-broker-caps=29
+[m10-apps] independent fresh boot reads durable preference and changes desktop pixels PASS
+======================================================================
+== running test_m10_archive_preflight.py
+======================================================================
+/home/agent/.local/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+[m10-archive-preflight] building kernel image + ESP ...
+[m10-archive-preflight] independently staged standard-library tools, firmware, full shipping console/tablet/network, real two-spawn/retire graphical workflow PASS; strict qualification refuses absent 100/100 receipt
+======================================================================
+== running test_m10_boundaries.py
+======================================================================
+[m10-boundaries] building kernel image + ESP ...
+[m10-boundaries] native function/diagnostic audits; actual launch/process counts; pointer activation; owned key raster/exact drag; Process, cap, SharedRegion/map cleanup PASS
+======================================================================
+== running test_m10_boundaries_red.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-boundaries-red-base] building kernel image + ESP ...
+[m10-boundaries] native function/diagnostic audits; actual launch/process counts; pointer activation; owned key raster/exact drag; Process, cap, SharedRegion/map cleanup PASS
+[m10-dock-safe-title-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production dock-safe-title: actual guest oracle RED PASS
+[m10-live-theme-delivery-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production live-theme-delivery: actual guest oracle RED PASS
+[m10-function-scope-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production function-scope: actual guest oracle RED PASS
+[m10-launch-target-scope-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production launch-target-scope: actual guest oracle RED PASS
+[m10-pointer-hit-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production pointer-hit: actual guest oracle RED PASS
+[m10-real-process-spawn-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production real-process-spawn: actual guest oracle RED PASS
+[m10-process-retirement-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production process-retirement: actual guest oracle RED PASS
+[m10-readonly-diagnostic-grant-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production readonly-diagnostic-grant: actual guest oracle RED PASS
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-owned-stale-surface-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production owned-stale-surface: actual guest oracle RED PASS
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-surface-generation-reuse-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production surface-generation-reuse: actual guest oracle RED PASS
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-frame-publication-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production frame-publication: actual guest oracle RED PASS
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-capacity-preflight-mutant] building kernel image + ESP ...
+[m10-boundaries-red] production capacity-preflight: actual guest oracle RED PASS
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-boundaries-exact-restored] building kernel image + ESP ...
+[m10-boundaries] native function/diagnostic audits; actual launch/process counts; pointer activation; owned key raster/exact drag; Process, cap, SharedRegion/map cleanup PASS
+[m10-dynamic] signed ELF 1472 bytes sha256=b0bb614360938ee8ea13e0738d29de1b407ab2423fa3b65af74864cc087feadc; four broker-owned real dynamic graphical processes plus two ordinary builtins, mixed capacity refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS
+[m10-boundaries-red] 12 real production RED controls; byte-exact source/EFI/ESP restored, native/pointer/process and signed dynamic graphical GREEN sha256=4a3166221dc684fc5e3c1045fb0c63643460c775a27ed717ba3a51e87998e1b9
+======================================================================
+== running test_m10_client_death.py
+======================================================================
+[m10-client-death-base] building kernel image + ESP ...
+[m10-client-death-fault] building kernel image + ESP ...
+[m10-client-death-restored] building kernel image + ESP ...
+[m10-boundaries] native function/diagnostic audits; actual launch/process counts; pointer activation; owned key raster/exact drag; Process, cap, SharedRegion/map cleanup PASS
+[m10-client-death] actual unexpected ordinary client exit cleans original Process/shared/map/cap state; sibling raster/input survives; full-queue LIVE client second close consumes exact Process; byte-exact source/EFI restored GREEN sha256=9699cedeccecb0099fdb5c98ac1a09d7c7a7c220ff1358a688b59286f50ddd7b
+======================================================================
+== running test_m10_clock_sampling.py
+======================================================================
+[m10-clock-base] building kernel image + ESP ...
+[m10-clock-early-mutant] building kernel image + ESP ...
+[m10-clock-early-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m10-clock] compiled early: native measurement oracle PASS
+[m10-clock-one-stall-mutant] building kernel image + ESP ...
+[m10-clock] compiled one-stall: native measurement oracle PASS
+[m10-clock-persistent-mutant] building kernel image + ESP ...
+[m10-clock-persistent-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m10-clock] compiled persistent: native measurement oracle PASS
+[m10-clock-restored] building kernel image + ESP ...
+[m10-clock] early-return and persistent-upper-bound production RED; one injected measurement stall accepted within three windows; exact source/EFI GREEN sha256=19e4715d0ff62a23a22a92a4b922c676ae09db23ed0c19e0a98c9f5963ab9c1a
+======================================================================
+== running test_m10_desktop.py
+======================================================================
+[m10-desktop] building kernel image + ESP ...
+[m10-desktop] QMP real dock spawn, owned raster, keyboard theme, drag, close and relaunch PASS
+======================================================================
+== running test_m10_display.py
+======================================================================
+[m10-display] building kernel image + ESP ...
+[m10-display] m10-display-default 800x600: real pixels/input/drag, six-app peak=(112764, 20, 20, 7, 1231, 14, 28), exact teardown PASS
+[m10-display] m10-display-gpu 800x600: real pixels/input/drag, six-app peak=(112315, 20, 20, 8, 1233, 15, 28), exact teardown PASS
+[m10-display] m10-display-gpu640 640x480: real pixels/input/drag, six-app peak=(112666, 20, 20, 8, 1064, 15, 28), exact teardown PASS
+[m10-display] independently booted GOP800 and actual GPU800/GPU640 shipping desktop modes PASS
+======================================================================
+== running test_m10_dynamic.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1472 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1262 memsz=1262 RX; W+X/entry/truncation refused
+[m10-dynamic] building kernel image + ESP ...
+[m10-dynamic] signed ELF 1472 bytes sha256=b0bb614360938ee8ea13e0738d29de1b407ab2423fa3b65af74864cc087feadc; four broker-owned real dynamic graphical processes plus two ordinary builtins, mixed capacity refusal, native counters, owned key pixels, unpublished drawing remains invisible until authenticated Damage, dock-safe title movement/close, Process close and revoke-with-live-copied-pages PASS
+======================================================================
+== running test_m10_files.py
+======================================================================
+[m10-files] building kernel image + ESP ...
+[m10-files] Files actual select/read/open/delete, duplicate create refuses without overwrite, case-sensitive owned glyphs, bounded full document/refusal, Save As durable bytes, unsupported-file refusal and terminal real launch PASS
+======================================================================
+== running test_m10_handoff.py
+======================================================================
+[m10-handoff] building kernel image + ESP ...
+[m10-handoff] actual desktop, all six real apps, full working set, durable dark appearance; independent-boot byte-identical light/dark owned gallery QMP rasters PASS
+======================================================================
+== running test_m10_keyboard.py
+======================================================================
+[m10-keyboard] building kernel image + ESP ...
+[m10-keyboard] actual shipping desktop with one keyboard: F1..F6 ordinary launch, F7 focus, F8 owned close and graphical keyboard output; serial shutdown remains independent PASS
+======================================================================
+== running test_m10_multi_red.py
+======================================================================
+[m10-multi-red-base] building kernel image + ESP ...
+[m10-multi-red] production quota failed actual signed multi-child lifecycle PASS
+[m10-multi-red] production cancel failed actual signed multi-child lifecycle PASS
+[m10-multi-restored] building kernel image + ESP ...
+[m10-multi-red] exact source/artifact restoration; signed full cutover/resource GREEN sha256=13ccb08f3fd50d686cebf707e172d1f867200bc1cca7f05885073da71a04cce9
+======================================================================
+== running test_m10_replace.py
+======================================================================
+[m10-replace] building kernel image + ESP ...
+[m10-replace] crash 0: exact old-or-new 23 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] crash 1: exact old-or-new 23 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] crash 2: exact old-or-new 23 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] crash 3: exact old-or-new 45 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] complete create, replace, shrink-to-empty, two valid generations, mutation-free full refusal and guest crash-prefix recovery PASS
+======================================================================
+== running test_m10_replace_red.py
+======================================================================
+[m10-put-red-baseline] building kernel image + ESP ...
+[m10-replace] building kernel image + ESP ...
+[m10-put-red] real production in-place replacement rejected by independent crash bytes: (0, b'new replacement with di')
+[m10-put-restored] building kernel image + ESP ...
+[m10-replace] crash 0: exact old-or-new 23 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] crash 1: exact old-or-new 23 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] crash 2: exact old-or-new 23 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] crash 3: exact old-or-new 45 bytes, independent bitmap/extent audit and remount PASS
+[m10-replace] complete create, replace, shrink-to-empty, two valid generations, mutation-free full refusal and guest crash-prefix recovery PASS
+[m10-put-red] byte-exact source/EFI restoration and complete guest GREEN sha256=677105a174e1620f05b00aace4b8b448819d9f294bc748f1fd056ce79c7f8c1b
+======================================================================
+== running test_m10_select_failure_cleanup.py
+======================================================================
+production elf::validate: PASS; payload=648 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=436 memsz=436 RX; W+X/entry/truncation refused
+APKG v1: independently OpenSSL-signed/test-root-verified file=840 bytes, payload=648; payload_sha256=a591506a09d1e19ad24292f3608dbc9915b427380482332b6b84ab779b694d38; full_file_sha256=98cc82f0fb19d1c006c21f57853617cbd21a0f85993accbc20eb8b8b31cdfe97
+fresh offline build byte-identical; host-only measurement PASS; dynamic guest execution NOT proven
+[m10-select-cleanup-base] building kernel image + ESP ...
+[m10-select-cleanup-red] building kernel image + ESP ...
+[m10-select-cleanup] omitted original Process FINISH leaks native resources RED PASS [(113629, 16, 16), (113623, 17, 17)]
+[m10-select-cleanup-forced-refusal] building kernel image + ESP ...
+[m10-select-cleanup] same forced receipt refusal retires exact original Process GREEN PASS [(113644, 16, 16), (113644, 16, 16)]
+[m10-select-cleanup-restored] building kernel image + ESP ...
+[m85-select] baseline: rc=0 seconds=6.1
+[m85-select] select: rc=0 seconds=48.9
+[m85-select] reboot: rc=0 seconds=6.7
+[m85-select] corrupt: rc=0 seconds=6.2
+[m85-select] signed ELF SELECT/DEACTIVATE/SELECT hashes=['7583345375f9785105fb88858deb2cb30e68fd63a6124d1608a364dab6c2c317', 'bcce9a522e69379d7efc2092e6be87893d43c0ab7028d5503c1890dbd0f64f7e', '2ce73868e1e7594b3a023fa904857b32f202d8612b7e5443b657f78a5079d3e5']; ring-3 IPC/reap, same-platter reboot no auto launch, corrupt newest refusal PASS
+[m10-select-cleanup] bad receipt native cleanup RED/GREEN; exact original source/EFI historical signed selection GREEN sha256=c2624eead2d7e9df81fab677906d2e773728df1a40aaceaa5e4bfd8dcf153f87
+======================================================================
+== running test_m10_service_death.py
+======================================================================
+[m10-service-death-base] building kernel image + ESP ...
+[m10-service-death-mutant] building kernel image + ESP ...
+[m10-service-death] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m10-service-death-restored] building kernel image + ESP ...
+[m10-boundaries] native function/diagnostic audits; actual launch/process counts; pointer activation; owned key raster/exact drag; Process, cap, SharedRegion/map cleanup PASS
+[m10-service-death] real compositor death answers in-flight input CALL and root fail-stops without restart; exact source/EFI restored graphical GREEN sha256=3e4333e79b0a3d1c266e65b7b9906e8003921b0692f7693b8959cc73cd14563b
+======================================================================
+== running test_m10_ui.py
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (userspace/ui/target/x86_64-unknown-linux-gnu/debug/deps/arena_ui-70a8cb02f9525191)
+
+running 2 tests
+test motion::tests::endpoints_retarget_and_disabled_animation ... ok
+test motion::tests::monotone_extreme_geometry_and_clock_end ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+    Finished `release` profile [optimized] target(s) in 0.03s
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (userspace/desktop/target/x86_64-unknown-linux-gnu/debug/deps/arena_desktop-220ec22d27888bf9)
+
+running 17 tests
+test apps::model::tests::editor_full_refuses_without_cursor_or_data_mutation ... ok
+test apps::model::tests::editor_insert_delete_navigation_and_atomic_load_refusal ... ok
+test apps::model::tests::terminal_line_edit_and_bounded_scrollback ... ok
+test input_wire::tests::canonical_control_keys_pointer_and_reserved_fields ... ok
+test model::tests::body_button_release_is_captured_and_retirement_discards_capture ... ok
+test model::tests::capacity_stale_cleanup_and_routed_queue ... ok
+test model::tests::desktop_keyboard_launch_cycle_close_preserves_ordinary_key_focus ... ok
+test model::tests::dock_half_open_bounds_and_screen_edges ... ok
+test model::tests::exhausted_generations_refuse_before_publication ... ok
+test model::tests::hit_focus_drag_release_and_close_exact_content ... ok
+test model::tests::small_window_title_and_close_remain_above_dock ... ok
+test preferences::tests::canonical_durable_choices ... ok
+test scope::tests::explicit_resource_namespace_cannot_write_trust_records ... ok
+test scope::tests::graphics_never_amplifies_and_cross_function_scope_refuses ... ok
+test scope::tests::launch_targets_are_explicit_and_bounded ... ok
+test service_wire::tests::canonical_metadata_and_operations_do_not_accept_reserved_or_names_as_authority ... ok
+test wire::tests::strict_canonical_frames_and_reserved_refusal ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `release` profile [optimized] target(s) in 0.62s
+    Checking arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `release` profile [optimized] target(s) in 0.44s
+
+running 2 tests
+test tests::unknown_events_and_button_repeat_never_fabricate_motion ... ok
+test tests::coherent_batch_buttons_and_exact_edges ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test tests::empty_geometry_and_reserved_sectors ... ok
+test tests::fragmented_complete_reservation_and_mutation_free_refusal ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test tests::editor_insert_delete_navigation_and_atomic_load_refusal ... ok
+test tests::editor_full_refuses_without_cursor_or_data_mutation ... ok
+test tests::terminal_line_edit_and_bounded_scrollback ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+host fixture phase10-host-gallery-light.ppm sha256=54b3fb4ffa2483ee80f1617453c6720b385377d26014ac27fae0bda13392e8ab
+host fixture phase10-host-gallery-dark.ppm sha256=c79a33dc30abb06f17cfdafccfc5220cd58bdf461f4dda92fc3440176d417b78
+[m10-ui] host components/motion/window-policy, no_std binaries/static checks and deterministic palette-independent raster checks PASS; guest proof is separate
+======================================================================
+== running test_m2.py
+======================================================================
+[test-m2] building kernel image + ESP ...
+[test-m2] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m2] PASS: no kernel panic on serial
+[test-m2] PASS: self-test 'tss_installed' 
+[test-m2] PASS: self-test 'exc_de_recovered' 
+[test-m2] PASS: self-test 'exc_pf_recovered' 
+[test-m2] PASS: self-test 'pit_oneshot' 
+[test-m2] PASS: self-test 'tsc_frequency' 
+[test-m2] PASS: self-test 'clock_monotonic' 
+[test-m2] PASS: self-test 'tick_rate' 
+[test-m2] PASS: self-test 'frame_allocator' 
+[test-m2] PASS: self-test 'vm_address_space' 
+[test-m2] PASS: self-test 'vm_write_protect' 
+[test-m2] PASS: self-test 'vm_nx' 
+[test-m2] PASS: self-test 'heap_basics' 
+[test-m2] PASS: self-test 'heap_guards' 
+[test-m2] PASS: self-test 'heap_stress' 
+[test-m2] PASS: self-test 'crit_section' 
+[test-m2] PASS: self-test 'spinlock_basics' 
+[test-m2] PASS: self-test 'ebs_exited' 
+[test-m2] PASS: self-test 'kernel_entry' 
+[test-m2] PASS: self-test 'identity_torn_down' 
+[test-m2] PASS: self-test 'kernel_heap_live' 
+[test-m2] PASS: self-test 'kernel_irq_live' 
+[test-m2] PASS: milestone RESULT line present
+[test-m2] PASS: RESULT is PASS (21/21)
+[test-m2] PASS: RESULT covers all 21 expected tests (got 21)
+[test-m2] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[test-m2] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[test-m2] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[test-m2] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[test-m2] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[test-m2] PASS: prior-milestone regression: m7 RESULT PASS (2/2) in this boot
+[test-m2] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m2] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.2s)
+[test-m2] ==============================================
+[test-m2] MILESTONE M2: PASS  (serial: build/serial-m2.log)
+======================================================================
+== running test_m3.py
+======================================================================
+[test-m3] building kernel image + ESP ...
+[test-m3] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m3] PASS: no kernel panic on serial
+[test-m3] PASS: self-test 'thread_spawn_run' 
+[test-m3] PASS: self-test 'thread_rr_interleave' 
+[test-m3] PASS: self-test 'thread_callee_saved' 
+[test-m3] PASS: self-test 'thread_stack_isolation' 
+[test-m3] PASS: self-test 'thread_churn_accounting' 
+[test-m3] PASS: self-test 'preempt_rotation' 
+[test-m3] PASS: self-test 'preempt_coexist' 
+[test-m3] PASS: self-test 'user_ring3_syscall' 
+[test-m3] PASS: self-test 'user_ring3_interrupted' 
+[test-m3] PASS: self-test 'process_address_spaces' 
+[test-m3] PASS: self-test 'process_accounting' 
+[test-m3] PASS: self-test 'capability_spaces' 
+[test-m3] PASS: self-test 'capability_invoke' 
+[test-m3] PASS: milestone RESULT line present
+[test-m3] PASS: RESULT is PASS (13/13)
+[test-m3] PASS: RESULT covers all 13 expected tests (got 13)
+[test-m3] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[test-m3] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[test-m3] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[test-m3] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[test-m3] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[test-m3] PASS: prior-milestone regression: m7 RESULT PASS (2/2) in this boot
+[test-m3] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m3] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.2s)
+[test-m3] ==============================================
+[test-m3] MILESTONE M3: PASS  (serial: build/serial-m3.log)
+======================================================================
+== running test_m4.py
+======================================================================
+[test-m4] building kernel image + ESP ...
+[test-m4] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m4] PASS: no kernel panic on serial
+[test-m4] PASS: self-test 'elf_parse' 
+[test-m4] PASS: self-test 'elf_reject' 
+[test-m4] PASS: self-test 'elf_load' 
+[test-m4] PASS: self-test 'syscall_abi' 
+[test-m4] PASS: self-test 'thread_exit_abi' 
+[test-m4] PASS: self-test 'first_process' 
+[test-m4] PASS: self-test 'ipc_echo' 
+[test-m4] PASS: self-test 'spawn_restart' 
+[test-m4] PASS: self-test 'console_line' 
+[test-m4] PASS: milestone RESULT line present
+[test-m4] PASS: RESULT is PASS (9/9)
+[test-m4] PASS: RESULT covers all 9 expected tests (got 9)
+[test-m4] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[test-m4] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[test-m4] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[test-m4] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[test-m4] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[test-m4] PASS: prior-milestone regression: m7 RESULT PASS (2/2) in this boot
+[test-m4] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m4] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.5s)
+[test-m4] ==============================================
+[test-m4] MILESTONE M4: PASS  (serial: build/serial-m4.log)
+======================================================================
+== running test_m4_shell.py
+======================================================================
+[test-m4-shell] building kernel image + ESP ...
+[test-m4-shell] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m4-shell] PASS: no kernel panic on serial
+[test-m4-shell] PASS: m1 suite RESULT PASS (8/8) in this boot
+[test-m4-shell] PASS: m2 suite RESULT PASS (21/21) in this boot
+[test-m4-shell] PASS: m3 suite RESULT PASS (13/13) in this boot
+[test-m4-shell] PASS: m4 suite RESULT PASS (9/9) in this boot
+[test-m4-shell] PASS: kernel announced the spawned shell
+[test-m4-shell] PASS: the shell's banner reached the console
+[test-m4-shell] PASS: help lists the 'help' builtin
+[test-m4-shell] PASS: help lists the 'ps' builtin
+[test-m4-shell] PASS: help lists the 'echo' builtin
+[test-m4-shell] PASS: help lists the 'ls' builtin
+[test-m4-shell] PASS: help lists the 'cat' builtin
+[test-m4-shell] PASS: help lists the 'write' builtin
+[test-m4-shell] PASS: help lists the 'rm' builtin
+[test-m4-shell] PASS: help lists the 'spawn' builtin
+[test-m4-shell] PASS: help lists the 'shutdown' builtin
+[test-m4-shell] PASS: echo returned the typed line
+[test-m4-shell] PASS: ps listed both resident processes (got 16)
+[test-m4-shell] PASS: the kernel announced the shell's pid
+[test-m4-shell] PASS: ps listed the shell itself
+[test-m4-shell] PASS: the shell is single-threaded (got ['1'])
+[test-m4-shell] PASS: the kernel announced the spawned block service
+[test-m4-shell] PASS: the kernel announced the spawned filesystem service
+[test-m4-shell] PASS: the production fsd mounted the AFS1 volume the suite committed
+[test-m4-shell] PASS: ps listed storaged, single-threaded and parked in recv
+[test-m4-shell] PASS: ls listed the suite's committed arena.txt (512 bytes)
+[test-m4-shell] PASS: write created note.txt with 8 bytes through fsd
+[test-m4-shell] PASS: cat streamed note.txt's contents back byte-for-byte
+[test-m4-shell] PASS: the second ls listed note.txt (8 bytes)
+[test-m4-shell] PASS: the second ls counted exactly 2 files
+[test-m4-shell] PASS: rm deleted note.txt through fsd's UNLINK transaction
+[test-m4-shell] PASS: rm of an absent file was honestly refused
+[test-m4-shell] PASS: the final ls counted exactly 1 file after the rm
+[test-m4-shell] PASS: the final ls no longer listed note.txt
+[test-m4-shell] PASS: ps listed fsd, single-threaded and parked in recv
+[test-m4-shell] PASS: shell reported the spawned child's pid
+[test-m4-shell] PASS: the spawned payload's message appeared mid-session
+[test-m4-shell] PASS: the child's exit badge arrived at the shell
+[test-m4-shell] PASS: ring-3 queries see held Image/Notification/Endpoint caps and reject Power and bad pointer
+[test-m4-shell] PASS: caller-cap-only inventory never accepted a hidden or invalid slot
+[test-m4-shell] PASS: two ring-3 child lifecycles reaped by a live Process cap, with forged and stale slots refused
+[test-m4-shell] PASS: no lifecycle operation silently succeeded or missed its cap
+[test-m4-shell] PASS: an unknown command got the hint response
+[test-m4-shell] PASS: the shell acknowledged 'shutdown'
+[test-m4-shell] PASS: kernel logged the Power-gated shutdown request
+[test-m4-shell] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m4-shell] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 7.3s)
+[test-m4-shell] PASS: the shell served every typed line (14 prompts)
+[test-m4-shell] ==============================================
+[test-m4-shell] M4.6 SHELL SESSION: PASS  (serial: build/serial-m4-shell.log)
+======================================================================
+== running test_m5.py
+======================================================================
+[test-m5] building kernel image + ESP ...
+[test-m5] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m5] PASS: no kernel panic on serial
+[test-m5] PASS: self-test 'pci_scan' 
+[test-m5] PASS: self-test 'untyped_alloc' 
+[test-m5] PASS: self-test 'mmio_user' 
+[test-m5] PASS: self-test 'irq_relay' 
+[test-m5] PASS: self-test 'block_service' 
+[test-m5] PASS: self-test 'fs_service' 
+[test-m5] PASS: milestone RESULT line present
+[test-m5] PASS: RESULT is PASS (6/6)
+[test-m5] PASS: RESULT covers all 6 expected tests (got 6)
+[test-m5] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[test-m5] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[test-m5] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[test-m5] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[test-m5] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[test-m5] PASS: prior-milestone regression: m7 RESULT PASS (2/2) in this boot
+[test-m5] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m5] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.3s)
+[test-m5] ==============================================
+[test-m5] MILESTONE M5: PASS  (serial: build/serial-m5.log)
+[test-m5] disk proof: commit seq 3, objtab@21, bitmap@25, arena.txt size 512, extents [(19, 1)], pattern verified in the committed sectors
+[test-m5] PASS: the post-boot scratch image holds the committed file (on-disk layout verified)
+======================================================================
+== running test_m5_crash.py
+======================================================================
+[test-m5-crash] building kernel image + ESP ...
+[test-m5-crash] seed boot done (rc=0, 6.4s)
+[test-m5-crash] PASS: the seed boot shut down cleanly (rc=0)
+[test-m5-crash] PASS: the seed boot committed base.txt
+[test-m5-crash] PASS: the seed volume audits clean
+[test-m5-crash] round 0: killed QEMU (trigger 'storaged: WRITE' x1 +0.0s, 6.2s)
+[test-m5-crash] PASS: round 0: the boot was SIGKILLed, not shut down
+[test-m5-crash] round 0: verification boot done (rc=0, 6.3s)
+[test-m5-crash] PASS: round 0: the post-crash boot shut down cleanly
+[test-m5-crash] PASS: round 0: the suite passed on the crashed volume (6/6)
+[test-m5-crash] PASS: round 0: the pre-crash arena.txt verified byte-for-byte after the crash (zero writes, zero repairs)
+[test-m5-crash] PASS: round 0: the production fsd mounted without an fsck ritual
+[test-m5-crash] PASS: round 0: cat answered a legal committed state (absent)
+[test-m5-crash] PASS: round 0: no torn prefix reached the console
+[test-m5-crash] PASS: round 0: ls reported size None, agreeing with cat's absent state — only never-committed, committed-empty, or committed-full are legal
+[test-m5-crash] PASS: round 0: base.txt is still exact (older commits untouchable)
+[test-m5-crash] PASS: round 0: the kernel declared its clean halt
+[test-m5-crash] PASS: round 0: host audit of the crashed volume clean (no problems)
+[test-m5-crash] round 1: killed QEMU (trigger 'storaged: WRITE' x3 +0.0s, 6.3s)
+[test-m5-crash] PASS: round 1: the boot was SIGKILLed, not shut down
+[test-m5-crash] round 1: verification boot done (rc=0, 6.2s)
+[test-m5-crash] PASS: round 1: the post-crash boot shut down cleanly
+[test-m5-crash] PASS: round 1: the suite passed on the crashed volume (6/6)
+[test-m5-crash] PASS: round 1: the pre-crash arena.txt verified byte-for-byte after the crash (zero writes, zero repairs)
+[test-m5-crash] PASS: round 1: the production fsd mounted without an fsck ritual
+[test-m5-crash] PASS: round 1: cat answered a legal committed state (absent)
+[test-m5-crash] PASS: round 1: no torn prefix reached the console
+[test-m5-crash] PASS: round 1: ls reported size None, agreeing with cat's absent state — only never-committed, committed-empty, or committed-full are legal
+[test-m5-crash] PASS: round 1: base.txt is still exact (older commits untouchable)
+[test-m5-crash] PASS: round 1: the kernel declared its clean halt
+[test-m5-crash] PASS: round 1: host audit of the crashed volume clean (no problems)
+[test-m5-crash] round 2: killed QEMU (trigger 'fsd: commit seq' x1 +0.03s, 6.2s)
+[test-m5-crash] PASS: round 2: the boot was SIGKILLed, not shut down
+[test-m5-crash] round 2: verification boot done (rc=0, 6.3s)
+[test-m5-crash] PASS: round 2: the post-crash boot shut down cleanly
+[test-m5-crash] PASS: round 2: the suite passed on the crashed volume (6/6)
+[test-m5-crash] PASS: round 2: the pre-crash arena.txt verified byte-for-byte after the crash (zero writes, zero repairs)
+[test-m5-crash] PASS: round 2: the production fsd mounted without an fsck ritual
+[test-m5-crash] PASS: round 2: cat answered a legal committed state (empty)
+[test-m5-crash] PASS: round 2: no torn prefix reached the console
+[test-m5-crash] PASS: round 2: ls reported size 0, agreeing with cat's empty state — only never-committed, committed-empty, or committed-full are legal
+[test-m5-crash] PASS: round 2: base.txt is still exact (older commits untouchable)
+[test-m5-crash] PASS: round 2: the kernel declared its clean halt
+[test-m5-crash] PASS: round 2: host audit of the crashed volume clean (no problems)
+[test-m5-crash] round 3: killed QEMU (trigger 'storaged: WRITE' x14 +0.0s, 6.6s)
+[test-m5-crash] PASS: round 3: the boot was SIGKILLed, not shut down
+[test-m5-crash] round 3: verification boot done (rc=0, 6.6s)
+[test-m5-crash] PASS: round 3: the post-crash boot shut down cleanly
+[test-m5-crash] PASS: round 3: the suite passed on the crashed volume (6/6)
+[test-m5-crash] PASS: round 3: the pre-crash arena.txt verified byte-for-byte after the crash (zero writes, zero repairs)
+[test-m5-crash] PASS: round 3: the production fsd mounted without an fsck ritual
+[test-m5-crash] PASS: round 3: cat answered a legal committed state (empty)
+[test-m5-crash] PASS: round 3: no torn prefix reached the console
+[test-m5-crash] PASS: round 3: ls reported size 0, agreeing with cat's empty state — only never-committed, committed-empty, or committed-full are legal
+[test-m5-crash] PASS: round 3: base.txt is still exact (older commits untouchable)
+[test-m5-crash] PASS: round 3: the kernel declared its clean halt
+[test-m5-crash] PASS: round 3: host audit of the crashed volume clean (no problems)
+[test-m5-crash] round 4: killed QEMU (trigger "bytes to 'crash4.txt'" x1 +0.0s, 6.7s)
+[test-m5-crash] PASS: round 4: the boot was SIGKILLed, not shut down
+[test-m5-crash] round 4: verification boot done (rc=0, 6.6s)
+[test-m5-crash] PASS: round 4: the post-crash boot shut down cleanly
+[test-m5-crash] PASS: round 4: the suite passed on the crashed volume (6/6)
+[test-m5-crash] PASS: round 4: the pre-crash arena.txt verified byte-for-byte after the crash (zero writes, zero repairs)
+[test-m5-crash] PASS: round 4: the production fsd mounted without an fsck ritual
+[test-m5-crash] PASS: round 4: cat answered a legal committed state (full)
+[test-m5-crash] PASS: round 4: no torn prefix reached the console
+[test-m5-crash] PASS: round 4: ls reported size 74, agreeing with cat's full state — only never-committed, committed-empty, or committed-full are legal
+[test-m5-crash] PASS: round 4: base.txt is still exact (older commits untouchable)
+[test-m5-crash] PASS: round 4: the kernel declared its clean halt
+[test-m5-crash] PASS: round 4: host audit of the crashed volume clean (no problems)
+[test-m5-crash] ==============================================
+[test-m5-crash] CRASH CONSISTENCY: PASS  (5 kill/reboot rounds, no repair tool ran; serials: build/serial-test-m5-crash-*.log)
+======================================================================
+== running test_m5_persist.py
+======================================================================
+[test-m5-persist] building kernel image + ESP ...
+[test-m5-persist] boot 1 done (rc=0, 6.6s)
+[test-m5-persist] PASS: boot 1 shut down cleanly (rc=0)
+[test-m5-persist] PASS: boot 1: the m5 suite passed (6/6)
+[test-m5-persist] PASS: boot 1: fs_service ran the FRESH contract (exit 42)
+[test-m5-persist] PASS: boot 1: the shell created persist.txt through fsd
+[test-m5-persist] PASS: boot 1: cat streamed the marker back in the same boot
+[test-m5-persist] PASS: boot 1: the kernel declared its clean halt
+[test-m5-persist] PASS: boot 1: host audit clean (no problems)
+[test-m5-persist] PASS: boot 1: persist.txt exists in the newest commit (seq 5)
+[test-m5-persist] PASS: boot 1: committed size 30 == 30
+[test-m5-persist] PASS: boot 1: the marker bytes are physically in the committed sectors
+[test-m5-persist] boot 2 done (rc=0, 6.7s)
+[test-m5-persist] PASS: boot 2 shut down cleanly (rc=0)
+[test-m5-persist] PASS: boot 2: the m5 suite passed (6/6)
+[test-m5-persist] PASS: boot 2: fstest's branch probe found the file from boot 1
+[test-m5-persist] PASS: boot 2: fs_service ran the PERSISTED contract (exit 43, zero writes)
+[test-m5-persist] PASS: boot 2: the kernel confirmed the persisted branch's op contract
+[test-m5-persist] PASS: boot 2: fsd's mount reclaimed the superseded ping-pong generation
+[test-m5-persist] PASS: boot 2: cat streamed back the EXACT bytes written in boot 1
+[test-m5-persist] PASS: boot 2: the first ls listed persist.txt with its committed size
+[test-m5-persist] PASS: boot 2: rm unlinked the rebooted file transactionally
+[test-m5-persist] PASS: boot 2: the final ls counts only the suite's arena.txt
+[test-m5-persist] PASS: boot 2: the kernel declared its clean halt
+[test-m5-persist] PASS: boot 2: host audit clean (no problems)
+[test-m5-persist] PASS: boot 2: persist.txt is gone from the newest commit (seq 6)
+[test-m5-persist] PASS: boot 2: arena.txt survived at 512 bytes
+[test-m5-persist] PASS: boot 2: arena.txt's pattern is STILL byte-exact after the unlink
+[test-m5-persist] ==============================================
+[test-m5-persist] TWO-BOOT PERSISTENCE: PASS  (serials: build/serial-test-m5-persist-b1.log, build/serial-test-m5-persist-b2.log)
+======================================================================
+== running test_m6.py
+======================================================================
+[test-m6] building kernel image + ESP ...
+[test-m6] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m6] PASS: no kernel panic on serial
+[test-m6] PASS: self-test 'net_service' 
+[test-m6] PASS: self-test 'rng_service' 
+[test-m6] PASS: self-test 'input_service' 
+[test-m6] PASS: self-test 'console_service' 
+[test-m6] PASS: self-test 'service_death' 
+[test-m6] PASS: self-test 'service_restart' 
+[test-m6] PASS: milestone RESULT line present
+[test-m6] PASS: RESULT is PASS (6/6)
+[test-m6] PASS: RESULT covers all 6 expected tests (got 6)
+[test-m6] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[test-m6] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[test-m6] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[test-m6] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[test-m6] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[test-m6] PASS: prior-milestone regression: m7 RESULT PASS (2/2) in this boot
+[test-m6] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m6] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.3s)
+[test-m6] ==============================================
+[test-m6] MILESTONE M6: PASS  (serial: build/serial-m6.log)
+[test-m6] PASS: nettest verified the ARP reply and reported its PASS line
+[test-m6] PASS: the reply's protocol fields were verified at their wire offsets
+[test-m6] PASS: the kernel counted exactly one hardware delivery per relay vector (no polling)
+[test-m6] PASS: the suite's teardown was frame-exact
+[test-m6] PASS: the PRODUCTION netd spawned at boot with the fixture attached
+[test-m6] PASS: netd reached DRIVER_OK four times — the m6 suite's instance, the m7 ARP suite's, the one the SUPERVISOR restarted after M7.1b killed it, and the production service. Kept EXACT rather than loosened to >=: this count has now noticed two milestones adding instances, which is precisely what a count that cannot notice would not have done (the suite's production service)
+[test-m6] PASS: rngtest verified both draws and reported its PASS line
+[test-m6] PASS: the kernel counted exactly two hardware deliveries — one MSI per draw (no polling)
+[test-m6] PASS: the PRODUCTION rngd spawned at boot with the fixture attached
+[test-m6] PASS: rngd reached DRIVER_OK twice (the suite's instance + the production service)
+[test-m6] PASS: the logged draw fingerprints are present and differ (e3d68619 vs 943f528d)
+[test-m6] PASS: service-side diagnostic refusal: blktest: missing diagnostic authority refused by storaged
+[test-m6] PASS: service-side diagnostic refusal: netdtest: missing diagnostic authority refused by service
+[test-m6] PASS: service-side diagnostic refusal: rngdtest: missing diagnostic authority refused by service
+[test-m6] PASS: service-side diagnostic refusal: fstest: fsd and storaged rejected missing/wrong-object poison markers
+[test-m6] PASS: service-side diagnostic refusal: inputtest: service refused poison without diagnostic marker
+[test-m6] PASS: service-side diagnostic refusal: contest: service refused poison without diagnostic marker
+[test-m6] PASS: service-side diagnostic refusal: faulttest: service refused hang without diagnostic marker
+[test-m6] PASS: inputtest read back the exact sequence typed on the virtual keyboard
+[test-m6] PASS: the suite's inputd instance detected the WITHHELD ConsoleInput capability and ran as a service
+[test-m6] PASS: the PRODUCTION inputd instance found the capability and ran as the console feeder
+[test-m6] PASS: the PRODUCTION inputd spawned at boot with the keyboard attached
+[test-m6] PASS: inputd reached DRIVER_OK twice (the suite's instance + the production service)
+[test-m6] PASS: the kernel's PCI scan classified the keyboard as modern virtio-input (no transitional alias exists for this class)
+[test-m6] PASS: the console_service test PASSED — a real round trip through the port
+[test-m6] PASS: consoled completed the virtio 1.0 handshake on both queues
+[test-m6] PASS: the suite's consoled ran in SERVICE mode (both console capabilities withheld — the mode switch is under test)
+[test-m6] PASS: the client verified bytes out AND back, byte-for-byte
+[test-m6] PASS: both directions were INTERRUPT-completed (no polling)
+[test-m6] PASS: the production consoled got BOTH console capabilities (input to feed the line discipline, output to mirror what the machine prints)
+[test-m6] PASS: the production instance's capability probes put it in console mode
+[test-m6] PASS: the kernel's PCI scan resolved the console device through the transitional subsystem id
+[test-m6] PASS: the service_death test PASSED — a server destroyed mid-request produces a typed status, not a hung client
+[test-m6] PASS: the kernel failed the in-flight call when the server died
+[test-m6] PASS: destroying a process KILLED its blocked thread (a supervisor cannot restart a driver it cannot kill)
+[test-m6] PASS: the client observed the typed death from ring 3 and handled it
+[test-m6] PASS: the endpoint survived its server, so a restart can reuse it
+[test-m6] PASS: the service_restart test PASSED — the whole crash-and-restart cycle on real processes
+[test-m6] PASS: the supervisor respawned the dead service with its capabilities REPLAYED (an Mmio window is a value, so 'the same grants' is the identical list, not a reconstruction)
+[test-m6] PASS: a client reached the new instance through the capability it held before the crash — clients never learn the pid
+[test-m6] PASS: the death was announced to the supervisor from proc::destroy
+[test-m6-nonet] building kernel image + ESP ...
+[test-m6-nonet] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m6-nonet] PASS: no kernel panic without the net fixture
+[test-m6-nonet] PASS: the m6 suite reported an HONEST SKIP (not PASS, not FAIL)
+[test-m6-nonet] PASS: the m6 RESULT line says SKIP (a skip is never laundered into a pass count)
+[test-m6-nonet] PASS: the kernel logged the network service offline
+[test-m6-nonet] PASS: production netd was NOT spawned without the device
+[test-m6-nonet] PASS: no netd instance ran at all without the device
+[test-m6-nonet] PASS: the rng_service test reported an HONEST SKIP too
+[test-m6-nonet] PASS: the kernel logged the entropy service offline
+[test-m6-nonet] PASS: production rngd was NOT spawned without the device
+[test-m6-nonet] PASS: no rngd instance ran at all without the device
+[test-m6-nonet] PASS: the input_service test reported an HONEST SKIP too
+[test-m6-nonet] PASS: the kernel logged the keyboard service offline
+[test-m6-nonet] PASS: production inputd was NOT spawned without the device
+[test-m6-nonet] PASS: no inputd instance ran at all without the device
+[test-m6-nonet] PASS: the console_service test reported an HONEST SKIP too
+[test-m6-nonet] PASS: the kernel logged the console channel service offline
+[test-m6-nonet] PASS: production consoled was NOT spawned without the device
+[test-m6-nonet] PASS: no consoled instance ran at all without the device
+[test-m6-nonet] PASS: service_death PASSED even with NO fixtures — the fault-injection proof needs no device, so it holds on the barest machine
+[test-m6-nonet] PASS: service_restart PASSED with NO fixtures too — supervision is a property of the kernel, not of any device
+[test-m6-nonet] PASS: the shell still reached its prompt on the SERIAL console with no keyboard attached (the keyboard is additive, never required)
+[test-m6-nonet] PASS: prior-milestone regression: m1 RESULT PASS (8 tests) in the same no-net boot
+[test-m6-nonet] PASS: prior-milestone regression: m2 RESULT PASS (21 tests) in the same no-net boot
+[test-m6-nonet] PASS: prior-milestone regression: m3 RESULT PASS (13 tests) in the same no-net boot
+[test-m6-nonet] PASS: prior-milestone regression: m4 RESULT PASS (9 tests) in the same no-net boot
+[test-m6-nonet] PASS: prior-milestone regression: m5 RESULT PASS (6 tests) in the same no-net boot
+[test-m6-nonet] PASS: the kernel declared its clean halt
+[test-m6-nonet] PASS: QEMU exited cleanly (rc=0, 3.5s)
+[test-m6-notypist] building kernel image + ESP ...
+[test-m6-notypist] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m6-notypist] PASS: no kernel panic when nobody types
+[test-m6-notypist] PASS: the input_service test reported an HONEST SKIP (not a FAIL, not a fake PASS)
+[test-m6-notypist] PASS: the m6 RESULT line says SKIP
+[test-m6-notypist] PASS: the suite ended the wait deliberately after its window (the driver cannot time itself out — ADR-0026)
+[test-m6-notypist] PASS: inputtest reported the honest outcome instead of hanging
+[test-m6-notypist] PASS: the production keyboard service still came up for the user
+[test-m6-notypist] PASS: the machine reached the shell prompt — attaching a keyboard nobody uses does NOT make the machine unusable
+[test-m6-notypist] PASS: the kernel declared its clean halt after a serial `shutdown`
+[test-m6-notypist] PASS: QEMU exited cleanly (rc=0, 7.3s)
+[test-m6] ==============================================
+[test-m6] MILESTONE 6.1+6.2+6.3+6.4: PASS (link + entropy + input + console proofs, honest SKIPs with no fixtures)
+======================================================================
+== running test_m6_console.py
+======================================================================
+[test-m6-console] building kernel image + ESP ...
+[test-m6-console] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m6-console] PASS: no kernel panic during the port session
+[test-m6-console] PASS: the production consoled was spawned with BOTH console capabilities
+[test-m6-console] PASS: consoled's capability probes put it in console mode
+[test-m6-console] PASS: the shell's banner ARRIVED on the port (kernel console output → mirror → SYS_CONSOLE_PULL → transmit queue)
+[test-m6-console] PASS: the prompt arrived on the port — the port is a console, not a log tap
+[test-m6-console] PASS: the typed line was ECHOED back on the port by the kernel's line discipline
+[test-m6-console] PASS: the shell EXECUTED the command typed on the port and its output came back the same way (echo + result)
+[test-m6-console] PASS: the shell never saw a bad command — BACKSPACE erased the mistyped character inside the SAME line discipline the serial port and the keyboard use
+[test-m6-console] PASS: the corrected `ps` ran and listed the live processes on the port
+[test-m6-console] PASS: the Power-gated SYS_SHUTDOWN was reached from a keystroke typed ON THE PORT
+[test-m6-console] PASS: the kernel declared its clean halt
+[test-m6-console] PASS: serial stayed live alongside the port (a channel was ADDED, not moved)
+[test-m6-console] PASS: the suite's console_service test passed in this boot
+[test-m6-console] PASS: the untouched keyboard reported an honest SKIP in the same boot (one host actor absent does not corrupt the other's verdict)
+[test-m6-console] PASS: the self-driving fixtures (link + entropy) passed alongside
+[test-m6-console] PASS: QEMU exited cleanly (rc=0, 7.4s)
+[test-m6-console] M6.4 CONSOLE CHANNEL: PASS  (serial: build/serial-m6-console.log, port: build/vcon-test-m6-console.txt)
+======================================================================
+== running test_m6_typing.py
+======================================================================
+[test-m6-typing] building kernel image + ESP ...
+[test-m6-typing] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m6-typing] PASS: no kernel panic during the typing session
+[test-m6-typing] PASS: the production inputd was spawned with the ConsoleInput capability
+[test-m6-typing] PASS: inputd's capability probe put it in console mode
+[test-m6-typing] PASS: the typed characters were echoed back by the line discipline ('echo Hello-From-The-Keyboard')
+[test-m6-typing] PASS: SHIFTED characters decoded correctly (the driver tracked the modifier across separate press/release events)
+[test-m6-typing] PASS: the shell EXECUTED the typed command and printed its output (2 occurrences of 'Hello-From-The-Keyboard': the echo plus the result)
+[test-m6-typing] PASS: the shell never saw a bad command — BACKSPACE erased the mistyped character inside the line discipline
+[test-m6-typing] PASS: the corrected `ps` command ran and listed the live processes
+[test-m6-typing] PASS: the Power-gated SYS_SHUTDOWN was reached from a KEYSTROKE
+[test-m6-typing] PASS: the kernel declared its clean halt
+[test-m6-typing] PASS: the serial console stayed armed alongside the keyboard (the keyboard ADDS a source, it does not replace one)
+[test-m6-typing] PASS: prior-suite regression: m1 RESULT PASS in the typing boot
+[test-m6-typing] PASS: prior-suite regression: m2 RESULT PASS in the typing boot
+[test-m6-typing] PASS: prior-suite regression: m3 RESULT PASS in the typing boot
+[test-m6-typing] PASS: prior-suite regression: m4 RESULT PASS in the typing boot
+[test-m6-typing] PASS: prior-suite regression: m5 RESULT PASS in the typing boot
+[test-m6-typing] PASS: prior-suite regression: m6 RESULT PASS in the typing boot
+[test-m6-typing] PASS: QEMU exited cleanly (rc=0, 7.3s)
+[test-m6-typing] ==============================================
+[test-m6-typing] M6.3 LIVE TYPING: PASS  (serial: build/serial-m6-typing.log)
+======================================================================
+== running test_m7.py
+======================================================================
+[test-m7] building kernel image + ESP ...
+[test-m7] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[test-m7] PASS: no kernel panic on serial
+[test-m7] PASS: self-test 'timer_facility' 
+[test-m7] PASS: self-test 'arp_service' 
+[test-m7] PASS: milestone RESULT line present
+[test-m7] PASS: RESULT is PASS (2/2)
+[test-m7] PASS: RESULT covers all 2 expected tests (got 2)
+[test-m7] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[test-m7] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[test-m7] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[test-m7] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[test-m7] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[test-m7] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[test-m7] PASS: kernel declared its clean halt (ResetSystem path reached)
+[test-m7] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.4s)
+[test-m7] ==============================================
+[test-m7] MILESTONE M7: PASS  (serial: build/serial-m7.log)
+[test-m7] PASS: the kernel installed the timer facility before running anything that needs it
+[test-m7] PASS: the client measured a real 50 ms deadline against the monotonic clock
+[test-m7] PASS: the deadline was NOT early (53906us >= 50000us)
+[test-m7] PASS: the lag stayed inside one tick plus slack (3906us)
+[test-m7] PASS: a cancelled timer never fired, and cancelling it twice was an error rather than a silent success
+[test-m7] PASS: badges merge — a service can wait for work OR a timeout in one blocking call
+[test-m7] PASS: a STALE timer id was refused — ids carry a generation, so a reused slot cannot be cancelled by an old handle (C's review of v0.11.0)
+[test-m7] PASS: the kernel swept a timer whose owner died (the fourth thing proc::destroy sweeps, after relays, the console mirror and blocked-thread references)
+[test-m7] PASS: the whole cycle is frame-exact
+[test-m7] PASS: the production supervisor ran quietly — nothing died, so nothing was restarted
+[test-m7] PASS: the arp_service test PASSED — a protocol on the real wire
+[test-m7] PASS: the stack resolved the gateway by putting a real ARP request on the wire
+[test-m7] PASS: the resolved MAC is a real address (52:55:0a:00:02:02)
+[test-m7] PASS: the second lookup was served from cache
+[test-m7] PASS: the cache is proven the only honest way — the count of requests PUT ON THE WIRE did not move
+[test-m7] PASS: a silent address was reported UNREACHABLE rather than invented
+[test-m7] PASS: and that call TERMINATED — before M7.0 it could not have (netd bounds its own wait with a timer, because a client blocked in SYS_IPC_CALL cannot observe its own)
+[test-m7] PASS: the L2/protocol split held: netd stayed a device driver, netstackd stayed a protocol service
+[test-m7] PASS: the stack really did time out on the silent address (its own accounting, not the test's)
+[test-m7] PASS: the stack MET a dead driver — its call was answered STATUS_SERVICE_GONE rather than queued on an endpoint nobody would ever read
+[test-m7] PASS: the test produced a genuinely dead dependency before letting the supervisor work (the first version restarted netd so fast the stack never noticed, and proved nothing)
+[test-m7] PASS: the stack RE-ESTABLISHED with the new instance — it re-acquired its device facts rather than assuming anything survived
+[test-m7] PASS: the supervisor restarted netd with its capabilities replayed
+[test-m7] PASS: a resolve that had to reach the WIRE succeeded through the new instance (a cache hit would have proven nothing)
+[test-m7] PASS: the stack's own accounting records the re-attach
+[test-m7] PASS: an ICMP echo reply came back and was MATCHED on identifier and sequence — a reply that merely arrived could be an answer to somebody else's ping
+[test-m7] PASS: the round-trip time is plausible and measured on the monotonic clock (1762us)
+[test-m7] PASS: the echo carried a 200-byte payload — a frame far larger than one 64-byte IPC message, which the driver used to DROP outright
+[test-m7] PASS: the frame really was reassembled from multiple chunks (not a single message that happened to fit)
+[test-m7] PASS: every payload byte survived reassembly — the pattern is position-dependent, so a dropped, duplicated or reordered chunk could not pass
+[test-m7] PASS: the layers report distinctly: a ping to an unresolvable address fails at ARP, not as a silent host
+[test-m7] PASS: the receive parser REFUSES what its specification forbids — options headers, fragments, over-long declared lengths, bad checksums, and an echo reply from the wrong host — while still accepting the genuine article (C's v0.14.0 review; the wire never sends these, so they would otherwise ship untested)
+[test-m7] PASS: the demultiplexer can account for every frame it saw
+[test-m7] PASS: it sorted BOTH protocols (2 ARP, 9 IPv4) — with one consumer there is no demultiplexing to prove
+[test-m7] PASS: no frame failed a checksum (they are verified on receive, not assumed)
+[test-m7] PASS: UDP handles are drawn from the entropy service — a handle is authority by POSSESSION, so a guessable one would be authority by arithmetic
+[test-m7] PASS: bind-once is enforced (a namespace rule) and a forged handle is refused (the authority rule) — the two are separate questions and are tested separately
+[test-m7] PASS: a real UDP round trip against the host UDP fixture — the response is matched on OUR transaction id, so a datagram that merely arrived would not pass
+[test-m7] PASS: the transaction id came back as sent (0xa7e5)
+[test-m7] PASS: the stack's own accounting shows a datagram delivered to a binding and a bad handle refused
+[test-m7] PASS: outgoing UDP checksum computed and verified; corrupt incoming payload counted and refused; the IPv4 zero-checksum exception accepted
+[test-m7] PASS: the real DNS answer exceeded one UDP inline message and its tail was read through a bearer-authorised continuation
+[test-m7] PASS: CLOSE really revokes authority even when a binding slot is reused
+[test-m7] PASS: DNS LOOKUP parsed and validated a real A answer from the host UDP fixture
+[test-m7] PASS: bad DNS input was rejected before any network operation
+[test-m7] PASS: the public library crossed the bearer/continuation/revocation boundary on real packets
+[test-m7] PASS: OPEN returns a bearer; POLL completes the three-way handshake against a real host
+[test-m7] PASS: the TCP byte stream crosses several IPC messages and every position is checked
+[test-m7] PASS: close is an acknowledged FIN, followed by revocation of the bearer
+[test-m7] PASS: the independent host TCP stack received the request, sent the bytes and saw EOF
+[test-m7] PASS: netd retained all burst arrivals instead of dropping TCP data behind an ACK
+[test-m7] PASS: the machine still reaches the shell with the timer facility live
+[test-m7] M7.0-7.7 TIMERS + ARP + IPv4/ICMP + UDP + DNS + TCP + NATIVE API: PASS  (serial: build/serial-m7.log)
+======================================================================
+== running test_m7_no_tcp.py
+======================================================================
+[tcp-no-peer] building kernel image + ESP ...
+[tcp-no-peer] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[tcp-no-peer] PASS: no kernel panic on serial
+[tcp-no-peer] PASS: self-test 'timer_facility' 
+[tcp-no-peer] PASS: self-test 'arp_service' 
+[tcp-no-peer] PASS: milestone RESULT line present
+[tcp-no-peer] PASS: RESULT is PASS (2/2)
+[tcp-no-peer] PASS: RESULT covers all 2 expected tests (got 2)
+[tcp-no-peer] PASS: prior-milestone regression: m1 RESULT PASS (8/8) in this boot
+[tcp-no-peer] PASS: prior-milestone regression: m2 RESULT PASS (21/21) in this boot
+[tcp-no-peer] PASS: prior-milestone regression: m3 RESULT PASS (13/13) in this boot
+[tcp-no-peer] PASS: prior-milestone regression: m4 RESULT PASS (9/9) in this boot
+[tcp-no-peer] PASS: prior-milestone regression: m5 RESULT PASS (6/6) in this boot
+[tcp-no-peer] PASS: prior-milestone regression: m6 RESULT PASS (6/6) in this boot
+[tcp-no-peer] PASS: kernel declared its clean halt (ResetSystem path reached)
+[tcp-no-peer] PASS: QEMU exited cleanly via kernel ResetSystem shutdown (rc=0, 6.5s)
+[tcp-no-peer] PASS: an absent actor is an explicit SKIP, never a fake TCP PASS
+======================================================================
+== running test_m81_read.py
+======================================================================
+[m81-read] building kernel image + ESP ...
+[m81-read] fresh: rc=0, 6.2s
+[m81-read] PASS: fresh: historical boot, real isolated reader, frame/record-reaped clean halt
+[m81-read] PASS: fresh: no marker and copied wrong-kind endpoint refused 20x at receiver
+[m81-read] PASS: fresh: FS-backed READ yields UNSET, never an invented value
+[m81-read] PASS: fresh: real AFS1 platter audits clean
+[m81-read] seed: rc=0, 6.4s
+[m81-read] PASS: seed: historical boot, real isolated reader, frame/record-reaped clean halt
+[m81-read] PASS: seed: no marker and copied wrong-kind endpoint refused 20x at receiver
+[m81-read] PASS: seed: FS-backed READ yields UNSET, never an invented value
+[m81-read] PASS: trusted raw-FS shell created an intentionally malformed visible record
+[m81-read] PASS: seed: real AFS1 platter audits clean
+[m81-read] corrupt: rc=0, 6.3s
+[m81-read] PASS: corrupt: historical boot, real isolated reader, frame/record-reaped clean halt
+[m81-read] PASS: corrupt: no marker and copied wrong-kind endpoint refused 20x at receiver
+[m81-read] PASS: corrupt: FS-backed READ yields CORRUPT, never an invented value
+[m81-read] PASS: malformed reserved object remains visible; shell and fsd stay alive
+[m81-read] PASS: corrupt: real AFS1 platter audits clean
+[m81-read] PASS: host-formatted committed generation audits clean before boot
+[m81-read] preseeded value: rc=0, 6.2s
+[m81-read] PASS: real fsd/storaged DMA delivers exact precommitted bytes, no write inferred
+[m81-read] PASS: newest-corrupt disk still has consistent AFS1 metadata
+[m81-read] newer corrupted value: rc=0, 6.2s
+[m81-read] PASS: visible corrupt newest record rejects older valid seq1: no silent downgrade
+[m81-read-absent] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m81-read] optional-device-absent: rc=0, 3.4s
+[m81-read] PASS: missing optional devices do not forge authority or prevent disk-only read
+[m81-read] CONFIG-READ-BOUNDARY: PASS (8.1 still incomplete)
+======================================================================
+== running test_m81_update.py
+======================================================================
+[m81-update] building kernel image + ESP ...
+[m81-update] stage-one: rc=0, 7.4s
+[m81-update] PASS: trusted intent staged without automatic write or updater authority in shell
+[m81-update] commit-one: rc=0, 7.0s
+[m81-update] PASS: separate marker-holding updater committed exact seq1 to real disk
+[m81-update] repeat-one: rc=0, 6.8s
+[m81-update] PASS: idempotent repeated intent spends no second generation
+[m81-update] PASS: Power-gated boot-relative frame/record/process consumption exact across skip/commit/no-op: [(1677, 16, 16), (1677, 16, 16), (1677, 16, 16)]
+[m81-update] stage-two: rc=0, 6.4s
+[m81-update] PASS: trusted next intent staged without mutating old committed value
+[m81-update] kill-precreate: rc=None, 6.0s
+[m81-update] PASS: precreate: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: precreate: committed platter new=None within this boundary's exact legal states; audit clean
+[m81-update] recover-precreate: rc=0, 6.3s
+[m81-update] PASS: precreate: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: precreate: after recovery both immutable generations survive byte-exact
+[m81-update] kill-empty: rc=None, 6.2s
+[m81-update] PASS: empty: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: empty: committed platter new=b'guest-v2' within this boundary's exact legal states; audit clean
+[m81-update] recover-empty: rc=0, 6.2s
+[m81-update] PASS: empty: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: empty: after recovery both immutable generations survive byte-exact
+[m81-update] kill-prewrite: rc=None, 6.3s
+[m81-update] PASS: prewrite: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: prewrite: committed platter new=b'' within this boundary's exact legal states; audit clean
+[m81-update] recover-prewrite: rc=0, 6.2s
+[m81-update] PASS: prewrite: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: prewrite: after recovery both immutable generations survive byte-exact
+[m81-update] kill-write-commit: rc=None, 6.1s
+[m81-update] PASS: write-commit: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: write-commit: committed platter new=b'guest-v2' within this boundary's exact legal states; audit clean
+[m81-update] recover-write-commit: rc=0, 6.4s
+[m81-update] PASS: write-commit: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: write-commit: after recovery both immutable generations survive byte-exact
+[m81-update] kill-write-reply: rc=None, 6.3s
+[m81-update] PASS: write-reply: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: write-reply: committed platter new=b'guest-v2' within this boundary's exact legal states; audit clean
+[m81-update] recover-write-reply: rc=0, 6.4s
+[m81-update] PASS: write-reply: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: write-reply: after recovery both immutable generations survive byte-exact
+[m81-update] kill-close: rc=None, 6.1s
+[m81-update] PASS: close: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: close: committed platter new=b'guest-v2' within this boundary's exact legal states; audit clean
+[m81-update] recover-close: rc=0, 6.2s
+[m81-update] PASS: close: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: close: after recovery both immutable generations survive byte-exact
+[m81-update] kill-reply: rc=None, 6.1s
+[m81-update] PASS: reply: SIGKILL after observed real guest boundary, never a clean exit
+[m81-update] PASS: reply: committed platter new=b'guest-v2' within this boundary's exact legal states; audit clean
+[m81-update] recover-reply: rc=0, 6.6s
+[m81-update] PASS: reply: same-disk reboot reconciled ambiguous kill (new if durable, otherwise retry)
+[m81-update] PASS: reply: after recovery both immutable generations survive byte-exact
+[m81-update] PASS: offline allocator-full fixture has a valid committed AFS1 namespace
+[m81-update] disk-full: rc=0, 6.3s
+[m81-update] PASS: FS allocator refused WRITE; second marked SET DEGRADED, old READ/record intact
+[m81-update] PASS: visible-corrupt fixture still audits at AFS1 level
+[m81-update] visible-corrupt: rc=0, 6.3s
+[m81-update] PASS: reader and marker-holder both refuse a visible malformed predecessor
+[m81-update] stage-conflict: rc=0, 6.5s
+[m81-update] PASS: second intent staged after the already-authorized update
+[m81-update] intent-conflict: rc=0, 6.2s
+[m81-update] PASS: conflicting opt-in input typed refusal; no guessed update
+[m81-update] AUTHORIZED TRANSACTION/CRASH: PASS
+======================================================================
+== running test_m81_update_table.py
+======================================================================
+[m81-table] building kernel image + ESP ...
+[m81-table] staged: rc=0, 7.1s
+[m81-table] generation 1: PASS (rc=0, 7.0s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 2: PASS (rc=0, 7.2s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 3: PASS (rc=0, 7.3s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 4: PASS (rc=0, 7.4s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 5: PASS (rc=0, 7.1s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 6: PASS (rc=0, 7.3s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 7: PASS (rc=0, 7.2s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] generation 8: PASS (rc=0, 7.2s, old bytes=True, boot-relative counters=(1677, 16, 16))
+[m81-table] ninth attempt: PASS (rc=0, 7.1s, eight complete immutable generations)
+[m81-table] PASS: table preflight stayed bounded, not degraded
+[m81-table] EIGHT-SLOT EXHAUSTION: PASS
+======================================================================
+== running test_m82_capspace.py
+======================================================================
+[m82-capspace] building kernel image + ESP ...
+[m82-capspace] rc=0 6.8s; post-EBS-relative frames/records/processes=(1677, 16, 16)
+[m82-capspace] CAPSPACE32: PASS (guest last-slot copy/move/full-refusal, three live restart cycles)
+======================================================================
+== running test_m82_ipc_caller.py
+======================================================================
+[m82-ipc-caller] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m82-ipc-caller] GUEST FAILURE despite QEMU rc=0: missing m4: RESULT PASS (9/9)
+[m82-ipc-caller] PASS: harness refuses QEMU rc=0 kernel halt or missing semantic PASS
+[m82-ipc-caller] building kernel image + ESP ...
+[m82-ipc-caller-probe-stall-caller-first] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m82-ipc-caller] probe-stall-caller-first: rc=0, seconds=8.5
+[m82-ipc-caller] PASS: probe-stall-caller-first: semantic historical PASS and clean user shutdown (no kernel halt/error)
+[m82-ipc-caller] PASS: probe-stall-caller-first: exact frame/spawn/process accounting stable after worker and broker teardown
+[m82-ipc-caller] PASS: probe-stall-caller-first: failed probe did not approve; original endpoint still serves fresh PING/deny
+[m82-ipc-caller] PASS: worker died IN SYS_IPC_CALL before server death; kernel swept Delivered caller
+[m82-ipc-caller-probe-stall] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m82-ipc-caller] probe-stall: rc=0, seconds=8.3
+[m82-ipc-caller] PASS: probe-stall: semantic historical PASS and clean user shutdown (no kernel halt/error)
+[m82-ipc-caller] PASS: probe-stall: exact frame/spawn/process accounting stable after worker and broker teardown
+[m82-ipc-caller] PASS: probe-stall: failed probe did not approve; original endpoint still serves fresh PING/deny
+[m82-ipc-caller] PASS: broker-first timeout returned typed SERVICE_GONE to still-live probe
+[m82-ipc-caller-probe-bad] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m82-ipc-caller] probe-bad: rc=0, seconds=8.6
+[m82-ipc-caller] PASS: probe-bad: semantic historical PASS and clean user shutdown (no kernel halt/error)
+[m82-ipc-caller] PASS: probe-bad: exact frame/spawn/process accounting stable after worker and broker teardown
+[m82-ipc-caller] PASS: probe-bad: failed probe did not approve; original endpoint still serves fresh PING/deny
+[m82-ipc-caller] PASS: invalid typed reply never became authenticated readiness
+[m82-ipc-caller] ADR-0050: PASS (3 guest fault boundaries)
+======================================================================
+== running test_m82_permission.py
+======================================================================
+[m82-permission-integration] building kernel image + ESP ...
+[m82-permission-integration] exercise rc=0, 9.5s
+[m82-permission-integration] PASS: full-device boot completes cleanly
+[m82-permission-integration] PASS: actual two-grant worker witnesses reply and exit; manager owns app lifecycle
+[m82-permission-integration] PASS: request, endpoint and absent/wrong marker are not approval
+[m82-permission-integration] PASS: genuine approval and fresh rngd bearer mediate exact 512-byte file
+[m82-permission-integration] PASS: independently copied bearer survives another ACQUIRE
+[m82-permission-integration] PASS: intentional endpoint transfer to independent spawned client works
+[m82-permission-integration] PASS: revoke retires copied token bytes at receiver, not cap deletion
+[m82-permission-integration] PASS: READ dispatched before REVOKE succeeds; following READ refused only after durable ACK
+[m82-permission-integration] same-disk reboot rc=0, 6.3s
+[m82-permission-integration] PASS: durably committed revoke survives same-disk reboot as DENY
+[m82-permission-integration] MEDIATED INTEGRATION: PASS; separate restart/crash/ordering gates still required
+======================================================================
+== running test_m82_policy_crash.py
+======================================================================
+[m82-policy-crash] building kernel image + ESP ...
+[m82-policy-crash] revoke-baseline: rc=0, 6.3s
+[m82-policy-crash] PASS: revoke: independently audited, guest-committed old decision before fault
+[m82-policy-crash] kill-revoke-precreate: rc=None, 6.4s
+[m82-policy-crash] PASS: revoke/precreate: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-precreate: rc=0, 6.3s
+[m82-policy-crash] PASS: revoke/precreate: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-revoke-empty: rc=None, 6.3s
+[m82-policy-crash] PASS: revoke/empty: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-empty: rc=0, 6.7s
+[m82-policy-crash] PASS: revoke/empty: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-revoke-prewrite: rc=None, 6.5s
+[m82-policy-crash] PASS: revoke/prewrite: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-prewrite: rc=0, 6.6s
+[m82-policy-crash] PASS: revoke/prewrite: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-revoke-write-reply: rc=None, 6.4s
+[m82-policy-crash] PASS: revoke/write-reply: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-write-reply: rc=0, 6.1s
+[m82-policy-crash] PASS: revoke/write-reply: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-revoke-close: rc=None, 6.5s
+[m82-policy-crash] PASS: revoke/close: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-close: rc=0, 6.4s
+[m82-policy-crash] PASS: revoke/close: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-revoke-rescan: rc=None, 6.7s
+[m82-policy-crash] PASS: revoke/rescan: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-rescan: rc=0, 6.4s
+[m82-policy-crash] PASS: revoke/rescan: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-revoke-ack: rc=None, 6.6s
+[m82-policy-crash] PASS: revoke/ack: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-revoke-ack: rc=0, 6.3s
+[m82-policy-crash] PASS: revoke/ack: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] deny-baseline: rc=0, 6.5s
+[m82-policy-crash] PASS: deny: independently audited, guest-committed old decision before fault
+[m82-policy-crash] kill-deny-precreate: rc=None, 6.3s
+[m82-policy-crash] PASS: deny/precreate: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-precreate: rc=0, 6.4s
+[m82-policy-crash] PASS: deny/precreate: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-deny-empty: rc=None, 6.4s
+[m82-policy-crash] PASS: deny/empty: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-empty: rc=0, 6.4s
+[m82-policy-crash] PASS: deny/empty: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-deny-prewrite: rc=None, 6.4s
+[m82-policy-crash] PASS: deny/prewrite: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-prewrite: rc=0, 6.7s
+[m82-policy-crash] PASS: deny/prewrite: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-deny-write-reply: rc=None, 6.6s
+[m82-policy-crash] PASS: deny/write-reply: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-write-reply: rc=0, 6.4s
+[m82-policy-crash] PASS: deny/write-reply: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-deny-close: rc=None, 6.5s
+[m82-policy-crash] PASS: deny/close: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-close: rc=0, 6.4s
+[m82-policy-crash] PASS: deny/close: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-deny-rescan: rc=None, 6.9s
+[m82-policy-crash] PASS: deny/rescan: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-rescan: rc=0, 6.2s
+[m82-policy-crash] PASS: deny/rescan: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-deny-ack: rc=None, 6.7s
+[m82-policy-crash] PASS: deny/ack: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-deny-ack: rc=0, 6.4s
+[m82-policy-crash] PASS: deny/ack: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] allow-baseline: rc=0, 6.6s
+[m82-policy-crash] PASS: allow: independently audited, guest-committed old decision before fault
+[m82-policy-crash] kill-allow-precreate: rc=None, 6.3s
+[m82-policy-crash] PASS: allow/precreate: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-precreate: rc=0, 6.3s
+[m82-policy-crash] PASS: allow/precreate: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-allow-empty: rc=None, 6.6s
+[m82-policy-crash] PASS: allow/empty: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-empty: rc=0, 6.5s
+[m82-policy-crash] PASS: allow/empty: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-allow-prewrite: rc=None, 6.4s
+[m82-policy-crash] PASS: allow/prewrite: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-prewrite: rc=0, 6.3s
+[m82-policy-crash] PASS: allow/prewrite: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-allow-write-reply: rc=None, 6.5s
+[m82-policy-crash] PASS: allow/write-reply: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-write-reply: rc=0, 6.6s
+[m82-policy-crash] PASS: allow/write-reply: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-allow-close: rc=None, 6.4s
+[m82-policy-crash] PASS: allow/close: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-close: rc=0, 6.3s
+[m82-policy-crash] PASS: allow/close: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-allow-rescan: rc=None, 6.6s
+[m82-policy-crash] PASS: allow/rescan: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-rescan: rc=0, 6.5s
+[m82-policy-crash] PASS: allow/rescan: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] kill-allow-ack: rc=None, 6.6s
+[m82-policy-crash] PASS: allow/ack: SIGKILL at actual boundary; committed disk audits and no old-byte mutation
+[m82-policy-crash] recover-allow-ack: rc=0, 6.7s
+[m82-policy-crash] PASS: allow/ack: same-platter recovery uses only visible committed decision; no invented retry
+[m82-policy-crash] ALLOW/DENY/REVOKE POLICY CRASH MODEL: PASS
+======================================================================
+== running test_m82_policy_negative.py
+======================================================================
+[m82-policy-negative] building kernel image + ESP ...
+[m82-policy-negative] capacity rc=0 8.2s
+[m82-policy-negative] PASS: real rngd issuance, four-slot bearer table full refusal, independently copied token survives, invalid after revoke
+[m82-policy-negative-no-rng] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m82-policy-negative] no rng rc=0 4.0s
+[m82-policy-negative] PASS: NIC+disk but no rngd: no broker, no bearer, no partial authority
+[m82-policy-negative] real fsd absence rc=0 8.7s
+[m82-policy-negative] PASS: real production fsd absent: no stale ALLOW bearer, no new issuance/false replacement READY
+[m82-policy-negative] same-platter fsd restored rc=0 6.4s
+[m82-policy-negative] PASS: normal same-disk restart recovers fsd and policy but NOT old bearer bytes
+[m82-policy-negative] POLICY NEGATIVE SPACE: PASS
+======================================================================
+== running test_m82_policy_refusal.py
+======================================================================
+[m82-policy-refusal] building kernel image + ESP ...
+[m82-policy-refusal] eight: rc=0 12.8s
+[m82-policy-refusal] PASS: eight guest-issued immutable decisions exact; ninth refuses without minting a record
+[m82-policy-refusal] disk-base: rc=0 6.5s
+[m82-policy-refusal] PASS: guest created real ALLOW before allocator exhaustion
+[m82-policy-refusal] PASS: allocator-full platter audits at AFS1 level before guest boot
+[m82-policy-refusal] disk-full: rc=0 6.7s
+[m82-policy-refusal] PASS: real disk-full WRITE: typed NO_SPACE then DEGRADED; in-RAM fail-close and byte-exact old ALLOW
+[m82-policy-refusal] PASS: visible record corruption is outside AFS1 metadata integrity, not an invisible commit rollback
+[m82-policy-refusal] visible-corrupt: rc=0 8.3s
+[m82-policy-refusal] PASS: broker refuses visible malformed newest record rather than falling back to older ALLOW
+[m82-policy-refusal] POLICY BOUNDS/FAIL-CLOSED: PASS
+======================================================================
+== running test_m82_policy_restart.py
+======================================================================
+[m82-policy-restart] building kernel image + ESP ...
+[m82-policy-restart] restart-both: rc=0 7.6s
+[m82-policy-restart] PASS: two exact independent immutable records, final DENY on valid AFS1 platter
+[m82-policy-restart] PASS: host decoded byte-exact ALLOW then DENY; no duplicate or unnamed authority
+[m82-policy-restart] PASS: name-only app request under ALLOW cannot call ACQUIRE without endpoint
+[m82-policy-restart] PASS: two actual Process-cap reaps, replacements on original endpoint, PING readiness
+[m82-policy-restart] PASS: old copied token revoked on restart; held endpoint reissues under ALLOW, refuses under DENY
+[m82-policy-restart] PASS: after both broker restarts frames/records/processes exact: [('113629', '16', '16'), ('113629', '16', '16')]
+[m82-policy-restart] reboot-deny: rc=0 6.7s
+[m82-policy-restart] PASS: same-platter DENY on reboot; genuine marker commits ALLOW generation 3
+[m82-policy-restart] reboot-allow: rc=0 8.2s
+[m82-policy-restart] PASS: same-platter ALLOW issues only fresh bearer; delegated endpoint, durable REVOKE
+[m82-policy-restart] PERSISTENT RESTART: PASS
+======================================================================
+== running test_m83_libraries.py
+======================================================================
+[m83-libraries] building kernel image + ESP ...
+[m83-libraries] linked guests rc=0 7.0s
+[m83-libraries] PASS: arptest and shell separately link the native client and reach live network stack/wire
+[m83-libraries] PASS: fstest and broker link the FS client; real DMA, unchanged 34-operation contract, durable ALLOW/REVOKE
+[m83-libraries-no-devices] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m83-libraries] absent devices rc=0 3.6s
+[m83-libraries] PASS: no stack cap yields honest SKIP, not name/pid-based or invented wire access
+[m83-libraries] LINKED NO_STD LIBRARIES: PASS
+======================================================================
+== running test_m83_returned_cap.py
+======================================================================
+[m83-returned-cap] building kernel image + ESP ...
+[m83-returned-cap] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m83-returned-cap] PASS: rc=0, 6.6s, controlled server/client proofs=2, historical death/restart and clean shutdown
+======================================================================
+== running test_m84_crash.py
+======================================================================
+[m84-crash] building kernel image + ESP ...
+[m84-crash] baseline: rc=0 6.4s
+[m84-crash] PASS: fresh fixture READY
+[m84-crash] stage-one: rc=0 7.4s
+[m84-crash] PASS: guest committed baseline stage1 + root policy
+[m84-crash] kill-precreate: rc=None 6.7s
+[m84-crash] PASS: precreate: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: precreate: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-empty: rc=None 6.8s
+[m84-crash] PASS: empty: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: empty: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-first-submit: rc=None 6.6s
+[m84-crash] PASS: first-submit: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: first-submit: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-first-reply: rc=None 7.1s
+[m84-crash] PASS: first-reply: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: first-reply: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-second-submit: rc=None 6.9s
+[m84-crash] PASS: second-submit: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: second-submit: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-second-reply: rc=None 7.4s
+[m84-crash] PASS: second-reply: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: second-reply: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-close: rc=None 7.4s
+[m84-crash] PASS: close: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: close: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-rescan: rc=None 8.2s
+[m84-crash] PASS: rescan: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: rescan: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-ack: rc=None 7.6s
+[m84-crash] PASS: ack: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: ack: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] policy-kill-precreate: rc=None 6.5s
+[m84-crash] PASS: policy/precreate: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/precreate: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-empty: rc=None 6.9s
+[m84-crash] PASS: policy/empty: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/empty: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-submit: rc=None 6.8s
+[m84-crash] PASS: policy/submit: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/submit: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-reply: rc=None 6.7s
+[m84-crash] PASS: policy/reply: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/reply: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-close: rc=None 6.9s
+[m84-crash] PASS: policy/close: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/close: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-rescan: rc=None 6.8s
+[m84-crash] PASS: policy/rescan: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/rescan: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-ack: rc=None 7.2s
+[m84-crash] PASS: policy/ack: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/ack: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] PREFIX CRASH MODEL: PASS; no arbitrary corruption/rollback promise
+======================================================================
+== running test_m84_red_control.py
+======================================================================
+[m84-red-control] PASS: red mutant allows unauthorized real stage (gate detects violation)
+[m84-red-control] PASS: exact restored EFI refuses it, no stage; source/EFI hashes exact
+======================================================================
+== running test_m84_stage.py
+======================================================================
+[m84-stage] building kernel image + ESP ...
+[m84-stage] baseline: rc=0 6.4s
+[m84-stage] PASS: baseline clean boot/ready and AFS1 platter
+[m84-stage] PASS: host-seeded independently signed public inputs byte exact
+[m84-stage] stage-root: rc=0 8.9s
+[m84-stage] PASS: guest STAGE exact bytes, POLICY root chain, QUERY and idempotent no-op
+[m84-stage] equal-version-conflict: rc=0 6.9s
+[m84-stage] PASS: equal-version-conflict: receiver refuses and retains exact current staged bytes
+[m84-stage] version-downgrade: rc=0 7.1s
+[m84-stage] PASS: version-downgrade: receiver refuses and retains exact current staged bytes
+[m84-stage] PASS: manager-only Process-cap restart: same endpoint, durable rescan, exact resources
+[m84-stage] same-disk-reboot: rc=0 6.4s
+[m84-stage] PASS: same-disk reboot re-verifies staged bytes and root policy
+[m84-stage] bad-signature: rc=0 6.8s
+[m84-stage] PASS: guest rejects altered candidate signature without mutating accepted history
+[m84-stage] stage-subordinate: rc=0 7.9s
+[m84-stage] PASS: policy-authorized subordinate stage2, predecessor retained, idempotent repeat
+[m84-stage] revoke-stage2: rc=0 7.8s
+[m84-stage] PASS: root-signed revocation makes prior stage ineligible and refuses duplicate
+[m84-stage] reboot-revoked: rc=0 6.7s
+[m84-stage] PASS: same-platter REVOKE persists; different namespace collision refuses
+[m84-stage] third-stage-capacity: rc=0 6.5s
+[m84-stage] PASS: third signed stage typed NO_SPACE before CREATE, history unmodified
+[m84-stage] policy-3: rc=0 7.1s
+[m84-stage] PASS: root-signed policy generation 3 durably chained
+[m84-stage] policy-4: rc=0 7.2s
+[m84-stage] PASS: root-signed policy generation 4 durably chained
+[m84-stage] fifth-policy-capacity: rc=0 6.6s
+[m84-stage] PASS: fifth policy typed NO_SPACE before CREATE, all four immutable generations retained
+[m84-stage] wrong-key: rc=0 6.4s
+[m84-stage] PASS: wrong-key: guest typed refusal, no accepted stage or policy mutation
+[m84-stage] truncated: rc=0 6.4s
+[m84-stage] PASS: truncated: guest typed refusal, no accepted stage or policy mutation
+[m84-stage] altered-manifest: rc=0 6.5s
+[m84-stage] PASS: altered-manifest: guest typed refusal, no accepted stage or policy mutation
+[m84-stage] altered-payload: rc=0 6.3s
+[m84-stage] PASS: altered-payload: guest typed refusal, no accepted stage or policy mutation
+[m84-stage] noncanonical-id: rc=0 6.3s
+[m84-stage] PASS: noncanonical-id: guest typed refusal, no accepted stage or policy mutation
+[m84-stage] alias-policy: rc=0 6.4s
+[m84-stage] PASS: root-signed ZIP-215 subordinate-key alias refused at guest receiver
+[m84-stage] eight-revoked: rc=0 7.3s
+[m84-stage] PASS: guest verifies root-signed eight-digest cumulative capacity, no unrepresented ninth
+[m84-stage] PASS: malformed visible highest stage blocks READY, no fallback or false eligibility
+[m84-stage] object-table-full: rc=0 7.6s
+[m84-stage] PASS: 32/32 AFS1 objects: typed pre-CREATE NO_SPACE, no partial stage
+[m84-stage] allocator-full: rc=0 6.7s
+[m84-stage] PASS: allocator-full WRITE leaves visible empty highest stage; DEGRADED never acknowledges
+[m84-stage] PASS: same-platter reboot detects partial highest and refuses old/false stage
+[m84-stage] TARGETED GUEST RESULT: PASS; not milestone qualification
+======================================================================
+== running test_m84_wrong_root.py
+======================================================================
+[m84-wrong-root] PASS: guest embedded wrong root refuses authentic test-root package
+[m84-wrong-root] PASS: restored public root accepts; source/EFI/ESP/ELF exact
+======================================================================
+== running test_m85_crash.py
+======================================================================
+[m85-crash] building kernel image + ESP ...
+[m85-crash] baseline: rc=0 seconds=6.1
+[m85-crash] staged: rc=0 seconds=9.1
+[m85-crash] kill-install-precreate: rc=None seconds=8.4
+[m85-crash] recover-install-precreate: rc=0 seconds=6.2
+[m85-crash] INSTALL/precreate: legal prefix=absent; same-platter recovery exact PASS
+[m85-crash] kill-install-empty: rc=None seconds=8.4
+[m85-crash] recover-install-empty: rc=0 seconds=6.1
+[m85-crash] INSTALL/empty: legal prefix=0; same-platter recovery exact PASS
+[m85-crash] kill-install-submit: rc=None seconds=8.3
+[m85-crash] recover-install-submit: rc=0 seconds=6.4
+[m85-crash] INSTALL/submit: legal prefix=0; same-platter recovery exact PASS
+[m85-crash] kill-install-reply: rc=None seconds=8.3
+[m85-crash] recover-install-reply: rc=0 seconds=6.3
+[m85-crash] INSTALL/reply: legal prefix=512; same-platter recovery exact PASS
+[m85-crash] kill-install-close: rc=None seconds=8.5
+[m85-crash] recover-install-close: rc=0 seconds=6.2
+[m85-crash] INSTALL/close: legal prefix=512; same-platter recovery exact PASS
+[m85-crash] installed: rc=0 seconds=11.1
+[m85-crash] kill-aact-precreate: rc=None seconds=20.0
+[m85-crash] recover-aact-precreate: rc=0 seconds=6.6
+[m85-crash] AACT/precreate: legal prefix=absent; same-platter recovery exact PASS
+[m85-crash] kill-aact-empty: rc=None seconds=20.3
+[m85-crash] recover-aact-empty: rc=0 seconds=6.2
+[m85-crash] AACT/empty: legal prefix=0; same-platter recovery exact PASS
+[m85-crash] kill-aact-submit: rc=None seconds=19.9
+[m85-crash] recover-aact-submit: rc=0 seconds=6.1
+[m85-crash] AACT/submit: legal prefix=0; same-platter recovery exact PASS
+[m85-crash] kill-aact-reply: rc=None seconds=20.4
+[m85-crash] recover-aact-reply: rc=0 seconds=6.2
+[m85-crash] AACT/reply: legal prefix=512; same-platter recovery exact PASS
+[m85-crash] kill-aact-close: rc=None seconds=20.2
+[m85-crash] recover-aact-close: rc=0 seconds=6.1
+[m85-crash] AACT/close: legal prefix=512; same-platter recovery exact PASS
+[m85-crash] bounded INSTALL/AACT CREATE→WRITE→CLOSE crash-prefix proof PASS (not arbitrary corruption)
+======================================================================
+== running test_m85_crash_upgrade.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+[m85-crash-upgrade] building kernel image + ESP ...
+[m85-crash-upgrade] baseline: rc=0 seconds=6.5
+[m85-crash-upgrade] selected: rc=0 seconds=21.0
+[m85-crash-upgrade] installed: rc=0 seconds=9.1
+[m85-crash-upgrade] kill-ains-precreate: rc=None seconds=8.2
+[m85-crash-upgrade] recover-ains-precreate: rc=0 seconds=6.2
+[m85-crash-upgrade] AINS2/precreate: legal prefix=absent; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-ains-empty: rc=None seconds=7.8
+[m85-crash-upgrade] recover-ains-empty: rc=0 seconds=6.3
+[m85-crash-upgrade] AINS2/empty: legal prefix=0; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-ains-submit: rc=None seconds=8.2
+[m85-crash-upgrade] recover-ains-submit: rc=0 seconds=6.4
+[m85-crash-upgrade] AINS2/submit: legal prefix=0; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-ains-reply: rc=None seconds=8.6
+[m85-crash-upgrade] recover-ains-reply: rc=0 seconds=6.8
+[m85-crash-upgrade] AINS2/reply: legal prefix=512; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-ains-close: rc=None seconds=8.4
+[m85-crash-upgrade] recover-ains-close: rc=0 seconds=6.8
+[m85-crash-upgrade] AINS2/close: legal prefix=512; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-aact-precreate: rc=None seconds=10.8
+[m85-crash-upgrade] recover-aact-precreate: rc=0 seconds=6.8
+[m85-crash-upgrade] AACT4/precreate: legal prefix=absent; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-aact-empty: rc=None seconds=11.5
+[m85-crash-upgrade] recover-aact-empty: rc=0 seconds=6.2
+[m85-crash-upgrade] AACT4/empty: legal prefix=0; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-aact-submit: rc=None seconds=11.2
+[m85-crash-upgrade] recover-aact-submit: rc=0 seconds=6.3
+[m85-crash-upgrade] AACT4/submit: legal prefix=0; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-aact-reply: rc=None seconds=11.1
+[m85-crash-upgrade] recover-aact-reply: rc=0 seconds=6.8
+[m85-crash-upgrade] AACT4/reply: legal prefix=512; same-platter recovery exact PASS
+[m85-crash-upgrade] kill-aact-close: rc=None seconds=11.2
+[m85-crash-upgrade] recover-aact-close: rc=0 seconds=6.6
+[m85-crash-upgrade] AACT4/close: legal prefix=512; same-platter recovery exact PASS
+[m85-crash-upgrade] real AINS2/AACT4 CREATE->WRITE->CLOSE crash-prefix matrix PASS (AFS1 model only)
+======================================================================
+== running test_m85_install.py
+======================================================================
+[m85-install] building kernel image + ESP ...
+[m85-install] historical-baseline: rc=0, seconds=6.0
+[m85-install] install: rc=0, seconds=9.0
+[m85-install] exact 512-byte guest-committed AINS hash=c956cabab7dbfafb077813cbafcb1500fa016ef102fd863ebe9b145f0b30596c; independently checked
+[m85-install] reboot-repeat: rc=0, seconds=7.6
+[m85-install] same-platter reboot exact repeat: byte-exact NO new CREATE
+[m85-install] corrupt-newest: rc=0, seconds=6.3
+[m85-install] visible corrupt newest refuses READY; no fallback or disk mutation PASS
+======================================================================
+== running test_m85_live_cutover.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1608 bytes <=4096, entry=0x400080, PT_LOAD offset=0 filesz=1328 memsz=1328 RX; W+X/entry/truncation refused
+production elf::validate: PASS; payload=656 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=445 memsz=445 RX; W+X/entry/truncation refused
+[m85-live-cutover] building kernel image + ESP ...
+[m85-live-cutover] baseline: rc=0 seconds=6.2
+[m85-live-cutover] cutover: rc=0 seconds=37.7
+[m85-live-cutover] measured frames/records/processes=[(113631, 16, 16), (113617, 17, 17), (113631, 16, 16)]; manager caps={'baseline': 25, 'unretired-child': 27, 'two-live-images': 28, 'after-finish': 26, 'cycle-pre': 26, 'cycle-post': 26}; packaged cap peak=8
+[m85-live-cutover] old signed v7 child ALIVE at v8 PREPARE; four-child capacity refusal; held Process-cap STOP/reap and full-ID revoke before durable AACT4; distinct signed v8 ELF ran PASS
+======================================================================
+== running test_m85_manager_death.py
+======================================================================
+[m85-manager-death] building kernel image + ESP ...
+[m85-manager-death] baseline: rc=0 seconds=6.2
+[m85-manager-death-fatal-exit] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m85-manager-death] fatal-exit: rc=97 seconds=10.8
+[m85-manager-death-fatal-fault] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m85-manager-death] fatal-fault: rc=97 seconds=10.7
+[m85-manager-death] expected fatal exit and genuine ring-3 #UD manager-death halts before bookkeeping/IPC sweep; no durable selection PASS
+======================================================================
+== running test_m85_manager_death_live.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+[m85-manager-death-live] building kernel image + ESP ...
+[m85-manager-death-live] baseline: rc=0 seconds=6.3
+[m85-manager-death-live-exit] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m85-manager-death-live] exit: rc=97 seconds=23.8
+[m85-manager-death-live-fault] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m85-manager-death-live] fault: rc=97 seconds=25.0
+[m85-manager-death-live] genuinely LIVE signed v7 child and manager Image ID: last-thread exit and ring-3 #UD both HALT before bookkeeping/IPC sweep PASS
+======================================================================
+== running test_m85_manager_destroy.py
+======================================================================
+[m85-manager-destroy-fatal] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m85-manager-destroy] direct production proc::destroy guard under LIVE manager ID HALT; exact source/EFI/ESP restored PASS
+======================================================================
+== running test_m85_maximal.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+[m85-maximal] building kernel image + ESP ...
+[m85-maximal] baseline: rc=0 seconds=6.1
+[m85-maximal] maximal: rc=0 seconds=71.4
+[m85-maximal] historical 19 + staging 8 + real guest AINS2/AACT3=32/32; fourth typed NO_SPACE before CREATE, full platter byte-exact and prior signed v7 relaunched PASS
+======================================================================
+== running test_m85_ref_hook.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.01s
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
+   |
+23 | pub enum Error {
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
+   |
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:50:8
+   |
+50 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-shell` (bin "arena-shell") generated 25 warnings
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.00s
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-servicemgr` (bin "arena-servicemgr") generated 22 warnings
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
+   |
+23 | pub enum Error {
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
+   |
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:50:8
+   |
+50 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-permissiond` (bin "permapp") generated 25 warnings
+warning: constant `REQUEST_BYTES` is never used
+  --> src/../../permission.rs:32:11
+   |
+32 | pub const REQUEST_BYTES: usize = 8;
+   |           ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `READ_REQUEST` is never used
+  --> src/../../permission.rs:45:11
+   |
+45 | pub const READ_REQUEST: [u8; REQUEST_BYTES] = [1, 1, 1, 1, 1, 0, 0, 0];
+   |           ^^^^^^^^^^^^
+
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: `arena-permissiond` (bin "arena-permissiond") generated 27 warnings (23 duplicates)
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.02s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+/home/agent/.local/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+    Finished `release` profile [optimized] target(s) in 0.00s
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
+   |
+23 | pub enum Error {
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
+   |
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:50:8
+   |
+50 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-shell` (bin "arena-shell") generated 25 warnings
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-servicemgr` (bin "arena-servicemgr") generated 22 warnings
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
+   |
+23 | pub enum Error {
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
+   |
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:50:8
+   |
+50 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-permissiond` (bin "permapp") generated 25 warnings
+warning: constant `REQUEST_BYTES` is never used
+  --> src/../../permission.rs:32:11
+   |
+32 | pub const REQUEST_BYTES: usize = 8;
+   |           ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `READ_REQUEST` is never used
+  --> src/../../permission.rs:45:11
+   |
+45 | pub const READ_REQUEST: [u8; REQUEST_BYTES] = [1, 1, 1, 1, 1, 0, 0, 0];
+   |           ^^^^^^^^^^^^
+
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: `arena-permissiond` (bin "arena-permissiond") generated 27 warnings (23 duplicates)
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+   Compiling arena-kernel v0.1.0 (/workspace/ArenaOS/kernel/kernel)
+   Compiling arena-boot v0.1.0 (/workspace/ArenaOS/kernel/boot)
+    Finished `release` profile [optimized] target(s) in 3.61s
+/home/agent/.local/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+[m85-ref-hook] RED omitted real IPC reply credit: PASS; GREEN restored exact source/EFI and guest: PASS
+======================================================================
+== running test_m85_resources.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+production elf::validate: PASS; payload=1608 bytes <=4096, entry=0x400080, PT_LOAD offset=0 filesz=1328 memsz=1328 RX; W+X/entry/truncation refused
+production elf::validate: PASS; payload=656 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=445 memsz=445 RX; W+X/entry/truncation refused
+[m85-live-cutover] building kernel image + ESP ...
+[m85-live-cutover] baseline: rc=0 seconds=6.3
+[m85-live-cutover] cutover: rc=0 seconds=38.8
+[m85-live-cutover] measured frames/records/processes=[(113631, 16, 16), (113617, 17, 17), (113631, 16, 16)]; manager caps={'baseline': 25, 'unretired-child': 27, 'two-live-images': 28, 'after-finish': 26, 'cycle-pre': 26, 'cycle-post': 26}; packaged cap peak=8
+[m85-live-cutover] old signed v7 child ALIVE at v8 PREPARE; four-child capacity refusal; held Process-cap STOP/reap and full-ID revoke before durable AACT4; distinct signed v8 ELF ran PASS
+[m85-resources] guest Power snapshots baseline/live/retired=[(113631, 16, 16), (113617, 17, 17), (113631, 16, 16)]; manager measured caps={'baseline': 25, 'unretired-child': 27, 'two-live-images': 28, 'after-finish': 26, 'cycle-pre': 26, 'cycle-post': 26}; packaged measured initial=6 peak=8; Notification=25/25 and twenty-sixth refused PASS
+======================================================================
+== running test_m85_select.py
+======================================================================
+[m85-select] building kernel image + ESP ...
+[m85-select] baseline: rc=0 seconds=6.2
+[m85-select] select: rc=0 seconds=48.0
+[m85-select] reboot: rc=0 seconds=6.5
+[m85-select] corrupt: rc=0 seconds=6.2
+[m85-select] signed ELF SELECT/DEACTIVATE/SELECT hashes=['7583345375f9785105fb88858deb2cb30e68fd63a6124d1608a364dab6c2c317', 'bcce9a522e69379d7efc2092e6be87893d43c0ab7028d5503c1890dbd0f64f7e', '2ce73868e1e7594b3a023fa904857b32f202d8612b7e5443b657f78a5079d3e5']; ring-3 IPC/reap, same-platter reboot no auto launch, corrupt newest refusal PASS
+======================================================================
+== running test_m85_upgrade.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+[m85-upgrade] building kernel image + ESP ...
+[m85-upgrade] baseline: rc=0 seconds=6.3
+[m85-upgrade] first: rc=0 seconds=23.3
+[m85-upgrade] second: rc=0 seconds=16.9
+[m85-upgrade] reboot: rc=0 seconds=6.6
+[m85-upgrade] two distinct ELF payloads a591506a09d1e19ad24292f3608dbc9915b427380482332b6b84ab779b694d38 / 74c831647f38c834180c7ba0b5d378174468d15de3c3890e72bccb5db9c535b9, v7/v8 signed and actually executed; durable fourth select hash=fa8190c06c2ee625c26a1805e2eb3dc5d9a06c5232e7de7e5212bbb7ded19ccf PASS (no live overlap)
+======================================================================
+== running test_m8_bootstrap.py
+======================================================================
+[m8-bootstrap] building kernel image + ESP ...
+[m8-bootstrap-full] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-bootstrap] full boot: rc=0, 6.7s
+[m8-bootstrap] PASS: full fixture booted with all historical M7 tests green
+[m8-bootstrap] PASS: kernel installed and audited exactly twenty-two bounded manager grants (20 historical + registrar + lifecycle marker)
+[m8-bootstrap] PASS: ring-3 observed real netd/stack/rng endpoint IDs, matching kernel grants; drivers hold DIFFERENT readiness notifications
+[m8-bootstrap] PASS: twenty-fifth notification is allocated and a twenty-sixth is refused at boot
+[m8-bootstrap] PASS: two device-originated readiness badges preceded live-cap manifest resolution
+[m8-bootstrap] PASS: no panic and no dishonest 8.0 completion marker
+[m8-bootstrap] PASS: one manager-owned PRODUCTION child booted, reported ready and passed independent kernel cap audit
+[m8-bootstrap] PASS: the initial child stayed resident during this test boot
+[m8-bootstrap-none] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-bootstrap] none boot: rc=0, 3.3s
+[m8-bootstrap] PASS: none: old suites retain honest SKIP and machine boots
+[m8-bootstrap] PASS: none: actual cap table has exactly two root grants, no partial service authority
+[m8-bootstrap] PASS: none: manager reports OFFLINE instead of asserting fake readiness
+[m8-bootstrap-rng-only] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-bootstrap] rng-only boot: rc=0, 4.5s
+[m8-bootstrap] PASS: rng-only: old suites retain honest SKIP and machine boots
+[m8-bootstrap] PASS: rng-only: actual cap table has exactly two root grants, no partial service authority
+[m8-bootstrap] PASS: rng-only: manager reports OFFLINE instead of asserting fake readiness
+[m8-bootstrap] INITIAL-START SUBSTRATE: PASS (individual proof; full suite closes 8.0)
+======================================================================
+== running test_m8_dependencies.py
+======================================================================
+[m8-dependencies] building kernel image + ESP ...
+[m8-dependencies-restart] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-dependencies] restart: rc=0, 6.7s
+[m8-dependencies] PASS: full fixture, historical suites and live-stop recovery remain green
+[m8-dependencies] PASS: two independently cap-audited worker reaps with real MAC/entropy BEFORE two audited production pids
+[m8-dependencies] PASS: same endpoint, new real wire and flat resource counts without a false boot-level proof
+[m8-dependencies-fault] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-dependencies] fault: rc=0, 6.5s
+[m8-dependencies] PASS: fault: real dependency refused before a replacement; bounded manager OFFLINE
+[m8-dependencies] PASS: kernel deferred supervised-fault teardown, failed IPC and restarted real driver
+[m8-dependencies-stall] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-dependencies] stall: rc=0, 8.4s
+[m8-dependencies] PASS: stall: real dependency refused before a replacement; bounded manager OFFLINE
+[m8-dependencies] PASS: stalled IPC could not hang manager; Process-cap stop reaped worker after deadline
+[m8-dependencies-no-devices] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-dependencies] no-devices: rc=0, 3.5s
+[m8-dependencies] PASS: no-devices: absent dependency grants neither probe image nor partial production authority
+[m8-dependencies-rng-only] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-dependencies] rng-only: rc=0, 4.3s
+[m8-dependencies] PASS: rng-only: absent dependency grants neither probe image nor partial production authority
+[m8-dependencies] ACTIVE DEPENDENCY PROBES: PASS
+======================================================================
+== running test_m8_diagnostic.py
+======================================================================
+[m8-diagnostic] building kernel image + ESP ...
+[m8-diagnostic-orderly] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-diagnostic] orderly: rc=0, 6.4s
+[m8-diagnostic] PASS: orderly: receiving service refused missing/wrong marker; real proof still works
+[m8-diagnostic] PASS: orderly: historical test service proved blktest: missing diagnostic authority refused by storaged
+[m8-diagnostic] PASS: orderly: historical test service proved fstest: fsd and storaged rejected missing/wrong-object poison markers
+[m8-diagnostic] PASS: orderly: historical test service proved netdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: orderly: historical test service proved rngdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: orderly: historical test service proved arptest: stack refused shutdown without diagnostic marker
+[m8-diagnostic] PASS: orderly: historical test service proved depcheck: production driver poison opcodes refused without marker
+[m8-diagnostic-fault] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-diagnostic] fault: rc=0, 6.8s
+[m8-diagnostic] PASS: fault: receiving service refused missing/wrong marker; real proof still works
+[m8-diagnostic] PASS: fault: historical test service proved blktest: missing diagnostic authority refused by storaged
+[m8-diagnostic] PASS: fault: historical test service proved fstest: fsd and storaged rejected missing/wrong-object poison markers
+[m8-diagnostic] PASS: fault: historical test service proved netdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: fault: historical test service proved rngdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: fault: historical test service proved arptest: stack refused shutdown without diagnostic marker
+[m8-diagnostic] PASS: fault: historical test service proved depcheck: production driver poison opcodes refused without marker
+[m8-diagnostic-rng-fault] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-diagnostic] rng-fault: rc=0, 6.7s
+[m8-diagnostic] PASS: rng-fault: receiving service refused missing/wrong marker; real proof still works
+[m8-diagnostic] PASS: rng-fault: historical test service proved blktest: missing diagnostic authority refused by storaged
+[m8-diagnostic] PASS: rng-fault: historical test service proved fstest: fsd and storaged rejected missing/wrong-object poison markers
+[m8-diagnostic] PASS: rng-fault: historical test service proved netdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: rng-fault: historical test service proved rngdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: rng-fault: historical test service proved arptest: stack refused shutdown without diagnostic marker
+[m8-diagnostic] PASS: rng-fault: historical test service proved depcheck: production driver poison opcodes refused without marker
+[m8-diagnostic] PASS: rng-fault: failed probe did not create a production replacement
+[m8-diagnostic-rng-stall] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-diagnostic] rng-stall: rc=0, 8.6s
+[m8-diagnostic] PASS: rng-stall: receiving service refused missing/wrong marker; real proof still works
+[m8-diagnostic] PASS: rng-stall: historical test service proved blktest: missing diagnostic authority refused by storaged
+[m8-diagnostic] PASS: rng-stall: historical test service proved fstest: fsd and storaged rejected missing/wrong-object poison markers
+[m8-diagnostic] PASS: rng-stall: historical test service proved netdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: rng-stall: historical test service proved rngdtest: missing diagnostic authority refused by service
+[m8-diagnostic] PASS: rng-stall: historical test service proved arptest: stack refused shutdown without diagnostic marker
+[m8-diagnostic] PASS: rng-stall: historical test service proved depcheck: production driver poison opcodes refused without marker
+[m8-diagnostic] PASS: rng-stall: failed probe did not create a production replacement
+[m8-diagnostic] SERVICE-SIDE DIAGNOSTIC AUTHORITY: PASS
+======================================================================
+== running test_m8_fault.py
+======================================================================
+[m8-fault] building kernel image + ESP ...
+[m8-fault] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-fault] production crash fixture: rc=0, 6.5s
+[m8-fault] PASS: historical suite green; no whole-kernel panic on ring-3 fault
+[m8-fault] PASS: two distinct manager-owned production children audited
+[m8-fault] PASS: CPU #UD mid-call, kernel client sweep, manager Process-cap reap and restart in order
+[m8-fault] PASS: same endpoint rejected stale bearer; new child made new ARP wire request; accounting flat
+[m8-fault] PASS: no hidden failure, no invented Phase 8.0 completion
+[m8-fault-absent] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-fault] no-device fixture: rc=0, 3.4s
+[m8-fault] PASS: absent dependencies grant no fault-injection authority
+[m8-fault] UNEXPECTED-CRASH SUBSTRATE: PASS (individual proof; full suite closes 8.0)
+======================================================================
+== running test_m8_lifecycle.py
+======================================================================
+[m8-lifecycle] building kernel image + ESP ...
+[m8-lifecycle] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-lifecycle] full fixture: rc=0, 6.2s
+[m8-lifecycle] PASS: ring-3 described five distinct REAL boot/audited targets, not pid guesses or another fixture
+[m8-lifecycle] PASS: two finish modes denied for protected/foreign/forged/stale, own child finished; clean halt
+[m8-lifecycle] PASS: surviving production child served new post-refusal wire; no stop, restart, fault or premature 8.0 closure
+[m8-lifecycle-no-devices] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-lifecycle] no-devices: rc=0, 3.4s
+[m8-lifecycle] PASS: no-devices: honest SKIP with no diagnostic grants or manager-owned child
+[m8-lifecycle-rng-only] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-lifecycle] rng-only: rc=0, 4.2s
+[m8-lifecycle] PASS: rng-only: honest SKIP with no diagnostic grants or manager-owned child
+[m8-lifecycle] LIFECYCLE-AUTHORITY REFUSAL SUBSTRATE: PASS (individual proof; full suite closes 8.0)
+======================================================================
+== running test_m8_restart.py
+======================================================================
+[m8-restart] building kernel image + ESP ...
+[m8-restart] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-restart] full network+entropy boot: rc=0, 6.6s
+[m8-restart] PASS: old M1–M7 regressions green and clean QEMU halt
+[m8-restart] PASS: exactly one production restart, each child independently cap-audited
+[m8-restart] PASS: real client/wire, orderly exit, Process-cap reap, backoff, restart, resumed wire in order
+[m8-restart] PASS: held endpoint got typed SERVICE_GONE before the replacement was ready
+[m8-restart] PASS: replacement sent a fresh ARP request and rejected the old bearer
+[m8-restart] PASS: no false 8.0 completion claim or offline failure
+[m8-restart-absent] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-restart] no-network boot: rc=0, 3.6s
+[m8-restart] PASS: no device means no shell stack authority and an honest SKIP
+[m8-restart] PRODUCTION ORDERLY-RESTART SUBSTRATE: PASS (individual proof; full suite closes 8.0)
+======================================================================
+== running test_m8_stop.py
+======================================================================
+[m8-stop] building kernel image + ESP ...
+[m8-stop] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-stop] full fixture: rc=0, 6.6s
+[m8-stop] PASS: old suites remain green; clean QEMU halt
+[m8-stop] PASS: two distinct manager-owned cap-audited production children
+[m8-stop] PASS: kernel accepted exactly one mode-1 stop of an actually LIVE child by its manager
+[m8-stop] PASS: forged hint refused; private authority, live teardown, IPC failure and bounded restart in order
+[m8-stop] PASS: not orderly exit or CPU crash: forced stop, stale bearer rejected, fresh real wire and flat accounting
+[m8-stop] PASS: no hidden failure or premature 8.0 completion
+[m8-stop-absent] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-stop] no-device fixture: rc=0, 3.3s
+[m8-stop] PASS: missing dependencies grant neither admin stop nor client authority
+[m8-stop] FORCED-LIVE-STOP SUBSTRATE: PASS (individual proof; full suite closes 8.0)
+======================================================================
+== running test_m8_stress.py
+======================================================================
+[m8-stress] building kernel image + ESP ...
+[m8-stress] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-stress] full fixture: rc=0, 6.7s
+[m8-stress] PASS: M1–M7 regressions still green and clean QEMU shutdown
+[m8-stress] PASS: actual kernel free frames/spawn records/process slots flat after EACH of three restarts
+[m8-stress] PASS: four distinct production child instances, every installed cap audited
+[m8-stress] PASS: three real-wire, bearer-revoking Process-cap reap/backoff/restart cycles
+[m8-stress] PASS: fourth exit exhausted fixed budget, no fifth child invented
+[m8-stress] PASS: no hidden failure or dishonest 8.0 completion marker
+[m8-stress-absent] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m8-stress] no-network fixture: rc=0, 3.4s
+[m8-stress] PASS: missing dependencies grant no client authority; explicit SKIP
+[m8-stress] REPEATED-ACCOUNTING SUBSTRATE: PASS (individual proof; full suite closes 8.0)
+======================================================================
+== running test_m9_bar_gate_red.py
+======================================================================
+[m9-bar-extent-red] building kernel image + ESP ...
+[m9-bar-extent-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-bar-gate] guest truncated-device-cap RED: PASS; exact source/EFI and real QMP pixels GREEN: PASS
+======================================================================
+== running test_m9_client_death.py
+======================================================================
+[m9-client-death] building kernel image + ESP ...
+[m9-client-death] real original-child exit, exact Process/region/map/cap retirement and independent QMP base/window uncover PASS
+======================================================================
+== running test_m9_client_death_red.py
+======================================================================
+[m9-client-death-red] building kernel image + ESP ...
+[m9-client-death-red] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m9-client-death-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-client-death-red] omitted Process-liveness guest stale-pixel/timeout RED: PASS; exact restored source/EFI and QMP uncovered-pixel GREEN: PASS
+======================================================================
+== running test_m9_compositor_input.py
+======================================================================
+[m9-compositor-input] building kernel image + ESP ...
+[m9-compositor-input] distinct owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS
+======================================================================
+== running test_m9_compositor_model.py
+======================================================================
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (userspace/compositord/target/x86_64-unknown-linux-gnu/debug/deps/arena_compositor_model-68419ed4b92b2955)
+
+running 12 tests
+test render::tests::negative_clip_and_offscreen_leave_uncovered_base ... ok
+test render::tests::overlapping_surfaces_use_z_and_preserve_base ... ok
+test render::tests::preflight_does_not_publish_partial_frame ... ok
+test tests::authority_preflight_and_capacity_never_mutate_on_refusal ... ok
+test tests::exhausted_monotonic_ids_refuse_without_mutation ... ok
+test tests::focus_input_ring_overflow_and_verified_death ... ok
+test tests::real_overlap_z_order_clipping_and_stale_reuse ... ok
+test wire::tests::exact_reserved_bytes_and_geometry_not_cap_authority ... ok
+test wire::tests::exact_versioned_golden_bytes_and_roundtrips ... ok
+test tests::repeated_owner_retirement_clears_all_state_before_reuse ... ok
+test wire::tests::hostile_inline_frame_fuzz_never_reads_short_buffers ... ok
+test wire::tests::malformed_opcode_reserved_and_bearerless_handle_refuse ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Checking arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Finished `release` profile [optimized] target(s) in 0.31s
+[m9-compositor-model] 12/12 host state/churn and typed-wire/fuzz tests, fmt/clippy, bare-metal no_std build PASS; no running service or input proof
+======================================================================
+== running test_m9_font_red.py
+======================================================================
+[m9-font] real QMP missing-glyph RED: PASS; restored exact source/EFI real QMP GREEN: PASS
+======================================================================
+== running test_m9_gfxkit.py
+======================================================================
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running unittests src/lib.rs (userspace/gfxkit/target/x86_64-unknown-linux-gnu/debug/deps/arena_gfxkit-6f5c92ca532a86fd)
+
+running 3 tests
+test tests::checked_geometry_and_disjoint_padding ... ok
+test tests::clipped_opaque_blit_and_refusals ... ok
+test tests::owned_font_and_bounded_rejection ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Finished `release` profile [optimized] target(s) in 0.10s
+[m9-gfxkit] 3/3 host contracts, bare-metal no_std build, pixel oracle GREEN and deliberate one-channel RED PASS
+======================================================================
+== running test_m9_gop_handoff.py
+======================================================================
+[m9-gop-handoff] building kernel image + ESP ...
+[m9-gop-handoff] QMP 800x600 matches GOP regions and linked toolkit font foreground/background; guest SharedRegion authority/zero/capacity + exact 512-page process teardown PASS; headless boot clean; no compositor, virtio-gpu or graphics input claim
+======================================================================
+== running test_m9_gpu2d_red.py
+======================================================================
+[m9-gpu2d-ack] production ACK matcher RED host control: PASS; exact source/no_std codec GREEN: PASS; no GPU guest claim
+======================================================================
+== running test_m9_gpu2d_wire.py
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (userspace/gpu2d/target/x86_64-unknown-linux-gnu/debug/deps/arena_gpu2d_wire-c2c0402d3971ea49)
+
+running 8 tests
+test device::tests::exact_modern_gpu_record_and_window_offsets ... ok
+test device::tests::wrong_type_split_layout_and_offset_overflow_refuse ... ok
+test queue::tests::invalid_offer_notify_offsets_and_used_entry_fail_closed ... ok
+test queue::tests::mock_mmio_ring_setup_and_one_strict_completion ... ok
+test tests::command_layouts_are_exact_and_refuse_before_touching_output ... ok
+test tests::hostile_geometry_and_stale_response_lengths_refuse ... ok
+test tests::display_response_only_one_checked_mode ... ok
+test tests::short_hostile_response_fuzz_never_reads_past_used_length ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+    Finished `release` profile [optimized] target(s) in 0.04s
+[m9-gpu2d-wire] 8/8 strict wire/refusal/fuzz, device-info and mock polling-queue tests, fmt/clippy, bare-metal no_std build PASS; device transport/guest pixels pending
+======================================================================
+== running test_m9_gpu_compositor_input.py
+======================================================================
+[m9-gpu-compositor-input] building kernel image + ESP ...
+[m9-gpu-compositor-input] virtio-gpu-only owned windows, z-order, preserved base, bitmap title and genuine QMP key after focused delivery: PASS
+======================================================================
+== running test_m9_gpu_fallback_red.py
+======================================================================
+[m9-gpu-fallback-reject] building kernel image + ESP ...
+[m9-gpu-pixels] building kernel image + ESP ...
+[m9-gpu-pixels-oversize] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-gpu-pixels] GPU-only guest commands + QMP 800x600 bars/font PASS; real default 1280x800 refuses bounded scanout; compositor/input/final stability pending
+[m9-gpu-fallback-reject] real QMP GOP fallback after forced pre-command VERSION_1 refusal; exact restored GPU-only device/QMP image PASS
+======================================================================
+== running test_m9_gpu_pixels.py
+======================================================================
+[m9-gpu-pixels] building kernel image + ESP ...
+[m9-gpu-pixels-oversize] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-gpu-pixels] GPU-only guest commands + QMP 800x600 bars/font PASS; real default 1280x800 refuses bounded scanout; compositor/input/final stability pending
+======================================================================
+== running test_m9_host_dns_red.py
+======================================================================
+[m9-dns-peer-red] building kernel image + ESP ...
+[m9-dns-peer-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-host-dns] real guest wrong-TXID RED; same-EFI restored host peer and three guest wire queries GREEN: PASS
+======================================================================
+== running test_m9_resources.py
+======================================================================
+[m9-resources] building kernel image + ESP ...
+[m9-resources] guest Power high-water resident 16/16 then exact child retire 15/15; free frames 113629->113666; shared 3/8->2/8, 507->488 pages, 6->4 maps, compositor caps 10/32->7..8/32 PASS
+======================================================================
+== running test_m9_service_death_red.py
+======================================================================
+[m9-service-death-red] building kernel image + ESP ...
+[m9-service-death-red] booting QEMU/EDK2: env LD_LIBRARY_PATH=/workspace/scratch/arena-tools/qemu/lib /workspace/scratch/arena-tools/musl/lib/libc.so ...
+[m9-service-death-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-service-death] mutant QEMU rc=97 elapsed=6.1s
+[m9-service-death] actual boot-root IPC fail-stop RED: PASS; byte-exact restored source/EFI and QMP key pixel GREEN: PASS
+======================================================================
+== running test_m9_shared_info_red.py
+======================================================================
+[m9-info-rights-red] building kernel image + ESP ...
+[m9-info-rights-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-shared-info] guest omitted READ gate RED: PASS; exact source/EFI and real QMP pixels GREEN: PASS
+======================================================================
+== running test_m9_shared_ref_hook.py
+======================================================================
+[m9-shared-hook-red] building kernel image + ESP ...
+[m9-shared-hook-red] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m9-shared-ref-hook] guest RED omitted real retirement hook: PASS; guest GREEN exact source/EFI and QMP pixels: PASS
+======================================================================
+== running test_m9_shared_unmap_red.py
+======================================================================
+[m9-unmap-omitted-pin] building kernel image + ESP ...
+[m9-unmap-omitted-pin] GUEST FAILURE despite QEMU rc=0: fatal PANIC
+[m9-unmap-hook] omitted-pin guest RED: PASS; exact restored source/EFI GOP QMP GREEN: PASS
+======================================================================
+QUALIFICATION SOURCE END: 11a45c34deae9a7a539a99fd7d3d6ea196ea6025
+ALL TESTS PASSED (97 test suites)

@@ -106,7 +106,8 @@ const VIRTIO_CFG_DEVICE: u8 = 4;
 /// user's extra devices rather than silently dropping the last one.
 pub const MAX_PCI_FUNCTIONS: usize = 12;
 /// How many VirtIO functions the kernel records.
-pub const MAX_VIRTIO_DEVICES: usize = 6;
+// Shipping desktop: block, net, entropy, keyboard, tablet, console, GPU.
+pub const MAX_VIRTIO_DEVICES: usize = 7;
 /// Capability-list walk bound (a corrupt loop must not hang the boot).
 const CAP_WALK_BOUND: usize = 48;
 

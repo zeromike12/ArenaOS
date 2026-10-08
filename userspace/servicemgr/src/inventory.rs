@@ -147,13 +147,14 @@ pub fn collect<P: Probe>(slots: &[NamedSlot], probe: &P) -> Result<Inventory, Er
 
 /// Resolve the Process cap created by SYS_SPAWN, which returns a pid but
 /// currently puts the cap into the first free parent slot. A pid alone
-/// never authorizes a finish operation. Scan only the caller's own cap
-/// space; require one exact live Process cap with DESTROY. Empty and
-/// unrelated/unsupported slots are ignored. The finish syscall rechecks
-/// the chosen slot, so a concurrent cap change fails closed.
+/// never authorizes a finish operation. Scan the caller's entire native cap
+/// space; manifest inventory remains independently bounded to its historical
+/// low 32 slots. Require one exact live Process cap with DESTROY. Empty and
+/// unrelated/unsupported slots are ignored. The finish syscall rechecks the
+/// chosen slot, so a concurrent cap change fails closed.
 pub fn child_handle<P: Probe>(pid: u64, probe: &P) -> Result<u8, Error> {
     let mut found = None;
-    for slot in 0..MAX_CAPS {
+    for slot in 0..abi::CAP_SLOTS {
         let Ok(desc) = probe.describe(slot as u8) else {
             continue;
         };
@@ -186,14 +187,14 @@ pub fn finish(slot: u8, stop_live_child: bool) -> Result<(), i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct Fake([Option<Description>; MAX_CAPS]);
+    struct Fake([Option<Description>; abi::CAP_SLOTS]);
     impl Probe for Fake {
         fn describe(&self, slot: u8) -> Result<Description, i64> {
             self.0[slot as usize].ok_or(-2)
         }
     }
     fn fake() -> Fake {
-        let mut x = Fake([None; MAX_CAPS]);
+        let mut x = Fake([None; abi::CAP_SLOTS]);
         x.0[2] = Some(Description {
             kind: IMAGE_KIND,
             object: 17,
@@ -315,16 +316,16 @@ mod tests {
     fn child_pid_is_not_authority_but_a_live_process_cap_is() {
         let mut f = fake();
         assert_eq!(child_handle(81, &f), Err(Error::MissingProcess));
-        f.0[10] = Some(Description {
+        f.0[100] = Some(Description {
             kind: PROCESS_KIND,
             object: 81,
             rights: manifest::DESTROY as u64,
         });
-        assert_eq!(child_handle(81, &f), Ok(10));
-        f.0[11] = f.0[10];
+        assert_eq!(child_handle(81, &f), Ok(100));
+        f.0[101] = f.0[100];
         assert_eq!(child_handle(81, &f), Err(Error::AmbiguousProcess));
-        f.0[11] = None;
-        f.0[10].as_mut().unwrap().rights = manifest::READ as u64;
+        f.0[101] = None;
+        f.0[100].as_mut().unwrap().rights = manifest::READ as u64;
         assert_eq!(child_handle(81, &f), Err(Error::BadRights));
     }
 }

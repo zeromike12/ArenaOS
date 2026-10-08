@@ -37,11 +37,11 @@ use crate::sched;
 use crate::sync::SyncCell;
 use crate::sync::without_interrupts;
 
-pub const MAX_ENDPOINTS: usize = 12; // ADR-0056: two disjoint userspace graphics endpoints
+pub const MAX_ENDPOINTS: usize = 16; // ADR-0056 graphics endpoints; ADR-0077 filesd (13 at desktop boot)
 // ADR-0038/0040/0043/0047/0046: fourteen disjoint production
 // notifications. The config update proof is inert and distinct from
 // readiness, private manager control and diagnostic markers.
-pub const MAX_NOTIFS: usize = 18; // ADR-0055 distinct Phase 8.5 lifecycle marker
+pub const MAX_NOTIFS: usize = 64; // ADR-0088: fixed services plus 32 private client clocks
 #[path = "ipc_adr50_test.rs"]
 mod adr50_test;
 /// In-guest internal-only M4 fixture; no userspace syscall or authority.
@@ -50,7 +50,9 @@ pub(crate) use adr50_test::{
 };
 /// Bounded caller queue per endpoint — a full queue answers
 /// `STATUS_BUSY`, never a silent drop (ADR-0018).
-const QUEUE_DEPTH: usize = 4;
+/// ADR-0089 raises the Phase-11 depth to hold a 32-client startup burst;
+/// callers still use bounded timer backoff when the queue is full.
+const QUEUE_DEPTH: usize = 32;
 
 /// The "no capability" marker in message buffers (ADR-0018): a cap word
 /// holds either a landing slot index (< `CAP_SLOTS`) or this.
@@ -108,6 +110,9 @@ struct CallSlot {
     /// Staged by `reply`, installed into the caller's space when the
     /// caller resumes (owner-context discipline).
     reply_cap: Cap,
+    /// ADR-0074: badge of the capability the caller invoked (0 = plain
+    /// endpoint cap). Delivered to the server; never interpreted here.
+    badge: u32,
 }
 
 const EMPTY_SLOT: CallSlot = CallSlot {
@@ -121,6 +126,7 @@ const EMPTY_SLOT: CallSlot = CallSlot {
     reply_words: [0; 2],
     reply_msg: [0; MSG_BYTES],
     reply_cap: Cap::EMPTY,
+    badge: 0,
 };
 
 #[derive(Clone, Copy)]
@@ -142,6 +148,21 @@ struct Endpoint {
     /// Thread parked in `recv` (`NO_TID` = none). v1: one server per
     /// endpoint — a second `recv` gets `STATUS_BUSY` (ADR-0018).
     server: u64,
+    /// Phase 11.0 (ADR-0071): at most one bound notification, signalled
+    /// with its badge whenever a call is queued while no server is
+    /// parked in `recv`. The generation pins the exact notification
+    /// object: a destroyed and re-minted index never matches.
+    bound: Option<Binding>,
+    /// ADR-0074: advanced on every mint and destroy of this index; badged
+    /// endpoint caps carry it and are refused once it moves on.
+    generation: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Binding {
+    nid: u32,
+    generation: u64,
+    badge: u64,
 }
 
 const EMPTY_EP: Endpoint = Endpoint {
@@ -149,6 +170,8 @@ const EMPTY_EP: Endpoint = Endpoint {
     orphaned: false,
     q: [EMPTY_SLOT; QUEUE_DEPTH],
     server: NO_TID,
+    bound: None,
+    generation: 0,
 };
 
 #[derive(Clone, Copy)]
@@ -159,12 +182,17 @@ struct Notif {
     /// Thread parked in `wait` (`NO_TID` = none). v1: one waiter —
     /// a second `wait` gets `STATUS_BUSY`.
     waiter: u64,
+    /// Advanced on every mint and destroy of this index (ADR-0071), so a
+    /// binding recorded against an earlier object can never signal a
+    /// later, unrelated one that happens to reuse the index.
+    generation: u64,
 }
 
 const EMPTY_NOTIF: Notif = Notif {
     live: false,
     pending: 0,
     waiter: NO_TID,
+    generation: 0,
 };
 
 /// Dispatcher-visible IPC accounting — the test side asserts deltas, so
@@ -185,6 +213,13 @@ pub struct IpcStats {
     /// Calls answered with `STATUS_SERVICE_GONE` because the serving
     /// process was destroyed under them (M6.5, ADR-0028).
     pub service_gone: u64,
+    /// Bound-notification signals raised by queued calls (ADR-0071).
+    pub bound_signals: u64,
+    /// Bindings removed by object destruction, orphaning or unbind.
+    pub unbinds: u64,
+    /// Wakes that placed the woken thread at the front of the ready ring
+    /// (ADR-0072 direct handoff).
+    pub handoffs: u64,
 }
 
 static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
@@ -197,6 +232,9 @@ static STATS: SyncCell<IpcStats> = SyncCell::new(IpcStats {
     cap_drops: 0,
     blocks: 0,
     service_gone: 0,
+    bound_signals: 0,
+    unbinds: 0,
+    handoffs: 0,
 });
 static ENDPOINTS: SyncCell<[Endpoint; MAX_ENDPOINTS]> = SyncCell::new([EMPTY_EP; MAX_ENDPOINTS]);
 static NOTIFS: SyncCell<[Notif; MAX_NOTIFS]> = SyncCell::new([EMPTY_NOTIF; MAX_NOTIFS]);
@@ -221,11 +259,28 @@ pub fn parked_server(eid: u32, pid: u64) -> bool {
 /// server dying must not take its endpoint with it — the clients'
 /// capabilities name the endpoint, not the process, which is what
 /// lets a restarted service pick the serve side back up.)
+/// Generation of a LIVE endpoint (ADR-0074), `None` when dead.
+pub fn endpoint_generation(eid: u32) -> Option<u16> {
+    without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())
+            .get(eid as usize)
+            .filter(|e| e.live)
+            .map(|e| e.generation)
+    })
+}
+
 pub fn endpoint_live(eid: u32) -> bool {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
         unsafe { (*ENDPOINTS.get()).get(eid as usize).is_some_and(|e| e.live) }
     })
+}
+
+/// Number of currently live endpoints, for capability-gated resource
+/// diagnostics. This exposes occupancy only; endpoint IDs remain authority
+/// only when held through an exact capability.
+pub fn endpoint_occupancy() -> usize {
+    without_interrupts(|| unsafe { (*ENDPOINTS.get()).iter().filter(|ep| ep.live).count() })
 }
 
 pub fn stats() -> IpcStats {
@@ -258,11 +313,14 @@ pub fn create_endpoint() -> Result<u32, &'static str> {
             let Some(i) = eps.iter().position(|e| !e.live) else {
                 return Err("endpoint table full (MAX_ENDPOINTS)");
             };
+            let generation = eps[i].generation.wrapping_add(1);
             eps[i] = Endpoint {
                 live: true,
                 orphaned: false,
                 q: [EMPTY_SLOT; QUEUE_DEPTH],
                 server: NO_TID,
+                bound: None,
+                generation,
             };
             Ok(i as u32)
         }
@@ -284,6 +342,10 @@ pub fn destroy_endpoint(eid: u32) -> Result<(), &'static str> {
                 return Err("destroy_endpoint: busy (server parked or requests outstanding)");
             }
             ep.live = false;
+            ep.generation = ep.generation.wrapping_add(1);
+            if ep.bound.take().is_some() {
+                (*STATS.get()).unbinds += 1;
+            }
             Ok(())
         }
     })
@@ -307,8 +369,10 @@ pub fn create_notification() -> Result<u32, &'static str> {
             let Some(i) = ns.iter().position(|n| !n.live) else {
                 return Err("notification table full (MAX_NOTIFS)");
             };
+            let generation = ns[i].generation.wrapping_add(1);
             ns[i] = EMPTY_NOTIF;
             ns[i].live = true;
+            ns[i].generation = generation;
             Ok(i as u32)
         }
     })
@@ -330,9 +394,121 @@ pub fn destroy_notification(nid: u32) -> Result<(), &'static str> {
             }
             n.live = false;
             n.pending = 0;
+            n.generation = n.generation.wrapping_add(1);
+            // No endpoint may keep signalling a dead notification, nor a
+            // later object minted at the same index (ADR-0071).
+            for ep in (*ENDPOINTS.get()).iter_mut() {
+                if ep.bound.is_some_and(|b| b.nid == nid) {
+                    ep.bound = None;
+                    (*STATS.get()).unbinds += 1;
+                }
+            }
             Ok(())
         }
     })
+}
+
+// ---- endpoint-bound notifications (Phase 11.0, ADR-0071) ----------------
+
+/// Bind notification `nid` to endpoint `eid` with `badge` (replacing any
+/// previous binding of that endpoint: one binding per endpoint). The
+/// syscall layer has already proved READ on the endpoint (serve side)
+/// and READ|WRITE on the notification; nothing here consults a PID.
+pub fn bind(eid: u32, nid: u32, badge: u64) -> Result<(), Status> {
+    if badge == 0 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let pending = without_interrupts(|| -> Result<Option<Binding>, Status> {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let generation = (*NOTIFS.get())
+                .get(nid as usize)
+                .filter(|n| n.live)
+                .ok_or(STATUS_BAD_ARG)?
+                .generation;
+            let ep = (*ENDPOINTS.get())
+                .get_mut(eid as usize)
+                .filter(|e| e.live)
+                .ok_or(STATUS_BAD_ARG)?;
+            let b = Binding {
+                nid,
+                generation,
+                badge,
+            };
+            ep.bound = Some(b);
+            // Calls queued before the binding existed would otherwise
+            // wait for an unrelated later wake: signal once now.
+            Ok(ep
+                .q
+                .iter()
+                .any(|s| s.state == SlotState::Waiting)
+                .then_some(b))
+        }
+    })?;
+    if let Some(b) = pending {
+        signal_bound(b);
+    }
+    Ok(())
+}
+
+/// Remove endpoint `eid`'s binding (READ on the endpoint proven by the
+/// syscall layer). Unbinding an unbound endpoint is not an error.
+pub fn unbind(eid: u32) -> Result<(), Status> {
+    without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let ep = (*ENDPOINTS.get())
+                .get_mut(eid as usize)
+                .filter(|e| e.live)
+                .ok_or(STATUS_BAD_ARG)?;
+            if ep.bound.take().is_some() {
+                (*STATS.get()).unbinds += 1;
+            }
+            Ok(())
+        }
+    })
+}
+
+/// The binding currently recorded for `eid` as (nid, badge), for the
+/// in-kernel proofs. `None` when unbound or dead.
+pub fn binding_of(eid: u32) -> Option<(u32, u64)> {
+    without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())
+            .get(eid as usize)
+            .filter(|e| e.live)
+            .and_then(|e| e.bound)
+            .map(|b| (b.nid, b.badge))
+    })
+}
+
+/// Raise a bound notification if — and only if — the exact object the
+/// binding was made against is still live. A stale generation is
+/// dropped silently: the binding should already have been cleared, and
+/// signalling a stranger is the one outcome that must never happen.
+fn signal_bound(b: Binding) {
+    let waiter = without_interrupts(|| {
+        // SAFETY: single writer under IF=0.
+        unsafe {
+            let n = (*NOTIFS.get()).get_mut(b.nid as usize)?;
+            if !n.live || n.generation != b.generation {
+                return None;
+            }
+            (*STATS.get()).bound_signals += 1;
+            n.pending |= b.badge;
+            let w = n.waiter;
+            n.waiter = NO_TID;
+            Some(w)
+        }
+    });
+    if let Some(w) = waiter.filter(|w| *w != NO_TID) {
+        // The caller is about to block: hand the CPU to the waiting
+        // server (ADR-0072), exactly as a parked recv would get it.
+        bump!(handoffs);
+        if let Err(e) = sched::wake_handoff(w) {
+            error!("ipc", "bound signal: wake(waiter {w}) failed: {e}");
+            crate::halt::halt_machine("ipc: bound signal could not wake its waiter");
+        }
+    }
 }
 
 // ---- the cap-transfer helper ---------------------------------------------
@@ -425,45 +601,66 @@ pub fn call(
     send_cap: Option<Cap>,
     msg: [u8; MSG_BYTES],
 ) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
+    call_badged(pid, eid, 0, words, send_cap, msg)
+}
+
+/// [`call`] through a capability carrying `badge` (ADR-0074; 0 = plain).
+pub fn call_badged(
+    pid: u64,
+    eid: u32,
+    badge: u32,
+    words: [u64; 2],
+    send_cap: Option<Cap>,
+    msg: [u8; MSG_BYTES],
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // Phase 1 — enqueue; note a parked server (borrow ends here).
     // SAFETY: single writer under IF=0.
-    let (eidx, qi, parked) = without_interrupts(|| -> Result<(usize, usize, u64), Status> {
-        bump!(calls);
-        unsafe {
-            let eps = &mut *ENDPOINTS.get();
-            let eidx = eid as usize;
-            let Some(ep) = eps.get_mut(eidx).filter(|e| e.live) else {
-                return Err(STATUS_BAD_ARG);
-            };
-            if ep.orphaned {
-                // Nobody is serving this. Answer now rather than
-                // enqueue into silence (M7.1b). Counted directly
-                // rather than through `bump!`, which brings its own
-                // `unsafe` and would nest inside this one.
-                (*STATS.get()).service_gone += 1;
-                return Err(STATUS_SERVICE_GONE);
+    let (eidx, qi, parked, signal) =
+        without_interrupts(|| -> Result<(usize, usize, u64, Option<Binding>), Status> {
+            bump!(calls);
+            unsafe {
+                let eps = &mut *ENDPOINTS.get();
+                let eidx = eid as usize;
+                let Some(ep) = eps.get_mut(eidx).filter(|e| e.live) else {
+                    return Err(STATUS_BAD_ARG);
+                };
+                if ep.orphaned {
+                    // Nobody is serving this. Answer now rather than
+                    // enqueue into silence (M7.1b). Counted directly
+                    // rather than through `bump!`, which brings its own
+                    // `unsafe` and would nest inside this one.
+                    (*STATS.get()).service_gone += 1;
+                    return Err(STATUS_SERVICE_GONE);
+                }
+                let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Empty) else {
+                    return Err(STATUS_BUSY);
+                };
+                let staged = send_cap.unwrap_or(Cap::EMPTY);
+                crate::image_registry::add_cap(staged);
+                crate::shared::add_cap(staged);
+                ep.q[qi] = CallSlot {
+                    state: SlotState::Waiting,
+                    caller: sched::current_thread_id(),
+                    words,
+                    msg,
+                    send_cap: staged,
+                    badge,
+                    ..EMPTY_SLOT
+                };
+                let parked = ep.server;
+                if parked != NO_TID {
+                    ep.server = NO_TID;
+                }
+                // Nobody is parked in recv: tell the server through its bound
+                // notification that work is queued (ADR-0071). Signalled
+                // after this borrow ends; the generation is re-checked there.
+                let signal = if parked == NO_TID { ep.bound } else { None };
+                Ok((eidx, qi, parked, signal))
             }
-            let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Empty) else {
-                return Err(STATUS_BUSY);
-            };
-            let staged = send_cap.unwrap_or(Cap::EMPTY);
-            crate::image_registry::add_cap(staged);
-            crate::shared::add_cap(staged);
-            ep.q[qi] = CallSlot {
-                state: SlotState::Waiting,
-                caller: sched::current_thread_id(),
-                words,
-                msg,
-                send_cap: staged,
-                ..EMPTY_SLOT
-            };
-            let parked = ep.server;
-            if parked != NO_TID {
-                ep.server = NO_TID;
-            }
-            Ok((eidx, qi, parked))
-        }
-    })?;
+        })?;
+    if let Some(b) = signal {
+        signal_bound(b);
+    }
 
     // Phase 2 — a parked server takes the request now (delivery in the
     // caller's context; ENDPOINTS borrow ended before grant/wake).
@@ -477,7 +674,10 @@ pub fn call(
             error!("ipc", "call: parked server {} has no process", parked);
             crate::halt::halt_machine("ipc: server without a process");
         }
-        if let Err(e) = sched::wake(parked) {
+        // Direct handoff (ADR-0072): the caller blocks next, so the
+        // server it just fed runs immediately, ahead of the ready ring.
+        bump!(handoffs);
+        if let Err(e) = sched::wake_handoff(parked) {
             error!("ipc", "call: wake(server {parked}) failed: {e}");
             crate::halt::halt_machine("ipc: delivered to a server that cannot wake");
         }
@@ -559,6 +759,40 @@ pub(crate) fn reopen_after_server_spawn(eid: u32) {
 /// Errors: `STATUS_BAD_ARG` (dead eid), `STATUS_BUSY` (a second server
 /// on one endpoint — v1 is single-server, ADR-0018).
 pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
+    recv_with_policy(pid, eid, true)
+}
+
+/// Take queued work without registering a waiter. Empty queues return BUSY;
+/// delivery, transferred references and cancellation use the blocking path.
+pub fn try_recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
+    recv_with_policy(pid, eid, false)
+}
+
+/// [`recv`]/[`try_recv`] that also returns the badge of the capability the
+/// caller invoked (ADR-0074; 0 = a plain endpoint cap).
+pub fn recv_badged(
+    pid: u64,
+    eid: u32,
+    blocking: bool,
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES], u32), Status> {
+    let (words, landed, msg) = recv_with_policy(pid, eid, blocking)?;
+    let tid = sched::current_thread_id();
+    // The request stays Delivered to this thread until it replies.
+    let badge = without_interrupts(|| unsafe {
+        (*ENDPOINTS.get())[eid as usize]
+            .q
+            .iter()
+            .find(|s| s.state == SlotState::Delivered && s.server == tid)
+            .map_or(0, |s| s.badge)
+    });
+    Ok((words, landed, msg, badge))
+}
+
+fn recv_with_policy(
+    pid: u64,
+    eid: u32,
+    blocking: bool,
+) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Status> {
     // The caller can die after waking us but before we resume here. Its
     // Delivered slot becomes a one-shot cancellation tombstone; consume it
     // and retry the same recv, rather than falsely fail-stop or lose a wake.
@@ -591,7 +825,7 @@ pub fn recv(pid: u64, eid: u32) -> Result<([u64; 2], u64, [u8; MSG_BYTES]), Stat
                 if let Some(qi) = ep.q.iter().position(|s| s.state == SlotState::Waiting) {
                     return Ok(Some(qi));
                 }
-                if ep.server != NO_TID {
+                if ep.server != NO_TID || !blocking {
                     return Err(STATUS_BUSY);
                 }
                 ep.server = sched::current_thread_id();
@@ -667,6 +901,18 @@ pub fn reply(
     send_cap: Option<Cap>,
     msg: [u8; MSG_BYTES],
 ) -> Result<(), Status> {
+    reply_policy(eid, words, send_cap, msg, false)
+}
+
+/// Additive checked reply distinguishes a cancelled delivered request from
+/// programmer errors, and consumes its tombstone without staging new refs.
+pub fn reply_policy(
+    eid: u32,
+    words: [u64; 2],
+    send_cap: Option<Cap>,
+    msg: [u8; MSG_BYTES],
+    checked: bool,
+) -> Result<(), Status> {
     // Phase 1 — find our Delivered slot, stage the reply (borrow ends).
     // SAFETY: single writer under IF=0.
     let caller = without_interrupts(|| -> Result<u64, Status> {
@@ -681,6 +927,15 @@ pub fn reply(
                 ep.q.iter_mut()
                     .find(|s| s.state == SlotState::Delivered && s.server == tid)
             else {
+                if checked {
+                    if let Some(cancelled) =
+                        ep.q.iter_mut()
+                            .find(|s| s.state == SlotState::Cancelled && s.server == tid)
+                    {
+                        *cancelled = EMPTY_SLOT;
+                        return Err(crate::arch::x86_64::syscall::STATUS_CALLER_GONE);
+                    }
+                }
                 return Err(STATUS_BAD_ARG);
             };
             slot.reply_words = words;
@@ -694,8 +949,15 @@ pub fn reply(
         }
     })?;
 
-    // Phase 2 — wake the caller (no borrow live).
-    if let Err(e) = sched::wake(caller) {
+    // Phase 2 — wake the caller (no borrow live) as a handoff: the
+    // rendezvous completes and the caller runs as soon as the server
+    // blocks, instead of after every other ready thread (ADR-0072
+    // amendment, Phase 11 latency). The scheduler's causal rule still
+    // applies (a server that already woke another thread in this run
+    // replies FIFO), and its chain budget bounds how long handoff-picked
+    // runs may keep the ring from turning: the unbounded variant of this
+    // livelocked the phase-9 polling fixture.
+    if let Err(e) = sched::wake_handoff(caller) {
         error!("ipc", "reply: wake(caller {caller}) failed: {e}");
         crate::halt::halt_machine("ipc: reply could not wake the caller");
     }
@@ -774,6 +1036,11 @@ pub fn fail_calls_for_server(pid: u64) -> usize {
                 // Whoever held the serve side is dying: until somebody
                 // takes it up again, calls here have nowhere to land.
                 ep.orphaned = true;
+                // Its binding described that server's wait; a successor
+                // binds its own notification (ADR-0071).
+                if ep.bound.take().is_some() {
+                    (*STATS.get()).unbinds += 1;
+                }
                 for slot in ep.q.iter_mut() {
                     if matches!(slot.state, SlotState::Waiting | SlotState::Delivered) {
                         slot.state = SlotState::Failed;

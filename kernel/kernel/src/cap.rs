@@ -32,7 +32,7 @@ use crate::sync::without_interrupts;
 /// bounded mature-userspace headroom, not authority. Source COPY and
 /// destination occupancy/rights are still checked on every delegation;
 /// a full table refuses rather than growing or replacing a cap.
-pub const CAP_SLOTS: usize = 32;
+pub const CAP_SLOTS: usize = 128; // ADR-0088: 32 managed desktop sessions
 
 /// Inspect what the cap references (and, for process caps, obtain the
 /// target's PML4 root through [`process_root`]).
@@ -68,6 +68,18 @@ pub enum CapObj {
     /// (recv/reply). The object lives in `ipc::ENDPOINTS`; the cap
     /// references it by index — destroying the cap frees nothing.
     Endpoint { eid: u32 },
+    /// ADR-0074: a client-side endpoint reference minted by the endpoint's
+    /// server (READ holder) with an unforgeable `badge`. Calling through it
+    /// delivers the badge to the server with the request; the server alone
+    /// decides what the badge names (typically an object index plus its
+    /// own generation). Never carries READ, so it can never serve, mint or
+    /// bind. `generation` pins the exact endpoint object: a destroyed and
+    /// re-minted endpoint index refuses every earlier badged cap.
+    BadgedEndpoint {
+        eid: u16,
+        generation: u16,
+        badge: u32,
+    },
     /// Physical frame (ADR-0021/0022) — the driver-substrate primitive.
     /// `owned` marks the ONE cap that owns the frame: `destroy` returns
     /// it to the allocator and `map_memory` TRANSFERS ownership into the
@@ -87,6 +99,18 @@ pub enum CapObj {
     /// A badged, merged notification flag word (ADR-0018, ARCHITECTURE
     /// §7.2). Rights: WRITE = notify, READ = wait.
     Notification { nid: u32 },
+    /// A notification minted through the Desktop's private notification
+    /// factory. Its DESTROY right retires the object as well as the cap;
+    /// ordinary Notification capabilities remain non-owning references.
+    OwnedNotification { nid: u32 },
+    /// Narrow boot-issued authority to mint bounded, Desktop-owned
+    /// notifications. WRITE is checked by SYS_NOTIFICATION_CREATE.
+    NotificationFactory,
+    /// ADR-0107: generation-safe wait keys for native Mutex/Condvar/Once.
+    /// The domain cap itself is created by the trusted Desktop factory.
+    SyncDomain { id: u32, generation: u32 },
+    /// Narrow boot-issued authority to create Desktop-owned SyncDomains.
+    SyncDomainFactory,
     /// A registered executable image (ADR-0019): the thing `SYS_SPAWN`
     /// builds processes from. Rights: READ = may spawn from it. v1's
     /// registry is kernel-side and fixed; a filesystem-backed source
@@ -101,6 +125,12 @@ pub enum CapObj {
     SharedRegion { id: u32 },
     /// Grants allocation (WRITE); never grants physical access by itself.
     MemoryPool,
+    /// ADR-0095: a process-owned native VM reservation. The generation-safe
+    /// ID is meaningful only through this exact non-copyable capability.
+    VmRegion { id: u32 },
+    /// Phase 11.5: read-only CMOS wall clock (READ = `SYS_RTC_READ`). Wall
+    /// time stamps file times; it is data, never authority.
+    Rtc,
     /// A separate bearer for physical backing queries (READ); only the
     /// display service receives this, and must also hold the region cap.
     SharedDma,
@@ -203,6 +233,18 @@ pub fn read(pid: u64, slot: usize) -> Result<Cap, &'static str> {
             Ok(cap)
         })
         .ok_or("cap: no such process")?
+    })
+}
+
+/// Read occupancy of one exact slot in a live process. This reveals no kind,
+/// object identity, rights, or device address; it is used only to distinguish
+/// an empty slot from an un-describable held object at the startup boundary.
+pub fn slot_occupied(pid: u64, slot: usize) -> Option<bool> {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| {
+            cs.get(slot).map(|cap| !matches!(cap.obj, CapObj::None))
+        })
+        .flatten()
     })
 }
 
@@ -351,6 +393,90 @@ pub fn move_cap(
 /// slots. This is the only public write path that does not move or
 /// attenuate an existing cap (`SYS_ALLOC_FRAME` mints Untyped caps
 /// through it).
+/// ADR-0074: mint a badged client reference from the plain endpoint cap in
+/// `pid`'s `slot`, which must carry READ (the serve side). The new cap has
+/// `rights` ⊆ WRITE|COPY (WRITE required) and lands in the first free slot
+/// of the same space. Badge 0 is reserved for unbadged calls.
+pub fn mint_badged(pid: u64, slot: usize, badge: u32, rights: u32) -> Result<usize, &'static str> {
+    if badge == 0 {
+        return Err("mint: badge 0 is reserved for unbadged endpoints");
+    }
+    // DESTROY only lets a holder empty its own slot (ADR-0074 amendment):
+    // without it a server could never drop the copy it keeps of each cap it
+    // minted and replied with (IPC transfer copies), and its space fills.
+    if rights & RIGHTS_WRITE == 0 || rights & !(RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY) != 0 {
+        return Err("mint: badged rights must be WRITE with optional COPY and DESTROY");
+    }
+    let src = read(pid, slot)?;
+    let CapObj::Endpoint { eid } = src.obj else {
+        return Err("mint: not a plain endpoint capability");
+    };
+    if src.rights & RIGHTS_READ == 0 {
+        return Err("mint: only the serve side (READ) may mint");
+    }
+    let generation = crate::ipc::endpoint_generation(eid).ok_or("mint: endpoint is not live")?;
+    let eid = u16::try_from(eid).map_err(|_| "mint: endpoint index out of range")?;
+    grant(
+        pid,
+        Cap {
+            obj: CapObj::BadgedEndpoint {
+                eid,
+                generation,
+                badge,
+            },
+            rights,
+        },
+    )
+}
+
+/// The badge of `cap_slot`, a badged capability to the endpoint whose
+/// serve side (READ) `pid` holds in `server_slot`. Only the server that
+/// minted a badge can read it back (it alone knows what it names);
+/// `describe` never shows badges.
+pub fn badge_of(pid: u64, server_slot: usize, cap_slot: usize) -> Result<u32, &'static str> {
+    let server = read(pid, server_slot)?;
+    let CapObj::Endpoint { eid } = server.obj else {
+        return Err("badge: not a plain endpoint");
+    };
+    if server.rights & RIGHTS_READ == 0 {
+        return Err("badge: only the serve side may read badges");
+    }
+    match read(pid, cap_slot)?.obj {
+        CapObj::BadgedEndpoint {
+            eid: e,
+            generation,
+            badge,
+        } if u32::from(e) == eid && crate::ipc::endpoint_generation(eid) == Some(generation) => {
+            Ok(badge)
+        }
+        _ => Err("badge: not a live badged cap of this endpoint"),
+    }
+}
+
+/// The endpoint and badge a CALL through `pid`'s `slot` reaches: a plain
+/// endpoint cap with WRITE (badge 0) or a badged cap with WRITE whose
+/// generation still matches the live endpoint (ADR-0074).
+pub fn call_target(pid: u64, slot: usize) -> Result<(u32, u32), &'static str> {
+    let c = read(pid, slot)?;
+    if c.rights & RIGHTS_WRITE == 0 {
+        return Err("call: no WRITE right");
+    }
+    match c.obj {
+        CapObj::Endpoint { eid } => Ok((eid, 0)),
+        CapObj::BadgedEndpoint {
+            eid,
+            generation,
+            badge,
+        } => {
+            if crate::ipc::endpoint_generation(u32::from(eid)) != Some(generation) {
+                return Err("call: stale badged endpoint (object was destroyed)");
+            }
+            Ok((u32::from(eid), badge))
+        }
+        _ => Err("call: not an endpoint capability"),
+    }
+}
+
 pub fn issue(pid: u64, slot: usize, cap: Cap) -> Result<(), &'static str> {
     without_interrupts(|| {
         if read(pid, slot).is_ok() {
@@ -395,6 +521,20 @@ pub fn destroy(pid: u64, slot: usize) -> Result<(), &'static str> {
         // cleared: the loud refusal beats a silent leak.
         if let CapObj::Untyped { phys, owned: true } = cap.obj {
             crate::frames::free(phys).map_err(|_| "cap destroy: untyped frame free refused")?;
+        }
+        if let CapObj::VmRegion { id } = cap.obj {
+            crate::vm::release(pid, id).map_err(|_| "cap destroy: VM region release refused")?;
+        }
+        if let CapObj::OwnedNotification { nid } = cap.obj {
+            crate::ipc::destroy_notification(nid)
+                .map_err(|_| "cap destroy: notification retirement refused")?;
+        }
+        if let CapObj::SyncDomain { id, generation } = cap.obj {
+            crate::sync_domain::destroy_domain(
+                pid,
+                crate::sync_domain::DomainRef { id, generation },
+            )
+            .map_err(|_| "cap destroy: synchronization domain retirement refused")?;
         }
         install(pid, slot, Cap::EMPTY)
     })

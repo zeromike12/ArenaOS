@@ -1,0 +1,41 @@
+ArenaOS Phase-12 qualification tool receipt
+Captured: 2026-10-07 UTC
+
+Host distribution: Debian GNU/Linux 13 (trixie), Debian release 13.6
+Privilege: no root/sudo; tools used from an unprivileged local installation
+Python: Python 3.12.14
+Rustup: rustup 1.29.1 (d95a37b6a 2026-08-13), official rustup distribution
+Rust compiler: rustc 1.97.0 (2d8144b78 2026-07-07)
+Cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+Formatter: rustfmt 1.9.0-stable (2d8144b788 2026-07-07)
+Linter: clippy 0.1.97 (2d8144b788 2026-07-07)
+Installed Rust targets: x86_64-unknown-linux-gnu, x86_64-unknown-none,
+  x86_64-unknown-uefi
+Repository root-level rust-toolchain file: none
+QEMU: QEMU emulator version 10.0.11 (Debian 1:10.0.11+ds-0+deb13u1)
+QEMU path: /home/agent/.local/bin/qemu-system-x86_64
+UEFI firmware package: Debian OVMF 2025.02-8+deb13u1
+OpenSSL: OpenSSL 3.5.7 9 Jun 2026
+Python FAT helper used by ESP qualification: pyfatfs 1.1.0
+
+QEMU and OVMF were extracted from trusted Debian repository packages because
+the environment had no root/sudo. The archive contains the exact firmware
+files used by the final extracted boot.
+
+OVMF code: /home/agent/.local/arenaos-deps/usr/share/OVMF/OVMF_CODE_4M.fd
+  size 3,653,632 bytes
+  SHA-256 624e06de18b4fa535e90db7160d00d3d07d206422b89999bf1e27d920264e4e0
+OVMF variables template:
+  /home/agent/.local/arenaos-deps/usr/share/OVMF/OVMF_VARS_4M.fd
+  size 540,672 bytes
+  SHA-256 5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e
+
+Final qualified EFI: 6,360,576 bytes
+  SHA-256 963053de20b32dbc354c20aecfdb9f1672a42f22b6bf46a2b63e478d651b1faa
+Final qualified ESP: 8,388,608 bytes
+  SHA-256 26c7a5414c7b0e22d7a303e13a957036a9eeef406cad1206158d051035df274a
+
+The repository's tools/dev-env/env.sh and existing build/test tools were used.
+Corrected crate-target check transcript: build/phase12-stage-a-corrected.log.
+Final historical suite: 15 host groups + 98 guest scripts, all passed.
+Exact-EFI stability: 100/100 boots, 748 seconds, zero failures.

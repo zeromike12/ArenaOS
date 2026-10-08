@@ -56,6 +56,8 @@ const BADGE_A: u64 = 1 << 16;
 const BADGE_B: u64 = 1 << 17;
 const BADGE_C: u64 = 1 << 18;
 const BADGE_CANCELLED: u64 = 1 << 19;
+/// Phase 11.0 per-process quota proof (ADR-0071).
+const BADGE_QUOTA: u64 = 1 << 20;
 
 const EXIT_CLOCK: u64 = 60;
 const EXIT_ARM: u64 = 61;
@@ -69,6 +71,13 @@ const EXIT_MERGE: u64 = 68;
 /// A stale id — one whose slot has been handed to a LATER timer —
 /// was accepted, which means it cancelled a stranger's timer.
 const EXIT_STALE: u64 = 69;
+/// The per-process timer quota did not refuse with STATUS_QUOTA at
+/// exactly the fifth simultaneously armed timer (ADR-0071).
+const EXIT_QUOTA: u64 = 70;
+/// ABI typed status for a per-process bound (ADR-0071).
+const STATUS_QUOTA: i64 = -7;
+/// Kernel MAX_TIMERS_PER_PROCESS.
+const TIMER_QUOTA: usize = 4;
 
 /// The delay under test: five ticks, far enough above the 10 ms
 /// granularity that lateness is meaningful and short enough that the
@@ -248,6 +257,29 @@ pub unsafe extern "C" fn _start() -> ! {
             o.u64(fresh);
             o.str(") still fired");
         });
+
+        // ---- the per-process quota (Phase 11.0, ADR-0071) ----
+        // Nothing is armed here. Exactly TIMER_QUOTA arms succeed and the
+        // next one refuses with the distinct quota status, not the
+        // table-full BUSY. The armed ones are left to FIRE (not cancelled)
+        // so the suite's exact cancel count is unchanged; firing returns
+        // the quota, which the 60 s arm below then relies on.
+        for _ in 0..TIMER_QUOTA {
+            arm(BADGE_QUOTA, 1_000);
+        }
+        let over = syscall3(SYS_TIMER_ARM, SLOT_NOTIF, BADGE_QUOTA, 1_000);
+        if over != STATUS_QUOTA {
+            log_line(|o| {
+                o.str("timertest: the over-quota arm returned ");
+                o.i64(over);
+            });
+            fail(EXIT_QUOTA, "the fifth simultaneous timer was not refused with STATUS_QUOTA");
+        }
+        let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
+        if badge < 0 || badge as u64 & BADGE_QUOTA == 0 {
+            fail(EXIT_QUOTA, "the quota timers never fired");
+        }
+        log("timertest: PASS — four timers armed, the fifth refused with STATUS_QUOTA (-7)");
 
         // Leave one armed on purpose: the suite proves the kernel
         // sweeps it when this process is destroyed.

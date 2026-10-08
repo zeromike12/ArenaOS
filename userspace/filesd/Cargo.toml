@@ -1,0 +1,24 @@
+[package]
+name = "arena-filesd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "AFS2 file service (ADR-0076/0077): capability records over badged endpoints"
+
+[[bin]]
+name = "filesd"
+path = "src/main.rs"
+
+[dependencies]
+arena-afs2 = { path = "../afs2" }
+arena-platform-core = { path = "../arena-platform" }
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"
+
+[profile.dev]
+panic = "abort"

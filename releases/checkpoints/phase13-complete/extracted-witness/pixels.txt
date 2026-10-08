@@ -1,0 +1,7 @@
+800x600 1ef50c4dc041f346c09e389cf8d49a2cde89301597d1e48514eae1d37ae3f730
+INPUT 0d7412ab65253770e225ebd59a9677ab513ed9f39c916d7e34e2f399ee0d6d5b 665c0d7a2380bbf941da6bdbf30ce0c748f61096f2850f7ed629c5687897727e
+DRAG 9371f143cf4f1b35163165ec9db0f0a38dd23cc71cbea050ecda9b3495065026
+RELAUNCH 665c0d7a2380bbf941da6bdbf30ce0c748f61096f2850f7ed629c5687897727e
+RESOURCES 113777,15,15,2,470,4,47 113775,15,15,2,470,4,47
+LIFECYCLE 2 2
+PHASE13 two signed APB1 packages installed and exact AFS2 payloads verified; Open With read-only File cap and AFS2 default; All Applications search and native launch; three real windows; helper/stream/thread/VM/synchronization proofs; headless Process-cap reap; four windows and identity resources returned to baseline

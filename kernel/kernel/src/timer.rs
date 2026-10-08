@@ -53,6 +53,23 @@ use crate::timekeeping;
 /// the table is a plain array scanned on the tick.
 pub const MAX_TIMERS: usize = 32;
 
+/// Per-process bound inside the shared table (Phase 11.0, ADR-0071).
+/// Measured: no production or test process holds more than three armed
+/// timers at once (timertest's merge proof); four leaves one spare while
+/// guaranteeing that any eight processes can still arm a timer each, so
+/// no single notification holder can exhaust the system's timers.
+pub const MAX_TIMERS_PER_PROCESS: usize = 4;
+
+/// Why arming refused. `Quota` is distinct from a full table so a caller
+/// can tell "you hold too many" from "the system is out".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArmError {
+    BadBadge,
+    Uncalibrated,
+    Full,
+    Quota,
+}
+
 #[derive(Clone, Copy)]
 struct Timer {
     live: bool,
@@ -123,6 +140,10 @@ pub struct TimerStats {
     pub fired: u64,
     pub cancelled: u64,
     pub swept: u64,
+    /// Arms refused because the owner already held its quota.
+    pub quota_refused: u64,
+    /// Largest number of timers one process has held at once.
+    pub per_process_high_water: usize,
 }
 
 static STATS: SyncCell<TimerStats> = SyncCell::new(TimerStats {
@@ -131,6 +152,8 @@ static STATS: SyncCell<TimerStats> = SyncCell::new(TimerStats {
     fired: 0,
     cancelled: 0,
     swept: 0,
+    quota_refused: 0,
+    per_process_high_water: 0,
 });
 
 pub fn stats() -> TimerStats {
@@ -154,20 +177,28 @@ pub fn init() -> Result<(), &'static str> {
 /// caller read the clock, do arithmetic, and then race whatever
 /// happens between the read and the call; "in 200 ms" cannot be stale
 /// by construction.
-pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u64, &'static str> {
+pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u64, ArmError> {
     if badge == 0 {
-        return Err("timer: badge must be nonzero (the merged-badge protocol has no empty word)");
+        // The merged-badge protocol has no empty word.
+        return Err(ArmError::BadBadge);
     }
     let now = timekeeping::now_us();
     if now == 0 {
-        return Err("timer: the monotonic clock is not calibrated");
+        return Err(ArmError::Uncalibrated);
     }
     without_interrupts(|| {
         // SAFETY: single writer under IF=0.
         unsafe {
             let timers = &mut *TIMERS.get();
+            // Quota before capacity: an over-budget process is refused
+            // even when slots are free, and its refusal is its own.
+            let held = timers.iter().filter(|t| t.live && t.owner == owner).count();
+            if held >= MAX_TIMERS_PER_PROCESS {
+                (*STATS.get()).quota_refused += 1;
+                return Err(ArmError::Quota);
+            }
             let Some(i) = timers.iter().position(|t| !t.live) else {
-                return Err("timer: table full (MAX_TIMERS)");
+                return Err(ArmError::Full);
             };
             // The generation belongs to the SLOT and only ever moves
             // forward, so ids handed out for it are never reused.
@@ -181,8 +212,24 @@ pub fn arm(owner: u64, nid: u32, badge: u64, delay_us: u64) -> Result<u64, &'sta
                 deadline_us: now.saturating_add(delay_us),
             };
             ARMED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-            (*STATS.get()).armed_total += 1;
+            let stats = &mut *STATS.get();
+            stats.armed_total += 1;
+            stats.per_process_high_water = stats.per_process_high_water.max(held + 1);
             Ok(make_id(generation, i))
+        }
+    })
+}
+
+/// Timers `owner` currently holds (the quota's accounting, derived from
+/// the table itself, so it cannot drift from the truth or outlive a slot).
+pub fn held_by(owner: u64) -> usize {
+    without_interrupts(|| {
+        // SAFETY: single reader under IF=0.
+        unsafe {
+            (*TIMERS.get())
+                .iter()
+                .filter(|t| t.live && t.owner == owner)
+                .count()
         }
     })
 }

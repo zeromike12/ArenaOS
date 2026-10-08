@@ -26,7 +26,7 @@ MARKER = b'[window_b] held-cap focused surface painted'
 
 def build(path: Path) -> None:
     with path.open('w') as log:
-        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,
+        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
                        stdout=log, stderr=subprocess.STDOUT, check=True)
 
 

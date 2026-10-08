@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Narrow guest PREPARE/ABORT/COMMIT/LAUNCH and signed ELF child fixture.
 
-Manager revokes old ID, checks one-child refusal, reaps the dynamic child and
+Manager revokes old ID, checks the bounded dynamic-child capacity refusal, reaps the dynamic child and
 revokes the LAUNCH ID. Not the full Phase-8.5 qualification.
 """
 import hashlib
@@ -23,17 +23,18 @@ def boot(esp,disk,tag,feed):
     assert rc==0 and 'm7: RESULT PASS (2/2)' in s and 'PANIC' not in s and '[arena ERROR halt]' not in s
     return s
 
-def main():
+def main(esp=None):
     # Independently signed PUBLIC fixture only. No signing code or private key
     # enters the guest. A frozen host measurement checks this exact ELF subset.
-    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py')],check=True,
+    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py'),
+                    *(['--existing-userspace'] if esp is not None else [])],check=True,
         stdout=(arena_env.build_dir()/'m85-select-elf-fit.log').open('w'))
     elf=(ROOT/'tools/phase85-elf-probe/target/x86_64-unknown-none/release/arena-phase85-elf-probe').read_bytes()
     assert len(elf)==648
     unsigned=record.signed_package(t.ID,7,elf,record.ROOT)
     signed=unsigned+openssl_sign(RFC_SEED,record.PKG_DOMAIN+unsigned)
     assert len(signed)==840
-    esp=mtest.build(LABEL)
+    if esp is None:esp=mtest.build(LABEL)
     disk=arena_env.make_scratch_disk()
     boot(esp,disk,'baseline',[(b'arena>',1,b'shutdown\r')])
     assert list(t.contents(disk))==[b'arena.txt']

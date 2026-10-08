@@ -26,7 +26,7 @@ use crate::arch::x86_64::idt;
 use crate::sync::{SyncCell, without_interrupts};
 
 /// Tick tasks this kernel can hold. Three today (console mirror wake,
-/// timer expiry, and room for one more); the bound exists so the table
+/// timer expiry, native synchronization timeout); the bound exists so the table
 /// is a plain array with no allocation on a path that runs 100 times a
 /// second.
 pub const MAX_TASKS: usize = 4;

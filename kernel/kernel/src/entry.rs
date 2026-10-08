@@ -373,6 +373,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     if let Err(e) = crate::timer::init() {
         crate::halt::halt_machine(e);
     }
+    if let Err(e) = crate::sync_domain::init() {
+        crate::halt::halt_machine(e);
+    }
     crate::timer::log_ready();
     if !crate::m6::run_suite() {
         crate::halt::halt_machine("milestone 6 suite failed");
@@ -380,6 +383,27 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     if !crate::m7::run_suite() {
         crate::halt::halt_machine("milestone 7 suite failed");
+    }
+
+    // --- Phase 11.0: kernel event plumbing (ADR-0071/0072) --------------------
+    // Endpoint-bound notifications, generation-pinned cleanup, the
+    // per-process timer quota and direct IPC handoff, proven on the real
+    // objects before any production resident exists (every object minted
+    // here is destroyed again).
+    if !crate::m11::run_suite() {
+        crate::halt::halt_machine("milestone 11 suite failed");
+    }
+
+    // ADR-0083: an independently linked native runtime consumes a real
+    // read-only startup SharedRegion, validates actual cap slots, and proves
+    // both valid entry and fail-closed hostile startup cases before residents.
+    if !crate::m12::run_suite() {
+        crate::halt::halt_machine("milestone 12 startup ABI suite failed");
+    }
+    // ADR-0089: prove the 32-deep IPC queue admits the simultaneous
+    // Phase-12 client burst and refuses caller 33 without losing requests.
+    if !crate::m12::run_ipc_queue_capacity_test() {
+        crate::halt::halt_machine("milestone 12 IPC queue capacity proof failed");
     }
 
     // ADR-0056: run the bounded ring-3 SharedRegion capacity/teardown
@@ -765,9 +789,81 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // A real, parked ring-3 server has already painted and finished its
     // bounded allocation before shell/manager resource commands can run.
     // This avoids a one-frame startup race across historical reboot tests.
-    let mut graphics = start_boot_display(_input_pid);
+    let desktop_frame_nid = crate::ipc::create_notification()
+        .unwrap_or_else(|_| crate::halt::halt_machine("desktop: frame notification bound"));
+    let mut app_clock_nids = [0u32; 32];
+    for nid in &mut app_clock_nids {
+        *nid = crate::ipc::create_notification()
+            .unwrap_or_else(|_| crate::halt::halt_machine("desktop: app clock capacity"));
+    }
+    // Phase 11.5 (ADR-0076/0077): the AFS2 file service, desktop profile
+    // only (the phase-9 fixture keeps its historical process set).
+    let filesd_eid = (option_env!("ARENA_GRAPHICS_FIXTURE") != Some("phase9"))
+        .then(|| spawn_filesd(blk_eid, fs_eid).unwrap_or_else(|e| crate::halt::halt_machine(e)));
+    let mut graphics = start_boot_display(
+        _input_pid,
+        desktop_frame_nid,
+        &app_clock_nids,
+        fs_eid,
+        filesd_eid,
+        package_root.map(|(eid, _)| eid),
+    );
     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+    if let Some(eid) = graphics.as_ref().and_then(|g| g.launch_endpoint) {
+        crate::cap::issue(
+            manager_pid,
+            31,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Endpoint { eid },
+                rights: crate::cap::RIGHTS_WRITE | crate::cap::RIGHTS_COPY,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        info!(
+            "m10",
+            "late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image"
+        );
+    }
+    // ADR-0091: issue the exact filesd APB1 badge into servicemgr's reserved
+    // root-owned slot127 after the other late boot grants. It is outside the
+    // manager's fixed 32-slot named child/process inventory, so it does not
+    // consume a Process-handle slot; no child receives it before packaged's
+    // readiness proof. Issuing it here also makes the historical low-32
+    // manager occupancy receipt independent of this later slot127 handoff.
+    if let (Some(eid), Some(_package)) = (filesd_eid, package_root) {
+        use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_WRITE as W};
+        let generation = crate::ipc::endpoint_generation(eid).unwrap_or_else(|| {
+            crate::halt::halt_machine("filesd endpoint vanished before install handoff")
+        });
+        let eid16 = u16::try_from(eid).unwrap_or_else(|_| {
+            crate::halt::halt_machine("filesd endpoint index exceeds badge ABI")
+        });
+        crate::sync::without_interrupts(|| {
+            if crate::cap::slot_occupied(manager_pid, MGR_SLOT_APB1_INSTALL_AUTH) != Some(false) {
+                crate::halt::halt_machine("servicemgr: reserved APB1 slot127 occupied");
+            }
+            crate::cap::issue(
+                manager_pid,
+                MGR_SLOT_APB1_INSTALL_AUTH,
+                Cap {
+                    obj: CapObj::BadgedEndpoint {
+                        eid: eid16,
+                        generation,
+                        badge: FILESD_APB1_INSTALL_BADGE,
+                    },
+                    rights: W | C,
+                },
+            )
+            .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        });
+        crate::ipc::notify(manager_nid, MGR_BADGE_APB1_INSTALL_AUTH)
+            .unwrap_or_else(|_| crate::halt::halt_machine("servicemgr: APB1 handoff wake refused"));
+        info!(
+            "m12",
+            "late filesd APB1 BadgedEndpoint issued to servicemgr slot127; authority remains withheld from packaged until receiver READY"
+        );
+    }
     if expected_stack_caps.is_some() {
         crate::cap::issue(
             shell_pid,
@@ -891,23 +987,44 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         );
     }
 
-    // ADR-0051/0053: production fsd and package approval markers are
-    // separate. 18 notifications at capacity; the nineteenth must be
-    // a typed refusal, never silent over-allocation;
-    // optional-device boots do not claim to fill that table.
+    // ADR-0088: fixed production notifications plus 32 private Desktop
+    // clocks occupy 51 of 64 slots on the full fixture. Fill the remaining
+    // table without dropping any occupied object, prove the 65th create is
+    // mutation-free, then retire only the exact temporary Notifications.
     if net_eid.is_some() && rng_eid.is_some() && _input_pid.is_some() && _console_pid.is_some() {
         let before = crate::ipc::notification_snapshot();
-        if crate::ipc::notification_occupancy() != 18
+        let fixed_occupied = crate::ipc::notification_occupancy();
+        if fixed_occupied != 51 {
+            crate::halt::halt_machine("servicemgr: 32-clock notification baseline changed");
+        }
+        let mut temporary = [u32::MAX; crate::ipc::MAX_NOTIFS];
+        let mut count = 0usize;
+        while crate::ipc::notification_occupancy() < crate::ipc::MAX_NOTIFS {
+            temporary[count] = crate::ipc::create_notification().unwrap_or_else(|_| {
+                crate::halt::halt_machine("servicemgr: notification fill refused")
+            });
+            count += 1;
+        }
+        let full = crate::ipc::notification_snapshot();
+        if count != 13
             || crate::ipc::create_notification().is_ok()
-            || crate::ipc::notification_snapshot() != before
+            || crate::ipc::notification_snapshot() != full
         {
             crate::halt::halt_machine(
-                "servicemgr: notification bound failed mutation-free nineteenth refusal",
+                "servicemgr: notification bound failed mutation-free sixty-fifth refusal",
             );
+        }
+        for nid in &temporary[..count] {
+            crate::ipc::destroy_notification(*nid).unwrap_or_else(|_| {
+                crate::halt::halt_machine("servicemgr: temporary notification cleanup refused")
+            });
+        }
+        if crate::ipc::notification_snapshot() != before {
+            crate::halt::halt_machine("servicemgr: notification probe cleanup changed baseline");
         }
         info!(
             "kernel",
-            "servicemgr: full fixture notification budget 18/18; nineteenth refused"
+            "servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed"
         );
     }
 
@@ -925,6 +1042,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         // rather than leave inputd blocked or advertise stale windows as
         // usable after either original boot-root graphics service died.
         if let Some(ref mut g) = graphics {
+            if let Some(manager) = g.desktop {
+                if crate::sched::proc_live_threads(manager) == 0 {
+                    crate::proc::destroy(manager).unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::spawn::forget(manager).unwrap_or_else(|e| crate::halt::halt_machine(e));
+                    crate::halt::halt_machine(
+                        "desktop: trusted application manager died; fail-stop to retire all session authority",
+                    );
+                }
+            }
             for pid in [g.compositor, g.display] {
                 if crate::sched::proc_live_threads(pid) == 0 {
                     crate::proc::destroy(pid).unwrap_or_else(|e| crate::halt::halt_machine(e));
@@ -935,6 +1061,9 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
                 }
             }
             for i in 0..2 {
+                if g.clients[i] == 0 {
+                    continue;
+                }
                 if !g.exited[i] && crate::sched::proc_live_threads(g.clients[i]) == 0 {
                     // Real original-child retirement (not a dropped cap).
                     // IPC cancellation is swept by proc::destroy as usual.
@@ -1072,10 +1201,22 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
             );
         }
         crate::sched::yield_now();
-        // SAFETY: ring 0; `sti; hlt` is the canonical idle pair — any
-        // pending or arriving interrupt resumes the loop right here,
-        // and the interrupt gate masks IF again for the handler.
-        unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+        // Halt only when nothing is runnable. A thread made ready by a
+        // wake (an IPC server woken by a caller that then blocked, a
+        // caller woken by a reply) must run now, not after the next PIT
+        // tick: halting with a non-empty ready ring cost every IPC hop up
+        // to a full 10 ms tick. The check runs with IF=0 so an
+        // interrupt-driven wake cannot slip in between check and halt.
+        x86_64::cli();
+        if crate::sched::ready_pending() {
+            x86_64::sti();
+        } else {
+            // SAFETY: ring 0; `sti; hlt` is the canonical idle pair —
+            // `sti` takes effect after `hlt` begins, so any pending or
+            // arriving interrupt resumes the loop right here, and the
+            // interrupt gate masks IF again for the handler.
+            unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+        }
     }
 }
 
@@ -1084,18 +1225,29 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 struct GraphicsRuntime {
     display: u64,
     compositor: u64,
+    /// The userspace application manager. Its failure is machine-fatal until
+    /// an independently supervised recovery authority exists.
+    desktop: Option<u64>,
     clients: [u64; 2],
     regions: [u32; 2],
     exited: [bool; 2],
     retired: [bool; 2],
     deadline: [u64; 2],
+    launch_endpoint: Option<u32>,
 }
 
 /// One boot-root graphics service: explicit optional GOP and/or modern 2D
 /// virtio GPU. A capability BAR, not the PCI numeric address, is delegated.
 /// The endpoint is parked before boot continues; graphical readiness is a
 /// separate service concern, never inferred from the mere presence of a BAR.
-fn start_boot_display(input_pid: Option<u64>) -> Option<GraphicsRuntime> {
+fn start_boot_display(
+    input_pid: Option<u64>,
+    frame_nid: u32,
+    app_clocks: &[u32; 32],
+    fs_eid: u32,
+    filesd_eid: Option<u32>,
+    package_eid: Option<u32>,
+) -> Option<GraphicsRuntime> {
     let gop = crate::handoff::display();
     if let Some(mode) = gop {
         if mode.phys & 4095 != 0 || mode.bytes == 0 || mode.bytes > 2 * 1024 * 1024 {
@@ -1278,7 +1430,22 @@ fn start_boot_display(input_pid: Option<u64>) -> Option<GraphicsRuntime> {
         "m9",
         "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
     );
-    Some(start_boot_compositor(display_pid, eid, input_pid))
+    // Explicit historical graphics fixture, independent of device names/counts.
+    // Shipping builds start the desktop with either keyboard alone or tablet.
+    if option_env!("ARENA_GRAPHICS_FIXTURE") != Some("phase9") {
+        Some(start_boot_desktop(
+            display_pid,
+            eid,
+            input_pid,
+            frame_nid,
+            app_clocks,
+            fs_eid,
+            filesd_eid,
+            package_eid,
+        ))
+    } else {
+        Some(start_boot_compositor(display_pid, eid, input_pid))
+    }
 }
 
 /// Root provides *exactly two* disjoint original-child Process/READ and
@@ -1415,11 +1582,13 @@ fn start_boot_compositor(
     GraphicsRuntime {
         display: display_pid,
         compositor: comp,
+        desktop: None,
         clients: [a, b],
         regions: region_ids,
         exited: [false; 2],
         retired: [false; 2],
         deadline: [0; 2],
+        launch_endpoint: None,
     }
 }
 
@@ -1930,6 +2099,50 @@ fn spawn_fsd(blk_eid: u32) -> Result<(u64, u32, u32), &'static str> {
     Ok((pid, eid, diag_nid))
 }
 
+/// filesd's user-root badge (`filesd_wire::USER_ROOT_BADGE`): record 1,
+/// record generation 1.
+const FILESD_USER_ROOT_BADGE: u32 = 1 | 1 << 16;
+/// ADR-0091 filesd-reserved APB1 install record 2/generation 1.
+const FILESD_APB1_INSTALL_BADGE: u32 = 2 | 1 << 16;
+/// Reserved high manager slot for late authority, outside its low32 inventory.
+const MGR_SLOT_APB1_INSTALL_AUTH: usize = 127;
+const _: () = assert!(MGR_SLOT_APB1_INSTALL_AUTH == crate::cap::CAP_SLOTS - 1);
+/// Wake hint only: servicemgr rechecks actual slot-127 capability possession.
+const MGR_BADGE_APB1_INSTALL_AUTH: u64 = 1 << 22;
+
+/// Spawn the AFS2 file service (Phase 11.5, ADR-0076/0077): boot image 9
+/// with storaged's block endpoint (call side), its own endpoint (serve
+/// side), the read-only RTC and fsd's endpoint (call side, read-only use:
+/// the one-shot AFS1 import). Returns its endpoint.
+fn spawn_filesd(blk_eid: u32, fs_eid: u32) -> Result<u32, &'static str> {
+    use crate::cap::{Cap, CapObj, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let eid = crate::ipc::create_endpoint().map_err(|_| "filesd: endpoint table full")?;
+    let grants = [
+        Cap {
+            obj: CapObj::Endpoint { eid: blk_eid },
+            rights: W,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid },
+            rights: R,
+        },
+        Cap {
+            obj: CapObj::Rtc,
+            rights: R,
+        },
+        Cap {
+            obj: CapObj::Endpoint { eid: fs_eid },
+            rights: W,
+        },
+    ];
+    let pid = crate::spawn::spawn_init_boot(9, &grants, None)?;
+    info!(
+        "kernel",
+        "filesd spawned: pid {pid} (caps: 0=Endpoint{blk_eid}/W 1=Endpoint{eid}/R 2=Rtc/R 3=Endpoint{fs_eid}/W) — AFS2 file service"
+    );
+    Ok(eid)
+}
+
 /// Spawn the production network service (M6.1, ADR-0024): registry
 /// image 6 with storaged's three-cap driver shape — an `Mmio` cap over
 /// the virtio-net structure BAR (R|W), its endpoint serve side (READ),
@@ -2092,6 +2305,32 @@ fn spawn_inputd() -> Result<Option<u64>, &'static str> {
         },
     ];
     let pid = crate::spawn::spawn_init(10, &grants, None)?;
+    // A single input service owns both queues and consumes their common
+    // IRQ notification. The second MMIO cap never reaches applications.
+    if let Some(second) = (0..crate::drivers::pci::virtio_count())
+        .filter_map(crate::drivers::pci::virtio_device)
+        .find(|d| {
+            d.virtio_type == crate::drivers::pci::VIRTIO_TYPE_INPUT && d.pci_index != v.pci_index
+        })
+    {
+        let sf = crate::drivers::pci::pci_function(second.pci_index)
+            .ok_or("inputd: second function vanished")?;
+        let sb = second.common.bar as usize;
+        if sb > 5 || sf.bar_is_io[sb] || sf.bar_base[sb] == 0 || sf.bar_size[sb] < 4096 {
+            return Err("inputd: second BAR invalid");
+        }
+        crate::cap::issue(
+            pid,
+            5,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Mmio {
+                    phys: sf.bar_base[sb],
+                    pages: (sf.bar_size[sb] / 4096) as u32,
+                },
+                rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+            },
+        )?;
+    }
     info!(
         "kernel",
         "inputd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=ConsoleInput/W) — the keyboard is live; keystrokes feed the shell's line discipline beside the serial port",
@@ -2339,4 +2578,210 @@ fn test_kernel_irq_live(_info: &BootInfo) -> Result<(), &'static str> {
         "kernel_irq_live: {ticks} ticks through the relocated IDT + kernel-alias LAPIC EOI"
     );
     Ok(())
+}
+
+/// Desktop's explicit broker clock slots preserve the Phase-10 layout
+/// (7..=12 and 14..=19), with the filesd endpoint at 13 and the `/Users/user`
+/// lineage at 20. Slots 30..=31 stay open for the first-free display IPC
+/// reply cap; additional Phase-12 clocks use 21..=29 and 32..=42.
+const fn desktop_clock_slot(index: usize) -> usize {
+    if index < 6 {
+        7 + index
+    } else if index < 12 {
+        8 + index
+    } else if index < 21 {
+        9 + index
+    } else {
+        11 + index
+    }
+}
+
+/// Ordinary userspace broker/compositor: kernel policy delegates explicit
+/// image, pool, endpoint and clock authorities; window policy remains ring 3.
+fn start_boot_desktop(
+    display: u64,
+    display_eid: u32,
+    input_pid: Option<u64>,
+    frame_nid: u32,
+    app_clocks: &[u32; 32],
+    fs_eid: u32,
+    filesd_eid: Option<u32>,
+    package_eid: Option<u32>,
+) -> GraphicsRuntime {
+    use crate::cap::{Cap, CapObj, RIGHTS_COPY as C, RIGHTS_READ as R, RIGHTS_WRITE as W};
+    let eid = crate::ipc::create_endpoint().unwrap_or_else(|e| crate::halt::halt_machine(e));
+    let token = CapObj::ProofToken {
+        id: 0x4152_454e_5031_3049,
+    };
+    let comp = crate::spawn::spawn_init_boot(
+        6,
+        &[
+            Cap {
+                obj: CapObj::Endpoint { eid: display_eid },
+                rights: W,
+            },
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: R,
+            },
+            Cap {
+                obj: token,
+                rights: R,
+            },
+            Cap {
+                obj: CapObj::MemoryPool,
+                rights: W,
+            },
+            // COPY: the broker lends its clock to filesd for the Desktop
+            // directory watch (ADR-0079).
+            Cap {
+                obj: CapObj::Notification { nid: frame_nid },
+                rights: R | W | C,
+            },
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W | C,
+            },
+            Cap {
+                obj: CapObj::BootImage { index: 8 },
+                rights: R,
+            },
+        ],
+        None,
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // Client clocks occupy 7..=12 and 14..=19, then the extension range
+    // 21..=29 and 32..=42. Slots 13 (filesystem endpoint), 20 (filesd
+    // lineage), and 30..=31 (first-free display reply window) stay fixed;
+    // the arithmetic is shared with Desktop's clock(i) mapping.
+    for (i, nid) in app_clocks.iter().enumerate() {
+        crate::cap::issue(
+            comp,
+            desktop_clock_slot(i),
+            Cap {
+                obj: CapObj::Notification { nid: *nid },
+                rights: R | W | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    crate::cap::issue(
+        comp,
+        13,
+        Cap {
+            obj: CapObj::Endpoint { eid: fs_eid },
+            rights: W,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // Slot 20: the broker's file grant — a badged capability naming the
+    // filesd record of `/Users/user` (all rights). `/System` has no badge
+    // anyone holds.
+    if let Some(eid) = filesd_eid {
+        let generation = crate::ipc::endpoint_generation(eid)
+            .unwrap_or_else(|| crate::halt::halt_machine("filesd endpoint vanished"));
+        crate::cap::issue(
+            comp,
+            20,
+            Cap {
+                obj: CapObj::BadgedEndpoint {
+                    eid: eid as u16,
+                    generation,
+                    badge: FILESD_USER_ROOT_BADGE,
+                },
+                rights: W | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    // ADR-0091: the trusted Desktop broker alone receives the package
+    // receiver endpoint. It can submit one exact filesd File cap, but receives
+    // no APKG marker or filesd install badge.
+    if let Some(eid) = package_eid {
+        crate::cap::issue(
+            comp,
+            43,
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    // Slot 44 is the Desktop-only mint authority for private helper timer
+    // notifications. It is WRITE-only and non-copyable; children receive an
+    // exact owner-created Notification cap only when their signed AHL1 entry
+    // requests it.
+    crate::cap::issue(
+        comp,
+        44,
+        Cap {
+            obj: CapObj::NotificationFactory,
+            rights: W,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    // Slot 45 is the Desktop-only authority to create AppInstance-owned
+    // native synchronization domains; children receive only an exact
+    // READ|WRITE domain grant from the manager.
+    crate::cap::issue(
+        comp,
+        45,
+        Cap {
+            obj: CapObj::SyncDomainFactory,
+            rights: W,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::cap::consume(comp, 3).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::cap::issue(
+        comp,
+        3,
+        Cap {
+            obj: CapObj::MemoryPool,
+            rights: R | W | C,
+        },
+    )
+    .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    if let Some(pid) = input_pid {
+        let old = crate::cap::read(pid, 1).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        let CapObj::Endpoint { eid: old_eid } = old.obj else {
+            crate::halt::halt_machine("desktop input endpoint invalid")
+        };
+        crate::cap::consume(pid, 1).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::ipc::destroy_endpoint(old_eid).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            pid,
+            1,
+            Cap {
+                obj: CapObj::Endpoint { eid },
+                rights: W,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::cap::issue(
+            pid,
+            4,
+            Cap {
+                obj: token,
+                rights: R | C,
+            },
+        )
+        .unwrap_or_else(|e| crate::halt::halt_machine(e));
+    }
+    info!(
+        "m10",
+        "desktop broker spawned with explicit delegated grants; application Process/region ownership remains userspace"
+    );
+    GraphicsRuntime {
+        display,
+        compositor: comp,
+        desktop: Some(comp),
+        clients: [0; 2],
+        regions: [0; 2],
+        exited: [false; 2],
+        retired: [false; 2],
+        deadline: [0; 2],
+        launch_endpoint: Some(eid),
+    }
 }

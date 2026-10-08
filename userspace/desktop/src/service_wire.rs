@@ -1,0 +1,509 @@
+//! Function-service and startup metadata. No visual tokens or authorization
+//! identity cross this wire; the held capability is carried separately.
+pub const BYTES: usize = 64;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Frame {
+    Bootstrap,
+    Started {
+        kind: u8,
+        theme: u8,
+        motion: bool,
+        path: [u8; 32],
+    },
+    List {
+        cursor: u32,
+    },
+    Entry {
+        cursor: u32,
+        size: u64,
+        name: [u8; 32],
+    },
+    Read {
+        name: [u8; 32],
+    },
+    Put {
+        name: [u8; 32],
+        length: u16,
+    },
+    Delete {
+        name: [u8; 32],
+    },
+    Configure {
+        theme: u8,
+        motion: bool,
+    },
+    Launch {
+        kind: u8,
+        path: [u8; 32],
+    },
+    /// Offer one exact read-only File cap to the registry-selected handler.
+    OpenDocument {
+        name: [u8; 32],
+    },
+    /// Ask the user to choose a handler for this exact read-only File cap.
+    OpenWith {
+        name: [u8; 32],
+    },
+    LaunchImage,
+    Display,
+    Create {
+        name: [u8; 32],
+    },
+    /// Ask the broker's trusted chooser for a document to open (or a place
+    /// to save, `name` suggested). Nothing is granted by the request.
+    Choose {
+        save: bool,
+        /// Open for reading only (never with `save`).
+        read_only: bool,
+        name: [u8; 32],
+    },
+    /// The lent capability (a filesd file capability) is offered for the
+    /// next application this session launches.
+    Offer,
+    /// Collect the chooser's outcome: the reply carries the granted
+    /// capability, or none when the user cancelled.
+    TakeGrant,
+    /// Reply to TakeGrant: the title of what was chosen (display only).
+    Granted {
+        save: bool,
+        read_only: bool,
+        name: [u8; 32],
+    },
+    /// Request one helper ID declared in the signed installed AHL1 resource.
+    SpawnHelper {
+        helper_id: [u8; 32],
+    },
+    /// Launch an AHL1 helper that explicitly allows the parent to receive its
+    /// dedicated stream set. The reply transfers that one exact SharedRegion.
+    SpawnHelperStreams {
+        helper_id: [u8; 32],
+    },
+    /// The manager-owned per-instance ProcessGroup handle (descriptive only).
+    HelperStarted {
+        handle: u32,
+    },
+    /// Poll an owner-scoped helper until it exits; the native client waits
+    /// outside the Desktop event loop while this request is pending.
+    WaitHelper {
+        handle: u32,
+    },
+    /// Final status from the exact Process cap, followed by manager reap.
+    HelperExited {
+        handle: u32,
+        status: u64,
+    },
+    /// Stop and reap one helper owned by this authenticated AppInstance.
+    TerminateHelper {
+        handle: u32,
+    },
+    HelperTerminated {
+        handle: u32,
+    },
+    /// Ask the authenticated owner service to wake one exact stream helper.
+    WakeHelper {
+        handle: u32,
+    },
+    HelperWoken {
+        handle: u32,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    Invalid,
+}
+fn name_valid(name: &[u8; 32], empty: bool) -> bool {
+    let n = name.iter().position(|b| *b == 0).unwrap_or(32);
+    (empty || n > 0)
+        && n < 32
+        && name[..n].iter().all(|b| b.is_ascii_graphic() && *b != b'/')
+        && name[n..].iter().all(|b| *b == 0)
+}
+/// A display title: printable ASCII then zero padding (never authority).
+fn printable(name: &[u8; 32]) -> bool {
+    let n = name.iter().position(|b| *b == 0).unwrap_or(32);
+    n < 32
+        && name[..n].iter().all(|b| (0x20..0x7f).contains(b))
+        && name[n..].iter().all(|b| *b == 0)
+}
+fn identity_valid(id: &[u8; 32]) -> bool {
+    let Some(end) = id.iter().position(|byte| *byte == 0) else {
+        return false;
+    };
+    (1..=31).contains(&end)
+        && id[end..].iter().all(|byte| *byte == 0)
+        && (id[0].is_ascii_lowercase() || id[0].is_ascii_digit())
+        && id[..end].iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
+}
+impl Frame {
+    pub fn encode(self) -> Result<[u8; BYTES], Error> {
+        let mut b = [0u8; BYTES];
+        b[..4].copy_from_slice(b"ASVC");
+        b[4] = 1;
+        b[5] = match self {
+            Self::Bootstrap => 1,
+            Self::Started {
+                kind,
+                theme,
+                motion,
+                path,
+            } => {
+                // `path` is the launch title or start folder: presentation
+                // (ADR-0077), validated exactly as launch validates it.
+                if kind > 6 || theme > 1 || !printable(&path) {
+                    return Err(Error::Invalid);
+                }
+                b[6] = kind;
+                b[7] = theme;
+                b[8] = u8::from(motion);
+                b[32..].copy_from_slice(&path);
+                2
+            }
+            Self::List { cursor } => {
+                b[12..16].copy_from_slice(&cursor.to_le_bytes());
+                3
+            }
+            Self::Entry { cursor, size, name } => {
+                if !name_valid(&name, true) {
+                    return Err(Error::Invalid);
+                }
+                b[12..16].copy_from_slice(&cursor.to_le_bytes());
+                b[16..24].copy_from_slice(&size.to_le_bytes());
+                b[32..].copy_from_slice(&name);
+                4
+            }
+            Self::Read { name } | Self::Delete { name } | Self::Create { name } => {
+                if !name_valid(&name, false) {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&name);
+                if matches!(self, Self::Read { .. }) {
+                    5
+                } else if matches!(self, Self::Delete { .. }) {
+                    7
+                } else {
+                    12
+                }
+            }
+            Self::Put { name, length } => {
+                if !name_valid(&name, false) || length > 4096 {
+                    return Err(Error::Invalid);
+                }
+                b[10..12].copy_from_slice(&length.to_le_bytes());
+                b[32..].copy_from_slice(&name);
+                6
+            }
+            Self::Configure { theme, motion } => {
+                if theme > 1 {
+                    return Err(Error::Invalid);
+                }
+                b[7] = theme;
+                b[8] = u8::from(motion);
+                8
+            }
+            Self::Launch { kind, path } => {
+                // A title only since ADR-0077 (never a name scope).
+                if kind > 5 || !printable(&path) {
+                    return Err(Error::Invalid);
+                }
+                b[6] = kind;
+                b[32..].copy_from_slice(&path);
+                9
+            }
+            Self::LaunchImage => 10,
+            Self::Display => 11,
+            Self::Choose {
+                save,
+                read_only,
+                name,
+            }
+            | Self::Granted {
+                save,
+                read_only,
+                name,
+            } => {
+                if !printable(&name) || (save && read_only) {
+                    return Err(Error::Invalid);
+                }
+                b[8] = u8::from(save);
+                b[9] = u8::from(read_only);
+                b[32..].copy_from_slice(&name);
+                if matches!(self, Self::Choose { .. }) {
+                    13
+                } else {
+                    16
+                }
+            }
+            Self::Offer => 14,
+            Self::TakeGrant => 15,
+            Self::OpenDocument { name } | Self::OpenWith { name } => {
+                if !printable(&name) || name[0] == 0 {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&name);
+                if matches!(self, Self::OpenDocument { .. }) {
+                    17
+                } else {
+                    18
+                }
+            }
+            Self::SpawnHelper { helper_id } => {
+                if !identity_valid(&helper_id) {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&helper_id);
+                19
+            }
+            Self::SpawnHelperStreams { helper_id } => {
+                if !identity_valid(&helper_id) {
+                    return Err(Error::Invalid);
+                }
+                b[32..].copy_from_slice(&helper_id);
+                25
+            }
+            Self::HelperStarted { handle }
+            | Self::WaitHelper { handle }
+            | Self::TerminateHelper { handle }
+            | Self::HelperTerminated { handle }
+            | Self::WakeHelper { handle }
+            | Self::HelperWoken { handle } => {
+                if handle == 0 {
+                    return Err(Error::Invalid);
+                }
+                b[12..16].copy_from_slice(&handle.to_le_bytes());
+                match self {
+                    Self::HelperStarted { .. } => 20,
+                    Self::WaitHelper { .. } => 21,
+                    Self::TerminateHelper { .. } => 23,
+                    Self::HelperTerminated { .. } => 24,
+                    Self::WakeHelper { .. } => 26,
+                    Self::HelperWoken { .. } => 27,
+                    _ => unreachable!(),
+                }
+            }
+            Self::HelperExited { handle, status } => {
+                if handle == 0 {
+                    return Err(Error::Invalid);
+                }
+                b[12..16].copy_from_slice(&handle.to_le_bytes());
+                b[16..24].copy_from_slice(&status.to_le_bytes());
+                22
+            }
+        };
+        Ok(b)
+    }
+    pub fn decode(b: &[u8]) -> Result<Self, Error> {
+        if b.len() != BYTES || &b[..4] != b"ASVC" || b[4] != 1 {
+            return Err(Error::Invalid);
+        }
+        let cursor = u32::from_le_bytes(b[12..16].try_into().map_err(|_| Error::Invalid)?);
+        let name = b[32..].try_into().map_err(|_| Error::Invalid)?;
+        let f = match b[5] {
+            1 => Self::Bootstrap,
+            2 if b[8] <= 1 => Self::Started {
+                kind: b[6],
+                theme: b[7],
+                motion: b[8] == 1,
+                path: name,
+            },
+            3 => Self::List { cursor },
+            4 => Self::Entry {
+                cursor,
+                size: u64::from_le_bytes(b[16..24].try_into().map_err(|_| Error::Invalid)?),
+                name,
+            },
+            5 => Self::Read { name },
+            6 => Self::Put {
+                name,
+                length: u16::from_le_bytes(b[10..12].try_into().map_err(|_| Error::Invalid)?),
+            },
+            7 => Self::Delete { name },
+            8 if b[8] <= 1 => Self::Configure {
+                theme: b[7],
+                motion: b[8] == 1,
+            },
+            9 => Self::Launch {
+                kind: b[6],
+                path: name,
+            },
+            10 => Self::LaunchImage,
+            11 => Self::Display,
+            12 => Self::Create { name },
+            13 if b[8] <= 1 && b[9] <= 1 => Self::Choose {
+                save: b[8] == 1,
+                read_only: b[9] == 1,
+                name,
+            },
+            14 => Self::Offer,
+            15 => Self::TakeGrant,
+            16 if b[8] <= 1 && b[9] <= 1 => Self::Granted {
+                save: b[8] == 1,
+                read_only: b[9] == 1,
+                name,
+            },
+            17 => Self::OpenDocument { name },
+            18 => Self::OpenWith { name },
+            19 => Self::SpawnHelper { helper_id: name },
+            20 => Self::HelperStarted { handle: cursor },
+            21 => Self::WaitHelper { handle: cursor },
+            22 => Self::HelperExited {
+                handle: cursor,
+                status: u64::from_le_bytes(b[16..24].try_into().map_err(|_| Error::Invalid)?),
+            },
+            23 => Self::TerminateHelper { handle: cursor },
+            24 => Self::HelperTerminated { handle: cursor },
+            25 => Self::SpawnHelperStreams { helper_id: name },
+            26 => Self::WakeHelper { handle: cursor },
+            27 => Self::HelperWoken { handle: cursor },
+            _ => return Err(Error::Invalid),
+        };
+        if f.encode()?.as_slice() != b {
+            return Err(Error::Invalid);
+        }
+        Ok(f)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn canonical_metadata_and_operations_do_not_accept_reserved_or_names_as_authority() {
+        let mut name = [0; 32];
+        name[..9].copy_from_slice(b"user-note");
+        let mut helper_id = [0; 32];
+        helper_id[..11].copy_from_slice(b"com.tool.gc");
+        for f in [
+            Frame::Bootstrap,
+            Frame::Started {
+                kind: 0,
+                theme: 1,
+                motion: false,
+                path: name,
+            },
+            Frame::List { cursor: u32::MAX },
+            Frame::Entry {
+                cursor: 4,
+                size: 9000,
+                name,
+            },
+            Frame::Read { name },
+            Frame::Put { name, length: 4096 },
+            Frame::Delete { name },
+            Frame::Create { name },
+            Frame::Configure {
+                theme: 0,
+                motion: true,
+            },
+            Frame::Launch {
+                kind: 5,
+                path: [0; 32],
+            },
+            Frame::LaunchImage,
+            Frame::OpenDocument { name },
+            Frame::OpenWith { name },
+            Frame::Display,
+            Frame::Choose {
+                save: true,
+                read_only: false,
+                name,
+            },
+            Frame::Offer,
+            Frame::TakeGrant,
+            Frame::Granted {
+                save: false,
+                read_only: true,
+                name,
+            },
+            Frame::SpawnHelper { helper_id },
+            Frame::SpawnHelperStreams { helper_id },
+            Frame::HelperStarted {
+                handle: 0x0001_0000,
+            },
+            Frame::WaitHelper {
+                handle: 0x0001_0000,
+            },
+            Frame::HelperExited {
+                handle: 0x0001_0000,
+                status: 42,
+            },
+            Frame::TerminateHelper {
+                handle: 0x0001_0000,
+            },
+            Frame::HelperTerminated {
+                handle: 0x0001_0000,
+            },
+            Frame::WakeHelper {
+                handle: 0x0001_0000,
+            },
+            Frame::HelperWoken {
+                handle: 0x0001_0000,
+            },
+        ] {
+            let b = f.encode().unwrap();
+            assert_eq!(Frame::decode(&b), Ok(f));
+            let flags = matches!(f, Frame::Choose { .. } | Frame::Granted { .. });
+            for i in [9, 24, 25, 26, 27, 28, 29, 30, 31] {
+                if flags && i == 9 {
+                    continue;
+                }
+                let mut bad = b;
+                bad[i] = 1;
+                assert_eq!(Frame::decode(&bad), Err(Error::Invalid));
+            }
+            assert!(Frame::decode(&b[..63]).is_err());
+        }
+        assert!(Frame::Read { name: [0; 32] }.encode().is_err());
+        // A save is never read-only.
+        assert!(
+            Frame::Choose {
+                save: true,
+                read_only: true,
+                name
+            }
+            .encode()
+            .is_err()
+        );
+        assert!(Frame::Put { name, length: 4097 }.encode().is_err());
+        let mut bad_helper = name;
+        bad_helper[4] = b'/';
+        assert!(
+            Frame::SpawnHelper {
+                helper_id: bad_helper
+            }
+            .encode()
+            .is_err()
+        );
+        assert!(Frame::WaitHelper { handle: 0 }.encode().is_err());
+        let mut bad = name;
+        bad[1] = b'/';
+        assert!(Frame::Read { name: bad }.encode().is_err());
+    }
+    /// Launch titles and start folders are presentation: any printable
+    /// ASCII (spaces and `/` included) crosses the wire both ways exactly
+    /// as the broker's launch accepts it; control bytes never do.
+    #[test]
+    fn titles_with_spaces_and_folders_cross_launch_and_started() {
+        let mut path = [0u8; 32];
+        path[..18].copy_from_slice(b"Desktop/New Folder");
+        for f in [
+            Frame::Launch { kind: 1, path },
+            Frame::Started {
+                kind: 1,
+                theme: 0,
+                motion: true,
+                path,
+            },
+        ] {
+            assert_eq!(Frame::decode(&f.encode().unwrap()), Ok(f));
+        }
+        path[3] = 0x07;
+        assert!(Frame::Launch { kind: 1, path }.encode().is_err());
+        path[3] = b's';
+        path[31] = b'x';
+        assert!(
+            Frame::Launch { kind: 1, path }.encode().is_err(),
+            "no terminator"
+        );
+    }
+}

@@ -1,0 +1,1177 @@
+//! Designer-editable desktop shell: no IPC, lifecycle or device authority.
+//!
+//! Draw order is fixed by the compositor (see compose.rs): background, then
+//! each window (owned raster + chrome), then `system` (bar, notice, dock,
+//! pointer). Shell surfaces drawn by `system` leave their rounded corners
+//! unpainted, so windows or the desktop show through them honestly.
+//!
+//! Every input `system` draws from is a field of [`Shell`], and every pixel
+//! it can touch lies inside one of the region functions below; compose.rs
+//! relies on both facts to repaint only what changed.
+use crate::{
+    apps::{DOCK, TITLES},
+    model::MAX_WINDOWS,
+};
+use arena_gfxkit::{Canvas, Rect};
+use arena_ui::{
+    components::{self as c, Glyph, Style},
+    metrics as m,
+    theme::Theme,
+};
+
+/// Empty desktop: a plain field with the Arena emblem and the real
+/// keyboard bindings. Nothing here is decorative hardware state.
+pub fn background(canvas: &mut Canvas<'_>, t: Theme) {
+    canvas.clear(t.desktop);
+    let (w, h) = canvas.size();
+    let (w, h) = (w as i32, h as i32);
+    let cx = w / 2;
+    let cy = (m::SYSTEM_BAR_HEIGHT + h - m::DOCK_HEIGHT) / 2 - 12;
+    let ew = (w * 3 / 10).min(240);
+    let eh = ew * 11 / 20;
+    // The emblem and the hint draw only inside their own boxes; a clip
+    // that misses a box skips its (whole-shape) work (Phase 11 latency:
+    // a cursor-sized repaint spent most of its compose time here).
+    let clip = canvas.clip();
+    let hits = |r: Rect| {
+        r.x < clip.x + clip.width as i32
+            && clip.x < r.x + r.width as i32
+            && r.y < clip.y + clip.height as i32
+            && clip.y < r.y + r.height as i32
+    };
+    let emblem = Rect {
+        x: cx - ew / 2,
+        y: cy - eh / 2,
+        width: ew as u32,
+        height: eh as u32,
+    };
+    if hits(emblem) {
+        c::emblem(canvas, emblem, t.desktop_mark, t.desktop);
+    }
+    let hint_y = cy + eh / 2 + 20;
+    if hits(Rect {
+        x: 0,
+        y: hint_y - 2,
+        width: w as u32,
+        height: 22,
+    }) {
+        let hint = "F1-F6 open  /  Alt+Tab switch  /  F8 close";
+        c::text_centered(canvas, 0, w, hint_y, hint, Style::Caption, t.desktop_text);
+    }
+}
+
+pub const MAX_DOCK_ITEMS: usize = 12;
+pub const MAX_ACTIVE_DOCK_APPS: usize = 32;
+
+/// Descriptive, generation-free identity for one catalog row shown in the
+/// dock. The broker resolves it against installed registry state on launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DockItem {
+    pub name: [u8; 8],
+    pub application_index: u8,
+    pub icon_kind: u8,
+    pub running: u8,
+    pub minimized: u8,
+    pub active: bool,
+    pub pinned: bool,
+}
+
+impl DockItem {
+    pub const EMPTY: Self = Self {
+        name: [0; 8],
+        application_index: u8::MAX,
+        icon_kind: 5,
+        running: 0,
+        minimized: 0,
+        active: false,
+        pinned: false,
+    };
+}
+
+/// A bounded visible page of favorites plus distinct running application IDs.
+/// All active IDs remain reachable through the dock's previous/next controls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DockView {
+    pub enabled: bool,
+    pub items: [DockItem; MAX_DOCK_ITEMS],
+    pub count: u8,
+    pub pinned_count: u8,
+    pub active_offset: u8,
+    pub active_total: u8,
+    pub has_previous: bool,
+    pub has_next: bool,
+}
+
+impl DockView {
+    pub const EMPTY: Self = Self {
+        enabled: false,
+        items: [DockItem::EMPTY; MAX_DOCK_ITEMS],
+        count: 0,
+        pinned_count: 0,
+        active_offset: 0,
+        active_total: 0,
+        has_previous: false,
+        has_next: false,
+    };
+}
+
+/// Descriptive facts the shell draws. Comparable, so the compositor can
+/// tell exactly which shell regions changed between frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shell {
+    pub pointer: (i32, i32),
+    /// Windows currently open (all sessions with a window).
+    pub open: usize,
+    /// Some window has keyboard focus (possibly a non-builtin one).
+    pub focused_any: bool,
+    /// Running sessions per built-in kind (including not-yet-shown ones).
+    pub running: [u8; 6],
+    /// Kind of the focused built-in application.
+    pub active: Option<u8>,
+    pub notice: Option<&'static str>,
+    pub uptime: u64,
+    /// Minimized windows per built-in kind (hollow dock indicator).
+    pub minimized: [u8; 6],
+    /// Registry-backed pinned plus active application inventory.
+    pub dock: DockView,
+    /// Alt+Tab overlay, while open.
+    pub switcher: Option<Switcher>,
+    /// Outline of where a title drag would snap if released now.
+    pub snap: Option<Rect>,
+    /// The trusted file chooser (ADR-0077), while open.
+    pub chooser: Option<ChooserView>,
+    /// The desktop surface: /Users/user/Desktop as icons (Phase 11.8).
+    pub desk: crate::desk::DeskView,
+    /// Installed application catalog launcher, backed by the verified
+    /// package-service registry rather than the built-in dock list.
+    pub applications: Option<ApplicationsView>,
+}
+
+pub const APPLICATION_ROWS: usize = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplicationsView {
+    pub names: [[u8; 32]; APPLICATION_ROWS],
+    pub running: [bool; APPLICATION_ROWS],
+    pub pinned: [bool; APPLICATION_ROWS],
+    pub count: u8,
+    pub selected: u8,
+    pub total: usize,
+    pub query: [u8; 32],
+    pub query_len: u8,
+    pub unavailable: bool,
+    /// This catalog surface is choosing a document handler.
+    pub open_with: bool,
+}
+
+/// Rows of the chooser list shown at once.
+pub const CHOOSER_ROWS: usize = 10;
+
+/// What the broker's trusted chooser shows: drawn by the shell, never by
+/// the requesting application, which neither sees nor steers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChooserView {
+    pub save: bool,
+    pub read_only: bool,
+    /// Folder shown, as a breadcrumb (`Home/Documents`), display only.
+    pub place: [u8; 48],
+    /// Visible rows (display names; folders end in `/`).
+    pub rows: [[u8; 32]; CHOOSER_ROWS],
+    pub count: u8,
+    /// Highlighted row (index into `rows`), if any.
+    pub selected: Option<u8>,
+    /// Entries above and below the visible window.
+    pub above: bool,
+    pub below: bool,
+    /// Save: the name being typed.
+    pub name: [u8; 32],
+    /// A one-line message (refusal, confirmation request).
+    pub message: [u8; 48],
+}
+
+/// The window switcher overlay: titles in most-recently-used order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Switcher {
+    pub count: u8,
+    pub selected: u8,
+    pub titles: [[u8; 32]; MAX_WINDOWS],
+    /// Built-in kind per row (6 = other application).
+    pub kinds: [u8; MAX_WINDOWS],
+}
+
+impl Shell {
+    pub const EMPTY: Shell = Shell {
+        pointer: (0, 0),
+        open: 0,
+        focused_any: false,
+        running: [0; 6],
+        active: None,
+        notice: None,
+        uptime: 0,
+        minimized: [0; 6],
+        dock: DockView::EMPTY,
+        switcher: None,
+        snap: None,
+        chooser: None,
+        desk: crate::desk::DeskView::EMPTY,
+        applications: None,
+    };
+}
+
+const APPLICATION_WIDTH: i32 = 440;
+const APPLICATION_ROW_HEIGHT: i32 = 24;
+const APPLICATION_TOP: i32 = 84;
+const APPLICATION_FOOTER: i32 = 28;
+
+pub fn applications_region(w: i32, h: i32) -> Rect {
+    let height =
+        APPLICATION_TOP + APPLICATION_ROWS as i32 * APPLICATION_ROW_HEIGHT + APPLICATION_FOOTER;
+    rect(
+        (w - APPLICATION_WIDTH) / 2,
+        (h - height) / 2,
+        APPLICATION_WIDTH + 3,
+        height + 3,
+    )
+}
+
+pub fn applications_contains(w: i32, h: i32, x: i32, y: i32) -> bool {
+    let area = applications_region(w, h);
+    x >= area.x && y >= area.y && x < area.x + area.width as i32 && y < area.y + area.height as i32
+}
+
+pub fn applications_row(w: i32, h: i32, x: i32, y: i32) -> Option<usize> {
+    let area = applications_region(w, h);
+    let y0 = area.y + APPLICATION_TOP;
+    if x < area.x + 8
+        || x >= area.x + APPLICATION_WIDTH - 8
+        || y < y0
+        || y >= y0 + APPLICATION_ROWS as i32 * APPLICATION_ROW_HEIGHT
+    {
+        return None;
+    }
+    Some(((y - y0) / APPLICATION_ROW_HEIGHT) as usize)
+}
+
+/// Stable hit target for the All Applications control in the system bar.
+pub fn applications_button_region() -> Rect {
+    // Keep this aligned with the wordmark width used by `system` below.
+    let wordmark = c::measure("Arena", Style::Strong) + c::measure("OS", Style::Strong);
+    rect(
+        m::L + wordmark as i32 + m::M,
+        3,
+        56,
+        m::SYSTEM_BAR_HEIGHT - 6,
+    )
+}
+
+pub const CHOOSER_WIDTH: i32 = 420;
+pub const CHOOSER_ROW: i32 = 20;
+const CHOOSER_LIST_Y: i32 = 52;
+
+/// Region holding the chooser panel (and its ledge), centred.
+pub fn chooser_region(w: i32, h: i32) -> Rect {
+    let height = chooser_height();
+    rect(
+        (w - CHOOSER_WIDTH) / 2,
+        (h - height) / 2,
+        CHOOSER_WIDTH + 3,
+        height + 3,
+    )
+}
+fn chooser_height() -> i32 {
+    CHOOSER_LIST_Y + CHOOSER_ROWS as i32 * CHOOSER_ROW + 88
+}
+/// What a pointer press at (`x`, `y`) hits in the chooser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChooserHit {
+    Row(usize),
+    Up,
+    Name,
+    Cancel,
+    Accept,
+    Inside,
+    Outside,
+}
+pub fn chooser_hit(w: i32, h: i32, x: i32, y: i32) -> ChooserHit {
+    let a = chooser_region(w, h);
+    let (x0, y0) = (a.x, a.y);
+    let height = chooser_height();
+    if x < x0 || y < y0 || x >= x0 + CHOOSER_WIDTH || y >= y0 + height {
+        return ChooserHit::Outside;
+    }
+    let list_top = y0 + CHOOSER_LIST_Y;
+    if y >= list_top && y < list_top + CHOOSER_ROWS as i32 * CHOOSER_ROW {
+        return ChooserHit::Row(((y - list_top) / CHOOSER_ROW) as usize);
+    }
+    if y >= y0 + 28 && y < y0 + 48 && x >= x0 + CHOOSER_WIDTH - 70 {
+        return ChooserHit::Up;
+    }
+    let by = y0 + height - 34;
+    if y >= by && y < by + 24 {
+        if x >= x0 + CHOOSER_WIDTH - 196 && x < x0 + CHOOSER_WIDTH - 106 {
+            return ChooserHit::Cancel;
+        }
+        if x >= x0 + CHOOSER_WIDTH - 98 && x < x0 + CHOOSER_WIDTH - 8 {
+            return ChooserHit::Accept;
+        }
+    }
+    let ny = y0 + CHOOSER_LIST_Y + CHOOSER_ROWS as i32 * CHOOSER_ROW + 8;
+    if y >= ny && y < ny + 22 {
+        return ChooserHit::Name;
+    }
+    ChooserHit::Inside
+}
+
+const SWITCHER_WIDTH: i32 = 360;
+const SWITCHER_ROW: i32 = 26;
+
+/// Region holding the switcher overlay with `count` rows (and its ledge).
+pub fn switcher_region(w: i32, h: i32, count: u8) -> Rect {
+    let height = 34 + i32::from(count) * SWITCHER_ROW;
+    rect(
+        (w - SWITCHER_WIDTH) / 2,
+        (h - height) / 2,
+        SWITCHER_WIDTH + 3,
+        height + 3,
+    )
+}
+
+/// Region covered by a snap-preview outline.
+pub fn snap_region(r: Rect) -> Rect {
+    r
+}
+
+fn rect(x: i32, y: i32, w: i32, h: i32) -> Rect {
+    Rect {
+        x,
+        y,
+        width: w.max(0) as u32,
+        height: h.max(0) as u32,
+    }
+}
+
+/// Region holding the system bar.
+pub fn bar_region(w: i32) -> Rect {
+    rect(0, 0, w, m::SYSTEM_BAR_HEIGHT)
+}
+
+/// Region holding the transient notice toast and its ledge.
+pub fn notice_region(w: i32) -> Rect {
+    rect(0, m::SYSTEM_BAR_HEIGHT, w, 30)
+}
+
+/// Region covered by the pointer drawn at `(x, y)`.
+pub fn pointer_region(x: i32, y: i32) -> Rect {
+    rect(x, y, c::POINTER_WIDTH, c::POINTER_HEIGHT)
+}
+
+fn dock_x_for(w: i32, items: usize) -> i32 {
+    (w - m::DOCK_ITEM_WIDTH * items as i32) / 2
+}
+
+fn visible_dock_count(dock: &DockView) -> usize {
+    if dock.enabled {
+        usize::from(dock.count)
+    } else {
+        DOCK.len()
+    }
+}
+
+/// Region holding the current dock panel, its scrolling controls and hover wells.
+pub fn dock_region_for(w: i32, h: i32, dock: &DockView) -> Rect {
+    let items = visible_dock_count(dock);
+    if dock.enabled && items == 0 {
+        return rect(0, h - m::DOCK_HEIGHT, 0, 0);
+    }
+    let strip = m::DOCK_ITEM_WIDTH * items as i32;
+    let x0 = dock_x_for(w, items);
+    let left = if dock.enabled && dock.has_previous {
+        20
+    } else {
+        0
+    };
+    let right = if dock.enabled && dock.has_next { 20 } else { 0 };
+    rect(
+        x0 - 6 - left,
+        h - m::DOCK_HEIGHT,
+        strip + 12 + left + right,
+        m::DOCK_HEIGHT,
+    )
+}
+
+/// Static six-item region retained for model-only shell tests.
+pub fn dock_region(w: i32, h: i32) -> Rect {
+    dock_region_for(w, h, &DockView::EMPTY)
+}
+
+/// Dock item under the pointer, if any (drawn as a hover well).
+pub fn hover_item_for(w: i32, h: i32, pointer: (i32, i32), dock: &DockView) -> Option<usize> {
+    let count = visible_dock_count(dock);
+    let x0 = dock_x_for(w, count);
+    let strip = m::DOCK_ITEM_WIDTH * count as i32;
+    let (px, py) = pointer;
+    (py >= h - m::DOCK_HEIGHT && px >= x0 && px < x0 + strip)
+        .then(|| ((px - x0) / m::DOCK_ITEM_WIDTH) as usize)
+}
+
+pub fn hover_item(w: i32, h: i32, pointer: (i32, i32)) -> Option<usize> {
+    hover_item_for(w, h, pointer, &DockView::EMPTY)
+}
+
+/// Return -1/+1 when a dock scroll control is pressed.
+pub fn dock_scroll_hit(w: i32, h: i32, dock: &DockView, x: i32, y: i32) -> Option<i8> {
+    if !dock.enabled || y < h - m::DOCK_HEIGHT || y >= h {
+        return None;
+    }
+    let count = usize::from(dock.count);
+    let x0 = dock_x_for(w, count);
+    let strip = m::DOCK_ITEM_WIDTH * count as i32;
+    if dock.has_previous && (x0 - 24..x0 - 6).contains(&x) {
+        Some(-1)
+    } else if dock.has_next && (x0 + strip + 6..x0 + strip + 24).contains(&x) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// Formats monotonic seconds as H:MM:SS (an uptime counter, not a clock).
+fn uptime_text(out: &mut [u8; 32], seconds: u64) -> &str {
+    let mut digits = [0u8; 32];
+    let hours = c::decimal(&mut digits, seconds / 3600, false);
+    let mut n = hours.len();
+    out[..n].copy_from_slice(hours.as_bytes());
+    for part in [(seconds / 60) % 60, seconds % 60] {
+        out[n] = b':';
+        out[n + 1] = b'0' + (part / 10) as u8;
+        out[n + 2] = b'0' + (part % 10) as u8;
+        n += 3;
+    }
+    core::str::from_utf8(&out[..n]).unwrap_or("?")
+}
+
+pub fn system(canvas: &mut Canvas<'_>, shell: &Shell, t: Theme) {
+    let Shell {
+        pointer,
+        open,
+        focused_any,
+        running,
+        active,
+        notice,
+        uptime,
+        minimized,
+        dock,
+        switcher,
+        snap,
+        chooser,
+        applications,
+        // Drawn by compose.rs: icons under the windows, its menu above.
+        desk: _,
+    } = *shell;
+    let (w, h) = canvas.size();
+    let (w, h) = (w as i32, h as i32);
+    let dock = if dock.enabled {
+        dock
+    } else {
+        legacy_dock(running, active, minimized)
+    };
+    let bar = m::SYSTEM_BAR_HEIGHT;
+    let ty = (bar - 1 - m::FONT_HEIGHT) / 2;
+    // Each part draws only inside its own region; a clip that misses the
+    // region skips its layout and drawing (Phase 11 latency).
+    let clip = canvas.clip();
+    let hits = |r: Rect| {
+        r.x < clip.x + clip.width as i32
+            && clip.x < r.x + r.width as i32
+            && r.y < clip.y + clip.height as i32
+            && clip.y < r.y + r.height as i32
+    };
+    // System bar: identity, active application, real session/uptime facts.
+    if hits(bar_region(w)) {
+        c::rect(canvas, 0, 0, w, bar - 1, t.bar);
+        c::hline(canvas, 0, bar - 1, w, t.bar_edge);
+        // Wordmark only: a small capsule mark here could be misread as a
+        // battery or toggle indicator, which ArenaOS does not have.
+        let x = c::text(canvas, m::L, ty, "Arena", Style::Strong, t.bar_text);
+        let _x = c::text(canvas, x, ty, "OS", Style::Strong, t.accent);
+        let apps_button = applications_button_region();
+        c::outlined(
+            canvas,
+            apps_button,
+            if applications.is_some() {
+                t.dock_well
+            } else {
+                t.bar
+            },
+            t.bar_edge,
+            m::RADIUS,
+        );
+        c::text_centered(
+            canvas,
+            apps_button.x,
+            apps_button.width as i32,
+            ty,
+            "Apps",
+            Style::Body,
+            if applications.is_some() {
+                t.accent_strong
+            } else {
+                t.bar_text
+            },
+        );
+        let divider = apps_button.x + apps_button.width as i32 + m::S;
+        c::vline(canvas, divider, 7, bar - 14, t.bar_edge);
+        let x = divider + m::M;
+        match active {
+            Some(kind) => {
+                c::app_tile(canvas, x, ty - 2, 11, kind, false, t.bar, t);
+                c::text(
+                    canvas,
+                    x + 17,
+                    ty,
+                    TITLES[kind as usize],
+                    Style::Body,
+                    t.bar_text,
+                );
+            }
+            None if focused_any => {
+                c::glyph(canvas, x + 1, ty - 1, Glyph::Idle, t.bar_muted);
+                c::text(canvas, x + 17, ty, "Application", Style::Body, t.bar_text);
+            }
+            None => {
+                c::text(canvas, x, ty, "Desktop", Style::Body, t.bar_muted);
+            }
+        }
+        let mut buffer = [0u8; 32];
+        let value = uptime_text(&mut buffer, uptime);
+        let right = w - m::L;
+        c::text_right(canvas, right, ty, value, Style::Body, t.bar_text);
+        let x = right - c::measure(value, Style::Body) - m::S - 2;
+        c::text_right(canvas, x, ty, "UPTIME", Style::Caption, t.bar_muted);
+        let x = x - c::measure("UPTIME", Style::Caption) - m::L;
+        c::vline(canvas, x, 7, bar - 14, t.bar_edge);
+        let mut count = [0u8; 32];
+        let n = c::decimal(&mut count, open as u64, false).len();
+        count[n] = b'/';
+        let mut max = [0u8; 32];
+        let digits = c::decimal(&mut max, MAX_WINDOWS as u64, false).as_bytes();
+        count[n + 1..n + 1 + digits.len()].copy_from_slice(digits);
+        let count = core::str::from_utf8(&count[..n + 1 + digits.len()]).unwrap_or("?");
+        let x = x - m::L;
+        c::text_right(
+            canvas,
+            x,
+            ty,
+            count,
+            Style::Body,
+            if open >= MAX_WINDOWS {
+                t.warning
+            } else {
+                t.bar_text
+            },
+        );
+        let x = x - c::measure(count, Style::Body) - m::S - 2;
+        c::text_right(canvas, x, ty, "WINDOWS", Style::Caption, t.bar_muted);
+    }
+    // Transient shell notice (e.g. capacity refusal): an error toast.
+    if let Some(text) = notice {
+        let width = c::measure(text, Style::Caption) + m::GLYPH_SMALL + 3 * m::M + 2;
+        let r = Rect {
+            x: m::M,
+            y: bar + 4,
+            width: width as u32,
+            height: 22,
+        };
+        c::rect(canvas, r.x + 2, r.y + 22, width, 2, t.shadow);
+        c::outlined(canvas, r, t.error_soft, t.error, m::RADIUS_PANEL);
+        c::glyph(canvas, r.x + m::M + 1, r.y + 6, Glyph::Error, t.error);
+        c::text(
+            canvas,
+            r.x + m::M + m::GLYPH_SMALL + 7,
+            r.y + 8,
+            text,
+            Style::Caption,
+            t.error,
+        );
+    }
+
+    // Dock: the pinned/active catalog page uses the same panel and tiles.
+    if hits(dock_region_for(w, h, &dock)) {
+        let items = usize::from(dock.count);
+        let strip = m::DOCK_ITEM_WIDTH * items as i32;
+        let dock_x = dock_x_for(w, items);
+        let left = if dock.has_previous { 20 } else { 0 };
+        let right = if dock.has_next { 20 } else { 0 };
+        let panel = Rect {
+            x: dock_x - 6 - left,
+            y: h - m::DOCK_PANEL_BOTTOM - m::DOCK_PANEL_HEIGHT,
+            width: (strip + 12 + left + right) as u32,
+            height: m::DOCK_PANEL_HEIGHT as u32,
+        };
+        c::rect(
+            canvas,
+            panel.x + 3,
+            panel.y + panel.height as i32,
+            panel.width as i32 - 3,
+            2,
+            t.shadow,
+        );
+        c::outlined(canvas, panel, t.dock, t.dock_edge, m::RADIUS_PANEL);
+        let full = open >= MAX_WINDOWS;
+        let hover = hover_item_for(w, h, pointer, &dock);
+        if dock.has_previous {
+            c::text_centered(
+                canvas,
+                dock_x - 24,
+                18,
+                panel.y + 17,
+                "<",
+                Style::Strong,
+                t.bar_text,
+            );
+        }
+        if dock.has_next {
+            c::text_centered(
+                canvas,
+                dock_x + strip + 6,
+                18,
+                panel.y + 17,
+                ">",
+                Style::Strong,
+                t.bar_text,
+            );
+        }
+        for (i, item) in dock.items[..items].iter().enumerate() {
+            let x = dock_x + i as i32 * m::DOCK_ITEM_WIDTH;
+            let cx = x + m::DOCK_ITEM_WIDTH / 2;
+            let hovered = hover == Some(i);
+            if hovered {
+                c::well(
+                    canvas,
+                    Rect {
+                        x: x + 2,
+                        y: panel.y + 3,
+                        width: (m::DOCK_ITEM_WIDTH - 4) as u32,
+                        height: (m::DOCK_PANEL_HEIGHT - 6) as u32,
+                    },
+                    t.dock_well,
+                    None,
+                );
+            }
+            let under = if hovered { t.dock_well } else { t.dock };
+            c::app_tile(
+                canvas,
+                cx - m::TILE_SIZE / 2,
+                panel.y + 4,
+                m::TILE_SIZE,
+                item.icon_kind,
+                full,
+                under,
+                t,
+            );
+            let name = label(&item.name);
+            let (style, ink) = if item.active {
+                (Style::Strong, t.bar_text)
+            } else if item.running > 0 || hovered {
+                (Style::Body, t.bar_text)
+            } else {
+                (Style::Body, t.bar_muted)
+            };
+            c::text_centered(
+                canvas,
+                x,
+                m::DOCK_ITEM_WIDTH,
+                panel.y + 34,
+                name,
+                style,
+                ink,
+            );
+            let iy = panel.y + 44;
+            if item.active {
+                c::rect(canvas, cx - 7, iy, 14, 2, t.accent);
+            } else if item.running > 0 {
+                let n = i32::from(item.running.min(4));
+                let hollow = i32::from(item.minimized.min(item.running).min(4));
+                let start = cx - (n * 5 - 2) / 2;
+                for k in 0..n {
+                    if k >= n - hollow {
+                        c::border(
+                            canvas,
+                            Rect {
+                                x: start + k * 5 - 1,
+                                y: iy - 1,
+                                width: 4,
+                                height: 4,
+                            },
+                            t.bar_muted,
+                        );
+                    } else {
+                        c::rect(canvas, start + k * 5, iy, 2, 2, t.bar_muted);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(r) = snap {
+        for i in 0..3 {
+            c::border(
+                canvas,
+                Rect {
+                    x: r.x + i,
+                    y: r.y + i,
+                    width: r.width.saturating_sub(2 * i as u32),
+                    height: r.height.saturating_sub(2 * i as u32),
+                },
+                t.accent,
+            );
+        }
+    }
+    if let Some(sw) = switcher {
+        let area = switcher_region(w, h, sw.count);
+        let (x0, y0) = (area.x, area.y);
+        let height = area.height as i32 - 3;
+        c::rect(canvas, x0 + 3, y0 + height, SWITCHER_WIDTH, 3, t.shadow);
+        c::rect(canvas, x0 + SWITCHER_WIDTH, y0 + 3, 3, height, t.shadow);
+        c::outlined(
+            canvas,
+            Rect {
+                x: x0,
+                y: y0,
+                width: SWITCHER_WIDTH as u32,
+                height: height as u32,
+            },
+            t.elevated,
+            t.frame_focus,
+            m::RADIUS_PANEL,
+        );
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + 10,
+            "SWITCH TO",
+            Style::Caption,
+            t.muted,
+        );
+        for row in 0..usize::from(sw.count) {
+            let y = y0 + 26 + row as i32 * SWITCHER_ROW;
+            let on = row == usize::from(sw.selected);
+            if on {
+                c::rect(
+                    canvas,
+                    x0 + 4,
+                    y,
+                    SWITCHER_WIDTH - 8,
+                    SWITCHER_ROW - 2,
+                    t.accent,
+                );
+            }
+            let kind = sw.kinds[row];
+            if kind < 6 {
+                c::app_tile(
+                    canvas,
+                    x0 + m::L,
+                    y + 3,
+                    18,
+                    kind,
+                    false,
+                    if on { t.accent } else { t.elevated },
+                    t,
+                );
+            }
+            let title = &sw.titles[row];
+            let end = title.iter().position(|b| *b == 0).unwrap_or(32);
+            let text = core::str::from_utf8(&title[..end]).unwrap_or("Application");
+            c::text(
+                canvas,
+                x0 + m::L + 26,
+                y + 8,
+                text,
+                Style::Body,
+                if on { t.on_accent } else { t.text },
+            );
+        }
+    }
+    if let Some(ch) = chooser {
+        draw_chooser(canvas, &ch, w, h, t);
+    }
+    if let Some(apps) = applications {
+        draw_applications(canvas, &apps, w, h, t);
+    }
+    c::pointer(canvas, pointer.0, pointer.1, t);
+}
+
+fn legacy_dock(running: [u8; 6], active: Option<u8>, minimized: [u8; 6]) -> DockView {
+    let mut dock = DockView {
+        enabled: true,
+        count: DOCK.len() as u8,
+        ..DockView::EMPTY
+    };
+    for index in 0..DOCK.len() {
+        let name = DOCK[index].as_bytes();
+        dock.items[index] = DockItem {
+            name: {
+                let mut field = [0; 8];
+                let length = name.len().min(field.len());
+                field[..length].copy_from_slice(&name[..length]);
+                field
+            },
+            application_index: index as u8,
+            icon_kind: index as u8,
+            running: running[index],
+            minimized: minimized[index],
+            active: active == Some(index as u8),
+            ..DockItem::EMPTY
+        };
+    }
+    dock
+}
+
+fn label(b: &[u8]) -> &str {
+    let end = b.iter().position(|x| *x == 0).unwrap_or(b.len());
+    core::str::from_utf8(&b[..end]).unwrap_or("?")
+}
+
+fn draw_chooser(canvas: &mut Canvas<'_>, ch: &ChooserView, w: i32, h: i32, t: Theme) {
+    let area = chooser_region(w, h);
+    let (x0, y0) = (area.x, area.y);
+    let height = chooser_height();
+    c::rect(canvas, x0 + 3, y0 + height, CHOOSER_WIDTH, 3, t.shadow);
+    c::rect(canvas, x0 + CHOOSER_WIDTH, y0 + 3, 3, height, t.shadow);
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0,
+            y: y0,
+            width: CHOOSER_WIDTH as u32,
+            height: height as u32,
+        },
+        t.elevated,
+        t.frame_focus,
+        m::RADIUS_PANEL,
+    );
+    c::text(
+        canvas,
+        x0 + m::L,
+        y0 + 10,
+        if ch.save {
+            "SAVE DOCUMENT"
+        } else if ch.read_only {
+            "OPEN DOCUMENT (READ-ONLY)"
+        } else {
+            "OPEN DOCUMENT"
+        },
+        Style::Caption,
+        t.muted,
+    );
+    c::text(
+        canvas,
+        x0 + m::L,
+        y0 + 32,
+        label(&ch.place),
+        Style::Body,
+        t.text,
+    );
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0 + CHOOSER_WIDTH - 70,
+            y: y0 + 28,
+            width: 58,
+            height: 20,
+        },
+        t.field,
+        t.field_edge,
+        m::RADIUS,
+    );
+    c::text(
+        canvas,
+        x0 + CHOOSER_WIDTH - 62,
+        y0 + 34,
+        "UP",
+        Style::Caption,
+        t.text,
+    );
+    let list_top = y0 + CHOOSER_LIST_Y;
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0 + m::L - 4,
+            y: list_top - 2,
+            width: (CHOOSER_WIDTH - 2 * m::L + 8) as u32,
+            height: (CHOOSER_ROWS as i32 * CHOOSER_ROW + 4) as u32,
+        },
+        t.field,
+        t.field_edge,
+        m::RADIUS,
+    );
+    if ch.count == 0 {
+        c::text(
+            canvas,
+            x0 + m::L + 4,
+            list_top + 6,
+            "This folder is empty",
+            Style::Body,
+            t.muted,
+        );
+    }
+    for row in 0..usize::from(ch.count) {
+        let y = list_top + row as i32 * CHOOSER_ROW;
+        let on = ch.selected == Some(row as u8);
+        if on {
+            c::rect(
+                canvas,
+                x0 + m::L - 2,
+                y,
+                CHOOSER_WIDTH - 2 * m::L + 4,
+                CHOOSER_ROW,
+                t.accent,
+            );
+        }
+        c::text(
+            canvas,
+            x0 + m::L + 4,
+            y + 5,
+            label(&ch.rows[row]),
+            Style::Body,
+            if on { t.on_accent } else { t.text },
+        );
+    }
+    if ch.above {
+        c::text(
+            canvas,
+            x0 + CHOOSER_WIDTH - 40,
+            list_top + 4,
+            "^",
+            Style::Body,
+            t.muted,
+        );
+    }
+    if ch.below {
+        c::text(
+            canvas,
+            x0 + CHOOSER_WIDTH - 40,
+            list_top + (CHOOSER_ROWS as i32 - 1) * CHOOSER_ROW + 4,
+            "v",
+            Style::Body,
+            t.muted,
+        );
+    }
+    let ny = list_top + CHOOSER_ROWS as i32 * CHOOSER_ROW + 8;
+    if ch.save {
+        c::text(canvas, x0 + m::L, ny + 6, "NAME", Style::Caption, t.muted);
+        c::outlined(
+            canvas,
+            Rect {
+                x: x0 + m::L + 44,
+                y: ny,
+                width: (CHOOSER_WIDTH - 2 * m::L - 44) as u32,
+                height: 22,
+            },
+            t.field,
+            t.frame_focus,
+            m::RADIUS,
+        );
+        let name = label(&ch.name);
+        c::text(canvas, x0 + m::L + 50, ny + 7, name, Style::Body, t.text);
+        // The caret after the typed name.
+        let caret = x0 + m::L + 50 + name.len() as i32 * m::FONT_ADVANCE;
+        c::rect(canvas, caret, ny + 5, 1, 13, t.text);
+    }
+    c::text(
+        canvas,
+        x0 + m::L,
+        ny + 30,
+        label(&ch.message),
+        Style::Caption,
+        t.muted,
+    );
+    let by = y0 + height - 34;
+    for (i, text) in ["CANCEL", if ch.save { "SAVE" } else { "OPEN" }]
+        .iter()
+        .enumerate()
+    {
+        let bx = x0 + CHOOSER_WIDTH - 196 + i as i32 * 98;
+        c::outlined(
+            canvas,
+            Rect {
+                x: bx,
+                y: by,
+                width: 90,
+                height: 24,
+            },
+            if i == 1 { t.accent } else { t.control },
+            t.frame,
+            m::RADIUS,
+        );
+        c::text(
+            canvas,
+            bx + 12,
+            by + 8,
+            text,
+            Style::Caption,
+            if i == 1 { t.on_accent } else { t.text },
+        );
+    }
+}
+
+fn draw_applications(canvas: &mut Canvas<'_>, apps: &ApplicationsView, w: i32, h: i32, t: Theme) {
+    let area = applications_region(w, h);
+    let x0 = area.x;
+    let y0 = area.y;
+    let height = area.height as i32 - 3;
+    c::rect(canvas, x0 + 3, y0 + height, APPLICATION_WIDTH, 3, t.shadow);
+    c::rect(canvas, x0 + APPLICATION_WIDTH, y0 + 3, 3, height, t.shadow);
+    c::outlined(
+        canvas,
+        Rect {
+            x: x0,
+            y: y0,
+            width: APPLICATION_WIDTH as u32,
+            height: height as u32,
+        },
+        t.elevated,
+        t.frame_focus,
+        m::RADIUS_PANEL,
+    );
+    c::text(
+        canvas,
+        x0 + m::L,
+        y0 + 10,
+        if apps.open_with {
+            "OPEN WITH"
+        } else {
+            "ALL APPLICATIONS"
+        },
+        Style::Caption,
+        t.muted,
+    );
+    let search = Rect {
+        x: x0 + m::L,
+        y: y0 + 30,
+        width: (APPLICATION_WIDTH - 2 * m::L) as u32,
+        height: 24,
+    };
+    c::outlined(canvas, search, t.field, t.field_edge, m::RADIUS);
+    let query = core::str::from_utf8(&apps.query[..usize::from(apps.query_len)]).unwrap_or("");
+    c::text(
+        canvas,
+        search.x + m::S,
+        search.y + 7,
+        if query.is_empty() {
+            "Search applications"
+        } else {
+            query
+        },
+        Style::Body,
+        if query.is_empty() { t.muted } else { t.text },
+    );
+    if apps.unavailable {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + APPLICATION_TOP + 6,
+            "Application catalog unavailable",
+            Style::Body,
+            t.warning,
+        );
+    } else if apps.total == 0 {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + APPLICATION_TOP + 6,
+            "No installed applications",
+            Style::Body,
+            t.muted,
+        );
+    } else if apps.count == 0 {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + APPLICATION_TOP + 6,
+            "No applications match this search",
+            Style::Body,
+            t.muted,
+        );
+    }
+    for row in 0..usize::from(apps.count) {
+        let y = y0 + APPLICATION_TOP + row as i32 * APPLICATION_ROW_HEIGHT;
+        let selected = row == usize::from(apps.selected);
+        if selected {
+            c::rect(
+                canvas,
+                x0 + 6,
+                y,
+                APPLICATION_WIDTH - 12,
+                APPLICATION_ROW_HEIGHT - 1,
+                t.accent_soft,
+            );
+            c::border(
+                canvas,
+                Rect {
+                    x: x0 + 6,
+                    y,
+                    width: (APPLICATION_WIDTH - 12) as u32,
+                    height: (APPLICATION_ROW_HEIGHT - 1) as u32,
+                },
+                t.accent,
+            );
+        }
+        let name = label(&apps.names[row]);
+        c::text(
+            canvas,
+            x0 + m::M,
+            y + 7,
+            name,
+            if selected { Style::Strong } else { Style::Body },
+            t.text,
+        );
+        let right = x0 + APPLICATION_WIDTH - m::M;
+        if apps.pinned[row] {
+            c::text_right(
+                canvas,
+                right,
+                y + 7,
+                "Pinned",
+                Style::Caption,
+                t.accent_strong,
+            );
+        }
+        if apps.running[row] {
+            c::text_right(
+                canvas,
+                right - if apps.pinned[row] { 38 } else { 0 },
+                y + 7,
+                "Running",
+                Style::Caption,
+                t.success,
+            );
+        }
+    }
+    if apps.total > APPLICATION_ROWS {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + height - 18,
+            if apps.open_with {
+                "Type to search  /  ↑ ↓ move  /  Enter open  /  Ctrl+D default  /  Esc cancel"
+            } else {
+                "Type to search  /  ↑ ↓ move  /  Enter launch  /  Ctrl+P pin/unpin  /  Esc close"
+            },
+            Style::Caption,
+            t.muted,
+        );
+    } else {
+        c::text(
+            canvas,
+            x0 + m::L,
+            y0 + height - 18,
+            if apps.open_with {
+                "Enter open  /  Ctrl+D set default  /  Esc cancel"
+            } else {
+                "Type to search  /  Enter launch  /  Ctrl+P pin/unpin  /  Esc close"
+            },
+            Style::Caption,
+            t.muted,
+        );
+    }
+}

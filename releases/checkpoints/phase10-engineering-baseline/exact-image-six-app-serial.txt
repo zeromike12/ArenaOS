@@ -1,0 +1,1127 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: failed to load Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x2,0x0): Not Found
+BdsDxe: loading Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[arena INFO  boot] ArenaOS boot stage v0.1.0 (release build, x86_64-unknown-uefi) — milestones 1–2
+[arena INFO  boot] firmware: vendor="EDK II" revision=0x10000
+[arena INFO  boot] cpu: vendor=AuthenticAMD family=15 model=107 stepping=1 physaddr=40bit sse2=true nx=true longmode=true smep=true smap=true
+[arena INFO  boot] cpustate: cr0=0x80010033 cr3=0x1f801000 cr4=0x668 efer=0xd00
+[arena INFO  boot] uefi: boot services rev=0x20046 hdr_size=0x178
+[arena INFO  boot] gdt: installed own GDT (base=0x1d2ecbe0, code_sel=0x8, data_sel=0x10, tss_sel=0x18)
+[arena INFO  boot] tss: installed (IST1 fault stack top=0x1cbe1ad0)
+[arena INFO  boot] idt: installed own IDT (base=0x1d2f7dc0, 256 vectors: 0-31 diagnostics+halt, 32-255 absorb+EOI)
+[arena INFO  boot] bootinfo: captured 115 regions (map_key=0xa97, conventional=451MiB)
+[arena INFO  boot] GOP handoff: 800x600 pitch=800 format=1 phys=0x80000000 bytes=1920000
+[arena INFO  m1] running milestone-1 self-tests
+m1:test:serial_loopback: PASS
+[arena INFO  m1] cpustate: cr0=0x80010033 cr3=0x1f801000 cr4=0x668 efer=0xd00
+m1:test:cpu_long_mode: PASS
+[arena INFO  m1] cpu: vendor=AuthenticAMD family=15 model=107 stepping=1 physaddr=40bit sse2=true nx=true longmode=true smep=true smap=true
+m1:test:cpuid_sane: PASS
+[arena INFO  m1] gdt: sgdt read-back base=0x1d2ecbe0 limit=0x3f
+m1:test:gdt_installed: PASS
+[arena INFO  m1] idt: sidt read-back base=0x1d2f7dc0 limit=0xfff
+m1:test:idt_installed: PASS
+[arena INFO  bootinfo] regions=115 desc_size=48 version=1 map_key=0xa97
+[arena INFO  bootinfo] memory: conventional=451MiB reclaimable=46MiB largest_free=419MiB@0x1780000 total_described=13059MiB (incl. reserved/MMIO spans)
+[arena INFO  bootinfo] region[0]: type=ConventionalMemory phys=0x0 pages=160 (0xf attr)
+[arena INFO  bootinfo] region[1]: type=ConventionalMemory phys=0x100000 pages=1792 (0xf attr)
+[arena INFO  bootinfo] region[2]: type=ACPIMemoryNVS phys=0x800000 pages=8 (0xf attr)
+[arena INFO  bootinfo] region[3]: type=ConventionalMemory phys=0x808000 pages=3 (0xf attr)
+[arena INFO  bootinfo] region[4]: type=ACPIMemoryNVS phys=0x80b000 pages=1 (0xf attr)
+[arena INFO  bootinfo] region[5]: type=ConventionalMemory phys=0x80c000 pages=5 (0xf attr)
+[arena INFO  bootinfo] region[6]: type=ACPIMemoryNVS phys=0x811000 pages=239 (0xf attr)
+[arena INFO  bootinfo] region[7]: type=BootServicesData phys=0x900000 pages=3712 (0xf attr)
+m1:test:memory_map: PASS
+[arena INFO  m1] wide_math: (0xdeadbeefcafebabe * 0x123456789abcdef1) / 7 = 0x2431b22219849681cde9fbfc6c0f01f
+m1:test:wide_math: PASS
+[arena INFO  m1] timer_irq: absorbed 2 hardware IRQ(s) through our IDT (EOI cycle verified, spin=119643)
+m1:test:timer_irq_absorbed: PASS
+m1: RESULT PASS (8/8)
+[arena INFO  timekeeping] tsc calibration round 1/3: window1 23899 counts/51999506 tsc = 2596128481 Hz, window2 23900/51994852 = 2595787510 Hz (131 ppm apart)
+[arena INFO  timekeeping] tsc_hz=2595957995 (2595 MHz); PIT ch0 ticking at 100 Hz (mode 3, vector 32 via IOAPIC/LAPIC)
+[arena INFO  boot] frames: managing 115361 frames (450 MiB free)
+[arena INFO  paging] address space live: cr3=0x100000 identity+direct-map(offset 0xffffffff80000000), image window [0x1cb77000,0x1d327000) 5 sections, skipped_high_regions=1
+[arena INFO  heap] kernel heap ready: guards=on chunk=64KiB frame-backed (arena-heap core, host-tested)
+[arena INFO  m2] running milestone-2 self-tests
+[arena INFO  m2] tss: str read-back sel=0x18; IST1 top=0x1cbe1ad0 (want 0x1cbe1ad0)
+m2:test:tss_installed: PASS
+[arena INFO  m2] exc_de: observed vector=0x0 error_code=0x0; resumed after faulting div
+m2:test:exc_de_recovered: PASS
+[arena INFO  m2] exc_pf: observed vector=0xe error_code=0x2 cr2=0x600000000000; resumed after faulting write
+m2:test:exc_pf_recovered: PASS
+[arena INFO  m2] pit_oneshot: status=0xb2 (OUT=true) after 10077us (spin=25703)
+m2:test:pit_oneshot: PASS
+[arena INFO  m2] tsc_frequency: window 1/3 re-measured 2596156556 Hz (2596 MHz) vs boot 2595 MHz over 23901 PIT counts — 76 ppm apart
+m2:test:tsc_frequency: PASS
+[arena INFO  m2] clock_monotonic: waited 2044us for 2000us request; cross-check best window pit=2314us clock=2392us skew=78us
+m2:test:clock_monotonic: PASS
+[arena INFO  m2] tick_rate: 10 ticks in 98395us (avg 9839us, expected ~10000us at 100 Hz)
+m2:test:tick_rate: PASS
+[arena INFO  m2] frame_allocator: managing 115361 frames (450 MiB) from 10 conventional regions; 16 frames owned by boot infrastructure (page tables)
+[arena INFO  m2] frame_allocator: stress 200x64 OK; benchmark 2048 alloc+free in 275us (~134 ns/op)
+m2:test:frame_allocator: PASS
+[arena INFO  m2] vm_address_space: cr3=0x100000 (ours 0x100000)
+[arena INFO  m2] vm_address_space: alias round-trip OK; higher-half call at 0xffffffff9cb7c1c0 returned 0x2464a0ffee005a5a
+m2:test:vm_address_space: PASS
+[arena INFO  m2] vm_write_protect: write to RO .text at 0xffffffff9cb7c1c0: vector=0xe ec=0x3 cr2=0xffffffff9cb7c1c0
+m2:test:vm_write_protect: PASS
+[arena INFO  m2] vm_nx: fetch at NX data page 0xffffffff9d2f7d78: vector=0xe ec=0x11 cr2=0xffffffff9d2f7d78
+m2:test:vm_nx: PASS
+[arena INFO  m2] heap_basics: distinct/aligned/patterned; chunks=1 reserved=64KiB
+m2:test:heap_basics: PASS
+[arena ERROR heap] free rejected: DoubleFree ptr=0x110040
+[arena ERROR heap] free rejected: RedZoneBack ptr=0x110040
+[arena ERROR heap] free rejected: NotFromHeap ptr=0x1d2f7d78
+[arena INFO  m2] heap_guards: DoubleFree/RedZoneBack/NotFromHeap rejected; heap usable after each
+m2:test:heap_guards: PASS
+[arena INFO  m2] heap_stress: 1920 alloc/free ops in 712us (~370 ns/op), chunks=1, reserved=64KiB, this-test allocs=961
+m2:test:heap_stress: PASS
+[arena INFO  m2] crit_section: 2 ticks delivered, 0 crossed a 25ms section entered with IF=1, resumed, RFLAGS exact
+m2:test:crit_section: PASS
+[arena INFO  m2] spinlock_basics: acquire/try_lock/drop/owner exact; heap cooperates under outer lock
+m2:test:spinlock_basics: PASS
+[arena INFO  boot] exiting UEFI boot services (M2.7 handover)
+[arena INFO  boot] restoring firmware page tables for the EBS window (cr3=0x1f801000)
+[arena INFO  boot] ExitBootServices succeeded (attempt 1, map_key=0xa97, 115 regions, conventional=451MiB)
+[arena INFO  boot] back on kernel dual-view tables (cr3=0x100000); boot services are dead
+m2:test:ebs_exited: PASS
+[arena INFO  boot] frames: post-EBS reconcile leaked 0 frame(s); 115329 free (450 MiB)
+[arena INFO  boot] heap: recycled 1 boot chunk(s); kernel-view heap armed
+[arena INFO  boot] map probe 0xfec00000: NOT DESCRIBED
+[arena INFO  boot] map probe 0xfee00000: NOT DESCRIBED
+[arena INFO  paging] kernel view built: pml4=0x110000 (direct map + image window + RT identity + MMIO/APIC aliases + PCI-window root; identity view of RAM deliberately absent)
+[arena INFO  boot] descriptors relocated to the kernel view (GDT/TSS/IDT, LAPIC EOI)
+[arena INFO  boot] idt readback: idtr=0xffffffff9d2f7dc0 vec14=0xffffffff9cb7f200/0xffffffff9cb7f200 vec32=0xffffffff9cb7f340/0xffffffff9cb7f340
+[arena INFO  boot] image re-relocated for the kernel view: 311 DIR64 slot(s) +KERNEL_OFFSET, 0 other-kind skipped
+[arena INFO  boot] entering kernel proper: trampoline=0xffffffff9cb8b5b0 kmain=0xffffffff9cb8e0f0 boot-info=0xffffffff9d2f97d8 kernel_cr3=0x110000
+[arena INFO  kernel] arena kernel proper entered: boot-info v1 map_key=0xa97 regions=115 conventional=451MiB tsc=2595957995Hz tick=100Hz
+[arena INFO  kernel] handover: boot m1 8/8, m2 pre-entry 17/17; post-EBS reconcile leaked 0 frame(s); 1 heap chunk(s) recycled
+[arena INFO  kernel] timer chain reclaimed: pit 100 Hz (ch0 11229 -> 6359 over 2ms); ioapic pin 2 rte 0x10000/0x0 -> 0x20; hpet gen_conf 0x0 -> 0x0; lapic svr=0x10f
+[arena INFO  kernel] console input armed: com1 rx -> ioapic pin 4 -> vector 33 (rte 0x21), line discipline live
+[arena INFO  kernel] kernel_entry: rip=0xffffffff9cb8e957 rsp=0xffffffff9fe64470 cr3=0x110000 (dual was 0x100000) cr0=0x80010033 efer=0xd00
+m2:test:kernel_entry: PASS
+[arena INFO  kernel] identity_torn_down: write to 0x1000 → #PF ec=0x2 cr2=0x1000, recovered at a kernel-view RIP
+m2:test:identity_torn_down: PASS
+[arena INFO  kernel] kernel_heap_live: alloc/free at 0xffffffff80125040 (chunk #1, reserved 64KiB), frame 0x135000 round-trip
+m2:test:kernel_heap_live: PASS
+[arena INFO  kernel] kernel_irq_live: 2 ticks through the relocated IDT + kernel-alias LAPIC EOI
+m2:test:kernel_irq_live: PASS
+m2: RESULT PASS (21/21)
+[arena INFO  kernel] milestone 2 complete — starting the milestone 3 suite
+[arena INFO  pci] 00:00.0 8086:29c0 class 060000 rev 00 subsys 11001af4
+[arena INFO  pci] 00:01.0 1234:1111 class 030000 rev 02 subsys 11001af4
+[arena INFO  pci]   bar0: base 0x80000000 size 0x1000000
+[arena INFO  pci]   bar2: base 0x81047000 size 0x1000
+[arena INFO  pci] 00:02.0 1af4:1001 class 010000 rev 00 subsys 00021af4
+[arena INFO  pci]   bar0: base 0x6000 size 0x80 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x81046000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000000000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1001 → type 2 (block), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:03.0 1af4:1000 class 020000 rev 00 subsys 00011af4
+[arena INFO  pci]   bar0: base 0x6140 size 0x20 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x81045000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000004000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1000 → type 1 (net), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 4 entries, table bar1 + 0x0
+[arena INFO  pci] 00:04.0 1af4:1005 class 00ff00 rev 00 subsys 00041af4
+[arena INFO  pci]   bar0: base 0x6120 size 0x20 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x81044000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000008000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1005 → type 4 (entropy), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:05.0 1af4:1052 class 090000 rev 01 subsys 11001af4
+[arena INFO  pci]   bar1: base 0x81043000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc00000c000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1052 → type 18 (input), modern
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:06.0 1af4:1052 class 098000 rev 01 subsys 11001af4
+[arena INFO  pci]   bar1: base 0x81042000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000010000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1052 → type 18 (input), modern
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:07.0 1af4:1003 class 078000 rev 00 subsys 00031af4
+[arena INFO  pci]   bar0: base 0x60c0 size 0x40 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x81041000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000014000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1003 → type 3 (console), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:31.0 8086:2918 class 060100 rev 02 subsys 11001af4
+[arena INFO  pci] bus 0 scan complete: 9 function(s) recorded, 6 virtio
+[arena INFO  kernel] pci enumeration: 9 bus-0 function(s), 6 virtio
+[arena INFO  syscall] ring-3 boundary armed: STAR=0x20000800000000 LSTAR=0xffffffff9cba9d40 SFMASK=0x44700 kernel_gs_base=0xffffffff9d31d1c0 smep=true smap=true (cpu: smep=true smap=true)
+[arena INFO  m3] thread_spawn_run: id 1 ran to completion and was reaped; 2 context switches; live=1
+m3:test:thread_spawn_run: PASS
+[arena INFO  m3] thread_rr_interleave: exact global order 1,2,3 × 4 passes (12 entries)
+m3:test:thread_rr_interleave: PASS
+[arena INFO  m3] thread_callee_saved: rsi/rdi/r12-r15 round-tripped through a live switch (mask 0x3f); rbx/rbp by frame symmetry
+m3:test:thread_callee_saved: PASS
+[arena INFO  m3] thread_stack_isolation: patterns survived interleaving; depth-200 recursion correct; ranges 0xffffffff80135000..0xffffffff8013d000 and 0xffffffff8013d000..0xffffffff80145000 disjoint
+m3:test:thread_stack_isolation: PASS
+[arena INFO  m3] thread_churn_accounting: 127 threads created/run/reaped; free frames 115308 -> 115308 (exact); heap reserved unchanged at 64 KiB; table-full refusal at MAX_THREADS=64
+m3:test:thread_churn_accounting: PASS
+[arena INFO  m3] preempt_rotation: 12 timer rotations, exact order 0->1->2->3 cycle; progress without a single yield call: 285885 / 286435 / 288907 loop iterations
+m3:test:preempt_rotation: PASS
+[arena INFO  m3] preempt_coexist: 2 threads finished 3x(15ms wait + yield) under 10ms quanta; 17 timer rotations interleaved with cooperative yields
+m3:test:preempt_coexist: PASS
+USER32-SYSWRITE-OK[arena INFO  m3] user_ring3_syscall: hand-assembled payload ran at CPL 3 — cli -> #GP(ec=0) recovered, invalid nr -> -1 seen in ring 3, SYS_DEBUG_WRITE copied 18 bytes, SYS_THREAD_EXIT(42); RSP0 exact; SMAP enforced (bare kernel read of user page -> recovered #PF); frames 115305 (teardown exact)
+m3:test:user_ring3_syscall: PASS
+USER32-SPUN-OK[arena INFO  m3] user_ring3_interrupted: ring-3 spin survived 6 ticks and 4 timer rotations (RSP0 path + mid-user preemption, resume-to-user via iretq); kernel-released flag ended the spin; SYS_DEBUG_WRITE+SYS_THREAD_EXIT(7) verified; frames 115305 (teardown exact)
+m3:test:user_ring3_interrupted: PASS
+[arena INFO  m3] process_address_spaces: same VA over distinct frames in two processes (0xAA vs 0xBB, write under procA invisible to procB, persisted in procA); kernel-half .data identical under both CR3s; unmapped VA -> recovered #PF (CR2=0x500000); teardown freed 5+5 frames, accounting exact (115305)
+m3:test:process_address_spaces: PASS
+[arena INFO  m3] process clone kernel-half check: EOI slot fffffffffee000b0 identical through both CR3s
+[arena INFO  sched] spawn(proc): id=142 slot=1 entry=ffffffff9cbb7910 cr3=135000
+[arena INFO  sched] thread_main(proc): id=142 entry=ffffffff9cbb7910 arg=0 cr3=135000
+USER32-SYSWRITE-OK[arena INFO  m3] process_accounting: 8 create/map/destroy rounds (8 frames back each) + a 32-process full-table refusal reclaimed every frame (free 115305 exact); payload A ran at ring 3 INSIDE a process address space (SYS_DEBUG_WRITE 18 bytes, SYS_THREAD_EXIT(42), RSP0 exact, CR3 restored on exit); final teardown freed 9 frames incl. the root
+m3:test:process_accounting: PASS
+[arena INFO  m3] capability_spaces: 32 slots/space, grant fills in order; copy attenuates only (amplification, COPY-less source, occupied dst all refused); move clears the source; destroy right-gated (double destroy refused); spaces isolated; full space refuses; dangling cap fails invoke while its reference remains; teardown exact (115305)
+m3:test:capability_spaces: PASS
+[arena INFO  m3] capability_invoke: READ gate returned the live root (refused without it, wrong kind refused); map_memory demanded WRITE on BOTH caps (three refusals measured); the real invoke mapped the untyped frame — 0xC3 read back under the target's CR3; dangling caps refuse cleanly; teardown exact (115305)
+m3:test:capability_invoke: PASS
+m3: RESULT PASS (13/13)
+[arena INFO  m4] elf_parse: 9552-byte rust-lld artifact — ET_EXEC entry 0x200000, 2 PT_LOADs: text RX 0x200000+0x863, data RW 0x201000+0x2000 (filesz 0x40 < memsz: NOLOAD bss), META cross-check agrees (99-byte message pinned at 0x200800, exit_ok 42)
+m4:test:elf_parse: PASS
+[arena INFO  m4] elf_reject: 25 mutation classes refused — identification (magic/class/endian/versions/type/machine/sizes/phnum/phoff), truncation, W+X, unknown flags, filesz>memsz, zero memsz, unaligned vaddr, kernel-half vaddr, overlap, file-span EOF, entry outside X segment (2 ways), PT_INTERP, no PT_LOAD
+m4:test:elf_reject: PASS
+[arena INFO  m4] elf_load: 3 pages into 'elfLoad' (7 frames spent: root+3 tables+3 leaves), PTEs W^X-exact (text RX, data/bss RW+NX), double-load refused at zero cost, dead target refused, 2147-byte text span byte-identical to the file + META + 4 KiB zeroed NOLOAD bss read under the target's CR3, teardown exact (115305)
+m4:test:elf_load: PASS
+ABI-V1-DEBUG-WRITE[arena INFO  m4] syscall_abi: ring-3 payload proved ABI v1 end to end — echo6 fingerprint 0x29f1d5c67195ed5f across RDI/RSI/RDX/R10/R8/R9, six callee-saved canaries survived, debug_write copied 18 bytes with 3 typed refusals observed in ring 3 (-3/-2/-2), unknown nr -> -1, thread_exit(42); frames 115305 (teardown exact)
+m4:test:syscall_abi: PASS
+[arena INFO  m4] thread_exit_abi: full-width code 0xbeefc0de0042 recorded faithfully, thread reaped through the scheduler (live count back to 1), frames 115305 (teardown exact)
+m4:test:thread_exit_abi: PASS
+[arena INFO  sched] spawn(proc): id=145 slot=1 entry=ffffffff9cbc1b30 cr3=135000
+[arena INFO  sched] thread_main(proc): id=145 entry=ffffffff9cbc1b30 arg=0 cr3=135000
+ARENAOS-M43-FIRST-USER-PROCESS: ELF-loaded image running in ring 3, wrote via syscall, exiting now
+[arena INFO  m4] first_process: the 9552-byte rust-lld image RAN in ring 3 inside 'm4First' (spawn_with_cr3, 8 frames) — META verified and bss found zero FROM the user side, the 99-byte pinned message arrived byte-identical to the file, stamp 0x2d534f414e455241 read back under the process CR3, thread_exit(42) recorded, thread reaped, teardown exact (115305)
+m4:test:first_process: PASS
+[arena INFO  sched] spawn(proc): id=146 slot=1 entry=ffffffff9cbc1ba0 cr3=135000
+[arena INFO  sched] thread_main(proc): id=146 entry=ffffffff9cbc1ba0 arg=0 cr3=135000
+[arena INFO  sched] spawn(proc): id=147 slot=2 entry=ffffffff9cbc1ba0 cr3=136000
+[arena INFO  sched] thread_main(proc): id=147 entry=ffffffff9cbc1ba0 arg=0 cr3=136000
+[arena INFO  m4] ipc_echo: two processes talked — the server parked in recv, the client's call delivered 2 words + a Memory cap (landed rights-intact at the server's first free slot, sender kept its copy), the reply echoed both words (verified IN RING 3), notify/wait carried badge 0xbeef; 7 dispatches + 3 blocking events counted, threads reaped, frames 115305 (teardown exact)
+[arena INFO  sched] spawn(proc): id=148 slot=1 entry=ffffffff9cbc6ea0 cr3=135000
+[arena INFO  proc] destroy pid 53: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 4 abandoned caller slot(s))
+[arena INFO  m4] ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact
+m4:test:ipc_echo: PASS
+[arena INFO  sched] spawn(proc): id=149 slot=1 entry=ffffffff9cbc1ba0 cr3=135000
+[arena INFO  sched] thread_main(proc): id=149 entry=ffffffff9cbc1ba0 arg=0 cr3=135000
+[arena INFO  sched] spawn(proc): id=150 slot=2 entry=ffffffff9cbb1280 cr3=148000
+[arena INFO  sched] thread_main(proc): id=150 entry=ffffffff9cbb1280 arg=0 cr3=148000
+ARENAOS-M43-FIRST-USER-PROCESS: ELF-loaded image running in ring 3, wrote via syscall, exiting now
+[arena INFO  sched] spawn(proc): id=151 slot=2 entry=ffffffff9cbb1280 cr3=150000
+[arena INFO  sched] thread_main(proc): id=151 entry=ffffffff9cbb1280 arg=1 cr3=150000
+ARENAOS-M43-FIRST-USER-PROCESS: ELF-loaded image running in ring 3, wrote via syscall, exiting now
+[arena INFO  m4] spawn_restart: a ring-3 supervisor spawned the real image TWICE through SYS_SPAWN — each child inherited the attenuated Memory cap at its slot 0, ran the M4.3 program (its 99-byte message on the console twice: the restart, visible), and badged the supervisor at exit; both children exited 42, Process handles landed in order, the supervisor kept its original, counters exact (9 dispatches / 2 notifies / 2 parked waits), frames 115305 (teardown exact)
+m4:test:spawn_restart: PASS
+ab c
+
+uvwxyz
+l1
+l2
+l3
+l4
+l5
+[arena INFO  sched] spawn(proc): id=152 slot=1 entry=ffffffff9cbc1ba0 cr3=135000
+[arena INFO  sched] thread_main(proc): id=152 entry=ffffffff9cbc1ba0 arg=0 cr3=135000
+hi m4
+[arena INFO  m4] console_line: the line discipline (fed through the RX ISR's own entry point) did backspace edits, refused empty lines, truncated and counted, dropped the OLDEST of five queued lines; a ring-3 reader parked on the empty queue and a fed line woke it — length and bytes verified IN RING 3; the shell image validated as registry image 1 (58848 bytes, entry 0x403e10, 2 segments); counters exact, frames 115305 (teardown exact)
+m4:test:console_line: PASS
+m4: RESULT PASS (9/9)
+[arena INFO  m5] pci_scan: virtio-blk at 00:02.0 device_id 0x1001 (transitional) — common bar4+0x0 len 0x1000, notify bar4+0x3000 mult 0x4, isr bar4+0x1000, device bar4+0x2000, msix 2 entries table bar1+0x0; command 0x0007 (MEM|BUS MASTER by kernel policy); 9 function(s) on bus 0
+m5:test:pci_scan: PASS
+[arena INFO  sched] spawn(proc): id=153 slot=1 entry=ffffffff9cbc78d0 cr3=135000
+[arena INFO  sched] thread_main(proc): id=153 entry=ffffffff9cbc78d0 arg=0 cr3=135000
+[arena INFO  syscall] map_memory: pid 58 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  m5] untyped_alloc: ring 3 allocated two owned frames (0x149000, 0x14a000), self-mapped the first at 0x40000000 writable (cap consumed — the re-map refused -2 in ring 3), stamped and read back 0xdeadbeefcafe0051 through the window; the kernel destroyed the second cap (+1 frame exactly) and proc::destroy reclaimed the mapped frame — frames 115305 (teardown exact)
+m5:test:untyped_alloc: PASS
+[arena INFO  sched] spawn(proc): id=154 slot=1 entry=ffffffff9cbc78d0 cr3=135000
+[arena INFO  sched] thread_main(proc): id=154 entry=ffffffff9cbc78d0 arg=0 cr3=135000
+[arena INFO  syscall] map_memory: pid 59 window va=0x40000000 pages=1 writable=false mmio=true
+[arena INFO  m5] mmio_user: ring 3 read the HPET main counter through a kernel-minted Mmio cap — 0x2b6e08 → 0x2c90b9 strictly increasing across a bounded delay (kernel observed 0x1548 → 0x2a3cc7), read-only window, cap survived the mapping, teardown freed exactly the RAM (device page skipped) — frames 115305
+m5:test:mmio_user: PASS
+[arena INFO  relay] vector 48 → notification 0 badge 0x51ab (owner pid 0)
+[arena WARN  relay] spurious delivery on unregistered vector 49
+[arena INFO  m5] irq_relay: vector 48 → notification 0 badge 0x51ab — a LAPIC self-IPI walked the live stub (dual EOI) into ipc::notify and woke the parked waiter with the exact badge (1 delivery, 1 notify, thread reaped); a spurious hit on unregistered vector 49 was counted and survived; register/release seams hold (range, empty badge, double-register, double-release all refused)
+m5:test:irq_relay: PASS
+[arena INFO  sched] spawn(proc): id=156 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=157 slot=2 entry=ffffffff9cbb1280 cr3=14a000
+[arena INFO  m5] block_service: storaged pid 60 (window bar4 phys 0xc000000000 4 pages, endpoint 0 serve side, irq notification 0), blktest pid 61 (endpoint 0 call side) — running the write/read-back cycle
+[arena INFO  sched] thread_main(proc): id=156 entry=ffffffff9cbb1280 arg=0 cr3=135000
+storaged: starting — ArenaOS block service (M5.2, ADR-0022)
+[arena INFO  syscall] map_memory: pid 60 window va=0x40000000 pages=4 writable=true mmio=true
+storaged: virtio-blk device_id 0x0000000000001001 (transitional) pci_index 2 dev_idx 0 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 60 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 60 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 60 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 60 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81046000
+[arena INFO  relay] vector 48 → notification 0 badge 0x9e71 (owner pid 60)
+[arena INFO  syscall] irq_relay: pid 60 dev 0 msix entry 0 → vector 48, notification 0 badge 0x9e71
+storaged: virtio-blk ready — DRIVER_OK, queue 0 size 256, desc 0x000000000015c000, avail 0x000000000015e000, used 0x0000000000160000, req 0x0000000000162000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=157 entry=ffffffff9cbb1280 arg=1 cr3=14a000
+blktest: block-service client starting (write→read-back→verify through storaged)
+[arena INFO  syscall] map_memory: pid 61 window va=0x40000000 pages=1 writable=true mmio=false
+blktest: buffer frame 0x0000000000164000 mapped at 0x0000000040000000 (lent copy in slot 9)
+storaged: WRITE sector 16383 buf 0x0000000000164000 → status 0, device wrote 1 bytes (completion #1, used idx 1)
+blktest: WRITE sector 16383 → status OK (device wrote 1 bytes to the used ring)
+storaged: READ  sector 16383 buf 0x0000000000164000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+blktest: READ sector 16383 → status OK (device wrote 513 bytes) — all 512 bytes verified across the service boundary
+blktest: missing diagnostic authority refused by storaged
+storaged: shutdown requested after 2 interrupt-delivered completion(s) — replying and exiting
+blktest: PASS — the cycle completed and the service shut down cleanly
+[arena INFO  proc] destroy pid 60: released 1 owned IRQ relay vector(s)
+[arena INFO  m5] block_service: blktest (pid 61) drove a write→read-back→verify cycle through storaged's (pid 60) endpoint — zero-copy (the buffer frame was LENT through IPC, the device DMA'd the caller's own page), 2 interrupt-delivered completions on relay vector 48 (exactly one per request), both children exited 42, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames 115305)
+m5:test:block_service: PASS
+[arena INFO  sched] spawn(proc): id=158 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=159 slot=2 entry=ffffffff9cbb1280 cr3=14a000
+[arena INFO  sched] spawn(proc): id=160 slot=3 entry=ffffffff9cbb1280 cr3=15f000
+[arena INFO  m5] fs_service: storaged pid 62 (window bar4 phys 0xc000000000, block endpoint 0), fsd pid 63 (block call side 0, fs endpoint 1), fstest pid 64 (fs call side 1, poison side 0) — running the branch probe, then create→write→verify (fresh) or read→verify (persisted)
+[arena INFO  sched] thread_main(proc): id=158 entry=ffffffff9cbb1280 arg=0 cr3=135000
+storaged: starting — ArenaOS block service (M5.2, ADR-0022)
+[arena INFO  syscall] map_memory: pid 62 window va=0x40000000 pages=4 writable=true mmio=true
+storaged: virtio-blk device_id 0x0000000000001001 (transitional) pci_index 2 dev_idx 0 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 62 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 62 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 62 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 62 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81046000
+[arena INFO  relay] vector 48 → notification 0 badge 0x9e71 (owner pid 62)
+[arena INFO  syscall] irq_relay: pid 62 dev 0 msix entry 0 → vector 48, notification 0 badge 0x9e71
+storaged: virtio-blk ready — DRIVER_OK, queue 0 size 256, desc 0x0000000000173000, avail 0x0000000000175000, used 0x0000000000177000, req 0x0000000000179000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=159 entry=ffffffff9cbb1280 arg=1 cr3=14a000
+fsd: AFS1 filesystem service starting (M5.3/5.4, ADR-0023)
+[arena INFO  syscall] map_memory: pid 63 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=160 entry=ffffffff9cbb1280 arg=2 cr3=15f000
+fstest: filesystem-service client starting (M5.3/5.4, ADR-0023)
+[arena INFO  syscall] map_memory: pid 64 window va=0x40000000 pages=1 writable=true mmio=false
+fstest: buffer frame 0x000000000017e000 mapped at 0x0000000040000000 (lent copy in slot 9)
+storaged: READ  sector 0 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
+storaged: READ  sector 1 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+storaged: READ  sector 2 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
+storaged: READ  sector 21 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
+storaged: READ  sector 22 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
+storaged: READ  sector 23 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #6, used idx 6)
+storaged: READ  sector 24 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #7, used idx 7)
+storaged: READ  sector 25 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #8, used idx 8)
+storaged: READ  sector 26 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #9, used idx 9)
+storaged: READ  sector 27 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #10, used idx 10)
+storaged: READ  sector 28 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
+storaged: READ  sector 1 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #12, used idx 12)
+fsd: reclaimed 8 superseded metadata sector(s) from commit seq 2
+fsd: mounted AFS1 — commit seq 3, objtab@21, bitmap@25, 16384 sectors, 16359 free, 3 file(s)
+fsd: OPEN obj 0 → fh 1
+fstest: OPEN 'arena.txt' succeeded BEFORE any create — this volume PERSISTED from an earlier boot (fh 1)
+storaged: READ  sector 20 buf 0x000000000017b000 → status 0, device wrote 513 bytes (completion #13, used idx 13)
+storaged: READ  sector 19 buf 0x000000000017e000 → status 0, device wrote 513 bytes (completion #14, used idx 14)
+fstest: READ 512 bytes → all verified byte-for-byte through fsd+storaged
+fstest: LS walk: 'arena.txt' 512 bytes present — 3 file(s) total
+fstest: fsd and storaged rejected missing/wrong-object poison markers
+fsd: shutdown requested after 14 disk operation(s) — replying and exiting
+storaged: shutdown requested after 14 interrupt-delivered completion(s) — replying and exiting
+fstest: fsd reported 14 disk operation(s); storaged reported 14 completion(s) — the contract's 14
+fstest: PASS (persisted) — the committed file SURVIVED THE REBOOT: opened, read back, verified byte-for-byte, zero writes issued
+[arena INFO  proc] destroy pid 62: released 1 owned IRQ relay vector(s)
+[arena INFO  m5] fs_service: fstest (pid 64) RE-FOUND a file committed by an EARLIER BOOT and verified it byte-for-byte with ZERO writes (the two-boot persistence proof, exit 43) through fsd (pid 63) — AFS1 mounted from the host-formatted image, metadata CoW'd per transaction, file data DMA'd end-to-end zero-copy (fstest's frame → forwarded cap → storaged (pid 62) → device), 14 interrupt-delivered block calls matching the branch's derived contract, all exit badges exact, the dead driver's relay swept, teardown frame-exact (frames 115305)
+m5:test:fs_service: PASS
+m5: RESULT PASS (6/6)
+[arena INFO  timer] timer facility ready: 32 slots, 100 Hz tick (a deadline means NOT BEFORE, ~10 ms lag), delivery by notification badge
+[arena INFO  sched] spawn(proc): id=161 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=162 slot=2 entry=ffffffff9cbb1280 cr3=14a000
+[arena INFO  m6] net_service: netd pid 65 (window bar4 phys 0xc000004000 4 pages, endpoint 0 serve side, irq notification 0), nettest pid 66 (endpoint 0 call side) — running the ARP link probe against the slirp gateway
+[arena INFO  sched] thread_main(proc): id=161 entry=ffffffff9cbb1280 arg=0 cr3=135000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 65 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 3 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 65 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 65 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 65 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 65 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 65 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81045000
+[arena INFO  relay] vector 48 → notification 0 badge 0x1 (owner pid 65)
+[arena INFO  syscall] irq_relay: pid 65 dev 1 msix entry 0 → vector 48, notification 0 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x81045000
+[arena INFO  relay] vector 49 → notification 0 badge 0x2 (owner pid 65)
+[arena INFO  syscall] irq_relay: pid 65 dev 1 msix entry 1 → vector 49, notification 0 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 48/49
+[arena INFO  sched] thread_main(proc): id=162 entry=ffffffff9cbb1280 arg=1 cr3=14a000
+nettest: network-service client starting (ARP link probe against the slirp gateway)
+[arena INFO  syscall] map_memory: pid 66 window va=0x40000000 pages=1 writable=true mmio=false
+nettest: device MAC 52:54:00:12:34:56 (from the device-config region, through the service)
+netd: SEND 42 bytes buf 0x0000000000166000 → completion #2
+nettest: SEND 42 bytes — ARP who-has 10.0.2.2 tell 10.0.2.15 is on the wire
+nettest: RECV 64 bytes — ARP reply verified: ethertype 0x0806, opcode 2, sender 10.0.2.2, target MAC ours, sender MAC == Ethernet source
+netdtest: missing diagnostic authority refused by service
+netd: shutdown requested after 2 interrupt-delivered completion(s), 0 RX drop(s) — replying and exiting
+nettest: PASS — the ARP round trip completed (netd counted 2 interrupt-delivered completion(s)) and the service shut down cleanly
+[arena INFO  proc] destroy pid 65: released 2 owned IRQ relay vector(s)
+[arena INFO  m6] net_service: nettest (pid 66) sent a hand-built ARP request for 10.0.2.2 and verified the reply byte-for-byte through netd's (pid 65) endpoint — zero-copy TX (the frame was LENT through IPC, the device DMA'd the caller's own page behind netd's virtio header), 1 RX + 1 TX interrupt deliveries on relay vectors 48/49 (no polling), both children exited 42, both exit badges exact, the dead driver's relays were swept by proc::destroy, teardown frame-exact (frames 115305)
+m6:test:net_service: PASS
+[arena INFO  sched] spawn(proc): id=163 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=164 slot=2 entry=ffffffff9cbb1280 cr3=149000
+[arena INFO  m6] rng_service: rngd pid 67 (window bar4 phys 0xc000008000 4 pages, endpoint 0 serve side, irq notification 0), rngtest pid 68 (endpoint 0 call side) — running two device-filled draws with variance checks
+[arena INFO  sched] thread_main(proc): id=163 entry=ffffffff9cbb1280 arg=0 cr3=135000
+rngd: starting — ArenaOS entropy service (M6.2, ADR-0025)
+[arena INFO  syscall] map_memory: pid 67 window va=0x40000000 pages=4 writable=true mmio=true
+rngd: virtio-rng device_id 0x0000000000001005 (transitional) pci_index 4 dev_idx 2 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 67 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81044000
+[arena INFO  relay] vector 48 → notification 0 badge 0x7201 (owner pid 67)
+[arena INFO  syscall] irq_relay: pid 67 dev 2 msix entry 0 → vector 48, notification 0 badge 0x7201
+rngd: virtio-rng ready — DRIVER_OK, queue 0 size 8, ring frame 0x000000000015b000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=164 entry=ffffffff9cbb1280 arg=1 cr3=149000
+rngtest: entropy-service client starting (two draws, variance-checked)
+[arena INFO  syscall] map_memory: pid 68 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 68 window va=0x40200000 pages=1 writable=true mmio=false
+rngd: GET 4096 bytes buf 0x000000000015d000 → device wrote 4096 (completion #1)
+rngd: GET 4096 bytes buf 0x0000000000160000 → device wrote 4096 (completion #2)
+rngtest: draw A 2ade1fcb… vs draw B c4a662eb… — both varied, and different
+rngdtest: missing diagnostic authority refused by service
+rngd: shutdown requested after 2 interrupt-delivered completion(s) — replying and exiting
+rngtest: PASS — two device-filled draws, both varied, mutually different, 2 interrupt-served completions
+[arena INFO  proc] destroy pid 67: released 1 owned IRQ relay vector(s)
+[arena INFO  m6] rng_service: rngtest (pid 68) drew two 4 KiB frames of device entropy through rngd's (pid 67) endpoint — the device DMA'd directly into the client's OWN pages (each frame LENT through IPC, zero copy), both draws non-zero, non-constant, and mutually different, 2 interrupt deliveries on relay vector 48 (one per draw, no polling), both children exited 42, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames 115305)
+m6:test:rng_service: PASS
+[arena INFO  sched] spawn(proc): id=165 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=166 slot=2 entry=ffffffff9cbb1280 cr3=14c000
+[arena INFO  m6] input_service: inputd pid 69 (window bar4 phys 0xc00000c000 4 pages, endpoint 0 serve side, irq notification 0, NO console authority — service mode), inputtest pid 70 (endpoint 0 call side) — awaiting the keystrokes the harness types on the virtual keyboard
+[arena INFO  sched] thread_main(proc): id=165 entry=ffffffff9cbb1280 arg=0 cr3=135000
+inputd: starting — ArenaOS input service (M6.3, ADR-0026)
+[arena INFO  syscall] map_memory: pid 69 window va=0x40000000 pages=4 writable=true mmio=true
+inputd: virtio-input device_id 0x0000000000001052 pci_index 5 dev_idx 3 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 69 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81043000
+[arena INFO  relay] vector 48 → notification 0 badge 0x10000 (owner pid 69)
+[arena INFO  syscall] irq_relay: pid 69 dev 3 msix entry 0 → vector 48, notification 0 badge 0x10000
+inputd: virtio-input ready — DRIVER_OK, eventq size 64, 32 event buffers posted, ring frame 0x000000000015e000; msix entry 0 → relay vector 48
+inputd: service mode — no console authority, serving decoded keys on the endpoint
+[arena INFO  sched] thread_main(proc): id=166 entry=ffffffff9cbb1280 arg=1 cr3=14c000
+inputtest: input-service client starting — reading keystrokes typed on the virtual keyboard
+inputd: READ → 1 decoded key byte(s) delivered inline (batch #1)
+inputtest: read 1 key byte(s), 1/5 of the injected sequence
+inputd: READ → 1 decoded key byte(s) delivered inline (batch #2)
+inputtest: read 1 key byte(s), 2/5 of the injected sequence
+inputd: READ → 1 decoded key byte(s) delivered inline (batch #3)
+inputtest: read 1 key byte(s), 3/5 of the injected sequence
+inputd: READ → 1 decoded key byte(s) delivered inline (batch #4)
+inputtest: read 1 key byte(s), 4/5 of the injected sequence
+inputd: READ → 1 decoded key byte(s) delivered inline (batch #5)
+inputtest: read 1 key byte(s), 5/5 of the injected sequence
+inputtest: PASS — the injected keystrokes arrived decoded and in order: "arena"
+inputtest: service refused poison without diagnostic marker
+inputd: shutdown requested after 5 interrupt-delivered batch(es), 15 event(s), 5 key byte(s), 0 abandoned wait(s) — replying and exiting
+inputtest: the service reported 5 interrupt-delivered event batch(es) — exiting 42
+[arena INFO  proc] destroy pid 69: released 1 owned IRQ relay vector(s)
+[arena INFO  m6] input_service: inputtest (pid 70) read the keystrokes the harness typed on the virtual keyboard back through inputd's (pid 69) endpoint — evdev keycodes harvested from a device-writable virtqueue on 5 interrupt delivery/deliveries on relay vector 48 (no polling), decoded to ASCII, and verified byte-for-byte; the driver ran in SERVICE mode because the suite withheld the ConsoleInput capability, both children exited 42, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames 115305)
+m6:test:input_service: PASS
+[arena INFO  sched] spawn(proc): id=167 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=168 slot=2 entry=ffffffff9cbb1280 cr3=14a000
+[arena INFO  m6] console_service: consoled pid 71 (window bar4 phys 0xc000014000 4 pages, endpoint 0 serve side, irq notification 0, NO console authority — service mode), contest pid 72 (endpoint 0 call side) — the port's far end is the harness's socket
+[arena INFO  sched] thread_main(proc): id=167 entry=ffffffff9cbb1280 arg=0 cr3=135000
+consoled: starting — ArenaOS console channel service (M6.4, ADR-0027)
+[arena INFO  syscall] map_memory: pid 71 window va=0x40000000 pages=4 writable=true mmio=true
+consoled: virtio-console device_id 0x0000000000001003 (transitional) pci_index 7 dev_idx 5 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 71 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 71 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81041000
+[arena INFO  relay] vector 48 → notification 0 badge 0x10000 (owner pid 71)
+[arena INFO  syscall] irq_relay: pid 71 dev 5 msix entry 0 → vector 48, notification 0 badge 0x10000
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x81041000
+[arena INFO  relay] vector 49 → notification 0 badge 0x20000 (owner pid 71)
+[arena INFO  syscall] irq_relay: pid 71 dev 5 msix entry 1 → vector 49, notification 0 badge 0x20000
+consoled: virtio-console ready — DRIVER_OK, rx/tx size 32/32, 16 rx buffers posted; relay vectors 48/49
+consoled: service mode — no console authority, serving the port on the endpoint
+[arena INFO  sched] thread_main(proc): id=168 entry=ffffffff9cbb1280 arg=1 cr3=14a000
+contest: console-service client starting — a port round trip through the service
+contest: wrote 28 byte(s) out the port — the harness reads them off the socket
+contest: PASS — the port carried bytes BOTH ways: 28 out, 16 back in, verified byte-for-byte
+contest: service refused poison without diagnostic marker
+consoled: poison shutdown — 28 byte(s) sent, 16 received over 1 rx batch(es), 0 dropped
+[arena INFO  proc] destroy pid 71: released 2 owned IRQ relay vector(s)
+[arena INFO  m6] console_service: contest (pid 72) drove a port ROUND TRIP through consoled's (pid 71) endpoint — bytes out the transmit queue that the harness read off the host socket, and the harness's answer back in on the receive queue, verified byte-for-byte; 2 transmit and 1 receive interrupt delivery/deliveries on relay vectors 49/48 (no polling), the driver in SERVICE mode because the suite withheld BOTH console capabilities, both children exited 42, both exit badges exact, both relays swept by proc::destroy, teardown frame-exact (frames 115305)
+m6:test:console_service: PASS
+[arena INFO  sched] spawn(proc): id=169 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=170 slot=2 entry=ffffffff9cbb1280 cr3=148000
+[arena INFO  m6] service_death: faultd pid 73 (endpoint 0 serve side, hang signal 0), faulttest pid 74 (endpoint 0 call side) — the client will be blocked in a call when the server dies
+[arena INFO  sched] thread_main(proc): id=169 entry=ffffffff9cbb1280 arg=0 cr3=135000
+faultd: starting — the service that exists to be killed (M6.5, ADR-0028)
+[arena INFO  sched] thread_main(proc): id=170 entry=ffffffff9cbb1280 arg=1 cr3=148000
+faulttest: client starting — a service is about to die under me
+faulttest: PING answered (ping #1) — the service is live; now asking it to hang
+m83: returncap PASS (40 real reply caps rejected and discarded; slot 2 empty, occupancy 2/32 exact; ordinary no-cap PING unchanged)
+faulttest: service refused hang without diagnostic marker
+faultd: holding a request and hanging on purpose (after 2 ping(s)) — kill me now
+[arena INFO  proc] destroy pid 73: 1 in-flight call(s) answered STATUS_SERVICE_GONE
+[arena INFO  proc] destroy pid 73: killed 1 live thread(s) (released 0 endpoint server slot(s), 1 notification waiter(s), 0 abandoned caller slot(s))
+faulttest: PASS — the HANG call returned STATUS_SERVICE_GONE (-5): the server died holding my request and the kernel said so, instead of leaving me blocked forever
+faulttest: a client that outlived its service, and knows it
+[arena INFO  m6] service_death: faultd (pid 73) was destroyed while holding faulttest's (pid 74) request — the kernel answered that call STATUS_SERVICE_GONE instead of leaving the caller blocked forever, the client handled it and exited 42, the ENDPOINT outlived its server (so a restart can reuse it), and teardown is frame-exact (frames 115305)
+m6:test:service_death: PASS
+[arena INFO  sched] spawn(proc): id=171 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=172 slot=2 entry=ffffffff9cbb1280 cr3=148000
+[arena INFO  m6] service_restart: faultd pid 75 under supervision (endpoint 0), faulttest pid 76 — about to kill the service under its client
+[arena INFO  sched] thread_main(proc): id=171 entry=ffffffff9cbb1280 arg=0 cr3=135000
+faultd: starting — the service that exists to be killed (M6.5, ADR-0028)
+[arena INFO  sched] thread_main(proc): id=172 entry=ffffffff9cbb1280 arg=1 cr3=148000
+faulttest: client starting — a service is about to die under me
+faulttest: PING answered (ping #1) — the service is live; now asking it to hang
+m83: returncap PASS (40 real reply caps rejected and discarded; slot 2 empty, occupancy 2/32 exact; ordinary no-cap PING unchanged)
+faulttest: service refused hang without diagnostic marker
+faultd: holding a request and hanging on purpose (after 2 ping(s)) — kill me now
+[arena INFO  proc] destroy pid 75: 1 in-flight call(s) answered STATUS_SERVICE_GONE
+[arena INFO  proc] destroy pid 75: a SUPERVISED service died — the supervisor will restart it
+[arena INFO  proc] destroy pid 75: killed 1 live thread(s) (released 0 endpoint server slot(s), 1 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  sched] spawn(proc): id=173 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  supervise] faultd: RESTARTED as pid 77 with its 4 original capability/capabilities replayed (restart 1/3) — clients keep the endpoint they already hold
+[arena INFO  sched] spawn(proc): id=174 slot=3 entry=ffffffff9cbb1280 cr3=158000
+faulttest: PASS — the HANG call returned STATUS_SERVICE_GONE (-5): the server died holding my request and the kernel said so, instead of leaving me blocked forever
+faulttest: a client that outlived its service, and knows it
+[arena INFO  sched] thread_main(proc): id=173 entry=ffffffff9cbb1280 arg=0 cr3=135000
+faultd: starting — the service that exists to be killed (M6.5, ADR-0028)
+[arena INFO  sched] thread_main(proc): id=174 entry=ffffffff9cbb1280 arg=2 cr3=158000
+faulttest: quiet mode — checking a service that was RESTARTED under its clients
+faulttest: PASS — the RESTARTED service answered on the SAME endpoint (ping #1); the capability I was granted before the crash still works
+[arena INFO  proc] destroy pid 77: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  m6] service_restart: faultd died as pid 75 holding a request and came back as pid 77 with its 4 capabilities REPLAYED — the client blocked across the crash was answered STATUS_SERVICE_GONE and exited cleanly, a new client reached the restarted instance through the SAME endpoint capability, the supervisor counted exactly 1 restart, and teardown is frame-exact across the whole cycle (frames 115305)
+m6:test:service_restart: PASS
+m6: RESULT PASS (6/6)
+[arena INFO  sched] spawn(proc): id=175 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  m7] timer_facility: timertest pid 79 (notification 0) — measuring real deadlines against the monotonic clock
+[arena INFO  sched] thread_main(proc): id=175 entry=ffffffff9cbb1280 arg=0 cr3=135000
+timertest: measuring the timer facility against the monotonic clock
+timertest: PASS — 50000us timer delivered after 54404us (never early, 4404us of lag against a 10000us tick)
+timertest: PASS — a cancelled timer stayed silent, and a second cancel was refused
+timertest: PASS — two timers on one notification both delivered
+timertest: PASS — a stale id was refused and the live timer it aliased (30064771072) still fired
+timertest: leaving one timer armed for 60s on purpose — the kernel must sweep it
+[arena INFO  proc] destroy pid 79: swept 1 armed timer(s)
+[arena INFO  m7] timer_facility: timertest (pid 79) armed 8 timers and measured them against SYS_CLOCK_NOW — no deadline fired early, none lagged beyond one tick plus slack, a cancelled timer stayed silent, a second cancel was refused, two due timers merged into one wake; the kernel counted 6 firing(s) and 1 cancellation(s), swept the timer the client abandoned, and teardown is frame-exact (frames 115305)
+m7:test:timer_facility: PASS
+[arena INFO  sched] spawn(proc): id=176 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] spawn(proc): id=177 slot=2 entry=ffffffff9cbb1280 cr3=14a000
+[arena INFO  sched] spawn(proc): id=178 slot=3 entry=ffffffff9cbb1280 cr3=15b000
+[arena INFO  sched] spawn(proc): id=179 slot=4 entry=ffffffff9cbb1280 cr3=172000
+[arena INFO  m7] arp_service: netd pid 80 (L2 only), netstackd pid 82 (ARP + cache, NO device cap), arptest pid 83 — resolving on the real wire
+[arena INFO  sched] thread_main(proc): id=176 entry=ffffffff9cbb1280 arg=0 cr3=135000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 80 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 3 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 80 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 80 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 80 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 80 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 80 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81045000
+[arena INFO  relay] vector 48 → notification 0 badge 0x1 (owner pid 80)
+[arena INFO  syscall] irq_relay: pid 80 dev 1 msix entry 0 → vector 48, notification 0 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x81045000
+[arena INFO  relay] vector 49 → notification 0 badge 0x2 (owner pid 80)
+[arena INFO  syscall] irq_relay: pid 80 dev 1 msix entry 1 → vector 49, notification 0 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 48/49
+[arena INFO  sched] thread_main(proc): id=177 entry=ffffffff9cbb1280 arg=1 cr3=14a000
+rngd: starting — ArenaOS entropy service (M6.2, ADR-0025)
+[arena INFO  syscall] map_memory: pid 81 window va=0x40000000 pages=4 writable=true mmio=true
+rngd: virtio-rng device_id 0x0000000000001005 (transitional) pci_index 4 dev_idx 2 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 81 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 50 (addr 0xfee00000 data 0x32) at table phys 0x81044000
+[arena INFO  relay] vector 50 → notification 6 badge 0x7201 (owner pid 81)
+[arena INFO  syscall] irq_relay: pid 81 dev 2 msix entry 0 → vector 50, notification 6 badge 0x7201
+rngd: virtio-rng ready — DRIVER_OK, queue 0 size 8, ring frame 0x0000000000194000; doorbell 0x0000000040003000, msix entry 0 → relay vector 50
+[arena INFO  sched] thread_main(proc): id=178 entry=ffffffff9cbb1280 arg=2 cr3=15b000
+netstackd: starting — ArenaOS network stack service (M7.1, ADR-0030)
+[arena INFO  syscall] map_memory: pid 82 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=179 entry=ffffffff9cbb1280 arg=3 cr3=172000
+arptest: asking the stack to resolve an address on the real wire
+rngd: GET 64 bytes buf 0x0000000000196000 → device wrote 64 (completion #1)
+netstackd: drew 8 unguessable UDP handles from rngd — possession of one IS the authority to use its port
+netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted
+netstackd: UDP checksum self-test PASSED 4/4 — outgoing nonzero and valid, incoming valid/nonzero accepted, corruption counted, IPv4 zero-checksum accepted
+netstackd: ready — ARP over IPv4 for 52:54:00:12:34:56, cache 8 entries, TTL 30s; netd stays L2
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #2
+netstackd: resolved 10.0.2.2 → 52:55:0a:00:02:02 on attempt 1 (cached for 30s)
+arptest: PASS — 10.0.2.2 resolved to 52:55:0a:00:02:02 through a real ARP exchange
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+arptest: PASS — the second lookup was a cache HIT (1 hit(s), wire requests still 1)
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #3
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #4
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #5
+netstackd: no ARP reply after every retry — reporting unreachable, not guessing
+arptest: PASS — a silent address came back UNREACHABLE after real deadlines (before M7.0 this call could never have returned)
+arptest: phase 1 complete — signalling the suite to kill the driver
+[arena INFO  proc] destroy pid 80: a SUPERVISED service died — the supervisor will restart it
+[arena INFO  proc] destroy pid 80: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  proc] destroy pid 80: released 2 owned IRQ relay vector(s)
+arptest: the driver has been killed and restarted — resolving through the NEW instance
+netstackd: the driver refused a call: -5
+netstackd: the driver is GONE — waiting for the supervisor, then re-establishing
+netstackd: the driver refused a call: -5
+[arena INFO  m7] arp_service: the stack has met the dead driver and is backing off — releasing the supervisor now
+[arena INFO  sched] spawn(proc): id=180 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  supervise] netd: RESTARTED as pid 84 with its 3 original capability/capabilities replayed (restart 1/3) — clients keep the endpoint they already hold
+[arena INFO  sched] thread_main(proc): id=180 entry=ffffffff9cbb1280 arg=0 cr3=135000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 84 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 3 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 84 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 84 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 84 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 84 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 84 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81045000
+[arena INFO  relay] vector 48 → notification 0 badge 0x1 (owner pid 84)
+[arena INFO  syscall] irq_relay: pid 84 dev 1 msix entry 0 → vector 48, notification 0 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x81045000
+[arena INFO  relay] vector 49 → notification 0 badge 0x2 (owner pid 84)
+[arena INFO  syscall] irq_relay: pid 84 dev 1 msix entry 1 → vector 49, notification 0 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 48/49
+netstackd: RE-ATTACHED to the restarted driver on attempt 2 — device facts re-acquired, nothing assumed to have survived
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #2
+netstackd: resolved 10.0.2.3 → 52:55:0a:00:02:03 on attempt 2 (cached for 30s)
+arptest: PASS — 10.0.2.3 resolved to 52:55:0a:00:02:03 through a driver that was RESTARTED under the stack
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+netd: SEND 242 bytes buf 0x0000000000196000 → completion #4
+netstackd: echo reply from 10.0.2.2 seq 1 in 1565us — identifier, sequence and all 200 payload bytes matched across the chunked receive
+arptest: PASS — ICMP echo to 10.0.2.2 answered in 1565us (measured on the monotonic clock, identifier and sequence matched)
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #5
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #6
+netd: SEND 42 bytes buf 0x0000000000196000 → completion #7
+netstackd: no ARP reply after every retry — reporting unreachable, not guessing
+arptest: PASS — pinging an unresolvable address failed as UNREACHABLE (no host), not NO_REPLY (a silent host) — the layers report distinctly
+arptest: PASS — the demultiplexer sorted 3 frame(s): 2 ARP, 1 IPv4, 0 dropped and counted
+netstackd: port 5353 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
+arptest: PASS — a second bind of the same port was refused, and a FORGED handle bought nothing
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+netd: SEND 71 bytes buf 0x0000000000196000 → completion #9
+arptest: PASS — UDP round trip to 10.0.2.2:1053, 61-byte response with our transaction id 0x000000000000a7e5 and the response bit set
+arptest: PASS — UDP answer drained across IPC messages: 61/ 61 bytes, the tail contains answer data
+rngd: GET 8 bytes buf 0x0000000000196000 → device wrote 8 (completion #2)
+netstackd: port 5353 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
+arptest: PASS — closing and rebinding rotated the bearer; the old handle stayed revoked
+rngd: GET 8 bytes buf 0x0000000000196000 → device wrote 8 (completion #3)
+netstackd: port 5355 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+netd: SEND 71 bytes buf 0x0000000000196000 → completion #11
+arptest: PASS — native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+rngd: GET 2 bytes buf 0x0000000000196000 → device wrote 2 (completion #4)
+netd: SEND 71 bytes buf 0x0000000000196000 → completion #12
+arptest: PASS — DNS resolver returned example.com A = 93.184.215.14; a malformed name was refused BEFORE sending
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+rngd: GET 16 bytes buf 0x0000000000196000 → device wrote 16 (completion #5)
+netd: SEND 58 bytes buf 0x0000000000196000 → completion #15
+netd: SEND 54 bytes buf 0x0000000000196000 → completion #16
+arptest: PASS — TCP active OPEN returned a bearer; POLL completed the real three-way handshake
+netd: SEND 63 bytes buf 0x0000000000196000 → completion #18
+netd: SEND 54 bytes buf 0x0000000000196000 → completion #21
+arptest: PASS — TCP read 200 position-dependent bytes from the host in IPC chunks without loss or reordering
+netd: SEND 54 bytes buf 0x0000000000196000 → completion #23
+netd: SEND 54 bytes buf 0x0000000000196000 → completion #24
+netd: SEND 54 bytes buf 0x0000000000196000 → completion #25
+arptest: PASS — TCP FIN was acknowledged, the peer closed, and the bearer was revoked
+arptest: stack refused shutdown without diagnostic marker
+netstackd: shutdown — 8 ARP request(s) on the wire, 2 reply/replies, 6 cache hit(s), 6 timeout(s), 1 re-attach(es); demux saw 11 frame(s): 2 ARP, 9 IPv4, 0 dropped, 0 bad checksum; 9 continuation chunk(s) read, 0 oversize, 0 corrupt payload
+netstackd: UDP — 3 delivered, 0 unbound, 4 bad handle(s) refused
+arptest: done — the stack put 8 request(s) on the wire and served 6 from cache
+[arena INFO  m7] arp_service: netd died as pid 80 and came back as pid 84 with its capabilities replayed — the stack met the corpse, re-established, and carried on
+[arena INFO  proc] destroy pid 81: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  proc] destroy pid 81: released 1 owned IRQ relay vector(s)
+[arena INFO  proc] destroy pid 84: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  proc] destroy pid 84: released 2 owned IRQ relay vector(s)
+[arena INFO  m7] arp_service: arptest drove netstackd (pid 82) over netd (pid 80) through the whole Phase-7-so-far story — ARP resolved on the wire (15 transmit and 9 receive interrupt delivery/deliveries), a cached lookup that touched no wire, a silent address reported UNREACHABLE, the driver KILLED and re-established with, and an ICMP echo answered over IPv4 with both checksums verified and the demultiplexer sorting each frame to its protocol; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames 115305)
+m7:test:arp_service: PASS
+m7: RESULT PASS (2/2)
+[arena INFO  sched] spawn(proc): id=181 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  sched] thread_main(proc): id=181 entry=ffffffff9cbb1280 arg=0 cr3=135000
+[sharedprobe] truncated virtio BAR device-info refused PASS
+[sharedprobe] held SharedRegion INFO bound/refusal PASS
+[sharedprobe] exact own SharedRegion UNMAP 48x capless churn PASS
+[sharedprobe] capacity/rights/zero PASS
+[arena INFO  m9] SharedRegion guest 512-page zero/authority/capacity refusals; dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)
+[arena INFO  sched] spawn(proc): id=182 slot=1 entry=ffffffff9cbb1280 cr3=135000
+[arena INFO  kernel] storaged spawned: pid 86 (caps: 0=Mmio bar4 phys 0xc000000000 RW, 1=Endpoint0/R, 2=Notif0/RW) — the block service is live; fsd is its first production client
+[arena INFO  sched] spawn(proc): id=183 slot=2 entry=ffffffff9cbb1280 cr3=14a000
+[arena INFO  kernel] fsd spawned: pid 87 (caps: 0=Endpoint0/W 1=Endpoint1/R 2=Notif1/R) — AFS1 mount and serve from ring 3
+[arena INFO  sched] spawn(proc): id=184 slot=3 entry=ffffffff9cbb1280 cr3=15f000
+[arena INFO  kernel] configd spawned: pid 88, image21, FS/W + cfg/R + marker/R anchor; updater separately granted
+[arena INFO  sched] spawn(proc): id=185 slot=4 entry=ffffffff9cbb1280 cr3=170000
+[arena INFO  kernel] netd spawned: pid 89 (caps: 0=Mmio bar4 phys 0xc000004000 RW, 1=Endpoint3/R, 2=Notif9/RW, 3=Notif3/W) — kernel-owned link-layer driver; signals manager when DRIVER_OK
+[arena INFO  sched] spawn(proc): id=186 slot=5 entry=ffffffff9cbb1280 cr3=182000
+[arena INFO  kernel] rngd spawned: pid 90 (caps: 0=Mmio bar4 phys 0xc000008000 RW, 1=Endpoint4/R, 2=Notif10/RW, 3=Notif4/W) — kernel-owned entropy driver; signals manager when DRIVER_OK
+[arena INFO  sched] spawn(proc): id=187 slot=6 entry=ffffffff9cbb1280 cr3=193000
+[arena INFO  kernel] inputd spawned: pid 91 (caps: 0=Mmio bar4 phys 0xc00000c000 RW, 1=Endpoint5/R, 2=Notif11/RW, 3=ConsoleInput/W) — the keyboard is live; keystrokes feed the shell's line discipline beside the serial port
+[arena INFO  sched] spawn(proc): id=188 slot=7 entry=ffffffff9cbb1280 cr3=1a7000
+[arena INFO  kernel] consoled spawned: pid 92 (caps: 0=Mmio bar4 phys 0xc000014000 RW, 1=Endpoint6/R, 2=Notif12/RW, 3=ConsoleInput/W, 4=ConsoleOutput/R) — the port is a second console; what the machine prints goes there too, and what you type there reaches the shell
+[arena INFO  kernel] milestones 5–6.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own + supervised restart: a destroyed service answers its callers with a typed status and comes back with its capabilities replayed) — spawning the shell
+[arena INFO  sched] spawn(proc): id=189 slot=8 entry=ffffffff9cbb1280 cr3=1b9000
+[arena INFO  kernel] servicemgr spawned: pid 93, image19; stack endpoint Some(7); audited 22 literal caps; no device/Power/Process grants
+[arena INFO  sched] spawn(proc): id=190 slot=9 entry=ffffffff9cbb1280 cr3=1d3000
+[arena INFO  sched] thread_main(proc): id=182 entry=ffffffff9cbb1280 arg=0 cr3=135000
+storaged: starting — ArenaOS block service (M5.2, ADR-0022)
+[arena INFO  syscall] map_memory: pid 86 window va=0x40000000 pages=4 writable=true mmio=true
+storaged: virtio-blk device_id 0x0000000000001001 (transitional) pci_index 2 dev_idx 0 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 86 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 86 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 86 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 86 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x81046000
+[arena INFO  relay] vector 48 → notification 0 badge 0x9e71 (owner pid 86)
+[arena INFO  syscall] irq_relay: pid 86 dev 0 msix entry 0 → vector 48, notification 0 badge 0x9e71
+storaged: virtio-blk ready — DRIVER_OK, queue 0 size 256, desc 0x00000000001e4000, avail 0x00000000001e6000, used 0x00000000001e8000, req 0x00000000001ea000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=183 entry=ffffffff9cbb1280 arg=1 cr3=14a000
+fsd: AFS1 filesystem service starting (M5.3/5.4, ADR-0023)
+[arena INFO  syscall] map_memory: pid 87 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=184 entry=ffffffff9cbb1280 arg=2 cr3=15f000
+configd: transactional store boot; marker-gated updates
+[arena INFO  syscall] map_memory: pid 88 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=185 entry=ffffffff9cbb1280 arg=3 cr3=170000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 89 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 3 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 89 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 89 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 89 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 89 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 89 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x81045000
+[arena INFO  relay] vector 49 → notification 9 badge 0x1 (owner pid 89)
+[arena INFO  syscall] irq_relay: pid 89 dev 1 msix entry 0 → vector 49, notification 9 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 50 (addr 0xfee00000 data 0x32) at table phys 0x81045000
+[arena INFO  relay] vector 50 → notification 9 badge 0x2 (owner pid 89)
+[arena INFO  syscall] irq_relay: pid 89 dev 1 msix entry 1 → vector 50, notification 9 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 49/50
+[arena INFO  sched] thread_main(proc): id=186 entry=ffffffff9cbb1280 arg=4 cr3=182000
+rngd: starting — ArenaOS entropy service (M6.2, ADR-0025)
+[arena INFO  syscall] map_memory: pid 90 window va=0x40000000 pages=4 writable=true mmio=true
+rngd: virtio-rng device_id 0x0000000000001005 (transitional) pci_index 4 dev_idx 2 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 90 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 51 (addr 0xfee00000 data 0x33) at table phys 0x81044000
+[arena INFO  relay] vector 51 → notification 10 badge 0x7201 (owner pid 90)
+[arena INFO  syscall] irq_relay: pid 90 dev 2 msix entry 0 → vector 51, notification 10 badge 0x7201
+rngd: virtio-rng ready — DRIVER_OK, queue 0 size 8, ring frame 0x0000000000200000; doorbell 0x0000000040003000, msix entry 0 → relay vector 51
+[arena INFO  sched] thread_main(proc): id=187 entry=ffffffff9cbb1280 arg=5 cr3=193000
+inputd: starting — ArenaOS input service (M6.3, ADR-0026)
+[arena INFO  syscall] map_memory: pid 91 window va=0x40000000 pages=4 writable=true mmio=true
+inputd: virtio-input device_id 0x0000000000001052 pci_index 5 dev_idx 3 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 91 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 52 (addr 0xfee00000 data 0x34) at table phys 0x81043000
+[arena INFO  relay] vector 52 → notification 11 badge 0x10000 (owner pid 91)
+[arena INFO  syscall] irq_relay: pid 91 dev 3 msix entry 0 → vector 52, notification 11 badge 0x10000
+inputd: virtio-input ready — DRIVER_OK, eventq size 64, 32 event buffers posted, ring frame 0x0000000000204000; msix entry 0 → relay vector 52
+[arena INFO  syscall] map_memory: pid 91 window va=0x40400000 pages=4 writable=true mmio=true
+inputd: virtio-tablet device_id 0x0000000000001052 pci_index 6 dev_idx 4 — window 0x0000000040400000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 91 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 53 (addr 0xfee00000 data 0x35) at table phys 0x81042000
+[arena INFO  relay] vector 53 → notification 11 badge 0x10000 (owner pid 91)
+[arena INFO  syscall] irq_relay: pid 91 dev 4 msix entry 0 → vector 53, notification 11 badge 0x10000
+inputd: real virtio tablet ready; graphical input isolated from serial shell
+[arena INFO  sched] thread_main(proc): id=188 entry=ffffffff9cbb1280 arg=6 cr3=1a7000
+consoled: starting — ArenaOS console channel service (M6.4, ADR-0027)
+[arena INFO  syscall] map_memory: pid 92 window va=0x40000000 pages=4 writable=true mmio=true
+consoled: virtio-console device_id 0x0000000000001003 (transitional) pci_index 7 dev_idx 5 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 92 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 92 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 54 (addr 0xfee00000 data 0x36) at table phys 0x81041000
+[arena INFO  relay] vector 54 → notification 12 badge 0x10000 (owner pid 92)
+[arena INFO  syscall] irq_relay: pid 92 dev 5 msix entry 0 → vector 54, notification 12 badge 0x10000
+[arena INFO  pci] msix entry 1 armed → vector 55 (addr 0xfee00000 data 0x37) at table phys 0x81041000
+[arena INFO  relay] vector 55 → notification 12 badge 0x20000 (owner pid 92)
+[arena INFO  syscall] irq_relay: pid 92 dev 5 msix entry 1 → vector 55, notification 12 badge 0x20000
+consoled: virtio-console ready — DRIVER_OK, rx/tx size 32/32, 16 rx buffers posted; relay vectors 54/55
+consoled: console mode — the port is a second console (serial stays the kernel's own)
+[arena INFO  sched] thread_main(proc): id=189 entry=ffffffff9cbb1280 arg=7 cr3=1b9000
+servicemgr: ring-3 boot (Phase 8.0 bounded-restart substrate)
+servicemgr: live caps image17 netd=3 stack=7 rngd=4
+[arena INFO  sched] spawn(proc): id=191 slot=10 entry=ffffffff9cbb1280 cr3=20f000
+[arena INFO  sched] thread_main(proc): id=190 entry=ffffffff9cbb1280 arg=8 cr3=1d3000
+[arena INFO  m8] manager-owned dependency probe pid 95: netd/W rngd/W private-notification/W audited, no privileged extras
+[arena INFO  sched] thread_main(proc): id=191 entry=ffffffff9cbb1280 arg=9 cr3=20f000
+configd: SET refused without receiving-service authority
+storaged: READ  sector 0 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
+configd: SET refused without receiving-service authority
+storaged: READ  sector 1 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+depcheck: production driver poison opcodes refused without marker
+configd: SET refused without receiving-service authority
+depcheck: netd MAC answered
+[arena INFO  syscall] map_memory: pid 95 window va=0x40000000 pages=1 writable=true mmio=false
+configd: SET refused without receiving-service authority
+storaged: READ  sector 2 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
+configd: SET refused without receiving-service authority
+rngd: GET 64 bytes buf 0x000000000021f000 → device wrote 64 (completion #1)
+depcheck: rngd device completed 64 varied bytes
+configd: SET refused without receiving-service authority
+storaged: READ  sector 21 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
+servicemgr: active netd MAC and rngd entropy probes passed; worker reaped
+servicemgr: policy validated from live caps and ready drivers
+[arena INFO  sched] spawn(proc): id=192 slot=10 entry=ffffffff9cbb1280 cr3=20f000
+[arena INFO  sched] thread_main(proc): id=192 entry=ffffffff9cbb1280 arg=9 cr3=20f000
+netstackd: starting — ArenaOS network stack service (M7.1, ADR-0030)
+[arena INFO  syscall] map_memory: pid 96 window va=0x40000000 pages=1 writable=true mmio=false
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 22 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
+configd: SET refused without receiving-service authority
+rngd: GET 64 bytes buf 0x0000000000226000 → device wrote 64 (completion #2)
+netstackd: drew 8 unguessable UDP handles from rngd — possession of one IS the authority to use its port
+netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted
+netstackd: UDP checksum self-test PASSED 4/4 — outgoing nonzero and valid, incoming valid/nonzero accepted, corruption counted, IPv4 zero-checksum accepted
+netstackd: ready — ARP over IPv4 for 52:54:00:12:34:56, cache 8 entries, TTL 30s; netd stays L2
+configd: SET refused without receiving-service authority
+storaged: READ  sector 23 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #6, used idx 6)
+servicemgr: production netstackd READY pid 96
+[arena INFO  sched] spawn(proc): id=193 slot=11 entry=ffffffff9cbb1280 cr3=229000
+[arena INFO  sched] spawn(proc): id=194 slot=12 entry=ffffffff9cbb1280 cr3=23b000
+[arena INFO  sched] thread_main(proc): id=193 entry=ffffffff9cbb1280 arg=10 cr3=229000
+permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty
+[arena INFO  syscall] map_memory: pid 97 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=194 entry=ffffffff9cbb1280 arg=11 cr3=23b000
+configd: SET refused without receiving-service authority
+storaged: READ  sector 24 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #7, used idx 7)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 25 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #8, used idx 8)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 26 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #9, used idx 9)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 27 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #10, used idx 10)
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 28 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
+configd: SET refused without receiving-service authority
+configread: SET absent/wrong-kind refused x20 by receiver
+storaged: READ  sector 1 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #12, used idx 12)
+fsd: reclaimed 8 superseded metadata sector(s) from commit seq 2
+fsd: mounted AFS1 — commit seq 3, objtab@21, bitmap@25, 16384 sectors, 16359 free, 3 file(s)
+permissiond: validated durable policy generation 0 DENY
+configd: READ UNSET
+configread: READ UNSET
+servicemgr: permission PING result + exit before deadline; worker reaped
+servicemgr: permissiond READY (validated durable decision; bearer table fresh)
+[arena INFO  sched] spawn(proc): id=195 slot=12 entry=ffffffff9cbb1280 cr3=23b000
+servicemgr: permission app SPAWNED (not grant/approval)
+[arena INFO  sched] spawn(proc): id=196 slot=13 entry=ffffffff9cbb1280 cr3=24e000
+[arena INFO  sched] spawn(proc): id=197 slot=14 entry=ffffffff9cbb1280 cr3=27b000
+[arena INFO  sched] thread_main(proc): id=195 entry=ffffffff9cbb1280 arg=11 cr3=23b000
+permapp: REQUEST arena.txt READ (not authority)
+permapp: audited ONLY mediator WRITE|COPY, 31 other cap slots empty
+[arena INFO  sched] thread_main(proc): id=196 entry=ffffffff9cbb1280 arg=12 cr3=24e000
+[arena INFO  syscall] map_memory: pid 100 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=197 entry=ffffffff9cbb1280 arg=13 cr3=27b000
+configd: READ UNSET
+permapp: endpoint-only ALLOW/DENY/REVOKE refused by receiver
+configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)
+[arena INFO  kernel] configread: boot-root reader reaped; no update authority delegated
+[arena INFO  sched] spawn(proc): id=198 slot=9 entry=ffffffff9cbb1280 cr3=1d3000
+packaged: observed initial cap occupancy 6
+
+packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified
+[arena INFO  sched] thread_main(proc): id=198 entry=ffffffff9cbb1280 arg=8 cr3=1d3000
+servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)
+permapp: malformed version/duplicate/rights/op refused by receiver x4
+permapp: ACQUIRE denied (no approval)
+servicemgr: permission app reaped through held Process cap
+configup: SKIP (no trusted test intent; no SET)
+[arena INFO  kernel] configup: boot-root updater reaped; marker never delegated to shell
+[arena INFO  sched] spawn(proc): id=199 slot=9 entry=ffffffff9cbb1280 cr3=1d3000
+[arena INFO  kernel] displayd spawned: pid 103; GOP=true virtio-gpu=false; sole framebuffer/BAR holder
+[arena INFO  sched] thread_main(proc): id=199 entry=ffffffff9cbb1280 arg=8 cr3=1d3000
+[displayd] GPU fallback reason: no covering modern GPU BAR cap
+[displayd] SharedRegion guest authority/zero/copy/mapping PASS
+[displayd] diagnostic shared region fully unmapped
+[arena INFO  syscall] map_memory: pid 103 window va=0x40200000 pages=469 writable=true mmio=true
+[displayd] ring3 GOP pixels ready (staged font v2)
+[arena INFO  kernel] displayd resources at parked boundary: shared 1/8 runs, 469/2048 pages, 1/32 maps; caps 5/32; free frames 114519; live processes 12
+[arena INFO  sched] spawn(proc): id=200 slot=12 entry=ffffffff9cbb1280 cr3=280000
+[arena INFO  sched] thread_main(proc): id=200 entry=ffffffff9cbb1280 arg=11 cr3=280000
+[displayprobe] ring3 MODE/cap-refusal/PRESENT 80x drain PASS
+[arena INFO  m9] displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS
+[arena INFO  sched] spawn(proc): id=201 slot=12 entry=ffffffff9cbb1280 cr3=280000
+[arena INFO  m10] desktop broker spawned with explicit delegated grants; application Process/region ownership remains userspace
+[arena INFO  sched] spawn(proc): id=202 slot=14 entry=ffffffff9cbb1280 cr3=767000
+[arena INFO  m10] late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image
+[arena INFO  kernel] shell spawned: pid 106 (caps: 0=Power/W 1=Image0/R 2=Notif13/RW 3=Endpoint1/W) — the console is live; type 'help'
+[arena INFO  m8] lifecycle protected refs shell=106 manager=93 netd=89 rngd=90; foreign placeholder READ-only
+[arena INFO  kernel] servicemgr: full fixture notification budget 25/25; twenty-sixth refused
+[arena INFO  m8] manager-owned netstackd pid 96: five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded
+[arena INFO  m8] lifecycle read-only foreign Process reference installed pid 96 slot 14
+[arena INFO  sched] thread_main(proc): id=201 entry=ffffffff9cbb1280 arg=11 cr3=280000
+[arena INFO  sched] thread_main(proc): id=202 entry=ffffffff9cbb1280 arg=13 cr3=767000
+ArenaOS shell v0.10 (M4.6 + M5.3/5.4 + M6.5, ADR-0020/0023/0028) — serial, keyboard, or console port.
+arena> [arena INFO  syscall] map_memory: pid 105 window va=0x40200000 pages=1 writable=true mmio=false
+fsd: OPEN obj 1 → fh 1
+storaged: READ  sector 16257 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #13, used idx 13)
+storaged: READ  sector 16256 buf 0x0000000000783000 → status 0, device wrote 513 bytes (completion #14, used idx 14)
+[desktop] real desktop frame presented; gallery launcher available
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113706/14/14/1/469/2/16
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113706/14/14/1/469/2/16
+[desktop] measured broker cap high-water=17
+[arena INFO  sched] spawn(proc): id=203 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] measured broker cap high-water=19
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=203 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113557/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113705/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=204 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=204 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+fsd: OPEN obj 2 → fh 1
+storaged: READ  sector 16259 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #15, used idx 15)
+storaged: READ  sector 16258 buf 0x0000000000783000 → status 0, device wrote 513 bytes (completion #16, used idx 16)
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+fsd: OPEN obj 2 → fh 1
+storaged: READ  sector 16259 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #17, used idx 17)
+storaged: READ  sector 16258 buf 0x0000000000783000 → status 0, device wrote 513 bytes (completion #18, used idx 18)
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113557/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113705/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=205 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=205 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+fsd: OPEN obj 2 → fh 1
+storaged: READ  sector 16259 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #19, used idx 19)
+storaged: READ  sector 16258 buf 0x0000000000783000 → status 0, device wrote 513 bytes (completion #20, used idx 20)
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113557/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113705/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=206 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=206 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113557/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113705/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=207 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=207 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113557/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113705/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=208 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=208 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113557/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113705/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=209 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=209 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113551/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113549/15/15/2/596/4/18
+[arena INFO  sched] spawn(proc): id=210 slot=16 entry=ffffffff9cbb1280 cr3=189d000
+[desktop] measured broker cap high-water=21
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=210 entry=ffffffff9cbb1280 arg=15 cr3=189d000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113394/16/16/3/723/5/20
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113394/16/16/3/723/5/20
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113394/16/16/3/723/5/20
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113392/16/16/3/723/6/20
+fsd: OPEN obj 2 → fh 1
+storaged: READ  sector 16259 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #21, used idx 21)
+storaged: READ  sector 16258 buf 0x0000000000783000 → status 0, device wrote 513 bytes (completion #22, used idx 22)
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113392/16/16/3/723/6/20
+[arena INFO  sched] spawn(proc): id=211 slot=17 entry=ffffffff9cbb1280 cr3=193a000
+[desktop] measured broker cap high-water=23
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=211 entry=ffffffff9cbb1280 arg=16 cr3=193a000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113237/17/17/4/850/7/22
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113237/17/17/4/850/7/22
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113237/17/17/4/850/7/22
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113235/17/17/4/850/8/22
+[arena INFO  sched] spawn(proc): id=212 slot=18 entry=ffffffff9cbb1280 cr3=19d7000
+[desktop] measured broker cap high-water=25
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=212 entry=ffffffff9cbb1280 arg=17 cr3=19d7000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113080/18/18/5/977/9/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113080/18/18/5/977/9/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113080/18/18/5/977/9/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113078/18/18/5/977/10/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113078/18/18/5/977/10/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113078/18/18/5/977/10/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113078/18/18/5/977/10/24
+[arena INFO  sched] spawn(proc): id=213 slot=19 entry=ffffffff9cbb1280 cr3=1a74000
+[desktop] measured broker cap high-water=27
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=213 entry=ffffffff9cbb1280 arg=18 cr3=1a74000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112923/19/19/6/1104/11/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112923/19/19/6/1104/11/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112923/19/19/6/1104/11/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112921/19/19/6/1104/12/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112921/19/19/6/1104/12/26
+[arena INFO  sched] spawn(proc): id=214 slot=20 entry=ffffffff9cbb1280 cr3=1b11000
+[desktop] measured broker cap high-water=29
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=214 entry=ffffffff9cbb1280 arg=19 cr3=1b11000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112766/20/20/7/1231/13/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112766/20/20/7/1231/13/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112766/20/20/7/1231/13/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112764/20/20/7/1231/14/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112764/20/20/7/1231/14/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112764/20/20/7/1231/14/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112764/20/20/7/1231/14/28
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112764/20/20/7/1231/14/28
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112920/19/19/6/1104/12/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112920/19/19/6/1104/12/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112920/19/19/6/1104/12/26
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112928/19/19/6/1104/12/26
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113076/18/18/5/977/10/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113076/18/18/5/977/10/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113076/18/18/5/977/10/24
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113084/18/18/5/977/10/24
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113232/17/17/4/850/8/22
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113232/17/17/4/850/8/22
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113232/17/17/4/850/8/22
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113388/16/16/3/723/6/20
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113388/16/16/3/723/6/20
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113396/16/16/3/723/6/20
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113552/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113700/14/14/1/469/2/16
+[arena INFO  sched] spawn(proc): id=215 slot=15 entry=ffffffff9cbb1280 cr3=1800000
+[desktop] real application spawned; held Process and own region bound
+[arena INFO  sched] thread_main(proc): id=215 entry=ffffffff9cbb1280 arg=14 cr3=1800000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113546/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113546/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113546/15/15/2/596/3/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+storaged: READ  sector 16257 buf 0x00000000001ec000 → status 0, device wrote 513 bytes (completion #23, used idx 23)
+storaged: WRITE sector 30 buf 0x0000000000783000 → status 0, device wrote 1 bytes (completion #24, used idx 24)
+fsd: PUT data written 1
+storaged: WRITE sector 29 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #25, used idx 25)
+storaged: WRITE sector 11 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #26, used idx 26)
+storaged: WRITE sector 12 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #27, used idx 27)
+storaged: WRITE sector 13 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #28, used idx 28)
+storaged: WRITE sector 14 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #29, used idx 29)
+storaged: WRITE sector 15 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #30, used idx 30)
+storaged: WRITE sector 16 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #31, used idx 31)
+storaged: WRITE sector 17 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #32, used idx 32)
+storaged: WRITE sector 18 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #33, used idx 33)
+storaged: WRITE sector 1 buf 0x00000000001ec000 → status 0, device wrote 1 bytes (completion #34, used idx 34)
+fsd: commit seq 4 (put): objtab@11 bitmap@15
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113544/15/15/2/596/4/18
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113552/15/15/2/596/4/18
+[desktop] application retired: Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=113700/14/14/1/469/2/16
+shutdown
+shutting down...
+[arena INFO  kernel] shutdown requested by pid 106 through its Power cap — goodnight
+[arena INFO  halt] halting via UEFI ResetSystem(shutdown)

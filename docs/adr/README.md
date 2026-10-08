@@ -80,6 +80,16 @@ Rules:
 
 | [0060](0060-phase9-owner-liveness-and-input-token.md) | Process-cap read-only owner liveness and inert input token, no PID authority or new notification | Implemented; real guest death/RED and final exact-EFI artifact qualification proved |
 | [0061](0061-phase9-graphics-fail-closed-boot-root.md) | Fail-stop service death and explicit client-death proof without claiming restart | Implemented; real guest death/RED and final exact-EFI artifact qualification proved |
+| [0062](0062-phase10-desktop-foundations.md) | Capability-safe desktop foundations and presentation boundary | Implemented; qualification pending |
+| [0063](0063-afs1-complete-file-replacement.md) | AFS1 complete-file CoW PUT | Implemented; crash/bytes/RED controls proved |
+| [0064](0064-bounded-multiple-dynamic-children.md) | Four unretired dynamic children and checked reply cancellation | Implemented; quota/refcounts/RED controls proved |
+| [0065](0065-desktop-function-grants-and-observation.md) | Scoped function grants, private clocks and read-only observations | Implemented; native/QMP proof, qualification pending |
+| [0066](0066-generic-image-graphical-launch.md) | Generic Image-cap graphics and mutation-free spawn preflight | Implemented; signed guest/pixel proof, qualification pending |
+| [0067](0067-desktop-owned-frame-publication.md) | Complete owned frame publication into private broker snapshots | Implemented; final mutation/qualification pending |
+| [0068](0068-desktop-qualification-measurements.md) | Bounded native clock sampling and unconditional signed-child diagnostic cleanup | Implemented; native mutation proof; qualification pending |
+| [0069](0069-idle-halts-only-when-nothing-is-runnable.md) | Idle loop halts only when nothing is runnable (IPC hops no longer wait for the PIT tick) | Implemented; qualification pending |
+| [0070](0070-damage-driven-composition-and-client-wake.md) | Damage-driven composition (canvas clip, retained scene, partial present) and broker client wake | Implemented; host equivalence proof; qualification pending |
+
 
 ## Template
 
@@ -108,3 +118,40 @@ What this costs us.
 ## Future implications
 What this constrains or enables later; what would trigger revisiting.
 ```
+| [0071](0071-endpoint-bound-notifications-and-timer-quota.md) | Endpoint-bound notifications (one wait for IPC, timers and events) and a per-process timer quota | Accepted |
+| [0072](0072-direct-ipc-handoff.md) | Direct handoff to a server woken by a blocking caller; bounded reply handoff (handoff chain budget) | Accepted |
+| [0073](0073-keyed-partial-repaint-and-regional-publication.md) | Keyed partial client repaint and regional Damage publication | Accepted |
+| [0074](0074-badged-endpoint-capabilities.md) | Badged endpoint capabilities (server-minted, generation-safe object handles) | Accepted |
+| [0075](0075-variable-and-transient-surfaces.md) | Variable and transient surfaces; twelve desktop sessions (measured budgets) | Accepted |
+| [0076](0076-afs2-hierarchical-filesystem.md) | AFS2: hierarchical copy-on-write filesystem (crash-prefix proven, fail-closed) | Accepted |
+| [0077](0077-filesd-file-capabilities.md) | filesd: AFS2 file service and badged file capabilities (lineages, Rtc, endpoint_badge) | Accepted |
+| [0078](0078-explorer-and-desktop-surface.md) | Files explorer and desktop surface over capabilities (Trash records, desk in the broker, pointer modifiers) | Accepted |
+| [0079](0079-directory-watches.md) | Directory watches (held directory capability, exact object identity, bounded, lineage-scoped) | Accepted |
+| [0080](0080-phase12-application-platform-and-abi.md) | Phase-12 native application-platform foundation and ABI boundary | Accepted; revised foundation scope qualified; installed-app maturity and foreign ABI deferred |
+| [0081](0081-apb1-bundle-format.md) | APB1 canonical signed multi-file application bundle wire format | Accepted and host/guest qualified; registry launch remains open |
+| [0082](0082-apb1-afs2-install-activation.md) | APB1 AFS2 staged install, durable readback and immutable rename activation | Accepted and protected guest install path qualified |
+| [0083](0083-native-startup-abi-v2.md) | Native startup ABI v2 via explicit read-only SharedRegion and capability descriptors | Accepted and built-in M12 path guest-qualified; installed registry launch remains open |
+| [0084](0084-bounded-native-heap.md) | Bounded native `GlobalAlloc` over owned frame mappings; explicit OOM, cap-slot and teardown contract | Accepted (host and independent single-thread guest proof pass; general VM and multi-user-thread integration open) |
+| [0085](0085-native-per-thread-tls-fsbase.md) | Native per-thread TLS through validated FS.base; preserve GS/`swapgs` | Accepted (host/runtime and independent single-thread guest handoff proof pass; user-thread lifecycle remains open) |
+| [0086](0086-native-startup-exact-cap-inventory.md) | Native startup scans every caller-owned cap slot and rejects unlisted authority using metadata-free `SYS_CAP_OCCUPIED` | Accepted; exact 128-slot inventory guest-qualified |
+| [0087](0087-native-process-groups-and-process-cap-lifecycle.md) | Fixed-capacity native process groups retain exact Process caps; PID and exit badges remain descriptive/wake-only | Accepted; M12 and Desktop lifecycle integrations guest-qualified; helpers and multi-window remain deferred |
+| [0088](0088-phase12-desktop-capacity-envelope.md) | Measured bounded kernel/Desktop resource envelope for 32 managed sessions | Accepted; 32-session capacity and mutation-free refusal guest-qualified |
+| [0089](0089-phase12-ipc-burst-capacity.md) | Bounded per-endpoint IPC caller queue for 32 simultaneous Phase-12 clients | Accepted; exact 32/33 queue guest proof and M12 32-session integration pass |
+| [0090](0090-desktop-badged-application-sessions.md) | Built-in ABI-v2 startup profile and badge-authenticated Desktop session dispatch | Accepted and guest-qualified through 32 sessions; multi-window and installed-app launch remain open |
+| [0091](0091-apb1-filesd-install-handoff.md) | APB1 install authority across packaged and filesd, preserving five startup grants and `/System` denial | Accepted and protected install handoff guest-qualified; installed-app registry launch deferred |
+| [0092](0092-installed-application-registry-and-launch-authority.md) | Boot-integrated APB1 registry and exact verified Image launch authority | Accepted; registry launch and teardown guest-qualified, full negative controls pending |
+| [0093](0093-bounded-native-image-envelope.md) | Bounded native Image storage, load-page, and dynamic child envelope | Accepted for Phase 13; install/launch guest passes, full refusal matrix pending |
+| [0094](0094-process-owned-user-mapping-inventory.md) | Process-owned mapping validation shared by all address-space threads | Accepted; M12 startup, 32-session, installed-app guests and 20/20 boots passed |
+| [0095](0095-process-owned-native-vm.md) | Guarded process-owned native VM regions with exact-cap commit, protect, query, and release | Accepted; ring-3 VM proof and 20/20 fresh boots passed |
+| [0096](0096-scalable-native-heap.md) | Lazy 16 MiB native application heap backed by process-owned VM | Accepted; host allocator tests and signed installed-app guest proof passed |
+| [0097](0097-multiple-ordinary-windows-per-application-session.md) | Multiple independently backed ordinary windows per badge-authenticated application session | Accepted; three-window signed APB1 guest proof and teardown passed |
+| [0098](0098-headless-installed-application-launch.md) | Headless signed APB1 launch with no Desktop endpoint or surface authority | Accepted; signed installed-app timer/wait guest proof and Process-cap reap passed |
+| [0099](0099-desktop-app-instance-process-groups.md) | Each Desktop AppInstance owns a separate bounded ProcessGroup of exact Process caps | Accepted; signed APB1 and 32-session scale regressions plus 10/10 clean boots passed |
+| [0100](0100-process-cap-exit-status.md) | Stable process exit status through the exact Process/READ capability | Accepted; M8 authority controls and signed APB1/headless lifecycle guest pass |
+| [0101](0101-signed-helper-allowlist.md) | Signed AHL1 helper allowlists, private timer authority, and AppInstance-owned ProcessGroup lifecycle | Accepted; signed guest exercises wait/reap, terminate, crash, and owner cleanup |
+| [0102](0102-native-thread-yield.md) | Native voluntary thread yield through the scheduler's existing yield path | Accepted; distinct from blocking and synchronization |
+| [0103](0103-desktop-manager-fail-stop.md) | Boot-root fail-stop policy when the trusted Desktop application manager exits | Accepted; avoids running orphaned app groups without exact owner state |
+| [0104](0104-native-byte-streams.md) | Native stdin/stdout/stderr over bounded SharedRegion rings and existing notification wake hints | Accepted; installed-app T1 guest proof passed |
+| [0105](0105-helper-standard-streams.md) | Explicit AHL1 helper stream delegation and owner-scoped wake | Accepted; signed helper T1 guest proof passed |
+| [0106](0106-native-user-threads.md) | Native process-owned ring-3 threads, guarded VM stacks, per-thread FS.base TLS, join and detach | Accepted; T1 guest proof and T3 preservation passed |
+| [0107](0107-native-synchronization-domains.md) | Capability-backed native wait domains for Mutex, Condvar, and Once | Accepted and implemented; T1 guest proof and 20/20 T3 preservation passed |

@@ -12,8 +12,6 @@ use abi::*;
 
 const EP: u64 = 0;
 const POOL: u64 = 1;
-const TARGET_X: usize = 700;
-const TARGET_Y: usize = 300;
 const COLOR: u32 = 0x00_a2_51_f4;
 
 fn exit(code: u64) -> ! {
@@ -73,13 +71,18 @@ pub extern "C" fn _start() -> ! {
         CAP_NONE,
     );
     let (mode, response) = call(Frame::Mode, CAP_NONE).unwrap_or_else(|code| exit(code));
+    let width = (mode[1] & 0xffff_ffff) as usize;
+    let height = (mode[1] >> 32) as usize;
     if mode[0] != 0
-        || mode[1] != (800 | (600 << 32))
+        || !(320..=1024).contains(&width)
+        || !(240..=768).contains(&height)
         || mode[2] == CAP_NONE
         || Frame::decode(&response) != Ok(Frame::Mode)
     {
         exit(85)
     }
+    let target_x = width - 100;
+    let target_y = height / 2;
     let source = mode[2];
     let mut cap = [0u64; 3];
     let mut bound = [0u64; 2];
@@ -100,7 +103,7 @@ pub extern "C" fn _start() -> ! {
             )
         } != 0
         || bound[0] != cap[1]
-        || bound[1] != 469
+        || bound[1] != (width * height * 4).div_ceil(4096) as u64
         || unsafe { syscall3(SYS_SHARED_PHYS, source, 0, denied.as_mut_ptr() as u64) } != -2
         || denied != [0xfeed_u64; 3]
     {
@@ -137,8 +140,8 @@ pub extern "C" fn _start() -> ! {
     for _ in 0..40 {
         reject(
             Frame::Present {
-                x: TARGET_X as i32,
-                y: TARGET_Y as i32,
+                x: target_x as i32,
+                y: target_y as i32,
                 w: 1,
                 h: 1,
             },
@@ -148,8 +151,8 @@ pub extern "C" fn _start() -> ! {
     // A valid capability cannot authorize *invalid geometry*.
     reject(
         Frame::Present {
-            x: 799,
-            y: 599,
+            x: width as i32 - 1,
+            y: height as i32 - 1,
             w: 2,
             h: 2,
         },
@@ -163,8 +166,8 @@ pub extern "C" fn _start() -> ! {
     }
     reject(
         Frame::Present {
-            x: TARGET_X as i32,
-            y: TARGET_Y as i32,
+            x: target_x as i32,
+            y: target_y as i32,
             w: 1,
             h: 1,
         },
@@ -174,13 +177,13 @@ pub extern "C" fn _start() -> ! {
         exit(90)
     }
 
-    let at = TARGET_Y * 800 + TARGET_X;
+    let at = target_y * width + target_x;
     unsafe {
         core::ptr::write_volatile((ram as *mut u32).add(at), COLOR);
     }
     let frame = Frame::Present {
-        x: TARGET_X as i32,
-        y: TARGET_Y as i32,
+        x: target_x as i32,
+        y: target_y as i32,
         w: 1,
         h: 1,
     };

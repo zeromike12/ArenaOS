@@ -1176,6 +1176,47 @@ outside the demonstrated scope. Phase 10 desktop applications are next.
 Shell, launcher, terminal, settings, file manager, editor, system monitor —
 each an ordinary ArenaOS application, no privileged status.
 
+## Phase 12 — Application platform (in progress)
+
+Phase 12 is building on the qualified Phase-11 source/archive baseline; it does
+not redesign desktop visuals or turn the kernel into POSIX/Linux. Accepted
+ADR-0080 separates app definitions, instances, process groups, windows, native
+capability authority, and the future launch-selected foreign proxy. ADR-0081
+freezes a distinct bounded APB1 multi-file format while preserving APKG v1;
+ADR-0082 chooses protected AFS2 staging, durable readback, cleanup, and atomic
+rename activation; ADR-0083 defines the additive userspace-owned startup ABI
+with 32 descriptive instance slots aligned to the 32-session manager envelope;
+ADR-0086 adds metadata-free occupancy checks for the complete 128-slot startup
+capability inventory (widened by ADR-0088); ADR-0087 records capability-native
+ProcessGroup lifecycles; ADR-0090 specifies per-session badged Desktop dispatch.
+ADR-0088 measures the bounded 32-session resource envelope, and ADR-0089
+raises only the per-endpoint IPC queue to 32 with typed BUSY backpressure.
+Host-only no_std lifecycle and APB1 install/registry cores pass 34 Rust tests
+plus the independent Python/OpenSSL oracle; the APB1 key resolver uses existing
+`Chain` semantics but is not fed by guest persistent policy authority.
+ADR-0083's no-alloc codec and reusable startup entry gate pass independent Rust
+and Python vectors; the production built-in path now uses them, with M12 guest
+qualification and affected M10/M11 regressions pending. ADR-0084 adds a bounded native
+`GlobalAlloc`; the exact M12 boot validates startup, rejects malformed ABI
+inputs and an unlisted live capability, qualifies FS-base TLS across a
+timer/kernel-thread handoff, exercises the generation-safe handle table and
+real attenuated Notification copy/close, and spawns/waits/reaps a child only
+through its held Process capability. It fills 32 heap pages, refuses page 33,
+frees/reuses blocks, preserves an occupied runtime cap slot, and verifies
+process-teardown accounting (7/7). The protected Desktop routes real app
+children through the capability-native ProcessGroup. The official M12 scale
+guest passes the 32-live built-in-app, one-window-per-process checkpoint with
+exact refusal/resource receipts, close/reuse, window operations, and teardown;
+M10 app/dynamic and M11 window/files regressions also pass. This is not yet the
+multi-window-per-app, headless-helper, signed/dynamic, or full lifecycle target.
+APB1/registry remain unwired to protected guest filesd or the desktop. Installed
+app discovery/launch, multi-window/headless helper ownership, general VM,
+user-thread lifecycle/TLS uniqueness, parent-death handling, streams, typed
+stream/file/event/socket wrappers, PIE, foreign proxy, complete resource
+qualification, the artifact-bound 100-boot run and extracted final archive
+remain open. See [the Phase-12 plan](phase12/PLAN.md) and [progress
+ledger](phase12/PROGRESS.md).
+
 ---
 
 ## Explicitly NOT building yet (scope firewall)
@@ -1188,8 +1229,10 @@ early, it's a scope violation:
 - ❌ Networking of any kind (before Phase 7; and no protocol beyond the one
   being milestone-tested)
 - ❌ Filesystem/disk code (before Phase 5)
-- ❌ POSIX compatibility layer, `fork`, signals, errno — ever, unless a
-  superseding ADR appears
+- ❌ POSIX compatibility in the native ArenaOS ABI, implicit `fork`, signals,
+  or errno semantics in the kernel. A future constrained userspace foreign-ABI
+  personality/proxy is separate from the native ABI (ADR-0080); Phase 12 proves
+  only the generic proxy boundary, not Linux compatibility.
 - ❌ SMP execution (structures are SMP-ready from M3, but second cores stay
   parked until a dedicated SMP milestone after M4)
 - ❌ Dynamic linking, shared libraries (static everything until Phase 8
@@ -1197,7 +1240,8 @@ early, it's a scope violation:
 - ❌ ARM64 code paths (interfaces stay arch-neutral; no second arch)
 - ❌ Real-hardware drivers (VirtIO/QEMU only until Phase 8 hardening)
 - ❌ Audio, USB, Bluetooth, printers, Wi-Fi
-- ❌ Package manager, installer, updater (Phase 8)
+- ❌ General package manager/updater beyond the accepted Phase-8 APKG v1
+  scope; APB1 application installation is a separate Phase-12 gate (ADR-0081/0082).
 - ❌ Kernel heap before M2.5; paging before M2.4; no "temporary" versions of
   them either
 - ❌ Secure boot / signing infrastructure (design is reserved — ADR-0003 —

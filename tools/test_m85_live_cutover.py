@@ -52,7 +52,8 @@ def main():
         (b'pkg: observed frames=',3,b'shutdown\r')])
     assert s.count('phase85-hold: first signed v7 launch exited normally')>=1
     assert s.count('phase85-hold: old signed v7 child ALIVE until manager Process-cap STOP')>=1
-    assert 'servicemgr: four repeated signed-child STOP/FINISH cycles and BUSY refusals PASS' in s
+    assert 'servicemgr: four repeated signed-child STOP/FINISH cycles and 24-child capacity refusals PASS' in s
+    assert 'servicemgr: 16 signed Image IDs fill the verified registry; seventeenth is mutation-free BUSY, exact revoke frees slots, stale copied bearer refused PASS' in s
     assert 'servicemgr: genuinely LIVE v7 child stopped and reaped by held Process cap before v8 COMMIT' in s
     assert 'servicemgr: distinct signed v7/v8 registry slots live together at PREPARE; old copied ID revoked before COMMIT' in s
     assert 'phase85-v2: version-eight image queried signed stage via inherited endpoint' in s
@@ -61,10 +62,16 @@ def main():
     samples=[tuple(map(int,x)) for x in re.findall(r'pkg: observed frames=(\d+) records=(\d+) processes=(\d+)',s)]
     assert len(samples)==3 and samples[0]==samples[2] and samples[1][0]<samples[0][0]
     assert samples[1][1:]==(samples[0][1]+1,samples[0][2]+1),samples
-    assert 'servicemgr: full fixture notification budget 18/18; nineteenth refused' in s
+    assert 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' in s
     mgr={name:int(n) for name,n in re.findall(r'servicemgr: observed cap occupancy ([\w-]+)=(\d+)',s)}
     assert all(0<mgr[k]<=32 for k in ('baseline','two-live-images','unretired-child','after-finish')),mgr
+    assert mgr['full-image-table']==32,mgr
     assert mgr['two-live-images']>mgr['unretired-child']>=mgr['baseline'] and mgr['after-finish']<mgr['two-live-images'],mgr
+    # This Phase-9 graphics fixture deliberately has no filesd/APB1 grant.
+    # Keep its late slot visible as a separate receipt without widening the
+    # historical low-32 manager inventory or its capacity assertion.
+    late_slot=[int(n) for n in re.findall(r'servicemgr: reserved APB1 slot127 descriptor=(\d+)',s)]
+    assert late_slot and all(n==0 for n in late_slot),late_slot
     peaks=[int(n) for n in re.findall(r'packaged: observed cap high-water (\d+)',s)]
     assert peaks and max(peaks)<=32 and max(peaks)>=7,peaks
     print(f'[{LABEL}] measured frames/records/processes={samples}; manager caps={mgr}; packaged cap peak={max(peaks)}',flush=True)
@@ -74,5 +81,5 @@ def main():
     acts=[('v8-'+t.PREFIX+f'-{i:02}').encode() for i in range(1,5)]
     assert all(k in now for k in (n1,n2,*acts)) and now[acts[3]][80:112]==H(s2)
     assert not afs1.audit(disk)
-    print(f'[{LABEL}] old signed v7 child ALIVE at v8 PREPARE; second child BUSY; held Process-cap STOP/reap and full-ID revoke before durable AACT4; distinct signed v8 ELF ran PASS',flush=True)
+    print(f'[{LABEL}] old signed v7 child ALIVE at v8 PREPARE; 24-child capacity refusal; held Process-cap STOP/reap and full-ID revoke before durable AACT4; distinct signed v8 ELF ran PASS',flush=True)
 if __name__=='__main__':main()

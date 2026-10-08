@@ -1,0 +1,17 @@
+{
+  "checkpoint": "phase10-engineering-baseline",
+  "source_commit": "11a45c34deae9a7a539a99fd7d3d6ea196ea6025",
+  "source_tree": "9ee2f00b0fb63a9598ae3ecdb9e58338f6ee4f97",
+  "branch": "arena/phase10-sol-engineering",
+  "suite_count": 97,
+  "efi_sha256": "18357914fbfca7c7af87bd846c0f12f645e7f9a78d4816395d688b295ba90c7f",
+  "esp_sha256": "6b6aad7070d54e63757997147a95f175c4485dcaf6c96be72a249a8e273f8494",
+  "stability": "100/100",
+  "resource_receipts": [
+    "[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, capacity refusal and exact cleanup PASS; baseline=(113706, 14, 14, 1, 469, 2, 16) peak=(112764, 20, 20, 7, 1231, 14, 28) transient-broker-caps=29",
+    "[m10-display] m10-display-default 800x600: real pixels/input/drag, six-app peak=(112764, 20, 20, 7, 1231, 14, 28), exact teardown PASS",
+    "[m10-display] m10-display-gpu 800x600: real pixels/input/drag, six-app peak=(112315, 20, 20, 8, 1233, 15, 28), exact teardown PASS",
+    "[m10-display] m10-display-gpu640 640x480: real pixels/input/drag, six-app peak=(112666, 20, 20, 8, 1064, 15, 28), exact teardown PASS"
+  ],
+  "reference_skin": "Sol; final Opus identity and post-design qualification remain pending"
+}

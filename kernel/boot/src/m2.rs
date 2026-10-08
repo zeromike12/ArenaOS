@@ -319,13 +319,36 @@ fn test_clock_monotonic() -> Result<(), &'static str> {
     }
 
     const WAIT_US: u64 = 2_000;
-    if !timekeeping::busy_wait_us(WAIT_US) {
-        return Err("busy-wait hit its anti-hang guard (clock not advancing?)");
+    // TCG's vCPU can be descheduled after the target is reached. Keep the
+    // strict lower bound on EVERY measurement and the original 4x upper
+    // bound on at least one of three windows, as for the PIT check below.
+    // A stopped/backward/early clock never earns another attempt.
+    let mut waited = 0;
+    let mut bounded = false;
+    for trial in 0..3 {
+        let start = timekeeping::now_us();
+        if !timekeeping::busy_wait_us(WAIT_US) {
+            return Err("busy-wait hit its anti-hang guard (clock not advancing?)");
+        }
+        let end = timekeeping::now_us();
+        if end < start {
+            return Err("clock went backwards during busy-wait");
+        }
+        waited = end - start;
+        if waited < WAIT_US {
+            return Err("busy-wait returned before requested monotonic duration");
+        }
+        if waited <= WAIT_US * 4 {
+            bounded = true;
+            break;
+        }
+        info!(
+            "m2",
+            "clock_monotonic: window {trial} overshot: {waited}us for {WAIT_US}us"
+        );
     }
-    let c = timekeeping::now_us();
-    let waited = c - b;
-    if !(WAIT_US..=WAIT_US * 4).contains(&waited) {
-        return Err("busy-wait duration outside [1x, 4x] of request");
+    if !bounded {
+        return Err("busy-wait exceeded 4x request in all three windows");
     }
 
     // Cross-check the scale against the oscillator directly: run a ~2 ms

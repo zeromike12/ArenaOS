@@ -18,12 +18,16 @@ def main():
     assert samples[1][1:]==(samples[0][1]+1,samples[0][2]+1)
     caps={k:int(v) for k,v in re.findall(r'servicemgr: observed cap occupancy ([\w-]+)=(\d+)',s)}
     assert all(0<caps[k]<=32 for k in ('baseline','two-live-images','unretired-child','after-finish'))
+    assert caps['full-image-table']==32,caps
     assert caps['two-live-images']>caps['unretired-child']>caps['baseline']
     assert caps['cycle-pre']==caps['cycle-post']==caps['after-finish'],caps
     initial=[int(n) for n in re.findall(r'packaged: observed initial cap occupancy (\d+)',s)]
     peaks=[int(n) for n in re.findall(r'packaged: observed cap high-water (\d+)',s)]
     assert initial and peaks and max(peaks)>initial[0] and max(peaks)<=32
-    assert 'servicemgr: full fixture notification budget 18/18; nineteenth refused' in s
-    assert 'servicemgr: second dynamic child BUSY while live and exited-unreaped; FINISH permits next spawn PASS' in s
-    print(f'[m85-resources] guest Power snapshots baseline/live/retired={samples}; manager measured caps={caps}; packaged measured initial={initial[0]} peak={max(peaks)}; Notification=18/18 and nineteenth refused PASS',flush=True)
+    assert 'servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed' in s
+    assert 'servicemgr: reserved APB1 slot127 descriptor=0 kind=0 rights=0' in s
+    assert 'servicemgr: extended cap occupancy [32,127)=0' in s
+    assert 'servicemgr: 24 dynamic children bounded; exact FINISH permits next spawn PASS' in s
+    assert 'servicemgr: 16 signed Image IDs fill the verified registry; seventeenth is mutation-free BUSY, exact revoke frees slots, stale copied bearer refused PASS' in s
+    print(f'[m85-resources] guest Power snapshots baseline/live/retired={samples}; manager measured caps={caps}; packaged measured initial={initial[0]} peak={max(peaks)}; Notification=64/64, sixty-fifth refused, probe slots reclaimed PASS',flush=True)
 if __name__=='__main__':main()

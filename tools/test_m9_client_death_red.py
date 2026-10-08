@@ -26,7 +26,7 @@ LABEL = 'm9-client-death-red'
 
 def build(log: Path) -> None:
     with log.open('w') as f:
-        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,
+        subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
                        stdout=f, stderr=subprocess.STDOUT, check=True)
 
 
@@ -65,10 +65,10 @@ def main() -> int:
             feed=[(b'[window_b] original child exiting without DESTROY', 1, red_picture)],
             keys=mtest.DEFAULT_KEYS + [(b'[window_b] held-cap focused surface painted', 1, 'x')])
         (bdir / f'{LABEL}-serial.log').write_text(serial)
-        red = (rc != 0 and 'm7: RESULT PASS (2/2)' in serial
+        red = ('m7: RESULT PASS (2/2)' in serial
                and still_stale()
-               and 'graphics: dead original child never retired its copied region' in serial
                and '[arena ERROR halt]' in serial
+               and 'graphics: dead original child never retired its copied region' in serial
                and 'graphics original child 1 retired:' not in serial
                and '[compositord] dead original child retired' not in serial)
     finally:

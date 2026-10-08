@@ -1,0 +1,17 @@
+[package]
+name = "arena-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+[dependencies]
+arena-ui = { path = "../ui" }
+arena-gfxkit = { path = "../gfxkit" }
+arena-compositor-model = { path = "../compositord" }
+arena-process = { path = "../arena-process" }
+arena-startup-abi = { path = "../arena-startup-abi" }
+arena-runtime = { path = "../arena-runtime" }
+[workspace]
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = "s"

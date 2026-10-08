@@ -17,7 +17,7 @@ from pathlib import Path
 from pyfatfs.PyFat import PyFat
 from pyfatfs.PyFatFS import PyFatFS
 
-FAT16_SIZE = 8 * 1024 * 1024  # 8 MiB: plenty for a few-MiB PE image
+FAT16_SIZE = 16 * 1024 * 1024  # 16 MiB: includes the Phase-13 bounded Image registry
 VOLUME_LABEL = "ARENAESP"
 
 

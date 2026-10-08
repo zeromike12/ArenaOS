@@ -679,6 +679,12 @@ fn finish_refused(slot: u64) -> bool {
     true
 }
 
+/// SYS_PROC_STATUS has six-register ABI slots. Always zero its reserved tail;
+/// syscall2 intentionally leaves registers 2–5 unspecified.
+fn process_status_query(slot: u64, out: u64) -> i64 {
+    unsafe { syscall6(SYS_PROC_STATUS, slot, out, 0, 0, 0, 0) }
+}
+
 fn lifetest() {
     let mut client = [0u64; 3];
     if unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_STACK, client.as_mut_ptr() as u64) } != 0 {
@@ -758,6 +764,22 @@ fn lifetest() {
         }
     }
     write_str("m8: lifetest held DESTROY refused for self/manager/netd/rngd\r\n");
+    let mut process_status = [u64::MAX; 2];
+    if process_status_query(SLOT_LIFE_SELF, process_status.as_mut_ptr() as u64) != 0
+        || process_status != [0, 0]
+        || process_status_query(SLOT_LIFE_FOREIGN, process_status.as_mut_ptr() as u64) != 0
+        || process_status != [0, 0]
+        || process_status_query(SLOT_STACK, process_status.as_mut_ptr() as u64) != STATUS_BAD_ARG
+        || process_status_query(CAP_SLOTS as u64, process_status.as_mut_ptr() as u64)
+            != STATUS_BAD_ARG
+        || process_status_query(SLOT_LIFE_SELF, 0) != STATUS_BAD_ADDRESS
+    {
+        write_str("m8: lifetest FAIL (Process status cap/right/pointer boundary)\r\n");
+        return;
+    }
+    write_str(
+        "m8: lifetest Process/READ status live state and wrong-cap/pointer refusals passed\r\n",
+    );
     if !finish_refused(SLOT_LIFE_FOREIGN)
         || !finish_refused(SLOT_STACK)
         || !finish_refused(SLOT_POWER)
@@ -785,9 +807,12 @@ fn lifetest() {
     }
     let badge = unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) };
     let mut desc = [0u64; 3];
+    process_status = [u64::MAX; 2];
     if badge != SPAWN_BADGE as i64
         || unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_LIFE_CHILD, desc.as_mut_ptr() as u64) } != 0
         || desc != [4, child as u64, RIGHTS_READ | RIGHTS_DESTROY]
+        || process_status_query(SLOT_LIFE_CHILD, process_status.as_mut_ptr() as u64) != 0
+        || process_status != [1, 42]
         || unsafe { syscall2(SYS_PROC_FINISH, SLOT_LIFE_CHILD, 1) } != STATUS_BUSY
         || unsafe { syscall2(SYS_PROC_FINISH, SLOT_LIFE_CHILD, 0) } != 0
         || !finish_refused(SLOT_LIFE_CHILD)
@@ -795,6 +820,11 @@ fn lifetest() {
         write_str("m8: lifetest FAIL (live-only mode, positive reap or stale slot)\r\n");
         return;
     }
+    if process_status_query(SLOT_LIFE_CHILD, process_status.as_mut_ptr() as u64) != STATUS_BAD_ARG {
+        write_str("m8: lifetest FAIL (stale Process status cap remained usable)\r\n");
+        return;
+    }
+    write_str("m8: lifetest status Process/READ reported exact child exit=42; stale refused\r\n");
     write_str("m8: lifetest child reaped by held cap; dead mode-1 and stale both refused\r\n");
     // Resolve a different slirp address after the refusals: the first
     // gateway resolve cannot make this a cache hit. The same endpoint
@@ -988,6 +1018,7 @@ fn do_cat(o: &mut Out, name: &[u8]) {
         unsafe { core::ptr::write_unaligned(msg.as_mut_ptr() as *mut u64, FS_XFER_MAX) };
         let (r, st, n) = fs_call(FS_OP_READ, fs_rw_w1(fh, off), SLOT_FILE_LENT, &mut msg);
         if r < 0 || st != FS_OK {
+            o.flush();
             fs_error(o, "cat: read", r, st);
             break;
         }
@@ -997,11 +1028,19 @@ fn do_cat(o: &mut Out, name: &[u8]) {
         // SAFETY: the device DMA'd `n` bytes into the shell's own
         // mapped frame; n <= FS_XFER_MAX < 4096.
         let chunk: &[u8] = unsafe { core::slice::from_raw_parts(va as *const u8, n as usize) };
-        write_all(chunk);
+        // Release the tail held from the previous chunk, then hold this
+        // chunk's tail in `o` until a read reports EOF: the file's last
+        // bytes and its line end leave in ONE console write (atomic in the
+        // kernel), so another process's log line cannot split them.
+        o.flush();
+        let held = chunk.len() - chunk.len().min(WRITE_MAX - 2);
+        write_all(&chunk[..held]);
+        o.bytes(&chunk[held..]);
         total += n;
         off += n;
     }
     o.crlf();
+    o.flush();
     let (r, st, _) = fs_call(FS_OP_CLOSE, fh, CAP_NONE, &mut msg);
     if r < 0 || st != FS_OK {
         fs_error(o, "cat: close", r, st);
@@ -1070,6 +1109,47 @@ fn do_write(o: &mut Out, rest: &[u8]) {
     o.str(" bytes to '");
     o.bytes(name);
     o.str("'\r\n");
+}
+
+/// `put NAME TEXT` — complete CoW replacement, including empty content.
+fn do_put(o: &mut Out, rest: &[u8]) {
+    let (name, tail) = split_word(rest);
+    let text = if tail.first() == Some(&b' ') {
+        &tail[1..]
+    } else {
+        tail
+    };
+    if name.is_empty() || name.len() >= FS_NAME_MAX {
+        o.str("usage: put NAME TEXT\r\n");
+        return;
+    }
+    let va = file_va(o);
+    if va == 0 {
+        return;
+    }
+    unsafe {
+        core::ptr::write_bytes(va as *mut u8, 0, 4096);
+        core::ptr::copy_nonoverlapping(text.as_ptr(), va as *mut u8, text.len());
+    }
+    let mut msg = [0u8; MSG_BYTES];
+    msg[..name.len()].copy_from_slice(name);
+    let (r, st, n) = fs_call(
+        FS_OP_PUT,
+        text.len() as u64,
+        if text.is_empty() {
+            CAP_NONE
+        } else {
+            SLOT_FILE_LENT
+        },
+        &mut msg,
+    );
+    if r < 0 || st != FS_OK || n != text.len() as u64 {
+        fs_error(o, "put", r, st);
+        return;
+    }
+    o.str("  put committed ");
+    o.u64(n);
+    o.str(" bytes\r\n");
 }
 
 /// `rm NAME` — UNLINK (M5.4): one transaction removes the name and
@@ -1245,6 +1325,8 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         || eq(rest, b"installtwo")
         || eq(rest, b"fourthtest")
         || eq(rest, b"maximalselect")
+        || eq(rest, b"graphics")
+        || eq(rest, b"graphicsrevoke")
     {
         let installtest = eq(rest, b"installtest");
         let selecttest = eq(rest, b"selecttest");
@@ -1257,6 +1339,8 @@ fn package_command(o: &mut Out, rest: &[u8]) {
         let installtwo = eq(rest, b"installtwo");
         let fourthtest = eq(rest, b"fourthtest");
         let maximalselect = eq(rest, b"maximalselect");
+        let graphics = eq(rest, b"graphics");
+        let graphicsrevoke = eq(rest, b"graphicsrevoke");
         if resources {
             if let Some([frames, records, processes]) = resource_snapshot() {
                 o.str("pkg: observed frames=");
@@ -1295,7 +1379,11 @@ fn package_command(o: &mut Out, rest: &[u8]) {
             o.str("pkg: private restart authority unavailable\r\n");
             return;
         }
-        let badge = if installtest {
+        let badge = if graphics {
+            MGR_BADGE_ADMIN_PKG_GRAPHICS
+        } else if graphicsrevoke {
+            MGR_BADGE_ADMIN_PKG_GRAPHICS_REVOKE
+        } else if installtest {
             MGR_BADGE_ADMIN_PKG_INSTALLTEST
         } else if selecttest {
             MGR_BADGE_ADMIN_PKG_SELECTTEST
@@ -1581,6 +1669,8 @@ pub unsafe extern "C" fn _start() -> ! {
                 do_ls(&mut o);
             } else if let Some(rest) = strip_prefix(line, b"cat ") {
                 do_cat(&mut o, rest);
+            } else if let Some(rest) = strip_prefix(line, b"put ") {
+                do_put(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"write ") {
                 do_write(&mut o, rest);
             } else if let Some(rest) = strip_prefix(line, b"rm ") {

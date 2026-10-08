@@ -1,0 +1,1 @@
+[m10-handoff] actual desktop, all six real apps, full working set, durable dark appearance; independent-boot byte-identical light/dark owned gallery QMP rasters PASS

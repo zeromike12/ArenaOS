@@ -1,0 +1,16 @@
+# Reuse the already-vendored, audited offline dependency closure from ADR-0053.
+[source.crates-io]
+replace-with = "arena-phase84-vendor"
+[source.arena-phase84-vendor]
+directory = "../../vendor/phase84"
+[net]
+offline = true
+[build]
+target = "x86_64-unknown-none"
+[target.x86_64-unknown-none]
+rustflags = [
+    '--cfg', 'curve25519_dalek_backend="serial"',
+    '-C', 'link-arg=-Tstartup-proof.ld',
+    '-C', 'link-arg=-no-pie',
+    '-C', 'relocation-model=static',
+]

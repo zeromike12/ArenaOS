@@ -24,7 +24,8 @@ def main() -> int:
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
     counters = resource_use(serial)
     passed = (rc == 0 and "m3:test:capability_spaces: PASS" in serial
-              and "capability_spaces: 32 slots/space" in serial
+              # ADR-0088 raises the fixed table from 64 to 128 slots.
+              and "capability_spaces: 128 slots/space" in serial
               and "m8: stackstress PASS" in serial and counters is not None
               # Phase 8.3 was 11/11; packaged adds one, displayd adds
               # one (13/13 before live graphics). ADR-0060 adds exactly
@@ -41,7 +42,7 @@ def main() -> int:
               and "halting via UEFI ResetSystem(shutdown)" in serial)
     print(f"[{LABEL}] rc={rc} {elapsed:.1f}s; post-EBS-relative "
           f"frames/records/processes={counters}")
-    print(f"[{LABEL}] CAPSPACE32: {'PASS' if passed else 'FAIL'} "
+    print(f"[{LABEL}] CAPSPACE128: {'PASS' if passed else 'FAIL'} "
           "(guest last-slot copy/move/full-refusal, three live restart cycles)")
     return 0 if passed else 1
 

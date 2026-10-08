@@ -53,6 +53,12 @@ use abi::*;
 // and the compositor; neither side can invent an untyped keyboard message.
 #[path = "../../compositord/src/wire.rs"]
 mod graphics_wire;
+#[allow(dead_code)]
+#[path = "../../desktop/src/input_wire.rs"]
+mod input_wire;
+#[allow(dead_code)]
+mod pointer;
+const DESKTOP_INPUT_TOKEN: u64 = 0x4152_454e_5031_3049;
 
 #[path = "../../virtio.rs"]
 mod virtio;
@@ -137,6 +143,23 @@ const KEY_REPEAT: u32 = 2;
 
 const KEY_LEFTSHIFT: u16 = 42;
 const KEY_RIGHTSHIFT: u16 = 54;
+/// Every modifier key (evdev code) and the modifier bit it holds
+/// (shift 1, ctrl 2, alt 4, super 8; the desktop wire's `mods`).
+const MODIFIER_KEYS: [(u16, u8); 8] = [
+    (KEY_LEFTSHIFT, 1),
+    (KEY_RIGHTSHIFT, 1),
+    (29, 2),
+    (97, 2),
+    (56, 4),
+    (100, 4),
+    (125, 8),
+    (126, 8),
+];
+/// A ring entry: key code, pressed flag and modifier bits packed together
+/// (console mode only ever stores presses of plain bytes).
+const fn entry(code: u16, pressed: bool, mods: u8) -> u32 {
+    code as u32 | (pressed as u32) << 16 | (mods as u32) << 24
+}
 
 /// The US-ASCII keymap: evdev keycode → byte, unshifted. Index 0 and
 /// every unmapped code (escape, control, alt, the function keys, the
@@ -212,12 +235,14 @@ struct Drv {
     bufs_va: u64,
     /// Their base physical address (what the descriptors carry).
     bufs_phys: u64,
-    /// Decoded keys awaiting a consumer (FIFO).
-    keys: [u8; KEY_RING],
+    /// Decoded keys awaiting a consumer (FIFO), packed by `entry`.
+    keys: [u32; KEY_RING],
     head: usize,
     len: usize,
     /// Either shift held — modifier state lives across events.
     shift: bool,
+    /// Which of the eight modifier keys are held (one bit per key).
+    held: u8,
     /// Interrupt-delivered event batches (what the poison reply
     /// reports: the driver's own count of hardware wakes).
     batches: u64,
@@ -255,12 +280,12 @@ impl Drv {
     /// Buffer one decoded key byte. A full ring means nobody is
     /// consuming: the NEWEST key loses (so what is already queued
     /// stays in typing order) and the loss is counted, never hidden.
-    fn push_key(&mut self, b: u8) {
+    fn push(&mut self, e: u32) {
         if self.len == KEY_RING {
             self.dropped += 1;
             return;
         }
-        self.keys[(self.head + self.len) % KEY_RING] = b;
+        self.keys[(self.head + self.len) % KEY_RING] = e;
         self.len += 1;
         self.bytes += 1;
     }
@@ -269,25 +294,75 @@ impl Drv {
     fn take(&mut self, out: &mut [u8]) -> usize {
         let n = core::cmp::min(out.len(), self.len);
         for (i, slot) in out.iter_mut().enumerate().take(n) {
-            *slot = self.keys[(self.head + i) % KEY_RING];
+            *slot = (self.keys[(self.head + i) % KEY_RING] & 0xff) as u8;
         }
         self.head = (self.head + n) % KEY_RING;
         self.len -= n;
         n
     }
 
+    /// Modifier bits of the currently held modifier keys.
+    fn mods(&self) -> u8 {
+        MODIFIER_KEYS
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.held & (1 << i) != 0)
+            .fold(0, |m, (_, (_, bit))| m | bit)
+    }
+    /// Take the next decoded desktop key: (code, pressed, modifiers).
+    fn next_key(&mut self) -> Option<(u16, bool, u8)> {
+        if self.len == 0 {
+            return None;
+        }
+        let e = self.keys[self.head];
+        self.head = (self.head + 1) % KEY_RING;
+        self.len -= 1;
+        Some((e as u16, (e >> 16) & 1 == 1, (e >> 24) as u8))
+    }
     /// Decode one evdev event into the key ring (or into modifier
-    /// state). Everything this keymap does not cover is ignored.
+    /// state). Everything this keymap does not cover is ignored. In
+    /// desktop mode releases and modifier changes are forwarded too (key
+    /// repeat and Alt+Tab need them); the console line discipline only
+    /// ever sees presses of plain bytes, as before.
     fn decode(&mut self, etype: u16, code: u16, value: u32) {
         if etype != EV_KEY {
             return; // EV_SYN and the rest are batching punctuation
         }
-        if code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT {
-            self.shift = value != KEY_RELEASE;
+        if let Some(i) = MODIFIER_KEYS.iter().position(|(c, _)| *c == code) {
+            let before = self.mods();
+            if value == KEY_RELEASE {
+                self.held &= !(1 << i);
+            } else {
+                self.held |= 1 << i;
+            }
+            self.shift = self.mods() & 1 != 0;
+            if desktop_mode() && self.mods() != before {
+                self.push(entry(input_wire::MODIFIERS, true, self.mods()));
+            }
             return;
         }
-        if value != KEY_PRESS && value != KEY_REPEAT {
+        let release = value == KEY_RELEASE;
+        if !release && value != KEY_PRESS && value != KEY_REPEAT {
+            return;
+        }
+        if release && !desktop_mode() {
             return; // releases produce no byte
+        }
+        let navigation = match code {
+            1 if desktop_mode() => 27,
+            59..=66 if desktop_mode() => input_wire::LAUNCH_FIRST + code - 59,
+            105 => 256,
+            106 => 257,
+            103 => 258,
+            108 => 259,
+            102 => 260,
+            107 => 261,
+            111 => 262,
+            _ => 0,
+        };
+        if navigation != 0 && desktop_mode() {
+            self.push(entry(navigation, !release, self.mods()));
+            return;
         }
         if (code as usize) >= KEYMAP_LEN {
             return;
@@ -298,7 +373,7 @@ impl Drv {
             KEYMAP_BASE[code as usize]
         };
         if b != 0 {
-            self.push_key(b);
+            self.push(entry(u16::from(b), !release, self.mods()));
         }
     }
 
@@ -423,8 +498,15 @@ pub unsafe extern "C" fn _start() -> ! {
         //    one-entry MSI-X table for the relay, VERSION_1 and
         //    nothing else (virtio-input defines no class feature
         //    bits), and at least the event queue.
-        let info = virtio::discover("inputd", "virtio-input", DEV_ID_INPUT, DEV_ID_INPUT, 1)
-            .unwrap_or_else(|e| vfail(e));
+        let info = virtio::discover_at(
+            "inputd",
+            "virtio-input",
+            DEV_ID_INPUT,
+            DEV_ID_INPUT,
+            1,
+            Some(syscall1(SYS_CAP_PHYS, SLOT_MMIO) as u64),
+        )
+        .unwrap_or_else(|e| vfail(e));
         let w = virtio::map_window("inputd", "virtio-input", &info, SLOT_MMIO)
             .unwrap_or_else(|e| vfail(e));
         virtio::handshake("inputd", &w, 0, FEATURE_VERSION_1, 1).unwrap_or_else(|e| vfail(e));
@@ -480,10 +562,11 @@ pub unsafe extern "C" fn _start() -> ! {
             q,
             bufs_va: va[0] + EVT_BUF_OFF,
             bufs_phys: phys[0] + EVT_BUF_OFF,
-            keys: [0u8; KEY_RING],
+            keys: [0u32; KEY_RING],
             head: 0,
             len: 0,
             shift: false,
+            held: 0,
             batches: 0,
             events: 0,
             bytes: 0,
@@ -511,6 +594,10 @@ pub unsafe extern "C" fn _start() -> ! {
             o.i64(vec);
         });
 
+        if syscall1(SYS_CAP_PHYS, 5) > 0 {
+            let mut tablet = Tablet::start();
+            desktop_loop(&mut drv, &mut tablet);
+        }
         // 5. Which service is this? A zero-length push asks the
         //    kernel whether slot 3 really holds the ConsoleInput
         //    authority — the capability IS the mode (ADR-0026).
@@ -591,6 +678,16 @@ unsafe fn console_loop(drv: &mut Drv) -> ! {
             match drv.wait_for_key() {
                 Ok(_) => {}
                 Err(()) => fail(EXIT_WAIT, "the relay wait or harvest failed"),
+            }
+            if desktop_mode() {
+                while let Some((code, pressed, mods)) = drv.next_key() {
+                    forward_desktop(input_wire::Frame::Key {
+                        code,
+                        pressed,
+                        mods,
+                    });
+                }
+                continue;
             }
             loop {
                 let n = drv.take(&mut buf);
@@ -721,5 +818,157 @@ fn reply_err(status: u64) {
     let rr = unsafe { syscall5(SYS_IPC_REPLY, SLOT_EP, status, 0, CAP_NONE, 0) };
     if rr < 0 {
         fail(EXIT_REPLY, "the error reply refused");
+    }
+}
+
+fn desktop_mode() -> bool {
+    let mut d = [0u64; 3];
+    (unsafe { syscall2(SYS_CAP_DESCRIBE, SLOT_DIAG, d.as_mut_ptr() as u64) == 0 })
+        && d[0] == 10
+        && d[1] == DESKTOP_INPUT_TOKEN
+        && d[2] & RIGHTS_READ != 0
+}
+struct Tablet {
+    q: Queue,
+    va: u64,
+    phys: u64,
+    pointer: pointer::Pointer,
+}
+impl Tablet {
+    unsafe fn start() -> Self {
+        unsafe {
+            let bar = syscall1(SYS_CAP_PHYS, 5);
+            let info = discover_at(
+                "inputd",
+                "virtio-tablet",
+                DEV_ID_INPUT,
+                DEV_ID_INPUT,
+                1,
+                Some(bar as u64),
+            )
+            .unwrap_or_else(|e| vfail(e));
+            let w = map_window("inputd", "virtio-tablet", &info, 5).unwrap_or_else(|e| vfail(e));
+            handshake("inputd", &w, 0, FEATURE_VERSION_1, 1).unwrap_or_else(|e| vfail(e));
+            let mut phys = [0];
+            let mut va = [0];
+            alloc_frames("inputd", 9, 1, &mut phys, &mut va).unwrap_or_else(|e| vfail(e));
+            let (q, _) = queue_setup(
+                "inputd",
+                &w,
+                &info,
+                QUEUE_EVT,
+                QUEUE_MAX,
+                RingMem::Packed {
+                    frame_phys: phys[0],
+                    frame_va: va[0],
+                },
+                IrqPlan {
+                    msix_entry: 0,
+                    slot_notif: SLOT_NOTIF,
+                    badge: IRQ_BADGE_INPUT,
+                },
+            )
+            .unwrap_or_else(|e| vfail(e));
+            let (_, _, used) = ring_offsets(q.qsz);
+            if used + 6 + 8 * u64::from(q.qsz) > EVT_BUF_OFF || q.qsz < EVT_BUFS {
+                fail(EXIT_QUEUE, "tablet buffers overlap ring");
+            }
+            let mut t = Self {
+                q,
+                va: va[0] + EVT_BUF_OFF,
+                phys: phys[0] + EVT_BUF_OFF,
+                pointer: pointer::Pointer::new(),
+            };
+            for id in 0..EVT_BUFS {
+                t.post(id);
+            }
+            driver_ok(&w);
+            log("inputd: real virtio tablet ready; graphical input isolated from serial shell");
+            t
+        }
+    }
+    unsafe fn post(&mut self, id: u16) {
+        unsafe {
+            desc_write(
+                self.q.desc_va,
+                id,
+                self.phys + u64::from(id) * EVT_BYTES,
+                EVT_BYTES as u32,
+                DESC_F_WRITE,
+                0,
+            );
+            self.q.publish(id);
+        }
+    }
+    unsafe fn harvest(&mut self) {
+        unsafe {
+            while self.q.used_idx() != self.q.used_seen {
+                let (id, bytes) = self.q.used_entry(self.q.used_seen % self.q.qsz);
+                self.q.used_seen = self.q.used_seen.wrapping_add(1);
+                if id >= u32::from(EVT_BUFS) {
+                    fail(EXIT_QUEUE, "tablet descriptor outside owned queue");
+                }
+                if u64::from(bytes) >= EVT_BYTES {
+                    let p = self.va + u64::from(id) * EVT_BYTES;
+                    if let Some(a) = self.pointer.event(r16(p), r16(p + 2), r32(p + 4)) {
+                        forward_desktop(input_wire::Frame::Pointer {
+                            x: a.x,
+                            y: a.y,
+                            buttons: a.buttons,
+                            wheel: a.wheel,
+                        });
+                    }
+                }
+                self.post(id as u16);
+            }
+        }
+    }
+}
+unsafe fn forward_desktop(frame: input_wire::Frame) {
+    if !desktop_mode() {
+        return;
+    }
+    let mut inline = frame
+        .encode()
+        .unwrap_or_else(|_| fail(EXIT_PUSH, "input frame invalid"));
+    let mut out = [0, 0, CAP_NONE];
+    let r = unsafe {
+        syscall6(
+            SYS_IPC_CALL,
+            SLOT_EP,
+            0,
+            0,
+            SLOT_DIAG,
+            out.as_mut_ptr() as u64,
+            inline.as_mut_ptr() as u64,
+        )
+    };
+    if out[2] != CAP_NONE {
+        unsafe {
+            syscall1(SYS_CAP_DESTROY, out[2]);
+        }
+        fail(EXIT_PUSH, "unexpected input reply cap");
+    }
+    if r != 0 || out[0] != 0 || input_wire::Frame::decode(&inline) != Ok(frame) {
+        fail(EXIT_PUSH, "desktop input service gone or refused");
+    }
+}
+unsafe fn desktop_loop(drv: &mut Drv, tablet: &mut Tablet) -> ! {
+    loop {
+        unsafe {
+            let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
+            if badge < 0 || badge as u64 & IRQ_BADGE_INPUT == 0 {
+                fail(EXIT_WAIT, "desktop IRQ wait refused");
+            }
+            drv.harvest();
+            while let Some((code, pressed, mods)) = drv.next_key() {
+                forward_desktop(input_wire::Frame::Key {
+                    code,
+                    pressed,
+                    mods,
+                });
+            }
+            tablet.harvest();
+        }
     }
 }

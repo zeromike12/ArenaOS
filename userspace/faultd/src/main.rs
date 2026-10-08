@@ -101,9 +101,10 @@ pub unsafe extern "C" fn _start() -> ! {
                     // Only the isolated M6 fault fixture grants COPY on
                     // SLOT_VOID. The caller requested no reply cap; the
                     // generic library must discard this landed reference.
-                    let r = syscall5(SYS_IPC_REPLY, SLOT_EP, FAULT_S_OK, 0,
-                                     SLOT_VOID, 0);
-                    if r < 0 { fail(EXIT_REPLY, "test reply cap refused"); }
+                    let r = syscall5(SYS_IPC_REPLY, SLOT_EP, FAULT_S_OK, 0, SLOT_VOID, 0);
+                    if r < 0 {
+                        fail(EXIT_REPLY, "test reply cap refused");
+                    }
                 }
                 FAULT_OP_HANG => {
                     if !take_diagnostic(landed, SLOT_DIAG) {

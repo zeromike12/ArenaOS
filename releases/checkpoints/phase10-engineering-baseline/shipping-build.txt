@@ -1,0 +1,613 @@
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.01s
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building userspace shell (userspace/shell, x86_64-unknown-none) ==
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
+   |
+23 | pub enum Error {
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
+   |
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:50:8
+   |
+50 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-shell` (bin "arena-shell") generated 25 warnings
+    Finished `release` profile [optimized] target(s) in 0.01s
+shell image: userspace/shell/target/x86_64-unknown-none/release/arena-shell (58848 bytes)
+== building userspace storaged (userspace/storaged, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.01s
+storaged image: userspace/storaged/target/x86_64-unknown-none/release/arena-storaged (23856 bytes)
+storaged image: userspace/storaged/target/x86_64-unknown-none/release/blktest (15592 bytes)
+== building userspace fsd (userspace/fsd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+fsd image: userspace/fsd/target/x86_64-unknown-none/release/fsd (33688 bytes)
+fsd image: userspace/fsd/target/x86_64-unknown-none/release/fstest (24944 bytes)
+== building userspace netd (userspace/netd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+netd image: userspace/netd/target/x86_64-unknown-none/release/arena-netd (24600 bytes)
+netd image: userspace/netd/target/x86_64-unknown-none/release/nettest (15784 bytes)
+== building userspace rngd (userspace/rngd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+rngd image: userspace/rngd/target/x86_64-unknown-none/release/arena-rngd (19936 bytes)
+rngd image: userspace/rngd/target/x86_64-unknown-none/release/rngtest (16008 bytes)
+== building userspace inputd (userspace/inputd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+inputd image: userspace/inputd/target/x86_64-unknown-none/release/arena-inputd (33704 bytes)
+inputd image: userspace/inputd/target/x86_64-unknown-none/release/inputtest (16032 bytes)
+== building userspace consoled (userspace/consoled, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.01s
+consoled image: userspace/consoled/target/x86_64-unknown-none/release/arena-consoled (24776 bytes)
+consoled image: userspace/consoled/target/x86_64-unknown-none/release/contest (15760 bytes)
+== building userspace faultd (userspace/faultd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.01s
+faultd image: userspace/faultd/target/x86_64-unknown-none/release/arena-faultd (15448 bytes)
+faultd image: userspace/faultd/target/x86_64-unknown-none/release/faulttest (15776 bytes)
+== building userspace timertest (userspace/timertest, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+timertest image: userspace/timertest/target/x86_64-unknown-none/release/timertest (15928 bytes)
+== building userspace netstackd (userspace/netstackd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+netstackd image: userspace/netstackd/target/x86_64-unknown-none/release/arena-netstackd (42168 bytes)
+netstackd image: userspace/netstackd/target/x86_64-unknown-none/release/arptest (34560 bytes)
+== building userspace servicemgr (userspace/servicemgr, x86_64-unknown-none) ==
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-servicemgr` (bin "arena-servicemgr") generated 22 warnings
+    Finished `release` profile [optimized] target(s) in 0.00s
+servicemgr image: userspace/servicemgr/target/x86_64-unknown-none/release/arena-servicemgr (60368 bytes)
+== building userspace configd (userspace/configd, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+config image: userspace/configd/target/x86_64-unknown-none/release/arena-configd (19720 bytes)
+config image: userspace/configd/target/x86_64-unknown-none/release/configread (9480 bytes)
+config image: userspace/configd/target/x86_64-unknown-none/release/configup (13568 bytes)
+== building userspace permissiond (userspace/permissiond, x86_64-unknown-none) ==
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
+   |
+23 | pub enum Error {
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
+   |
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:46:8
+   |
+46 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:50:8
+   |
+50 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:56:12
+   |
+56 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:63:12
+   |
+62 | impl Record {
+   | ----------- methods in this implementation
+63 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+67 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:72:8
+   |
+72 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:79:4
+   |
+79 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:87:8
+   |
+87 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:91:8
+   |
+91 | pub fn decision(allow: bool) -> [u8; 4] { [1, 1, u8::from(allow), 0] }
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+  --> src/../../permission.rs:95:8
+   |
+95 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+   |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:113:8
+    |
+113 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:144:12
+    |
+144 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:153:12
+    |
+153 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:161:12
+    |
+158 | impl Recovery {
+    | ------------- method in this implementation
+...
+161 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:170:18
+    |
+169 | impl Scan {
+    | --------- associated items in this implementation
+170 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+180 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+189 |     pub fn ingest(
+    |            ^^^^^^
+...
+228 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-permissiond` (bin "permapp") generated 25 warnings
+warning: constant `REQUEST_BYTES` is never used
+  --> src/../../permission.rs:32:11
+   |
+32 | pub const REQUEST_BYTES: usize = 8;
+   |           ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `READ_REQUEST` is never used
+  --> src/../../permission.rs:45:11
+   |
+45 | pub const READ_REQUEST: [u8; REQUEST_BYTES] = [1, 1, 1, 1, 1, 0, 0, 0];
+   |           ^^^^^^^^^^^^
+
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: `arena-permissiond` (bin "arena-permissiond") generated 27 warnings (23 duplicates)
+    Finished `release` profile [optimized] target(s) in 0.00s
+permission image: userspace/permissiond/target/x86_64-unknown-none/release/arena-permissiond (24912 bytes)
+permission image: userspace/permissiond/target/x86_64-unknown-none/release/permapp (15176 bytes)
+== building ADR-0053 verify-only package receiver (offline pinned sources) ==
+    Finished `release` profile [optimized] target(s) in 0.01s
+package image: userspace/packaged/target/x86_64-unknown-none/release/arena-packaged (108392 bytes)
+== building userspace depcheck (userspace/depcheck, x86_64-unknown-none) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+depcheck image: userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck (13744 bytes)
+== building Phase-9 userspace display service (GOP fallback) ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+display image: userspace/displayd/target/x86_64-unknown-none/release/arena-displayd (31480 bytes)
+shared probe image: userspace/displayd/target/x86_64-unknown-none/release/sharedprobe (15664 bytes)
+display protocol probe image: userspace/displayd/target/x86_64-unknown-none/release/displayprobe (15168 bytes)
+== building Phase-9 compositor and two independent windows ==
+    Finished `release` profile [optimized] target(s) in 0.00s
+graphics image: arena-compositord (3171944 bytes)
+graphics image: arena-window-a (16056 bytes)
+graphics image: arena-window-b (16064 bytes)
+    Finished `release` profile [optimized] target(s) in 0.00s
+   Compiling arena-kernel v0.1.0 (/workspace/ArenaOS/kernel/kernel)
+   Compiling arena-boot v0.1.0 (/workspace/ArenaOS/kernel/boot)
+    Finished `release` profile [optimized] target(s) in 3.90s
+kernel image: build/arena-boot.efi (7829504 bytes)
+ADR-0012 audit: no FPU/SSE/MMX instructions in the image
+/home/agent/.local/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+built /workspace/ArenaOS/build/arena-esp.img (8388608 bytes) with /EFI/BOOT/BOOTX64.EFI <- /workspace/ArenaOS/build/arena-boot.efi

@@ -10,9 +10,11 @@
 //! Phase 8.0 implementation substrate only: no service is spawned here.
 
 pub const MAX_SERVICES: usize = 4;
-pub const MAX_GRANTS: usize = 5; // matches spawn::MAX_INHERIT
+/// Independent service-manifest bound; Phase-13 application launches may
+/// use up to seven explicit kernel spawn grants.
+pub const MAX_GRANTS: usize = 5;
 pub const MAX_DEPS: usize = 4;
-pub const MAX_CAPS: usize = 32; // ADR-0048, matches fixed kernel cap slots
+pub const MAX_CAPS: usize = 32; // ADR-0048 manager policy bound (kernel table: 64, ADR-0075)
 pub const MAX_RESTARTS: u8 = 3;
 pub const MAX_BACKOFF_US: u64 = 1_000_000;
 pub const READ: u32 = 1;

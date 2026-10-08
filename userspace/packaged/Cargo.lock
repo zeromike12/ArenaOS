@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "arena-afs2"
+version = "0.1.0"
+
+[[package]]
 name = "arena-lib"
 version = "0.1.0"
 
@@ -12,6 +16,7 @@ version = "0.1.0"
 dependencies = [
  "arena-lib",
  "arena-phase84-crypto-audit",
+ "arena-platform-core",
 ]
 
 [[package]]
@@ -21,6 +26,19 @@ dependencies = [
  "ed25519-dalek",
  "sha2",
 ]
+
+[[package]]
+name = "arena-platform-core"
+version = "0.1.0"
+dependencies = [
+ "arena-afs2",
+ "arena-phase84-crypto-audit",
+ "arena-startup-abi",
+]
+
+[[package]]
+name = "arena-startup-abi"
+version = "0.1.0"
 
 [[package]]
 name = "block-buffer"

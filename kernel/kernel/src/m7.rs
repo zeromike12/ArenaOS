@@ -542,6 +542,9 @@ fn test_timer_facility() -> Res {
                 "client: a STALE timer id was accepted — it could have cancelled a stranger's timer (69)",
             );
         }
+        Some(70) => {
+            return Err("client: the fifth timer was not refused with STATUS_QUOTA (70)");
+        }
         Some(99) => return Err("client: the panic handler ran (99)"),
         _ => return Err("the client exited with a code from nowhere in the contract"),
     }
@@ -559,6 +562,13 @@ fn test_timer_facility() -> Res {
     }
     if after.fired < before.fired + 6 {
         return Err("the kernel counted fewer firings than the client observed");
+    }
+    // Phase 11.0 (ADR-0071): exactly one over-quota refusal, and no
+    // process ever held more than the per-process bound.
+    if after.quota_refused != before.quota_refused + 1
+        || after.per_process_high_water > timer::MAX_TIMERS_PER_PROCESS
+    {
+        return Err("timer_facility: the per-process quota was not enforced exactly once");
     }
     if after.cancelled != before.cancelled + 1 {
         return Err("the kernel did not count exactly one cancellation");

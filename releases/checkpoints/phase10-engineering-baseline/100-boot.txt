@@ -1,0 +1,24 @@
+/home/agent/.local/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+expectation derived from boot 1:
+    m1: RESULT PASS (8/8
+    m2: RESULT PASS (21/21
+    m3: RESULT PASS (13/13
+    m4: RESULT PASS (9/9
+    m5: RESULT PASS (6/6
+    m6: RESULT PASS (6/6
+    m7: RESULT PASS (2/2
+progress: 10/100 boots (pass=10 fail=0, 90s)
+progress: 20/100 boots (pass=20 fail=0, 180s)
+progress: 30/100 boots (pass=30 fail=0, 269s)
+progress: 40/100 boots (pass=40 fail=0, 361s)
+progress: 50/100 boots (pass=50 fail=0, 451s)
+progress: 60/100 boots (pass=60 fail=0, 542s)
+progress: 70/100 boots (pass=70 fail=0, 632s)
+progress: 80/100 boots (pass=80 fail=0, 723s)
+progress: 90/100 boots (pass=90 fail=0, 813s)
+progress: 100/100 boots (pass=100 fail=0, 905s)
+==============================================
+stability: 100/100 boots fully green in 905s (fail=0)
+receipt: build/stability-receipt.txt (18357914fbfca7c7af87bd846c0f12f645e7f9a78d4816395d688b295ba90c7f 100/100)
+STABILITY: PASS

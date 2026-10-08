@@ -59,7 +59,9 @@ def main() -> int:
                 "ring-3 described five distinct REAL boot/audited targets, not pid guesses or another fixture")
     ordered = ("m8: lifetest refs shell=",
                "m8: lifetest held DESTROY refused for self/manager/netd/rngd",
+               "m8: lifetest Process/READ status live state and wrong-cap/pointer refusals passed",
                "m8: lifetest foreign READ-only/guessed pid/empty/wrong-kind refused",
+               "m8: lifetest status Process/READ reported exact child exit=42; stale refused",
                "m8: lifetest child reaped by held cap; dead mode-1 and stale both refused",
                PASS)
     places = [serial.find(s) for s in ordered]

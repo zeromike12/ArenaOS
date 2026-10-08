@@ -1,0 +1,1101 @@
+{
+ "idle-empty": {
+  "host_s": 10.0,
+  "guest": {
+   "desktop.render": {
+    "count": 11,
+    "total_us": 22079,
+    "max_us": 2468,
+    "mean_us": 2007
+   },
+   "desktop.compose": {
+    "count": 11,
+    "total_us": 7437,
+    "max_us": 829,
+    "mean_us": 676
+   },
+   "desktop.rects": {
+    "count": 11,
+    "total_us": 11,
+    "max_us": 1,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 11,
+    "total_us": 13954,
+    "max_us": 1571,
+    "mean_us": 1268
+   },
+   "desktop.damage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.input2frame": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.sleep": {
+    "count": 2209,
+    "total_us": 10687949,
+    "max_us": 7534,
+    "mean_us": 4838
+   },
+   "desktop.request": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.kpx": {
+    "count": 11,
+    "total_us": 220,
+    "max_us": 20,
+    "mean_us": 20
+   }
+  }
+ },
+ "cursor-latency": {
+  "host_s": 2.095,
+  "motion_to_photon_ms": {
+   "median": 14.1,
+   "p95": 21.7,
+   "max": 24.9,
+   "n": 30,
+   "screendump_ms": 4.7
+  },
+  "guest": {
+   "desktop.render": {
+    "count": 34,
+    "total_us": 106055,
+    "max_us": 8285,
+    "mean_us": 3119
+   },
+   "desktop.compose": {
+    "count": 34,
+    "total_us": 16935,
+    "max_us": 760,
+    "mean_us": 498
+   },
+   "desktop.rects": {
+    "count": 34,
+    "total_us": 34,
+    "max_us": 2,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 34,
+    "total_us": 87336,
+    "max_us": 7670,
+    "mean_us": 2568
+   },
+   "desktop.damage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.input2frame": {
+    "count": 30,
+    "total_us": 109446,
+    "max_us": 8505,
+    "mean_us": 3648
+   },
+   "desktop.sleep": {
+    "count": 749,
+    "total_us": 3658173,
+    "max_us": 10090,
+    "mean_us": 4884
+   },
+   "desktop.request": {
+    "count": 30,
+    "total_us": 7743,
+    "max_us": 1121,
+    "mean_us": 258
+   },
+   "desktop.kpx": {
+    "count": 34,
+    "total_us": 69,
+    "max_us": 20,
+    "mean_us": 2
+   }
+  }
+ },
+ "pointer-empty": {
+  "host_s": 0.122,
+  "events": 150,
+  "guest": {
+   "desktop.render": {
+    "count": 51,
+    "total_us": 79662,
+    "max_us": 2465,
+    "mean_us": 1562
+   },
+   "desktop.compose": {
+    "count": 51,
+    "total_us": 21675,
+    "max_us": 695,
+    "mean_us": 425
+   },
+   "desktop.rects": {
+    "count": 51,
+    "total_us": 51,
+    "max_us": 2,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 51,
+    "total_us": 55080,
+    "max_us": 1894,
+    "mean_us": 1080
+   },
+   "desktop.damage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.input2frame": {
+    "count": 50,
+    "total_us": 87900,
+    "max_us": 2754,
+    "mean_us": 1758
+   },
+   "desktop.sleep": {
+    "count": 174,
+    "total_us": 842334,
+    "max_us": 5267,
+    "mean_us": 4841
+   },
+   "desktop.request": {
+    "count": 50,
+    "total_us": 7300,
+    "max_us": 300,
+    "mean_us": 146
+   },
+   "desktop.kpx": {
+    "count": 51,
+    "total_us": 0,
+    "max_us": 20,
+    "mean_us": 0
+   }
+  }
+ },
+ "launch-terminal": {
+  "host_s": 2.699,
+  "guest": {
+   "app0.paint": {
+    "count": 1,
+    "total_us": 5897,
+    "max_us": 5897,
+    "mean_us": 5897
+   },
+   "app0.damage": {
+    "count": 1,
+    "total_us": 8336,
+    "max_us": 8336,
+    "mean_us": 8336
+   },
+   "app0.event2damage": {
+    "count": 1,
+    "total_us": 21021,
+    "max_us": 21021,
+    "mean_us": 21021
+   },
+   "app0.poll": {
+    "count": 2,
+    "total_us": 13516,
+    "max_us": 6965,
+    "mean_us": 6758
+   },
+   "desktop.render": {
+    "count": 21,
+    "total_us": 115855,
+    "max_us": 12273,
+    "mean_us": 5516
+   },
+   "desktop.compose": {
+    "count": 21,
+    "total_us": 27507,
+    "max_us": 3608,
+    "mean_us": 1309
+   },
+   "desktop.rects": {
+    "count": 21,
+    "total_us": 21,
+    "max_us": 3,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 1,
+    "total_us": 122,
+    "max_us": 122,
+    "mean_us": 122
+   },
+   "desktop.present": {
+    "count": 21,
+    "total_us": 86942,
+    "max_us": 11015,
+    "mean_us": 4140
+   },
+   "desktop.damage": {
+    "count": 1,
+    "total_us": 1068,
+    "max_us": 1068,
+    "mean_us": 1068
+   },
+   "desktop.input2frame": {
+    "count": 3,
+    "total_us": 13104,
+    "max_us": 10672,
+    "mean_us": 4368
+   },
+   "desktop.sleep": {
+    "count": 779,
+    "total_us": 3636342,
+    "max_us": 8901,
+    "mean_us": 4667
+   },
+   "desktop.request": {
+    "count": 135,
+    "total_us": 51138,
+    "max_us": 7074,
+    "mean_us": 378
+   },
+   "desktop.kpx": {
+    "count": 21,
+    "total_us": 2112,
+    "max_us": 172,
+    "mean_us": 100
+   }
+  }
+ },
+ "typing-terminal": {
+  "host_s": 0.98,
+  "events": 31,
+  "guest": {
+   "desktop.render": {
+    "count": 33,
+    "total_us": 213112,
+    "max_us": 8338,
+    "mean_us": 6457
+   },
+   "desktop.compose": {
+    "count": 33,
+    "total_us": 58495,
+    "max_us": 2413,
+    "mean_us": 1772
+   },
+   "desktop.rects": {
+    "count": 33,
+    "total_us": 33,
+    "max_us": 1,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 33,
+    "total_us": 152423,
+    "max_us": 5944,
+    "mean_us": 4618
+   },
+   "desktop.damage": {
+    "count": 31,
+    "total_us": 31784,
+    "max_us": 1515,
+    "mean_us": 1025
+   },
+   "desktop.input2frame": {
+    "count": 31,
+    "total_us": 8171,
+    "max_us": 448,
+    "mean_us": 263
+   },
+   "desktop.sleep": {
+    "count": 367,
+    "total_us": 1616645,
+    "max_us": 5140,
+    "mean_us": 4405
+   },
+   "desktop.request": {
+    "count": 158,
+    "total_us": 74054,
+    "max_us": 1872,
+    "mean_us": 468
+   },
+   "desktop.kpx": {
+    "count": 33,
+    "total_us": 4092,
+    "max_us": 131,
+    "mean_us": 124
+   },
+   "app0.paint": {
+    "count": 31,
+    "total_us": 35207,
+    "max_us": 1367,
+    "mean_us": 1135
+   },
+   "app0.damage": {
+    "count": 31,
+    "total_us": 203265,
+    "max_us": 7502,
+    "mean_us": 6556
+   },
+   "app0.event2damage": {
+    "count": 31,
+    "total_us": 394261,
+    "max_us": 14289,
+    "mean_us": 12718
+   },
+   "app0.poll": {
+    "count": 97,
+    "total_us": 490598,
+    "max_us": 5947,
+    "mean_us": 5057
+   }
+  }
+ },
+ "key-latency": {
+  "host_s": 2.767,
+  "key_to_photon_ms": {
+   "median": 35.0,
+   "p95": 47.9,
+   "max": 48.3,
+   "n": 30
+  },
+  "guest": {
+   "app0.paint": {
+    "count": 30,
+    "total_us": 43724,
+    "max_us": 2164,
+    "mean_us": 1457
+   },
+   "app0.damage": {
+    "count": 30,
+    "total_us": 208219,
+    "max_us": 10523,
+    "mean_us": 6940
+   },
+   "app0.event2damage": {
+    "count": 30,
+    "total_us": 415589,
+    "max_us": 19311,
+    "mean_us": 13852
+   },
+   "app0.poll": {
+    "count": 164,
+    "total_us": 763826,
+    "max_us": 8936,
+    "mean_us": 4657
+   },
+   "desktop.render": {
+    "count": 33,
+    "total_us": 234581,
+    "max_us": 10303,
+    "mean_us": 7108
+   },
+   "desktop.compose": {
+    "count": 33,
+    "total_us": 63633,
+    "max_us": 3428,
+    "mean_us": 1928
+   },
+   "desktop.rects": {
+    "count": 33,
+    "total_us": 33,
+    "max_us": 2,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 1,
+    "total_us": 102,
+    "max_us": 102,
+    "mean_us": 102
+   },
+   "desktop.present": {
+    "count": 33,
+    "total_us": 168525,
+    "max_us": 7183,
+    "mean_us": 5106
+   },
+   "desktop.damage": {
+    "count": 30,
+    "total_us": 36656,
+    "max_us": 1984,
+    "mean_us": 1221
+   },
+   "desktop.input2frame": {
+    "count": 30,
+    "total_us": 9972,
+    "max_us": 590,
+    "mean_us": 332
+   },
+   "desktop.sleep": {
+    "count": 742,
+    "total_us": 3465588,
+    "max_us": 14543,
+    "mean_us": 4670
+   },
+   "desktop.request": {
+    "count": 222,
+    "total_us": 106106,
+    "max_us": 2408,
+    "mean_us": 477
+   },
+   "desktop.kpx": {
+    "count": 33,
+    "total_us": 3989,
+    "max_us": 152,
+    "mean_us": 120
+   }
+  }
+ },
+ "launch-five-more": {
+  "host_s": 13.658,
+  "guest": {
+   "app1.paint": {
+    "count": 2,
+    "total_us": 7302,
+    "max_us": 6090,
+    "mean_us": 3651
+   },
+   "app1.damage": {
+    "count": 2,
+    "total_us": 14514,
+    "max_us": 8942,
+    "mean_us": 7257
+   },
+   "app1.event2damage": {
+    "count": 2,
+    "total_us": 34575,
+    "max_us": 22897,
+    "mean_us": 17287
+   },
+   "app1.poll": {
+    "count": 35,
+    "total_us": 272431,
+    "max_us": 61846,
+    "mean_us": 7783
+   },
+   "app0.paint": {
+    "count": 1,
+    "total_us": 1191,
+    "max_us": 1191,
+    "mean_us": 1191
+   },
+   "app0.damage": {
+    "count": 1,
+    "total_us": 9197,
+    "max_us": 9197,
+    "mean_us": 9197
+   },
+   "app0.event2damage": {
+    "count": 1,
+    "total_us": 18046,
+    "max_us": 18046,
+    "mean_us": 18046
+   },
+   "app0.poll": {
+    "count": 35,
+    "total_us": 253575,
+    "max_us": 67677,
+    "mean_us": 7245
+   },
+   "desktop.render": {
+    "count": 108,
+    "total_us": 747258,
+    "max_us": 19335,
+    "mean_us": 6919
+   },
+   "desktop.compose": {
+    "count": 108,
+    "total_us": 317081,
+    "max_us": 7553,
+    "mean_us": 2935
+   },
+   "desktop.rects": {
+    "count": 108,
+    "total_us": 108,
+    "max_us": 3,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 5,
+    "total_us": 637,
+    "max_us": 211,
+    "mean_us": 127
+   },
+   "desktop.present": {
+    "count": 108,
+    "total_us": 416359,
+    "max_us": 14075,
+    "mean_us": 3855
+   },
+   "desktop.damage": {
+    "count": 22,
+    "total_us": 22118,
+    "max_us": 1516,
+    "mean_us": 1005
+   },
+   "desktop.input2frame": {
+    "count": 15,
+    "total_us": 71961,
+    "max_us": 11478,
+    "mean_us": 4797
+   },
+   "desktop.sleep": {
+    "count": 2708,
+    "total_us": 10745452,
+    "max_us": 39963,
+    "mean_us": 3968
+   },
+   "desktop.request": {
+    "count": 1955,
+    "total_us": 959199,
+    "max_us": 6273,
+    "mean_us": 490
+   },
+   "desktop.kpx": {
+    "count": 108,
+    "total_us": 12881,
+    "max_us": 172,
+    "mean_us": 119
+   },
+   "app2.paint": {
+    "count": 2,
+    "total_us": 7589,
+    "max_us": 6405,
+    "mean_us": 3794
+   },
+   "app2.damage": {
+    "count": 2,
+    "total_us": 20466,
+    "max_us": 11730,
+    "mean_us": 10233
+   },
+   "app2.event2damage": {
+    "count": 2,
+    "total_us": 44336,
+    "max_us": 27845,
+    "mean_us": 22168
+   },
+   "app2.poll": {
+    "count": 34,
+    "total_us": 292582,
+    "max_us": 93404,
+    "mean_us": 8605
+   },
+   "app3.paint": {
+    "count": 2,
+    "total_us": 8573,
+    "max_us": 7326,
+    "mean_us": 4286
+   },
+   "app3.damage": {
+    "count": 2,
+    "total_us": 16079,
+    "max_us": 8456,
+    "mean_us": 8039
+   },
+   "app3.event2damage": {
+    "count": 2,
+    "total_us": 37594,
+    "max_us": 22518,
+    "mean_us": 18797
+   },
+   "app3.poll": {
+    "count": 34,
+    "total_us": 289880,
+    "max_us": 95346,
+    "mean_us": 8525
+   },
+   "app4.paint": {
+    "count": 13,
+    "total_us": 27360,
+    "max_us": 10753,
+    "mean_us": 2104
+   },
+   "app4.damage": {
+    "count": 13,
+    "total_us": 112792,
+    "max_us": 11141,
+    "mean_us": 8676
+   },
+   "app4.event2damage": {
+    "count": 2,
+    "total_us": 48570,
+    "max_us": 32152,
+    "mean_us": 24285
+   },
+   "app4.poll": {
+    "count": 190,
+    "total_us": 1296950,
+    "max_us": 95266,
+    "mean_us": 6826
+   },
+   "app5.paint": {
+    "count": 1,
+    "total_us": 8824,
+    "max_us": 8824,
+    "mean_us": 8824
+   },
+   "app5.damage": {
+    "count": 1,
+    "total_us": 7933,
+    "max_us": 7933,
+    "mean_us": 7933
+   },
+   "app5.event2damage": {
+    "count": 1,
+    "total_us": 24938,
+    "max_us": 24938,
+    "mean_us": 24938
+   },
+   "app5.poll": {
+    "count": 2,
+    "total_us": 19128,
+    "max_us": 11251,
+    "mean_us": 9564
+   }
+  }
+ },
+ "idle-six-apps": {
+  "host_s": 10.0,
+  "guest": {
+   "app4.paint": {
+    "count": 22,
+    "total_us": 31138,
+    "max_us": 1933,
+    "mean_us": 1415
+   },
+   "app4.damage": {
+    "count": 22,
+    "total_us": 196934,
+    "max_us": 14508,
+    "mean_us": 8951
+   },
+   "app4.event2damage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "app4.poll": {
+    "count": 331,
+    "total_us": 2167372,
+    "max_us": 9952,
+    "mean_us": 6547
+   },
+   "desktop.render": {
+    "count": 32,
+    "total_us": 266154,
+    "max_us": 17325,
+    "mean_us": 8317
+   },
+   "desktop.compose": {
+    "count": 32,
+    "total_us": 117548,
+    "max_us": 7512,
+    "mean_us": 3673
+   },
+   "desktop.rects": {
+    "count": 32,
+    "total_us": 32,
+    "max_us": 1,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 32,
+    "total_us": 143465,
+    "max_us": 9567,
+    "mean_us": 4483
+   },
+   "desktop.damage": {
+    "count": 21,
+    "total_us": 21749,
+    "max_us": 1609,
+    "mean_us": 1035
+   },
+   "desktop.input2frame": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.sleep": {
+    "count": 1841,
+    "total_us": 6701756,
+    "max_us": 6950,
+    "mean_us": 3640
+   },
+   "desktop.request": {
+    "count": 1972,
+    "total_us": 1084964,
+    "max_us": 2471,
+    "mean_us": 550
+   },
+   "desktop.kpx": {
+    "count": 32,
+    "total_us": 2970,
+    "max_us": 131,
+    "mean_us": 92
+   }
+  }
+ },
+ "pointer-six-apps": {
+  "host_s": 0.109,
+  "events": 150,
+  "guest": {
+   "app2.paint": {
+    "count": 1,
+    "total_us": 928,
+    "max_us": 928,
+    "mean_us": 928
+   },
+   "app2.damage": {
+    "count": 1,
+    "total_us": 24025,
+    "max_us": 24025,
+    "mean_us": 24025
+   },
+   "app2.event2damage": {
+    "count": 1,
+    "total_us": 49371,
+    "max_us": 49371,
+    "mean_us": 49371
+   },
+   "app2.poll": {
+    "count": 27,
+    "total_us": 400194,
+    "max_us": 163371,
+    "mean_us": 14822
+   },
+   "app5.paint": {
+    "count": 1,
+    "total_us": 1912,
+    "max_us": 1912,
+    "mean_us": 1912
+   },
+   "app5.damage": {
+    "count": 1,
+    "total_us": 10555,
+    "max_us": 10555,
+    "mean_us": 10555
+   },
+   "app5.event2damage": {
+    "count": 1,
+    "total_us": 123231,
+    "max_us": 123231,
+    "mean_us": 123231
+   },
+   "app5.poll": {
+    "count": 33,
+    "total_us": 452001,
+    "max_us": 174022,
+    "mean_us": 13697
+   },
+   "desktop.render": {
+    "count": 30,
+    "total_us": 132000,
+    "max_us": 13660,
+    "mean_us": 4400
+   },
+   "desktop.compose": {
+    "count": 30,
+    "total_us": 44850,
+    "max_us": 5139,
+    "mean_us": 1495
+   },
+   "desktop.rects": {
+    "count": 30,
+    "total_us": 30,
+    "max_us": 2,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 30,
+    "total_us": 82260,
+    "max_us": 9099,
+    "mean_us": 2742
+   },
+   "desktop.damage": {
+    "count": 7,
+    "total_us": 7693,
+    "max_us": 1515,
+    "mean_us": 1099
+   },
+   "desktop.input2frame": {
+    "count": 22,
+    "total_us": 81224,
+    "max_us": 5476,
+    "mean_us": 3692
+   },
+   "desktop.sleep": {
+    "count": 128,
+    "total_us": 455040,
+    "max_us": 5325,
+    "mean_us": 3555
+   },
+   "desktop.request": {
+    "count": 198,
+    "total_us": 113850,
+    "max_us": 2056,
+    "mean_us": 575
+   },
+   "desktop.kpx": {
+    "count": 30,
+    "total_us": 930,
+    "max_us": 131,
+    "mean_us": 31
+   },
+   "app1.paint": {
+    "count": 1,
+    "total_us": 1467,
+    "max_us": 1467,
+    "mean_us": 1467
+   },
+   "app1.damage": {
+    "count": 1,
+    "total_us": 14517,
+    "max_us": 14517,
+    "mean_us": 14517
+   },
+   "app1.event2damage": {
+    "count": 1,
+    "total_us": 24467,
+    "max_us": 24467,
+    "mean_us": 24467
+   },
+   "app1.poll": {
+    "count": 27,
+    "total_us": 387288,
+    "max_us": 154823,
+    "mean_us": 14344
+   },
+   "app0.paint": {
+    "count": 1,
+    "total_us": 1408,
+    "max_us": 1408,
+    "mean_us": 1408
+   },
+   "app0.damage": {
+    "count": 1,
+    "total_us": 12456,
+    "max_us": 12456,
+    "mean_us": 12456
+   },
+   "app0.event2damage": {
+    "count": 1,
+    "total_us": 31667,
+    "max_us": 31667,
+    "mean_us": 31667
+   },
+   "app0.poll": {
+    "count": 29,
+    "total_us": 379958,
+    "max_us": 93656,
+    "mean_us": 13102
+   },
+   "app4.paint": {
+    "count": 2,
+    "total_us": 2612,
+    "max_us": 1433,
+    "mean_us": 1306
+   },
+   "app4.damage": {
+    "count": 2,
+    "total_us": 22724,
+    "max_us": 14332,
+    "mean_us": 11362
+   },
+   "app4.event2damage": {
+    "count": 1,
+    "total_us": 38898,
+    "max_us": 38898,
+    "mean_us": 38898
+   },
+   "app4.poll": {
+    "count": 28,
+    "total_us": 352212,
+    "max_us": 153959,
+    "mean_us": 12579
+   },
+   "app3.paint": {
+    "count": 1,
+    "total_us": 1247,
+    "max_us": 1247,
+    "mean_us": 1247
+   },
+   "app3.damage": {
+    "count": 1,
+    "total_us": 9483,
+    "max_us": 9483,
+    "mean_us": 9483
+   },
+   "app3.event2damage": {
+    "count": 1,
+    "total_us": 68559,
+    "max_us": 68559,
+    "mean_us": 68559
+   },
+   "app3.poll": {
+    "count": 27,
+    "total_us": 376029,
+    "max_us": 146957,
+    "mean_us": 13927
+   }
+  }
+ },
+ "drag-six-apps": {
+  "host_s": 0.046,
+  "events": 62,
+  "guest": {
+   "desktop.render": {
+    "count": 18,
+    "total_us": 118774,
+    "max_us": 12625,
+    "mean_us": 6598
+   },
+   "desktop.compose": {
+    "count": 18,
+    "total_us": 64530,
+    "max_us": 5337,
+    "mean_us": 3585
+   },
+   "desktop.rects": {
+    "count": 18,
+    "total_us": 18,
+    "max_us": 2,
+    "mean_us": 1
+   },
+   "desktop.nodamage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "desktop.present": {
+    "count": 18,
+    "total_us": 51390,
+    "max_us": 7131,
+    "mean_us": 2855
+   },
+   "desktop.damage": {
+    "count": 4,
+    "total_us": 3858,
+    "max_us": 1127,
+    "mean_us": 964
+   },
+   "desktop.input2frame": {
+    "count": 13,
+    "total_us": 88855,
+    "max_us": 12206,
+    "mean_us": 6835
+   },
+   "desktop.sleep": {
+    "count": 344,
+    "total_us": 1180508,
+    "max_us": 5434,
+    "mean_us": 3431
+   },
+   "desktop.request": {
+    "count": 384,
+    "total_us": 207453,
+    "max_us": 1703,
+    "mean_us": 540
+   },
+   "desktop.kpx": {
+    "count": 18,
+    "total_us": 2170,
+    "max_us": 152,
+    "mean_us": 120
+   },
+   "app4.paint": {
+    "count": 4,
+    "total_us": 5842,
+    "max_us": 1754,
+    "mean_us": 1460
+   },
+   "app4.damage": {
+    "count": 4,
+    "total_us": 32902,
+    "max_us": 9490,
+    "mean_us": 8225
+   },
+   "app4.event2damage": {
+    "count": 0,
+    "total_us": 0,
+    "max_us": 0,
+    "mean_us": 0
+   },
+   "app4.poll": {
+    "count": 58,
+    "total_us": 488770,
+    "max_us": 146729,
+    "mean_us": 8427
+   },
+   "app5.paint": {
+    "count": 1,
+    "total_us": 2191,
+    "max_us": 2191,
+    "mean_us": 2191
+   },
+   "app5.damage": {
+    "count": 1,
+    "total_us": 11118,
+    "max_us": 11118,
+    "mean_us": 11118
+   },
+   "app5.event2damage": {
+    "count": 1,
+    "total_us": 28613,
+    "max_us": 28613,
+    "mean_us": 28613
+   },
+   "app5.poll": {
+    "count": 31,
+    "total_us": 321470,
+    "max_us": 76179,
+    "mean_us": 10370
+   }
+  }
+ }
+}

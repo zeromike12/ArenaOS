@@ -152,10 +152,15 @@ struct Queue {
 /// relay until the device's MSI-X completion arrives. Returns the
 /// device's status byte and its used-ring length.
 fn serve(q: &mut Queue, op: u64, sector: u64, buf_phys: u64) -> Result<(u64, u32), ()> {
+    let block = op == OP_READ_BLOCK || op == OP_WRITE_BLOCK;
     // The request header lives in the driver's own req page; the DATA
     // descriptor points at the CALLER's frame — the device DMAs it
     // directly (zero copy, ADR-0022).
-    let req_type = if op == OP_WRITE { BLK_T_OUT } else { BLK_T_IN };
+    let req_type = if op == OP_WRITE || op == OP_WRITE_BLOCK {
+        BLK_T_OUT
+    } else {
+        BLK_T_IN
+    };
     // SAFETY: q's VAs are the driver's own mapped frames; single-
     // threaded image; volatile ring writes; the sentinel proves the
     // completion status is the device's.
@@ -167,7 +172,7 @@ fn serve(q: &mut Queue, op: u64, sector: u64, buf_phys: u64) -> Result<(u64, u32
         // Chain: 0 header (device-readable) → 1 data (readable for a
         // write, WRITABLE for a read) → 2 status (device-writable).
         desc_write(q.vq.desc_va, 0, q.req_phys, REQ_HEADER_LEN, DESC_F_NEXT, 1);
-        let data_flags = if op == OP_READ {
+        let data_flags = if op == OP_READ || op == OP_READ_BLOCK {
             DESC_F_NEXT | DESC_F_WRITE
         } else {
             DESC_F_NEXT
@@ -176,7 +181,11 @@ fn serve(q: &mut Queue, op: u64, sector: u64, buf_phys: u64) -> Result<(u64, u32
             q.vq.desc_va,
             1,
             buf_phys,
-            SECTOR_BYTES as u32,
+            if block {
+                BLOCK_FRAME_BYTES as u32
+            } else {
+                SECTOR_BYTES as u32
+            },
             data_flags,
             2,
         );
@@ -395,7 +404,8 @@ pub unsafe extern "C" fn _start() -> ! {
                 // SAFETY: thread_exit diverges; 42 is the clean-exit code.
                 syscall1(SYS_THREAD_EXIT, EXIT_OK);
             }
-            if op > OP_WRITE {
+            let block = op == OP_READ_BLOCK || op == OP_WRITE_BLOCK;
+            if op > OP_WRITE && !block {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
                 let rr = syscall5(SYS_IPC_REPLY, SLOT_EP, VIRTIO_BLK_S_UNSUPP, 0, CAP_NONE, 0);
                 if rr < 0 {
@@ -403,7 +413,12 @@ pub unsafe extern "C" fn _start() -> ! {
                 }
                 continue;
             }
-            if landed == CAP_NONE || buf_off + SECTOR_BYTES as u64 > BLOCK_FRAME_BYTES {
+            let span = if block {
+                BLOCK_FRAME_BYTES
+            } else {
+                SECTOR_BYTES as u64
+            };
+            if landed == CAP_NONE || buf_off + span > BLOCK_FRAME_BYTES {
                 let _ = syscall1(SYS_CAP_DESTROY, landed);
                 let st = if landed == CAP_NONE {
                     VIRTIO_BLK_S_IOERR
@@ -447,7 +462,14 @@ pub unsafe extern "C" fn _start() -> ! {
                     }
                     log_line(|o| {
                         o.str("storaged: ");
-                        o.str(if op == OP_WRITE { "WRITE" } else { "READ " });
+                        // Whole-block ops use distinct words so historical
+                        // per-sector triggers keep their exact counts.
+                        o.str(match op {
+                            OP_WRITE => "WRITE",
+                            OP_READ => "READ ",
+                            OP_WRITE_BLOCK => "BLKW4K",
+                            _ => "BLKR4K",
+                        });
                         o.str(" sector ");
                         o.u64(sector);
                         o.str(" buf ");

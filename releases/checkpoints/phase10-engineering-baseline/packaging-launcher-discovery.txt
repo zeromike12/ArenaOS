@@ -1,0 +1,11 @@
+/home/agent/.local/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/phase10_checkpoint_bundle.py", line 131, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/phase10_checkpoint_bundle.py", line 128, in main
+    assert result.returncode==0 and 'EXTRACTED PHASE10 PIXELS PASS:' in result.stdout,result.stdout+result.stderr
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: EXTRACTED PHASE10 BOOT FAILED: usage: phase10_archive_boot.py [--unqualified-smoke]
+

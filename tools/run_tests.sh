@@ -11,6 +11,14 @@ if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
 fi
 failures=0
 ran=0
+source_commit=$(git -C "$REPO_ROOT" rev-parse HEAD)
+source_status=$(git -C "$REPO_ROOT" status --porcelain)
+echo "QUALIFICATION SOURCE COMMIT: $source_commit"
+if [[ -z "$source_status" ]]; then
+    echo "QUALIFICATION SOURCE CLEAN: yes"
+else
+    echo "QUALIFICATION SOURCE CLEAN: no (development run)"
+fi
 
 # Host-side unit tests (ROADMAP 2.5+): pure-logic crates run natively.
 for pkg in arena-heap arena-sync; do
@@ -150,6 +158,98 @@ else
     echo "!! Phase 8.5 records/refusal tests FAILED"
 fi
 
+# ADR-0076 AFS2: host model proofs and the Rust engine against the model
+# (both with RED controls).
+echo "== AFS2 host model and Rust engine (crash prefixes, cross-check, RED)"
+if (cd "$REPO_ROOT/tools" && python3 test_afs2.py && python3 test_afs2.py --red && \
+    python3 test_afs2_rust.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! AFS2 host proofs FAILED"
+fi
+
+echo "== Phase 11 directory watches: host table and RED controls"
+if (cd "$REPO_ROOT/tools" && python3 test_watch_red.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! directory watch host proofs FAILED"
+fi
+
+echo "== Phase 11.7: Arena Sans 13 art and generated face in sync"
+if (cd "$REPO_ROOT" && python3 tools/gen_face13.py --check); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! face13 generation check FAILED"
+fi
+
+# Phase 12.3/12.4: independent bundle/startup oracles, Rust host suites,
+# no_std receiver/runtime builds, and the exact guest image used by M12.
+echo "== Phase 12 APB1, startup ABI and native runtime host/target suites"
+if (cd "$REPO_ROOT" && python3 tools/test_package_record.py && \
+    python3 tools/test_apb1_format.py && \
+    python3 tools/test_startup_abi.py && \
+    (cd userspace/arena-platform && \
+        cargo fmt -- --check && \
+        cargo test --manifest-path Cargo.toml --lib \
+            --target x86_64-unknown-linux-gnu --locked && \
+        cargo clippy --lib --target x86_64-unknown-linux-gnu \
+            --locked -- -D warnings && \
+        cargo build --manifest-path Cargo.toml \
+            --release --target x86_64-unknown-none --locked) && \
+    (cd userspace/arena-runtime && \
+        cargo fmt -- --check && \
+        cargo test --manifest-path Cargo.toml --lib \
+            --target x86_64-unknown-linux-gnu --locked && \
+        cargo clippy --lib --target x86_64-unknown-linux-gnu \
+            --locked -- -D warnings && \
+        cargo build --manifest-path Cargo.toml \
+            --bin arena-startup-proof --release --locked)); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! APB1 host or no_std target tests FAILED"
+fi
+
+# Phase 13 runtime ownership and installed-application integration. The
+# Desktop and service-manager host suites cover policy/record models; the
+# guest fixture below exercises real installed APB1 launch, windows, streams,
+# helper cleanup, VM, heap, threads, synchronization, and persistent state.
+echo "== Phase 13 Desktop and service-manager host/target suites"
+if (cd "$REPO_ROOT" && \
+    cargo fmt --manifest-path userspace/desktop/Cargo.toml -- --check && \
+    cargo test --manifest-path userspace/desktop/Cargo.toml --lib \
+        --target x86_64-unknown-linux-gnu --locked && \
+    cargo clippy --manifest-path userspace/desktop/Cargo.toml --lib \
+        --target x86_64-unknown-linux-gnu --locked -- -D warnings && \
+    rustfmt --check --edition 2024 userspace/servicemgr/src/package.rs \
+        userspace/servicemgr/src/inventory.rs && \
+    cargo test --manifest-path userspace/servicemgr/Cargo.toml --lib \
+        --target x86_64-unknown-linux-gnu --locked && \
+    cargo check --manifest-path userspace/servicemgr/Cargo.toml \
+        --target x86_64-unknown-none --locked); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! Phase 13 Desktop or service-manager host/target tests FAILED"
+fi
+
+echo "== Phase 13 real installed-application pressure guest"
+if (cd "$REPO_ROOT" && python3 tools/test_phase13_registry_guest.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! Phase 13 installed-application guest FAILED"
+fi
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"
@@ -164,6 +264,12 @@ for t in "$REPO_ROOT"/tools/test_m*.py; do
 done
 
 echo "======================================================================"
+if [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" != "$source_commit" || \
+      "$(git -C "$REPO_ROOT" status --porcelain)" != "$source_status" ]]; then
+    failures=$((failures+1))
+    echo "!! source changed during full suite"
+fi
+echo "QUALIFICATION SOURCE END: $(git -C "$REPO_ROOT" rev-parse HEAD)"
 if [[ $failures -eq 0 ]]; then
     echo "ALL TESTS PASSED ($ran test suites)"
     exit 0

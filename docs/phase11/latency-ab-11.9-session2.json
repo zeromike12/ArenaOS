@@ -1,0 +1,142 @@
+{
+ "base": {
+  "commit": "44559f2",
+  "pointer_p50_median": 6.45,
+  "pointer_p95_median": 9.75,
+  "key_p50_median": 12.3,
+  "key_p95_median": 15.350000000000001,
+  "screendump_ms_median": 4.85,
+  "runs": [
+   {
+    "pointer": {
+     "median": 6.5,
+     "p95": 11.6,
+     "max": 17.7,
+     "n": 30,
+     "screendump_ms": 5.0
+    },
+    "key": {
+     "median": 11.7,
+     "p95": 15.4,
+     "max": 21.2,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.3,
+     "p95": 7.7,
+     "max": 13.7,
+     "n": 30,
+     "screendump_ms": 4.5
+    },
+    "key": {
+     "median": 12.2,
+     "p95": 16.1,
+     "max": 16.3,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.4,
+     "p95": 7.9,
+     "max": 16.3,
+     "n": 30,
+     "screendump_ms": 5.1
+    },
+    "key": {
+     "median": 12.7,
+     "p95": 15.3,
+     "max": 18.7,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 7.1,
+     "p95": 12.3,
+     "max": 14.7,
+     "n": 30,
+     "screendump_ms": 4.7
+    },
+    "key": {
+     "median": 12.4,
+     "p95": 15.2,
+     "max": 19.1,
+     "n": 30
+    }
+   }
+  ]
+ },
+ "new": {
+  "commit": "674eff8",
+  "pointer_p50_median": 6.6,
+  "pointer_p95_median": 11.0,
+  "key_p50_median": 12.2,
+  "key_p95_median": 16.45,
+  "screendump_ms_median": 4.55,
+  "runs": [
+   {
+    "pointer": {
+     "median": 7.6,
+     "p95": 14.0,
+     "max": 15.0,
+     "n": 30,
+     "screendump_ms": 4.4
+    },
+    "key": {
+     "median": 10.6,
+     "p95": 15.7,
+     "max": 17.0,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.7,
+     "p95": 8.7,
+     "max": 12.1,
+     "n": 30,
+     "screendump_ms": 5.0
+    },
+    "key": {
+     "median": 14.2,
+     "p95": 16.5,
+     "max": 17.7,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.5,
+     "p95": 8.1,
+     "max": 13.3,
+     "n": 30,
+     "screendump_ms": 4.6
+    },
+    "key": {
+     "median": 12.8,
+     "p95": 17.3,
+     "max": 18.2,
+     "n": 30
+    }
+   },
+   {
+    "pointer": {
+     "median": 6.5,
+     "p95": 13.3,
+     "max": 13.7,
+     "n": 30,
+     "screendump_ms": 4.5
+    },
+    "key": {
+     "median": 11.6,
+     "p95": 16.4,
+     "max": 19.2,
+     "n": 30
+    }
+   }
+  ]
+ }
+}
