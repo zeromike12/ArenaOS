@@ -40,6 +40,10 @@ pub const TRANSIENT_PAGES: usize = TRANSIENT_MAX_PIXELS * 4 / 4096;
 /// The last page of the reservation: this client's filesd I/O page
 /// (ADR-0077). The broker never reads it as pixels.
 pub const FILE_PAGES: usize = 1;
+/// The broker rejected a surface commit because a newer Configure superseded
+/// the size this client just adopted. The client should poll for that size and
+/// repaint instead of treating the ordinary drag race as a dead session.
+pub const STATUS_RESIZE_SUPERSEDED: i64 = 3;
 /// A live transient surface (menu, tooltip, dialog) of this client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Transient {

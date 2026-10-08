@@ -67,6 +67,7 @@ const _: () = assert!(LIMIT == arena_desktop::apps::STARTUP_INSTANCE_SLOTS);
 const TRANSIENT_PAGES: u64 = (wm::TRANSIENT_MAX_PIXELS * 4 / 4096) as u64;
 /// The session's filesd I/O page, last in the reservation (ADR-0077).
 const FILE_PAGES: u64 = arena_desktop::client::FILE_PAGES as u64;
+const STATUS_RESIZE_SUPERSEDED: u64 = arena_desktop::client::STATUS_RESIZE_SUPERSEDED as u64;
 /// Per-session memory, fixed for the screen at startup (ADR-0075): every
 /// session can take any size up to the work area (maximize) without
 /// reallocation, so a resize never changes which memory backs a session.
@@ -6509,6 +6510,13 @@ extern "C" fn main() -> ! {
                                         status = 0;
                                         dirty = true;
                                     }
+                                } else {
+                                    // A pointer resize may advance the policy
+                                    // dimensions after the client polled the
+                                    // previous Configure. Let it fetch and
+                                    // publish the newer size instead of
+                                    // treating this ordinary race as fatal.
+                                    status = STATUS_RESIZE_SUPERSEDED;
                                 }
                             }
                             Frame::Resizable {

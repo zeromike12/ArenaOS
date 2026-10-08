@@ -265,13 +265,13 @@ pub unsafe extern "C" fn _start() -> ! {
         // so the suite's exact cancel count is unchanged; firing returns
         // the quota, which the 60 s arm below then relies on.
         for badge in BADGE_QUOTA {
-            arm(badge, 1_000);
+            arm(badge, 1_000_000);
         }
         let quota_mask = BADGE_QUOTA
             .iter()
             .copied()
             .fold(0, |mask, badge| mask | badge);
-        let over = syscall3(SYS_TIMER_ARM, SLOT_NOTIF, BADGE_QUOTA[0], 1_000);
+        let over = syscall3(SYS_TIMER_ARM, SLOT_NOTIF, BADGE_QUOTA[0], 1_000_000);
         if over != STATUS_QUOTA {
             log_line(|o| {
                 o.str("timertest: the over-quota arm returned ");
@@ -282,9 +282,9 @@ pub unsafe extern "C" fn _start() -> ! {
                 "the fifth simultaneous timer was not refused with STATUS_QUOTA",
             );
         }
-        // The timers are deliberately short. Under scheduler load, the
-        // first one can wake us before the others expire. Unique badge bits
-        // let the test collect every firing across multiple blocking waits.
+        // Keep a generous overlap window so host scheduling cannot expire a
+        // timer between the four successful arms and the over-quota check.
+        // Unique badge bits let the test collect every firing across waits.
         let mut quota_fired = 0;
         while quota_fired & quota_mask != quota_mask {
             let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
