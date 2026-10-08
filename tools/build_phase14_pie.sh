@@ -44,3 +44,4 @@ print(f"Phase-14 static PIE: {len(raw)} bytes, ELF64 ET_DYN x86-64, SHA-256 {dig
 PY
 
 echo "fixture: ${FIXTURE#"$REPO_ROOT"/}"
+python3 "$REPO_ROOT/tools/build_phase14_bundle.py"

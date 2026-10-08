@@ -21,6 +21,12 @@ to `fixture.elf`; this checked-in ELF is also used by kernel validator tests.
 Rebuilding with the recorded toolchain must reproduce the fixture hash in
 `docs/phase14/PIE-FIXTURE.md`.
 
+The same build script creates `phase14-pie.apb1`, a pinned, already-signed
+APB1 package containing the exact ELF. The signature uses the repository's
+existing development/test package root; the checked-in package is the
+extracted-witness input, so release verification does not need or embed a
+signing key. `tools/build_phase14_bundle.py` checks its exact bundle digest.
+
 The fixture intentionally exercises relocations generated throughout the Rust
 startup runtime. The kernel must apply every supported `R_X86_64_RELATIVE`
 record, not just the one application-visible function pointer.

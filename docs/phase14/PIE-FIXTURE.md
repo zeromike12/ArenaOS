@@ -19,6 +19,15 @@ readelf 2.44. The output is a genuine linker-produced ELF64 PIE, not a relabeled
 | File size | 23,256 bytes |
 | SHA-256 | `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e` |
 
+## Signed APB1 fixture
+
+`userspace/phase14-pie/phase14-pie.apb1` is a 24,040-byte deterministic
+development-root-signed bundle containing exactly `bin/pie` with the ELF above.
+Its SHA-256 is
+`04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`. The
+release archive carries these signed bytes directly; extracted verification
+does not need a private signing key.
+
 ## Program headers
 
 | Type | File offset | Virtual address | File size | Memory size | Flags | Alignment |

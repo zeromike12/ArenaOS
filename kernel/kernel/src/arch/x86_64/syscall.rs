@@ -225,6 +225,9 @@ pub const SYS_SYNC_INFO: u64 = 74;
 pub const SYS_NOTIFICATION_CREATE: u64 = 63;
 /// Read aggregate thread/service/timer/VM/sync occupancy through MemoryPool/READ.
 pub const SYS_RESOURCE_DETAIL: u64 = 75;
+/// ADR-0110: submit one exact 32-byte virtio-rng seed through the private
+/// production rngd capability; (cap slot, readable 32-byte user buffer).
+pub const SYS_ENTROPY_SEED: u64 = 76;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -271,6 +274,10 @@ pub const STATUS_CALLER_GONE: Status = -6;
 pub const STATUS_QUOTA: Status = -7;
 /// ADR-0107: a bounded native synchronization wait reached its deadline.
 pub const STATUS_TIMEOUT: Status = -8;
+/// ADR-0110: PIE placement requires a kernel CSPRNG seed that is not ready.
+pub const STATUS_NO_ENTROPY: Status = -9;
+/// ADR-0110: no collision-free aligned PIE placement remains in the arena.
+pub const STATUS_NO_SPACE: Status = -10;
 
 /// `SYS_ABI_ECHO6`'s mix of the six received arguments (call 6). Public
 /// so the m4 suite computes its expectation with the very function the
@@ -813,6 +820,7 @@ extern "C" fn syscall_dispatch(
         SYS_SYNC_WAKE if [a3, a4, a5] == [0; 3] => sys_sync_wake(a0, a1, a2) as u64,
         SYS_SYNC_INFO if [a2, a3, a4, a5] == [0; 4] => sys_sync_info(a0, a1) as u64,
         SYS_RESOURCE_DETAIL if [a2, a3, a4, a5] == [0; 4] => sys_resource_detail(a0, a1) as u64,
+        SYS_ENTROPY_SEED if [a2, a3, a4, a5] == [0; 4] => sys_entropy_seed(a0, a1) as u64,
         _ => {
             // SAFETY: as above.
             unsafe { (*STATS.get()).invalid_nr += 1 };
@@ -1713,6 +1721,11 @@ fn sys_spawn_check(slot: u64) -> Status {
         crate::cap::CapObj::Image { img_id } => {
             if !crate::image_registry::live(img_id) {
                 return STATUS_BAD_ARG;
+            }
+            if crate::image_registry::kind(img_id) == Some(crate::elf::ImageKind::StaticPie)
+                && !crate::entropy::is_ready()
+            {
+                return STATUS_NO_ENTROPY;
             }
             if crate::spawn::dynamic_children_full() {
                 return STATUS_BUSY;
@@ -3459,6 +3472,46 @@ fn user_range_with_access(buf: u64, len: u64, writable: bool) -> bool {
         page = page_end;
     }
     true
+}
+
+/// SYS_ENTROPY_SEED(slot, pointer): the exact rngd-only seed authority
+/// consumes 32 bytes once virtio-rng has filled a caller-owned writable
+/// buffer. The source is wiped after the kernel copies it.
+fn sys_entropy_seed(slot: u64, pointer: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(capability) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if capability.obj != crate::cap::CapObj::KernelEntropySeed
+        || capability.rights != crate::cap::RIGHTS_WRITE
+    {
+        return STATUS_BAD_ARG;
+    }
+    if !user_range_writable(pointer, 32) {
+        return STATUS_BAD_ADDRESS;
+    }
+    let mut seed = [0u8; 32];
+    // SAFETY: validated 32-byte writable user span in this process; IF is
+    // masked by the syscall boundary and SMAP is bracketed below.
+    unsafe {
+        super::stac();
+        let source = pointer as *mut u8;
+        for (index, byte) in seed.iter_mut().enumerate() {
+            *byte = core::ptr::read_volatile(source.add(index));
+        }
+        for index in 0..32 {
+            core::ptr::write_volatile(source.add(index), 0);
+        }
+        super::clac();
+    }
+    let seeded = crate::entropy::seed(&seed);
+    seed.fill(0);
+    if seeded { STATUS_OK } else { STATUS_NO_ENTROPY }
 }
 
 /// SYS_RTC_READ(slot, out): the held `Rtc` cap with READ; writes the wall

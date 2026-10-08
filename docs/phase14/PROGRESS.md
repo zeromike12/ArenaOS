@@ -36,11 +36,78 @@
 
 ## Current state
 
-The exact branch parent is confirmed. Required Phase-13 handoff and scope ADR,
-ELF contract, Image, process VM, and Startup ABI references have been read.
-The bounded contract is committed. The fixture now matches its bounded linker
-profile; the next checkpoint is production-validator integration and T0
-mutation coverage.
+The production validator now accepts only the ADR-0110 static PIE profile and
+retains the prior fixed-address `ET_EXEC` path. The real fixture passes the same
+validator used by Image registration. PIE loading builds private RW/NX pages,
+applies checked `R_X86_64_RELATIVE` relocations, enforces and verifies final
+RX/R/RW page flags, and maps no image/stack guards. M4 guest coverage verifies
+all 30 relocation results, the zero-filled writable tail, exact PTE flags,
+unmapped guard pages, frame-exact teardown, and refusal of a pre-existing
+process-region or mapped guard-page collision by the production placement
+preflight.
+
+The kernel CSPRNG is a ChaCha20 generator with a boot known-answer check and
+unbiased bounded slot selection. Production `rngd` obtains 32 bytes from the
+virtio RNG after `DRIVER_OK` and submits them through the exact write-only,
+non-copyable `KernelEntropySeed` capability. The service-manager readiness
+signal follows that seed operation. PIE spawn checks and launches return a
+typed refusal when the CSPRNG is not ready; fixed `ET_EXEC` starts do not wait
+on it.
+
+T0 so far: full `tools/build.sh` completed, and the M4 QEMU guest passed 9/9,
+including the Phase-14 parser mutation corpus and positive relocation/mapping
+checks. The same guest also passed M1, M2, M3, M5, M6, M7, M11, and M12. The
+first M6 attempt found that the new `rngd` seed capability probes used syscall
+wrappers with unspecified unused registers; those probes now use the explicit
+six-argument ABI wrapper, and the rerun passed M6 6/6. The host needed
+`pyfatfs` plus setuptools 80.10.2 in `/tmp` for ESP image generation, and its
+QEMU package ROM search path required an explicit `-L` directory assembled
+from the official Debian `share/qemu` and `share/seabios` package contents.
+
+T1 positive guest proof passed against real QEMU/OVMF with virtio block, user
+networking, RNG, keyboard, tablet, and console devices. Desktop installed the
+validly signed APB1 through filesd and packaged, the AFS2 record and exact ELF
+bytes were checked, and All Applications launched the same immutable Image
+twice. The fixture verified Startup ABI v2's actual base and entry, relocated
+data and function pointer, read-only constant, BSS, and exit 42. Kernel-selected
+bases were `0x526a33200000` and `0x552f9b800000`; both were 2-MiB aligned in the
+64–96 TiB arena, with 16,777,215 valid placement candidates. Both launches
+restored the same steady process/Image/cap/map/resource receipt. The first
+launch warmed three empty parent page-table frames retained by the existing
+SharedRegion unmap contract; the second launch returned exactly to that steady
+state.
+
+T1 signed APB1 negative guest coverage passed for invalid ELF magic,
+unsupported relocation, relocation destination outside the image, overflowing
+relocation span, invalid segment alignment, and W+X layout. Each package was
+installed and retained its exact signed record and malformed executable bytes;
+the production Image validator refused it at installed-image resolution. A
+separately signed and otherwise valid image with a link-time layout outside the
+placement arena passed Image validation but was refused by kernel spawn with
+`STATUS_NO_SPACE` before any placement was logged. A temporary red mutation
+withheld rngd's device bytes from the kernel while preserving the manager-ready
+path; signed installation still completed and PIE spawn preflight returned
+`STATUS_NO_ENTROPY`. That script restored the exact rngd source and production
+EFI/ESP bytes. The checked-in signed APB1 fixture is 24,040 bytes with
+SHA-256 `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`.
+The no-entropy mutant is test-only and is not present in the release image.
+
+A separate signed APB1 stale-authority guest revokes the freshly registered
+Image before IPC transfer. The test-only Desktop client mutation uses the
+known link-time entry/base solely to reach production `SYS_SPAWN_CHECK`; the
+kernel refuses the stale Image with `STATUS_BAD_ARG`, the PIE never runs, and
+ownership/resource receipts return to baseline. The first version of this
+mutation was rejected one stage earlier by Desktop's live Image-info check.
+That was correct behavior; the adjusted test bypasses only this descriptive
+check so it can directly prove the kernel authority gate. Packaged/Desktop
+sources and the exact production EFI/ESP are restored byte-for-byte by the
+test.
+
+T0/T1 results: `tools/build.sh --image` and M4's 9/9 guest passed after the
+collision-preflight addition; M1, M2, M3, M5, M6, M7, M11, and M12 also passed
+in that same boot. The final preservation run, 10-boot and 20–25-boot
+checkpoints, complete historical suite, fresh 100/100 exact-artifact stability,
+and independent release-archive boot remain pending.
 
 ## Evidence log
 
@@ -49,3 +116,8 @@ mutation coverage.
 | Source branch | Created from exact Phase-13 release tip; no Phase-13 files changed |
 | Host | Debian GNU/Linux 13 (trixie), unprivileged user; `cargo`, `rustc`, `rustfmt`, QEMU, and OVMF were initially absent from PATH |
 | Historical qualification | Phase-13 report records 115/115 suite groups and 100/100 clean boots; Phase-14 exact-artifact qualification remains pending |
+| Native PIE | Rust 1.97.0/rust-lld fixture, genuine `ET_DYN`; SHA-256 `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e` |
+| Positive APB1 guest | Two launches exited 42 at distinct bases; each verified relocated function/data, Startup ABI v2, RX/R/RW protections, guards, and reclamation |
+| Signed negative APB1 guest | Six malformed/unsupported ELF classes refused at Image validation; valid out-of-arena image refused with `STATUS_NO_SPACE`; ownership counters returned to baseline |
+| Missing entropy guest | Seed-withholding red mutation refused signed PIE with `STATUS_NO_ENTROPY`; original rngd source and EFI/ESP restored byte-for-byte |
+| Stale Image authority guest | Revoked Image received through signed APB1 was refused by kernel `SYS_SPAWN_CHECK` with `STATUS_BAD_ARG`; process/Image ownership returned to baseline |

@@ -763,6 +763,21 @@ fn log_number(mut value: u64) {
         log(core::slice::from_ref(digit));
     }
 }
+const PIE_STARTUP_TEMPLATE_BASE: u64 = 0x0040_0000;
+/// Startup ABI v2 requires a valid nonzero entry/base pair at encode time.
+/// A zero-based ET_DYN Image has no valid link-time pair for that contract,
+/// so Desktop supplies the shared canonical template that the kernel verifies
+/// and replaces before the child's first thread becomes runnable.
+fn startup_image_location(entry: u64, load_base: u64) -> Option<(u64, u64)> {
+    if load_base == 0 {
+        Some((
+            PIE_STARTUP_TEMPLATE_BASE.checked_add(entry)?,
+            PIE_STARTUP_TEMPLATE_BASE,
+        ))
+    } else {
+        Some((entry, load_base))
+    }
+}
 /// Sample native occupancy while request references are still landed.
 fn transient_caps() {
     let mut counts = [0u64; 9];
@@ -2912,8 +2927,13 @@ fn launch_installed_application(
             return Ok(());
         }
     }
-    let image = arena_desktop::package::launch_installed(application_id, POOL)
-        .map_err(|error| error as i64)?;
+    let image = match arena_desktop::package::launch_installed(application_id, POOL) {
+        Ok(image) => image,
+        Err(error) => {
+            log_launch_refusal(b"installed-image-resolve", error as i64);
+            return Err(error as i64);
+        }
+    };
     if app_flags & manifest::FLAG_HEADLESS != 0 {
         if document != CAP_NONE {
             destroy(image.capability);
@@ -2968,8 +2988,13 @@ fn launch_headless_image_v2(
         | FLAG_STANDARD_STREAMS
         | FLAG_NATIVE_SYNC;
     if app_flags & FLAG_HEADLESS == 0 || app_flags & !known_flags != 0 {
+        log_launch_refusal(b"headless-flags", STATUS_BAD_ARG);
         return Err(STATUS_BAD_ARG);
     }
+    let Some((startup_entry, startup_load_base)) = startup_image_location(entry, load_base) else {
+        log_launch_refusal(b"headless-image-location", STATUS_BAD_ARG);
+        return Err(STATUS_BAD_ARG);
+    };
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
     if ready != 0 {
         log_launch_refusal(b"headless-spawn-check", ready);
@@ -3008,6 +3033,7 @@ fn launch_headless_image_v2(
         .position(|byte| *byte == 0)
         .unwrap_or(32);
     if id_len == 0 || id_len == 32 {
+        log_launch_refusal(b"headless-app-id", STATUS_BAD_ARG);
         return Err(STATUS_BAD_ARG);
     }
     let arguments: [&[u8]; 1] = [&application_id[..id_len]];
@@ -3066,12 +3092,13 @@ fn launch_headless_image_v2(
         stdin,
         stdout,
         stderr,
-        entry,
-        load_base,
+        entry: startup_entry,
+        load_base: startup_load_base,
         clock_us: arena_desktop::app_client::now(),
     };
     let mut startup_page = [0u8; startup_abi::BLOCK_BYTES];
     if startup_abi::encode(&spec, &mut startup_page).is_err() {
+        log_launch_refusal(b"headless-startup-encode", STATUS_BAD_ARG);
         return Err(STATUS_BAD_ARG);
     }
 
@@ -3381,6 +3408,10 @@ fn launch_image_v2_for_app_with_document(
     if kind > 6 {
         return Err(-2);
     }
+    let Some((startup_entry, startup_load_base)) = startup_image_location(entry, load_base) else {
+        log_launch_refusal(b"image-startup-location", STATUS_BAD_ARG);
+        return Err(STATUS_BAD_ARG);
+    };
     let ready = unsafe { syscall6(SYS_SPAWN_CHECK, image, 0, 0, 0, 0, 0) };
     if ready != 0 {
         log_launch_refusal(b"spawn-check", ready);
@@ -3652,8 +3683,8 @@ fn launch_image_v2_for_app_with_document(
         stdin,
         stdout,
         stderr,
-        entry,
-        load_base,
+        entry: startup_entry,
+        load_base: startup_load_base,
         clock_us: arena_desktop::app_client::now(),
     };
     let mut startup_page = [0u8; startup_abi::BLOCK_BYTES];
@@ -5934,11 +5965,11 @@ extern "C" fn main() -> ! {
                             dirty = true;
                         }
                         Action::Launch(selection) => {
+                            let open_with = unsafe { ALL_APPS_OPEN_WITH };
                             let full_sessions =
                                 unsafe { (&*(&raw const SESSIONS)).iter().all(|s| s.id != 0) };
                             let before = full_sessions
                                 .then(|| (cap_inventory_snapshot(), observe_receipt()));
-                            let open_with = unsafe { ALL_APPS_OPEN_WITH };
                             let result = if open_with {
                                 let document = take_open_with_document();
                                 let title = unsafe { *(&raw const OPEN_WITH_TITLE) };
@@ -5968,6 +5999,12 @@ extern "C" fn main() -> ! {
                                 }
                             };
                             if let Err(rc) = result {
+                                // Launch refusal is a lifecycle boundary too:
+                                // emit a fresh receipt so rollback can be
+                                // checked against process, mapping, and cap
+                                // occupancy even when the session table was
+                                // not full.
+                                snapshot(true);
                                 if let Some((caps_before, resources_before)) = before {
                                     log_capacity_refusal_inventory(caps_before, resources_before);
                                     snapshot(true);

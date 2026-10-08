@@ -25,26 +25,29 @@ fixed seed as entropy.
 
 ### 1. Executable profile
 
-Keep the current `ET_EXEC` checks and addresses unchanged. Accept `ET_DYN` only
-as this bounded native profile:
+Keep the current `ET_EXEC` checks and addresses unchanged for existing images,
+including the established rule that unknown non-interpreter program-header
+types are ignored and receive no loader semantics. Only the new `ET_DYN` path
+interprets `PT_DYNAMIC`. Accept `ET_DYN` only as this bounded native profile:
 
 - ELF64, little-endian, current ELF version, `EM_X86_64`, System V ABI, ABI
-  version zero, `e_flags == 0`, 64-byte ELF header, and 56-byte program header.
+  version zero, zero reserved identification bytes, `e_flags == 0`, 64-byte
+  ELF header, and 56-byte program header.
 - At most 8 program headers and 8 `PT_LOAD` segments; the existing Image file
   limit remains 256 KiB and the mapped `PT_LOAD` page count and image span each
   remain at most 128 4-KiB pages.
 - Program headers may be `PT_LOAD`, exactly one `PT_DYNAMIC`, and at most one
   `PT_GNU_STACK`. Reject `PT_INTERP`, `PT_TLS`, `PT_PHDR`, `PT_NOTE`,
-  `PT_GNU_RELRO`, and every other program-header type. `PT_GNU_STACK` must not
-  request execute permission.
-- Each load segment has nonzero memory size, `p_filesz <= p_memsz`, 4-KiB
-  `p_align`, page-aligned virtual address and file offset, and checked file and
-  virtual ranges. Reject byte overlap and page-rounded overlap. The entry must
-  fall in executable load memory. Reject every segment/page layout that would
-  produce W+X. Require the segment flags to be a subset of R/W/X.
-- `PT_DYNAMIC` is readable, file-backed by a `PT_LOAD`, has equal file and
-  memory sizes, is no larger than one page, and terminates with exactly one
-  `DT_NULL` at the end. Its bytes and all relocation metadata must resolve
+  `PT_GNU_RELRO`, and every other program-header type. An optional
+  `PT_GNU_STACK` must be empty and must not request execute permission.
+- Each load segment has nonzero memory size, `p_filesz <= p_memsz`, read
+  permission, `p_align == 4096`, page-aligned virtual address and file offset,
+  and checked file and virtual ranges. Reject byte overlap and page-rounded
+  overlap. The entry must fall in executable load memory. Reject every
+  segment/page layout that would produce W+X. Segment flags are R, RW, or RX.
+- `PT_DYNAMIC` is readable, non-executable, file-backed by a `PT_LOAD`, has
+  equal file and memory sizes, `p_align == 8`, is no larger than one page, and
+  terminates with exactly one `DT_NULL` at the end. Its bytes and all relocation metadata must resolve
   wholly into file-backed load memory. Reject duplicate, missing, or unknown
   dynamic tags.
 - The permitted dynamic tags are exactly one each of `DT_FLAGS`, `DT_FLAGS_1`,
@@ -142,19 +145,26 @@ X. Relocation writes are restricted to destinations checked by validation.
 Image guards and the stack guard have no PTE. The kernel may use private
 temporary mappings but never exposes a writable-and-executable page to ring 3.
 
-The Startup ABI record remains version 2. Kernel patching is limited to its
-existing 64-bit entry and image-base fields at offsets 104 and 112, after
-checking the exact one-page startup SharedRegion authority and before the child
-thread can run. Existing descriptor inventory and startup transport checks
-remain userspace-enforced. For `ET_EXEC`, the current static base/entry
-behavior is unchanged.
+The Startup ABI record remains version 2. For a zero-based `ET_DYN` image,
+Desktop first encodes the valid template pair `base = 0x0040_0000` and
+`entry = base + link_time_entry`; this is only a codec-valid private template,
+not a placement request. Kernel patching is limited to the existing 64-bit
+entry and image-base fields at offsets 104 and 112. It checks the exact
+one-page startup SharedRegion authority and the expected link-time/template
+pair, then writes the actual relocated entry/base before the child thread can
+run. Existing descriptor inventory and startup transport checks remain
+userspace-enforced. For `ET_EXEC`, the current static base/entry behavior is
+unchanged.
 
 Any failure after pinning destroys the unpublished process/address space,
 clears its spawn record, drops the Image pin, and reclaims provisional caps,
-pages, page tables, and ownership records before returning. No failed launch
-leaves a live child or executable mapping. The same immutable Image capability
-may be pinned for multiple launches, with independent bases and process-owned
-memory.
+image/stack pages, child page tables, and ownership records before returning.
+No failed launch leaves a live child or executable mapping. The existing
+SharedRegion unmap contract retains empty parent page-table frames in the
+long-lived broker address space for reuse; this is not a mapping, pin, region,
+or child-owned frame. A one-page Startup mapping can warm up at most three such
+tables on the first launch. The same immutable Image capability may be pinned
+for multiple launches, with independent bases and process-owned memory.
 
 ## Consequences
 

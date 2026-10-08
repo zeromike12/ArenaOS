@@ -23,7 +23,9 @@
 //! records as machine-state evidence of which children exist.
 
 use crate::arch::x86_64::paging;
-use crate::arch::x86_64::syscall::{self, STATUS_BAD_ARG, STATUS_BUSY, Status};
+use crate::arch::x86_64::syscall::{
+    self, STATUS_BAD_ARG, STATUS_BUSY, STATUS_NO_ENTROPY, STATUS_NO_SPACE, Status,
+};
 use crate::cap::{self, Cap, CapObj};
 use crate::elf;
 use crate::frames;
@@ -178,6 +180,8 @@ struct SpawnRec {
     /// SYS_PROC_FINISH retirement, including after the thread exits.
     dynamic_img_id: Option<u32>,
     entry: u64,
+    image_base: u64,
+    static_pie: bool,
     stack_top: u64,
     /// Page-granular (lo, hi) user regions: the image's segments plus
     /// the derived stack page, zeros filling the rest.
@@ -191,6 +195,8 @@ const EMPTY_REC: SpawnRec = SpawnRec {
     user_child: false,
     dynamic_img_id: None,
     entry: 0,
+    image_base: 0,
+    static_pie: false,
     stack_top: 0,
     regions: [(0, 0); sched::USER_REGIONS_MAX],
 };
@@ -287,6 +293,11 @@ struct Prepared {
     idx: usize,
     pid: u64,
     entry: u64,
+    image_base: u64,
+    load_bias: u64,
+    link_entry: u64,
+    link_base: u64,
+    static_pie: bool,
     stack_top: u64,
     regions: [(u64, u64); sched::USER_REGIONS_MAX],
 }
@@ -324,6 +335,126 @@ impl Drop for LoaderPin {
     }
 }
 
+fn pie_bias_bounds(info: &elf::ImageInfo) -> Result<(u64, u64), Status> {
+    let lower_guard = elf::PIE_ARENA_START
+        .checked_add(paging::PAGE)
+        .and_then(|start| start.checked_sub(info.image_start))
+        .ok_or(STATUS_NO_SPACE)?
+        .max(elf::PIE_ARENA_START);
+    let first = lower_guard
+        .checked_add(elf::PIE_BIAS_ALIGN - 1)
+        .ok_or(STATUS_NO_SPACE)?
+        & !(elf::PIE_BIAS_ALIGN - 1);
+    // Image, upper image guard, stack guard, and one mapped stack page.
+    let tail = info
+        .image_end
+        .checked_add(3 * paging::PAGE)
+        .ok_or(STATUS_NO_SPACE)?;
+    let last_unaligned = elf::PIE_ARENA_END
+        .checked_sub(tail)
+        .ok_or(STATUS_NO_SPACE)?;
+    let last = last_unaligned & !(elf::PIE_BIAS_ALIGN - 1);
+    if first > last {
+        return Err(STATUS_NO_SPACE);
+    }
+    let slots = (last - first) / elf::PIE_BIAS_ALIGN + 1;
+    Ok((first, slots))
+}
+
+/// Preflight a candidate's complete ownership envelope, both guards,
+/// stack, process-region table, and actual page table before any image
+/// frame is allocated.
+pub(crate) fn pie_candidate_clear(pid: u64, root: u64, info: &elf::ImageInfo, bias: u64) -> bool {
+    let Some(image_low) = bias.checked_add(info.image_start) else {
+        return false;
+    };
+    let Some(image_high) = bias.checked_add(info.image_end) else {
+        return false;
+    };
+    let Some(guard_low) = image_low.checked_sub(paging::PAGE) else {
+        return false;
+    };
+    let Some(stack_va) = image_high.checked_add(2 * paging::PAGE) else {
+        return false;
+    };
+    let Some(stack_top) = stack_va.checked_add(paging::PAGE) else {
+        return false;
+    };
+    if guard_low < elf::PIE_ARENA_START
+        || stack_top > elf::PIE_ARENA_END
+        || stack_top > 0x0000_8000_0000_0000
+    {
+        return false;
+    }
+    // This range is separate from the current 1 GiB–1 TiB mapping window
+    // and the bounded 32 TiB VM arena. Keep the exclusions explicit here.
+    const VM_BASE: u64 = 0x0000_2000_0000_0000;
+    const VM_END: u64 = VM_BASE + (crate::vm::MAX_REGIONS as u64 + 1) * 18 * 1024 * 1024;
+    let envelope_end = stack_top;
+    const MAP_WINDOW_START: u64 = 0x0000_0000_4000_0000;
+    const MAP_WINDOW_END: u64 = 0x0000_0100_0000_0000;
+    if guard_low < MAP_WINDOW_END && MAP_WINDOW_START < envelope_end {
+        return false;
+    }
+    if guard_low < VM_END && VM_BASE < envelope_end {
+        return false;
+    }
+    let Some(regions) = proc::user_regions(pid) else {
+        return false;
+    };
+    if regions
+        .iter()
+        .any(|&(start, end)| start != 0 && guard_low < end && start < envelope_end)
+    {
+        return false;
+    }
+    without_interrupts(|| {
+        let mut page = guard_low;
+        while page < envelope_end {
+            // SAFETY: IF=0; this is the unpublished child's owned root.
+            if unsafe { paging::user_pte_flags(root, page).is_some() } {
+                return false;
+            }
+            page += paging::PAGE;
+        }
+        true
+    })
+}
+
+fn choose_pie_placement(
+    pid: u64,
+    root: u64,
+    info: &elf::ImageInfo,
+) -> Result<(u64, u64, u64, [(u64, u64); sched::USER_REGIONS_MAX]), Status> {
+    let (first, slots) = pie_bias_bounds(info)?;
+    let mut tried = [u64::MAX; 16];
+    for attempt in 0..tried.len() {
+        let selected = crate::entropy::uniform_below(slots).ok_or(STATUS_NO_ENTROPY)?;
+        if tried[..attempt].contains(&selected) {
+            continue;
+        }
+        tried[attempt] = selected;
+        let Some(offset) = selected.checked_mul(elf::PIE_BIAS_ALIGN) else {
+            return Err(STATUS_NO_SPACE);
+        };
+        let Some(bias) = first.checked_add(offset) else {
+            return Err(STATUS_NO_SPACE);
+        };
+        if !pie_candidate_clear(pid, root, info, bias) {
+            continue;
+        }
+        let image_low = bias + info.image_start;
+        let image_high = bias + info.image_end;
+        let stack_va = image_high + 2 * paging::PAGE;
+        let stack_top = stack_va + paging::PAGE;
+        let mut regions = [(0u64, 0u64); sched::USER_REGIONS_MAX];
+        regions[0] = (image_low, image_high);
+        regions[1] = (stack_va, stack_top);
+        return Ok((bias, stack_va, stack_top, regions));
+    }
+    Err(STATUS_NO_SPACE)
+}
+
 fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
     let dynamic = boot_index.is_none() && img_id >= DYNAMIC_FIRST_ID;
     // 1. Resolve full LIVE ID and pin immutable kernel bytes BEFORE
@@ -347,25 +478,34 @@ fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
         });
     }
     let parsed = elf::validate(bytes).map_err(|_| STATUS_BAD_ARG)?;
+    if parsed.kind == elf::ImageKind::StaticPie && !crate::entropy::is_ready() {
+        return Err(STATUS_NO_ENTROPY);
+    }
     // Regions: one per segment + the stack page must fit the thread's
     // region table.
     if parsed.nsegs == 0 || parsed.nsegs + 1 > sched::USER_REGIONS_MAX {
         return Err(STATUS_BAD_ARG);
     }
-    let mut top = 0u64;
-    for seg in &parsed.segs[..parsed.nsegs] {
-        top = top.max(seg.vaddr + seg.memsz);
-    }
-    let stack_va = top.div_ceil(paging::PAGE) * paging::PAGE;
-    let stack_top = stack_va + paging::PAGE;
-    let mut regions = [(0u64, 0u64); sched::USER_REGIONS_MAX];
-    let mut nr = 0;
-    for seg in &parsed.segs[..parsed.nsegs] {
-        let hi = (seg.vaddr + seg.memsz).div_ceil(paging::PAGE) * paging::PAGE;
-        regions[nr] = (seg.vaddr, hi);
-        nr += 1;
-    }
-    regions[nr] = (stack_va, stack_top);
+    let (fixed_stack_va, fixed_stack_top, fixed_regions) =
+        if parsed.kind == elf::ImageKind::FixedExec {
+            let mut top = 0u64;
+            for seg in &parsed.segs[..parsed.nsegs] {
+                top = top.max(seg.vaddr + seg.memsz);
+            }
+            let stack_va = top.div_ceil(paging::PAGE) * paging::PAGE;
+            let stack_top = stack_va + paging::PAGE;
+            let mut regions = [(0u64, 0u64); sched::USER_REGIONS_MAX];
+            let mut nr = 0;
+            for seg in &parsed.segs[..parsed.nsegs] {
+                let hi = (seg.vaddr + seg.memsz).div_ceil(paging::PAGE) * paging::PAGE;
+                regions[nr] = (seg.vaddr, hi);
+                nr += 1;
+            }
+            regions[nr] = (stack_va, stack_top);
+            (stack_va, stack_top, regions)
+        } else {
+            (0, 0, [(0u64, 0u64); sched::USER_REGIONS_MAX])
+        };
 
     // 2. Reserve the record (its index is the child thread's argument).
     // SAFETY: single writer under IF=0.
@@ -408,14 +548,67 @@ fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
             return Err(STATUS_BUSY); // process table full
         }
     };
-    let half = Prepared {
+    let mut half = Prepared {
         idx,
         pid: child,
         entry: parsed.entry,
-        stack_top,
-        regions,
+        image_base: parsed.image_start,
+        load_bias: 0,
+        link_entry: parsed.entry,
+        link_base: parsed.image_start,
+        static_pie: parsed.kind == elf::ImageKind::StaticPie,
+        stack_top: fixed_stack_top,
+        regions: fixed_regions,
     };
-    if elf::load(bytes, child).is_err() {
+
+    let stack_va = if half.static_pie {
+        let Some(root) = proc::pml4_of(child) else {
+            half.rollback();
+            return Err(STATUS_BAD_ARG);
+        };
+        match choose_pie_placement(child, root, &parsed) {
+            Ok((bias, stack_va, stack_top, regions)) => {
+                half.entry = bias + parsed.entry;
+                half.image_base = bias + parsed.image_start;
+                half.load_bias = bias;
+                half.link_entry = parsed.entry;
+                half.link_base = parsed.image_start;
+                half.stack_top = stack_top;
+                half.regions = regions;
+                if proc::set_user_regions(child, &regions[..2]).is_err() {
+                    half.rollback();
+                    return Err(STATUS_BUSY);
+                }
+                match elf::load_pie(bytes, child, bias) {
+                    Ok(load) => {
+                        half.entry = load.entry;
+                        half.image_base = load.image_base;
+                    }
+                    Err(reason) => {
+                        half.rollback();
+                        return Err(if reason == "elf: out of frames" {
+                            STATUS_BUSY
+                        } else {
+                            STATUS_BAD_ARG
+                        });
+                    }
+                }
+                stack_va
+            }
+            Err(status) => {
+                half.rollback();
+                return Err(status);
+            }
+        }
+    } else {
+        if elf::load(bytes, child).is_err() {
+            half.rollback();
+            return Err(STATUS_BAD_ARG);
+        }
+        fixed_stack_va
+    };
+
+    if half.stack_top == 0 {
         half.rollback();
         return Err(STATUS_BAD_ARG);
     }
@@ -440,6 +633,18 @@ fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
         half.rollback(); // destroy reclaims the stack frame too
         return Err(STATUS_BAD_ARG);
     }
+    if half.static_pie {
+        let candidates = pie_bias_bounds(&parsed)
+            .map(|(_, count)| count)
+            .unwrap_or(0);
+        crate::log_info!(
+            "aslr",
+            "PIE placement image={img_id} pid={child} bias={:#x} base={:#x} entry={:#x} candidates={candidates}; RX/R/RW finalized, W^X and lower/upper/stack guards checked",
+            half.load_bias,
+            half.image_base,
+            half.entry
+        );
+    }
     Ok(half)
 }
 
@@ -461,6 +666,8 @@ fn finish(p: &Prepared, notif: Option<(u32, u64)>, user_child: bool) -> Result<u
         rec.child_pid = p.pid;
         rec.user_child = user_child;
         rec.entry = p.entry;
+        rec.image_base = p.image_base;
+        rec.static_pie = p.static_pie;
         rec.stack_top = p.stack_top;
         rec.regions = p.regions;
     });
@@ -477,6 +684,82 @@ fn finish(p: &Prepared, notif: Option<(u32, u64)>, user_child: bool) -> Result<u
             Err(STATUS_BUSY)
         }
     }
+}
+
+/// Patch only the ABI-v2 entry/base fields in the exact one-page Startup
+/// SharedRegion inherited at child slot 0. The block remains READ-only to
+/// the child; the kernel writes through its direct map before publication.
+fn patch_pie_startup(p: &Prepared, link_entry: u64, link_base: u64) -> Result<(), Status> {
+    let cap = cap::read(p.pid, 0).map_err(|_| STATUS_BAD_ARG)?;
+    let CapObj::SharedRegion { id } = cap.obj else {
+        return Err(STATUS_BAD_ARG);
+    };
+    if cap.rights != (cap::RIGHTS_READ | cap::RIGHTS_DESTROY) {
+        return Err(STATUS_BAD_ARG);
+    }
+    let (phys, pages) = crate::shared::backing(id).ok_or(STATUS_BAD_ARG)?;
+    if pages != 1 {
+        return Err(STATUS_BAD_ARG);
+    }
+    let page = (phys + paging::KERNEL_OFFSET) as *mut u8;
+    // Startup ABI v2 validates a nonzero image base before it can encode a
+    // block. For the valid ET_DYN case whose lowest p_vaddr is zero, Desktop
+    // uses this fixed template pair; it is checked here and overwritten below
+    // before the process is published. It never selects the actual mapping.
+    const PIE_TEMPLATE_BASE: u64 = 0x0040_0000;
+    let (template_entry, template_base) = if link_base == 0 {
+        (
+            PIE_TEMPLATE_BASE
+                .checked_add(link_entry)
+                .ok_or(STATUS_BAD_ARG)?,
+            PIE_TEMPLATE_BASE,
+        )
+    } else {
+        (link_entry, link_base)
+    };
+    // The published userspace Startup ABI v2 layout (ADR-0083): magic,
+    // version/header, page size at 96, entry at 104, image base at 112.
+    // Inspect every field before touching the shared page.
+    unsafe {
+        let read_u16 = |at: usize| {
+            u16::from_le_bytes([
+                core::ptr::read_volatile(page.add(at)),
+                core::ptr::read_volatile(page.add(at + 1)),
+            ])
+        };
+        let read_u32 = |at: usize| {
+            u32::from_le_bytes([
+                core::ptr::read_volatile(page.add(at)),
+                core::ptr::read_volatile(page.add(at + 1)),
+                core::ptr::read_volatile(page.add(at + 2)),
+                core::ptr::read_volatile(page.add(at + 3)),
+            ])
+        };
+        let read_u64 = |at: usize| {
+            let mut bytes = [0u8; 8];
+            for (index, byte) in bytes.iter_mut().enumerate() {
+                *byte = core::ptr::read_volatile(page.add(at + index));
+            }
+            u64::from_le_bytes(bytes)
+        };
+        if core::ptr::read_volatile(page) != b'A'
+            || core::ptr::read_volatile(page.add(1)) != b'R'
+            || core::ptr::read_volatile(page.add(2)) != b'S'
+            || core::ptr::read_volatile(page.add(3)) != b'T'
+            || read_u16(4) != 2
+            || read_u16(6) != 128
+            || read_u32(96) != paging::PAGE as u32
+            || read_u32(8) < 128
+            || read_u32(8) > paging::PAGE as u32
+            || read_u64(104) != template_entry
+            || read_u64(112) != template_base
+        {
+            return Err(STATUS_BAD_ARG);
+        }
+        page.add(104).cast::<u64>().write_volatile(p.entry);
+        page.add(112).cast::<u64>().write_volatile(p.image_base);
+    }
+    Ok(())
 }
 
 // ---- entry point 1: the syscall path (ADR-0019) ----------------------------
@@ -545,6 +828,15 @@ fn spawn_from_source(
         })();
         if let Err(e) = inherited {
             error!("spawn", "inheritance refused: {e}");
+            half.rollback();
+            return Err(STATUS_BAD_ARG);
+        }
+    }
+
+    if half.static_pie {
+        // All executable bytes and the actual startup base are process
+        // state. The immutable Image registry keeps only link-time facts.
+        if patch_pie_startup(&half, half.link_entry, half.link_base).is_err() {
             half.rollback();
             return Err(STATUS_BAD_ARG);
         }
