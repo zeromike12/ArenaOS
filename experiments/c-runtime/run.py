@@ -34,8 +34,9 @@ EXP = Path(__file__).resolve().parent
 REPO = EXP.parent.parent
 BUILD = EXP / "build"
 
-RUNTIME_SRC = ["src/crt0.c", "src/rt.c", "src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c"]
-GUEST_APPS = {"crt-probe": ["app/crt_probe.c"]}
+RUNTIME_SRC = ["src/crt0.c", "src/rt.c", "src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c",
+               "src/startup.c", "src/streams.c", "src/threads.c", "src/sync.c"]
+GUEST_APPS = {"crt-probe": ["app/crt_probe.c"], "c-native": ["app/c_native_app.c"]}
 
 ZIG = os.environ.get("ARENA_ZIG", "/opt/zig-clang/pkg/ziglang/zig")
 
@@ -52,6 +53,9 @@ def common_flags(root):
     "-mgeneral-regs-only", "-msoft-float",
     "-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387",
     "-ftls-model=local-exec",
+    # Shared ring pages are accessed through atomic u32 views of byte-backed
+    # mappings (streams.c); disable type-based alias assumptions for them.
+    "-fno-strict-aliasing",
     "-I", str(root / "include"), "-I", str(root / "src"),
     ]
 LINK_FLAGS = [
@@ -216,52 +220,188 @@ def disassemble_check(path, objdump="objdump"):
 
 # ----------------------------------------------------------------- abi ----
 
+def _rust_consts(path):
+    """`pub const NAME: T = <int | (-N) | 1 << N | N as ...>;` from a Rust file."""
+    vals = {}
+    text = path.read_text()
+    for m in re.finditer(r"(?:pub )?const ([A-Z0-9_]+): [A-Za-z0-9]+ = ([^;]+);", text):
+        expr = m.group(2).strip()
+        expr = expr.replace("u16::MAX", "65535").replace("u8::MAX", "255").replace("u32::MAX", "4294967295")
+        expr = re.sub(r"\(\s*(-?\d+)i64\s*\)\s*as\s*u64", r"\1", expr)
+        expr = re.sub(r"\s*as\s*u(8|16|32|64)", "", expr)
+        expr = re.sub(r"(\d+)(u8|u16|u32|u64|i64|usize)\b", r"\1", expr)
+        expr = expr.replace("usize", "")
+        expr = re.sub(r"\bu64::MAX\b", str(2**64 - 1), expr)
+        if re.fullmatch(r"[0-9 <()+*-]+", expr.replace(" ", "")) or re.fullmatch(r"-?\d+|\(-\d+\)|[0-9<\s]+", expr):
+            try:
+                vals[m.group(1)] = int(eval(expr, {"__builtins__": {}}))
+            except Exception:
+                pass
+    return vals
+
+
+def _rust_const_values_u64(v):
+    return v & (2**64 - 1)
+
+
+# Mapping: C family prefix -> (Rust source files, Rust name builder).
+# Every ARENA_* name in abi.h must resolve to exactly one Rust constant with the
+# same value. Unmapped names and missing Rust constants fail the check.
+ABI_SOURCES = {
+    "abi": REPO / "userspace/abi.rs",
+    "kernel_syscall": REPO / "kernel/kernel/src/arch/x86_64/syscall.rs",
+    "startup": REPO / "userspace/arena-platform/src/startup.rs",
+    "startup_abi": REPO / "userspace/arena-startup-abi/src/lib.rs",
+    "streams": REPO / "userspace/arena-runtime/src/streams.rs",
+    "heap": REPO / "userspace/arena-runtime/src/heap.rs",
+    "desktop": REPO / "userspace/desktop/src/bin/desktop.rs",
+}
+
+ROLE_VALUES = {  # arena-platform/src/startup.rs CapabilityRole discriminants
+    "CURRENT_DIRECTORY": 1, "STANDARD_INPUT": 2, "STANDARD_OUTPUT": 3, "STANDARD_ERROR": 4,
+    "OTHER": 5, "STANDARD_STREAM_SET": 6, "STREAM_WAKE": 7, "SYNC_DOMAIN": 8,
+}
+
+
 def abi_check():
-    rust = {}
-    for line in (REPO / "userspace/abi.rs").read_text().splitlines():
-        m = re.match(r"pub const (SYS_[A-Z0-9_]+|VM_PROT_[A-Z]+): u64 = (\d+);", line)
-        if m:
-            rust[m.group(1)] = int(m.group(2))
-    kern = {}
-    for line in (REPO / "kernel/kernel/src/arch/x86_64/syscall.rs").read_text().splitlines():
-        m = re.match(r"pub const (SYS_[A-Z0-9_]+): u64 = (\d+);", line)
-        if m:
-            kern[m.group(1)] = int(m.group(2))
+    src = {k: _rust_consts(v) for k, v in ABI_SOURCES.items()}
     c = {}
     for line in (EXP / "include/arena/abi.h").read_text().splitlines():
-        m = re.match(r"#define ARENA_(SYS_[A-Z0-9_]+|VM_PROT_[A-Z]+)\s+(\d+)u?", line)
-        if m:
-            c[m.group(1)] = int(m.group(2))
+        m = re.match(r"#define (ARENA_[A-Z0-9_]+)\s+(\(1u << \d+\)|\(?-?(?:0x[0-9A-Fa-f]+|\d+)u?\)?)(?![A-Za-z0-9_])", line)
+        if not m:
+            continue
+        expr = m.group(2)
+        expr = re.sub(r"u\b", "", expr).strip("()")
+        if "<<" in expr:
+            a, b = [x.strip() for x in expr.split("<<")]
+            val = int(a, 0) << int(b, 0)
+        else:
+            val = int(expr, 0)
+        c[m.group(1)] = val
+
+    def find(*candidates):
+        for fam, name in candidates:
+            v = src.get(fam, {}).get(name)
+            if v is not None:
+                return v, f"{fam}:{name}"
+        return None, None
+
     rows, bad = [], []
     for name, val in sorted(c.items()):
-        r = rust.get(name)
-        k = kern.get(name)
-        ok = r == val and (k is None or k == val)
-        rows.append({"name": name, "c": val, "userspace_abi_rs": r, "kernel_syscall_rs": k, "match": ok})
+        base = name[len("ARENA_"):]
+        cands = []
+        if base.startswith("SYS_"):
+            cands = [("abi", base), ("kernel_syscall", base)]
+        elif base.startswith("STATUS_"):
+            cands = [("abi", base), ("kernel_syscall", base)]
+        elif base == "CAP_SLOTS":
+            cands = [("abi", "CAP_SLOTS")]
+        elif base.startswith("CAP_KIND_"):
+            cands = [("startup", base)]
+        elif base.startswith("RIGHT_"):
+            cands = [("startup", base)]
+        elif base.startswith("VM_PROT_"):
+            cands = [("abi", base)]
+        elif base.startswith("ARST_FLAG_"):
+            cands = [("startup_abi", "FLAG_" + base[len("ARST_FLAG_"):])]
+        elif base.startswith("ARST_ROLE_"):
+            r = ROLE_VALUES.get(base[len("ARST_ROLE_"):])
+            cands = []
+            if r is not None:
+                rows.append({"name": name, "c": val, "rust": "CapabilityRole", "rust_value": r, "match": val == r})
+                if val != r:
+                    bad.append(name)
+                continue
+        elif base in ("ARST_BLOCK_BYTES", "ARST_HEADER_BYTES", "ARST_ARGUMENT_MAX",
+                      "ARST_ENVIRONMENT_MAX", "ARST_CAPABILITY_MAX", "ARST_STRING_BYTES_MAX",
+                      "ARST_CAPABILITY_DESCRIPTOR_BYTES", "ARST_STRING_DESCRIPTOR_BYTES",
+                      "ARST_VERSION", "ARST_NONE"):
+            if base == "ARST_BLOCK_BYTES":
+                cands = [("startup", "BLOCK_BYTES")]
+            if base == "ARST_HEADER_BYTES":
+                cands = [("startup", "HEADER_BYTES")]
+            if base == "ARST_ARGUMENT_MAX":
+                cands = [("startup", "ARGUMENT_MAX")]
+            if base == "ARST_ENVIRONMENT_MAX":
+                cands = [("startup", "ENVIRONMENT_MAX")]
+            if base == "ARST_CAPABILITY_MAX":
+                cands = [("startup", "CAPABILITY_MAX")]
+            if base == "ARST_STRING_BYTES_MAX":
+                cands = [("startup", "STRING_BYTES_MAX")]
+            if base == "ARST_CAPABILITY_DESCRIPTOR_BYTES":
+                cands = [("startup", "CAPABILITY_DESCRIPTOR_BYTES")]
+            if base == "ARST_STRING_DESCRIPTOR_BYTES":
+                cands = [("startup", "STRING_DESCRIPTOR_BYTES")]
+            if base == "ARST_VERSION":
+                cands = [("startup", "VERSION")]
+            if base == "ARST_NONE":
+                cands = [("startup", "NONE")]
+        elif base == "STREAM_READY_BADGE":
+            cands = [("desktop", "BADGE_STREAM_READY")]
+        elif base.startswith("STREAM_"):
+            cands = [("streams", base)]
+            if base == "STREAM_MAGIC":
+                cands = []
+                magic = int.from_bytes(b"ASTR", "little")
+                rows.append({"name": name, "c": val, "rust": "MAGIC=b\"ASTR\"", "rust_value": magic,
+                             "match": val == magic})
+                if val != magic:
+                    bad.append(name)
+                continue
+            if base == "STREAM_VERSION":
+                cands = [("streams", "VERSION")]
+        elif base == "PAGE_SIZE":
+            cands = [("heap", "PAGE_BYTES")]
+        elif base == "WRITE_MAX":
+            cands = [("abi", "WRITE_MAX")]
+        if not cands:
+            rows.append({"name": name, "c": val, "rust": None, "match": False,
+                         "error": "no Rust mapping (unmapped ARENA_* name fails)"})
+            bad.append(name)
+            continue
+        rv, origin = find(*cands)
+        if rv is None:
+            rows.append({"name": name, "c": val, "rust": None, "match": False,
+                         "error": f"Rust constant missing in {[f for f, _ in cands]}"})
+            bad.append(name)
+            continue
+        ok = rv == val
+        rows.append({"name": name, "c": val, "rust": origin, "rust_value": rv, "match": ok})
         if not ok:
             bad.append(name)
-    return {"checked": len(rows), "mismatches": bad, "rows": rows}
+    return {"checked": len(rows), "mismatches": bad, "rows": rows,
+            "source_counts": {k: len(v) for k, v in src.items()}}
 
 
 # ---------------------------------------------------------------- host ----
+
+# The only accepted host verdict. The pinned protocol defect (u32 ring wrap,
+# see docs/compat/C1-FINAL-REPORT.md) is required to reproduce; if it stops
+# reproducing, the pin fails and the change needs review.
+HOST_VERDICT = re.compile(r"^HOST-ONLY RESULT PASS \(\d+ checks, known protocol defect pinned\)$", re.M)
+
 
 def host_tests():
     out = BUILD / "host"
     out.mkdir(parents=True, exist_ok=True)
     exe = out / "test_runtime"
-    srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "host/host_main.c",
-            "host/test_runtime.c"]
+    srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "src/streams.c",
+            "host/host_main.c", "host/test_runtime.c"]
     cmd = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
            "-DARENA_HOSTED", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+           "-fno-strict-aliasing",
            "-I", str(EXP / "include"), "-I", str(EXP / "src")]
     run(cmd + [str(EXP / s) for s in srcs] + ["-o", str(exe)])
     p = run([str(exe)], capture=True, check=False)
     sys.stdout.write(p.stdout)
     sys.stderr.write(p.stderr)
-    return p.returncode == 0, p.stdout
+    verdict = HOST_VERDICT.search(p.stdout) is not None
+    return p.returncode == 0 and verdict, p.stdout
 
 
 # --------------------------------------------------------------- guest ----
+
+PROBE_VERDICT = re.compile(r"^CRT-PROBE RESULT PASS \(6/6\)\s*$", re.M)
 
 PROBE_FEED = [
     # Wait for the probe's own result line before typing `shutdown` at the
@@ -351,6 +491,7 @@ def main():
     for cc in ccs:
         summary["tools"][cc] = tool_version(cc)
 
+    failed = []
     if args.command in ("build", "audit", "all"):  # guest ELFs
         elfs = {}
         for cc in ccs:
@@ -367,20 +508,30 @@ def main():
             bad = {k: v for k, v in audits.items()
                    if v["loader_failures"] or v["disasm"]["simd_or_x87_count"]}
             summary["results"]["static_audit_pass"] = not bad
+            if bad:
+                failed.append("static audit: " + ", ".join(sorted(bad)))
             print(json.dumps(audits, indent=2))
     if args.command in ("abi", "all"):
         a = abi_check()
-        summary["results"]["abi"] = {"checked": a["checked"], "mismatches": a["mismatches"]}
+        summary["results"]["abi"] = {"checked": a["checked"], "mismatches": a["mismatches"],
+                                     "source_counts": a["source_counts"]}
         print(f"abi: checked {a['checked']} constants, mismatches={a['mismatches']}")
+        if a["mismatches"] or a["checked"] == 0:
+            failed.append(f"abi mismatches: {a['mismatches']}")
     if args.command in ("host", "all"):
         ok, out = host_tests()
         summary["results"]["host_pass"] = ok
+        if not ok:
+            failed.append("host verdict missing or failing")
     if args.command in ("guest", "all"):
         cc = args.cc[0] if args.cc else "clang"
         g = guest_run(cc, keep=args.keep_scratch, baseline=args.baseline)
         sr = g["serial"]
         markers = [l for l in sr.splitlines() if "crt-probe" in l or "CRT-PROBE" in l]
         result_line = next((l for l in markers if "CRT-PROBE RESULT" in l), None)
+        # Only the exact expected verdict counts. A bare "CRT-PROBE RESULT"
+        # line, a different count, or a non-clean stop is a failure.
+        exact = PROBE_VERDICT.search(sr) is not None
         summary["results"]["guest"] = {
             "compiler": cc,
             "baseline_unpatched": args.baseline,
@@ -388,12 +539,19 @@ def main():
             "stop_reason": g["reason"],
             "markers": markers,
             "result_line": result_line,
-            "guest_executed": result_line is not None,
+            "exact_verdict": exact,
+            "guest_executed": exact,
         }
         print("\n".join(markers) if markers else "(no probe markers on serial)")
-        print("stop reason:", g["reason"], "| guest executed:", result_line is not None)
+        print("stop reason:", g["reason"], "| exact verdict:", exact)
+        if not args.baseline and not exact:
+            failed.append(f"guest crt-probe ({cc}): exact verdict {PROBE_VERDICT.pattern} missing")
+    summary["failed"] = failed
     (BUILD / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     print(f"summary: {BUILD / 'summary.json'}")
+    if failed:
+        print("FAILED:", "; ".join(failed))
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

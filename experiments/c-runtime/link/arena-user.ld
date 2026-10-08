@@ -35,12 +35,14 @@ SECTIONS
 
     . = ALIGN(0x1000);
 
+    /* KEEP: --gc-sections (LLD, zig cc) would otherwise drop the unreferenced
+     * layout anchor in crt0.c and change the TLS segment per toolchain. */
     .tdata : ALIGN(16) {
-        *(.tdata .tdata.*)
+        KEEP(*(.tdata .tdata.*))
     } :data :tls
 
     .tbss (NOLOAD) : ALIGN(16) {
-        *(.tbss .tbss.*)
+        KEEP(*(.tbss .tbss.*))
     } :data :tls
 
     .data : ALIGN(16) {
