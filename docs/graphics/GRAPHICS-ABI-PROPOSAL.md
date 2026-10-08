@@ -1,150 +1,159 @@
-# ADR Proposal: ArenaOS Native Graphics ABI v2 (`ADSK-v2`)
+# ADR Proposal: ArenaOS Desktop Session Protocol Version 2 (`ADSK-v2`)
 
-- **Status:** Proposed (Under Review — Do not merge into production until Phase 14 qualification)
+- **Status:** Proposed Architecture Draft (NOT approved for production implementation)
 - **Author:** ArenaOS Graphics Infrastructure Engineer
 - **Target Subsystem:** Desktop Compositor (`desktop`), Application Runtime (`arena-runtime`), Display Service (`displayd`)
-- **Compatibility Baseline:** Qualified Phase 13 (`arena/phase13-native-app-maturity`, tip `74ace4f9e989`)
+- **Compatibility Baseline:** Qualified Phase 13 (`arena/phase13-native-app-maturity`, commit `74ace4f9e989`)
+- **Strict Implementation Constraint:** This document specifies an architectural proposal for future review. Production kernel, desktop, and wire interfaces must NOT be modified. All legacy ADSK-v1 operations and wire frames must be preserved verbatim.
 
 ---
 
 ## 1. Context and Problem Statement
 
-In ArenaOS Phase 13, applications interact with the desktop via the neutral 64-byte `ADSK` inline IPC frame protocol (`userspace/desktop/src/wire.rs`). While this protocol successfully supports built-in 2D applications and basic multi-window lifecycle (ADR-0097), it presents several friction points when targeting standard graphics libraries (SDL3, software OpenGL, future 3D drivers):
+In ArenaOS Phase 13, applications interact with the desktop compositor (`desktop`) via the canonical 64-byte `ADSK` inline IPC frame protocol (`userspace/desktop/src/wire.rs`). This protocol governs surface creation, input delivery, transient popups, and damage presentation for native applications.
 
-1. **Uncertain Frame Synchronization:** The existing `Frame::Damage` call synchronously blocks the caller while the compositor executes `publish_rects`. There is no asynchronous completion token or fence mechanism, limiting render pipelines to synchronous single-buffered lockstep.
-2. **Fixed Pixel Format:** The wire format implicitly assumes 32-bit opaque `XRGB8888`. It provides no negotiation for alpha blending (`ARGB8888`), 16-bit color (`RGB565`), or explicit color-space metadata.
-3. **Implicit Buffer Stride:** Surface dimensions in `Frame::Create` supply only `width` and `height`, implicitly assuming `stride == width`. Standard rendering engines require explicit row pitch/stride to satisfy cacheline alignment and SIMD requirements.
-4. **Resizing State Transitions:** While ADR-0075 introduces session surface reservations, transitioning between window resize drag and active rendering lacks an atomic buffer swap and fence acknowledgment.
+While the existing `ADSK-v1` protocol successfully qualifies single and multi-window desktop applications (ADR-0097, ADR-0107), targeting standard 2D/3D libraries (e.g. SDL3, Mesa software rasterizers, and future hardware acceleration) exposes key protocol limitations:
+
+1. **Synchronous Presentation Lockstep:** In `ADSK-v1`, `Frame::Damage` carries damage rectangles and synchronously triggers compositor consumption. There is no asynchronous completion token, presentation fence, or notification mechanism indicating when the compositor has finished reading the buffer. Consequently, clients cannot reliably pipeline double-buffered rendering without risking tearing or blocking.
+2. **Implicit Pixel Format:** `ADSK-v1` implicitly treats all surfaces as 32-bit opaque `XRGB8888`. It provides no negotiation for alpha blending (`ARGB8888`), 16-bit packed modes (`RGB565`), or linear color spaces.
+3. **Implicit Row Stride:** `Frame::Create` and `Frame::CreateAdditional` accept only `width` and `height`, enforcing `stride == width`. Vectorized SIMD software rasterizers and hardware memory controllers require row pitch alignment (typically 16-pixel / 64-byte boundaries).
+4. **Wire Compatibility Requirement:** Millions of cycles of guest qualification rely on the exact ADSK-v1 wire format. Any revision must preserve all 12 existing opcodes, error handling, and payload semantics without breaking legacy clients.
 
 ---
 
-## 2. Decision & Technical Specification
+## 2. ADSK-v1 Baseline Audit
 
-We propose `ADSK-v2` (ArenaOS Desktop Session Protocol Version 2), a capability-guarded, versioned graphics interface preserving ArenaOS's security invariants while providing standard primitives for rendering engines.
+The verified `ADSK-v1` wire layout (`userspace/desktop/src/wire.rs`) defines a fixed 64-byte structure:
 
-### 2.1 Capability-Based Resource Ownership & Security Model
+```
+Bytes  0..4:   b"ADSK" (ASCII Magic)
+Byte   4:      1 (Wire Version)
+Byte   5:      Opcode (1..=12)
+Bytes  6..7:   Reserved (strictly checked zero)
+Bytes  8..16:  Window Handle (u64 LE, descriptive routing token)
+Bytes 16..24:  Opcode payload (damage count, coordinates, or dismissed popup handle)
+Bytes 24..28:  Width/Height, or Keycode, or Min Dimensions
+Bytes 28..30:  Event sub-opcode / flags
+Bytes 30..32:  Reserved (strictly checked zero)
+Bytes 32..64:  Title text (32 bytes) or DamageRects payload
+```
+
+### Full Legacy Opcode Table (ADSK-v1)
+
+| Opcode | Legacy Operation | ADSK-v1 Field Usage | Status in Proposal |
+|---|---|---|---|
+| `1` | `Create` | `b[24..26]=width`, `b[26..28]=height` | **Preserved 100%** |
+| `2` | `Damage` | `b[16]=n`, `b[24..64]=r[5][4]` | **Preserved 100%** |
+| `3` | `Poll` | `b[8..16]=handle` | **Preserved 100%** |
+| `4` | `Title` | `b[8..16]=handle`, `b[32..64]=text[32]` | **Preserved 100%** |
+| `5` | `Event` | `b[8..16]=handle`, `b[28]=kind`, `b[24..28]=args` | **Preserved 100%** |
+| `6` | `CancelClose` | `b[8..16]=handle` | **Preserved 100%** |
+| `7` | `Resize` | `b[8..16]=handle`, `b[24..26]=w`, `b[26..28]=h` | **Preserved 100%** |
+| `8` | `Resizable` | `b[8..16]=handle`, `b[24..26]=min_w`, `b[26..28]=min_h` | **Preserved 100%** |
+| `9` | `Popup` | `b[8..16]=handle`, `b[16..24]=x,y`, `b[24..28]=w,h`, `b[28]=kind` | **Preserved 100%** |
+| `10` | `Dismiss` | `b[8..16]=handle` | **Preserved 100%** |
+| `11` | `DestroyWindow` | `b[8..16]=handle` | **Preserved 100%** |
+| `12` | `CreateAdditional`| `b[24..26]=width`, `b[26..28]=height` | **Preserved 100%** |
+
+---
+
+## 3. Proposed ADSK-v2 Extensions (Additive & Non-Breaking)
+
+To maintain absolute backward compatibility while introducing graphics extensions, `ADSK-v2` introduces:
+1. Version Negotiation: `b[4]` can be negotiated as `1` (legacy ADSK-v1) or `2` (`ADSK-v2`).
+2. Additive Fields: Using currently reserved bytes in `Create`, `CreateAdditional`, and `Damage` when version is 2.
+3. New Additive Opcode: Opcode `13` (`SyncFence`) for non-blocking presentation query.
+
+### 3.1 Extended Wire Framing (`version == 2`)
+
+```
+Bytes  0..4:   b"ADSK" (Magic)
+Byte   4:      2 (Version)
+Byte   5:      Opcode (1..=13)
+Bytes  6..7:   Pixel Format:
+                 0 = XRGB8888 (32-bit opaque default)
+                 1 = ARGB8888 (32-bit premultiplied alpha)
+                 2 = RGB565   (16-bit packed direct color)
+Bytes  8..16:  Window Handle (u64 LE, descriptive routing token)
+Bytes 16..24:  Sequence / Presentation Token (u64 LE for Damage/SyncFence)
+Bytes 24..26:  Width (u16 LE)
+Bytes 26..28:  Height (u16 LE)
+Bytes 28..30:  Row Pitch / Stride in Pixels (u16 LE; 0 defaults to width)
+Bytes 30..32:  Reserved (zero)
+Bytes 32..64:  Opcode payload (DamageRects, Title, Popup, or Fence metadata)
+```
+
+### 3.2 Operation Extensions
+
+#### Opcode 1 (`Create`) & Opcode 12 (`CreateAdditional`) in v2
+- `b[6..7]`: Requested `PixelFormat`. If the requested format is unsupported, Desktop responds with `XRGB8888` or returns `STATUS_BAD_ARG`.
+- `b[28..30]`: Requested `stride`. Must be $\ge \text{width}$ and a multiple of 16 pixels. If 0, compositor defaults `stride = width`.
+
+#### Opcode 2 (`Damage`) in v2
+- `b[8..16]`: Window handle.
+- `b[16]`: `rects.n` (0..=5).
+- `b[17..24]`: Monotonic frame submission token `seq: u64`.
+- `b[24..64]`: Up to 5 damage bounding rectangles `[x, y, w, h]`.
+
+#### Opcode 13 (`SyncFence`) — Additive New Opcode
+- Used by the client to query presentation status or register a notification callback for a submitted sequence token.
+- `b[8..16]`: Window handle.
+- `b[16..24]`: Sequence token `seq: u64`.
+- `b[24..26]`: Action (`0 = QueryStatus`, `1 = RequestAsyncNotification`).
+
+---
+
+## 4. Credible Buffer Ownership & Memory Protection
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    KERNEL CAPABILITY SPACE                  │
 ├──────────────────────────────┬──────────────────────────────┤
-│ Desktop Process Holds:       │ Client Process Holds:        │
-│ - Desktop Session Endpoint   │ - Badged Client Endpoint     │
-│   (Server side: READ)        │   (Caller side: WRITE)       │
+│ Desktop Process:             │ Client Application Process:  │
+│ - Desktop Session Server Port│ - Badged Client Endpoint     │
+│   (Receives ADSK requests)   │   (Sends ADSK requests)      │
 │ - SharedRegion Cap (Backing) │ - SharedRegion Cap (Backing) │
-│ - Private Snapshot Map (Pin) │   (RW / NX Mapping)          │
-│ - Client Process Cap         │ - Pacing Notification Cap    │
-│ - Client Pacing Notification │                              │
+│   (Attenuated transfer)      │   (Mapped RW, NX)            │
+│ - Private Snapshot Map (Pin) │ - Client Pacing Notification │
+│   (Double-buffer protection) │   (Receives FRAME_RETIRED)   │
+│ - Client Process Cap (Reap)  │                              │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-1. **Authority by Possession Only:**
-   - Window creation, damage presentation, and destruction require possessing an exact `BadgedEndpoint` capability minted by Desktop.
-   - Numeric window handles (`u64`) are purely descriptive routing identifiers. Passing a numeric handle without the corresponding badged endpoint capability returns `STATUS_BAD_ARG` (-2).
-2. **Buffer Protection & Isolation:**
-   - The application receives its surface backing as a `SharedRegion` capability with attenuated rights `RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY`.
-   - The application has zero access to the compositor's scanout buffer, other application surfaces, or device MMIO.
-   - The compositor maintains a **private snapshot region** for each window. The compositor never renders directly from the application's shared buffer, isolating the display from application memory corruption.
-3. **Fail-Closed Teardown:**
-   - If an application terminates or crashes, the kernel automatically unmaps its shared memory and releases capability references (`docs/adr/0056`).
-   - Desktop observes client termination via its held `Process` capability, reaps the window record, destroys its private snapshot mapping, and marks the window slot vacant.
+1. **Allocation & Attenuation:**
+   - The surface backing is created by `desktop` via `SYS_SHARED_CREATE(pages)`.
+   - `desktop` retains the master capability and passes an attenuated capability (`RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY | RIGHTS_DESTROY`) to the client during session handshake.
+   - The application maps the region into its user address space via `SYS_SHARED_MAP(backing, VM_PROT_READ | VM_PROT_WRITE)`.
+2. **Double-Buffering & Snapshot Isolation:**
+   - In ArenaOS, the compositor never composites directly from live application shared memory during screen scanout to avoid race conditions, torn frames, and malicious memory modification.
+   - Upon receiving `Frame::Damage`, `desktop` blits only the damaged rectangles into its private compositor snapshot buffer.
+   - The display controller (`displayd`) reads exclusively from the desktop compositor's scanout buffer via unmapped physical DMA / MMIO. Application processes have zero capability access to display hardware.
+3. **Clean Resource Reclamation:**
+   - If an application exits or faults, the microkernel reclaims all mapped pages and decrements capability reference counts (`docs/adr/0056`).
+   - Desktop detects process termination via its held `Process` handle, reaps the window slot, and frees the `SharedRegion`.
 
 ---
 
-### 2.2 Wire Protocol Specification (`ADSK-v2`)
+## 5. Presentation Completion & Synchronization Model
 
-All client-compositor requests cross the existing 64-byte inline IPC payload structure. The magic header is updated to `ADSK`, version `2`.
+To avoid unbounded synchronous blocking and eliminate frame tearing:
 
-```
-Bytes 0..4:   ASCII Magic 'ADSK'
-Byte  4:      Version = 2
-Byte  5:      Opcode
-Byte  6..7:   Flags / Format (0 = XRGB8888, 1 = ARGB8888, 2 = RGB565)
-Bytes 8..15:  Window Handle (u64 LE, descriptive)
-Bytes 16..23: Sequence / Fence Token (u64 LE)
-Bytes 24..27: Width (u16 LE), Height (u16 LE)
-Bytes 28..31: Stride in Pixels (u16 LE), Reserved (u16 zero)
-Bytes 32..63: Opcode-specific payload / Damage Rectangles / Reserved zero
-```
-
-#### Supported Operations
-
-| Opcode | Name | Description |
-|---|---|---|
-| `1` | `Create` | Create the primary window surface for this authenticated session. |
-| `2` | `CreateAdditional` | Request an additional independently backed ordinary window (ADR-0097). |
-| `3` | `Damage` | Publish modified rectangles and commit rendering. |
-| `4` | `Poll` | Retrieve queued input and window events. |
-| `5` | `Resize` | Adopt newly configured window dimensions. |
-| `6` | `Title` | Set descriptive window title string. |
-| `7` | `DestroyWindow` | Explicitly close an individual window while keeping the process alive. |
-| `8` | `SyncFence` | Query or wait for completion of a previously submitted damage sequence. |
+1. **Asynchronous Notification Badge:**
+   - On startup, the application receives a badged `Notification` capability minted from the system notification broker.
+   - In `ADSK-v2`, when the desktop compositor finishes blitting the damaged regions of sequence `seq` into its private snapshot, it signals the client's pacing notification:
+     ```
+     SYS_NOTIFY(client_pacing_slot, BADGE_FRAME_RETIRED | (seq & 0xFFFF))
+     ```
+2. **Pipelined Double Buffering:**
+   - The client application renders frame $N$ into back-buffer partition 0, issues `Damage(seq=N)`.
+   - The client immediately begins rendering frame $N+1$ into back-buffer partition 1 without waiting.
+   - Before publishing frame $N+1$, the client checks its notification badge or calls `SYS_WAIT` on the pacing notification to ensure frame $N$ has been retired by the compositor.
+   - Result: Full 60 FPS throughput with zero tearing and minimal IPC latency.
 
 ---
 
-### 2.3 Buffer Geometry, Pitch, and Formats
+## 6. Implementation Rule & Roadmap Alignment
 
-1. **Dimensions:**
-   - Strictly bounded: `MIN_WIDTH = 80`, `MIN_HEIGHT = 60`, `MAX_WIDTH = 1024`, `MAX_HEIGHT = 768`.
-   - Oversized or zero dimensions are rejected before resource mutation.
-2. **Explicit Stride:**
-   - `stride` must be $\ge \text{width}$ and aligned to a 16-pixel (64-byte) cacheline boundary.
-   - Allows graphics rasterizers to employ SIMD vector stores without corrupting adjacent rows.
-3. **Pixel Formats:**
-   - `Format 0 (XRGB8888)`: 32 bits per pixel, opaque, byte order B, G, R, X in memory. (Default standard format).
-   - `Format 1 (ARGB8888)`: 32 bits per pixel, straight or premultiplied alpha for transparent overlays.
-   - `Format 2 (RGB565)`: 16 bits per pixel, packed direct color for memory-constrained clients.
-
----
-
-### 2.4 Presentation, Damage, and Completion Fences
-
-To enable high-performance double-buffering without tearing or unbounded blocking:
-
-1. **Damage Rectangles:**
-   - `Damage` carries up to 4 discrete bounding rectangles `[x, y, width, height]` plus an accumulation flag (`DamageRects::MAX = 4`).
-   - If `n == 0` or overflow occurs, it degrades safely to full-window damage.
-2. **Monotonic Frame Sequence Numbers:**
-   - The application increments a 64-bit monotonic sequence counter with each `Damage` request.
-   - The compositor acknowledges receipt with the sequence number.
-3. **Asynchronous Presentation Fence:**
-   - When the compositor finishes copying pixels into its private snapshot, it signals the application's private pacing Notification capability with badge `BADGE_FRAME_RETIRED | (seq & 0xFFFF)`.
-   - The application can immediately reuse its back-buffer memory without polling or tearing.
-
----
-
-### 2.5 Window Resizing Protocol
-
-Resizing leverages the Phase 11.3 / ADR-0075 pre-reserved surface capacity:
-
-1. **Event Delivery:** When the user resizes a window frame, Desktop queues an `Event::Configure { width, height }` to the client.
-2. **Adoption:** The client invokes `Client::adopt(new_w, new_h)` to reconfigure its internal rasterizer and viewport. Because the initial reservation covers the full screen work area, no memory re-allocation or capability re-negotiation occurs.
-3. **Commit:** The client repaints the new dimensions and sends `Frame::Resize { width, height }`, instantly re-synchronizing compositor bounds.
-
----
-
-### 2.6 Input Event Delivery
-
-Input routing preserves the verified Phase-10 model (`docs/adr/0062`):
-
-- **Event Queue:** Each window session maintains an isolated 16-slot FIFO ring.
-- **Typed Delivery:** `Event::Key(code, pressed, mods)`, `Event::Pointer(x, y, buttons)`, `Event::Wheel(delta)`, `Event::Configure(w, h)`, and `Event::Close`.
-- **Zero Raw Device Access:** Applications never receive raw `inputd` tokens, hardware scancodes, or global pointer coordinates.
-
----
-
-## 3. Security Analysis
-
-| Threat Model Vector | Mitigation in Proposed ABI |
-|---|---|
-| **Buffer Overrun / Out-of-Bounds Write** | Kernel validates page counts on `SYS_SHARED_CREATE`. Framebuffer wrappers enforce bounds checks on slice dimensions and strides. |
-| **Cross-Client Information Leak** | Kernel zeroes all physical frames upon allocation before minting capabilities. |
-| **Compositor Hijacking / Forgery** | Operations require possession of exact unforgeable `BadgedEndpoint` capabilities. Descriptive IDs cannot authenticate actions. |
-| **Denial of Service via Unbounded Allocation** | Bounded reservations: max 32 windows system-wide, max 1024 pages per surface, max 96 total system SharedRegions. |
-| **Display Memory Corruption** | Framebuffer MMIO is held exclusively by `displayd`. Client applications possess zero physical DMA or MMIO capabilities. |
-
----
-
-## 4. Implementation Rule
-
-**This proposal is an engineering design deliverable. Production kernel and userspace interfaces must NOT be modified until formal review alongside Phase-14 qualification.**
+- **Scope:** Architectural specification only.
+- **Production Status:** `ADSK-v1` remains the sole production desktop protocol in ArenaOS Phase 13.
+- **Review Requirement:** Any changes to `userspace/desktop/src/wire.rs` or compositor message processing require formal architectural review and qualification alongside Phase 14 core OS milestones.

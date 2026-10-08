@@ -78,7 +78,16 @@
   - **Linux Hosts:** Requires QEMU built with `--enable-virglrenderer` and `--enable-opengl`, plus access to host `/dev/dri/renderD128`.
   - **Windows Hosts:** QEMU on native Windows generally lacks `virglrenderer` support or requires complex WSL2 / ANGLE GPU abstraction.
   - **Headless / Cloud Sandboxes:** Cloud CI environments running QEMU often lack physical GPU hardware or DRI render nodes, causing `VIRTIO_GPU_F_VIRGL` negotiation to fail closed.
-- **Guest Kernel Requirements:** Requires host-visible memory mappings (PCI BAR 2/4 shared memory for resource blobs), MSI-X interrupt delivery for command completion fences, and asynchronous submission queues.
+- **Architectural Requirements: Baseline vs. Optional Optimizations:**
+  - **Baseline VirGL 3D (Functional Minimum):**
+    - Feature bit: `VIRTIO_GPU_F_VIRGL` (bit 0).
+    - Uses existing Virtio modern control queue to issue 3D commands (`CTX_CREATE`, `RESOURCE_CREATE_3D`, `ATTACH_BACKING`, `SUBMIT_3D`, `TRANSFER_TO_HOST_3D`, `RESOURCE_FLUSH`).
+    - Backing memory is attached using standard guest physical scatter-gather page lists (`ATTACH_BACKING`), identical to ArenaOS's existing Virtio-GPU 2D driver in `userspace/gpu2d`.
+    - Fence synchronization can be polled synchronously on the control virtqueue used-ring without kernel interrupt modifications.
+    - **No PCI BAR 2/4 host-visible memory or kernel MSI-X changes are required for baseline VirGL 3D.**
+  - **Optional High-Performance Enhancements:**
+    - `VIRTIO_GPU_F_RESOURCE_BLOB` and host-visible memory (`VIRTIO_GPU_F_HOSTMEM`): Requires kernel support for mapping PCI BAR 2/4 to enable zero-copy staging buffers between host and guest.
+    - Asynchronous interrupt-driven fences: Requires MSI-X interrupt routing (`SYS_IRQ_RELAY`) to wake parked driver threads on GPU fence retirement instead of busy-polling the used ring.
 
 #### B. Venus (Virtio-GPU Vulkan)
 - **Architecture:** Encapsulates Vulkan command streams over Virtio. Host translates and submits directly to host Vulkan drivers.

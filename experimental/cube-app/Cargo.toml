@@ -1,0 +1,19 @@
+[package]
+name = "arena-cube-app"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+arena-lib = { path = "../../userspace/arena-lib" }
+arena-desktop = { path = "../../userspace/desktop" }
+arena-runtime = { path = "../../userspace/arena-runtime" }
+arena-startup-abi = { path = "../../userspace/arena-startup-abi" }
+arena-graphics-prototype = { path = "../graphics-prototype", default-features = false }
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = 3

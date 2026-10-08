@@ -9,6 +9,10 @@ description = "ArenaOS Graphics Infrastructure Research: 3D Software Renderer & 
 default = ["std"]
 std = []
 
+[[bin]]
+name = "cube_bench"
+required-features = ["std"]
+
 [workspace]
 
 [profile.release]

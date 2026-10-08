@@ -1,7 +1,7 @@
 //! Deterministic 3D vector and matrix mathematics for software rasterization.
 //!
 //! Fully portable without standard library floating-point hardware dependencies,
-//! providing bit-identical results across host tests and bare-metal environments.
+//! providing consistent mathematical behavior across host tests and bare-metal environments.
 
 #![allow(dead_code)]
 

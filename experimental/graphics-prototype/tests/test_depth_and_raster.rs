@@ -2,7 +2,7 @@
 
 use arena_graphics_prototype::framebuffer::{Framebuffer, PixelFormat};
 use arena_graphics_prototype::rasterizer::{
-    ScreenVertex, ShadingMode, rasterize_triangle,
+    CullMode, ScreenVertex, ShadingMode, WindingOrder, rasterize_triangle,
 };
 use arena_graphics_prototype::texture::{FilterMode, Texture, WrapMode};
 use arena_graphics_prototype::zbuffer::ZBuffer;
@@ -32,9 +32,19 @@ fn test_hidden_surface_removal_order_independence() {
         let mut zb = ZBuffer::new(&mut zb1, 20, 20).unwrap();
 
         // Far (Blue)
-        rasterize_triangle(&mut fb, &mut zb, v_far_0, v_far_1, v_far_2, None, ShadingMode::Flat, FilterMode::Nearest, 0x00_00_00_FF);
+        rasterize_triangle(
+            &mut fb, &mut zb, v_far_0, v_far_1, v_far_2,
+            None, ShadingMode::Flat, FilterMode::Nearest,
+            CullMode::None, WindingOrder::CounterClockwise,
+            0x00_00_00_FF,
+        );
         // Near (Red)
-        rasterize_triangle(&mut fb, &mut zb, v_near_0, v_near_1, v_near_2, None, ShadingMode::Flat, FilterMode::Nearest, 0x00_FF_00_00);
+        rasterize_triangle(
+            &mut fb, &mut zb, v_near_0, v_near_1, v_near_2,
+            None, ShadingMode::Flat, FilterMode::Nearest,
+            CullMode::None, WindingOrder::CounterClockwise,
+            0x00_FF_00_00,
+        );
     }
 
     // Case 2: Near then Far
@@ -45,9 +55,19 @@ fn test_hidden_surface_removal_order_independence() {
         let mut zb = ZBuffer::new(&mut zb2, 20, 20).unwrap();
 
         // Near (Red)
-        rasterize_triangle(&mut fb, &mut zb, v_near_0, v_near_1, v_near_2, None, ShadingMode::Flat, FilterMode::Nearest, 0x00_FF_00_00);
+        rasterize_triangle(
+            &mut fb, &mut zb, v_near_0, v_near_1, v_near_2,
+            None, ShadingMode::Flat, FilterMode::Nearest,
+            CullMode::None, WindingOrder::CounterClockwise,
+            0x00_FF_00_00,
+        );
         // Far (Blue)
-        rasterize_triangle(&mut fb, &mut zb, v_far_0, v_far_1, v_far_2, None, ShadingMode::Flat, FilterMode::Nearest, 0x00_00_00_FF);
+        rasterize_triangle(
+            &mut fb, &mut zb, v_far_0, v_far_1, v_far_2,
+            None, ShadingMode::Flat, FilterMode::Nearest,
+            CullMode::None, WindingOrder::CounterClockwise,
+            0x00_00_00_FF,
+        );
     }
 
     // Both cases must yield exact Red at (10, 10)
@@ -67,16 +87,66 @@ fn test_backface_culling() {
     let mut fb = Framebuffer::new(&mut fb_storage, 10, 10, 10, PixelFormat::Xrgb8888).unwrap();
     let mut zb = ZBuffer::new(&mut zb_storage, 10, 10).unwrap();
 
-    // Clockwise winding (back-facing)
+    // In screen coordinates (y-down):
+    // v0=(1,1) -> v1=(8,1) -> v2=(1,8) has signed_area = (8-1)*(8-1) - 0 = +49.0 > 0.
+    // Under CounterClockwise front-face winding, signed_area > 0 is back-facing!
+    let v0 = ScreenVertex { x: 1.0, y: 1.0, z: 0.5, inv_w: 1.0, u_over_w: 0.0, v_over_w: 0.0, light: 1.0 };
+    let v1 = ScreenVertex { x: 8.0, y: 1.0, z: 0.5, inv_w: 1.0, u_over_w: 0.0, v_over_w: 0.0, light: 1.0 };
+    let v2 = ScreenVertex { x: 1.0, y: 8.0, z: 0.5, inv_w: 1.0, u_over_w: 0.0, v_over_w: 0.0, light: 1.0 };
+
+    rasterize_triangle(
+        &mut fb, &mut zb, v0, v1, v2,
+        None, ShadingMode::Flat, FilterMode::Nearest,
+        CullMode::Back, WindingOrder::CounterClockwise,
+        0x00_FF_00_00,
+    );
+
+    // No pixels should have been drawn due to backface culling
+    assert_eq!(fb.take_damage(), None);
+    assert!(fb.raw_slice().iter().all(|&p| p == 0));
+
+    // If CullMode::None is used, it MUST draw pixels
+    rasterize_triangle(
+        &mut fb, &mut zb, v0, v1, v2,
+        None, ShadingMode::Flat, FilterMode::Nearest,
+        CullMode::None, WindingOrder::CounterClockwise,
+        0x00_FF_00_00,
+    );
+    assert!(fb.take_damage().is_some());
+    assert!(fb.raw_slice().iter().any(|&p| p == 0x00_FF_00_00));
+}
+
+#[test]
+fn test_frontface_culling() {
+    let mut fb_storage = [0u32; 100];
+    let mut zb_storage = [1.0f32; 100];
+    let mut fb = Framebuffer::new(&mut fb_storage, 10, 10, 10, PixelFormat::Xrgb8888).unwrap();
+    let mut zb = ZBuffer::new(&mut zb_storage, 10, 10).unwrap();
+
+    // Front-facing triangle (signed_area < 0 in screen coords)
     let v0 = ScreenVertex { x: 1.0, y: 1.0, z: 0.5, inv_w: 1.0, u_over_w: 0.0, v_over_w: 0.0, light: 1.0 };
     let v1 = ScreenVertex { x: 1.0, y: 8.0, z: 0.5, inv_w: 1.0, u_over_w: 0.0, v_over_w: 0.0, light: 1.0 };
     let v2 = ScreenVertex { x: 8.0, y: 1.0, z: 0.5, inv_w: 1.0, u_over_w: 0.0, v_over_w: 0.0, light: 1.0 };
 
-    rasterize_triangle(&mut fb, &mut zb, v0, v1, v2, None, ShadingMode::Flat, FilterMode::Nearest, 0x00_FF_00_00);
-
-    // No pixels should have been drawn due to backface culling
+    // With CullMode::Front, front-facing triangle is culled
+    rasterize_triangle(
+        &mut fb, &mut zb, v0, v1, v2,
+        None, ShadingMode::Flat, FilterMode::Nearest,
+        CullMode::Front, WindingOrder::CounterClockwise,
+        0x00_00_FF_00,
+    );
     assert_eq!(fb.take_damage(), None);
-    assert!(fb_storage.iter().all(|&p| p == 0));
+    assert!(fb.raw_slice().iter().all(|&p| p == 0));
+
+    // With CullMode::Back, front-facing triangle is kept and rendered
+    rasterize_triangle(
+        &mut fb, &mut zb, v0, v1, v2,
+        None, ShadingMode::Flat, FilterMode::Nearest,
+        CullMode::Back, WindingOrder::CounterClockwise,
+        0x00_00_FF_00,
+    );
+    assert!(fb.take_damage().is_some());
+    assert!(fb.raw_slice().iter().any(|&p| p == 0x00_00_FF_00));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! 3D Triangle Rasterizer with perspective-correct interpolation and depth testing.
 //!
 //! Implements:
-//! - Backface culling
+//! - Configurable face culling (None, Back, Front) and winding order (CCW, CW)
 //! - Sub-pixel accurate barycentric edge functions
 //! - Perspective-correct attribute interpolation (1/w, u/w, v/w)
 //! - Depth buffering (Z-buffer) with early-Z test
@@ -54,25 +54,65 @@ pub enum ShadingMode {
     TexturedLit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CullMode {
+    None,
+    Back,
+    Front,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindingOrder {
+    CounterClockwise,
+    Clockwise,
+}
+
 /// Rasterize a single triangle with perspective-correct attributes and depth test.
 #[allow(clippy::too_many_arguments)]
 pub fn rasterize_triangle(
     fb: &mut Framebuffer<'_>,
     zb: &mut ZBuffer<'_>,
     v0: ScreenVertex,
-    v1: ScreenVertex,
-    v2: ScreenVertex,
+    mut v1: ScreenVertex,
+    mut v2: ScreenVertex,
     texture: Option<&Texture<'_>>,
     shading: ShadingMode,
     filter: FilterMode,
+    cull: CullMode,
+    winding: WindingOrder,
     flat_color: u32,
 ) {
-    // 2D cross product for signed area and back-face culling (counter-clockwise winding)
-    let area = (v1.x - v0.x) * (v2.y - v0.y) - (v1.y - v0.y) * (v2.x - v0.x);
-    if area <= 0.0 {
-        // Back-facing or degenerate triangle
+    // In screen coordinates with inverted Y (y=0 top, increasing downwards):
+    // A Counter-Clockwise triangle in Cartesian 3D has signed_area < 0.
+    // A Clockwise triangle in Cartesian 3D has signed_area > 0.
+    let signed_area = (v1.x - v0.x) * (v2.y - v0.y) - (v1.y - v0.y) * (v2.x - v0.x);
+
+    // Degenerate triangle check (zero area or subpixel collinear)
+    if signed_area.abs() < 1e-5 {
         return;
     }
+
+    let is_ccw = signed_area < 0.0;
+    let is_front_facing = match winding {
+        WindingOrder::CounterClockwise => is_ccw,
+        WindingOrder::Clockwise => !is_ccw,
+    };
+
+    // Apply face culling
+    match cull {
+        CullMode::Back if !is_front_facing => return,
+        CullMode::Front if is_front_facing => return,
+        _ => {}
+    }
+
+    // Ensure positive area orientation for barycentric rasterization by swapping v1 and v2 if needed
+    let area = if signed_area < 0.0 {
+        core::mem::swap(&mut v1, &mut v2);
+        -signed_area
+    } else {
+        signed_area
+    };
+
     let inv_area = 1.0 / area;
 
     // Viewport-clipped bounding box
