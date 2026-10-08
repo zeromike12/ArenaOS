@@ -155,3 +155,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0105](0105-helper-standard-streams.md) | Explicit AHL1 helper stream delegation and owner-scoped wake | Accepted; signed helper T1 guest proof passed |
 | [0106](0106-native-user-threads.md) | Native process-owned ring-3 threads, guarded VM stacks, per-thread FS.base TLS, join and detach | Accepted; T1 guest proof and T3 preservation passed |
 | [0107](0107-native-synchronization-domains.md) | Capability-backed native wait domains for Mutex, Condvar, and Once | Accepted and implemented; T1 guest proof and 20/20 T3 preservation passed |
+| [0110](0110-static-native-pie-and-kernel-placement.md) | Bounded static PIE, relative relocations, and RNG-backed kernel placement | Accepted as Phase-14 implementation contract; release qualification pending |
