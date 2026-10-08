@@ -7,6 +7,7 @@
 //! - Mapped `SharedRegion` backing surface
 //! - Real damage presentation (`window.damage()`)
 //! - Event loop handling (`window.poll()`)
+//! - Monotonic microsecond clock timing via `arena_desktop::app_client::now()`
 
 #![no_std]
 #![no_main]
@@ -58,7 +59,11 @@ fn cube_main(_view: StartupView<'_>) {
     let mut zb_storage = vec![1.0f32; width * height];
     let config = RendererConfig::default();
 
-    // Render an initial sequence of 60 frames demonstrating continuous 3D rotation
+    let mut total_raster_us: u64 = 0;
+    let mut total_present_us: u64 = 0;
+    let anim_start_us = arena_desktop::app_client::now();
+
+    // Render 60 frames demonstrating continuous 3D rotation and measure genuine guest timing
     let total_frames = 60;
     for frame_idx in 0..total_frames {
         // Direct zero-copy slice of the desktop window's mapped SharedRegion surface
@@ -66,16 +71,28 @@ fn cube_main(_view: StartupView<'_>) {
             core::slice::from_raw_parts_mut(window.pixels, width * height)
         };
 
-        // Render 3D cube frame
+        // 1. Measure genuine guest rasterization time (CPU rendering into surface)
+        let t_raster_start = arena_desktop::app_client::now();
         let receipt = demo.render_frame(frame_idx, slice, &mut zb_storage, config);
+        let t_raster_end = arena_desktop::app_client::now();
+        let raster_us = t_raster_end.saturating_sub(t_raster_start);
+        total_raster_us += raster_us;
 
-        // Publish damage to compositor
+        // 2. Measure genuine guest presentation time (synchronous damage IPC to compositor)
+        let t_present_start = t_raster_end;
         window.damage().unwrap_or_else(|_| client::exit(76));
+        let t_present_end = arena_desktop::app_client::now();
+        let present_us = t_present_end.saturating_sub(t_present_start);
+        total_present_us += present_us;
 
         client::log(b"[cube-app] frame rendered; damage published; frame=");
         log_u64(frame_idx as u64);
         client::log(b"; hash=0x");
         log_hex(receipt.pixel_hash);
+        client::log(b"; raster_us=");
+        log_u64(raster_us);
+        client::log(b"; present_us=");
+        log_u64(present_us);
         client::log(b"\n");
 
         // Poll for window events (Close, Key, etc.)
@@ -89,6 +106,17 @@ fn cube_main(_view: StartupView<'_>) {
             }
         }
     }
+
+    let anim_end_us = arena_desktop::app_client::now();
+    let total_elapsed_us = anim_end_us.saturating_sub(anim_start_us);
+
+    client::log(b"[cube-app] timing summary: total_frames=60; total_elapsed_us=");
+    log_u64(total_elapsed_us);
+    client::log(b"; total_raster_us=");
+    log_u64(total_raster_us);
+    client::log(b"; total_present_us=");
+    log_u64(total_present_us);
+    client::log(b"\n");
 
     client::log(b"[cube-app] animation sequence completed successfully; exiting\n");
 }

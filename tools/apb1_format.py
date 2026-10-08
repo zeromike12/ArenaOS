@@ -28,6 +28,10 @@ CHUNK_BYTES = 4096
 # Phase 13 adds signed stream/synchronization request hints in bits 3 and 4.
 # These bits remain descriptive; launch policy mints the actual capabilities.
 KNOWN_APP_FLAGS = 0x1F
+# RFC 8032 Section 7.1 public test-vector seed.
+# CRITICAL NOTICE: This is a publicly documented test-only signing seed used
+# strictly for development and automated qualification fixtures. It does NOT
+# constitute a confidential or production release-signing key authority.
 RFC_SEED = bytes.fromhex(
     "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 )

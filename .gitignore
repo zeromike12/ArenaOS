@@ -1,10 +1,12 @@
 # Generated artifacts — never commit
 build/
 kernel/target/
+**/target/
 *.img
 *.efi
 *.pdb
 *.log
+*.ppm
 target/
 
 # Editor/OS noise
