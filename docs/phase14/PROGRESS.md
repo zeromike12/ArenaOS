@@ -105,9 +105,9 @@ test.
 
 T0/T1 results: `tools/build.sh --image` and M4's 9/9 guest passed after the
 collision-preflight addition; M1, M2, M3, M5, M6, M7, M11, and M12 also passed
-in that same boot. The final preservation run, 10-boot and 20–25-boot
-checkpoints, complete historical suite, fresh 100/100 exact-artifact stability,
-and independent release-archive boot remain pending.
+in that same boot. T2 and T3 preservation checkpoints are now complete. The
+final complete historical suite, fresh 100/100 exact-artifact stability, and
+independent release-archive boot remain pending.
 
 ## Preservation follow-up
 
@@ -137,7 +137,15 @@ completed, all 32 Desktop sessions started, session 33 was refused without
 resource mutation, 16 sessions were closed and reused, and final counts
 returned exactly to baseline. It took 259.1 seconds and is recorded in
 `build/m12-scale-afterfix.log` and `build/serial-m12-scale.log`. The full suite
-must confirm this case again before release qualification.
+must confirm this case again before release qualification. T2 then passed
+10/10 clean boots in 98 seconds and T3 passed 25/25 in 249 seconds on EFI
+SHA-256 `418c63acbf9eee0eadb6dd8de21e860bddd5e868d612028d7e93cb45e8d1ff2f`.
+Each boot had the same complete nine-suite PASS set, orderly UEFI shutdown,
+and the runner's Desktop pixel/input, network, virtio-console, and native
+application lifecycle checks. The M5 filesystem self-test also completed on
+each boot. Receipts and logs are `build/phase14-stability-t2-receipt.txt`,
+`build/phase14-stability-t3-receipt.txt`, and their matching `*-t2.log` and
+`*-t3.log` files.
 
 After those changes, `tools/test_phase14_pie_guest.py` again installed and ran
 the signed application twice and returned exit 42 with exact process/Image
@@ -161,4 +169,4 @@ receipt is `build/phase14-pie-afterfix.log` and the guest serial is
 | Missing entropy guest | Seed-withholding red mutation refused signed PIE with `STATUS_NO_ENTROPY`; original rngd source and EFI/ESP restored byte-for-byte |
 | Stale Image authority guest | Revoked Image received through signed APB1 was refused by kernel `SYS_SPAWN_CHECK` with `STATUS_BAD_ARG`; process/Image ownership returned to baseline |
 | Fresh PIE rerun | Bases `0x53674ce00000` and `0x5d036e600000`; both signed launches exited 42 with exact steady-state receipts |
-| Historical follow-up | M11 Desktop and window-manager tests pass after the TSC-window and typed-status fixes; M12 scale guest passes targeted rerun; final full suite pending |
+| Historical follow-up | M11 Desktop and window-manager targeted reruns pass; M12 scale targeted rerun passes; T2 10/10 and T3 25/25 clean boot checkpoints pass; final full suite pending |
