@@ -84,6 +84,12 @@ int main(int argc, char **argv) { (void)argv; return (int)(mix((unsigned)argc, 7
 """
 
 
+X87_SRC = """static volatile double xa = 1.5, xb = 2.0, xc;
+__attribute__((noinline)) void mulx(void) { xc = xa * xb; }
+int main(int argc, char **argv) { (void)argv; mulx(); return argc > 99 ? 1 : 0; }
+"""
+
+
 def self_test() -> int:
     """Negative control (SSE double math must FAIL) and positive control (integer-only,
     C2 profile, freestanding link must PASS). Both are built here, not stored."""
@@ -92,17 +98,28 @@ def self_test() -> int:
         d = Path(td)
         (d / "neg.c").write_text(NEG_SRC)
         (d / "pos.c").write_text(POS_SRC)
+        (d / "x87.c").write_text(X87_SRC)
         subprocess.run(["gcc", "-O2", "-msse2", "-mfpmath=sse", "-static", "-o", str(d / "neg.elf"),
                         str(d / "neg.c")], check=True)
         subprocess.run(["gcc", "-O2", "-mgeneral-regs-only", "-mno-sse", "-mno-sse2", "-mno-mmx",
                         "-mno-80387", "-msoft-float", "-ffreestanding", "-fno-builtin", "-fno-pic",
                         "-fno-pie", "-nostdlib", "-static", "-no-pie", "-Wl,-e,main", "-o",
                         str(d / "pos.elf"), str(d / "pos.c")], check=True)
+        # x87 negative control: -mfpmath=387 double math with the vector and x87 gate
+        # flags off. Clang (Zig) emits x87 for this profile too (C2.8 finding).
+        subprocess.run(["gcc", "-O2", "-mfpmath=387", "-mno-sse", "-mno-sse2", "-m80387",
+                        "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie", "-nostdlib",
+                        "-static", "-no-pie", "-Wl,-e,main", "-o", str(d / "x87.elf"),
+                        str(d / "x87.c")], check=True)
         neg = scan(d / "neg.elf")
         pos = scan(d / "pos.elf")
-    ok = (not neg["pass"]) and bool(neg["vector_operand_hits"]) and pos["pass"]
+        x87 = scan(d / "x87.elf")
+    ok = ((not neg["pass"]) and bool(neg["vector_operand_hits"]) and pos["pass"]
+          and (not x87["pass"]) and bool(x87["x87_hits"]))
     print(json.dumps({"negative_control_fails_as_expected": not neg["pass"],
                       "negative_vector_hits": len(neg["vector_operand_hits"]),
+                      "x87_control_fails_as_expected": not x87["pass"],
+                      "x87_control_hits": len(x87["x87_hits"]),
                       "positive_control_passes_as_expected": pos["pass"],
                       "positive_instructions": pos["instructions_scanned"]}))
     print("ISA-AUDIT-SELFTEST", "PASS" if ok else "FAIL")

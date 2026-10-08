@@ -11,9 +11,12 @@
  * defines struct timespec on the host). It declares the few prototypes it needs.
  */
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "arena/rt.h"
 #include "arena/string.h"
@@ -52,6 +55,25 @@ int arena_atoi(const char *s);
 char *arena_getenv(const char *name);
 int arena_rand(void);
 void arena_srand(unsigned int seed);
+/* C2.6 coverage: refusal paths, va_list formatter entry points, errno location, and
+ * the process-ending paths (checked in a forked child). Host-only evidence. */
+int arena_vsprintf(char *buf, const char *fmt, va_list ap);
+int arena_vprintf(const char *fmt, va_list ap);
+int arena_vfprintf(struct arena_file *f, const char *fmt, va_list ap);
+struct arena_file *arena_fopen(const char *path, const char *mode);
+struct arena_file *arena_freopen(const char *path, const char *mode, struct arena_file *f);
+int arena_remove(const char *path);
+int arena_rename(const char *from, const char *to);
+int arena_fgetc(struct arena_file *f);
+int arena_getc(struct arena_file *f);
+char *arena_fgets(char *buf, int n, struct arena_file *f);
+size_t arena_fread(void *p, size_t size, size_t n, struct arena_file *f);
+int arena_fclose(struct arena_file *f);
+int *__arena_errno_location(void);
+void arena_libc_abort(void) __attribute__((noreturn));
+void arena_libc_Exit(int status) __attribute__((noreturn));
+void __arena_assert_fail(const char *expr, const char *file, int line) __attribute__((noreturn));
+
 long arena_labs(long v);
 long long arena_llabs(long long v);
 long arena_atol(const char *s);
@@ -480,6 +502,100 @@ static void test_startup_count(void) {
     CHECK(arena_startup_count_kind(&s, ARENA_CAP_KIND_SHARED_REGION, 0) == -1, "count: oversized table refused");
 }
 
+
+static int via_vsnprintf(char *b, size_t n, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = arena_vsnprintf(b, n, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static int via_vsprintf(char *b, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = arena_vsprintf(b, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static int via_vprintf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = arena_vprintf(fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static int via_vfprintf(struct arena_file *f, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = arena_vfprintf(f, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static void child_abort(void) { arena_libc_abort(); }
+static void child_exit7(void) { arena_libc_Exit(7); }
+static void child_assert(void) { __arena_assert_fail("x", "t.c", 1); }
+
+/* Runs fn in a forked child and returns its exit status, or -1 if it did not exit. */
+static int child_status(void (*fn)(void)) {
+    fflush(NULL);
+    pid_t pid = fork();
+    if (pid == 0) {
+        fn();
+        _exit(99); /* not reached: fn must end the child itself */
+    }
+    int st = 0;
+    if (pid < 0 || waitpid(pid, &st, 0) != pid) {
+        return -1;
+    }
+    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+static void test_refusals_and_exit_paths(void) {
+    char a[32], b[32];
+    CHECK(via_vsnprintf(a, sizeof a, "%d-%s", 42, "x") == 4 && strcmp(a, "42-x") == 0,
+          "vsnprintf through a va_list");
+    CHECK(via_vsprintf(b, "%x", 255u) == 2 && strcmp(b, "ff") == 0, "vsprintf through a va_list");
+    CHECK(via_vprintf("vp:%d\n", 7) == 5, "vprintf returns the byte count");
+    CHECK(via_vfprintf(arena_stdout_object(), "vf:%d\n", 8) == 5, "vfprintf returns the byte count");
+
+    arena_c_set_errno(0);
+    *__arena_errno_location() = EPERM;
+    CHECK(arena_c_get_errno() == EPERM, "__arena_errno_location is the errno value");
+    *__arena_errno_location() = 0;
+
+    arena_c_set_errno(0);
+    CHECK(arena_fopen("/no/such", "r") == NULL && arena_c_get_errno() == ENOSYS,
+          "fopen refused with ENOSYS (no file authority)");
+    arena_c_set_errno(0);
+    CHECK(arena_freopen("/no/such", "r", arena_stdout_object()) == NULL && arena_c_get_errno() == ENOSYS,
+          "freopen refused with ENOSYS");
+    arena_c_set_errno(0);
+    CHECK(arena_remove("/no/such") == -1 && arena_c_get_errno() == ENOSYS, "remove refused with ENOSYS");
+    arena_c_set_errno(0);
+    CHECK(arena_rename("/a", "/b") == -1 && arena_c_get_errno() == ENOSYS, "rename refused with ENOSYS");
+
+    /* NULL streams are rejected with EBADF; the read paths never block here. */
+    arena_c_set_errno(0);
+    CHECK(arena_fgetc(NULL) == EOF && arena_c_get_errno() == EBADF, "fgetc(NULL) is EOF with EBADF");
+    arena_c_set_errno(0);
+    CHECK(arena_fgets(a, sizeof a, NULL) == NULL && arena_c_get_errno() == EBADF, "fgets(NULL) is NULL");
+    arena_c_set_errno(0);
+    CHECK(arena_fread(a, 1, sizeof a, NULL) == 0 && arena_c_get_errno() == EBADF, "fread(NULL) is 0");
+    arena_c_set_errno(0);
+    CHECK(arena_fclose(NULL) == -1 && arena_c_get_errno() == EBADF, "fclose(NULL) fails with EBADF");
+    arena_c_set_errno(0);
+    CHECK(arena_getc(NULL) == EOF && arena_c_get_errno() == EBADF, "getc(NULL) is EOF with EBADF");
+
+    /* Process-ending paths, observed from a child. */
+    CHECK(child_status(child_abort) == 134, "abort ends with status 134");
+    CHECK(child_status(child_exit7) == 7, "_Exit ends with the given status");
+    CHECK(child_status(child_assert) == 134, "a failed assertion ends with status 134");
+}
+
 int libc_host_checks;
 
 int libc_host_tests(void) {
@@ -496,6 +612,7 @@ int libc_host_tests(void) {
     test_errno_map();
     test_pure_additions();
     test_startup_count();
+    test_refusals_and_exit_paths();
     test_atexit(); /* keep last */
     libc_host_checks = checks;
     printf("LIBC-HOST checks=%d failures=%d\n", checks, failures);

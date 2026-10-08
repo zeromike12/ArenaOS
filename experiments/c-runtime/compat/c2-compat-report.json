@@ -26,35 +26,43 @@
     "defined_both": 110,
     "missing": 0,
     "one_compiler_only": 0,
-    "referenced_in_guest_app": 52,
-    "referenced_in_host_test": 53,
-    "no_test_reference": 20,
-    "refused_by_design": 7
+    "referenced_in_guest_app": 48,
+    "referenced_in_host_test": 69,
+    "no_test_reference": 5,
+    "refused_by_design": 10
   },
   "symbols": [
     {
       "name": "_Exit",
       "header": "stdlib.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "__arena_assert_fail",
       "header": "assert.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "__arena_errno_location",
       "header": "errno.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "abort",
       "header": "stdlib.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "abs",
@@ -143,9 +151,7 @@
       "name": "clock",
       "header": "time.h",
       "status": "defined",
-      "evidence": [
-        "guest-app-source"
-      ],
+      "evidence": [],
       "refusal": "no CPU-time source: refused"
     },
     {
@@ -217,16 +223,16 @@
       "header": "stdlib.h",
       "status": "defined",
       "evidence": [
-        "host-test-source",
-        "guest-app-source"
+        "host-test-source"
       ]
     },
     {
       "name": "fclose",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": [],
-      "refusal": "no file authority: only the standard streams exist"
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "feof",
@@ -256,19 +262,25 @@
       "name": "fgetc",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "fgets",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "fopen",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": [],
+      "evidence": [
+        "host-test-source"
+      ],
       "refusal": "no file authority in C2: refused (ENOSYS/ENOENT); see C2-LIBC-COVERAGE.md"
     },
     {
@@ -300,7 +312,9 @@
       "name": "fread",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "free",
@@ -315,7 +329,9 @@
       "name": "freopen",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": [],
+      "evidence": [
+        "host-test-source"
+      ],
       "refusal": "no file authority in C2: refused"
     },
     {
@@ -330,7 +346,9 @@
       "name": "getc",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "getchar",
@@ -408,8 +426,7 @@
       "header": "string.h",
       "status": "defined",
       "evidence": [
-        "host-test-source",
-        "guest-app-source"
+        "host-test-source"
       ]
     },
     {
@@ -459,7 +476,8 @@
       "status": "defined",
       "evidence": [
         "guest-app-source"
-      ]
+      ],
+      "refusal": "no timeout path in the mutex binding: refused with thrd_error (guest G6)"
     },
     {
       "name": "mtx_trylock",
@@ -555,14 +573,18 @@
       "name": "remove",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": [],
+      "evidence": [
+        "host-test-source"
+      ],
       "refusal": "no file authority in C2: refused"
     },
     {
       "name": "rename",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": [],
+      "evidence": [
+        "host-test-source"
+      ],
       "refusal": "no file authority in C2: refused"
     },
     {
@@ -834,10 +856,7 @@
       "name": "time",
       "header": "time.h",
       "status": "defined",
-      "evidence": [
-        "host-test-source",
-        "guest-app-source"
-      ],
+      "evidence": [],
       "refusal": "no wall-clock authority: refused with ENOSYS"
     },
     {
@@ -846,7 +865,8 @@
       "status": "defined",
       "evidence": [
         "guest-app-source"
-      ]
+      ],
+      "refusal": "no thread-specific storage: refused with thrd_error (guest G6)"
     },
     {
       "name": "tss_delete",
@@ -860,7 +880,8 @@
       "status": "defined",
       "evidence": [
         "guest-app-source"
-      ]
+      ],
+      "refusal": "no thread-specific storage: returns NULL, a quiet refusal (guest G6)"
     },
     {
       "name": "tss_set",
@@ -868,31 +889,40 @@
       "status": "defined",
       "evidence": [
         "guest-app-source"
-      ]
+      ],
+      "refusal": "no thread-specific storage: refused with thrd_error (guest G6)"
     },
     {
       "name": "vfprintf",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "vprintf",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "vsnprintf",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     },
     {
       "name": "vsprintf",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "host-test-source"
+      ]
     }
   ]
 }

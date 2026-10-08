@@ -37,8 +37,13 @@ REFUSED_BY_DESIGN = {
     "freopen": "no file authority in C2: refused",
     "remove": "no file authority in C2: refused",
     "rename": "no file authority in C2: refused",
-    "fclose": "no file authority: only the standard streams exist",
+    "mtx_timedlock": "no timeout path in the mutex binding: refused with thrd_error (guest G6)",
+    "tss_create": "no thread-specific storage: refused with thrd_error (guest G6)",
+    "tss_set": "no thread-specific storage: refused with thrd_error (guest G6)",
+    "tss_get": "no thread-specific storage: returns NULL, a quiet refusal (guest G6)",
 }
+# fclose is NOT refused by design: it closes a granted stream and refuses only NULL or
+# closed streams (EBADF). It is tested on the host for the NULL refusal.
 # A top-level function declaration: unindented, not a typedef, a type ending in
 # whitespace or '*', then the function name directly followed by '('.
 DECL = re.compile(r"^([A-Za-z_][\w \t\*]*?[\s\*])([A-Za-z_]\w*)\s*\(")
@@ -72,13 +77,26 @@ def defined_symbols(archive: Path) -> set[str]:
     return syms
 
 
+def code_only(text: str) -> str:
+    """Strip comments, string literals, and #include lines so prose cannot count as a reference."""
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", " ", text)
+    text = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', text)
+    text = re.sub(r"^\s*#\s*include[^\n]*$", " ", text, flags=re.M)
+    return text
+
+
 def evidence_for(name: str, host_text: str, guest_text: str) -> list[str]:
     ev = []
     # Source-reference match only. A guest "exact PASS" run is what proves execution;
     # these labels say the symbol is referenced by a test/app, not that it ran.
-    if re.search(rf"\b{name}\b", host_text):
+    # Comments, string literals, and #include lines are excluded (C2.8 fix: prose
+    # such as "G4 time" had been counted as a reference to time()).
+    # Host tests call the internal arena_* names (libc_names.c wraps them for the guest).
+    host_alias = {"_Exit": "arena_libc_Exit", "abort": "arena_libc_abort"}.get(name, name)
+    if re.search(rf"\b(?:arena_)?{name}\b", code_only(host_text)) or re.search(rf"\b{host_alias}\b", code_only(host_text)):
         ev.append("host-test-source")
-    if re.search(rf"\b{name}\b", guest_text):
+    if re.search(rf"\b{name}\b", code_only(guest_text)):
         ev.append("guest-app-source")
     return ev
 
