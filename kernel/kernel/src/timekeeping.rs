@@ -36,10 +36,11 @@ use crate::log::log_info as info;
 /// consumes these interrupts, nothing before it needs finer.
 pub const KERNEL_TICK_HZ: u32 = 100;
 
-/// Each calibration window: ~20 ms of PIT oscillator ticks
-/// (1 193 182 Hz / 50). Long enough that latch/poll latency (µs) is deep
-/// in the noise, short enough to keep boot snappy under TCG.
-const CAL_WINDOW_COUNTS: u32 = pit::OSCILLATOR_HZ as u32 / 50;
+/// Each calibration window: ~100 ms of PIT oscillator ticks
+/// (1 193 182 Hz / 10). A longer interval keeps host descheduling inside a
+/// TCG window from biasing an otherwise stable TSC estimate by several
+/// percent; the agreement threshold remains unchanged.
+const CAL_WINDOW_COUNTS: u32 = pit::OSCILLATOR_HZ as u32 / 10;
 
 /// The two windows must agree on TSC frequency within this many percent.
 const CAL_AGREE_PERCENT: u64 = 5;
@@ -47,8 +48,7 @@ const CAL_AGREE_PERCENT: u64 = 5;
 /// How many two-window rounds `init` may take before giving up. Three
 /// is enough that a single host hiccup cannot fail a boot, and few
 /// enough that a truly unusable TSC still stops the machine promptly
-/// (each round is two ~20 ms windows, so the worst case adds ~80 ms to
-/// boot and only on a machine that was already misbehaving).
+/// (each round is two ~100 ms windows).
 const CAL_ROUNDS: u32 = 3;
 
 /// Plausible TSC bounds (Hz). Anything outside means the measurement — not

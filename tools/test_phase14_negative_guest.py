@@ -34,6 +34,15 @@ APP_KEYS = {
     "writable-executable": "wx",
     "outside-placement-arena": "arena",
 }
+APP_FILTERS = {
+    "bad-magic": "magic",
+    "unsupported-relocation": "unsupported",
+    "relocation-outside-image": "image",
+    "relocation-span-overflow": "span",
+    "invalid-alignment": "align",
+    "writable-executable": "writ",
+    "outside-placement-arena": "placement",
+}
 
 
 def fixture_bytes() -> bytes:
@@ -290,9 +299,9 @@ def main() -> None:
         label = f"phase14-neg-{name}"
         # The full manifest title is susceptible to missed QMP key events
         # during the long APB1-install workflow. Search a short unique title
-        # substring for this one row, then retain the same signed install and
-        # production launch-refusal assertions.
-        filter_query = "writ" if name == "writable-executable" else display
+        # substring, then retain the same signed install and production
+        # launch-refusal assertions.
+        filter_query = APP_FILTERS[name]
         rc, serial, elapsed = mtest.boot(
             label,
             esp,

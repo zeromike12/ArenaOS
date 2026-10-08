@@ -109,6 +109,45 @@ in that same boot. The final preservation run, 10-boot and 20–25-boot
 checkpoints, complete historical suite, fresh 100/100 exact-artifact stability,
 and independent release-archive boot remain pending.
 
+## Preservation follow-up
+
+The first 119-group Phase-14 full-suite run on source checkpoint
+`f6443caaf5ff2f7ac32378b8bdac9892c9559386` completed 115 groups and exposed
+four failures. The negative guest missed one All Applications row after using
+its full title as a QMP search string; it now uses short unique filters, and
+all seven signed negative PIE package cases pass in
+`build/phase14-negative-afterfix.log`.
+
+The M11 Desktop boot failure was a measured TSC calibration disagreement:
+20-ms PIT windows gave a 2.74-GHz estimate while independent windows measured
+about 2.596 GHz after TCG host descheduling. The kernel boot calibration and
+M2 remeasurement now use 100-ms windows; the existing 5% agreement limit is
+unchanged. `tools/test_m11_desk.py` passes after the change. The M11 window
+resize test exposed a separate IPC client bug: a nonzero server status was
+collapsed to `-2`, hiding `STATUS_RESIZE_SUPERSEDED`. The client now preserves
+the status, and `tools/test_m11_wm.py` passes its resize race, 12-session
+workload, and teardown checks.
+
+The M12 scale run in the first full suite stopped during its M5 filesystem
+setup after 14 virtio block completions, with all three service threads still
+live and no later completion. The observed evidence does not identify the
+cause, and none of the M12 filesystem or storage implementation was changed.
+The full targeted M12 guest was rerun and passed: its filesystem setup
+completed, all 32 Desktop sessions started, session 33 was refused without
+resource mutation, 16 sessions were closed and reused, and final counts
+returned exactly to baseline. It took 259.1 seconds and is recorded in
+`build/m12-scale-afterfix.log` and `build/serial-m12-scale.log`. The full suite
+must confirm this case again before release qualification.
+
+After those changes, `tools/test_phase14_pie_guest.py` again installed and ran
+the signed application twice and returned exit 42 with exact process/Image
+teardown. Its observed bases were `0x53674ce00000` and `0x5d036e600000`; both
+were 2-MiB aligned within the 64–96-TiB placement arena, out of 16,777,215
+candidate slots. The relocated function pointer, initialized data, BSS,
+Startup ABI v2 base/entry, final protections, and guard checks passed. The
+receipt is `build/phase14-pie-afterfix.log` and the guest serial is
+`build/serial-phase14-pie.log`.
+
 ## Evidence log
 
 | Stage | Result |
@@ -121,3 +160,5 @@ and independent release-archive boot remain pending.
 | Signed negative APB1 guest | Six malformed/unsupported ELF classes refused at Image validation; valid out-of-arena image refused with `STATUS_NO_SPACE`; ownership counters returned to baseline |
 | Missing entropy guest | Seed-withholding red mutation refused signed PIE with `STATUS_NO_ENTROPY`; original rngd source and EFI/ESP restored byte-for-byte |
 | Stale Image authority guest | Revoked Image received through signed APB1 was refused by kernel `SYS_SPAWN_CHECK` with `STATUS_BAD_ARG`; process/Image ownership returned to baseline |
+| Fresh PIE rerun | Bases `0x53674ce00000` and `0x5d036e600000`; both signed launches exited 42 with exact steady-state receipts |
+| Historical follow-up | M11 Desktop and window-manager tests pass after the TSC-window and typed-status fixes; M12 scale guest passes targeted rerun; final full suite pending |

@@ -94,7 +94,11 @@ fn exchange_at_with_cap(
                 // SAFETY: malformed replies do not retain their transferred cap.
                 let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
             }
-            return Err(-2);
+            // Preserve the server's typed status. In particular, a resize
+            // commit can lose a race with a newer Configure and must reach
+            // the application as STATUS_RESIZE_SUPERSEDED so it can adopt
+            // the newer size and repaint.
+            return Err(out[0] as i64);
         }
         let decoded = match Frame::decode(&bytes) {
             Ok(frame) => frame,
