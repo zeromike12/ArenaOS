@@ -168,6 +168,14 @@ def send_key(desktop: Desktop, qcode: str) -> None:
     )
 
 
+def selected_catalog_row_visible(image: bytes) -> bool:
+    # All Applications highlights its selected row. The empty-results label
+    # leaves this interior pixel equal to the panel background below it.
+    top = image[(210 * 800 + 400) * 3 : (210 * 800 + 400) * 3 + 3]
+    below = image[(240 * 800 + 400) * 3 : (240 * 800 + 400) * 3 + 3]
+    return top != below
+
+
 def install_and_refuse(
     label: str,
     disk: Path,
@@ -202,7 +210,7 @@ def install_and_refuse(
         # Establish the last pre-launch resource receipt after signed install.
         desktop.click(94, 12)
         desktop.q.type_text(display_name, gap_s=0.025)
-        desktop.shot("negative-app-filter")
+        desktop.shot("negative-app-filter", selected_catalog_row_visible)
         before = desktop.serial()
         counters_before = len(COUNTERS.findall(before))
         send_key(desktop, "ret")
