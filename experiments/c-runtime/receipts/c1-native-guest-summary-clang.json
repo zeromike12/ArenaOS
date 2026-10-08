@@ -1,6 +1,13 @@
 {
-  "source_commit": "9d622a3ec12590bee83775119ec2ffba75769537",
-  "worktree_dirty_paths": [],
+  "source_commit": "7b27c67ab494f74ba2f35c598eab377bc64f47b8",
+  "worktree_dirty_paths": [
+    " M docs/compat/C2-LIBC-COVERAGE.md",
+    " M docs/compat/C2-SDL3-INTEGRATION.md",
+    " M experiments/c-runtime/c2_isa_audit.py",
+    " M experiments/c-runtime/c2_report.py",
+    " M experiments/c-runtime/compat/c2-compat-report.json",
+    " M experiments/c-runtime/host/test_libc.c"
+  ],
   "source_sha256": {
     "guest_native.py": "1d0ba0615aed6c0266214a6f086407d7eb5ef073ae45a89266ffb391b6a31e65",
     "app/c_native_app.c": "ec98574bba6c3b494d697de134f62d82f780f36e7f91ff0c236d6223dd5e6944",
@@ -77,7 +84,7 @@
       "run": 1,
       "compiler": "clang",
       "boot_rc": 0,
-      "elapsed_s": 10.0,
+      "elapsed_s": 9.6,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run1.log",
       "driver": {
         "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
@@ -100,7 +107,7 @@
       "run": 2,
       "compiler": "clang",
       "boot_rc": 0,
-      "elapsed_s": 10.2,
+      "elapsed_s": 9.6,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run2.log",
       "driver": {
         "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
@@ -123,7 +130,7 @@
       "run": 3,
       "compiler": "clang",
       "boot_rc": 0,
-      "elapsed_s": 10.3,
+      "elapsed_s": 9.7,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run3.log",
       "driver": {
         "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
@@ -146,7 +153,7 @@
       "run": 4,
       "compiler": "clang",
       "boot_rc": 0,
-      "elapsed_s": 9.5,
+      "elapsed_s": 10.0,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run4.log",
       "driver": {
         "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
@@ -169,7 +176,7 @@
       "run": 5,
       "compiler": "clang",
       "boot_rc": 0,
-      "elapsed_s": 9.4,
+      "elapsed_s": 9.8,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run5.log",
       "driver": {
         "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",

@@ -1,9 +1,11 @@
-{"elf": "build/guest-gcc/c2-console-gcc.elf", "functions": 288, "instructions_scanned": 8141, "pass": true}
-{"elf": "build/guest-clang/c2-console-clang.elf", "functions": 281, "instructions_scanned": 9445, "pass": true}
-{"elf": "build/guest-gcc/xxhash-app-gcc.elf", "functions": 297, "instructions_scanned": 12146, "pass": true}
-{"elf": "build/guest-clang/xxhash-app-clang.elf", "functions": 287, "instructions_scanned": 16450, "pass": true}
-{"elf": "build/guest-gcc/crt-probe-gcc.elf", "functions": 110, "instructions_scanned": 5381, "pass": true}
-{"elf": "build/guest-clang/crt-probe-clang.elf", "functions": 230, "instructions_scanned": 8269, "pass": true}
 {"elf": "build/guest-gcc/c-native-gcc.elf", "functions": 141, "instructions_scanned": 7430, "pass": true}
+{"elf": "build/guest-gcc/c2-console-gcc.elf", "functions": 291, "instructions_scanned": 8637, "pass": true}
+{"elf": "build/guest-gcc/crt-probe-gcc.elf", "functions": 110, "instructions_scanned": 5381, "pass": true}
+{"elf": "build/guest-gcc/xxhash-app-gcc.elf", "functions": 297, "instructions_scanned": 12146, "pass": true}
 {"elf": "build/guest-clang/c-native-clang.elf", "functions": 260, "instructions_scanned": 10451, "pass": true}
+{"elf": "build/guest-clang/c2-console-clang.elf", "functions": 283, "instructions_scanned": 9915, "pass": true}
+{"elf": "build/guest-clang/crt-probe-clang.elf", "functions": 230, "instructions_scanned": 8269, "pass": true}
+{"elf": "build/guest-clang/xxhash-app-clang.elf", "functions": 287, "instructions_scanned": 16450, "pass": true}
 ISA-AUDIT PASS elfs=8
+{"negative_control_fails_as_expected": true, "negative_vector_hits": 11358, "x87_control_fails_as_expected": true, "x87_control_hits": 4, "positive_control_passes_as_expected": true, "positive_instructions": 8}
+ISA-AUDIT-SELFTEST PASS

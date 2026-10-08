@@ -73,17 +73,17 @@
     "segments": [
       {
         "vaddr": "0x200000",
-        "memsz": 41688,
+        "memsz": 46312,
         "perm": "R-X"
       },
       {
-        "vaddr": "0x20b000",
+        "vaddr": "0x20c000",
         "memsz": 20448,
         "perm": "RW-"
       }
     ],
     "tls": {
-      "vaddr": "0x20b000",
+      "vaddr": "0x20c000",
       "filesz": 0,
       "memsz": 32,
       "align": 16
@@ -92,11 +92,11 @@
       "__arena_tls_align": 16,
       "__arena_tls_filesz": 0,
       "__arena_tls_memsz": 32,
-      "__arena_tls_image": 2142208
+      "__arena_tls_image": 2146304
     },
     "loader_failures": [],
     "disasm": {
-      "instructions": 11950,
+      "instructions": 13281,
       "simd_or_x87": [],
       "simd_or_x87_count": 0
     }

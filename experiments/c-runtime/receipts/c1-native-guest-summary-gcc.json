@@ -1,6 +1,11 @@
 {
-  "source_commit": "9d622a3ec12590bee83775119ec2ffba75769537",
-  "worktree_dirty_paths": [],
+  "source_commit": "7b27c67ab494f74ba2f35c598eab377bc64f47b8",
+  "worktree_dirty_paths": [
+    " M docs/compat/C2-LIBC-COVERAGE.md",
+    " M experiments/c-runtime/c2_report.py",
+    " M experiments/c-runtime/compat/c2-compat-report.json",
+    " M experiments/c-runtime/host/test_libc.c"
+  ],
   "source_sha256": {
     "guest_native.py": "1d0ba0615aed6c0266214a6f086407d7eb5ef073ae45a89266ffb391b6a31e65",
     "app/c_native_app.c": "ec98574bba6c3b494d697de134f62d82f780f36e7f91ff0c236d6223dd5e6944",
@@ -77,7 +82,7 @@
       "run": 1,
       "compiler": "gcc",
       "boot_rc": 0,
-      "elapsed_s": 9.4,
+      "elapsed_s": 9.5,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-gcc-run1.log",
       "driver": {
         "nostream_installed_entry_sha256": "76be1e5f05d3b7609c7c5d2221a04ac186b0be9372347bd7a35e0b23a526e0fd",
@@ -100,7 +105,7 @@
       "run": 2,
       "compiler": "gcc",
       "boot_rc": 0,
-      "elapsed_s": 9.1,
+      "elapsed_s": 9.5,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-gcc-run2.log",
       "driver": {
         "nostream_installed_entry_sha256": "76be1e5f05d3b7609c7c5d2221a04ac186b0be9372347bd7a35e0b23a526e0fd",
@@ -123,7 +128,7 @@
       "run": 3,
       "compiler": "gcc",
       "boot_rc": 0,
-      "elapsed_s": 9.4,
+      "elapsed_s": 9.1,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-gcc-run3.log",
       "driver": {
         "nostream_installed_entry_sha256": "76be1e5f05d3b7609c7c5d2221a04ac186b0be9372347bd7a35e0b23a526e0fd",
@@ -146,7 +151,7 @@
       "run": 4,
       "compiler": "gcc",
       "boot_rc": 0,
-      "elapsed_s": 9.4,
+      "elapsed_s": 9.3,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-gcc-run4.log",
       "driver": {
         "nostream_installed_entry_sha256": "76be1e5f05d3b7609c7c5d2221a04ac186b0be9372347bd7a35e0b23a526e0fd",
@@ -169,7 +174,7 @@
       "run": 5,
       "compiler": "gcc",
       "boot_rc": 0,
-      "elapsed_s": 9.6,
+      "elapsed_s": 9.4,
       "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-gcc-run5.log",
       "driver": {
         "nostream_installed_entry_sha256": "76be1e5f05d3b7609c7c5d2221a04ac186b0be9372347bd7a35e0b23a526e0fd",
