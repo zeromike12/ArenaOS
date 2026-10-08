@@ -1,0 +1,21 @@
+ArenaOS Phase-14 development tools (unprivileged setup)
+Host: Debian GNU/Linux 13.6 (trixie), x86_64, UID 1000, no root/sudo
+Rust toolchain: official rustup, rustc 1.97.0 (2d8144b78 2026-07-07)
+Cargo: 1.97.0 (c980f4866 2026-06-30)
+rustfmt: 1.9.0-stable (2d8144b788 2026-07-07)
+Rust target: x86_64-unknown-none
+QEMU: 1:10.0.13+ds-0+deb13u1 (QEMU emulator 10.0.13)
+OVMF: edk2-ovmf 2025.02-8+deb13u1 (4 MiB CODE/VARS pair)
+ELF tooling: GNU readelf (GNU Binutils for Debian) 2.44
+
+Rust was installed under /tmp/arena-rust from static.rust-lang.org; the
+rustup-init checksum was verified before execution. QEMU, OVMF, and their
+runtime libraries were downloaded from the official signed Debian Trixie
+archive indices at deb.debian.org and security.debian.org, then extracted
+under /tmp/arena-qemu with dpkg-deb. No host packages were installed and no
+root privileges were used.
+
+The test/release boot profile uses OVMF_CODE_4M.fd and a fresh writable copy
+of OVMF_VARS_4M.fd. Environment overrides are ARENA_RUST_BIN,
+ARENA_QEMU, ARENA_OVMF_CODE, and ARENA_OVMF_VARS; QEMU is wrapped to set
+LD_LIBRARY_PATH to the unprivileged extracted package libraries.

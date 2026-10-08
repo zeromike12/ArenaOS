@@ -26,13 +26,21 @@
   startup remains independent of it.
 - The APB1 → filesd verification → packaged policy → fresh Image capability →
   kernel spawn route is already present and is the required Phase-14 proof path.
+- Host setup is verified without root: Rust 1.97.0 / rustfmt /
+  `x86_64-unknown-none` from official rustup; QEMU 10.0.13 and OVMF 2025.02
+  extracted from packages authenticated by the official Debian Trixie archive.
+- Milestone 14.1 has a real `rust-lld` PIE build. It is 23,256 bytes, has five
+  program headers, three non-overlapping RX/R/RW load segments, no interpreter,
+  one bounded `PT_DYNAMIC`, and 30 symbol-zero `R_X86_64_RELATIVE` records.
+  `docs/phase14/PIE-FIXTURE.md` records the exact ELF and relocation metadata.
 
 ## Current state
 
 The exact branch parent is confirmed. Required Phase-13 handoff and scope ADR,
-ELF contract, Image, process VM, and Startup ABI references have been read. No
-production implementation has started. The next checkpoint is a real toolchain
-and linker-produced PIE fixture, followed by T0 validator work.
+ELF contract, Image, process VM, and Startup ABI references have been read.
+The bounded contract is committed. The fixture now matches its bounded linker
+profile; the next checkpoint is production-validator integration and T0
+mutation coverage.
 
 ## Evidence log
 

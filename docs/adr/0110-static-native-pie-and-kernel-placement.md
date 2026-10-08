@@ -47,12 +47,20 @@ as this bounded native profile:
   `DT_NULL` at the end. Its bytes and all relocation metadata must resolve
   wholly into file-backed load memory. Reject duplicate, missing, or unknown
   dynamic tags.
-- The only permitted dynamic tags are one each of `DT_RELA`, `DT_RELASZ`,
-  `DT_RELAENT`, `DT_RELACOUNT`, and `DT_FLAGS_1`, followed by `DT_NULL`.
+- The permitted dynamic tags are exactly one each of `DT_FLAGS`, `DT_FLAGS_1`,
+  `DT_DEBUG`, `DT_RELA`, `DT_RELASZ`, `DT_RELAENT`, `DT_RELACOUNT`,
+  `DT_SYMTAB`, `DT_SYMENT`, `DT_STRTAB`, `DT_STRSZ`, and `DT_HASH`, followed
+  by exactly one `DT_NULL` as the final record. `DT_FLAGS` must equal
+  `DF_BIND_NOW`; `DT_FLAGS_1` must equal `DF_1_NOW | DF_1_PIE`; and `DT_DEBUG`
+  must be zero. The symbol table must consist only of the all-zero null symbol
+  (`DT_SYMENT == 24`); the string table must be one NUL byte (`DT_STRSZ == 1`);
+  and the System V hash table must describe exactly that one symbol, with one
+  zero bucket and one zero chain. No relocation may refer to a symbol.
   `DT_RELAENT` is 24; `DT_RELASZ` is a multiple of 24 and at most 12 KiB;
-  `DT_RELACOUNT` equals the number of records; `DT_FLAGS_1` contains only
-  `DF_1_PIE`. Dynamic table plus relocation table is at most 16 KiB. A zero
-  relocation count is valid only with a zero-sized table.
+  `DT_RELACOUNT` equals the number of records. Dynamic table plus symbol/hash
+  and relocation metadata is at most 16 KiB. A zero relocation count is valid
+  only with a zero-sized table. All other dynamic tags—including dependency,
+  PLT, text-relocation, TLS, and GNU-hash tags—are rejected.
 - The only relocation is `R_X86_64_RELATIVE` (type 8) with symbol index zero.
   There are at most 512 entries. Each `r_offset` is 8-byte aligned and names
   one complete 8-byte destination in a writable, non-executable load segment.
@@ -66,10 +74,12 @@ bias and `A` is the signed `r_addend` (negative values are rejected by this
 profile). The destination address and value must remain in the lower canonical
 user half and the destination must meet the writable non-X rule above.
 
-The fixture's linker script and flags will be adjusted to emit this profile.
-The kernel does not broaden acceptance to accommodate unrelated linker
-metadata. Linker output must be inspected and recorded before the fixture is
-qualified.
+The fixture uses Rust 1.97.0's `rust-lld`, a checked-in crate-local Cargo
+configuration, `-pie`, `--no-dynamic-linker`, `--no-undefined`, and
+`--hash-style=sysv`. The null-only symbol/hash metadata above is the bounded
+profile emitted by this linker; it enables no symbol binding. The kernel does
+not broaden acceptance to accommodate unrelated linker metadata. Linker output
+must be inspected and recorded before the fixture is qualified.
 
 ### 2. Placement and address ownership
 
