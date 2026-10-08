@@ -59,6 +59,38 @@ the C2 commit it names.
 - Do not build SDL3. Do not modify `tools/startup_abi.py` without authorization.
 - ADR-0110 remains proposed. ADR-0111 (ring counter wrap) remains an unresolved defect.
 
+## Status at closeout (C2.8)
+
+Source of truth for the evidence is `docs/compat/C2-FINAL-REPORT.md`. Guest results
+cite source commit `7b27c67`; the receipts are in `experiments/c-runtime/receipts/`.
+
+| Checkpoint | Status | Evidence class |
+|---|---|---|
+| C2.0 plan and integration audit | Done (`2d0b1cd`) | document |
+| C2.1 reusable static runtime | Implemented. Headers and archive are used in place from `include/` and `build/`. No separate installed SDK tree was produced, so that part of the C2.1 exit condition is not met | static + guest |
+| C2.2 libc subset | Implemented: 110 declared, 110 defined in both archives; 69 host-referenced, 48 guest-referenced, 10 refused, 5 without a test reference | host + static + guest |
+| C2.3 threads and sync | Implemented as a C11 subset. Create, join, detach, mutex, trylock, condvar wait and broadcast, timed wait, `call_once`, TLS isolation (C1 T8) guest-tested. `thrd_exit`, `tss_delete` untested. Refusals documented | guest + host |
+| C2.4 graphical runtime contract | **Blocked** for service identification (B-GFX-1). Count-only query host-tested. No graphical guest run | host + doc |
+| C2.5 two native apps | Done: App A (nine groups) and App B (xxHash v0.8.4, unmodified). Both guest-tested on both compilers | guest |
+| C2.6 toolchain validation | Done for symbol agreement, ABI constants (92, 0 mismatches), ISA audit with x87 and SSE controls. Finding: Zig clang emits x87 for double math under the no-FP flags; the audit is the gate | static + host |
+| C2.7 gates | Host ASan/UBSan green (`LIBC-HOST 988/0`, `HOST-ONLY PASS 1586`). Guest suites 5/5 per compiler for C2 and C1, 3/3 crt-probe per compiler | host + guest |
+
+Acceptance criteria:
+
+1. Multiple independent native apps link one reusable runtime: **guest** (App A and App B
+   link the same `libarena_c.a` and both pass).
+2. Standard library interfaces behave correctly within documented scope: **partial**
+   (host differential tests and guest tests for the listed groups; not full libc).
+3. Apps launch through the normal signed lifecycle: **guest** (APB1 install and All
+   Applications launch; RFC 8032 test-only signing).
+4. Streams, allocation, TLS, and threads remain functional: **guest** for streams,
+   allocation, and threads; TLS through the C1 native suite (T8).
+5. Arena 1 has a concrete migration path: **documented** in `C2-SDL3-INTEGRATION.md`.
+   It has not been applied to Arena 1's branch, and no Arena 1 build has been run
+   against it.
+6. C1 regressions still pass: **guest** (C1 native 5/5 per compiler; crt-probe 3/3 per
+   compiler, at `7b27c67`).
+
 ## Toolchain (sandbox)
 
 C1 used `ARENA_ZIG=/opt/zig-clang/pkg/ziglang/zig`. That path is not present in this
