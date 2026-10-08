@@ -2,7 +2,7 @@
 #include "SDL_arenaosvideo.h"
 
 bool ARENAOS_CreateWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window, SDL_PixelFormat *format, void **pixels, int *pitch) {
-    arenaos_debug_write("[sdl3-app] -> ARENAOS_CreateWindowFramebuffer\n", 45);
+    arenaos_debug_write("[sdl3-app] -> ARENAOS_CreateWindowFramebuffer (upstream)\n", 56);
     (void)_this;
     if (!window || !window->internal) {
         return false;
@@ -41,29 +41,44 @@ bool ARENAOS_UpdateWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window,
         return false;
     }
 
-    if (rects && numrects > 0) {
-        int count = (numrects > 5) ? 5 : numrects;
-        uint16_t r[5][4];
-        for (int i = 0; i < count; i++) {
-            int x = (rects[i].x < 0) ? 0 : rects[i].x;
-            int y = (rects[i].y < 0) ? 0 : rects[i].y;
-            int w = rects[i].w;
-            int h = rects[i].h;
-            if (x + w > window->w) w = window->w - x;
-            if (y + h > window->h) h = window->h - y;
-            if (w <= 0 || h <= 0) {
-                w = 1;
-                h = 1;
-            }
-            r[i][0] = (uint16_t)x;
-            r[i][1] = (uint16_t)y;
-            r[i][2] = (uint16_t)w;
-            r[i][3] = (uint16_t)h;
-        }
-        return adsk_damage_rects(count, r);
-    } else {
+    if (!rects || numrects <= 0) {
         return adsk_damage_full();
     }
+
+    if (numrects > 5) {
+        /* ADSK-v1 wire format limits damage rects to 5.
+         * Fall back to full-window damage to prevent dropping regions. */
+        return adsk_damage_full();
+    }
+
+    uint16_t r[5][4];
+    for (int i = 0; i < numrects; i++) {
+        if (rects[i].w <= 0 || rects[i].h <= 0) {
+            return adsk_damage_full();
+        }
+
+        int x1 = rects[i].x;
+        int y1 = rects[i].y;
+        int x2 = x1 + rects[i].w;
+        int y2 = y1 + rects[i].h;
+
+        /* Clip to window bounds */
+        if (x1 < 0) x1 = 0;
+        if (y1 < 0) y1 = 0;
+        if (x2 > window->w) x2 = window->w;
+        if (y2 > window->h) y2 = window->h;
+
+        if (x2 <= x1 || y2 <= y1) {
+            /* Empty or outside visible window */
+            return adsk_damage_full();
+        }
+
+        r[i][0] = (uint16_t)x1;
+        r[i][1] = (uint16_t)y1;
+        r[i][2] = (uint16_t)(x2 - x1);
+        r[i][3] = (uint16_t)(y2 - y1);
+    }
+    return adsk_damage_rects(numrects, r);
 }
 
 void ARENAOS_DestroyWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window) {

@@ -14,17 +14,27 @@ static void retry_after_busy(size_t attempt) {
     uint64_t now = arenaos_clock_now();
     uint64_t shift = (attempt < 5) ? attempt : 5;
     uint64_t delay = (1000ULL << shift) + (now & 0x7ff);
-    arenaos_syscall3(SYS_TIMER_ARM, CLOCK_SLOT, 1, delay);
-    arenaos_syscall1(SYS_WAIT, CLOCK_SLOT);
-    arenaos_syscall1(SYS_TIMER_CANCEL, CLOCK_SLOT);
+    int64_t timer_id = arenaos_syscall3(SYS_TIMER_ARM, CLOCK_SLOT, 1, delay);
+    if (timer_id >= 0) {
+        int64_t w = arenaos_syscall1(SYS_WAIT, CLOCK_SLOT);
+        if (w < 0) {
+            /* If wait was aborted before badge delivery, disarm the timer */
+            arenaos_syscall1(SYS_TIMER_CANCEL, (uint64_t)timer_id);
+        }
+    }
 }
 
 void adsk_sleep_ms(uint32_t ms) {
     if (ms == 0) return;
     uint64_t us = (uint64_t)ms * 1000ULL;
-    arenaos_syscall3(SYS_TIMER_ARM, CLOCK_SLOT, 1, us);
-    arenaos_syscall1(SYS_WAIT, CLOCK_SLOT);
-    arenaos_syscall1(SYS_TIMER_CANCEL, CLOCK_SLOT);
+    int64_t timer_id = arenaos_syscall3(SYS_TIMER_ARM, CLOCK_SLOT, 1, us);
+    if (timer_id >= 0) {
+        int64_t w = arenaos_syscall1(SYS_WAIT, CLOCK_SLOT);
+        if (w < 0) {
+            /* If wait was aborted before badge delivery, disarm the timer */
+            arenaos_syscall1(SYS_TIMER_CANCEL, (uint64_t)timer_id);
+        }
+    }
 }
 
 static int exchange(uint8_t frame_buf[ADSK_BYTES], uint64_t out[3]) {
@@ -178,7 +188,25 @@ bool adsk_damage_full(void) {
 
 bool adsk_damage_rects(int count, const uint16_t rects[][4]) {
     if (s_handle == 0 || count <= 0) return adsk_damage_full();
-    if (count > 5) count = 5;
+    if (count > 5) {
+        /* ADSK-v1 wire protocol admits at most 5 damage rectangles.
+         * Fall back to full-surface damage to avoid silently dropping regions. */
+        return adsk_damage_full();
+    }
+
+    /* Validate each rectangle against surface bounds */
+    for (int i = 0; i < count; i++) {
+        uint16_t x = rects[i][0];
+        uint16_t y = rects[i][1];
+        uint16_t w = rects[i][2];
+        uint16_t h = rects[i][3];
+        if (w == 0 || h == 0 ||
+            ((uint32_t)x + (uint32_t)w > (uint32_t)s_width) ||
+            ((uint32_t)y + (uint32_t)h > (uint32_t)s_height)) {
+            /* Invalid or out-of-bounds rectangle: fall back to full damage */
+            return adsk_damage_full();
+        }
+    }
 
     uint8_t buf[ADSK_BYTES];
     for (int i = 0; i < ADSK_BYTES; i++) buf[i] = 0;

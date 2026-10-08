@@ -30,9 +30,9 @@ gcc $FLAGS -c "${SCRIPT_DIR}/src/demo/main.c" -o "${BUILD_DIR}/demo_main.o"
 
 # 3. Link executable
 gcc $LDFLAGS \
-    "${ROOT_DIR}/experimental/sdl3/src/platform/arenaos/arenaos_entry.c" \
-    "${ROOT_DIR}/experimental/sdl3/src/platform/arenaos/arenaos_client.c" \
-    "${ROOT_DIR}/experimental/sdl3/src/platform/arenaos/arenaos_memory.c" \
+    "${UPSTREAM_DIR}/src/platform/arenaos/arenaos_entry.c" \
+    "${UPSTREAM_DIR}/src/platform/arenaos/arenaos_client.c" \
+    "${UPSTREAM_DIR}/src/platform/arenaos/arenaos_memory.c" \
     "${BUILD_DIR}/demo_main.o" \
     "${BUILD_DIR}/libSDL3_upstream.a" \
     -o "${BUILD_DIR}/sdl3_upstream_demo"
@@ -54,7 +54,7 @@ echo "[SUCCESS] Packaged signed APB1 bundle: ${BUILD_DIR}/SDL3Upstream.apb1 (${B
 REPORT="${BUILD_DIR}/provenance_report.txt"
 cat << EOF > "${REPORT}"
 ================================================================================
-Milestone G2.1 Genuine Upstream SDL3 Linker Symbol & Provenance Report
+Milestone G2.2 Genuine Upstream SDL3 Linker Symbol & Provenance Report
 ================================================================================
 Date: $(date -u +"%Y-%m-%d %H:%M:%SZ")
 Upstream Version: SDL 3.2.0 official release (commit 535d80badefc83c5c527ec5748f2a20d6a9310fe)
@@ -73,10 +73,12 @@ $(size -A -d "${BUILD_DIR}/sdl3_upstream_demo")
 $(nm "${BUILD_DIR}/sdl3_upstream_demo" | grep -E "(PRIVATE_bootstrap|SDL_Init|SDL_CreateWindow|SDL_GetWindowSurface|SDL_UpdateWindowSurface|SDL_PollEvent|SDL_Quit)")
 
 4. Disassembly Machine Code FP/SIMD Audit:
-Total %xmm register occurrences: $(objdump -d "${BUILD_DIR}/sdl3_upstream_demo" | grep -cE "%xmm" || true)
-Total x87 instruction occurrences: $(objdump -d "${BUILD_DIR}/sdl3_upstream_demo" | grep -cE "\s(f(ld|st|ild|ist|add|sub|mul|div|com|ucom|xch|cmov|ninit|nstcw|ldcw|nstsw|wait|sqrt|abs|chs|nop)[a-z0-9]*)\s" || true)
+$(python3 "${ROOT_DIR}/tools/isa_audit.py" "${BUILD_DIR}/sdl3_upstream_demo")
 
-5. SHA-256 Hashes:
+5. Deterministic Kernel ELF Audit:
+$(python3 "${ROOT_DIR}/tools/audit_elf.py" "${BUILD_DIR}/sdl3_upstream_demo")
+
+6. SHA-256 Hashes:
 $(sha256sum "${BUILD_DIR}/libSDL3_upstream.a")
 $(sha256sum "${BUILD_DIR}/sdl3_upstream_demo")
 $(sha256sum "${BUILD_DIR}/SDL3Upstream.apb1")

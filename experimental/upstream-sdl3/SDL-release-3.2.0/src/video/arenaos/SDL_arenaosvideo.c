@@ -57,6 +57,7 @@ bool ARENAOS_VideoInit(SDL_VideoDevice *_this) {
     mode.refresh_rate = 60.0f;
 
     if (SDL_AddBasicVideoDisplay(&mode) == 0) {
+        SDL_SetError("ArenaOS: Failed to register default display mode");
         return false;
     }
 
@@ -72,6 +73,7 @@ void ARENAOS_VideoQuit(SDL_VideoDevice *_this) {
     struct SDL_VideoData *vdata = (struct SDL_VideoData *)_this->internal;
     if (vdata) {
         vdata->initialized = false;
+        vdata->primary_window = NULL;
     }
 }
 
@@ -89,6 +91,7 @@ bool ARENAOS_CreateSDLWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Pro
 
     struct SDL_WindowData *wdata = (struct SDL_WindowData *)SDL_calloc(1, sizeof(struct SDL_WindowData));
     if (!wdata) {
+        SDL_SetError("ArenaOS: Out of memory allocating SDL_WindowData");
         return false;
     }
 
