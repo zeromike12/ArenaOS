@@ -122,6 +122,12 @@ PT_LOAD, PT_INTERP, PT_TLS = 1, 3, 7
 PF_X, PF_W, PF_R = 1, 2, 4
 USER_HALF_LIMIT = 0x0000_8000_0000_0000
 X87_OR_SSE_OPERAND = re.compile(r"%(xmm|ymm|zmm|mm[0-7]|st\b|st\()")
+X87_MNEMONIC = re.compile(
+    r"^(?:f(?:ld|st|ild|ist|add|sub|subr|mul|div|divr|com|ucom|xch|cmov|nstcw|ldcw|nstsw|"
+    r"nstenv|ldenv|nsave|rstor|ninit|nclex|wait|sqrt|abs|chs|prem|rndint|scale|sin|cos|"
+    r"sincos|patan|ptan|yl2x|yl2xp1|2xm1|xam|xtract|free|incstp|decstp|nop|bld|bstp|iadd|"
+    r"isub|imul|idiv|icom|icomp|comi|ucomi|comip|ucomip|compp|ucompp)[a-z0-9]*"
+    r"|fxsave|fxrstor|xsave|xrstor|xsaveopt|xsavec|xsaves|xrstors|emms|ldmxcsr|stmxcsr|vzeroupper)$")
 X87_MNEMONIC = re.compile(r"^\s*[0-9a-f]+:\s+(?:[0-9a-f]{2} )+\s*(f[a-z0-9]+)\b")
 
 
@@ -212,7 +218,10 @@ def disassemble_check(path, objdump="objdump"):
         if X87_OR_SSE_OPERAND.search(ins):
             hits.append(line.strip())
         m = re.match(r"^\s*[0-9a-f]+:\s+([a-z][a-z0-9]*)", line)
-        if m and m.group(1).startswith("f") and m.group(1) not in ("fs",):
+        # Explicit x87 / FP-state mnemonics only. A plain "startswith f" test
+        # also matched data bytes decoded as text ("failed line"), which made
+        # the audit fail on string literals rather than on instructions.
+        if m and X87_MNEMONIC.match(m.group(1)):
             hits.append(line.strip())
     return {"instructions": sum(1 for l in p.stdout.splitlines() if ":\t" in l),
             "simd_or_x87": hits[:10], "simd_or_x87_count": len(hits)}
