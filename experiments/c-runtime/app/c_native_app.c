@@ -20,6 +20,12 @@
 #define APP_ID "org.arenaos.cnative"
 #define EXIT_PASS 57
 #define EXIT_FAIL 1
+/* No stdout/stdin grant: the app cannot report, so it says so through status. */
+#define EXIT_NO_STREAMS 58
+
+/* Written first by main (see there); checked by T2. */
+static const char stderr_probe_line[] = "[c-native] stderr channel reached the broker\n";
+static long stderr_probe_rc = -1000;
 #define GROUPS 9
 
 static int groups_passed;
@@ -82,10 +88,9 @@ static void t2_streams(void) {
     EXPECT(total == 2048, "backpressure transfer");
     arena_printf("[c-native] backpressure: %lu bytes accepted over the bounded stdout ring\n",
                  (unsigned long)total);
-    static const char err[] = "[c-native] stderr channel reached the broker\n";
-    EXPECT(arena_stream_write(2, err, sizeof err - 1) == (long)(sizeof err - 1), "stderr write");
-    EXPECT(arena_stream_write(0, err, 1) == ARENA_E_INVALID, "stdin is not writable");
-    EXPECT(arena_stream_write(7, err, 1) == ARENA_E_INVALID, "out-of-range fd refused");
+    EXPECT(stderr_probe_rc == (long)(sizeof stderr_probe_line - 1), "stderr write");
+    EXPECT(arena_stream_write(0, stderr_probe_line, 1) == ARENA_E_INVALID, "stdin is not writable");
+    EXPECT(arena_stream_write(7, stderr_probe_line, 1) == ARENA_E_INVALID, "out-of-range fd refused");
     group_result("T2 granted-streams", failed_checks == before, checks - n0);
 }
 
@@ -586,6 +591,17 @@ static void t9_sync(void) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+    /* C1.1: a launch without a stream grant must fail cleanly. Without stdio
+     * nothing can be reported, so the defined status is the only signal. */
+    if (arena_stdio_init() != 0) {
+        return EXIT_NO_STREAMS;
+    }
+    /* The stderr probe is written BEFORE any stdout. The desktop drains stdout
+     * and then stderr on each pump; stderr bytes left pending while a stdout
+     * line is being written can be printed between that line's chunks (the
+     * serial log then shows an interleaved line). Writing stderr first keeps
+     * the console lines intact; T2 checks the stored result. */
+    stderr_probe_rc = arena_stream_write(2, stderr_probe_line, sizeof stderr_probe_line - 1);
     arena_printf("[c-native] C application entered through the ARST v2 startup gate\n");
     t1_startup();
     t2_streams();

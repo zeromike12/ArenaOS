@@ -66,6 +66,20 @@ GROUP_RE = re.compile(r"^\[c-native\] (T\d [\w-]+) (PASS|FAIL) checks=(\d+)\r?$"
 FINAL_RE = re.compile(
     r"^\[c-native\] RESULT PASS groups=9/9 checks=(\d+) failed=0\r?$", re.M)
 EXIT_RE = re.compile(r"^\[desktop\] child Process-cap exit status=57\r?$", re.M)
+# C1.1 negative: the same binary, packaged WITHOUT STANDARD_STREAMS, must see
+# no stream grant, fail stdio setup cleanly, and exit with the defined status 58.
+NOSTREAM_APP_ID = b"org.arenaos.nostream"          # no "native" substring (search collision)
+NOSTREAM_DISPLAY = b"Stream Less Probe"
+NOSTREAM_SOURCE_NAME = b"aaa-nostream.apb1"         # sorts first: Desktop row 0
+NOSTREAM_DESKTOP_SOURCE = f"/Users/user/Desktop/{NOSTREAM_SOURCE_NAME.decode()}"
+NOSTREAM_INSTALLED_ENTRY = f"/System/Applications/{NOSTREAM_APP_ID.decode()}/1/bin/cnative"
+NOSTREAM_FLAGS = 20                                  # HEADLESS | NATIVE_SYNC, no STANDARD_STREAMS
+NOSTREAM_EXIT = 58
+NOSTREAM_SEARCH = "Stream"
+NATIVE_ICON_Y = 132                                  # Desktop row 1 (after aaa-nostream)
+EXIT58_RE = re.compile(r"^\[desktop\] child Process-cap exit status=58\r?$", re.M)
+EXIT57_LINE_RE = re.compile(r"^\[desktop\] child Process-cap exit status=(\d+)\r?$", re.M)
+RETIRED_MARK = "[desktop] application retired:"
 INSTALL_MARK = "[desktop] APB1 installed; signed version="
 HEADLESS_MARK = "[desktop] verified headless application spawned"
 
@@ -91,7 +105,7 @@ def source_hashes() -> dict:
             ("guest_native.py", "app/c_native_app.c", "run.py", "link/arena-user.ld")}
 
 
-def build_native_bundle(cc: str) -> tuple[bytes, Path, dict]:
+def build_native_bundle(cc: str) -> tuple[bytes, bytes, Path, dict]:
     elfs = crun.build_guest(cc)
     elf = elfs["c-native"]
     audit = crun.audit_elf(elf)
@@ -127,13 +141,37 @@ def build_native_bundle(cc: str) -> tuple[bytes, Path, dict]:
         "signing": "RFC 8032 development fixture (test-only, not a production key)",
         "loader_audit": audit,
     }
-    return bundle, elf, identity
+    nostream_manifest = apb1_format.make_manifest(
+        app_id=NOSTREAM_APP_ID,
+        package_id=PACKAGE_ID,
+        display_name=NOSTREAM_DISPLAY,
+        version=1,
+        flags=NOSTREAM_FLAGS,
+        requested=0,
+        entry=b"bin/cnative",
+        icon=b"",
+        width=0,
+        height=0,
+        associations=(),
+    )
+    nostream = apb1_format.build_bundle([(1, b"bin/cnative", elf_bytes)], manifest=nostream_manifest)
+    parsed_ns = apb1_format.parse_bundle(nostream)
+    if [name for _k, name, _s, _d in parsed_ns.files] != [b"bin/cnative"]:
+        raise SystemExit("nostream APB1 round-trip changed the payload list")
+    identity["nostream"] = {
+        "app_id": NOSTREAM_APP_ID.decode(),
+        "manifest_flags": NOSTREAM_FLAGS,
+        "bundle_sha256": sha256(nostream),
+        "bundle_size": len(nostream),
+        "elf_sha256": identity["elf_sha256"],  # same binary, different manifest
+    }
+    return bundle, nostream, elf, identity
 
 
-def seed_bundle(disk: Path, bundle: bytes) -> None:
+def seed_bundle(disk: Path, name: bytes, bundle: bytes) -> None:
     volume = afs2.Volume(disk.read_bytes()[BASE:])
     desktop = volume.resolve("/Users/user/Desktop")
-    source = volume.create(desktop, SOURCE_NAME, 1)
+    source = volume.create(desktop, name, 1)
     volume.write(source, 0, bundle, 1)
     with disk.open("r+b") as f:
         f.seek(BASE)
@@ -169,48 +207,74 @@ def ppm_to_png(src: Path, dst: Path) -> None:
     dst.write_bytes(png)
 
 
-def interaction(disk: Path, bundle: bytes, outcome: dict) -> bytes:
+def _clear_and_search(d: Desktop, text: str) -> None:
+    """Open All Applications, clear any old search text, type `text`, press Enter."""
+    d.click(120, 12)
+    for _ in range(24):  # backspace-clear any previous query (no-op when empty)
+        d.q.command("input-send-event", events=[d.q._ev("backspace", True), d.q._ev("backspace", False)])
+    d.q.type_text(text, gap_s=0.025)
+    d.q.command("input-send-event", events=[d.q._ev("ret", True), d.q._ev("ret", False)])
+
+
+def _install(d: Desktop, disk: Path, row_y: int, source_path: str, expected: bytes,
+             entry_path: str, outcome: dict, label: str) -> None:
+    before = d.serial().count(INSTALL_MARK)
+    d.click(52, row_y)
+    time.sleep(0.1)
+    d.click(52, row_y)
+    try:
+        d.wait(lambda: d.serial().count(INSTALL_MARK) == before + 1,
+               f"Desktop did not complete the protected APB1 install of {label}")
+    except AssertionError:
+        d.shot(f"desktop-after-install-{label}")
+        p2 = arena_env.build_dir() / f"{LABEL}-desktop-after-install-{label}.ppm"
+        if p2.exists():
+            ppm_to_png(p2, BUILD_DIR / f"desktop-after-install-{label}.png")
+        raise
+    installed = tree(disk)
+    if installed.get(source_path) != expected:
+        raise AssertionError(f"AFS2 changed the original {label} APB1 source")
+    if installed.get(entry_path) is None:
+        raise AssertionError(f"installed {label} ELF payload is missing from /System/Applications")
+    outcome[f"{label}_installed_entry_sha256"] = sha256(installed[entry_path])
+
+
+def interaction(disk: Path, bundle: bytes, nostream: bytes, outcome: dict) -> bytes:
     d = Desktop(LABEL)
     try:
         d.wait(lambda: "[desktop] desktop surface shows /Users/user/Desktop" in d.serial(),
-               "Desktop did not enumerate the seeded APB1 source")
-        # Evidence: the Desktop as the install click is made (layout check).
-        snap = d.shot("desktop-before-install")
+               "Desktop did not enumerate the seeded APB1 sources")
+        d.shot("desktop-before-install")
         ppm = arena_env.build_dir() / f"{LABEL}-desktop-before-install.ppm"
-        if ppm is not None and ppm.exists():
+        if ppm.exists():
             ppm_to_png(ppm, BUILD_DIR / "desktop-before-install.png")
-        outcome["snapshot_bytes"] = len(snap)
-        before = d.serial().count(INSTALL_MARK)
-        d.click(52, ICON_Y)
-        time.sleep(0.1)
-        d.click(52, ICON_Y)
-        try:
-            d.wait(lambda: d.serial().count(INSTALL_MARK) == before + 1,
-                   "Desktop did not complete its protected APB1 install")
-        except AssertionError:
-            after = d.shot("desktop-after-install-click")
-            p2 = arena_env.build_dir() / f"{LABEL}-desktop-after-install-click.ppm"
-            if p2.exists():
-                ppm_to_png(p2, BUILD_DIR / "desktop-after-install-click.png")
-            raise
-        installed = tree(disk)
-        if installed.get(DESKTOP_SOURCE) != bundle:
-            raise AssertionError("AFS2 changed the original APB1 source")
-        if installed.get(INSTALLED_ENTRY) is None:
-            raise AssertionError("installed ELF payload is missing from /System/Applications")
-        outcome["installed_entry_sha256"] = sha256(installed[INSTALLED_ENTRY])
-        # All Applications: open, type the search, Enter launches the first match.
-        d.click(120, 12)
-        d.q.type_text(SEARCH, gap_s=0.025)
-        d.q.command("input-send-event", events=[d.q._ev("ret", True), d.q._ev("ret", False)])
-        d.wait(lambda: HEADLESS_MARK in d.serial(),
-               "All Applications did not launch the installed headless package")
+        # Install both packages through the protected install path.
+        _install(d, disk, ICON_Y, NOSTREAM_DESKTOP_SOURCE, nostream,
+                 NOSTREAM_INSTALLED_ENTRY, outcome, "nostream")
+        _install(d, disk, NATIVE_ICON_Y, DESKTOP_SOURCE, bundle, INSTALLED_ENTRY, outcome, "native")
+
+        # Negative: no stream grant. Must exit 58 through the Process cap.
+        launches_before = d.serial().count(HEADLESS_MARK)
+        _clear_and_search(d, NOSTREAM_SEARCH)
+        d.wait(lambda: d.serial().count(HEADLESS_MARK) == launches_before + 1,
+               "All Applications did not launch the stream-less package", timeout_s=120)
+        d.wait(lambda: EXIT58_RE.search(d.serial()) is not None,
+               "the stream-less application did not exit with status 58 through the Process cap",
+               timeout_s=180)
+        d.wait(lambda: d.serial().count(RETIRED_MARK) >= 1,
+               "the stream-less application was not retired", timeout_s=120)
+        outcome["nostream_driven"] = True
+
+        # Positive: the signed C application with its streams granted.
+        launches_before = d.serial().count(HEADLESS_MARK)
+        _clear_and_search(d, SEARCH)
+        d.wait(lambda: d.serial().count(HEADLESS_MARK) == launches_before + 1,
+               "All Applications did not launch the native package", timeout_s=120)
         d.wait(lambda: FINAL_RE.search(d.serial()) is not None or "[c-native] RESULT FAIL" in d.serial(),
                "the C application produced no final verdict", timeout_s=240)
         d.wait(lambda: EXIT_RE.search(d.serial()) is not None,
-               "the desktop did not observe exit status 57 through the Process cap", timeout_s=120)
-        # Teardown must finish before the guest is shut down (native app retired).
-        d.wait(lambda: "[desktop] application retired:" in d.serial(),
+               "the desktop did not observe exit status 57 through the Process cap", timeout_s=180)
+        d.wait(lambda: d.serial().count(RETIRED_MARK) >= 2,
                "the native application was not retired after exit", timeout_s=120)
         outcome["driven"] = True
     finally:
@@ -219,10 +283,26 @@ def interaction(disk: Path, bundle: bytes, outcome: dict) -> bytes:
     return b"shutdown\r"
 
 
+# The serial console multiplexes the desktop's relay of the app's stdout and
+# stderr with kernel and desktop log lines. The desktop drains the stream ring
+# in chunks, and a ring wrap can split one app line into two chunks, so a
+# kernel or desktop log line can land inside it:
+#   "[c-native] T2 granted-st[arena INFO  sched] spawn(...)\nreams PASS checks=5"
+# That is an ordering artefact of the console, not dropped output. The app-line
+# view removes those whole log fragments, then matches the app's own lines.
+# A split that cannot be repaired leaves the group missing and fails the run.
+LOG_FRAGMENT_RE = re.compile(r"\[(?:arena (?:INFO|WARN|ERROR|DEBUG|TRACE)|desktop)\b[^\n]*\n")
+
+
+def app_stream_view(serial: str) -> str:
+    return LOG_FRAGMENT_RE.sub("", serial)
+
+
 def judge(serial: str) -> dict:
     """Exact verdicts only. Returns a dict of booleans and the matched lines."""
-    groups = {name: status for name, status, _count in GROUP_RE.findall(serial)}
-    final = FINAL_RE.search(serial)
+    view = app_stream_view(serial)
+    groups = {name: status for name, status, _count in GROUP_RE.findall(view)}
+    final = FINAL_RE.search(view)
     failures = []
     for name in GROUPS:
         matched = [g for g in groups if g.startswith(name.split(" ")[0] + " ")]
@@ -230,28 +310,33 @@ def judge(serial: str) -> dict:
             failures.append(f"missing group {name}")
         elif groups[matched[0]] != "PASS":
             failures.append(f"group {matched[0]} FAIL")
-    if "[c-native] RESULT FAIL" in serial:
+    if "[c-native] RESULT FAIL" in view:
         failures.append("RESULT FAIL line present")
-    if "check failed line" in serial:
+    if "check failed line" in view:
         failures.append("a check failed line was printed")
     if final is None:
         failures.append("exact final verdict line missing")
-    if EXIT_RE.search(serial) is None:
-        failures.append("exact desktop exit status=57 receipt missing")
-    if serial.count("[c-native] RESULT ") != 1:
+    exits = [int(v) for v in EXIT57_LINE_RE.findall(serial)]
+    if exits.count(57) != 1:
+        failures.append(f"exact desktop exit status=57 receipt count is {exits.count(57)}, not 1")
+    if exits.count(58) != 1:
+        failures.append(f"exact desktop exit status=58 receipt count is {exits.count(58)}, not 1")
+    if exits != [58, 57]:
+        failures.append(f"exit order is {exits}, expected [58, 57] (negative then positive)")
+    if view.count("[c-native] RESULT ") != 1:
         failures.append("RESULT line count is not exactly 1")
     return {
         "groups_pass": sum(1 for s in groups.values() if s == "PASS"),
         "groups_total": len(GROUPS),
         "checks": int(final.group(1)) if final else None,
         "final_line": final.group(0) if final else None,
-        "exit_line": EXIT_RE.search(serial).group(0) if EXIT_RE.search(serial) else None,
+        "exit_lines": [int(v) for v in EXIT57_LINE_RE.findall(serial)],
         "failures": failures,
         "pass": not failures,
     }
 
 
-def one_run(cc: str, bundle: bytes, identity: dict, index: int) -> dict:
+def one_run(cc: str, bundle: bytes, nostream: bytes, identity: dict, index: int) -> dict:
     esp = mtest.build(LABEL, desktop=True)
     disk = arena_env.make_scratch_disk()
     rc, serial, _ = mtest.boot(LABEL + "-seed", esp, [(b"arena>", 1, b"shutdown\r")], disk, pointer=True)
@@ -265,12 +350,14 @@ def one_run(cc: str, bundle: bytes, identity: dict, index: int) -> dict:
                                [(b"filesd: AFS2 mounted", 1, b"shutdown\r")], disk, pointer=True)
     if rc != 0 or "filesd: AFS2 mounted" not in serial:
         return {"run": index, "pass": False, "reason": "AFS2 mount boot failed", "rc": rc}
-    seed_bundle(disk, bundle)
-    if tree(disk).get(DESKTOP_SOURCE) != bundle:
-        return {"run": index, "pass": False, "reason": "seeded bundle is not byte-identical on AFS2"}
+    seed_bundle(disk, SOURCE_NAME, bundle)
+    seed_bundle(disk, NOSTREAM_SOURCE_NAME, nostream)
+    seeded = tree(disk)
+    if seeded.get(DESKTOP_SOURCE) != bundle or seeded.get(NOSTREAM_DESKTOP_SOURCE) != nostream:
+        return {"run": index, "pass": False, "reason": "seeded bundles are not byte-identical on AFS2"}
     outcome: dict = {}
     feed = [((b"[desktop] real desktop frame presented", b"filesd: AFS2 mounted"), 1,
-             lambda: interaction(disk, bundle, outcome))]
+             lambda: interaction(disk, bundle, nostream, outcome))]
     rc, serial, elapsed = mtest.boot(LABEL, esp, feed, disk, pointer=True, timeout_s=900)
     log = BUILD_DIR / f"serial-{LABEL}-{cc}-run{index}.log"
     log.write_text(serial)
@@ -292,11 +379,11 @@ def main() -> int:
     ap.add_argument("--runs", type=int, default=1)
     args = ap.parse_args()
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    bundle, elf, identity = build_native_bundle(args.cc)
+    bundle, nostream, elf, identity = build_native_bundle(args.cc)
     (BUILD_DIR / "bundle-identity.json").write_text(json.dumps(identity, indent=2))
     results = []
     for i in range(1, args.runs + 1):
-        results.append(one_run(args.cc, bundle, identity, i))
+        results.append(one_run(args.cc, bundle, nostream, identity, i))
         print(json.dumps({k: v for k, v in results[-1].items() if k != "driver"}, indent=2), flush=True)
     passed = sum(1 for r in results if r.get("pass"))
     summary = {
