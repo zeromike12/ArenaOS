@@ -76,7 +76,42 @@ def scan(elf: Path) -> dict:
             "pass": bool(funcs) and scanned > 0 and not vec_hits and not x87_hits}
 
 
+NEG_SRC = """__attribute__((noinline)) double scale(double a, double b) { return a * b + 1.5; }
+int main(int argc, char **argv) { (void)argv; return scale(argc, 2.0) > 0.0 ? 0 : 1; }
+"""
+POS_SRC = """__attribute__((noinline)) unsigned mix(unsigned a, unsigned b) { return (a * 2654435761u) ^ (b + 0x9e3779b9u); }
+int main(int argc, char **argv) { (void)argv; return (int)(mix((unsigned)argc, 7u) & 1u); }
+"""
+
+
+def self_test() -> int:
+    """Negative control (SSE double math must FAIL) and positive control (integer-only,
+    C2 profile, freestanding link must PASS). Both are built here, not stored."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "neg.c").write_text(NEG_SRC)
+        (d / "pos.c").write_text(POS_SRC)
+        subprocess.run(["gcc", "-O2", "-msse2", "-mfpmath=sse", "-static", "-o", str(d / "neg.elf"),
+                        str(d / "neg.c")], check=True)
+        subprocess.run(["gcc", "-O2", "-mgeneral-regs-only", "-mno-sse", "-mno-sse2", "-mno-mmx",
+                        "-mno-80387", "-msoft-float", "-ffreestanding", "-fno-builtin", "-fno-pic",
+                        "-fno-pie", "-nostdlib", "-static", "-no-pie", "-Wl,-e,main", "-o",
+                        str(d / "pos.elf"), str(d / "pos.c")], check=True)
+        neg = scan(d / "neg.elf")
+        pos = scan(d / "pos.elf")
+    ok = (not neg["pass"]) and bool(neg["vector_operand_hits"]) and pos["pass"]
+    print(json.dumps({"negative_control_fails_as_expected": not neg["pass"],
+                      "negative_vector_hits": len(neg["vector_operand_hits"]),
+                      "positive_control_passes_as_expected": pos["pass"],
+                      "positive_instructions": pos["instructions_scanned"]}))
+    print("ISA-AUDIT-SELFTEST", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
 def main(argv: list[str]) -> int:
+    if argv == ["--self-test"]:
+        return self_test()
     if not argv:
         print("usage: c2_isa_audit.py ELF...", file=sys.stderr)
         return 2

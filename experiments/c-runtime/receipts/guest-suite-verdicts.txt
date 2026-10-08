@@ -1,0 +1,30 @@
+== f-c1n-clang.txt
+C1.2 guest native app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-native/summary-clang.json)
+EXIT=0
+== f-c1n-gcc.txt
+C1.2 guest native app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-native/summary-gcc.json)
+EXIT=0
+== f-c2-clang.txt
+C2 guest multi-app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-c2/summary-clang.json)
+EXIT=0
+== f-c2-gcc.txt
+C2 guest multi-app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-c2/summary-gcc.json)
+EXIT=0
+== f-cp-clang-1.txt
+CRT-PROBE RESULT PASS (6/6)
+EXIT=0
+== f-cp-clang-2.txt
+CRT-PROBE RESULT PASS (6/6)
+EXIT=0
+== f-cp-clang-3.txt
+CRT-PROBE RESULT PASS (6/6)
+EXIT=0
+== f-cp-gcc-1.txt
+CRT-PROBE RESULT PASS (6/6)
+EXIT=0
+== f-cp-gcc-2.txt
+CRT-PROBE RESULT PASS (6/6)
+EXIT=0
+== f-cp-gcc-3.txt
+CRT-PROBE RESULT PASS (6/6)
+EXIT=0

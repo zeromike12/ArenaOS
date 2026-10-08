@@ -1,0 +1,182 @@
+{
+  "source_commit": "9d622a3ec12590bee83775119ec2ffba75769537",
+  "worktree_dirty_paths": [],
+  "source_sha256": {
+    "guest_native.py": "1d0ba0615aed6c0266214a6f086407d7eb5ef073ae45a89266ffb391b6a31e65",
+    "app/c_native_app.c": "ec98574bba6c3b494d697de134f62d82f780f36e7f91ff0c236d6223dd5e6944",
+    "run.py": "5a69f2518e16dac54abdaee23eb45e509e30668a7fe8ac22d4640642510294e6",
+    "link/arena-user.ld": "6d3d2bbd77941a3a4032416a0921cea5b0f6664aefdddb04e3748b9dea734850"
+  },
+  "identity": {
+    "compiler": "clang",
+    "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+    "elf_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+    "elf_size": 70424,
+    "bundle_sha256": "f31e244413838a07228ae5f9dd4e7c7ff9dd41c8d4f6a14b679f218d8c602da9",
+    "bundle_size": 71208,
+    "manifest_flags": 28,
+    "signing": "RFC 8032 development fixture (test-only, not a production key)",
+    "loader_audit": {
+      "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+      "entry": "0x200000",
+      "segments": [
+        {
+          "vaddr": "0x200000",
+          "memsz": 50984,
+          "perm": "R-X"
+        },
+        {
+          "vaddr": "0x20d000",
+          "memsz": 44976,
+          "perm": "RW-"
+        }
+      ],
+      "tls": {
+        "vaddr": "0x20d000",
+        "filesz": 4,
+        "memsz": 36,
+        "align": 16
+      },
+      "tls_symbols": {
+        "__arena_tls_align": 16,
+        "__arena_tls_filesz": 4,
+        "__arena_tls_memsz": 36,
+        "__arena_tls_image": 2150400
+      },
+      "loader_failures": [],
+      "disasm": {
+        "instructions": 11540,
+        "simd_or_x87": [],
+        "simd_or_x87_count": 0
+      }
+    },
+    "nostream": {
+      "app_id": "org.arenaos.nostream",
+      "manifest_flags": 20,
+      "bundle_sha256": "533a02c6d30b04f3029693cf7892fa83d67c07b7b4a61078e53945acde3e7cb9",
+      "bundle_size": 71208,
+      "elf_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b"
+    }
+  },
+  "runs": 5,
+  "passed": 5,
+  "failed": 0,
+  "evidence_class": "GUEST",
+  "results": [
+    {
+      "groups_pass": 9,
+      "groups_total": 9,
+      "checks": 93,
+      "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 1,
+      "compiler": "clang",
+      "boot_rc": 0,
+      "elapsed_s": 10.0,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run1.log",
+      "driver": {
+        "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "native_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "nostream_driven": true,
+        "driven": true
+      }
+    },
+    {
+      "groups_pass": 9,
+      "groups_total": 9,
+      "checks": 93,
+      "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 2,
+      "compiler": "clang",
+      "boot_rc": 0,
+      "elapsed_s": 10.2,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run2.log",
+      "driver": {
+        "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "native_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "nostream_driven": true,
+        "driven": true
+      }
+    },
+    {
+      "groups_pass": 9,
+      "groups_total": 9,
+      "checks": 93,
+      "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 3,
+      "compiler": "clang",
+      "boot_rc": 0,
+      "elapsed_s": 10.3,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run3.log",
+      "driver": {
+        "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "native_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "nostream_driven": true,
+        "driven": true
+      }
+    },
+    {
+      "groups_pass": 9,
+      "groups_total": 9,
+      "checks": 93,
+      "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 4,
+      "compiler": "clang",
+      "boot_rc": 0,
+      "elapsed_s": 9.5,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run4.log",
+      "driver": {
+        "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "native_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "nostream_driven": true,
+        "driven": true
+      }
+    },
+    {
+      "groups_pass": 9,
+      "groups_total": 9,
+      "checks": 93,
+      "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 5,
+      "compiler": "clang",
+      "boot_rc": 0,
+      "elapsed_s": 9.4,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run5.log",
+      "driver": {
+        "nostream_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "native_installed_entry_sha256": "4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b",
+        "nostream_driven": true,
+        "driven": true
+      }
+    }
+  ]
+}

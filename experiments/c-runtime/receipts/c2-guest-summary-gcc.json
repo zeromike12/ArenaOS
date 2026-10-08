@@ -1,0 +1,314 @@
+{
+  "source_commit": "9d622a3ec12590bee83775119ec2ffba75769537",
+  "worktree_dirty_paths": [],
+  "identity": {
+    "compiler": "gcc",
+    "apps": {
+      "c2-console": {
+        "c2": {
+          "app_id": "org.arenaos.c2console",
+          "manifest_flags": 28,
+          "bundle_sha256": "71a505e9e110e4115a5f686be85203f46d8d19e2e65d2e86e845fd6bf7182026",
+          "bundle_size": 58960,
+          "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf",
+          "elf_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+          "elf_size": 58176,
+          "loader_audit": {
+            "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf",
+            "entry": "0x200000",
+            "segments": [
+              {
+                "vaddr": "0x200000",
+                "memsz": 37252,
+                "perm": "R-X"
+              },
+              {
+                "vaddr": "0x20a000",
+                "memsz": 16776,
+                "perm": "RW-"
+              }
+            ],
+            "tls": {
+              "vaddr": "0x20a000",
+              "filesz": 0,
+              "memsz": 32,
+              "align": 16
+            },
+            "tls_symbols": {
+              "__arena_tls_memsz": 32,
+              "__arena_tls_filesz": 0,
+              "__arena_tls_image": 2138112,
+              "__arena_tls_align": 16
+            },
+            "loader_failures": [],
+            "disasm": {
+              "instructions": 9849,
+              "simd_or_x87": [],
+              "simd_or_x87_count": 0
+            }
+          },
+          "signing": "RFC 8032 development fixture (test-only, not a production key)"
+        },
+        "c2-nostream": {
+          "app_id": "org.arenaos.c2nostream",
+          "manifest_flags": 20,
+          "bundle_sha256": "3d93741e50b2c9906df294722824b48fa1d6acb9d19c9f64f37cafa8d15ebf0a",
+          "bundle_size": 58960,
+          "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf",
+          "elf_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+          "elf_size": 58176,
+          "loader_audit": null,
+          "signing": "RFC 8032 development fixture (test-only, not a production key)"
+        }
+      },
+      "xxhash-app": {
+        "xx": {
+          "app_id": "org.arenaos.xxhashprobe",
+          "manifest_flags": 12,
+          "bundle_sha256": "25e6fd0e37c2ddc30f0022f6d1d9c96ede08853d05615b5d9809d91c78390514",
+          "bundle_size": 71568,
+          "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf",
+          "elf_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+          "elf_size": 70784,
+          "loader_audit": {
+            "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf",
+            "entry": "0x200000",
+            "segments": [
+              {
+                "vaddr": "0x200000",
+                "memsz": 52006,
+                "perm": "R-X"
+              },
+              {
+                "vaddr": "0x20d000",
+                "memsz": 16712,
+                "perm": "RW-"
+              }
+            ],
+            "tls": {
+              "vaddr": "0x20d000",
+              "filesz": 0,
+              "memsz": 20,
+              "align": 16
+            },
+            "tls_symbols": {
+              "__arena_tls_memsz": 20,
+              "__arena_tls_filesz": 0,
+              "__arena_tls_image": 2150400,
+              "__arena_tls_align": 16
+            },
+            "loader_failures": [],
+            "disasm": {
+              "instructions": 12813,
+              "simd_or_x87": [],
+              "simd_or_x87_count": 0
+            }
+          },
+          "signing": "RFC 8032 development fixture (test-only, not a production key)"
+        },
+        "xx-nostream": {
+          "app_id": "org.arenaos.xxnostream",
+          "manifest_flags": 4,
+          "bundle_sha256": "6220e8a7b912b92280d72ab60e1053e99728df11b010889bc0ee52a92e120356",
+          "bundle_size": 71568,
+          "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf",
+          "elf_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+          "elf_size": 70784,
+          "loader_audit": null,
+          "signing": "RFC 8032 development fixture (test-only, not a production key)"
+        }
+      }
+    },
+    "runtime": {
+      "archive": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/lib/libarena_c.a",
+      "archive_sha256": "9d8a0acd1d987d69289b0cda27fec846e1d269b7fcc923399f85d377ba79ca12",
+      "crt0_sha256": "f19cc80e8c054252e13aec4e873fc5e867a0d69406bf0337f5bdbec885ae259b"
+    }
+  },
+  "runs": 5,
+  "passed": 5,
+  "failed": 0,
+  "evidence_class": "GUEST",
+  "results": [
+    {
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "console_groups": {
+        "G1 stdio": "PASS",
+        "G2 stdin": "PASS",
+        "G3 allocator": "PASS",
+        "G4 time": "PASS",
+        "G5 threads": "PASS",
+        "G6 exit": "PASS"
+      },
+      "console_checks": 34,
+      "console_result": "[c2-console] RESULT PASS groups=6/6 checks=34 failed=0",
+      "xxhash_digest_ok": true,
+      "failures": [],
+      "pass": true,
+      "run": 1,
+      "compiler": "gcc",
+      "boot_rc": 0,
+      "elapsed_s": 20.4,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-c2/serial-gcc-run1.log",
+      "driver": {
+        "c2-nostream_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx-nostream_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "c2_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "driven-c2-nostream": true,
+        "driven-xx-nostream": true,
+        "driven-c2": true,
+        "driven-xx": true
+      }
+    },
+    {
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "console_groups": {
+        "G1 stdio": "PASS",
+        "G2 stdin": "PASS",
+        "G3 allocator": "PASS",
+        "G4 time": "PASS",
+        "G5 threads": "PASS",
+        "G6 exit": "PASS"
+      },
+      "console_checks": 34,
+      "console_result": "[c2-console] RESULT PASS groups=6/6 checks=34 failed=0",
+      "xxhash_digest_ok": true,
+      "failures": [],
+      "pass": true,
+      "run": 2,
+      "compiler": "gcc",
+      "boot_rc": 0,
+      "elapsed_s": 20.1,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-c2/serial-gcc-run2.log",
+      "driver": {
+        "c2-nostream_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx-nostream_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "c2_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "driven-c2-nostream": true,
+        "driven-xx-nostream": true,
+        "driven-c2": true,
+        "driven-xx": true
+      }
+    },
+    {
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "console_groups": {
+        "G1 stdio": "PASS",
+        "G2 stdin": "PASS",
+        "G3 allocator": "PASS",
+        "G4 time": "PASS",
+        "G5 threads": "PASS",
+        "G6 exit": "PASS"
+      },
+      "console_checks": 34,
+      "console_result": "[c2-console] RESULT PASS groups=6/6 checks=34 failed=0",
+      "xxhash_digest_ok": true,
+      "failures": [],
+      "pass": true,
+      "run": 3,
+      "compiler": "gcc",
+      "boot_rc": 0,
+      "elapsed_s": 20.1,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-c2/serial-gcc-run3.log",
+      "driver": {
+        "c2-nostream_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx-nostream_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "c2_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "driven-c2-nostream": true,
+        "driven-xx-nostream": true,
+        "driven-c2": true,
+        "driven-xx": true
+      }
+    },
+    {
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "console_groups": {
+        "G1 stdio": "PASS",
+        "G2 stdin": "PASS",
+        "G3 allocator": "PASS",
+        "G4 time": "PASS",
+        "G5 threads": "PASS",
+        "G6 exit": "PASS"
+      },
+      "console_checks": 34,
+      "console_result": "[c2-console] RESULT PASS groups=6/6 checks=34 failed=0",
+      "xxhash_digest_ok": true,
+      "failures": [],
+      "pass": true,
+      "run": 4,
+      "compiler": "gcc",
+      "boot_rc": 0,
+      "elapsed_s": 19.9,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-c2/serial-gcc-run4.log",
+      "driver": {
+        "c2-nostream_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx-nostream_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "c2_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "driven-c2-nostream": true,
+        "driven-xx-nostream": true,
+        "driven-c2": true,
+        "driven-xx": true
+      }
+    },
+    {
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "console_groups": {
+        "G1 stdio": "PASS",
+        "G2 stdin": "PASS",
+        "G3 allocator": "PASS",
+        "G4 time": "PASS",
+        "G5 threads": "PASS",
+        "G6 exit": "PASS"
+      },
+      "console_checks": 34,
+      "console_result": "[c2-console] RESULT PASS groups=6/6 checks=34 failed=0",
+      "xxhash_digest_ok": true,
+      "failures": [],
+      "pass": true,
+      "run": 5,
+      "compiler": "gcc",
+      "boot_rc": 0,
+      "elapsed_s": 19.8,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-c2/serial-gcc-run5.log",
+      "driver": {
+        "c2-nostream_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx-nostream_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "c2_installed_entry_sha256": "37fe1047b1f29733c63a9d689333ba7cd050f5773d9df8cc7c6ffec6bad1409c",
+        "xx_installed_entry_sha256": "ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a",
+        "driven-c2-nostream": true,
+        "driven-xx-nostream": true,
+        "driven-c2": true,
+        "driven-xx": true
+      }
+    }
+  ]
+}

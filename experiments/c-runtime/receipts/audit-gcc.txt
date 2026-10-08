@@ -1,0 +1,139 @@
+{
+  "crt-probe-gcc": {
+    "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/crt-probe-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 24388,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x206000",
+        "memsz": 24896,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x206000",
+      "filesz": 8,
+      "memsz": 44,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 44,
+      "__arena_tls_filesz": 8,
+      "__arena_tls_image": 2121728,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 6155,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "c-native-gcc": {
+    "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c-native-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 39812,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20a000",
+        "memsz": 41280,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20a000",
+      "filesz": 4,
+      "memsz": 36,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 36,
+      "__arena_tls_filesz": 4,
+      "__arena_tls_image": 2138112,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 10402,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "c2-console-gcc": {
+    "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 37252,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20a000",
+        "memsz": 16776,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20a000",
+      "filesz": 0,
+      "memsz": 32,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 32,
+      "__arena_tls_filesz": 0,
+      "__arena_tls_image": 2138112,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 9849,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "xxhash-app-gcc": {
+    "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 52006,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20d000",
+        "memsz": 16712,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20d000",
+      "filesz": 0,
+      "memsz": 20,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 20,
+      "__arena_tls_filesz": 0,
+      "__arena_tls_image": 2150400,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 12813,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  }
+}
+summary: /home/user/ArenaOS/experiments/c-runtime/build/summary.json

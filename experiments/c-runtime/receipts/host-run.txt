@@ -1,0 +1,7 @@
+HOST-ONLY arena C runtime tests (ASan+UBSan, glibc differential)
+  stress: 200000 ops, 50225 allocs ok, 79902 frees, 499 refusals (499 over-ceiling), reuse=98683, committed=2064/4096 pages
+[host] reserve-refusal child: refused cleanly
+[host] KNOWN-DEFECT ring u32-wrap discontinuity reproduced: unread bytes overwritten (protocol ADR required)
+LIBC-HOST checks=971 failures=0
+HOST-ONLY RESULT PASS (1569 checks, known protocol defect pinned)
+summary: /home/user/ArenaOS/experiments/c-runtime/build/summary.json
