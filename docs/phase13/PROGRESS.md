@@ -25,7 +25,7 @@
 | 13.6 user threads | Implemented; T1 guest proof and T3 preservation passed | ADR-0106 uses the existing process PML4/cap space, exact guarded VM stack caps, per-thread FS.base, same-process join/detach, and four created threads per process. The installed APB1 guest ran four concurrent ring-3 threads with shared heap/read-only VM, checked quota and stale IDs, joined/detached, and restored VM accounting. A killed helper also had a live user worker. The exact rebuilt EFI passed 20/20 fresh preservation boots. |
 | 13.7 native synchronization | Implemented; T1 guest proof, M10 built-in launch regression, and 20/20 T3 preservation passed | ADR-0107 adds a Desktop-minted per-AppInstance SyncDomain, generation-checked keys, atomic sequence-and-park waits, bounded timeout, and process-owned key/waiter cleanup. The signed registry guest proves contended Mutex, Condvar wake-one/all, Once, sequence-before-wait, timeout, invalid capability refusal, helper teardown with a parked ring-3 waiter, and key/waiter reclamation. 20/20 clean T3 preservation boots passed on the corrected EFI. |
 | 13.7 pressure and PIE | T1 pressure guest passed; PIE scope accepted in ADR-0108 | The signed APB1 mixed workload reached 26 AppInstances and 32 windows, then closed half, relaunched, and fully tore down. ADR-0109 records resource snapshots. Static `ET_EXEC` remains the only native executable format; static `ET_DYN`/ASLR is deferred with its concrete loader blocker in ADR-0108. |
-| Preservation and final qualification | T2 preservation passed; final qualification in progress | M10 Desktop, M11 Files/window manager, M12 scale, the Phase-13 pressure guest, and 10/10 clean preservation boots passed. The source is preserved below. Source freeze, complete historical qualification, 100-boot receipt, and extracted-archive witness remain. |
+| Preservation and final qualification | Complete | The frozen OS image passed the historical suite (115/115 groups), focused Phase-13 pressure guest, relevant M9/M10/M11/M12 regressions, fresh 100/100 boots, and the independent extracted `phase13-complete` witness. Exact image/archive checksums and receipts are in `FINAL-REPORT.md`. |
 
 ## Baseline evidence before implementation
 
@@ -915,11 +915,12 @@ and final qualification remain open.
   headless exit/reap, real standard-stream transfer/EOF, user-thread/TLS
   lifecycle, native VM release, synchronization wake/teardown, and clean
   shutdown. A second boot of the same AFS2 disk reloads and renders the pin.
-- This T1 proof is complete. M10 Desktop, M11 Files/window-manager, and M12
+- At the time of this T1 checkpoint, the proof was complete; M10 Desktop,
+  M11 Files/window-manager, and M12
   scale regressions passed, followed by the T2 10-boot preservation set. ADR-
   0108 closes the PIE decision by deferring ET_DYN/ASLR to the next native
-  executable phase. Full historical, 100/100, exact archive, and
-  extracted-archive qualification remain outstanding.
+  executable phase. The final historical, 100/100, archive, and extracted-
+  archive qualification are recorded in the final section below.
 
 ### T2 launcher and mixed-workload preservation checkpoint
 
@@ -937,3 +938,42 @@ and final qualification remain open.
   qualification. Continue with the complete historical suite, final fresh
   100-boot run, exact `phase13-complete` artifact, and independent extracted
   archive boot.
+
+### Final source, test-oracle, and artifact qualification
+
+- The OS source image is frozen at `c4ad723a3e66b8b72a020589cd9ab6eab73de34d`.
+  The exact EFI SHA-256 is
+  `3afbceffc8c98e65790552589c5bd4bb59e4245ad4f3599d7cef093ff652f42d`; the
+  exact ESP SHA-256 is
+  `147c05de9e868954c3afb929c439533e48ffa7ded2a0740740664e44865f5377`.
+- The complete historical suite passed 115/115 suite groups. Its frozen-source
+  log is `build/qualification-phase13-final-suite.log`. The M9 and M10
+  corrected RED/GREEN oracle gates passed in that run.
+- Packaging review found the independent host APB1 codec had not been updated
+  for manifest request bits 3 and 4 already defined by the Phase-13 Rust
+  manifest. The host parser now accepts only known bits 0–4 and refuses bit 5;
+  ADR-0081 records that these stream/synchronization bits remain descriptive
+  and do not grant capabilities. APB1 reference tests passed 7/7 after the
+  correction, and the real registry pressure guest passed again on QEMU 10.0.11
+  / OVMF 2025.02 (281.4 seconds plus 6.1-second favorites-reload boot).
+- `tools/stability_loop.sh 100` passed 100/100 fresh boots with zero failures
+  in 764 seconds, bound to the exact EFI hash above. Receipt:
+  `build/stability-receipt.txt`; log:
+  `build/stability-phase13-final-100.log`.
+- The independent archive witness was exercised from an extracted smoke
+  archive and passed installed signed app discovery/launch, exact document
+  handoff, search launcher, three separately backed windows, helper and
+  headless lifecycle, streams, VM/heap/thread/synchronization checks, exact
+  resource teardown, and clean UEFI shutdown. The final 100/100-receipt-bound
+  archive was extracted into a fresh `/tmp` directory with `PYTHONPATH`
+  removed; its independent QEMU witness passed, checked the exact EFI/ESP and
+  receipt, exercised both signed APB1 installations, and shut down cleanly.
+  Serial, PPM, pixel receipt, TCP/DNS fixture and console logs are stored in
+  `releases/checkpoints/phase13-complete/extracted-witness/`.
+- PIE decision: static `ET_EXEC` remains the qualified native format; ADR-0108
+  records why static `ET_DYN`/ASLR is deferred and names it as the next native
+  executable scope. Phase 14 should not default to Linux compatibility while
+  that executable-loading prerequisite remains.
+- Tool versions and install sources are recorded in `TOOL-VERSIONS.txt`.
+  Qualification, architecture, artifact checksums, and the exact recommended
+  Phase-14 scope are in `FINAL-REPORT.md` and `PHASE14-HANDOFF.md`.

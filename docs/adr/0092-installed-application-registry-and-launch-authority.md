@@ -1,6 +1,6 @@
 # ADR-0092 — Installed application registry and launch authority
 
-**Status:** Accepted for Phase-13 implementation; guest qualification pending.
+**Status:** Accepted; installed-registry launch guest and Phase-13 T4 passed.
 **Date:** 2026-10-07.
 **Related decisions:** ADR-0053, ADR-0080, ADR-0081, ADR-0082, ADR-0083,
 ADR-0086, ADR-0090, ADR-0091.

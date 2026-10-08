@@ -1,8 +1,8 @@
 # ADR-0099: Desktop AppInstances own separate native ProcessGroups
 
-*Status: Accepted (2026-10-07). The production ownership split is implemented
-and regression-tested; signed helper resolution and process exit status remain
-open Phase-13 work.*
+*Status: Accepted (2026-10-07). Production AppInstance and ProcessGroup
+ownership, signed helper cleanup, and process exit status passed the Phase-13
+guest and T4 preservation suite.*
 
 ## Context
 

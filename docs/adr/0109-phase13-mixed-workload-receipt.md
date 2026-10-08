@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted as the T1 guest evidence and measured resource receipt for Phase 13.
-T2 preservation and final qualification remain open.
+Accepted as the measured Phase-13 guest resource receipt. The T2/T3
+preservation checkpoints and final T4 qualification passed on the preserved
+native image.
 
 ## Context
 

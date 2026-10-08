@@ -1,0 +1,17 @@
+ArenaOS Phase-13 final qualification tool receipt
+
+Operating system: Debian GNU/Linux 13 (trixie)
+Rust compiler: rustc 1.97.0 (2d8144b78 2026-07-07), official rustup
+Cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+Rustfmt: rustfmt 1.9.0-stable (2d8144b788 2026-07-07)
+Rust targets: x86_64-unknown-none; x86_64-unknown-uefi
+QEMU: QEMU emulator version 10.0.11 (Debian 1:10.0.11+ds-0+deb13u1)
+OVMF: edk2-ovmf 2025.02-8+deb13u1, 4 MiB CODE/VARS firmware pair
+QEMU/OVMF source: signed Debian trixie snapshot package repository
+Privilege: UID 1000, no root or sudo; packages/tools extracted below /tmp
+Build entry point: tools/dev-env/env.sh and tools/build.sh --image
+
+The final qualification used the repository's existing build configuration
+and crate-local target settings. The extracted archive witness needs Python 3,
+QEMU qemu-system-x86_64, and Unix sockets; firmware and guest disk templates
+are included in the archive.

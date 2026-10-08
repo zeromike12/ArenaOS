@@ -1,6 +1,6 @@
 # ADR-0096: Scalable lazy native application heap
 
-**Status:** Accepted for Phase 13 implementation
+**Status:** Accepted; installed-app heap proof and 20/20 T3 preservation passed.
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR-0093 — Bounded native Image envelope for installed applications
 
-**Status:** Accepted for Phase-13 implementation; guest qualification pending.
+**Status:** Accepted; verified installed Image launch and Phase-13 T4 passed.
 **Date:** 2026-10-07.
 **Related decisions:** ADR-0016, ADR-0055, ADR-0083, ADR-0086, ADR-0092.
 

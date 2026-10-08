@@ -1,6 +1,6 @@
 # ADR-0097: Multiple ordinary windows per application session
 
-**Status:** Accepted for Phase 13 implementation
+**Status:** Accepted; three-window guest proof and Phase-13 T4 passed.
 
 **Date:** 2026-10-07
 

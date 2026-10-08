@@ -1,7 +1,7 @@
 # ADR-0098: Headless installed application launch
 
-**Status:** Accepted for Phase 13; helper processes and multi-process instance
-ownership remain open.
+**Status:** Accepted; installed headless and helper-process lifecycle guests
+passed as part of Phase-13 T4.
 
 ## Context
 

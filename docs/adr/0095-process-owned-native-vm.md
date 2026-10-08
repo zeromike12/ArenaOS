@@ -1,6 +1,6 @@
 # ADR-0095: Process-owned native VM reservations
 
-**Status:** Accepted for Phase 13 implementation
+**Status:** Accepted; real VM guest proof and 20/20 T3 preservation passed.
 
 **Date:** 2026-10-07
 

@@ -1,6 +1,6 @@
 # ADR-0106: Native process-owned user threads
 
-Status: Accepted for Phase 13 implementation
+Status: Accepted; ring-3 thread/TLS guest proof and 20/20 T3 preservation passed.
 Date: 2026-10-07
 
 ## Problem

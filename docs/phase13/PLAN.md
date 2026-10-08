@@ -38,6 +38,27 @@ The starting path is:
    path. App/window/process tables and APB1 metadata APIs exist as foundations,
    but do not yet form a package-backed app manager.
 
+### Phase-12 behavior hard-coded to the six built-in applications
+
+The starting hard-coded path was concrete and limited to these owners:
+
+- Desktop dispatch accepted built-in kinds 0–5, chose the matching static
+  boot Image and startup policy, and made one process/window per launch.
+- All Applications did not exist as an installed catalog surface; the dock's
+  six built-in tiles were the entire visible launch inventory.
+- Document open selected Editor kind 2. There was no signed content-type
+  handler list or AFS2 user default.
+- Desktop sessions were one-window records; the reusable `AppInstanceTable`
+  did not own production process or window state.
+- Packaged APKG v1 dynamic Images were limited to two 4 KiB images and four
+  dynamic child processes. There was no APB1 installed Image resolver.
+- Standard-stream roles, helper membership, user-created threads, process VM
+  regions, and native synchronization objects had no production lifecycle.
+
+These are the exact Phase-12 demo ties removed or extended in production during
+Phase 13. The six built-ins remain as applications and regression fixtures;
+they no longer define the entire application inventory or launch mechanism.
+
 ## Initial resource inventory
 
 Bounds below are source constants and existing ABI limits; Phase 13 will not
@@ -105,6 +126,11 @@ The following are Phase-13 bounds layered on the unchanged Phase-12 inventory:
 | User-thread stacks | one exact 16-page VmRegion per thread; one metadata/TLS page, one uncommitted guard, 14 committed RW/NX pages | ADR-0106 |
 | Thread lifecycle | same-process stable status join or detach; kernel stack and detached VmRegion cleanup after the thread is switched off | ADR-0106 |
 | Spawn grants / startup descriptors | at most 8 grants (including slot-0 startup cap) / 7 descriptors; 128 process capability slots and slot-127 accounting are unchanged | ADR-0104 |
+| Installed application metadata | 64 boot-rebuilt descriptive entries; each launch rechecks the verified installed tree and obtains a fresh exact Image cap | ADR-0092/0093 |
+| Installed native Images | 16 live kernel Image records, at most 256 KiB per Image and 128 mapped PT_LOAD pages; 24 dynamic child slots | ADR-0093 |
+| ProcessGroups | 32 AppInstances, up to 4 exact Process-cap members per group | ADR-0099/0101 |
+| Ordinary windows | 32 globally; a Session/AppInstance can own multiple independently backed windows | ADR-0097 |
+| Package handler/favorite preferences | bounded AFS2 records; application IDs select metadata only, stale registry references are pruned | `desktop::favorites`, `desktop::associations` |
 
 The Phase-12 BoundedHeap, its 32-page limit, and startup proof remain intact.
 The Phase-13 application opts into ScalableHeap; no reserved capability slot
@@ -295,6 +321,21 @@ See `PROGRESS.md` for measured receipts and current qualification state.
   qualification.
 - Produce `FINAL-REPORT.md` and `PHASE14-HANDOFF.md` only after the source and
   qualification receipts are complete.
+
+**Final result:** the Phase-13 source image at implementation checkpoint
+`c4ad723a3e66b8b72a020589cd9ab6eab73de34d` passed 115/115 historical suite
+groups, the signed 26-AppInstance/32-window pressure guest, all affected M9,
+M10, M11 and M12 regressions, and 100/100 fresh boots of EFI SHA-256
+`3afbceffc8c98e65790552589c5bd4bb59e4245ad4f3599d7cef093ff652f42d`. The
+standalone `phase13-complete` archive was extracted into a fresh directory and
+its bundled EFI/ESP/OVMF/AFS2 fixtures passed a separate real QEMU guest witness.
+The witness proved both signed package installs, installed registry launch,
+All Applications search, exact read-only document handoff, three independently
+backed windows, helper and headless process lifecycle, streams, user threads,
+VM/runtime synchronization, identity-resource teardown, and clean shutdown.
+Exact receipts and evidence are recorded in `FINAL-REPORT.md`; the artifact
+digest is intentionally recorded there instead of in the self-containing
+archive report copy.
 
 ## Regression dependency map
 
