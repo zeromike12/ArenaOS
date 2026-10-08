@@ -22,12 +22,26 @@ struct sink {
     size_t count; /* bytes the formatted text WOULD occupy */
     int fd;      /* output fd for printf, -1 for snprintf */
     size_t used; /* bytes pending in fbuf */
+    int err;     /* first fd write error (negative ARENA_E_*), 0 if none */
     char fbuf[128];
 };
 
+/* Flush the pending bytes, looping over short writes. A write error or a
+ * zero-progress write stops the flush and is recorded in s->err; later output
+ * is discarded so the first failure is the one reported. */
 static void sink_flush(struct sink *s) {
     if (s->fd >= 0 && s->used > 0) {
-        arena_write(s->fd, s->fbuf, s->used);
+        size_t off = 0;
+        while (off < s->used && s->err == 0) {
+            long n = arena_write(s->fd, s->fbuf + off, s->used - off);
+            if (n < 0) {
+                s->err = (int)n;
+            } else if (n == 0) {
+                s->err = ARENA_E_CLOSED;
+            } else {
+                off += (size_t)n;
+            }
+        }
         s->used = 0;
     }
 }
@@ -239,12 +253,15 @@ int arena_snprintf(char *buf, size_t n, const char *fmt, ...) {
     return r;
 }
 
+/* Returns the byte count on success, or the first negative ARENA_E_* from the
+ * stdout write path. Output lost to a failed write is never reported as
+ * written. */
 int arena_vprintf(const char *fmt, va_list ap) {
     struct sink s = {0};
     s.fd = 1;
     vformat(&s, fmt, ap);
     sink_flush(&s);
-    return (int)s.count;
+    return s.err != 0 ? s.err : (int)s.count;
 }
 
 int arena_printf(const char *fmt, ...) {

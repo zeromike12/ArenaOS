@@ -498,6 +498,62 @@ void arena_vm_host_reset(void);
 
 /* Commit refusal in a running process: a request that needs uncommitted
  * space must be refused, and nothing already live may change. */
+/* C1.1 partial transfers and peer failure on the printf path. The host
+ * arena_write seam can cap each write (short writes) or fail every write. */
+extern long arena_host_write_limit;
+extern long arena_host_write_fail;
+extern int arena_host_capture_on;
+extern char arena_host_capture[512];
+extern size_t arena_host_capture_n;
+extern long arena_host_write_calls;
+
+static void test_stdio_partial_writes(void) {
+    static const char want[] = "partial-write-check 0123456789 abcdefghijklmnopqrstuvwxyz 42\n";
+    size_t want_n = sizeof want - 1;
+    arena_host_capture_on = 1;
+    arena_host_capture_n = 0;
+    arena_host_write_limit = 3;
+    long calls0 = arena_host_write_calls;
+    int r = arena_printf("partial-write-check 0123456789 abcdefghijklmnopqrstuvwxyz %d\n", 42);
+    long calls = arena_host_write_calls - calls0;
+    CHECK(r == (int)want_n, "partial writes: printf reports every byte (got %d, want %zu)", r, want_n);
+    CHECK(arena_host_capture_n == want_n && memcmp(arena_host_capture, want, want_n) == 0,
+          "partial writes: every byte arrives once, in order, across 3-byte short writes");
+    CHECK(calls == (long)((want_n + 2) / 3), "partial writes: the flush retries the remainder (calls=%ld)", calls);
+
+    /* Longer than the 128-byte sink buffer: the buffer-full flush also loops. */
+    char longs[200];
+    memset(longs, 'Q', sizeof longs - 1);
+    longs[sizeof longs - 1] = '\0';
+    arena_host_capture_n = 0;
+    calls0 = arena_host_write_calls;
+    r = arena_printf("%s", longs);
+    CHECK(r == (int)(sizeof longs - 1), "partial writes: >128-byte output reports every byte (got %d)", r);
+    CHECK(arena_host_capture_n == sizeof longs - 1 && memcmp(arena_host_capture, longs, sizeof longs - 1) == 0,
+          "partial writes: >128-byte output arrives intact across the buffer-full flush");
+    arena_host_write_limit = 0;
+    arena_host_capture_on = 0;
+}
+
+static void test_stdio_write_error(void) {
+    arena_host_write_fail = ARENA_E_BROKEN_PIPE;
+    long calls0 = arena_host_write_calls;
+    int r = arena_printf("never-written\n");
+    CHECK(r == ARENA_E_BROKEN_PIPE, "write error: printf returns the peer error, not a byte count (got %d)", r);
+    CHECK(arena_host_write_calls - calls0 == 1, "write error: one attempt, no retry (calls=%ld)", arena_host_write_calls - calls0);
+
+    /* Multi-flush output: after the first failure, later flushes are skipped. */
+    char longs[300];
+    memset(longs, 'Z', sizeof longs - 1);
+    longs[sizeof longs - 1] = '\0';
+    calls0 = arena_host_write_calls;
+    r = arena_printf("%s", longs);
+    CHECK(r == ARENA_E_BROKEN_PIPE, "write error: multi-flush output returns the first error (got %d)", r);
+    CHECK(arena_host_write_calls - calls0 == 1, "write error: later flushes are not attempted after a failure (calls=%ld)",
+          arena_host_write_calls - calls0);
+    arena_host_write_fail = 0;
+}
+
 /* C1.1: a process without a stream grant must fail stdio setup cleanly with
  * ARENA_E_NO_STREAMS and never touch a stream ring. The host startup stub
  * returns no record at all, which is the "no grant" case. */
@@ -637,6 +693,8 @@ int main(int argc, char **argv) {
     test_allocator_stress();
     test_allocator_hardening();
     test_stdio_missing_grant();
+    test_stdio_partial_writes();
+    test_stdio_write_error();
     test_vm_commit_refusal();
     test_vm_reserve_refusal();
     test_ring_wrap();
