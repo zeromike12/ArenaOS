@@ -9,7 +9,11 @@
  *   G3 allocator  malloc/calloc/realloc/free/aligned_alloc, overflow, accounting
  *   G4 time       CLOCK_MONOTONIC ordering and nanosleep; REALTIME refused (ENOSYS)
  *   G5 threads    thrd_create/join, mtx, cnd_timedwait timeout, call_once, TLS
- *   G6 exit       atexit handler runs after main returns
+ *   G6 threads ext  trylock busy, cnd_wait/broadcast wakeup, detach, thrd_sleep,
+ *                 documented refusals (recursive mutex, timed lock, tss keys)
+ *   G7 stdio ext  fputc/putc/fwrite, error and EOF flags, setvbuf range
+ *   G8 init       a constructor (.init_array) ran before main
+ *   G9 exit       atexit handler runs after main returns
  * Exit status: 61 when every group passes, 62 otherwise, 58 if stdio cannot attach.
  */
 #include <errno.h>
@@ -28,7 +32,7 @@
 #define EXIT_PASS 61
 #define EXIT_FAIL 62
 #define EXIT_NO_STREAMS 58
-#define GROUPS 6
+#define GROUPS 9
 
 static int groups_passed;
 static int checks;
@@ -224,7 +228,127 @@ static void g5_threads(void) {
     group_result("G5 threads", failed_checks == before, checks - n0);
 }
 
-/* ------------------------------------------------------------ G6 exit ------ */
+
+/* ------------------------------------------------- G6 threads, extended ----- */
+static mtx_t gate_lock;
+static cnd_t gate_cv;
+static int gate_open;
+static volatile int detached_done;
+
+static int gate_waiter(void *arg) {
+    (void)arg;
+    if (mtx_lock(&gate_lock) != thrd_success) {
+        return -1;
+    }
+    while (!gate_open) {
+        if (cnd_wait(&gate_cv, &gate_lock) != thrd_success) {
+            mtx_unlock(&gate_lock);
+            return -2;
+        }
+    }
+    mtx_unlock(&gate_lock);
+    return 7;
+}
+
+static int detached_worker(void *arg) {
+    (void)arg;
+    detached_done = 1;
+    return 0;
+}
+
+static void g6_threads_ext(void) {
+    int before = failed_checks, n0 = checks;
+    mtx_t self_lock, timed_lock;
+    EXPECT(thrd_current() != NULL && thrd_equal(thrd_current(), thrd_current()) != 0,
+           "thrd_current and thrd_equal on the main thread");
+
+    /* Trylock: free -> success; held by this thread (non-recursive) -> busy. */
+    EXPECT(mtx_init(&self_lock, mtx_plain) == thrd_success, "trylock mutex init");
+    EXPECT(mtx_trylock(&self_lock) == thrd_success, "trylock on a free mutex succeeds");
+    EXPECT(mtx_trylock(&self_lock) == thrd_busy, "trylock on a self-held mutex is busy");
+    EXPECT(mtx_unlock(&self_lock) == thrd_success, "unlock after trylock");
+    mtx_destroy(&self_lock);
+
+    /* Refusals must be explicit errors, never success. */
+    EXPECT(mtx_init(&timed_lock, mtx_plain | mtx_recursive) == thrd_error,
+           "recursive mutex refused at init");
+    EXPECT(mtx_init(&timed_lock, mtx_plain) == thrd_success, "timed-lock mutex init");
+    struct timespec soon;
+    EXPECT(clock_gettime(CLOCK_MONOTONIC, &soon) == 0, "timed-lock deadline base");
+    soon.tv_nsec += 1000000L;
+    if (soon.tv_nsec >= 1000000000L) {
+        soon.tv_sec += 1;
+        soon.tv_nsec -= 1000000000L;
+    }
+    EXPECT(mtx_timedlock(&timed_lock, &soon) == thrd_error, "mtx_timedlock is refused");
+    mtx_destroy(&timed_lock);
+    tss_t key;
+    EXPECT(tss_create(&key, NULL) == thrd_error, "tss_create is refused");
+    EXPECT(tss_get(key) == NULL, "tss_get reports no value (refused key)");
+    EXPECT(tss_set(key, (void *)1) == thrd_error, "tss_set is refused");
+
+    /* Condition variable wakeup: waiter parks until the gate opens. The predicate
+     * loop makes the result independent of which side runs first. */
+    EXPECT(mtx_init(&gate_lock, mtx_plain) == thrd_success, "gate mutex init");
+    EXPECT(cnd_init(&gate_cv) == thrd_success, "gate condvar init");
+    thrd_t waiter;
+    EXPECT(thrd_create(&waiter, gate_waiter, NULL) == thrd_success, "gate waiter created");
+    EXPECT(mtx_lock(&gate_lock) == thrd_success, "gate lock");
+    gate_open = 1;
+    EXPECT(cnd_broadcast(&gate_cv) == thrd_success, "cnd_broadcast returns success");
+    EXPECT(mtx_unlock(&gate_lock) == thrd_success, "gate unlock");
+    int res = -99;
+    EXPECT(thrd_join(waiter, &res) == thrd_success && res == 7,
+           "cnd_wait woke after broadcast (status %d)", res);
+    EXPECT(cnd_signal(&gate_cv) == thrd_success, "cnd_signal with no waiters succeeds");
+    cnd_destroy(&gate_cv);
+    mtx_destroy(&gate_lock);
+
+    /* Detach: the thread runs to completion without a join. Bounded wait. */
+    thrd_t quiet;
+    EXPECT(thrd_create(&quiet, detached_worker, NULL) == thrd_success, "detach candidate created");
+    EXPECT(thrd_detach(quiet) == thrd_success, "thrd_detach succeeds");
+    int spins = 0;
+    while (!detached_done && spins < 2000) {
+        (void)thrd_sleep(&(struct timespec){.tv_sec = 0, .tv_nsec = 1000000L}, NULL);
+        spins++;
+    }
+    EXPECT(detached_done == 1, "detached thread ran (%d spins)", spins);
+
+    /* thrd_sleep delegates to nanosleep: 1 ms returns success. */
+    EXPECT(thrd_sleep(&(struct timespec){.tv_sec = 0, .tv_nsec = 1000000L}, NULL) == thrd_success,
+           "thrd_sleep 1 ms");
+    group_result("G6 threads ext", failed_checks == before, checks - n0);
+}
+
+/* ------------------------------------------------------ G7 stdio, extended -- */
+static void g7_stdio_ext(void) {
+    int before = failed_checks, n0 = checks;
+    EXPECT(fputc('A', stdout) == 'A', "fputc returns the character");
+    EXPECT(putc('B', stdout) == 'B', "putc returns the character");
+    EXPECT(fwrite("CD", 1, 2, stdout) == 2, "fwrite returns the item count");
+    printf("\n");
+    EXPECT(ferror(stdout) == 0 && feof(stdout) == 0, "stdout starts with no error or EOF");
+    clearerr(stdout);
+    EXPECT(ferror(stdout) == 0, "clearerr leaves no error");
+    EXPECT(setvbuf(stdout, NULL, _IOLBF, 0) == 0, "setvbuf accepts a valid mode");
+    errno = 0;
+    EXPECT(setvbuf(stdout, NULL, 9, 0) == -1 && errno == EINVAL, "setvbuf refuses a bad mode");
+    perror("[c2-console] perror probe");
+    group_result("G7 stdio ext", failed_checks == before, checks - n0);
+}
+
+/* ------------------------------------------------------ G8 init constructor -- */
+static int ctor_ran;
+__attribute__((constructor)) static void early_ctor(void) { ctor_ran = 1; }
+
+static void g8_init(void) {
+    int before = failed_checks, n0 = checks;
+    EXPECT(ctor_ran == 1, "constructor in .init_array ran before main");
+    group_result("G8 init", failed_checks == before, checks - n0);
+}
+
+/* ------------------------------------------------------------ G9 exit ------ */
 static void on_exit_handler(void) {
     atexit_ran = 1;
     printf(APP_NAME " atexit handler ran\n");
@@ -244,9 +368,12 @@ int main(int argc, char **argv) {
     g3_allocator();
     g4_time();
     g5_threads();
-    /* G6 exit: registration succeeded. The handler runs after main returns; the
+    g6_threads_ext();
+    g7_stdio_ext();
+    g8_init();
+    /* G9 exit: registration succeeded. The handler runs after main returns; the
      * harness requires its line AFTER the RESULT line (ordering = exit path). */
-    group_result("G6 exit", atexit_registered, 1);
+    group_result("G9 exit", atexit_registered, 1);
     int pass = groups_passed == GROUPS && failed_checks == 0;
     printf(APP_NAME " RESULT %s groups=%d/%d checks=%d failed=%d\n", pass ? "PASS" : "FAIL",
            groups_passed, GROUPS, checks, failed_checks);

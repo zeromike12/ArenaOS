@@ -26,9 +26,9 @@
     "defined_both": 110,
     "missing": 0,
     "one_compiler_only": 0,
-    "referenced_in_guest_app": 30,
+    "referenced_in_guest_app": 52,
     "referenced_in_host_test": 53,
-    "no_test_reference": 42,
+    "no_test_reference": 20,
     "refused_by_design": 7
   },
   "symbols": [
@@ -135,7 +135,9 @@
       "name": "clearerr",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "clock",
@@ -158,13 +160,17 @@
       "name": "cnd_broadcast",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "cnd_destroy",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "cnd_init",
@@ -178,7 +184,9 @@
       "name": "cnd_signal",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "cnd_timedwait",
@@ -192,7 +200,9 @@
       "name": "cnd_wait",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "div",
@@ -222,13 +232,17 @@
       "name": "feof",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "ferror",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "fflush",
@@ -270,7 +284,9 @@
       "name": "fputc",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "fputs",
@@ -306,7 +322,9 @@
       "name": "fwrite",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "getc",
@@ -415,7 +433,9 @@
       "name": "mtx_destroy",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "mtx_init",
@@ -437,13 +457,17 @@
       "name": "mtx_timedlock",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "mtx_trylock",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "mtx_unlock",
@@ -465,7 +489,9 @@
       "name": "perror",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "printf",
@@ -480,7 +506,9 @@
       "name": "putc",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "putchar",
@@ -541,7 +569,9 @@
       "name": "setvbuf",
       "header": "stdio.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "snprintf",
@@ -750,19 +780,25 @@
       "name": "thrd_current",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "thrd_detach",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "thrd_equal",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "thrd_exit",
@@ -782,7 +818,9 @@
       "name": "thrd_sleep",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "thrd_yield",
@@ -806,7 +844,9 @@
       "name": "tss_create",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "tss_delete",
@@ -818,13 +858,17 @@
       "name": "tss_get",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "tss_set",
       "header": "threads.h",
       "status": "defined",
-      "evidence": []
+      "evidence": [
+        "guest-app-source"
+      ]
     },
     {
       "name": "vfprintf",

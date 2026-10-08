@@ -14,7 +14,7 @@ APB1 path and launched from All Applications.
 Expected, in launch order (the exact exit-status sequence is part of the verdict):
   1. A without streams   -> exit 58, no application output
   2. B without streams   -> exit 58, no application output
-  3. A with streams      -> six PASS groups, RESULT PASS, exit 61, atexit line AFTER RESULT
+  3. A with streams      -> nine PASS groups, RESULT PASS, exit 61, atexit line AFTER RESULT
   4. B with streams      -> corpus digest 1df15d5d2925ddb0 over 319 inputs, RESULT PASS, exit 63
 
 Signing: RFC 8032 development fixture (test-only, never a production key), as in C1.
@@ -66,9 +66,10 @@ NEG_XX = dict(key="xx-nostream", app_id=b"org.arenaos.xxnostream", display=b"Opa
 ROW_Y = {"c2-nostream": 58, "xx-nostream": 132, "xx": 206, "c2": 280}
 EXPECTED_EXITS = [58, 58, 61, 63]
 
-GROUP_NAMES = ["G1 stdio", "G2 stdin", "G3 allocator", "G4 time", "G5 threads", "G6 exit"]
+GROUP_NAMES = ["G1 stdio", "G2 stdin", "G3 allocator", "G4 time", "G5 threads",
+               "G6 threads ext", "G7 stdio ext", "G8 init", "G9 exit"]
 C2_GROUP_RE = re.compile(r"^\[c2-console\] (G\d [\w ]+?) (PASS|FAIL) checks=(\d+)\r?$", re.M)
-C2_RESULT_RE = re.compile(r"^\[c2-console\] RESULT PASS groups=6/6 checks=(\d+) failed=0\r?$", re.M)
+C2_RESULT_RE = re.compile(r"^\[c2-console\] RESULT PASS groups=9/9 checks=(\d+) failed=0\r?$", re.M)
 C2_ATEXIT_RE = re.compile(r"^\[c2-console\] atexit handler ran\r?$", re.M)
 C2_STDIN_RE = re.compile(r"^\[c2-console\] stdin class=(would-block|eof|data)\r?$", re.M)
 C2_ENTER = "[c2-console] C2 console application entered (ARST v2 gate)"
