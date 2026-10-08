@@ -382,6 +382,64 @@ static int quiet_worker(void *arg) {
     return 5;
 }
 
+/* Allocator under concurrent threads (C1.4 thread-safety). Each worker churns
+ * eight live slots of varied sizes in the one shared heap, verifying every
+ * byte before it frees. Return 0 = clean, 1 = corruption, 2 = refused. */
+static int alloc_worker(void *arg) {
+    unsigned id = (unsigned)(uintptr_t)arg;
+    struct { uint8_t *p; size_t n; uint8_t seed; } s[8];
+    for (unsigned k = 0; k < 8; k++) {
+        s[k].p = NULL;
+        s[k].n = 0;
+        s[k].seed = 0;
+    }
+    int status = 0;
+    for (unsigned i = 0; i < 400 && status == 0; i++) {
+        unsigned k = i % 8u;
+        if (s[k].p != NULL) {
+            for (size_t j = 0; j < s[k].n; j++) {
+                if (s[k].p[j] != (uint8_t)(s[k].seed + j)) {
+                    status = 1;
+                    break;
+                }
+            }
+            arena_free(s[k].p);
+            s[k].p = NULL;
+            if (status != 0) {
+                break;
+            }
+        }
+        size_t n = 16u + (size_t)((i * 97u + id * 31u) % 2000u);
+        uint8_t *p = arena_malloc(n);
+        if (p == NULL) {
+            status = 2;
+            break;
+        }
+        uint8_t seed = (uint8_t)(i + id * 17u);
+        for (size_t j = 0; j < n; j++) {
+            p[j] = (uint8_t)(seed + j);
+        }
+        s[k].p = p;
+        s[k].n = n;
+        s[k].seed = seed;
+    }
+    for (unsigned k = 0; k < 8; k++) {
+        if (s[k].p != NULL) {
+            if (status == 0) {
+                for (size_t j = 0; j < s[k].n; j++) {
+                    if (s[k].p[j] != (uint8_t)(s[k].seed + j)) {
+                        status = 1;
+                        break;
+                    }
+                }
+            }
+            arena_free(s[k].p);
+            s[k].p = NULL;
+        }
+    }
+    return status;
+}
+
 static void t9_sync(void) {
     int before = failed_checks, n0 = checks;
     uint64_t keys_base = 0;
@@ -389,6 +447,31 @@ static void t9_sync(void) {
     EXPECT(arena_mutex_init(&counter_lock) == 0, "counter mutex");
     EXPECT(arena_once_init(&once_gate) == 0, "once");
     EXPECT(arena_mutex_init(&gate_lock) == 0 && arena_condvar_init(&gate_cv) == 0, "gate primitives");
+
+    /* Allocator under concurrent threads: four workers churn one shared heap.
+     * Every block is verified before it is freed; live blocks must return to
+     * the baseline and no worker may be refused. */
+    {
+        struct arena_heap_stats hb, ha;
+        arena_heap_stats(&hb);
+        arena_thread_t ac[4];
+        int acreated = 0;
+        for (unsigned i = 0; i < 4; i++) {
+            if (arena_thread_create(&ac[i], alloc_worker, (void *)(uintptr_t)i) == 0) {
+                acreated++;
+            }
+        }
+        int alloc_ok = acreated == 4;
+        for (int i = 0; i < acreated; i++) {
+            int ast = -1;
+            if (arena_thread_join(&ac[i], &ast) != 0 || ast != 0) {
+                alloc_ok = 0;
+            }
+        }
+        EXPECT(alloc_ok, "concurrent allocator: four threads churned clean (no corruption, no refusal)");
+        arena_heap_stats(&ha);
+        EXPECT(ha.live_blocks == hb.live_blocks, "concurrent allocator: live blocks return to baseline");
+    }
 
     /* Four concurrent workers: join results, mutex-protected counter, once. */
     arena_thread_t workers[4];
