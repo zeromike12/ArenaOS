@@ -108,3 +108,51 @@ it.
 4. Numbering: this proposal takes the next free number on this branch (0110).
    If another branch lands 0110 first, renumber at integration. Accepted ADRs
    are never renumbered.
+
+## C1 update (2026-10-08): status of each decision
+
+This addendum records what the C1 work implemented and tested. It does **not**
+accept the ADR. The decision list above is unchanged.
+
+1. **Freestanding static C profile**: implemented as an experiment in
+   `experiments/c-runtime/` (gcc and clang, static `ET_EXEC` at 0x200000,
+   no SSE/x87). Static audit rc 0 for both compilers on the final tree
+   (`simd_or_x87_count` 0 for every ELF). Guest-executed on the final sources
+   (commit `bcdfb95`): the native application ran 5 of 5 exact PASS per compiler
+   (exit lines `[58, 57]`); the crt-probe ran 3 of 3 exact PASS per compiler. See
+   `docs/compat/C1-FINAL-REPORT.md` for the hashes and the earlier runs.
+2. **C stream binding over ADR-0104**: implemented experimentally on the C side
+   (`src/streams.c`, `src/stdio.c`). It uses the existing StreamSet and
+   StreamWake grants and existing syscalls only. Guest-tested with the signed
+   native application: granted stdout and stderr writes, stdin bounded reads,
+   EOF, and backpressure. Still a proposal for landing.
+3. **`SYS_DEBUG_WRITE` excluded from the C path**: the C1 native application
+   never calls `arena_legacy_serial_enable()`, so no C1 application output
+   reaches the debug syscall. The legacy boot probe still opts in. The kernel
+   still has no capability check on `SYS_DEBUG_WRITE` (F1). The follow-up ADR
+   that decides its fate is still **open**.
+4. **TLS runtime-managed**: unchanged. The loader still ignores `PT_TLS` (F3).
+   The C runtime installs TLS. Guest-tested per thread (group T8: four
+   threads keep their own TLS value).
+5. **No new syscalls, kernel objects, or ABI v1 changes**: held. C1 threads use
+   `SYS_THREAD_CREATE/JOIN/DETACH/EXIT/YIELD/COUNT`; synchronization uses the
+   existing sync-domain calls; memory uses `SYS_VM_*`. No kernel file was
+   changed by C1.
+
+New items raised by C1 (each has its own record):
+
+- **Thread API (C1.3)**: the C thread and synchronization binding exists
+  experimentally and is guest-tested (group T9: 34 checks, including quota
+  refusal, condvar notify-all and notify-one, timed wait, detach, stale join,
+  and a stale-handle rejection). Landing a C thread API still needs its own
+  ADR, as the Future implications section already says.
+- **Stream ring counter wrap**: a defect in the ADR-0104 protocol at 2^32 bytes
+  per channel lifetime. Proposed fix options are in `docs/adr/0111-stream-ring-counter-wrap.md`.
+- **FP/SIMD**: C code cannot use FP or SIMD. The kernel has no FP state save
+  or restore, and this is a core-OS dependency for Luna's review after Phase 14.
+  See `docs/compat/C1-FPSIMD-BOUNDARY.md`.
+- **Heap size**: the C allocator reserves 16 MiB per process (C1.4). The
+  prototype's 4 MiB heap is superseded. Legacy probe expectations were updated
+  to match (see the final report).
+
+Review question 1 above remains open. Question 3 (`PT_TLS` ownership) remains open.
