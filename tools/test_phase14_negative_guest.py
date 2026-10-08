@@ -186,6 +186,7 @@ def install_and_refuse(
     expected_status: int,
     outside_arena: bool,
     required_marker: str | None = None,
+    filter_query: str | None = None,
 ) -> bytes:
     desktop = Desktop(label)
     try:
@@ -209,7 +210,7 @@ def install_and_refuse(
 
         # Establish the last pre-launch resource receipt after signed install.
         desktop.click(94, 12)
-        desktop.q.type_text(display_name, gap_s=0.025)
+        desktop.q.type_text(filter_query or display_name, gap_s=0.025)
         desktop.shot("negative-app-filter", selected_catalog_row_visible)
         before = desktop.serial()
         counters_before = len(COUNTERS.findall(before))
@@ -287,6 +288,11 @@ def main() -> None:
         assert apb1_format.parse_bundle(bundle).payload == bytes(mutate(name))
         seed_source(disk, bundle)
         label = f"phase14-neg-{name}"
+        # The full manifest title is susceptible to missed QMP key events
+        # during the long APB1-install workflow. Search a short unique title
+        # substring for this one row, then retain the same signed install and
+        # production launch-refusal assertions.
+        filter_query = "writ" if name == "writable-executable" else display
         rc, serial, elapsed = mtest.boot(
             label,
             esp,
@@ -305,6 +311,7 @@ def main() -> None:
                         stage,
                         status,
                         outside_arena,
+                        filter_query=filter_query,
                     ),
                 )
             ],
@@ -322,7 +329,7 @@ def main() -> None:
             flush=True,
         )
     assert not afs1.audit(disk)
-    print(f"[{LABEL}] seven signed malformed/unsupported PIE launch cases PASS", flush=True)
+    print(f"[{LABEL}] {len(cases)} signed malformed/unsupported PIE launch case(s) PASS", flush=True)
 
 
 if __name__ == "__main__":

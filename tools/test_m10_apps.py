@@ -209,7 +209,11 @@ def workflow(label,disk):
 def main(esp=None):
     if esp is None:esp=mtest.build('m10-apps',desktop=True)
     disk=arena_env.make_scratch_disk(afs2=True);label='m10-apps'
-    rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>',b'AFS2 file service online'),1,lambda:workflow(label,disk))],disk,pointer=True)
+    # This is the historical multi-lane workflow: dozens of real app
+    # launches, screen checks and Process-cap retirements run under TCG.
+    # Keep the ordinary 120s boot limit for other tests, but give this
+    # intentionally long desktop proof a bounded seven-minute window.
+    rc,s,_=mtest.boot(label,esp,[((b'[desktop] real desktop frame presented',b'arena>',b'AFS2 file service online'),1,lambda:workflow(label,disk))],disk,pointer=True,timeout_s=420)
     assert rc==0
     assert afs1.audit(disk)==[] and doc_bytes(disk,b'user-note')==b'saved hello desktop'
     samples=receipts(s)
@@ -253,7 +257,7 @@ def main(esp=None):
             d.shot('persisted',lambda p:crop(p,600,200,80,80)==crop(dark,600,200,80,80))
             return b'shutdown\r'
         finally:d.dispose()
-    rc,s,_=mtest.boot(label,esp,[(b'[desktop] real desktop frame presented',1,persisted)],disk,pointer=True)
+    rc,s,_=mtest.boot(label,esp,[(b'[desktop] real desktop frame presented',1,persisted)],disk,pointer=True,timeout_s=420)
     assert rc==0 and afs1.audit(disk)==[]
     print('[m10-apps] independent fresh boot reads durable preference and changes desktop pixels PASS')
 if __name__=='__main__':main()
