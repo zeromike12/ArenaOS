@@ -12,6 +12,7 @@ import argparse
 import gzip
 import hashlib
 import os
+import re
 import shutil
 import sys
 import tarfile
@@ -67,7 +68,7 @@ ADR_NAMES = (
     "0086-native-startup-exact-cap-inventory.md",
     "0087-native-process-groups-and-process-cap-lifecycle.md",
     "0088-phase12-desktop-capacity-envelope.md",
-    "0089-native-ipc-queue-backpressure.md",
+    "0089-phase12-ipc-burst-capacity.md",
     "0090-desktop-badged-application-sessions.md",
     "0091-apb1-filesd-install-handoff.md",
     "0092-installed-application-registry-and-launch-authority.md",
@@ -77,7 +78,7 @@ ADR_NAMES = (
     "0096-scalable-native-heap.md",
     "0097-multiple-ordinary-windows-per-application-session.md",
     "0098-headless-installed-application-launch.md",
-    "0099-application-instance-process-groups.md",
+    "0099-desktop-app-instance-process-groups.md",
     "0100-process-cap-exit-status.md",
     "0101-signed-helper-allowlist.md",
     "0102-native-thread-yield.md",
@@ -145,12 +146,24 @@ def archive_report_copy(source: Path, target: Path) -> None:
     report = source.read_text()
     phrase = "phase13-complete archive SHA-256:"
     lines = report.splitlines()
-    lines = [
-        (line.split(phrase, 1)[0] + phrase + " recorded in the repository final report (outer archive self-reference omitted)")
-        if phrase in line else line
-        for line in lines
-    ]
-    target.write_text("\n".join(lines) + "\n")
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if phrase in line:
+            output.append(
+                line.split(phrase, 1)[0]
+                + phrase
+                + " recorded in the repository final report (outer archive self-reference omitted)"
+            )
+            if not line.split(phrase, 1)[1].strip() and index + 1 < len(lines):
+                continuation = lines[index + 1].strip().strip("`")
+                if re.fullmatch(r"[0-9a-f]{64}", continuation):
+                    index += 1
+        else:
+            output.append(line)
+        index += 1
+    target.write_text("\n".join(output) + "\n")
 
 
 def main() -> None:
