@@ -1,19 +1,18 @@
 /*
- * Guest C startup (prototype): _start -> stack switch -> TLS -> .init_array
- * -> main -> arena_exit.
+ * Guest C startup (C1): _start -> ARST v2 gate -> stack switch -> TLS ->
+ * .init_array -> main(argc, argv) -> arena_exit.
  *
- * Why the stack switch: the kernel gives the initial thread ONE 4 KiB page,
- * placed directly above the image's highest segment (spawn.rs, "stack page
- * derived from the image"). That is too small for ordinary C. We reserve a
- * 256 KiB process VM region and move RSP into it before any application
- * code runs. The initial page is used only for the few frames in
- * arena_crt_start and the VM reservation calls.
- *
- * Why TLS is installed by hand: the ArenaOS loader consumes only PT_LOAD and
- * ignores PT_TLS (elf.rs: unknown phdr types are inert). Nothing copies the
- * .tdata image or points FS.base at a block, so this file does both, using
- * the x86-64 variant-II layout the GNU/LLVM linkers emit (TLS block below the
- * thread pointer, TCB self-pointer at %fs:0).
+ * Order matters:
+ *   - The startup gate runs first, on the kernel's initial page, using only
+ *     static storage. The record's slot 0 is destroyed and the live capability
+ *     table is verified before ANY runtime call creates a capability (a VM
+ *     reservation mints one). A VM reservation before the gate would make the
+ *     "unlisted slot must be empty" rule impossible to satisfy.
+ *   - Stack: the kernel gives the initial thread one 4 KiB page. We reserve a
+ *     256 KiB process VM region and move RSP into it before application code.
+ *   - TLS: the ArenaOS loader consumes only PT_LOAD and ignores PT_TLS, so this
+ *     file installs the block itself using the x86-64 variant-II layout (TLS
+ *     block below the thread pointer, TCB self-pointer at %fs:0).
  */
 #include <stddef.h>
 #include <stdint.h>
@@ -21,7 +20,15 @@
 #include "arena/abi.h"
 #include "arena/rt.h"
 #include "arena/string.h"
+#include "internal.h"
 #include "vm.h"
+
+/* Layout anchor: a zero-initialised TLS variable that is always linked, so
+ * .tbss is never empty. GNU ld drops an empty .tbss output section while LLD
+ * keeps it (padded to the TLS alignment), so without this the PT_TLS memsz
+ * differs by toolchain and the __arena_tls_memsz formula in arena-user.ld
+ * would be wrong for one of them. Never read or written. */
+static __thread uint64_t arena_tls_layout_anchor[2] __attribute__((used, aligned(16)));
 
 #define STACK_PAGES 64u
 #define STACK_BYTES (STACK_PAGES * ARENA_PAGE_SIZE)
@@ -110,8 +117,8 @@ static int tls_init(void) {
     if (block == NULL) {
         return -1;
     }
-    uint8_t *image = block + shift;               /* TP - tls_round */
-    uintptr_t tp = (uintptr_t)image + tls_round;  /* 16-byte aligned */
+    uint8_t *image = block + shift;              /* TP - tls_round */
+    uintptr_t tp = (uintptr_t)image + tls_round; /* 16-byte aligned */
     arena_memcpy(image, __arena_tls_image, (size_t)filesz);
     arena_memset(image + filesz, 0, (size_t)(memsz - filesz));
     *(uintptr_t *)tp = tp; /* TCB self-pointer: %fs:0 */
@@ -136,12 +143,17 @@ static void crt_main(void) {
         arena_exit(121);
     }
     run_init_array();
-    int rc = main(0, NULL);
+    const arena_startup_t *s = arena_startup();
+    int rc = s->present ? main(s->argc, s->argv) : main(0, NULL);
     arena_exit(rc);
 }
 
 void arena_crt_start(void) __attribute__((noreturn));
 void arena_crt_start(void) {
+    /* Gate BEFORE any allocation or VM reservation (see the header comment). */
+    if (arena_startup_gate() != 0) {
+        arena_exit(122);
+    }
     if (stack_init() != 0) {
         arena_exit(120);
     }

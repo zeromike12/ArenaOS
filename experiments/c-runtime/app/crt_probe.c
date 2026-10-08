@@ -279,6 +279,10 @@ static int t6_time(void) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+    /* Legacy scratch probe: it runs without a granted stream set and reports
+     * over the explicit SYS_DEBUG_WRITE opt-in. Ordinary C applications never
+     * call this. */
+    arena_legacy_serial_enable();
     arena_printf("crt-probe: start (freestanding C, ArenaOS prototype runtime)\n");
     report("T1 entry-stack-tls", t1_entry_stack());
     report("T2 tls", t2_tls());

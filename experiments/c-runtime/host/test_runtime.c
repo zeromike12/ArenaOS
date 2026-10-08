@@ -14,11 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "arena/abi.h"
 #include "arena/rt.h"
 #include "arena/string.h"
 
 static int checks;
 static int failures;
+static int known_defect_reproduced;
 
 #define CHECK(cond, ...)                                                  \
     do {                                                                  \
@@ -223,12 +225,12 @@ static void test_allocator_stress(void) {
             } else if (k < 99) {
                 n = 4096 + rnd() % (256 * 1024);
             } else {
-                n = (1u << 20) + 1 + rnd() % 4096; /* above the 1 MiB ceiling */
+                n = (16u << 20) + 1 + rnd() % 4096; /* above the 16 MiB ceiling */
             }
             unsigned char *p = arena_malloc(n);
             if (p == NULL) {
                 refused_seen++;
-                if (n > (1u << 20)) {
+                if (n > (16u << 20)) {
                     huge_refused++;
                 }
                 continue;
@@ -308,7 +310,7 @@ static void test_allocator_stress(void) {
     CHECK(overlap == 0, "%" PRIu64 " overlapping live allocations", overlap);
     CHECK(mid.live_blocks == cnt, "live_blocks %" PRIu64 " != shadow %zu", mid.live_blocks, cnt);
     CHECK(mid.refused >= huge_refused, "refused counter below observed refusals");
-    CHECK(huge_refused > 0, "stress never exercised the over-1MiB refusal path");
+    CHECK(huge_refused > 0, "stress never exercised the over-16MiB refusal path");
     CHECK(mid.reuse_hits > 0, "free lists were never reused");
 
     for (size_t i = 0; i < cnt; i++) {
@@ -362,6 +364,131 @@ static void test_allocator_contract(void) {
     arena_free(NULL);
 }
 
+/* ---- allocator: hardening, bounded coalescing, ceiling ------------------ */
+
+static void test_allocator_hardening(void) {
+    struct arena_heap_stats s0, s1;
+    arena_heap_stats(&s0);
+
+    /* Interior and freed pointers are rejected before any metadata is read. */
+    unsigned char *p = arena_malloc(64);
+    CHECK(p != NULL, "hardening: base allocation");
+    memset(p, 0x3C, 64);
+    arena_free(p + 1);
+    arena_free(p + 40);
+    arena_heap_stats(&s1);
+    CHECK(s1.bad_frees == s0.bad_frees + 2, "interior frees must be counted as bad");
+    CHECK(p[0] == 0x3C && p[63] == 0x3C, "rejected interior free must not disturb the block");
+    arena_free(p);
+    arena_heap_stats(&s1);
+    CHECK(s1.bad_frees == s0.bad_frees + 2, "a valid free must not count as bad");
+    arena_free(p);
+    arena_heap_stats(&s1);
+    CHECK(s1.bad_frees == s0.bad_frees + 3, "freed-pointer reuse must be rejected");
+
+    /* realloc of a freed pointer must not trust it: NULL, counted, no crash. */
+    void *stale = arena_malloc(96);
+    arena_free(stale);
+    void *again = arena_realloc(stale, 200);
+    CHECK(again == NULL, "realloc of a freed pointer must return NULL");
+    arena_heap_stats(&s1);
+    CHECK(s1.bad_frees == s0.bad_frees + 4, "realloc of a freed pointer must count as bad");
+
+    /* Ceiling: one byte past the 16 MiB payload is refused, and refusal is
+     * counted without corrupting the heap. */
+    size_t over = (size_t)16u << 20;
+    CHECK(arena_malloc(over) == NULL, "16 MiB request must be refused");
+    void *fit = arena_malloc((size_t)8u << 20);
+    CHECK(fit != NULL, "8 MiB request must succeed");
+    arena_free(fit);
+
+    /* Bounded coalescing: free many small blocks in shuffled order, then a
+     * large contiguous block must be available again. */
+    enum { N = 512 };
+    static void *blocks[N];
+    for (int i = 0; i < N; i++) {
+        blocks[i] = arena_malloc(4096);
+        CHECK(blocks[i] != NULL, "coalescing: 4 KiB allocation %d", i);
+    }
+    for (int i = N - 1; i > 0; i--) {
+        int j = (int)(rnd() % (uint64_t)(i + 1));
+        void *t = blocks[i];
+        blocks[i] = blocks[j];
+        blocks[j] = t;
+    }
+    for (int i = 0; i < N; i++) {
+        arena_free(blocks[i]);
+    }
+    void *big = arena_malloc((size_t)12u << 20);
+    CHECK(big != NULL, "freed small blocks must coalesce into a 12 MiB block");
+    arena_free(big);
+    arena_heap_stats(&s1);
+    CHECK(s1.live_blocks == s0.live_blocks, "hardening: live blocks return to baseline");
+}
+
+/* ---- ring protocol: u32 counter wrap ----------------------------------- */
+
+static uint32_t rd_u32(const unsigned char *at) {
+    uint32_t v;
+    memcpy(&v, at, 4);
+    return v;
+}
+
+static void wr_u32(unsigned char *at, uint32_t v) {
+    memcpy(at, &v, 4);
+}
+
+/* Stream ring channel 1 lives at page + 64 + 832; its write counter is at +0,
+ * read counter at +4, state at +8, data at +64 (wire layout, streams.c). */
+static void test_ring_wrap(void) {
+    unsigned char *page = aligned_alloc(4096, 4096);
+    CHECK(page != NULL, "ring: page allocation");
+    memset(page, 0, 4096);
+    CHECK(arena_ring_page_init(page) == 0, "ring: page init");
+    unsigned char *ring = page + 64 + 832;
+
+    /* Positive case: 100 bytes, then 200 bytes whose counter crosses 2^32
+     * (0xFFFFFF64 + 200 wraps to 0x2C). Occupancy stays far below capacity, so
+     * the transfer round-trips byte-exact across the wrap. */
+    wr_u32(ring + 0, 0xFFFFFF00u);
+    wr_u32(ring + 4, 0xFFFFFF00u);
+    unsigned char src[300], dst[300];
+    for (unsigned i = 0; i < sizeof src; i++) {
+        src[i] = (unsigned char)(i * 7u + 3u);
+    }
+    CHECK(arena_ring_write_some(page, 1, src, 100) == 100, "ring wrap: pre-wrap write");
+    CHECK(arena_ring_read_some(page, 1, dst, 100) == 100, "ring wrap: pre-wrap read");
+    CHECK(arena_ring_write_some(page, 1, src + 100, 200) == 200, "ring wrap: write across 2^32");
+    CHECK(rd_u32(ring + 0) == 0x0000002Cu, "ring wrap: write counter wrapped to 0x2C");
+    CHECK(arena_ring_read_some(page, 1, dst + 100, 200) == 200, "ring wrap: read across 2^32");
+    CHECK(memcmp(dst, src, sizeof src) == 0, "ring wrap: byte order across 2^32");
+
+    /* Known protocol defect, characterization pin (NOT a pass of the property):
+     * with head and tail at 0xFFFFFF00, a 256-byte write followed by a 512-byte
+     * write straddles the u32 wrap. Both writes use index = counter % 768, and
+     * 2^32 % 768 == 256, so the second write lands on residues still holding
+     * unread bytes of the first. The corruption is reproduced here and reported
+     * as a protocol finding. A fix changes the wire format and needs an ADR. */
+    wr_u32(ring + 0, 0xFFFFFF00u);
+    wr_u32(ring + 4, 0xFFFFFF00u);
+    unsigned char a[256], b[512];
+    memset(a, 0xAA, sizeof a);
+    memset(b, 0xBB, sizeof b);
+    CHECK(arena_ring_write_some(page, 1, a, sizeof a) == 256, "defect pin: first write");
+    CHECK(arena_ring_write_some(page, 1, b, sizeof b) == 512, "defect pin: second write");
+    unsigned char out[768];
+    CHECK(arena_ring_read_some(page, 1, out, sizeof out) == 768, "defect pin: drain");
+    int overwritten = memcmp(out, a, 256) != 0;
+    if (overwritten) {
+        printf("[host] KNOWN-DEFECT ring u32-wrap discontinuity reproduced: "
+               "unread bytes overwritten (protocol ADR required)\n");
+        known_defect_reproduced = 1;
+    } else {
+        CHECK(0, "defect pin: expected overwrite did not reproduce; re-review the ring protocol");
+    }
+    free(page);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -371,8 +498,10 @@ int main(int argc, char **argv) {
     test_memory_string();
     test_allocator_contract();
     test_allocator_stress();
-    if (failures == 0) {
-        fprintf(stdout, "HOST-ONLY RESULT PASS (%d checks)\n", checks);
+    test_allocator_hardening();
+    test_ring_wrap();
+    if (failures == 0 && known_defect_reproduced) {
+        fprintf(stdout, "HOST-ONLY RESULT PASS (%d checks, known protocol defect pinned)\n", checks);
         return 0;
     }
     fprintf(stdout, "HOST-ONLY RESULT FAIL (%d of %d checks)\n", failures, checks);

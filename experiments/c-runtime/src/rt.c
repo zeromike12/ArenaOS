@@ -1,12 +1,15 @@
-/* Guest runtime services over the native syscall ABI (prototype). */
+/* Guest runtime services over the native syscall ABI (C1). */
 #include <stddef.h>
 #include <stdint.h>
 
 #include "arena/abi.h"
 #include "arena/rt.h"
+#include "internal.h"
+
+static int legacy_serial;
 
 void arena_exit(int status) {
-    /* Kernel: SYS_THREAD_EXIT diverges; the process ends with its last thread
+    /* Kernel: SYS_THREAD_EXIT diverges for the last thread; the process ends
      * and the status is recorded (syscall.rs sys_thread_exit). */
     (void)arena_syscall6(ARENA_SYS_THREAD_EXIT, (uint64_t)(int64_t)status, 0, 0, 0, 0, 0);
     for (;;) {
@@ -14,9 +17,15 @@ void arena_exit(int status) {
     }
 }
 
-long arena_write(int fd, const void *buf, size_t len) {
+void arena_legacy_serial_enable(void) {
+    legacy_serial = 1;
+}
+
+/* Legacy diagnostics only (SYS_DEBUG_WRITE has no capability check and is not
+ * a stream). Used solely after arena_legacy_serial_enable. */
+long arena_legacy_write(int fd, const void *buf, size_t len) {
     if ((fd != 1 && fd != 2) || (buf == NULL && len != 0)) {
-        return -1;
+        return ARENA_E_INVALID;
     }
     const unsigned char *p = (const unsigned char *)buf;
     long total = 0;
@@ -32,6 +41,16 @@ long arena_write(int fd, const void *buf, size_t len) {
         total += (long)rc;
     }
     return total;
+}
+
+long arena_write(int fd, const void *buf, size_t len) {
+    if (legacy_serial) {
+        return arena_legacy_write(fd, buf, len);
+    }
+    if (fd != 1 && fd != 2) {
+        return ARENA_E_INVALID;
+    }
+    return arena_stream_write(fd, buf, len);
 }
 
 uint64_t arena_clock_us(void) {
