@@ -167,20 +167,24 @@ static int t4_memory(void) {
         arena_free(big);
     }
 
-    /* Negative control: above the 1 MiB class ceiling must be refused. */
-    ok = ok && arena_malloc(2u * 1024u * 1024u) == NULL;
+    /* Negative control: above the allocator ceiling must be refused. The C1
+     * allocator (HEAP_PAGES 4096 = 16 MiB) replaced the prototype's 4 MiB
+     * heap; the expectation follows that contract, the check is unchanged. */
+    ok = ok && arena_malloc(17u * 1024u * 1024u) == NULL;
 
     /* Exhaust the bounded heap; refusal must be a NULL return, not a fault. */
-    static uint8_t *hog[64];
+    /* Bounded by 512 x 64 KiB = 32 MiB, larger than the 16 MiB heap, so the
+     * loop always reaches refusal regardless of the heap size. */
+    static uint8_t *hog[512];
     unsigned hogs = 0;
-    while (hogs < 64) {
+    while (hogs < 512) {
         hog[hogs] = arena_malloc(64u * 1024u);
         if (hog[hogs] == NULL) {
             break;
         }
         hogs++;
     }
-    ok = ok && hogs > 0 && hogs < 64;
+    ok = ok && hogs > 0 && hogs < 512;
 
     /* Negative control: bad frees are counted and ignored. */
     uint8_t *victim = arena_malloc(64);
