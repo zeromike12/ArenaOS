@@ -1,0 +1,15 @@
+[package]
+name = "arena-graphics-prototype"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "ArenaOS Graphics Infrastructure Research: 3D Software Renderer & Native ABI Prototype"
+
+[features]
+default = ["std"]
+std = []
+
+[workspace]
+
+[profile.release]
+opt-level = 3
