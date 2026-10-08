@@ -193,8 +193,8 @@ int main(int argc, char *argv[]) {
     }
 
     Uint64 elapsed_ms = SDL_GetTicks() - start_time;
-    SDL_Log("[sdl3-app] Animation completed: %d frames in %lu ms (~%.1f FPS)",
-            frame_count, (unsigned long)elapsed_ms, (double)frame_count * 1000.0 / (double)(elapsed_ms ? elapsed_ms : 1));
+    SDL_Log("[sdl3-app] Animation completed: %d frames in %lu ms (~%lu FPS)",
+            frame_count, (unsigned long)elapsed_ms, (unsigned long)((frame_count * 1000UL) / (elapsed_ms ? elapsed_ms : 1)));
     SDL_Log("[sdl3-app] Timing breakdown: render=%lu us, present=%lu us",
             (unsigned long)(total_render_ns / 1000ULL), (unsigned long)(total_present_ns / 1000ULL));
 

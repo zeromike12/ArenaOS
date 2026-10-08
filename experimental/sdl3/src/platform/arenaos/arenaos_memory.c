@@ -1,6 +1,14 @@
+/*
+  ArenaOS Freestanding Memory Allocator (Milestone G2 Temporary Scaffolding)
+  Notice: This file provides minimal heap allocation scaffolding strictly scoped
+  to Milestone G2 graphics experimentation pending Arena 2's general C runtime.
+  It is not a general C runtime allocator and is not exported outside experimental/sdl3.
+*/
+
 #include "arenaos_syscalls.h"
 
-#define HEAP_SIZE (128 * 1024) /* 512 KiB static heap */
+#define HEAP_SIZE (128 * 1024) /* 128 KiB static heap */
+
 
 static uint8_t s_heap[HEAP_SIZE] __attribute__((aligned(16)));
 

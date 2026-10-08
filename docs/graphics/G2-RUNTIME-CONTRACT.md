@@ -8,6 +8,7 @@
   - **Arena 2:** C Runtime (libc), C Toolchain Support, Application Compatibility
   - **Arena 1 (Self):** Graphics Compatibility, SDL3 Platform Backend, Rendering
 - **Date:** October 8, 2026
+- **Status:** Checkpoint Report & Blocker Inventory
 
 ---
 
@@ -17,13 +18,15 @@ To maintain architectural integrity and prevent duplication or divergence across
 
 | Subsystem / Facility | Responsible Track | Current Implementation Status | G2 Milestone Approach |
 |---|---|---|---|
-| **General C Runtime (libc)** | **Arena 2** | In active development (not yet upstreamed to master). | **Do NOT implement competing libc.** Use freestanding subset with narrow, graphics-specific glue. |
+| **General C Runtime (libc)** | **Arena 2** | In active development (not yet upstreamed to master). | **Do NOT implement competing libc.** Use freestanding subset with narrow, explicitly labeled scaffolding. |
 | **C Standard I/O (`stdio.h`, `printf`, `FILE*`)** | **Arena 2** | Deferred / in development. | Use `SYS_DEBUG_WRITE` for debug logging; disable standard file I/O in SDL3. |
 | **POSIX Threads (`pthreads`)** | **Arena 2** | Deferred. | Build SDL3 with single-threaded event loop (`SDL_THREADS_DISABLED=1`). |
 | **POSIX Filesystem & Sockets** | **Arena 2** | Deferred. | Disable SDL storage, filesystem, and networking. |
+| **Memory Allocator (`malloc`/`mmap`)** | **Arena 2** | Required by upstream `dlmalloc`. | Temporary bounded 128 KiB heap scaffolding strictly for G2 graphics experimentation. |
 | **Executable Placement (Static PIE, ASLR)** | **Luna** | Phase 14 design (ADR-0108). | Comply with current strict static `ET_EXEC` image rules. |
+| **CPU State Management (SSE/x87/FPU)** | **Luna / Kernel** | Integer-only kernel (ADR-0012). | Document ring-3 SSE constraints; compile C code with `-mno-sse` where possible. |
 | **Dynamic Linker (`ld-linux`, `PT_INTERP`)** | **Luna** | Not supported by kernel loader. | Fully static linking (`-static -nostdlib`). |
-| **Image Size & Page Bounds** | **Luna / Core OS** | 256 KiB ELF, 128 PT_LOAD pages. | Strictly enforce via binary optimization (`-Os`, `--gc-sections`). |
+| **Image Size & Page Bounds** | **Luna / Core OS** | 256 KiB ELF, 128 PT_LOAD pages. | Document upstream SDL3 static size overflow against `MAX_LOAD_PAGES=128`. |
 | **SDL3 Platform Backend (Video, Windows)** | **Arena 1 (Self)** | **G2 Deliverable.** | Implement `SDL_VideoDevice` over `ADSK-v1` and `Client::connect_v2`. |
 | **SDL3 Software Framebuffer Lifecycle** | **Arena 1 (Self)** | **G2 Deliverable.** | Direct zero-copy / bounded-copy to mapped `SharedRegion` backing. |
 | **SDL3 Input Event Translation** | **Arena 1 (Self)** | **G2 Deliverable.** | Map `DesktopEvent` (Key, Pointer, Wheel, Close) to SDL event queues. |
@@ -31,83 +34,94 @@ To maintain architectural integrity and prevent duplication or divergence across
 
 ---
 
-## 2. ABI & Executable Loading Expectations
+## 2. ABI, Memory Bounds, and Startup Validation
 
-### 2.1 ELF64 Binary Format
+### 2.1 ELF64 Binary Format & Kernel Page Limits
 - **Type (`e_type`):** `ET_EXEC` (2). Static non-relocatable executable.
 - **Machine (`e_machine`):** `EM_X86_64` (62).
-- **Entry Point (`e_entry`):** Points to native entry symbol `_start` or `enter_user` at base `0x200000`.
+- **Entry Point (`e_entry`):** Points to native entry symbol `_start` at base `0x200000`.
 - **Segments:** All `PT_LOAD` segments must be strictly page-aligned (4 KiB) and enforce W^X:
   - Text & read-only data: `PF_R | PF_X`
   - Mutable data & BSS: `PF_R | PF_W`
   - No `PF_W | PF_X` segments are permitted.
-- **Size Bounds:**
-  - File size: $\le 262,144$ bytes (256 KiB).
-  - Memory footprint: $\le 128$ PT_LOAD pages (512 KiB).
+- **Kernel Load Budget (`image_registry.rs`):**
+  ```rust
+  pub const MAX_LOAD_PAGES: usize = 128; // 512 KiB total mapped image budget
+  ```
+  Every executable image loaded into user space must have its entire memory footprint (`.text`, `.rodata`, `.data`, `.bss`, stack, and heap) fit strictly inside 128 pages.
 
-### 2.2 Startup ABI v2 Register & Capability Contract
-When the kernel spawns a native process, it initializes ring-3 registers and stack:
-- **Stack:** 1 initial 4 KiB RW+NX stack page, 16-byte aligned.
-- **Slot Table (128 slots total):**
-  - **Slot 0:** Destroyable `SharedRegion` containing the `ARST` v2 Startup Record.
-  - **Slot 1 (`SERVICE_ENDPOINT`):** Badged endpoint connected to `desktop` session broker.
-  - **Slot 2 (`SURFACE`):** `SharedRegion` backing memory for primary window surface.
-  - **Slot 3 (`CLOCK`):** Notification capability for timers and wakeups.
-  - **Slot 4 (`DIAGNOSTICS`):** Diagnostic memory pool.
-- **Startup Protocol:**
-  1. Process maps Slot 0 via `SYS_SHARED_MAP(0, 0)`.
-  2. Verifies `ARST` v2 magic (`0x54535241`) and version.
-  3. Copies startup record to private static BSS memory.
-  4. Unmaps and destroys Slot 0 (`SYS_SHARED_UNMAP`, `SYS_CAP_DESTROY`).
-  5. Verifies all live capabilities match the startup manifest.
+### 2.2 Fail-Closed Startup (ARST v2) Validation Contract
+When the kernel spawns a native process, it provisions initial capabilities:
+- **Slot 0:** Destroyable `SharedRegion` containing the `ARST` v2 Startup Record.
+- **Slot 1 (`SERVICE_ENDPOINT`):** Badged endpoint connected to `desktop` session broker.
+- **Slot 2 (`SURFACE`):** `SharedRegion` backing memory for primary window surface.
+- **Slot 3 (`CLOCK`):** Notification capability for timers and wakeups.
 
----
-
-## 3. Required C Symbols & Narrow Graphics Glue
-
-To compile upstream SDL3 without a full libc, the platform glue must supply the following C runtime symbols:
-
-### 3.1 Memory Allocation
-Upstream SDL3 supports custom allocators via `SDL_SetMemoryFunctions` or built-in `dlmalloc`. For Milestone G2, Arena 1 provides a bounded heap allocator over a dedicated 16-page (`64 KiB`) static BSS pool:
-- `void *malloc(size_t size)`: 8-byte aligned allocation with size header.
-- `void free(void *ptr)`: Returns block to free list.
-- `void *calloc(size_t nmemb, size_t size)`: Zero-initialized allocation.
-- `void *realloc(void *ptr, size_t size)`: Resized allocation with data preservation.
-
-*Handoff to Arena 2:* In Milestone G3/Phase 14, these stubs will be superseded by Arena 2's `ScalableHeap`-backed libc allocator.
-
-### 3.2 Memory Manipulation & String Intrinsics
-Freestanding implementations compiled with `-fno-builtin`:
-- `void *memcpy(void *dest, const void *src, size_t n)`
-- `void *memset(void *s, int c, size_t n)`
-- `void *memmove(void *dest, const void *src, size_t n)`
-- `int memcmp(const void *s1, const void *s2, size_t n)`
-- `size_t strlen(const char *s)`
-- `int strcmp(const char *s1, const char *s2)`
-- `int strncmp(const char *s1, const char *s2, size_t n)`
-
-### 3.3 Math Routines
-Upstream SDL3 includes its own portable math library (`src/stdlib/SDL_stdlib.c` with uClibc algorithms) when `HAVE_LIBC` is not defined. Only compiler floating-point helper intrinsics are required:
-- `sinf`, `cosf`, `sqrtf`, `floorf`, `ceilf`, `fabsf` (provided by GCC builtins or SDL3 internal uClibc math).
+#### Defensive Verification Rules (Implemented in `arenaos_entry.c`):
+1. **Slot 0 Capability Inspection:** Invoke `SYS_CAP_DESCRIBE(0)`. Fail closed if `status != 0`, `kind != 7` (`SharedRegion`), or `rights & RIGHTS_READ == 0`.
+2. **Slot 0 Mapping:** Map via `SYS_SHARED_MAP(0, 0)`. Fail closed if mapping returns non-positive address.
+3. **ARST Header Verification:** Read header. Fail closed if `magic != 0x54535241` (`ARST`) or `version != 2`.
+4. **Transport Capability Release:** Copy 4096-byte record into private BSS, unmap via `SYS_SHARED_UNMAP`, and destroy capability via `SYS_CAP_DESTROY(0)`.
+5. **Slot 1 Validation:** Describe Slot 1. Fail closed if `status != 0`, `kind != 12` (`BadgedEndpoint`), or `(rights & RIGHTS_WRITE) == 0`.
+6. **Slot 2 Validation:** Describe Slot 2. Fail closed if `status != 0`, `kind != 7` (`SharedRegion`), or `(rights & (RIGHTS_READ | RIGHTS_WRITE)) != 3`.
+7. **Slot 3 Validation:** Describe Slot 3. Fail closed if `status != 0` or `kind != 3` (`Clock`).
 
 ---
 
-## 4. SDL3 Subsystem Feasibility Matrix for ArenaOS
+## 3. CPU State & Hardware Register Audit (SSE / x87 / FPU)
 
-| SDL3 Subsystem | Supported in G2 | Implementation Path / Dependency |
-|---|---|---|
-| **Video (`SDL_video.h`)** | **YES** | Native ArenaOS video backend (`SDL_arenaosvideo.c`). |
-| **Window Surface (`SDL_surface.h`)** | **YES** | Zero-copy / mapped surface in `SharedRegion` backing. |
-| **Events (`SDL_events.h`)** | **YES** | Desktop IPC polling (`window.poll()`) and translation. |
-| **Keyboard Input (`SDL_keyboard.h`)** | **YES** | Desktop `Event::Key` to `SDL_SendKeyboardKey`. |
-| **Mouse Input (`SDL_mouse.h`)** | **YES** | Desktop `Event::Pointer` and `Event::Wheel` translation. |
-| **Timers & Clocks (`SDL_timer.h`)** | **YES** | Microsecond time from `SYS_CLOCK_NOW`, delay via `SYS_WAIT`. |
-| **Software Renderer (`SDL_render.h`)** | **YES** | Upstream SDL software 2D renderer over window surface. |
-| **Audio (`SDL_audio.h`)** | **NO** | Disabled (`-DSDL_AUDIO=OFF`). ArenaOS has no audio service. |
-| **GPU / Vulkan (`SDL_gpu.h`)** | **NO** | Disabled (`-DSDL_GPU=OFF`). Requires Milestone G4 Virtio-GPU. |
-| **OpenGL / EGL** | **NO** | Disabled (`-DSDL_OPENGL=OFF`). Requires Mesa port (Milestone G5). |
-| **Joystick / Gamepad** | **NO** | Disabled (`-DSDL_JOYSTICK=OFF`). No game controller service. |
-| **Filesystem / Storage** | **NO** | Disabled (`-DSDL_FILESYSTEM=OFF`). Blocked on Arena 2 libc VFS. |
-| **Dialogs (File Choosers)** | **NO** | Disabled. ArenaOS uses capability-based file grants. |
-| **Process Control** | **NO** | Disabled (`-DSDL_PROCESS=OFF`). Blocked on Arena 2 process ABI. |
-| **Multi-threading** | **NO** | Disabled (`-DSDL_THREADS=OFF`). Blocked on Arena 2 pthreads. |
+An audit of machine code generation and kernel task-switching architecture reveals a critical dependency:
+
+### 3.1 Kernel State Management (ADR-0012)
+`kernel/kernel/src/arch/x86_64/context.rs` explicitly documents the kernel thread switch frame:
+```
+The switch frame is exactly the Win64 callee-saved set plus RFLAGS:
+`rbx, rbp, rdi, rsi, r12–r15` (8 × 8 B) + `pushfq` (8 B) + return address (8 B) = 80 bytes.
+No FPU/SSE state is saved — the kernel image contains zero FPU/SSE/MMX instructions
+(soft-float target, integer-only code) and tools/build.sh fails the build if that
+invariant ever breaks (ADR-0012).
+```
+
+### 3.2 Ring-3 Implications for SDL3
+1. **Upstream SDL3 Float APIs:** Genuine upstream SDL3 relies on standard IEEE 754 floating-point types (`float`, `double`) across public APIs (display scale, SDR white point, colorspace math, audio resampling).
+2. **AMD64 System V ABI:** Mandates passing and returning floating-point values in `%xmm0..%xmm7`.
+3. **Preemption Hazard:** Because the microkernel does not execute `fxsave`/`xsave` across context switches, multiple ring-3 threads or processes using SSE registers risk state corruption across preemptive switches.
+4. **Baseline Scaffolding Posture:** To guarantee 100% deterministic execution on the current integer-only microkernel, the Milestone G2 demonstration binary is compiled with `-mno-sse -mno-sse2` and uses integer fixed-point arithmetic for animation and timing.
+5. **Requirement for Luna / Core Track:** Multi-threaded or full upstream SDL3 execution will require Luna's architecture to incorporate optional user FPU/SSE context switching (`fxsave`/`fxrstor`) when ring-3 processes execute floating-point operations.
+
+---
+
+## 4. Genuine Upstream SDL 3.2.0 Blocker Inventory
+
+Compiling genuine upstream SDL 3.2.0 (`experimental/upstream-sdl3/SDL-release-3.2.0`) under freestanding GCC identifies the following concrete blockers:
+
+### 4.1 Missing C Runtime / POSIX Symbols
+
+| Missing Symbol | Upstream File | Required Functionality | Arena 2 Resolution Path |
+| :--- | :--- | :--- | :--- |
+| `mmap` / `munmap` | `src/stdlib/SDL_malloc.c` | Page-level allocation for dlmalloc 2.8.6 | Translate to `SYS_SHARED_PAGES` / `SYS_SHARED_MAP` |
+| `mremap` / `sbrk` | `src/stdlib/SDL_malloc.c` | Heap resizing | Emulate in libc over virtual memory regions |
+| `sched_yield` | `src/stdlib/SDL_malloc.c` | Spinlock backoff | Map to `SYS_WAIT` (timeout=0) |
+| `sysconf` | `src/stdlib/SDL_malloc.c` | Query system page size | Static return `4096` in libc |
+| `__errno_location` | `src/stdlib/SDL_malloc.c` | Thread-local error indicator | Provide TLS-backed errno |
+| `time` | `src/stdlib/SDL_malloc.c` | Entropy initialization | Wire to `SYS_RTC_READ` (syscall 50) |
+| `_exit` | `src/SDL.c` | Process termination | Wire to `SYS_THREAD_EXIT` (syscall 2) |
+| `access` | `src/SDL.c` | VFS sandbox detection | Return `-1` (no sandbox) |
+| `fopen`/`fscanf`/`fclose` | `src/cpuinfo/SDL_cpuinfo.c` | CPU cache size probe from `/sys` | Provide standard POSIX VFS over `filesd` |
+
+### 4.2 Executable Size Budget Overflow
+The genuine upstream SDL3 library archive (`libSDL3_upstream_full.a`) is **713 KiB** unstripped.
+Even with `-Os -Wl,--gc-sections`, a minimal application linked against genuine upstream SDL3 exceeds the kernel's `MAX_LOAD_PAGES = 128` (512 KiB) total memory ceiling when combined with the required stack (64 KiB) and heap (128 KiB).
+
+---
+
+## 5. Architectural Recommendations & Track Handoff
+
+1. **Arena 2 (C Runtime):**
+   - Provide minimal POSIX libc support supplying `_exit`, `mmap`, `munmap`, and thread-local `errno`.
+   - Implement `dlmalloc` backing over ArenaOS capability-based shared memory pages (`SYS_SHARED_PAGES`).
+2. **Luna (Phase 14 Loader):**
+   - Evaluate expanding `MAX_LOAD_PAGES` beyond 128 pages or providing dynamic on-demand paging for larger C/C++ runtimes.
+   - Introduce ring-3 FPU/SSE register save/restore (`fxsave`/`fxrstor`) on thread context switches to support standard floating-point System V AMD64 ABI applications.
+3. **Arena 1 (Graphics):**
+   - Maintain the native ArenaOS video backend (`PRIVATE_bootstrap`) ready to plug directly into upstream SDL3 once the C runtime and page budget prerequisites land.

@@ -7,6 +7,7 @@
 
 struct SDL_VideoData {
     bool initialized;
+    SDL_Window *primary_window;
 };
 
 struct SDL_WindowData {

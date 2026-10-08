@@ -381,6 +381,33 @@ def run_qemu_test():
             )
             print("[sdl3-guest] SDL3 application completed 60 frames and exited cleanly!")
 
+            # Independently observe clean process termination in desktop broker
+            wait_for(
+                lambda: "[desktop] child Process-cap exit status=0" in log_text(),
+                "Desktop observed child exit status 0",
+                timeout_s=10,
+            )
+            wait_for(
+                lambda: "[desktop] application retired" in log_text(),
+                "Desktop retired application mapping and process",
+                timeout_s=10,
+            )
+            print("[sdl3-guest] Independently verified clean process teardown and capability reclamation in desktop broker!")
+
+            # Assert actual interactive state transitions from serial log
+            full_log = log_text()
+            assert "[sdl3-app] Event: Spacebar pressed -> cycling color" in full_log, \
+                "Failed to observe keyboard event processing in guest log"
+            assert "[sdl3-app] Event: Mouse button down" in full_log, \
+                "Failed to observe mouse button event processing in guest log"
+            assert "frame rendered; damage published; frame=0" in full_log, \
+                "Missing initial frame 0 log"
+            assert "frame rendered; damage published; frame=25" in full_log, \
+                "Missing milestone frame 25 log"
+            assert "frame rendered; damage published; frame=59" in full_log, \
+                "Missing final frame 59 log"
+            print("[sdl3-guest] Interactive event assertions PASSED: Key press, mouse click, and frame sequence confirmed!")
+
             # Clean shutdown
             time.sleep(0.5)
             print("[sdl3-guest] Sending shutdown command to guest serial shell...")

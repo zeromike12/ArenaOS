@@ -74,8 +74,16 @@ void ARENAOS_VideoQuit(SDL_VideoDevice *_this) {
 }
 
 bool ARENAOS_CreateSDLWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID props) {
-    (void)_this;
     (void)props;
+    if (!_this || !window) {
+        return false;
+    }
+
+    struct SDL_VideoData *vdata = (struct SDL_VideoData *)_this->internal;
+    if (vdata && vdata->primary_window != NULL) {
+        SDL_SetError("ArenaOS ADSK-v1 allows only one window per process");
+        return false;
+    }
 
     struct SDL_WindowData *wdata = (struct SDL_WindowData *)SDL_calloc(1, sizeof(struct SDL_WindowData));
     if (!wdata) {
@@ -87,11 +95,21 @@ bool ARENAOS_CreateSDLWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Pro
     wdata->pitch = window->w * 4;
     window->internal = wdata;
 
+    if (vdata) {
+        vdata->primary_window = window;
+    }
+
     return true;
 }
 
 void ARENAOS_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window) {
-    (void)_this;
+    if (_this && _this->internal) {
+        struct SDL_VideoData *vdata = (struct SDL_VideoData *)_this->internal;
+        if (vdata->primary_window == window) {
+            vdata->primary_window = NULL;
+        }
+    }
+
     if (window && window->internal) {
         struct SDL_WindowData *wdata = (struct SDL_WindowData *)window->internal;
         if (wdata->handle != 0) {

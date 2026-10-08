@@ -1,5 +1,12 @@
+/*
+  ArenaOS Freestanding System Call Wrappers (Milestone G2 Temporary Scaffolding)
+  Notice: This file provides inline assembly system call primitives strictly scoped
+  to Milestone G2 graphics experimentation pending Arena 2's general C runtime.
+*/
+
 #ifndef ARENAOS_SYSCALLS_H
 #define ARENAOS_SYSCALLS_H
+
 
 #include <stdint.h>
 #include <stddef.h>

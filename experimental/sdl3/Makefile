@@ -4,7 +4,7 @@ CC ?= gcc
 AR ?= ar
 
 CFLAGS_COMMON = -Iinclude -Isrc -Os -Wall -Wextra -Wno-unused-parameter
-CFLAGS_ARENAOS = $(CFLAGS_COMMON) -ffreestanding -fno-builtin -nostdlib -fno-pie -no-pie
+CFLAGS_ARENAOS = $(CFLAGS_COMMON) -ffreestanding -fno-builtin -nostdlib -fno-pie -no-pie -mno-sse -mno-sse2
 LDFLAGS_ARENAOS = -Os -ffreestanding -nostdlib -static -fno-pie -no-pie -Wl,-e,_start -Wl,-Ttext=0x200000 -Wl,--build-id=none
 
 SRCS = \
