@@ -46,6 +46,7 @@
 #define ARENA_E_NOMEM (-1011)       /* allocation or VM commit refused */
 #define ARENA_E_NO_WAITER (-1012)   /* blocking call without a granted notification */
 #define ARENA_E_OVERFLOW (-1013)    /* size arithmetic would overflow */
+#define ARENA_E_UNSUPPORTED (-1014) /* the record or runtime does not provide this */
 
 /* --- process lifecycle --------------------------------------------------- */
 
@@ -85,6 +86,11 @@ typedef struct arena_startup {
 
 /* Verified record (present == 1) after crt start, else present == 0. */
 const arena_startup_t *arena_startup(void);
+
+/* EXPERIMENTAL (C2.4): number of verified descriptors with this kind whose rights
+ * include rights_mask; -1 when no verified record is present. Counts only; it does
+ * not identify a service (no role exists for graphical services in Startup ABI v2). */
+int arena_startup_count_kind(const arena_startup_t *s, uint8_t kind, uint32_t rights_mask);
 
 /* --- output ------------------------------------------------------------- */
 
@@ -151,6 +157,9 @@ void *arena_malloc(size_t n);
 void *arena_calloc(size_t count, size_t size);
 void *arena_realloc(void *p, size_t n);
 void arena_free(void *p);
+/* Aligned allocation (C2.2): align a power of two. align <= 16 is plain malloc;
+ * 32 <= align <= 64 KiB is served from the same buddy heap. NULL on refusal. */
+void *arena_aligned_alloc(size_t align, size_t n);
 
 struct arena_heap_stats {
     uint64_t reserved_pages;  /* VM region capacity */

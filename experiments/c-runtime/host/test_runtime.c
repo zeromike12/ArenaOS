@@ -679,6 +679,9 @@ static void test_vm_reserve_refusal(void) {
           "reserve refusal: fresh process refused the reservation cleanly");
 }
 
+int libc_host_tests(void);
+extern int libc_host_checks;
+
 int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "reserve-refusal") == 0) {
         reserve_refusal_mode();
@@ -698,6 +701,8 @@ int main(int argc, char **argv) {
     test_vm_commit_refusal();
     test_vm_reserve_refusal();
     test_ring_wrap();
+    failures += libc_host_tests();
+    checks += libc_host_checks;
     if (failures == 0 && known_defect_reproduced) {
         fprintf(stdout, "HOST-ONLY RESULT PASS (%d checks, known protocol defect pinned)\n", checks);
         return 0;

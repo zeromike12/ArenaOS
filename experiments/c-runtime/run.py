@@ -35,8 +35,12 @@ REPO = EXP.parent.parent
 BUILD = EXP / "build"
 
 RUNTIME_SRC = ["src/crt0.c", "src/rt.c", "src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c",
-               "src/startup.c", "src/streams.c", "src/threads.c", "src/sync.c"]
-GUEST_APPS = {"crt-probe": ["app/crt_probe.c"], "c-native": ["app/c_native_app.c"]}
+               "src/startup.c", "src/startup_query.c", "src/streams.c", "src/threads.c", "src/sync.c",
+               "src/errno.c", "src/exit.c", "src/legacy_debug.c", "src/libc_string.c", "src/libc_stdlib.c",
+               "src/libc_time.c", "src/libc_threads.c", "src/profile.c", "src/libc_names.c"]
+GUEST_APPS = {"crt-probe": ["app/crt_probe.c"], "c-native": ["app/c_native_app.c"],
+              "c2-console": ["app/c2_console_app.c"],
+              "xxhash-app": ["app/xxhash_app.c", "third_party/xxhash-0.8.4/xxhash.c"]}
 
 ZIG = os.environ.get("ARENA_ZIG", "/opt/zig-clang/pkg/ziglang/zig")
 
@@ -56,7 +60,8 @@ def common_flags(root):
     # Shared ring pages are accessed through atomic u32 views of byte-backed
     # mappings (streams.c); disable type-based alias assumptions for them.
     "-fno-strict-aliasing",
-    "-I", str(root / "include"), "-I", str(root / "src"),
+    "-I", str(root / "include"), "-I", str(root / "include" / "libc"), "-I", str(root / "src"),
+    "-I", str(root / "third_party" / "xxhash-0.8.4"),
     ]
 LINK_FLAGS = [
     "-nostdlib", "-static", "-no-pie",
@@ -90,28 +95,50 @@ def tool_version(cc):
     return (p.stdout.splitlines() or ["unknown"])[0]
 
 
+def ar_cmd(cc):
+    """Archiver matching the compiler: LLVM ar via the Zig toolchain for clang."""
+    return [ZIG, "ar"] if cc == "clang" else ["ar"]
+
+
 def build_guest(cc, root=EXP, out_root=None):
-    """Compile every guest app for compiler `cc`. Returns {name: elf_path}."""
+    """Compile the guest apps for compiler `cc` against the reusable static runtime.
+
+    Layout (C2.1): build/guest-<cc>/crt0.o (startup object, linked first),
+    build/guest-<cc>/lib/libarena_c.a (every other runtime object, archived),
+    and one ELF per app. Apps link only the archive; nothing is copied.
+    Returns {name: elf_path}.
+    """
     out_root = Path(out_root or BUILD)
-    obj_dir = out_root / f"guest-{cc}" / "obj"
+    base = out_root / f"guest-{cc}"
+    obj_dir = base / "obj"
+    lib_dir = base / "lib"
     obj_dir.mkdir(parents=True, exist_ok=True)
+    lib_dir.mkdir(parents=True, exist_ok=True)
     result = {}
-    runtime_objs = []
     flags = common_flags(root)
+    crt0 = base / "crt0.o"
+    run(COMPILERS[cc] + flags + ["-c", str(root / "src/crt0.c"), "-o", str(crt0)])
+    lib_objs = []
     for src in RUNTIME_SRC:
+        if src == "src/crt0.c":
+            continue
         obj = obj_dir / (Path(src).stem + ".o")
         run(COMPILERS[cc] + flags + ["-c", str(root / src), "-o", str(obj)])
-        runtime_objs.append(str(obj))
+        lib_objs.append(str(obj))
+    lib = lib_dir / "libarena_c.a"
+    if lib.exists():
+        lib.unlink()
+    run(ar_cmd(cc) + ["rcs", str(lib)] + lib_objs)
     for name, srcs in GUEST_APPS.items():
         objs = []
         for src in srcs:
             obj = obj_dir / f"{name}-{Path(src).stem}.o"
             run(COMPILERS[cc] + flags + ["-c", str(root / src), "-o", str(obj)])
             objs.append(str(obj))
-        elf = out_root / f"guest-{cc}" / f"{name}-{cc}.elf"
+        elf = base / f"{name}-{cc}.elf"
         run(COMPILERS[cc] + flags + LINK_FLAGS +
             ["-Wl,-T," + str(root / "link" / "arena-user.ld")] +
-            objs + runtime_objs + ["-o", str(elf)])
+            [str(crt0)] + objs + [str(lib)] + ["-o", str(elf)])
         result[name] = elf
     return result
 
@@ -275,7 +302,7 @@ ROLE_VALUES = {  # arena-platform/src/startup.rs CapabilityRole discriminants
 def abi_check():
     src = {k: _rust_consts(v) for k, v in ABI_SOURCES.items()}
     c = {}
-    for line in (EXP / "include/arena/abi.h").read_text().splitlines():
+    for line in ((EXP / "include/arena/abi.h").read_text() + (EXP / "src/sysabi.h").read_text()).splitlines():
         m = re.match(r"#define (ARENA_[A-Z0-9_]+)\s+(\(1u << \d+\)|\(?-?(?:0x[0-9A-Fa-f]+|\d+)u?\)?)(?![A-Za-z0-9_])", line)
         if not m:
             continue
@@ -394,8 +421,9 @@ def host_tests():
     out = BUILD / "host"
     out.mkdir(parents=True, exist_ok=True)
     exe = out / "test_runtime"
-    srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "src/streams.c",
-            "host/host_main.c", "host/test_runtime.c"]
+    srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "src/streams.c", "src/startup_query.c",
+            "src/errno.c", "src/exit.c", "src/libc_string.c", "src/libc_stdlib.c",
+            "host/host_main.c", "host/test_runtime.c", "host/test_libc.c"]
     cmd = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
            "-DARENA_HOSTED", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
            "-fno-strict-aliasing",

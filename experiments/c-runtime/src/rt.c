@@ -3,10 +3,14 @@
 #include <stdint.h>
 
 #include "arena/abi.h"
+#include "sysabi.h"
 #include "arena/rt.h"
 #include "internal.h"
 
-static int legacy_serial;
+/* Set only by arena_legacy_serial_enable (legacy_debug.c). Ordinary images never
+ * set it, and never reference arena_legacy_write (weak below), so they do not
+ * link the SYS_DEBUG_WRITE path at all. */
+int arena_legacy_serial_active;
 
 void arena_exit(int status) {
     /* Kernel: SYS_THREAD_EXIT diverges for the last thread; the process ends
@@ -17,34 +21,8 @@ void arena_exit(int status) {
     }
 }
 
-void arena_legacy_serial_enable(void) {
-    legacy_serial = 1;
-}
-
-/* Legacy diagnostics only (SYS_DEBUG_WRITE has no capability check and is not
- * a stream). Used solely after arena_legacy_serial_enable. */
-long arena_legacy_write(int fd, const void *buf, size_t len) {
-    if ((fd != 1 && fd != 2) || (buf == NULL && len != 0)) {
-        return ARENA_E_INVALID;
-    }
-    const unsigned char *p = (const unsigned char *)buf;
-    long total = 0;
-    while (len > 0) {
-        size_t chunk = len < ARENA_WRITE_MAX ? len : ARENA_WRITE_MAX;
-        int64_t rc = arena_syscall6(ARENA_SYS_DEBUG_WRITE, (uint64_t)(uintptr_t)p,
-                                    (uint64_t)chunk, 0, 0, 0, 0);
-        if (rc <= 0) {
-            return total > 0 ? total : (long)rc;
-        }
-        p += rc;
-        len -= (size_t)rc;
-        total += (long)rc;
-    }
-    return total;
-}
-
 long arena_write(int fd, const void *buf, size_t len) {
-    if (legacy_serial) {
+    if (arena_legacy_serial_active && arena_legacy_write != NULL) {
         return arena_legacy_write(fd, buf, len);
     }
     if (fd != 1 && fd != 2) {

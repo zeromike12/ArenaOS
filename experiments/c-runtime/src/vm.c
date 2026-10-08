@@ -71,6 +71,7 @@ void arena_backoff(void) {
 #else
 
 #include "arena/abi.h"
+#include "sysabi.h"
 
 /* Reply words: [slot, base, pages]. The kernel writes them only on success
  * (syscall.rs sys_vm_reserve). */

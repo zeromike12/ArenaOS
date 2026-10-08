@@ -1,0 +1,854 @@
+{
+  "scope": "C2 SDK surface (include/libc/*.h). Not full libc; not POSIX.",
+  "evidence_classes": {
+    "host": "ASan+UBSan host tests (glibc differential where meaningful); host-only",
+    "host-test-source": "name referenced by host/test_libc.c or host/test_runtime.c (reference only)",
+    "guest-app-source": "name referenced by app/c2_console_app.c or app/xxhash_app.c (reference only; execution is shown by the exact-PASS guest runs)",
+    "defined": "exported by the built static archive (nm); header presence is NOT proof"
+  },
+  "toolchains": {
+    "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "clang": "clang version 22.1.8 (Zig-bundled clang, target x86_64-freestanding-none)"
+  },
+  "archives": {
+    "gcc": {
+      "archive": "build/guest-gcc/lib/libarena_c.a",
+      "sha256": "9d8a0acd1d987d69289b0cda27fec846e1d269b7fcc923399f85d377ba79ca12"
+    },
+    "clang": {
+      "archive": "build/guest-clang/lib/libarena_c.a",
+      "sha256": "03f72ec00fac558e5fabf6d6139932384b052bab6d475163fc8eb4d007681caf"
+    }
+  },
+  "abi_symbol_agreement_gcc_clang": true,
+  "counts": {
+    "declared": 110,
+    "defined_both": 110,
+    "missing": 0,
+    "one_compiler_only": 0,
+    "referenced_in_guest_app": 30,
+    "referenced_in_host_test": 53,
+    "no_test_reference": 42,
+    "refused_by_design": 7
+  },
+  "symbols": [
+    {
+      "name": "_Exit",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "__arena_assert_fail",
+      "header": "assert.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "__arena_errno_location",
+      "header": "errno.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "abort",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "abs",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "aligned_alloc",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "atexit",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "atoi",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "atol",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "atoll",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "bsearch",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "call_once",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "calloc",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "clearerr",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "clock",
+      "header": "time.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ],
+      "refusal": "no CPU-time source: refused"
+    },
+    {
+      "name": "clock_gettime",
+      "header": "time.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "cnd_broadcast",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "cnd_destroy",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "cnd_init",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "cnd_signal",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "cnd_timedwait",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "cnd_wait",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "div",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "exit",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "fclose",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [],
+      "refusal": "no file authority: only the standard streams exist"
+    },
+    {
+      "name": "feof",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "ferror",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "fflush",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "fgetc",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "fgets",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "fopen",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [],
+      "refusal": "no file authority in C2: refused (ENOSYS/ENOENT); see C2-LIBC-COVERAGE.md"
+    },
+    {
+      "name": "fprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "fputc",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "fputs",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "fread",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "free",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "freopen",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [],
+      "refusal": "no file authority in C2: refused"
+    },
+    {
+      "name": "fwrite",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "getc",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "getchar",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "getenv",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "labs",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "ldiv",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "llabs",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "lldiv",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "malloc",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "memchr",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "memcmp",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "memcpy",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "memmove",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "memset",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "mtx_destroy",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "mtx_init",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "mtx_lock",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "mtx_timedlock",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "mtx_trylock",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "mtx_unlock",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "nanosleep",
+      "header": "time.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "perror",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "printf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "putc",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "putchar",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "puts",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "qsort",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "rand",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "realloc",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "remove",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [],
+      "refusal": "no file authority in C2: refused"
+    },
+    {
+      "name": "rename",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [],
+      "refusal": "no file authority in C2: refused"
+    },
+    {
+      "name": "setvbuf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "snprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "sprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "srand",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strcat",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strchr",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strcmp",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "strcoll",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strcpy",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strcspn",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strerror",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strlen",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "strncat",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strncmp",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strncpy",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strnlen",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strpbrk",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strrchr",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strspn",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strstr",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strtok",
+      "header": "string.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strtol",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strtoll",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strtoul",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "strtoull",
+      "header": "stdlib.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source"
+      ]
+    },
+    {
+      "name": "thrd_create",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "thrd_current",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "thrd_detach",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "thrd_equal",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "thrd_exit",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "thrd_join",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "thrd_sleep",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "thrd_yield",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": [
+        "guest-app-source"
+      ]
+    },
+    {
+      "name": "time",
+      "header": "time.h",
+      "status": "defined",
+      "evidence": [
+        "host-test-source",
+        "guest-app-source"
+      ],
+      "refusal": "no wall-clock authority: refused with ENOSYS"
+    },
+    {
+      "name": "tss_create",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "tss_delete",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "tss_get",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "tss_set",
+      "header": "threads.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "vfprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "vprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "vsnprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    },
+    {
+      "name": "vsprintf",
+      "header": "stdio.h",
+      "status": "defined",
+      "evidence": []
+    }
+  ]
+}

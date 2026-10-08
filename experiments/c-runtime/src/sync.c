@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "arena/abi.h"
+#include "sysabi.h"
 #include "arena/rt.h"
 #include "internal.h"
 #include "vm.h"

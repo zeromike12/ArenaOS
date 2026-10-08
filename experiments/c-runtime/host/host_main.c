@@ -43,6 +43,15 @@ long arena_write(int fd, const void *buf, size_t len) {
 
 /* Host stub for the ARST record: the host build has no startup grant. The
  * ring-only tests never attach stdio, so NULL is the correct answer here. */
+/* Host stub: no startup grant. The guest contract is that arena_startup() never
+ * returns NULL; the host returns an empty (present == 0) record the same way. */
 const arena_startup_t *arena_startup(void) {
-    return NULL;
+    static const arena_startup_t none;
+    return &none;
+}
+
+/* Host stub for the exit syscall path: the host test never returns from it. */
+#include <unistd.h> /* _exit */
+void arena_exit(int status) {
+    _exit(status);
 }

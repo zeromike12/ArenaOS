@@ -113,12 +113,3 @@ ARENA_NO_IDIOM int arena_strncmp(const char *a, const char *b, size_t n) {
     return 0;
 }
 
-#ifndef ARENA_HOSTED
-/* Guest build: export the standard names the compiler's runtime calls. */
-void *memcpy(void *dst, const void *src, size_t n) __attribute__((alias("arena_memcpy")));
-void *memmove(void *dst, const void *src, size_t n) __attribute__((alias("arena_memmove")));
-void *memset(void *dst, int c, size_t n) __attribute__((alias("arena_memset")));
-int memcmp(const void *a, const void *b, size_t n) __attribute__((alias("arena_memcmp")));
-size_t strlen(const char *s) __attribute__((alias("arena_strlen")));
-int strcmp(const char *a, const char *b) __attribute__((alias("arena_strcmp")));
-#endif

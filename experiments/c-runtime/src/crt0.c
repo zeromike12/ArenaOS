@@ -18,6 +18,8 @@
 #include <stdint.h>
 
 #include "arena/abi.h"
+#include "sysabi.h"
+#include "libc_impl.h"
 #include "arena/rt.h"
 #include "arena/string.h"
 #include "internal.h"
@@ -145,7 +147,7 @@ static void crt_main(void) {
     run_init_array();
     const arena_startup_t *s = arena_startup();
     int rc = s->present ? main(s->argc, s->argv) : main(0, NULL);
-    arena_exit(rc);
+    arena_libc_exit(rc);
 }
 
 void arena_crt_start(void) __attribute__((noreturn));

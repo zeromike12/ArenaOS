@@ -50,6 +50,12 @@
 
 #define LIVE_KIND 0x4C4956455F424C4BULL /* "LIVE_BLK" */
 #define FREE_KIND 0x46524545424C4B21ULL /* "FREEBLK!" */
+/* C2.2 aligned blocks: header kind ALIGNED, user pointer at off + align, and a
+ * record {ALIGN_RECORD_MAGIC, align} at user - HEADER_BYTES. The record lives inside
+ * the block (never in a neighbour) and is checked against the owning header. */
+#define ALIGNED_KIND 0x414C4947494E4721ULL /* "ALIGING!" */
+#define ALIGN_RECORD_MAGIC 0x414C49474E524344ULL
+#define ALIGN_MAX CHUNK_BYTES
 
 static struct {
     int lock;
@@ -245,6 +251,41 @@ static void *alloc_locked(size_t n) {
     return (void *)(H.base + (uint64_t)off + HEADER_BYTES);
 }
 
+/* Allocate n bytes at an address that is a multiple of `align` (a power of two,
+ * 32 <= align <= ALIGN_MAX). Same buddy heap and commit rules as alloc_locked. */
+static void *alloc_aligned_locked(size_t n, uint64_t align) {
+    if (heap_ready() != 0 || (uint64_t)n > MAX_PAYLOAD) {
+        H.stats.refused++;
+        return NULL;
+    }
+    uint64_t need = (uint64_t)n + align;
+    uint32_t level = MIN_LEVEL;
+    while (((uint64_t)1 << level) < need) {
+        level++;
+    }
+    if (level > TOP_LEVEL) {
+        H.stats.refused++;
+        return NULL;
+    }
+    H.new_commits = 0;
+    int64_t off = take_block(level);
+    if (off < 0) {
+        H.stats.refused++;
+        return NULL;
+    }
+    write_header((uint64_t)off, ALIGNED_KIND, level);
+    uint64_t user = (uint64_t)off + align;
+    uint64_t *rec = hdr(user - HEADER_BYTES);
+    rec[0] = ALIGN_RECORD_MAGIC;
+    rec[1] = align;
+    if (H.new_commits == 0) {
+        H.stats.reuse_hits++;
+    }
+    H.stats.live_blocks++;
+    H.stats.live_bytes += ((uint64_t)1 << level) - align;
+    return (void *)(H.base + user);
+}
+
 /* Ownership validation. Reads metadata only after the address and chunk
  * checks pass. Returns 1 and the block's header offset and level when the
  * pointer is a live block start in this heap. */
@@ -270,6 +311,48 @@ static int locate_live(const void *p, uint64_t *off_out, uint32_t *level_out) {
         return 0;
     }
     if (h[0] != tag_for(off, LIVE_KIND)) {
+        return 0;
+    }
+    if ((off & (((uint64_t)1 << level) - 1)) != 0) {
+        return 0;
+    }
+    *off_out = off;
+    *level_out = (uint32_t)level;
+    return 1;
+}
+
+/* Ownership of an aligned block. p must be off + align, with the record at p - 16
+ * naming the align, and the header at off carrying ALIGNED_KIND for a live block. */
+static int locate_aligned(const void *p, uint64_t *off_out, uint32_t *level_out) {
+    if (!H.ready || p == NULL) {
+        return 0;
+    }
+    uintptr_t a = (uintptr_t)p;
+    if (a < H.base + HEADER_BYTES || a - H.base >= HEAP_BYTES) {
+        return 0;
+    }
+    uint64_t user = a - H.base;
+    if ((user & 15u) != 0 || !is_committed(user - HEADER_BYTES)) {
+        return 0;
+    }
+    uint64_t *rec = hdr(user - HEADER_BYTES);
+    uint64_t align = rec[1];
+    if (rec[0] != ALIGN_RECORD_MAGIC || align < 32 || align > ALIGN_MAX || (align & (align - 1)) != 0) {
+        return 0;
+    }
+    if (user < align) {
+        return 0;
+    }
+    uint64_t off = user - align;
+    if (!is_committed(off)) {
+        return 0;
+    }
+    uint64_t *h = hdr(off);
+    uint64_t level = h[1];
+    if (level < MIN_LEVEL || level > TOP_LEVEL || (((uint64_t)1 << level) <= align)) {
+        return 0;
+    }
+    if (h[0] != tag_for(off, ALIGNED_KIND)) {
         return 0;
     }
     if ((off & (((uint64_t)1 << level) - 1)) != 0) {
@@ -327,6 +410,22 @@ void *arena_calloc(size_t count, size_t size) {
     return p;
 }
 
+void *arena_aligned_alloc(size_t align, size_t n) {
+    if (align == 0 || (align & (align - 1)) != 0 || align > ALIGN_MAX) {
+        lock();
+        H.stats.refused++;
+        unlock();
+        return NULL;
+    }
+    if (align <= HEADER_BYTES) {
+        return arena_malloc(n);
+    }
+    lock();
+    void *p = alloc_aligned_locked(n, (uint64_t)align);
+    unlock();
+    return p;
+}
+
 void arena_free(void *p) {
     if (p == NULL) {
         return; /* free(NULL) is a no-op, not a bad free */
@@ -334,7 +433,7 @@ void arena_free(void *p) {
     lock();
     uint64_t off = 0;
     uint32_t level = 0;
-    if (locate_live(p, &off, &level)) {
+    if (locate_live(p, &off, &level) || locate_aligned(p, &off, &level)) {
         free_locked(off, level);
     } else {
         H.stats.bad_frees++;
@@ -349,7 +448,14 @@ void *arena_realloc(void *p, size_t n) {
     lock();
     uint64_t off = 0;
     uint32_t level = 0;
-    if (!locate_live(p, &off, &level)) {
+    uint64_t cap;
+    int aligned = 0;
+    if (locate_live(p, &off, &level)) {
+        cap = ((uint64_t)1 << level) - HEADER_BYTES;
+    } else if (locate_aligned(p, &off, &level)) {
+        aligned = 1;
+        cap = ((uint64_t)1 << level) - (uint64_t)((uintptr_t)p - (H.base + off));
+    } else {
         H.stats.bad_frees++;
         unlock();
         return NULL; /* not ours: nothing is freed, nothing is copied */
@@ -359,7 +465,6 @@ void *arena_realloc(void *p, size_t n) {
         unlock();
         return NULL;
     }
-    uint64_t cap = ((uint64_t)1 << level) - HEADER_BYTES;
     if ((uint64_t)n <= cap) {
         unlock();
         return p;
@@ -369,6 +474,7 @@ void *arena_realloc(void *p, size_t n) {
         unlock();
         return NULL; /* old block untouched and still valid */
     }
+    (void)aligned;
     arena_memcpy(q, p, (size_t)cap);
     free_locked(off, level);
     unlock();
