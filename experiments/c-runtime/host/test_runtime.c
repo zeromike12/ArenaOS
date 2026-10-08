@@ -9,6 +9,8 @@
  */
 #define _GNU_SOURCE
 #include <inttypes.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -489,7 +491,130 @@ static void test_ring_wrap(void) {
     free(page);
 }
 
+/* Host-only VM fault injection (vm.c, ARENA_HOSTED). Not guest evidence. */
+void arena_vm_host_fail_reserve_from(int64_t n);
+void arena_vm_host_fail_commit_from(int64_t n);
+void arena_vm_host_reset(void);
+
+/* Commit refusal in a running process: a request that needs uncommitted
+ * space must be refused, and nothing already live may change. */
+static void test_vm_commit_refusal(void) {
+    struct arena_heap_stats b0, end;
+    arena_heap_stats(&b0);
+    enum { KEEP = 40, EXTRA = 64 };
+    uint8_t *keep[KEEP];
+    size_t kn[KEEP];
+    int kept = 0;
+    for (unsigned i = 0; i < KEEP; i++) {
+        kn[i] = 900u + i * 7u;
+        keep[i] = arena_malloc(kn[i]);
+        if (keep[i] == NULL) {
+            break;
+        }
+        memset(keep[i], (int)(i * 3u + 1u), kn[i]);
+        kept++;
+    }
+    CHECK(kept == KEEP, "commit refusal: setup blocks allocated before arming");
+
+    arena_vm_host_fail_commit_from(0);
+    uint8_t *extra[EXTRA];
+    int nextra = 0, big_refused = 0, big_total = 0;
+    for (unsigned k = 0; k < EXTRA; k++) {
+        if (k % 4 == 0) {
+            /* 12 MiB needs a top-level block, impossible while small blocks
+             * are live, so it must be refused without touching any list. */
+            big_total++;
+            uint8_t *p = arena_malloc((size_t)12u << 20);
+            if (p == NULL) {
+                big_refused++;
+            } else {
+                CHECK(0, "commit refusal: 12 MiB unexpectedly granted with live blocks");
+                arena_free(p);
+            }
+        } else {
+            uint8_t *p = arena_malloc(300u + k);
+            if (p != NULL) {
+                memset(p, 0x5A, 300u + k);
+                extra[nextra++] = p;
+            }
+        }
+    }
+    CHECK(big_refused == big_total, "commit refusal: every oversize request refused");
+
+    int intact = 1;
+    for (unsigned i = 0; i < KEEP && intact; i++) {
+        for (size_t j = 0; j < kn[i]; j++) {
+            if (keep[i][j] != (uint8_t)(i * 3u + 1u)) {
+                intact = 0;
+                break;
+            }
+        }
+    }
+    CHECK(intact, "commit refusal: live blocks unchanged after refused commits");
+
+    arena_heap_stats(&end);
+    CHECK(end.refused >= b0.refused + (uint64_t)big_refused,
+          "commit refusal: refusals counted");
+
+    for (int i = 0; i < nextra; i++) {
+        arena_free(extra[i]);
+    }
+    for (unsigned i = 0; i < KEEP; i++) {
+        arena_free(keep[i]);
+    }
+    arena_vm_host_reset();
+    arena_heap_stats(&end);
+    CHECK(end.live_blocks == b0.live_blocks && end.live_bytes == b0.live_bytes,
+          "commit refusal: live counters return to baseline");
+    CHECK(end.bad_frees == b0.bad_frees, "commit refusal: no spurious bad frees");
+
+    /* Recovery: with commits restored, the freed space coalesces back into a
+     * block large enough for the 12 MiB request. */
+    uint8_t *big = arena_malloc((size_t)12u << 20);
+    CHECK(big != NULL, "commit recovery: 12 MiB granted after the heap is empty again");
+    if (big != NULL) {
+        big[0] = 1;
+        big[(size_t)12u * 1024u * 1024u - 1u] = 2;
+        CHECK(big[0] == 1 && big[(size_t)12u * 1024u * 1024u - 1u] == 2,
+              "commit recovery: large block usable");
+        arena_free(big);
+    }
+}
+
+/* Reservation refusal before the heap exists. Needs a fresh process: this
+ * test re-executes the binary with "reserve-refusal" so the heap is never
+ * initialised by an earlier test. */
+static void reserve_refusal_mode(void) {
+    arena_vm_host_fail_reserve_from(0);
+    void *p = arena_malloc(100);
+    struct arena_heap_stats st;
+    arena_heap_stats(&st);
+    int ok = p == NULL && st.live_blocks == 0;
+    void *q = arena_malloc(100); /* the retry path must also refuse cleanly */
+    ok = ok && q == NULL;
+    arena_free(p);
+    arena_free(q);
+    fprintf(stdout, "[host] reserve-refusal child: %s\n", ok ? "refused cleanly" : "FAILED");
+    exit(ok ? 0 : 1);
+}
+
+static void test_vm_reserve_refusal(void) {
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/proc/self/exe", "host-test", "reserve-refusal", (char *)NULL);
+        _exit(99);
+    }
+    int status = 0;
+    CHECK(pid > 0 && waitpid(pid, &status, 0) == pid, "reserve refusal: child waited");
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
+          "reserve refusal: fresh process refused the reservation cleanly");
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "reserve-refusal") == 0) {
+        reserve_refusal_mode();
+    }
     (void)argc;
     (void)argv;
     fprintf(stdout, "HOST-ONLY arena C runtime tests (ASan+UBSan, glibc differential)\n");
@@ -499,6 +624,8 @@ int main(int argc, char **argv) {
     test_allocator_contract();
     test_allocator_stress();
     test_allocator_hardening();
+    test_vm_commit_refusal();
+    test_vm_reserve_refusal();
     test_ring_wrap();
     if (failures == 0 && known_defect_reproduced) {
         fprintf(stdout, "HOST-ONLY RESULT PASS (%d checks, known protocol defect pinned)\n", checks);

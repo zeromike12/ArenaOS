@@ -9,8 +9,35 @@
 #include <sys/mman.h>
 
 /* Host backend: mappings are committed eagerly; the allocator still tracks
- * its own commit chunks, so accounting is exercised. */
+ * its own commit chunks, so accounting is exercised.
+ *
+ * Deterministic fault injection (host tests only): "fail from call N" makes
+ * the Nth and every later call of that kind return a refusal. Counters reset
+ * when a fail point is armed. This is how the host suite exercises VM
+ * reservation and commit refusal; the guest backend has no such hook. */
+static int64_t host_reserve_calls, host_commit_calls;
+static int64_t host_reserve_fail_from = -1, host_commit_fail_from = -1;
+
+void arena_vm_host_fail_reserve_from(int64_t n) {
+    host_reserve_calls = 0;
+    host_reserve_fail_from = n;
+}
+
+void arena_vm_host_fail_commit_from(int64_t n) {
+    host_commit_calls = 0;
+    host_commit_fail_from = n;
+}
+
+void arena_vm_host_reset(void) {
+    host_reserve_fail_from = -1;
+    host_commit_fail_from = -1;
+}
+
 int arena_vm_reserve(uint32_t pages, uint64_t *slot_out, uintptr_t *base_out) {
+    int64_t k = host_reserve_calls++;
+    if (host_reserve_fail_from >= 0 && k >= host_reserve_fail_from) {
+        return -1;
+    }
     void *p = mmap(NULL, (size_t)pages * 4096u, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (p == MAP_FAILED) {
@@ -25,6 +52,10 @@ int arena_vm_commit(uint64_t slot, uint32_t offset_pages, uint32_t pages) {
     (void)slot;
     (void)offset_pages;
     (void)pages;
+    int64_t k = host_commit_calls++;
+    if (host_commit_fail_from >= 0 && k >= host_commit_fail_from) {
+        return -1;
+    }
     return 0;
 }
 
