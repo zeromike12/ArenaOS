@@ -21,15 +21,7 @@ ESP = ROOT / "build/arena-esp.img"
 PROFILE = ROOT / "build/graphics-profile.txt"
 LABEL = "phase14-no-entropy"
 
-NEEDLE = b'''            let status = syscall6(
-                SYS_ENTROPY_SEED,
-                SLOT_KERNEL_SEED,
-                va[1],
-                0,
-                0,
-                0,
-                0,
-            );
+NEEDLE = b'''            let status = syscall6(SYS_ENTROPY_SEED, SLOT_KERNEL_SEED, va[1], 0, 0, 0, 0);
             if status != 0 {
                 log_line(|o| {
                     o.str("rngd: kernel entropy seed refused with status ");
