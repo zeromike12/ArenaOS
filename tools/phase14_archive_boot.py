@@ -23,7 +23,7 @@ import qmp
 ROOT = Path(__file__).resolve().parent
 AFS2_BASE = 8 * 1024 * 1024
 APP_ID = "org.arenaos.phase14pie"
-SOURCE = "/Users/user/Desktop/phase14-pie.apb1"
+SOURCE = "/Users/user/Desktop/zzz-phase14-pie.apb1"
 PASS = re.compile(
     r"\[phase14-pie\] PASS base=0x([0-9a-f]+) entry=0x([0-9a-f]+) "
     r"relocated=0x([0-9a-f]+) data=0x([0-9a-f]+) bss=0x([0-9a-f]+) exit=42"
@@ -67,30 +67,33 @@ def disk_tree(disk: Path) -> dict[str, bytes]:
     raise AssertionError(f"AFS2 guest image did not settle for readback: {last_error}")
 
 
-def callback(sock: Path, serial: Path, _image: Path, disk: Path) -> str:
+def callback(sock: Path, serial: Path, image: Path, disk: Path) -> str:
     # Phase-13 launch coverage runs first on the same boot and uses the
     # unchanged fixed-address ET_EXEC package/runtime path.
-    phase13_proof = phase13.callback(sock, serial, _image, disk)
+    phase13_proof = phase13.callback(sock, serial, image, disk)
     conn = qmp.Qmp(str(sock), connect_timeout_s=5)
 
     def log() -> str:
         return log_text(serial)
 
-    def click(x: int, y: int) -> None:
+    def point(x: int, y: int, button: str | None = None, down: bool | None = None) -> None:
         events = [
             {"type": "abs", "data": {"axis": "x", "value": (x * 32767 + 799) // 799}},
             {"type": "abs", "data": {"axis": "y", "value": (y * 32767 + 599) // 599}},
-            {"type": "btn", "data": {"button": "left", "down": True}},
-            {"type": "btn", "data": {"button": "left", "down": False}},
         ]
+        if button is not None and down is not None:
+            events.append({"type": "btn", "data": {"button": button, "down": down}})
         conn.command("input-send-event", events=events)
-        conn.command(
-            "input-send-event",
-            events=[
-                {"type": "abs", "data": {"axis": "x", "value": (780 * 32767 + 799) // 799}},
-                {"type": "abs", "data": {"axis": "y", "value": (500 * 32767 + 599) // 599}},
-            ],
-        )
+
+    def click(x: int, y: int) -> None:
+        point(x, y, "left", True)
+        point(x, y, "left", False)
+        point(780, 500)
+
+    def right_click(x: int, y: int) -> None:
+        point(x, y)
+        point(x, y, "right", True)
+        point(x, y, "right", False)
 
     def key(qcode: str) -> None:
         conn.command("input-send-event", events=[qmp.Qmp._ev(qcode, True), qmp.Qmp._ev(qcode, False)])
@@ -105,11 +108,14 @@ def callback(sock: Path, serial: Path, _image: Path, disk: Path) -> str:
             raise AssertionError("bundled signed APB1 does not contain the exact Phase-14 ELF")
 
         installed_before = log().count("[desktop] APB1 installed; signed version=")
-        # The Phase-14 source is fourth in the pristine disk's create order;
-        # the first three existing Phase-13 icons keep their coordinates.
-        click(52, 280)
+        # The Phase-14 source is fourth in the desktop's sorted order; the
+        # three established Phase-13 icons keep their coordinates.
+        # Open the selected APB1 from its real desktop context menu. The
+        # production Open action invokes the same filesd/packaged installer
+        # affordance as a double click, without host-timing ambiguity.
+        right_click(52, 280)
         time.sleep(0.1)
-        click(52, 280)
+        click(84, 296)
         wait(lambda: log().count("[desktop] APB1 installed; signed version=") == installed_before + 1,
              "Desktop did not install the signed Phase-14 APB1 through packaged/filesd")
         tree = disk_tree(disk)
@@ -203,7 +209,7 @@ def main() -> None:
         label="PHASE14",
         after=callback,
         launches=4,
-        retirements=5,
+        retirements=7,
     )
     print(f"EXTRACTED PHASE14 PASS: EFI SHA-256 {sha}; suite and 100/100 receipts verified")
 

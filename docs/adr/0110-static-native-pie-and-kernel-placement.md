@@ -2,8 +2,11 @@
 
 ## Status
 
-Accepted as the Phase-14 implementation contract. Qualification remains
-required before release.
+Accepted and qualified for the Phase-14 release. The exact production EFI
+passed the 119-group historical/Phase-14 suite, fresh 100/100 stability, and
+the independently extracted signed-APB1 QEMU witness. See
+[`docs/phase14/FINAL-REPORT.md`](../phase14/FINAL-REPORT.md) for hashes and
+receipts.
 
 ## Context
 
@@ -181,7 +184,7 @@ for multiple launches, with independent bases and process-owned memory.
   signed APB1 launch results, exact cleanup, historical regressions, and
   exact-artifact boot qualification.
 
-## Evidence required before release
+## Qualification evidence
 
 - A genuine linker-produced `ET_DYN` Rust executable with executable code,
   read-only constants, initialized writable data, BSS, a relative relocation,
@@ -194,5 +197,9 @@ for multiple launches, with independent bases and process-owned memory.
   out-of-image target, arithmetic overflow, bad alignment, W+X, protected-range
   collision, missing entropy, stale/revoked Image, and resource exhaustion.
 - Guard, W^X, teardown, Image pin/refcount, and process-capacity receipts.
-- Full Phase-13 historical suite, exact final EFI SHA-256, fresh 100/100
-  stability, and independently extracted archive boot.
+- Full historical plus Phase-14 suite: 119/119 groups passed.
+- Exact final EFI SHA-256: `418c63acbf9eee0eadb6dd8de21e860bddd5e868d612028d7e93cb45e8d1ff2f`;
+  fresh stability passed 100/100 boots against that artifact.
+- Independently extracted archive boot verified archive checksums, Phase-13
+  fixed-address applications, and two signed installed PIE launches with
+  distinct bases and exact teardown.

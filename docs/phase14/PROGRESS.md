@@ -105,9 +105,10 @@ test.
 
 T0/T1 results: `tools/build.sh --image` and M4's 9/9 guest passed after the
 collision-preflight addition; M1, M2, M3, M5, M6, M7, M11, and M12 also passed
-in that same boot. T2 and T3 preservation checkpoints are now complete. The
-final complete historical suite, fresh 100/100 exact-artifact stability, and
-independent release-archive boot remain pending.
+in that same boot. T2 and T3 preservation checkpoints are complete. Final T4
+qualification is now complete: 119/119 suite groups passed, the exact
+production EFI passed 100/100 fresh boots, and the extracted release archive
+booted and ran both the Phase-13 and signed Phase-14 witnesses.
 
 ## Preservation follow-up
 
@@ -176,11 +177,24 @@ receipt is `build/phase14-pie-afterfix.log` and the guest serial is
 | --- | --- |
 | Source branch | Created from exact Phase-13 release tip; no Phase-13 files changed |
 | Host | Debian GNU/Linux 13 (trixie), unprivileged user; `cargo`, `rustc`, `rustfmt`, QEMU, and OVMF were initially absent from PATH |
-| Historical qualification | Phase-13 report records 115/115 suite groups and 100/100 clean boots; Phase-14 exact-artifact qualification remains pending |
+| Historical qualification | 119/119 combined historical and Phase-14 suite groups passed on source `e24f3fb2c83613bd4d60c08e8f7d5555c6b43bef` |
 | Native PIE | Rust 1.97.0/rust-lld fixture, genuine `ET_DYN`; SHA-256 `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e` |
 | Positive APB1 guest | Two launches exited 42 at distinct bases; each verified relocated function/data, Startup ABI v2, RX/R/RW protections, guards, and reclamation |
 | Signed negative APB1 guest | Six malformed/unsupported ELF classes refused at Image validation; valid out-of-arena image refused with `STATUS_NO_SPACE`; ownership counters returned to baseline |
 | Missing entropy guest | Seed-withholding red mutation refused signed PIE with `STATUS_NO_ENTROPY`; original rngd source and EFI/ESP restored byte-for-byte |
 | Stale Image authority guest | Revoked Image received through signed APB1 was refused by kernel `SYS_SPAWN_CHECK` with `STATUS_BAD_ARG`; process/Image ownership returned to baseline |
 | Fresh PIE rerun | Bases `0x53674ce00000` and `0x5d036e600000`; both signed launches exited 42 with exact steady-state receipts |
-| Historical follow-up | M11 Desktop and window-manager targeted reruns pass; M12 scale targeted rerun passes; T2 10/10 and T3 25/25 clean boot checkpoints pass; final full suite pending |
+| Historical follow-up | M11 Desktop and window-manager targeted reruns pass; M12 scale targeted rerun passes; T2 10/10, T3 25/25, and fresh T4 100/100 clean boots pass |
+
+## Final qualification
+
+The final production EFI SHA-256 is
+`418c63acbf9eee0eadb6dd8de21e860bddd5e868d612028d7e93cb45e8d1ff2f`; the
+matching ESP SHA-256 is
+`22fd51a49d4235cc20acd90eff92e75ad6e3f85fb2d0a14b51c37de27dfc4ce9`. The
+canonical 119-group suite log and fresh 100-boot log are under `build/`.
+The release archive's independently extracted witness verifies those receipts,
+boots only archived files, checks Phase-13 ET_EXEC behavior, and installs and
+launches the signed PIE APB1 twice through the production Desktop/filesd/
+packaged/Image path. The final archive digest is recorded in
+`FINAL-REPORT.md`.

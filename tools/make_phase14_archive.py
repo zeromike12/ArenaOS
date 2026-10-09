@@ -49,7 +49,7 @@ PHASE_DOCS = (
     "TOOL-VERSIONS.txt",
 )
 ADR_FILES = (
-    "0016-elf64-executable-contract.md",
+    "0016-executable-format-loader.md",
     "0083-native-startup-abi-v2.md",
     "0092-installed-application-registry-and-launch-authority.md",
     "0093-bounded-native-image-envelope.md",
@@ -112,9 +112,9 @@ def make_disk(path: Path, app: bytes, headless: bytes, pie: bytes) -> None:
     volume.write(source, 0, b"Phase 13 associated document\n")
     source = volume.create(desktop, b"zz-headless.apb1")
     volume.write(source, 0, headless)
-    # Keep the established Phase-13 icon rows stable; the Phase-14 fixture is
-    # a fourth source so the extracted witness can install it by real clicks.
-    source = volume.create(desktop, b"phase14-pie.apb1")
+    # Keep the established Phase-13 icon rows stable. The desktop sorts these
+    # names, so place the Phase-14 fixture after the existing zz-headless item.
+    source = volume.create(desktop, b"zzz-phase14-pie.apb1")
     volume.write(source, 0, pie)
     afs2.check(volume)
 
