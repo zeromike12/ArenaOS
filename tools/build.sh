@@ -34,6 +34,11 @@ if [[ ! -f "$PAYLOAD_ELF" ]]; then
 fi
 echo "payload image: ${PAYLOAD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PAYLOAD_ELF") bytes)"
 
+# Phase 14: the genuine rust-lld static PIE fixture is embedded in the kernel
+# mutation corpus and must be rebuilt from its locked crate-local configuration.
+echo "== building native static PIE fixture (userspace/phase14-pie) =="
+"$REPO_ROOT/tools/build_phase14_pie.sh"
+
 # M4.6 (ADR-0020): the minimal shell is embedded the same way —
 # spawn-registry image 1, spawned at boot as the initial service.
 echo "== building userspace shell (userspace/shell, x86_64-unknown-none) =="

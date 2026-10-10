@@ -40,7 +40,7 @@
 //! It then leaves a timer armed on purpose and exits, so the suite can
 //! prove the kernel sweeps it.
 //!
-//! Exit codes: 42 verified, 60..69 typed failures, 99 panic.
+//! Exit codes: 42 verified, 60..70 typed failures, 99 panic.
 #![no_std]
 #![no_main]
 
@@ -57,7 +57,7 @@ const BADGE_B: u64 = 1 << 17;
 const BADGE_C: u64 = 1 << 18;
 const BADGE_CANCELLED: u64 = 1 << 19;
 /// Phase 11.0 per-process quota proof (ADR-0071).
-const BADGE_QUOTA: u64 = 1 << 20;
+const BADGE_QUOTA: [u64; TIMER_QUOTA] = [1 << 20, 1 << 21, 1 << 22, 1 << 23];
 
 const EXIT_CLOCK: u64 = 60;
 const EXIT_ARM: u64 = 61;
@@ -264,22 +264,41 @@ pub unsafe extern "C" fn _start() -> ! {
         // table-full BUSY. The armed ones are left to FIRE (not cancelled)
         // so the suite's exact cancel count is unchanged; firing returns
         // the quota, which the 60 s arm below then relies on.
-        for _ in 0..TIMER_QUOTA {
-            arm(BADGE_QUOTA, 1_000);
+        for badge in BADGE_QUOTA {
+            arm(badge, 1_000_000);
         }
-        let over = syscall3(SYS_TIMER_ARM, SLOT_NOTIF, BADGE_QUOTA, 1_000);
+        let quota_mask = BADGE_QUOTA
+            .iter()
+            .copied()
+            .fold(0, |mask, badge| mask | badge);
+        let over = syscall3(SYS_TIMER_ARM, SLOT_NOTIF, BADGE_QUOTA[0], 1_000_000);
         if over != STATUS_QUOTA {
             log_line(|o| {
                 o.str("timertest: the over-quota arm returned ");
                 o.i64(over);
             });
-            fail(EXIT_QUOTA, "the fifth simultaneous timer was not refused with STATUS_QUOTA");
+            fail(
+                EXIT_QUOTA,
+                "the fifth simultaneous timer was not refused with STATUS_QUOTA",
+            );
         }
-        let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
-        if badge < 0 || badge as u64 & BADGE_QUOTA == 0 {
-            fail(EXIT_QUOTA, "the quota timers never fired");
+        // Keep a generous overlap window so host scheduling cannot expire a
+        // timer between the four successful arms and the over-quota check.
+        // Unique badge bits let the test collect every firing across waits.
+        let mut quota_fired = 0;
+        while quota_fired & quota_mask != quota_mask {
+            let badge = syscall1(SYS_WAIT, SLOT_NOTIF);
+            if badge < 0 || badge as u64 & !quota_mask != 0 {
+                fail(
+                    EXIT_QUOTA,
+                    "a quota timer failed or delivered an unexpected badge",
+                );
+            }
+            quota_fired |= badge as u64;
         }
-        log("timertest: PASS — four timers armed, the fifth refused with STATUS_QUOTA (-7)");
+        log(
+            "timertest: PASS — all four quota timers fired, the fifth refused with STATUS_QUOTA (-7)",
+        );
 
         // Leave one armed on purpose: the suite proves the kernel
         // sweeps it when this process is destroyed.

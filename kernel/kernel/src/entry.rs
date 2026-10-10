@@ -184,6 +184,13 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         boot_info.reconciled_leaks,
         boot_info.heap_chunks_released
     );
+    if !crate::entropy::self_test() {
+        crate::halt::halt_machine("ADR-0110: ChaCha20 known-answer check failed");
+    }
+    info!(
+        "entropy",
+        "ADR-0110 ChaCha20 block known-answer check passed; placement entropy remains unavailable until production rngd seeds it"
+    );
 
     // --- reclaim the timer and the interrupt chain -------------------------
     // The firmware's ExitBootServices teardown killed the tick three ways
@@ -2245,13 +2252,19 @@ fn spawn_rngd(rng_ready_nid: u32, rng_diag_nid: u32) -> Result<Option<(u64, u32)
             obj: crate::cap::CapObj::Notification { nid: rng_diag_nid },
             rights: crate::cap::RIGHTS_READ,
         },
+        // ADR-0110 production-only authority. It is deliberately WRITE-only
+        // and non-copyable; rngd can only provide 32 bytes from virtio-rng.
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::KernelEntropySeed,
+            rights: crate::cap::RIGHTS_WRITE,
+        },
     ];
     let pid = crate::spawn::spawn_init(8, &grants, None)?;
     crate::supervise::register("rngd", 8, &grants, pid)
         .map_err(|_| "rngd: production supervisor registration refused")?;
     info!(
         "kernel",
-        "rngd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=Notif{rng_ready_nid}/W) — kernel-owned entropy driver; signals manager when DRIVER_OK",
+        "rngd spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW, 3=Notif{rng_ready_nid}/W, 5=KernelEntropySeed/W non-copyable) — manager readiness follows DRIVER_OK and kernel CSPRNG seeding",
         f.bar_base[bar]
     );
     Ok(Some((pid, eid)))

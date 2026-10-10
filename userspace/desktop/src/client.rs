@@ -40,6 +40,10 @@ pub const TRANSIENT_PAGES: usize = TRANSIENT_MAX_PIXELS * 4 / 4096;
 /// The last page of the reservation: this client's filesd I/O page
 /// (ADR-0077). The broker never reads it as pixels.
 pub const FILE_PAGES: usize = 1;
+/// The broker rejected a surface commit because a newer Configure superseded
+/// the size this client just adopted. The client should poll for that size and
+/// repaint instead of treating the ordinary drag race as a dead session.
+pub const STATUS_RESIZE_SUPERSEDED: i64 = 3;
 /// A live transient surface (menu, tooltip, dialog) of this client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Transient {
@@ -90,7 +94,11 @@ fn exchange_at_with_cap(
                 // SAFETY: malformed replies do not retain their transferred cap.
                 let _ = unsafe { syscall1(SYS_CAP_DESTROY, out[2]) };
             }
-            return Err(-2);
+            // Preserve the server's typed status. In particular, a resize
+            // commit can lose a race with a newer Configure and must reach
+            // the application as STATUS_RESIZE_SUPERSEDED so it can adopt
+            // the newer size and repaint.
+            return Err(out[0] as i64);
         }
         let decoded = match Frame::decode(&bytes) {
             Ok(frame) => frame,

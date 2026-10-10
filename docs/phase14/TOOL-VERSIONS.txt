@@ -1,0 +1,16 @@
+ArenaOS Phase-14 qualification environment
+Host: Debian GNU/Linux 13.6 (trixie), x86_64, uid 1000 (unprivileged)
+Rust: rustc 1.97.0 (2d8144b78 2026-07-07), LLVM 22.1.6
+Cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+rustfmt: 1.9.0-stable (2d8144b788 2026-07-07)
+Guest Rust targets: x86_64-unknown-none and x86_64-unknown-uefi
+QEMU: QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)
+OVMF: edk2-ovmf 2025.02-8+deb13u1, 4 MiB CODE/VARS
+QEMU devices: q35, 512 MiB, qemu64,+nx,+smep,+smap, virtio-blk,
+  virtio-net with user networking, virtio-rng, virtio-keyboard,
+  virtio-tablet, virtio-serial/virtconsole, and QMP
+Package source: official Debian Trixie archive; packages verified before
+  unprivileged extraction under /tmp. No root or sudo was available or used.
+Python: system Python 3; pyfatfs and setuptools installed under /tmp for ESP
+  construction. The independent archive witness uses Python standard library
+  plus the included pure-Python AFS/APB1 codecs.

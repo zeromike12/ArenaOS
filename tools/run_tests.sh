@@ -250,6 +250,26 @@ else
     echo "!! Phase 13 installed-application guest FAILED"
 fi
 
+# Phase 14: real APB1-installed PIE execution, signed malformed-image
+# refusals, and restored RED mutations for missing entropy and revoked Image
+# authority. Mutation scripts restore the exact production source and EFI/ESP.
+for t in \
+    "$REPO_ROOT/tools/test_phase14_pie_guest.py" \
+    "$REPO_ROOT/tools/test_phase14_negative_guest.py" \
+    "$REPO_ROOT/tools/test_phase14_no_entropy_guest.py" \
+    "$REPO_ROOT/tools/test_phase14_stale_image_guest.py"; do
+    echo "======================================================================"
+    echo "== running $(basename "$t")"
+    echo "======================================================================"
+    if (cd "$REPO_ROOT" && python3 "$t"); then
+        ran=$((ran+1))
+    else
+        ran=$((ran+1))
+        failures=$((failures+1))
+        echo "!! $(basename "$t") FAILED"
+    fi
+done
+
 for t in "$REPO_ROOT"/tools/test_m*.py; do
     echo "======================================================================"
     echo "== running $(basename "$t")"
