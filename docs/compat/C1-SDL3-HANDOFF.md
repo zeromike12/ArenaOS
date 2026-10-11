@@ -6,13 +6,13 @@ prototype. **This is a handoff, not a port.** C1 did not port SDL3, did not buil
 it, did not implement graphics, and did not change Arena 1's branch.
 
 Status of the runtime: **experimental**, under `experiments/c-runtime/`, proposed
-in ADR-0110 (Proposed). Every statement below is labelled:
+in ADR-0112 (Proposed). Every statement below is labelled:
 **GUEST** (run under ArenaOS by the C1 harness), **HOST-ONLY** (ASan+UBSan host
 build, not kernel evidence), **STATIC** (source or disassembly), or **BLOCKED**.
 
 Companion documents: `C1-INTEGRATION-CONTRACT.md` (what ArenaOS provides),
 `C1-FINAL-REPORT.md` (evidence and hashes), `C1-FPSIMD-BOUNDARY.md` (FP
-decision), `docs/adr/0110-native-c-runtime-profile-proposal.md`,
+decision), `docs/adr/0112-native-c-runtime-profile-proposal.md`,
 `docs/adr/0111-stream-ring-counter-wrap.md`, `docs/compat/04-compat-strategy.md`
 (SDL3 verdicts).
 
@@ -277,7 +277,7 @@ No new ambient authority was added. C1 uses only grants the desktop already give
 | B4 | libc name shim (`malloc`, `snprintf`, `pthread_*`, `clock_gettime`, file I/O) | Arena 1 | Yes |
 | B5 | Video and audio backends, GPU | Arena 1 | Yes |
 | B6 | Fine-grained timer for frame pacing | Core OS and C | Yes, for games |
-| B7 | `SYS_DEBUG_WRITE` has no capability check (ADR-0110 D3) | Core OS | Not for SDL3; C avoids it |
+| B7 | `SYS_DEBUG_WRITE` has no capability check (ADR-0112 D3) | Core OS | Not for SDL3; C avoids it |
 | B8 | PT_TLS ignored by the loader | Luna loader owners | Not blocking; the runtime installs TLS |
 | B9 | No guest-side VM commit-failure test | C | Not blocking; host-tested |
 

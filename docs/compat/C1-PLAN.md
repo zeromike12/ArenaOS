@@ -35,7 +35,7 @@ Constraints carried into every step:
 | C1.4 | Allocator hardening; ownership checks; realloc; invalid, interior, and freed pointers; overflow; alignment; bounded coalescing; VM failure without corruption; thread safety | HOST-ONLY (ASan+UBSan); GUEST T5, T9, and crt-probe | Implemented. Host covers VM refusal. **Guest VM commit-failure test not done.** |
 | C1.5 | SDL3 handoff: calling convention, linking, startup, allocation, libc subset, streams, threads, TLS, timing, FP, limits, missing symbols, capabilities, blockers | Document, checked against source and guest evidence | Written: `C1-SDL3-HANDOFF.md`. |
 | FP/SIMD | Audit of CPU FP and SIMD state; core-OS dependency for Luna after Phase 14; no kernel FP code | STATIC audit of the kernel and every C image | Written: `C1-FPSIMD-BOUNDARY.md`. Decision left to Luna. |
-| Docs | `C1-PLAN.md`, `C1-INTEGRATION-CONTRACT.md`, `C1-FINAL-REPORT.md`, `C1-SDL3-HANDOFF.md`, ADR-0110 addendum, ADR-0111 (new, proposed) | Each claim labelled | Written. Reviewed against source and logs in this pass. |
+| Docs | `C1-PLAN.md`, `C1-INTEGRATION-CONTRACT.md`, `C1-FINAL-REPORT.md`, `C1-SDL3-HANDOFF.md`, ADR-0112 addendum, ADR-0111 (new, proposed) | Each claim labelled | Written. Reviewed against source and logs in this pass. |
 
 ## 3. Order of work actually followed
 
@@ -101,9 +101,9 @@ Escalated to the owners in the reports, with no change landed:
 
 1. Stream ring counter wrap (ADR-0111, proposed): M and C review. Blocks streams
    for unbounded output.
-2. `SYS_DEBUG_WRITE` capability check (ADR-0110 Decision 3): core OS.
+2. `SYS_DEBUG_WRITE` capability check (ADR-0112 Decision 3): core OS.
 3. FP/SIMD for C (`C1-FPSIMD-BOUNDARY.md`): Luna after Phase 14.
-4. PT_TLS ownership (ADR-0110 open question): Luna loader owners.
+4. PT_TLS ownership (ADR-0112 open question): Luna loader owners.
 5. Dynamic loading and optional backends for SDL3 (`C1-SDL3-HANDOFF.md` B2): Arena 1 and C.
 
 ## 8. Remaining gaps (not done in C1)

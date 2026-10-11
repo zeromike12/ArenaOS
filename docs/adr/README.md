@@ -155,3 +155,5 @@ What this constrains or enables later; what would trigger revisiting.
 | [0105](0105-helper-standard-streams.md) | Explicit AHL1 helper stream delegation and owner-scoped wake | Accepted; signed helper T1 guest proof passed |
 | [0106](0106-native-user-threads.md) | Native process-owned ring-3 threads, guarded VM stacks, per-thread FS.base TLS, join and detach | Accepted; T1 guest proof and T3 preservation passed |
 | [0107](0107-native-synchronization-domains.md) | Capability-backed native wait domains for Mutex, Condvar, and Once | Accepted and implemented; T1 guest proof and 20/20 T3 preservation passed |
+| [0111](0111-stream-ring-counter-wrap.md) | Native stream ring counter wrap at 2^32 (blocker, wire change required) | Proposed; unresolved in C2.1; no wire change; regression test preserved |
+| [0112](0112-native-c-runtime-profile-proposal.md) | Native C runtime profile and C-facing stdio (renumbered from 0110 in C2.1) | Proposed; not accepted; no production interface change |

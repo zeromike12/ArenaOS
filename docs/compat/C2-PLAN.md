@@ -57,7 +57,7 @@ the C2 commit it names.
 - The RFC 8032 development fixture is test-only and is never presented as a production key.
 - Do not modify `main`, Luna's branch `arena/phase14-native-pie-aslr`, or Arena 1's branch `arena/13f9221b-arenaos`.
 - Do not build SDL3. Do not modify `tools/startup_abi.py` without authorization.
-- ADR-0110 remains proposed. ADR-0111 (ring counter wrap) remains an unresolved defect.
+- ADR-0112 remains proposed. ADR-0111 (ring counter wrap) remains an unresolved defect.
 
 ## Status at closeout (C2.8)
 

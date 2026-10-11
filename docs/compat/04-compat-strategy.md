@@ -14,7 +14,7 @@ session; **[SECONDARY]** third-party summary, verify before relying on it;
 |---|---|---|---|
 | What it means | Port source to a native C API (`arena/*.h`, streams, caps) | Libc-style `open/read/socket` calls in userspace; each call is translated to a broker IPC using caps the process holds | Load Linux ELF binaries and emulate the Linux syscall ABI, glibc and ld.so |
 | Authority model | Explicit: a process holds exactly the caps it was granted | Preserved only if the broker, not the library, decides what a path means; path must never be authority | Ambient by design (uid, paths, `/proc`); must be wrapped to fit caps |
-| Kernel change | None to start (ABI v1 suffices for the probe); stream binding is a proposal (ADR-0110) | None if all brokering is userspace; any new IPC is a proposal | Large: hundreds of syscalls, `futex`, signals, `clone`, `mmap` semantics, dynamic loader |
+| Kernel change | None to start (ABI v1 suffices for the probe); stream binding is a proposal (ADR-0112) | None if all brokering is userspace; any new IPC is a proposal | Large: hundreds of syscalls, `futex`, signals, `clone`, `mmap` semantics, dynamic loader |
 | Loader needs | Static ET_EXEC today; PIE from Luna (Phase 14) | Same as (a) | Dynamic linking, PIE, `PT_INTERP`, vDSO |
 | Compatibility gained | Only ported code | Source code that uses the supported subset | Unmodified binaries |
 | Fork and process model | Native spawn (no fork) | No `fork()` (spawn-only model); `exec`-style use must map to spawn with explicit grants | `fork`, `exec`, signals and pipes must all be emulated |
@@ -140,7 +140,7 @@ constraints).
 ## 5. Conclusions
 
 - Option (a) is the right first step. It needs a capability stdio binding and
-  a C thread API, and both are proposed or in-scope (ADR-0110, report 05).
+  a C thread API, and both are proposed or in-scope (ADR-0112, report 05).
 - Option (b) is worth designing once (a) has real users, under the rules in §3.
 - Option (c) is rejected for this program.
 - SDL3 is the realistic first large target, and it depends on Arena 1 video

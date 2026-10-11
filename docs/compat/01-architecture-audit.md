@@ -132,7 +132,7 @@ The prototype does all four. [GUEST: T1 entry-stack-tls PASS]
   rule added to `run.py`. [GUEST, STATIC]
 - **Risk / proposal:** TLS is currently a runtime convention, not a loader
   feature. Supporting PT_TLS in the loader would be a loader change and
-  needs its own ADR ([PROPOSAL] in ADR-0110).
+  needs its own ADR ([PROPOSAL] in ADR-0112).
 
 ## 7. Stdio and streams
 
@@ -144,7 +144,7 @@ The prototype does all four. [GUEST: T1 entry-stack-tls PASS]
   explicitly not a POSIX pipe ABI.** [PHASE14-HANDOFF.md]
 - No C binding to those rings exists. The C prototype writes through
   `SYS_DEBUG_WRITE` (Risk F1). A proper C stdio goes through the stream
-  capability and must be proposed in ADR-0110.
+  capability and must be proposed in ADR-0112.
 - `printf` in the prototype is a bounded subset (flags `-`/`0`, width,
   precision on strings, `hh/h/l/ll/z/j/t` lengths, `%% %c %s %d %i %u %x %X %o %p`).
   Unknown conversions are echoed. No floating point. [CODE, HOST]

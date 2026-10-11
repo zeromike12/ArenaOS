@@ -3,7 +3,7 @@
 This directory is an experiment. It is **not** part of the production image,
 and no production build reads it. Analysis and decisions are in
 [`docs/compat/`](../../docs/compat/README.md); the proposed contract is in
-[ADR-0110](../../docs/adr/0110-native-c-runtime-profile-proposal.md) (Proposed).
+[ADR-0112](../../docs/adr/0112-native-c-runtime-profile-proposal.md) (Proposed).
 
 ## What is here
 

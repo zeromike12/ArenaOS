@@ -1,4 +1,4 @@
-# ADR-0110: Native C runtime profile and C-facing stdio (proposal)
+# ADR-0112: Native C runtime profile and C-facing stdio (proposal)
 
 Status: Proposed
 Date: 2026-10-08
@@ -105,9 +105,13 @@ it.
 2. Is the Startup ABI v2 descriptor slot the right way to hand C stream
    capabilities over, or should a C-specific descriptor be proposed?
 3. Should the runtime or the loader own `PT_TLS` long term?
-4. Numbering: this proposal takes the next free number on this branch (0110).
-   If another branch lands 0110 first, renumber at integration. Accepted ADRs
-   are never renumbered.
+4. Numbering: this proposal was first filed as ADR-0110. C2.1 (2026-10-11)
+   renumbered it to **0112**, the next number free on `main`, on the Phase-14
+   branch, on the Arena 1 graphics branch, and on this branch. ADR-0110 is
+   already taken by `0110-static-native-pie-and-kernel-placement.md` (accepted
+   Luna work). That accepted ADR is not changed by this renumbering. Status
+   remains **Proposed**; the renumbering does not accept this proposal.
+   Accepted ADRs are never renumbered.
 
 ## C1 update (2026-10-08): status of each decision
 

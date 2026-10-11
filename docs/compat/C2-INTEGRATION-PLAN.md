@@ -30,7 +30,7 @@ Each component is classed as one of:
 | String and memory functions | SHARED-RUNTIME | C1 `src/string.c` (subset) | C2.2 completes the set. G2 uses its own `SDL_stdlib.c`. |
 | Formatted output (`printf` family) | SHARED-RUNTIME | C1 `src/stdio.c` (integer and string only) | Float conversions to be refused, not faked. |
 | stdin, stdout, stderr | SHARED-RUNTIME over EXISTING (ADR-0104 streams) | C1 `src/streams.c` | Granted by the record only. Never ambient filesystem authority. |
-| Legacy serial (`SYS_DEBUG_WRITE`) | EXISTING, excluded from the C contract (ADR-0110) | C1 opt-in only | G2's OOM and log path uses it (F-C2-07). |
+| Legacy serial (`SYS_DEBUG_WRITE`) | EXISTING, excluded from the C contract (ADR-0112) | C1 opt-in only | G2's OOM and log path uses it (F-C2-07). |
 | Monotonic time | SHARED-RUNTIME over EXISTING (`SYS_CLOCK_NOW`) | C1 `arena_clock_us` | `clock_gettime` narrow form is C2.2. |
 | Sleep | SHARED-RUNTIME over EXISTING | C1 busy-yield only | A blocking timer binding over `SYS_TIMER_ARM`/`SYS_WAIT` is existing service; deferred (F-C2-13). |
 | errno | SHARED-RUNTIME | Missing in C1 | Per-thread through TLS. C2.2. |
@@ -139,7 +139,7 @@ Arena 1's documents and not reproduced.
   16-page (64 KiB) pool. `arenaos_memory.c` defines `HEAP_SIZE (128 * 1024)` with a comment saying
   512 KiB. The OOM message says 512 KiB. `G2-FINAL-REPORT.md` says 128 KiB. Four figures for one
   allocator.
-- **F-C2-07 (M, measured)**: G2's OOM path and its log output use `SYS_DEBUG_WRITE` (serial). ADR-0110
+- **F-C2-07 (M, measured)**: G2's OOM path and its log output use `SYS_DEBUG_WRITE` (serial). ADR-0112
   excludes that call from the C contract. The migration target is the granted stderr stream.
 - **F-C2-08 (H, reported and partly measured)**: G2 SDL3 math needs float helpers (`sinf`, `cosf`,
   `sqrtf`, and others), and F-C2-01 shows scalar double arithmetic in the app. Both are blocked by the

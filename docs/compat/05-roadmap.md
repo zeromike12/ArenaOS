@@ -13,7 +13,7 @@ below changes that scope. Graphics and SDL3 video/audio belong to Arena 1.
 - **Host-only:** 42-check runtime test under ASan+UBSan (report 03 §3).
 - **Static:** ELF audit, ABI cross-check, SIMD/x87 check (report 02).
 - **Documented:** architecture audit (report 01), strategy (report 04),
-  Proposed ADR-0110.
+  Proposed ADR-0112.
 - Exit criteria met: a C program ran on the guest with explicit exit and
   observed output. Exit status is **not** independently observed (F8).
 
@@ -24,10 +24,10 @@ Goal: a C runtime that a native app can depend on without the shortcuts.
 | Item | Existing | Missing | Evidence needed |
 |---|---|---|---|
 | Startup contract | `_start`, stack switch, TLS install, init_array | argv/env and a documented startup block for C (ARST v2 is Rust-only) | guest proof with argv |
-| Stdio | serial via `SYS_DEBUG_WRITE` (prototype) | capability stream binding (ADR-0110 proposal) | guest proof, stream-only output, backdoor not used |
+| Stdio | serial via `SYS_DEBUG_WRITE` (prototype) | capability stream binding (ADR-0112 proposal) | guest proof, stream-only output, backdoor not used |
 | Allocator | 4 MiB reservation, size classes, reuse, no coalescing | coalescing free runs; growth; C ABI for `realloc` growth in place | host stress; guest T4 with churn |
 | Threads | none for C | C thread create/join/detach wrappers over ABI v1 thread calls; mutex and condvar over sync domains | guest two-thread proof |
-| TLS | runtime-managed | decision: runtime or loader owns PT_TLS (ADR-0110 Q3) | ADR decision |
+| TLS | runtime-managed | decision: runtime or loader owns PT_TLS (ADR-0112 Q3) | ADR decision |
 | Time | monotonic clock, sleep by yield | a non-busy sleep over timers (`SYS_TIMER_ARM`) | guest sleep proof |
 | Exit | `SYS_THREAD_EXIT` | exit-status observation in the harness | serial or harness proof of the status value |
 | Toolchain | GCC, clang via zig, flags frozen in `run.py` | a documented LLVM toolchain profile for workstations | build reproducibility check |
@@ -125,8 +125,8 @@ runtime.
 
 ## Open questions for the architecture review
 
-1. Remove or capability-gate `SYS_DEBUG_WRITE` (ADR-0110 Q1)?
-2. Stream capabilities through Startup ABI v2 slots, or a C-specific descriptor (ADR-0110 Q2)?
-3. Runtime or loader owns PT_TLS (ADR-0110 Q3)?
+1. Remove or capability-gate `SYS_DEBUG_WRITE` (ADR-0112 Q1)?
+2. Stream capabilities through Startup ABI v2 slots, or a C-specific descriptor (ADR-0112 Q2)?
+3. Runtime or loader owns PT_TLS (ADR-0112 Q3)?
 4. Is a C++ profile a goal, and if so, when? (Affects Stage 5 only.)
 5. Who owns the audio backend for C, given that no C audio path exists?

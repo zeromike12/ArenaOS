@@ -185,7 +185,7 @@ result line (`PROBE_FEED`).
 
 - No Linux compatibility, no dynamic linker, no PIE/ASLR (Luna's Phase-14 scope).
 - No change to production kernel or userspace.
-- No ABI change landed. The proposed ABI changes are in ADR-0110 (Proposed).
+- No ABI change landed. The proposed ABI changes are in ADR-0112 (Proposed).
 - No SDL3, SuperTuxKart or Blender port (report 04 covers dependencies only).
 
 ## 8. How to reproduce

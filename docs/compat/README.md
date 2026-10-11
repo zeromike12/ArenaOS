@@ -38,7 +38,7 @@ differ (for example, the host count is now 598, not 42).
 | 04 | [Compatibility strategy](04-compat-strategy.md) | Options (a) native ports, (b) brokered POSIX subset, (c) Linux ELF compat; SDL3, SuperTuxKart, Blender dependency analysis |
 | 05 | [Staged roadmap](05-roadmap.md) | Stages 0–5: milestones, existing vs missing, security risks, core-OS and graphics dependencies, phase boundaries |
 
-Proposal: [ADR-0110 — Native C runtime profile and C-facing stdio](../adr/0110-native-c-runtime-profile-proposal.md)
+Proposal: [ADR-0112 — Native C runtime profile and C-facing stdio](../adr/0112-native-c-runtime-profile-proposal.md)
 (**Proposed**, not accepted; for architecture review).
 
 ## Evidence labels
@@ -79,7 +79,7 @@ Full table: report 03 §5 and report 02 §6.
 
 - No Linux binary compatibility, no dynamic linker, no PIE/ASLR (Luna, Phase 14).
 - No SDL3, SuperTuxKart or Blender port. No graphics work (Arena 1).
-- No ABI change landed. Proposals are in ADR-0110 only.
+- No ABI change landed. Proposals are in ADR-0112 only.
 - No merge, no release, no change to `main` or Luna's branch.
 - No `run.py all` in a single invocation was run; `build`, `audit`, `abi`,
   `host`, and each compiler's `guest` were run separately.

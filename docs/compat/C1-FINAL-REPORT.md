@@ -144,8 +144,8 @@ receipts 58 and 57.
 | Item | Status | Owner / decision needed |
 |---|---|---|
 | **Stream ring counters wrap at 2^32** (`counter % 768` jumps by 256; `2^32 mod 768 = 256`). Unread bytes can be overwritten. Pinned as KNOWN-DEFECT in host tests. | **BLOCKED** on a wire-format change. **PROPOSED**: `docs/adr/0111-stream-ring-counter-wrap.md`, options u64 counters (version 2) or power-of-two capacity. | M (Phase-13 streams) and C review. No change landed. |
-| **`SYS_DEBUG_WRITE` has no capability check** (F1). C1 avoids it, but the kernel still exposes it. | **PROPOSED** (ADR-0110 Decision 3). Not landed. | Core OS and architecture review. |
-| **Loader ignores `PT_TLS`** (F3). The C runtime installs TLS itself. | **OPEN** question in ADR-0110. | Luna loader owners. |
+| **`SYS_DEBUG_WRITE` has no capability check** (F1). C1 avoids it, but the kernel still exposes it. | **PROPOSED** (ADR-0112 Decision 3). Not landed. | Core OS and architecture review. |
+| **Loader ignores `PT_TLS`** (F3). The C runtime installs TLS itself. | **OPEN** question in ADR-0112. | Luna loader owners. |
 | **No FP/SIMD for C.** The kernel has no FP state save or restore. C images are audited to contain no SSE or x87. | **BLOCKED** for FP. Decision for Luna after Phase 14: keep the no-FP contract (recommended now), or enable FP with per-thread state (kernel ADR). | Luna. `C1-FPSIMD-BOUNDARY.md`. |
 | **Firmware CR4/CR0 FP bits unchecked** (CR4.OSFXSR, OSXSAVE, CR0.EM, CR0.TS are not read or asserted). | **OPEN** (no effect while no code uses FP). | Core OS, with the FP decision. |
 | **Target-feature baseline of the kernel target** (earlier note). | **UNVERIFIED** in this session: `rustc` is not on the sandbox PATH. Not relied on. | Re-check when the toolchain is available. |
@@ -156,7 +156,7 @@ receipts 58 and 57.
 | **Kernel-side memory safety of the C heap.** | Not proven. HOST-ONLY results are not kernel evidence. | Core OS. |
 | **SDL3.** Needs a static, no-optional-backend build (or a dlopen-style loader), FP (blocked), and Arena 1's video and audio backends. Not started. | **BLOCKED**, listed in `C1-SDL3-HANDOFF.md`. | Arena 1. |
 
-ADR-0110 remains **Proposed**. C1 added the status addendum only. ADR-0111 is new
+ADR-0112 remains **Proposed**. C1 added the status addendum only. ADR-0111 is new
 and **Proposed**.
 
 ## 6. Reproduction

@@ -143,8 +143,8 @@ the lower bound only, not timing precision.
 
 | # | Missing / broken | Owner | Impact on C1 / SDL3 | Status |
 |---|---|---|---|---|
-| M1 | `SYS_DEBUG_WRITE` has no capability check (F1) | Core OS + architecture review | Excluded from C path; kernel still has it | Proposed in ADR-0110 Decision 3; not landed |
-| M2 | Loader ignores `PT_TLS` (F3) | Luna loader owners | C runtime installs TLS itself; `link/arena-user.ld` KEEP contract is fragile | Open option in ADR-0110 |
+| M1 | `SYS_DEBUG_WRITE` has no capability check (F1) | Core OS + architecture review | Excluded from C path; kernel still has it | Proposed in ADR-0112 Decision 3; not landed |
+| M2 | Loader ignores `PT_TLS` (F3) | Luna loader owners | C runtime installs TLS itself; `link/arena-user.ld` KEEP contract is fragile | Open option in ADR-0112 |
 | M3 | Ring counter wrap at 2^32 bytes (streams.rs, streams.c) | Phase-13 stream owners | Corruption after 4 GiB per channel | Pinned defect; ADR-0111 proposed (wire-format change) |
 | M4 | No FP/SIMD state save/restore; kernel never sets CR4.OSFXSR/OSXSAVE | Core OS (Luna review after Phase 14) | User code must not use FP/SIMD; C audit enforces it | See C1-FPSIMD-BOUNDARY.md |
 | M5 | No PIE / relocation | Luna Phase-14 | C images are static at 0x200000 | Out of C1 scope |
