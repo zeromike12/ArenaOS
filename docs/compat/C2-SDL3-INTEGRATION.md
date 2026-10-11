@@ -13,6 +13,50 @@ Evidence labels used below: **guest** (asserted by an exact-PASS QEMU run),
 (deliberate error), **untested** (no test reference), **blocked** (cannot be done
 under the current contract).
 
+Status labels (C2.1, used in section 0 and throughout). Each label needs the evidence named:
+
+| Label | Meaning | Evidence required |
+|---|---|---|
+| **available/verified** | Implemented and exercised by a host test against the stated reference | host test name |
+| **build-only** | Compiles and links with both compilers and appears in both archives. No test reference | `c2_report.py` defined-in-both |
+| **guest-verified** | Exercised by an App A or App B group in an exact-PASS QEMU run | run receipt at a named commit |
+| **unsupported** | Refused by design: returns an error or NULL with `errno`, never a fake success | refusal test or code path |
+| **blocked** | Cannot be done under the current contract. Needs an architecture decision | blocker ID (see `C2-FINAL-REPORT.md`, `C2.1-B-GFX-1-HANDOFF.md`) |
+
+Evidence for this document is C2.1 at commit `c8887a1` or later. The verification receipt
+(`docs/compat/C2.1-VERIFICATION.md`) names the commit each result came from.
+
+## 0. Shared-runtime function status (C2.1)
+
+No symbols were added or removed in C2.1. The table covers the surface Arena 1 would use.
+
+| Area | Functions | Status | Evidence |
+|---|---|---|---|
+| Startup gate and record | `arena_startup()`, `arena_startup_count_kind`, `arena_startup_pick_notification` | available/verified (count and notification selection); guest-verified (gate, App A G8) | host (`test_notification_selection`), guest |
+| Allocation | `malloc calloc realloc free`, `aligned_alloc` (power-of-two alignment, size a multiple of alignment) | guest-verified (G3); aligned contract host-verified | host, guest |
+| Strings and memory | `string.h` set | available/verified | host (glibc differential) |
+| Formatting | `printf snprintf sprintf vsnprintf vsprintf vprintf fprintf vfprintf puts putchar fputs` | available/verified (integer conversions); unsupported (floating point) | host, guest (`printf snprintf puts putchar fputs`, G1) |
+| Streams | `fwrite` (complete elements), `fputc putc`, `fgets` (NULL on read error), `ungetc`, `setvbuf` (`_IONBF` only) | available/verified; `setvbuf` `_IOFBF`/`_IOLBF` **unsupported** (EINVAL) | host (C2.1.3 tests), guest (G1, G7) |
+| Input | `getchar`, `fgetc`, `getc`, `fread` | available/verified (pushback, errors); live stdin read **untested** (no controlled input fixture) | host, guest (G2 classification) |
+| Integers | `strtol` family, `atoi atol atoll abs labs llabs div ldiv lldiv` | available/verified; `abs`/`div` at MIN defined (no UB) | host (glibc differential, boundary tests) |
+| Time | `clock_gettime(CLOCK_MONOTONIC)`, `nanosleep` | guest-verified (G4) | guest |
+| Time | `time`, `clock`, `CLOCK_REALTIME` | unsupported (ENOSYS) | host (`test_time_refusals`) |
+| Process exit | `exit`, `atexit` (32 slots), `_Exit`, `abort`, `assert` | available/verified; `atexit` guest-verified (G9) | host (forked children), guest |
+| Process exit | `_exit` | **unsupported**: not defined. Use `exit` or `_Exit`. The Arena 1 G2.1 handoff lists it as needed; C2.1 adds no symbols | static (`nm`, source search) |
+| Threads | `thrd_create join detach current equal sleep yield`, `thrd_exit` | guest-verified (G5, G6) | guest |
+| Mutex | `mtx_init` (`mtx_plain` only), `mtx_lock unlock trylock destroy` | guest-verified (G5, G6) | guest |
+| Mutex | recursive mutex, `mtx_timed`, `mtx_timedlock` | unsupported (`thrd_error`) | guest (G6) |
+| Condition | `cnd_init wait signal broadcast destroy`, `cnd_timedwait` | guest-verified (G5); timed refusals and expiry guest-verified (G6) | guest |
+| Once | `call_once` | guest-verified (G5) | guest |
+| Thread-specific | `tss_create`, `tss_set`, `tss_get` | unsupported (`thrd_error`, or NULL from `tss_get`); `tss_delete` is a no-op because no key can exist | guest (G6) |
+| Floating point and SIMD | any | **blocked** (no FP state in the kernel; no soft-float path; see section 9) | static (ISA audit) |
+| Filesystem | `fopen freopen remove rename` | unsupported (ENOSYS) | host |
+
+Deadline base for `cnd_timedwait`: the runtime interprets `struct timespec` deadlines on
+the **monotonic** clock, because no wall-clock grant exists. C11 specifies absolute
+`TIME_UTC` time. A caller that builds deadlines from wall time is not supported. Use
+relative deadlines from `clock_gettime(CLOCK_MONOTONIC)`.
+
 ## 1. Paths (repository `experiments/c-runtime/`)
 
 Headers (add `-I include -I include/libc`):
@@ -67,6 +111,9 @@ $ARENA_ZIG cc -target x86_64-freestanding-none <same flags as above> \
     -o app-clang.elf
 ```
 
+Link set (C2.1, unchanged by C2.1 because no symbols were added): `crt0.o`, the application
+objects, and `libarena_c.a`. `_exit` is not in the set. Call `exit` or `_Exit`.
+
 Ordering matters: `crt0.o` first, application objects, then the archive. The archive is
 linked last so its symbols resolve application references. Ordinary apps do **not** pull
 `SYS_DEBUG_WRITE`: the legacy serial sink is in its own object and is gated behind
@@ -111,28 +158,43 @@ The authoritative list is `experiments/c-runtime/compat/c2-compat-report.json`
   `fgetc getc fgets fread` refusal paths host-tested; reads from a live stdin untested.
 - Time: `clock_gettime(CLOCK_MONOTONIC)` and `nanosleep` (guest, App A G4).
   `time()` and `clock()` are refused with `ENOSYS`; no test reference.
-- Process: `exit` and `atexit` (32 handlers; guest G9 and host). `_Exit` and `abort`
-  end the process with 7 and 134 (host, forked child). They run no handlers. Not guest-tested.
+- Process: `exit` and `atexit` (32 handlers, reverse order, each run at most once per process;
+  guest G9 and host). C2.1.4: a registration reserves its slot by compare-and-swap and publishes
+  it with a release store, so no handler is visible before it is complete. Re-entry from a
+  handler on the same thread is a no-op. Another thread that calls the run waits for the run in
+  progress. Host tests run the concurrency cases in forked children. `_Exit` and `abort` end
+  the process with 7 and 134 (host, forked child). They run no handlers. Not guest-tested.
 - `assert` failure prints and calls `abort` (host, forked child, status 134).
 
 ## 4. Supported thread APIs (C11 subset, not pthreads)
 
-Evidence is guest unless noted. The guest run is App A G5 and G6 (exact PASS, C2 source `7b27c67`).
+Evidence is guest (App A G5 and G6) unless noted. The labels follow section 0.
 
-- **Supported (guest):** `thrd_create`, `thrd_join`, `thrd_detach`,
-  `thrd_current`, `thrd_equal`, `thrd_sleep`; `mtx_init` (plain only), `mtx_lock`,
-  `mtx_unlock`, `mtx_trylock` (free succeeds, self-held returns `thrd_busy`), `mtx_destroy`;
-  `cnd_init`, `cnd_timedwait`, `cnd_wait`, `cnd_signal`, `cnd_broadcast`, `cnd_destroy`;
-  `call_once`. `mtx_destroy`, `cnd_destroy`, and `thrd_yield` are called by App A but not separately asserted.
-- **Refused (guest):** recursive mutexes (`mtx_init` returns `thrd_error`), `mtx_timedlock`
-  (`thrd_error`), `tss_create` and `tss_set` (`thrd_error`). `tss_get` returns `NULL`, a quiet
-  refusal, not an error code.
-- **No test reference:** `thrd_exit`. `tss_delete` is a no-op (no key table exists).
+- **Available and guest-verified:** `thrd_create`, `thrd_join`, `thrd_detach`, `thrd_current`,
+  `thrd_equal`, `thrd_sleep`, `thrd_yield`, `thrd_exit`. `mtx_init` (`mtx_plain` only),
+  `mtx_lock`, `mtx_unlock`, `mtx_trylock` (free succeeds; self-held returns `thrd_busy`),
+  `mtx_destroy`; `cnd_init`, `cnd_wait`, `cnd_signal`, `cnd_broadcast`, `cnd_destroy`,
+  `cnd_timedwait`; `call_once`.
+- **C2.1 corrections (static, then guest):**
+  - `mtx_init` accepts only `mtx_plain`. Other types return `thrd_error` (no capability is faked).
+  - `cnd_timedwait` refuses a field out of range, seconds-to-microseconds overflow, and a wait
+    longer than the kernel bound `ARENA_SYNC_MAX_TIMEOUT_US` (86 400 000 000 µs). The refusal
+    happens **before** the mutex is released. An expired deadline becomes a 1 µs wait and
+    returns `thrd_timedout` after the mutex is reacquired. A zero wait is never passed to the
+    kernel (zero means infinite there).
+  - Detached threads: the thread record is reference counted (handle and worker). A detached
+    worker is released when it finishes, with no use after free and no double free. A refused
+    detach keeps the handle valid. Stress (64 create-and-detach cycles, App A G6) checks that
+    every worker ran, the live thread count returns to baseline, and the allocator's live blocks
+    return to baseline. Termination is observed through the kernel thread count, not a flag.
+  - `thrd_exit` ends only the calling worker (App A G6: status 7, application continues).
+- **Refused (unsupported, guest-verified):** recursive mutexes (`mtx_init` returns `thrd_error`),
+  `mtx_timed` at init, `mtx_timedlock` (`thrd_error`), `tss_create` and `tss_set` (`thrd_error`).
+  `tss_get` returns `NULL`, a quiet refusal, not an error code. The C2.1 tss key in tests is
+  initialized to 0 and is never a live key.
+- **`tss_delete`:** a no-op. No key can exist, because `tss_create` always refuses. It is
+  unreachable in practice and has no test reference of its own.
 - **Not provided:** pthreads, `pthread_*`, POSIX signals.
-
-Caveat on `thrd_detach`: the detached worker sets a flag and returns, and the main thread
-waits on the flag, not on the worker's exit. The process exit status is the last thread
-to exit, so this does not yet prove the status cannot change. See the coverage doc.
 
 SDL3 uses thread-local state and thread-specific keys in parts of its code. Those assumptions
 must be checked against the pinned SDL source before porting. Arena 1 must **not** map
@@ -168,28 +230,32 @@ refuse the feature.
 
 Two hazards for Arena 1:
 
-- **Notification selection.** `src/startup.c` (around line 310) sets the stream-wait
-  notification to the first `Other`-role Notification with RW rights. An app that also holds
-  another `Other`-role RW Notification could have its stream waits bound to the wrong one.
-  This is static evidence of the rule, not a tested failure. Arena 1 must keep at most one such
-  descriptor, or the contract must change first (blocker; see the final report).
+- **Notification selection (C2.1.5, host-verified).** The stream-wait notification is chosen by
+  `arena_startup_pick_notification`. A candidate is role **Other**, kind **Notification**,
+  rights exactly READ|WRITE. Exactly one candidate is selected. Zero, two or more, or a NULL
+  table selects nothing, and a blocking stream wait then returns `ARENA_E_NO_WAITER`. The
+  runtime never binds to a guessed notification. Arena 1 must still keep the stream-wait
+  notification unambiguous in its own record, or it gets no blocking wait.
 - **Graphical descriptors** (BadgedEndpoint, SharedRegion, Notification) carry role **Other**.
   The runtime can count them by kind with `arena_startup_count_kind()`, but cannot tell which
-  one is the surface. Arena 1 must not index them by slot number. See `C2-FINAL-REPORT.md` (B-GFX-1).
+  one is the surface. Arena 1 must not index them by slot number. Status: **blocked** (B-GFX-1).
+  Options and a recommendation are in `docs/compat/C2.1-B-GFX-1-HANDOFF.md`.
 
 ## 7. Resource limits (kernel and runtime)
 
-- Threads: 4 user threads per process (kernel); process status is the last thread to exit.
+- Threads: 4 user threads per process (kernel). A create is refused while four are live; the
+  detached stress test waits for a worker to exit before creating the next. Process status is
+  the last thread to exit.
 - Heap: 16 MiB (`HEAP_PAGES` 4096), 64 KiB chunks, 16-byte default alignment. One heap per
   process. All allocator state is serialized by one spinlock (static; host-tested).
 - Aligned allocation: alignments up to 16 use the normal path. 32 to 65536 use validated
   aligned blocks. Larger, or non-power-of-two, is refused with NULL and `errno`.
-- atexit handlers: 32.
+- atexit handlers: 32 (reserved by CAS, published by release store; overflow refused).
 - Streams: ring capacity 768 bytes per direction.
 - Capability slots: 128 per process. Descriptors per startup record: 7 (`ARENA_ARST_CAPABILITY_MAX`).
 - VM: 8 regions per process, 4096 pages per region, 8192 committed pages per process.
 - Timers: 4 per process. Sync: 64 domains, 32 keys per domain, 2048 keys total.
-- Sync timeout maximum: 86 400 000 000 µs.
+- Sync timeout maximum: 86 400 000 000 µs (longer waits are refused with `thrd_error`).
 
 ## 8. Unsupported functionality (C2)
 
@@ -253,3 +319,63 @@ Two hazards for Arena 1:
 - No graphics protocol, no compositor integration, no display or input testing.
 - No verified graphical startup (B-GFX-1 blocks identifying a surface by contract).
 - No floating-point path. The no-FP profile is the contract, and C2 does not change it.
+
+## 12. Arena 1 coordination (C2.1.8, read-only)
+
+Arena 1's branch `arena/13f9221b-arenaos` was read only (head `8e4438e` on the remote at
+inspection). Its G2.1 handoff (`docs/graphics/G2.1-C-RUNTIME-HANDOFF.md`, at `34ccfe5`) was
+read with `git show`. Nothing on that branch was changed.
+
+**What Arena 1's handoff says, and what C2.1 finds:**
+
+| Arena 1 statement | C2.1 finding | Status |
+|---|---|---|
+| `malloc calloc realloc free` aliases present (`src/libc_names.c`) | present; C1 allocator underneath; no second allocator | available/verified |
+| integer-only `snprintf`; no floating point | present; floating-point conversions refused (`ENOTSUP`) | available/verified (integers); unsupported (floating point) |
+| monotonic `arena_clock_us` | present (`include/arena/rt.h`, `src/rt.c`) | guest-verified (via G4) |
+| `_exit` required by SDL3, missing from the handoff's runtime | **not defined** in C2.1. C2.1 adds no symbols. Use `exit` or `_Exit` | unsupported (gap, recorded) |
+| `HAVE_MALLOC`, `SDL_FILESYSTEM_DUMMY`, `SDL_LOADSO_DUMMY` | Arena 1's SDL configuration. **Not verified by C2.** SDL is not built here | untested (not verified by C2) |
+| Blocked on Luna for FP/SIMD | confirmed: no FP path under the no-FP profile (section 9) | blocked |
+| Desktop service BadgedEndpoint (kind 12, WRITE) | descriptor counted by kind; not identified (B-GFX-1) | blocked |
+| Window surface SharedRegion (kind 7, READ\|WRITE) | counted by kind; not identified (B-GFX-1) | blocked |
+| Clock device (kind 3) | a Notification (kind 3, role Other). Only the stream-wait notification is selected, and only when it is the sole RW candidate | blocked (identification) |
+| Names this proposal "ADR-0110" | that number is Luna's accepted ADR. The proposal is **ADR-0112** on this branch | corrected in this branch |
+
+**Exact compile and link instructions against C2.1** (the same recipe as section 2; Arena 1
+must link the archive and must not copy the sources):
+
+```
+# 1. Build the runtime for both compilers (from the ArenaOS repository root)
+python3 experiments/c-runtime/run.py --cc gcc build
+python3 experiments/c-runtime/run.py --cc clang build      # needs ARENA_ZIG=<zig binary>
+
+# 2. Compile the application (GCC shown; flags as in section 2)
+gcc -std=gnu11 -O2 -g0 -Wall -Wextra -Werror -ffreestanding -fno-builtin \
+    -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie \
+    -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-exceptions -fno-omit-frame-pointer \
+    -mgeneral-regs-only -msoft-float -mno-sse -mno-sse2 -mno-mmx -mno-80387 \
+    -ftls-model=local-exec -fno-strict-aliasing \
+    -I experiments/c-runtime/include -I experiments/c-runtime/include/libc \
+    -c app.c -o app.o
+
+# 3. Link (crt0 first, the application, then the archive; no other objects)
+gcc -nostdlib -static -no-pie -Wl,--no-dynamic-linker -Wl,-z,noexecstack \
+    -Wl,--build-id=none -Wl,-z,max-page-size=4096 -Wl,-T,experiments/c-runtime/link/arena-user.ld \
+    experiments/c-runtime/build/guest-gcc/crt0.o app.o \
+    experiments/c-runtime/build/guest-gcc/lib/libarena_c.a -o app-gcc.elf
+
+# 4. Audit (mandatory; a build that fails the audit is not ArenaOS-compatible)
+python3 experiments/c-runtime/c2_isa_audit.py app-gcc.elf
+```
+
+Those commands were not run against an SDL3 tree, so SDL3 compile and link are **untested**.
+The flags are the same ones `run.py` uses to build App A and App B, which are guest-verified
+(see `docs/compat/C2.1-VERIFICATION.md` for the commit).
+
+**Contract gaps and blockers Arena 1 must hold:**
+
+1. `_exit` is not provided. Do not add a second `_exit`. Route process termination through `exit`.
+2. Floating point and SIMD: SDL3 cannot pass the ISA audit (section 9, blocker B-FP-1 and B-FP-2).
+3. Graphical identification: B-GFX-1 (see `docs/compat/C2.1-B-GFX-1-HANDOFF.md`).
+4. Do not index graphical descriptors by slot number. Use kind and rights, and refuse on ambiguity.
+5. `_Thread_local` is the supported thread-local mechanism. `tss_*` is refused.

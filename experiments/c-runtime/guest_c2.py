@@ -70,8 +70,8 @@ EXPECTED_EXITS = [58, 58, 61, 63]
 # RESULT total must equal the sum. G9 has two real assertions (registration accepted,
 # handler not yet run). Changing a count is a deliberate edit here.
 EXPECTED_GROUP_CHECKS = {
-    "G1 stdio": 9, "G2 stdin": 2, "G3 allocator": 9, "G4 time": 5, "G5 threads": 9,
-    "G6 threads ext": 32, "G7 stdio ext": 8, "G8 init": 1, "G9 exit": 2,
+    "G1 stdio": 9, "G2 stdin": 2, "G3 allocator": 10, "G4 time": 5, "G5 threads": 9,
+    "G6 threads ext": 42, "G7 stdio ext": 8, "G8 init": 1, "G9 exit": 2,
 }
 GROUP_NAMES = list(EXPECTED_GROUP_CHECKS)
 EXPECTED_TOTAL = sum(EXPECTED_GROUP_CHECKS.values())

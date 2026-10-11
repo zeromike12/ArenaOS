@@ -128,9 +128,13 @@ static void g3_allocator(void) {
         free(p);
     }
 
-    void *al = aligned_alloc(4096, 10000);
+    /* C11 7.22.3.1: size must be an integral multiple of alignment (3 x 4096 here). */
+    void *al = aligned_alloc(4096, 12288);
     EXPECT(al != NULL && ((uintptr_t)al % 4096) == 0, "aligned_alloc(4096) alignment");
     free(al);
+    errno = 0;
+    EXPECT(aligned_alloc(4096, 10000) == NULL && errno == EINVAL,
+           "aligned_alloc size not a multiple of alignment refused (EINVAL)");
     errno = 0;
     EXPECT(aligned_alloc(3, 8) == NULL && errno == EINVAL, "non-power-of-two alignment refused");
     errno = 0;
@@ -325,6 +329,32 @@ static void g6_threads_ext(void) {
     EXPECT(cnd_signal(&gate_cv) == thrd_success, "cnd_signal with no waiters succeeds");
     cnd_destroy(&gate_cv);
     mtx_destroy(&gate_lock);
+
+    /* C2.1.1 timed-wait audit. A refused wait must not release the mutex. An expired
+     * deadline returns thrd_timedout with the mutex held again. Deadlines are on the
+     * monotonic base (no wall-clock grant). */
+    cnd_t tcv;
+    mtx_t tmx;
+    EXPECT(cnd_init(&tcv) == thrd_success && mtx_init(&tmx, mtx_plain) == thrd_success,
+           "timed-wait condvar and mutex created");
+    EXPECT(mtx_lock(&tmx) == thrd_success, "timed-wait mutex locked");
+    struct timespec tw_now, tw_far, tw_past, tw_bad;
+    EXPECT(clock_gettime(CLOCK_MONOTONIC, &tw_now) == 0, "timed-wait monotonic base");
+    tw_far = tw_now;
+    tw_far.tv_sec += 86401; /* more than the 86400 s kernel bound */
+    EXPECT(cnd_timedwait(&tcv, &tmx, &tw_far) == thrd_error, "cnd_timedwait over the sync bound refused");
+    EXPECT(mtx_trylock(&tmx) == thrd_busy, "refused timed wait leaves the mutex held");
+    tw_past.tv_sec = 0;
+    tw_past.tv_nsec = 0;
+    EXPECT(cnd_timedwait(&tcv, &tmx, &tw_past) == thrd_timedout, "expired deadline returns thrd_timedout");
+    EXPECT(mtx_trylock(&tmx) == thrd_busy, "mutex reacquired when the timed wait expires");
+    tw_bad = tw_now;
+    tw_bad.tv_nsec = 1000000000L; /* out of range */
+    EXPECT(cnd_timedwait(&tcv, &tmx, &tw_bad) == thrd_error, "cnd_timedwait refuses tv_nsec = 10^9");
+    EXPECT(mtx_trylock(&tmx) == thrd_busy, "mutex still held after a refused field");
+    EXPECT(mtx_unlock(&tmx) == thrd_success, "timed-wait mutex unlocked");
+    cnd_destroy(&tcv);
+    mtx_destroy(&tmx);
 
     /* Detach: the thread runs and terminates without a join. Termination is
      * observed through the kernel's live thread count, not a flag. */
