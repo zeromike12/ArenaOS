@@ -361,8 +361,9 @@ static void g6_threads_ext(void) {
         }
         created++;
     }
-    EXPECT(created == 64, "64 create+detach cycles accepted (created %d, capacity waits %d)", created,
-           capacity_waits);
+    /* EXPECT does not print its message arguments, so the counts are reported here. */
+    printf(APP_NAME " stress created=%d capacity_waits=%d\n", created, capacity_waits);
+    EXPECT(created == 64, "64 create+detach cycles accepted");
     EXPECT(wait_thread_count(base_threads), "all detached stress workers terminated");
     EXPECT(__atomic_load_n(&detached_runs, __ATOMIC_ACQUIRE) - runs0 == 64,
            "every stress worker ran exactly once");

@@ -45,20 +45,28 @@ void *arena_std_realloc(void *p, size_t n) {
 void arena_std_free(void *p) { arena_free(p); }
 
 void *arena_std_aligned_alloc(size_t alignment, size_t size) {
+    /* C11 7.22.3.1: alignment must be a power of two and size an integral multiple of
+     * alignment. Both violations are refused with EINVAL (no output, no allocation). */
+    int pow2 = alignment != 0 && (alignment & (alignment - 1)) == 0;
+    if (!pow2 || size % alignment != 0) {
+        arena_c_set_errno(EINVAL);
+        return NULL;
+    }
     void *p = arena_aligned_alloc(alignment, size);
     if (p == NULL) {
-        /* Not a power of two: EINVAL. Otherwise a refusal (limit, overflow, or memory). */
-        int bad = alignment == 0 || (alignment & (alignment - 1)) != 0;
-        arena_c_set_errno(bad ? EINVAL : ENOMEM);
+        arena_c_set_errno(ENOMEM); /* alignment above the supported limit, overflow, or memory */
     }
     return p;
 }
 
-int arena_abs(int v) { return v < 0 ? -v : v; }
+/* C11 7.22.6.1 leaves abs(INT_MIN) undefined. The runtime returns INT_MIN (the value a
+ * two's-complement negation wraps to, and glibc's result) and never executes signed
+ * overflow. The same rule applies to the long and long long forms. */
+int arena_abs(int v) { return v < 0 && v != (int)INT32_MIN ? -v : (v == (int)INT32_MIN ? (int)INT32_MIN : v); }
 
-long arena_labs(long v) { return v < 0 ? -v : v; }
+long arena_labs(long v) { return v < 0 && v != LONG_MIN_ARENA ? -v : (v == LONG_MIN_ARENA ? LONG_MIN_ARENA : v); }
 
-long long arena_llabs(long long v) { return v < 0 ? -v : v; }
+long long arena_llabs(long long v) { return v < 0 && v != (long long)INT64_MIN ? -v : (v == (long long)INT64_MIN ? (long long)INT64_MIN : v); }
 
 static int digit_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -259,6 +267,10 @@ char *arena_getenv(const char *name) {
 #include "libc/stdlib.h"
 div_t arena_div(int a, int b) {
     div_t r = {0, 0};
+    if (b == -1 && a == (int)INT32_MIN) { /* C11 undefined; returns the wrapped quotient, no trap */
+        r.quot = (int)INT32_MIN;
+        return r;
+    }
     if (b != 0) {
         r.quot = a / b;
         r.rem = a % b;
@@ -268,6 +280,10 @@ div_t arena_div(int a, int b) {
 
 ldiv_t arena_ldiv(long a, long b) {
     ldiv_t r = {0, 0};
+    if (b == -1 && a == LONG_MIN_ARENA) {
+        r.quot = LONG_MIN_ARENA;
+        return r;
+    }
     if (b != 0) {
         r.quot = a / b;
         r.rem = a % b;
@@ -277,6 +293,10 @@ ldiv_t arena_ldiv(long a, long b) {
 
 lldiv_t arena_lldiv(long long a, long long b) {
     lldiv_t r = {0, 0};
+    if (b == -1 && a == (long long)INT64_MIN) {
+        r.quot = (long long)INT64_MIN;
+        return r;
+    }
     if (b != 0) {
         r.quot = a / b;
         r.rem = a % b;

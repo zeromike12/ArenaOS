@@ -66,6 +66,14 @@ const arena_startup_t *arena_startup(void) {
 
 /* Host stand-in for the scheduler yield (the guest binds it to SYS_YIELD). Used by
  * the atexit re-entry path, which yields while another thread runs the handlers. */
+/* Host seam for src/libc_time.c (nanosleep's busy wait). src/rt.c, the real binding, talks
+ * to the kernel and is not in the host build. No host test sleeps: nanosleep is guest-verified
+ * (App A G4). time() and clock() refusals do not reach this seam. */
+int arena_busy_sleep_us(uint64_t us) {
+    (void)us;
+    return 0;
+}
+
 void arena_yield(void) {
     sched_yield();
 }

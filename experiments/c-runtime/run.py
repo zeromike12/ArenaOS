@@ -422,7 +422,7 @@ def host_tests():
     out.mkdir(parents=True, exist_ok=True)
     exe = out / "test_runtime"
     srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "src/streams.c", "src/startup_query.c",
-            "src/errno.c", "src/exit.c", "src/libc_string.c", "src/libc_stdlib.c",
+            "src/errno.c", "src/exit.c", "src/libc_string.c", "src/libc_stdlib.c", "src/libc_time.c",
             "host/host_main.c", "host/test_runtime.c", "host/test_libc.c"]
     cmd = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
            "-DARENA_HOSTED", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",

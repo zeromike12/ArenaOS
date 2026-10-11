@@ -14,6 +14,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <sys/types.h>
+#include <time.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -767,6 +768,90 @@ static void test_notification_selection(void) {
     CHECK(arena_startup_pick_notification(g, 3) == NONE, "notification: two notifications among graphical grants -> NONE");
 }
 
+
+/* ---- C2.1.7 integer boundaries, aligned_alloc contract, time/clock refusal ---- */
+
+time_t arena_time(time_t *out);
+clock_t arena_clock(void);
+
+static void test_integer_boundaries(void) {
+    /* abs family at MIN: no signed overflow executed; literal expected values (C11 leaves
+     * these undefined, the runtime defines them as the wrapped MIN). */
+    CHECK(arena_abs(INT_MIN) == INT_MIN, "abs(INT_MIN) == INT_MIN (no overflow)");
+    CHECK(arena_abs(INT_MIN + 1) == INT_MAX, "abs(INT_MIN+1) == INT_MAX");
+    CHECK(arena_labs(LONG_MIN) == LONG_MIN && arena_labs(LONG_MIN + 1) == LONG_MAX, "labs at LONG_MIN");
+    CHECK(arena_llabs(LLONG_MIN) == LLONG_MIN && arena_llabs(LLONG_MIN + 1) == LLONG_MAX, "llabs at LLONG_MIN");
+
+    /* div family: MIN / -1 wraps to MIN with remainder 0, no trap. Other cases agree
+     * with glibc, including negative operands. */
+    div_t d = arena_div(INT_MIN, -1);
+    CHECK(d.quot == INT_MIN && d.rem == 0, "div(INT_MIN, -1): wrapped quotient, rem 0");
+    ldiv_t ld = arena_ldiv(LONG_MIN, -1);
+    CHECK(ld.quot == LONG_MIN && ld.rem == 0, "ldiv(LONG_MIN, -1): wrapped quotient, rem 0");
+    lldiv_t lld = arena_lldiv(LLONG_MIN, -1);
+    CHECK(lld.quot == LLONG_MIN && lld.rem == 0, "lldiv(LLONG_MIN, -1): wrapped quotient, rem 0");
+    static const int pairs[][2] = {{7, -2}, {-7, 2}, {INT_MIN, 2}, {INT_MAX, -1}, {0, 5}, {-9, -4}};
+    for (size_t i = 0; i < sizeof pairs / sizeof pairs[0]; i++) {
+        div_t g = div(pairs[i][0], pairs[i][1]);
+        div_t w = arena_div(pairs[i][0], pairs[i][1]);
+        CHECK(g.quot == w.quot && g.rem == w.rem, "div(%d, %d) differs from glibc", pairs[i][0], pairs[i][1]);
+    }
+    ldiv_t lg = ldiv(LONG_MIN, 3);
+    ldiv_t lw = arena_ldiv(LONG_MIN, 3);
+    CHECK(lg.quot == lw.quot && lg.rem == lw.rem, "ldiv(LONG_MIN, 3) differs from glibc");
+
+    /* strtol / strtoul extremes against glibc, with ERANGE. */
+    static const char *lim[] = {"9223372036854775807", "9223372036854775808", "-9223372036854775808",
+                                "-9223372036854775809", "18446744073709551615", "18446744073709551616",
+                                "-1", "0", "-0"};
+    for (size_t i = 0; i < sizeof lim / sizeof lim[0]; i++) {
+        arena_c_set_errno(0);
+        long gv = arena_strtol(lim[i], NULL, 10);
+        int gerr = arena_c_get_errno();
+        errno = 0;
+        long wv = strtol(lim[i], NULL, 10);
+        int werr = errno;
+        CHECK(gv == wv, "strtol(\"%s\") got %ld want %ld", lim[i], gv, wv);
+        CHECK((werr == ERANGE) == (gerr == ERANGE), "strtol(\"%s\") ERANGE mismatch", lim[i]);
+        arena_c_set_errno(0);
+        unsigned long gu = arena_strtoul(lim[i], NULL, 10);
+        int guerr = arena_c_get_errno();
+        errno = 0;
+        unsigned long wu = strtoul(lim[i], NULL, 10);
+        int wuerr = errno;
+        CHECK(gu == wu, "strtoul(\"%s\") got %lu want %lu", lim[i], gu, wu);
+        CHECK((wuerr == ERANGE) == (guerr == ERANGE), "strtoul(\"%s\") ERANGE mismatch", lim[i]);
+    }
+    CHECK(arena_atoi("2147483647") == INT_MAX && arena_atoi("-2147483648") == INT_MIN,
+          "atoi at the int boundaries");
+}
+
+static void test_aligned_alloc_contract(void) {
+    /* C11 7.22.3.1: power-of-two alignment AND size a multiple of alignment. */
+    arena_c_set_errno(0);
+    CHECK(arena_std_aligned_alloc(16, 17) == NULL && arena_c_get_errno() == EINVAL,
+          "aligned_alloc(16, 17): size not a multiple -> NULL, EINVAL");
+    arena_c_set_errno(0);
+    CHECK(arena_std_aligned_alloc(3, 6) == NULL && arena_c_get_errno() == EINVAL,
+          "aligned_alloc(3, 6): not a power of two -> NULL, EINVAL");
+    arena_c_set_errno(0);
+    CHECK(arena_std_aligned_alloc(0, 16) == NULL && arena_c_get_errno() == EINVAL,
+          "aligned_alloc(0, 16): zero alignment -> NULL, EINVAL");
+    void *p = arena_std_aligned_alloc(64, 128);
+    CHECK(p != NULL && ((uintptr_t)p % 64) == 0, "aligned_alloc(64, 128): aligned allocation");
+    arena_free(p);
+}
+
+static void test_time_refusals(void) {
+    /* Wall clock and CPU time have no granted authority: refused with ENOSYS, not faked. */
+    time_t t = 42;
+    arena_c_set_errno(0);
+    CHECK(arena_time(&t) == (time_t)-1 && arena_c_get_errno() == 38, "time(): refused, ENOSYS");
+    CHECK(t == 42, "time(&t): output not written on refusal");
+    arena_c_set_errno(0);
+    CHECK(arena_clock() == (clock_t)-1 && arena_c_get_errno() == 38, "clock(): refused, ENOSYS");
+}
+
 /* ---- atexit: LAST, it alters process-wide exit state ----------------------- */
 
 static int order[4];
@@ -965,6 +1050,9 @@ int libc_host_tests(void) {
     test_input_contract();
     test_formatter_bounds();
     test_notification_selection();
+    test_integer_boundaries();
+    test_aligned_alloc_contract();
+    test_time_refusals();
     test_atexit_concurrency(); /* forks: must run before the parent's atexit state is used */
     test_atexit();
     test_closed_stream(); /* LAST: closes stderr for the rest of the process */
