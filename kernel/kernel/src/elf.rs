@@ -123,6 +123,13 @@ pub static FPU_TEST_IMAGE: &[u8] = include_bytes!(
     "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-fpu-fixture"
 );
 
+/// Minimal Phase-15 ring-3 #XF probe. Its only FP/SIMD operation is an
+/// unmasked SQRTSS invalid operation; the pre/post-MXCSR fallback status
+/// makes missing exception delivery observable to the kernel harness.
+pub static FPU_XF_PROBE_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe"
+);
+
 /// The minimal shell (M4.6, ADR-0020): spawn-registry image 1, built
 /// by `tools/build.sh` from `userspace/shell` with the same
 /// strict-subset contract as the payload — a genuine cargo/rust-lld

@@ -19,7 +19,8 @@ import mtest  # noqa: E402
 EXPECTED = (
     "thread_isolation_block_yield_preempt",
     "process_isolation_slot_reuse",
-    "fault_containment",
+    "xf_delivery_probe",
+    "mf_ud_fault_containment",
 )
 SHUTDOWN_FEED = [(b"arena>", 1, b"shutdown\r")]
 
@@ -38,8 +39,26 @@ def check_serial(label: str, serial: str, rc: int | None, avx_expected: bool) ->
     for name in EXPECTED:
         marker = f"m15:test:{name}: PASS"
         check(serial.count(marker) == 1, f"guest assertion {name}")
-    check(serial.count("m15: RESULT PASS (3/3)") == 1,
+    check(serial.count("m15: RESULT PASS (4/4)") == 1,
           "all Phase-15 guest cases passed")
+    if "m15:test:xf_delivery_probe: FAIL" in serial:
+        fallback = re.search(
+            r"minimal #XF probe did not receive vector 19: status=(0x[0-9a-f]+), "
+            r"pre-MXCSR=(0x[0-9a-f]+), post-MXCSR=(0x[0-9a-f]+)",
+            serial,
+        )
+        check(
+            fallback is not None
+            and tuple(int(value, 16) for value in fallback.groups())
+            == (0x1F0000001F01, 0x1F00, 0x1F01),
+            "failed #XF trial records clean pre-state and invalid-operation post-state",
+        )
+        check(
+            "minimal #XF probe receipts: fault=Some(1f0000001f01), "
+            "sibling=Some(2a), peer=Some(2a), sibling_and_peer_survived=true, "
+            "fault_slot_released=true, resource_baseline_restored=true" in serial,
+            "failed #XF trial records survivor and exact teardown receipts",
+        )
     check("halting via UEFI ResetSystem(shutdown)" in serial,
           "kernel reached declared clean shutdown")
     results = re.findall(r"^(m\d+): RESULT (PASS|FAIL) \((\d+)/(\d+)\)$",

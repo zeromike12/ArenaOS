@@ -3,7 +3,8 @@
 
 The release PE omits its COFF symbol table. A retained, fixed-layout table in
 .rdata names the exact audited architecture-leaf ranges. This script parses
-real `llvm-objdump` instruction records, checks every x87/MMX/SSE/AVX
+real `llvm-objdump` instruction records, verifies complete coverage of every
+executable section, checks every x87/MMX/SSE/AVX
 instruction against those ranges, and enforces the reviewed instruction
 counts inside each range.
 """
@@ -73,6 +74,10 @@ EXPECTED = (
 
 ALLOWED = tuple(frozenset(rule) for rule in EXPECTED)
 INSN_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s*([A-Za-z][A-Za-z0-9.]*)\s*(.*?)\s*$")
+RAW_INSN_RE = re.compile(
+    r"^\s*([0-9a-fA-F]+):\s*((?:[0-9a-fA-F]{2}\s+)+)"
+    r"([A-Za-z][A-Za-z0-9.]*)\s*(.*?)\s*$"
+)
 VECTOR_REG_RE = re.compile(r"\b(?:xmm|ymm|zmm|mm)[0-9]+\b", re.IGNORECASE)
 
 
@@ -81,6 +86,7 @@ class Instruction:
     address: int
     mnemonic: str
     operands: str
+    size: int = 0
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,17 @@ def parse_instructions(disassembly: str) -> list[Instruction]:
         # llvm-objdump adds a `# address <label>` comment to RIP-relative
         # operands. Comments and symbol labels are not machine instructions.
         line = line.split("#", 1)[0]
+        raw_match = RAW_INSN_RE.match(line)
+        if raw_match:
+            instructions.append(
+                Instruction(
+                    int(raw_match.group(1), 16),
+                    raw_match.group(3).lower(),
+                    raw_match.group(4).strip().lower(),
+                    len(raw_match.group(2).split()),
+                )
+            )
+            continue
         match = INSN_RE.match(line)
         if match:
             instructions.append(
@@ -149,7 +166,9 @@ def check_instruction(instruction: Instruction, ranges: tuple[AddressRange, ...]
         )
 
 
-def parse_pe_ranges(image: bytes) -> tuple[AddressRange, ...]:
+def parse_pe_ranges(
+    image: bytes,
+) -> tuple[tuple[AddressRange, ...], tuple[AddressRange, ...]]:
     if len(image) < 0x40 or image[:2] != b"MZ":
         raise ValueError("input is not a PE image")
     pe_offset = struct.unpack_from("<I", image, 0x3C)[0]
@@ -162,8 +181,10 @@ def parse_pe_ranges(image: bytes) -> tuple[AddressRange, ...]:
     optional = pe_offset + 24
     if optional + optional_size > len(image) or struct.unpack_from("<H", image, optional)[0] != 0x20B:
         raise ValueError("expected a complete PE32+ optional header")
+    image_base = struct.unpack_from("<Q", image, optional + 24)[0]
     section_headers = optional + optional_size
     sections: list[tuple[str, int, int, int, int]] = []
+    executable_sections: list[AddressRange] = []
     for index in range(section_count):
         offset = section_headers + index * 40
         if offset + 40 > len(image):
@@ -171,9 +192,23 @@ def parse_pe_ranges(image: bytes) -> tuple[AddressRange, ...]:
         raw_name = image[offset : offset + 8].split(b"\0", 1)[0]
         name = raw_name.decode("ascii", errors="replace")
         virtual_size, virtual_address, raw_size, raw_offset = struct.unpack_from("<IIII", image, offset + 8)
+        characteristics = struct.unpack_from("<I", image, offset + 36)[0]
         if raw_offset + raw_size > len(image):
             raise ValueError(f"section {name} extends beyond the PE file")
         sections.append((name, virtual_address, virtual_size, raw_offset, raw_size))
+        if characteristics & 0x20000000:  # IMAGE_SCN_MEM_EXECUTE
+            if virtual_size == 0 or raw_size < virtual_size:
+                raise ValueError(
+                    f"executable section {name} has no complete file-backed virtual range"
+                )
+            start = image_base + virtual_address
+            executable_sections.append(AddressRange(name, start, start + virtual_size))
+
+    if not executable_sections:
+        raise ValueError("PE image has no executable sections")
+    executable_sections.sort(key=lambda span: span.start)
+    if any(left.end > right.start for left, right in zip(executable_sections, executable_sections[1:])):
+        raise ValueError("executable PE sections overlap")
 
     table_offset = None
     for name, _va, _vsize, raw_offset, raw_size in sections:
@@ -193,7 +228,6 @@ def parse_pe_ranges(image: bytes) -> tuple[AddressRange, ...]:
     if version != TABLE_VERSION or count != len(RANGE_NAMES):
         raise ValueError(f"unsupported FP audit table version/count {version}/{count}")
 
-    image_base = struct.unpack_from("<Q", image, optional + 24)[0]
     ranges: list[AddressRange] = []
     for index, name in enumerate(RANGE_NAMES):
         start, end = struct.unpack_from("<QQ", image, header_end + index * 16)
@@ -205,25 +239,65 @@ def parse_pe_ranges(image: bytes) -> tuple[AddressRange, ...]:
             end += image_base
         if start <= 0 or end <= start:
             raise ValueError(f"invalid {name} leaf range 0x{start:x}..0x{end:x}")
-        if not any(name == ".text" and start >= image_base + va and end <= image_base + va + vsize
-                   for name, va, vsize, _raw, _size in sections):
+        if not any(
+            section.name == ".text" and start >= section.start and end <= section.end
+            for section in executable_sections
+        ):
             raise ValueError(f"{name} leaf does not reside in executable .text")
         ranges.append(AddressRange(name, start, end))
     ordered = sorted(ranges, key=lambda span: span.start)
     if any(left.end > right.start for left, right in zip(ordered, ordered[1:])):
         raise ValueError("trusted FP/SIMD leaf ranges overlap")
-    return tuple(ranges)
+    return tuple(ranges), tuple(executable_sections)
 
 
-def audit(disassembly: str, ranges: tuple[AddressRange, ...]) -> int:
+def audit(
+    disassembly: str,
+    ranges: tuple[AddressRange, ...],
+    executable_sections: tuple[AddressRange, ...],
+) -> int:
     if len(ranges) != len(RANGE_NAMES):
         raise ValueError("trusted-range table does not contain all required leaves")
+    if not executable_sections:
+        raise ValueError("PE image has no executable sections to audit")
     instructions = parse_instructions(disassembly)
     if not instructions:
         raise ValueError("disassembler produced no instruction records")
+    for section in executable_sections:
+        section_instructions = sorted(
+            (
+                instruction
+                for instruction in instructions
+                if section.start <= instruction.address < section.end
+            ),
+            key=lambda instruction: instruction.address,
+        )
+        if not section_instructions:
+            raise ValueError(f"disassembly contains no instructions for executable {section.name}")
+        cursor = section.start
+        for instruction in section_instructions:
+            if instruction.size <= 0:
+                raise ValueError("disassembler omitted raw instruction bytes")
+            if instruction.address != cursor:
+                raise ValueError(f"disassembly gap in executable {section.name} at 0x{cursor:x}")
+            cursor = instruction.address + instruction.size
+            if cursor > section.end:
+                raise ValueError(
+                    f"instruction extends beyond executable {section.name} at 0x{instruction.address:x}"
+                )
+        if cursor != section.end:
+            raise ValueError(f"disassembly ends before executable {section.name} at 0x{cursor:x}")
+
     counts = [collections.Counter() for _ in ranges]
     seen = [0 for _ in ranges]
     for instruction in instructions:
+        if not any(
+            section.start <= instruction.address < section.end
+            for section in executable_sections
+        ):
+            raise ValueError(
+                f"disassembler returned an instruction outside executable sections at 0x{instruction.address:x}"
+            )
         index = locate_range(instruction.address, ranges)
         if index is not None:
             seen[index] += 1
@@ -265,6 +339,20 @@ def self_test() -> None:
     )
     if records != [Instruction(0x1000, "fxsave64", "byte ptr [r8]")]:
         raise AssertionError(f"instruction parser treated text/comment as code: {records!r}")
+    raw = parse_instructions("1000: f3 0f 51 c0 sqrtss xmm0, xmm0\n")
+    if raw != [Instruction(0x1000, "sqrtss", "xmm0, xmm0", 4)]:
+        raise AssertionError(f"instruction parser lost raw-byte coverage: {raw!r}")
+    empty_ranges = tuple(
+        AddressRange(name, 0x1000 + index * 0x10, 0x1008 + index * 0x10)
+        for index, name in enumerate(RANGE_NAMES)
+    )
+    try:
+        audit("", empty_ranges, (AddressRange(".text", 0x1000, 0x1100),))
+    except ValueError as error:
+        if "no instruction records" not in str(error):
+            raise
+    else:
+        raise AssertionError("empty disassembly passed the kernel ISA audit")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -280,9 +368,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.image or not args.objdump:
         parser.error("--image and --objdump are required unless --self-test is used")
     try:
-        ranges = parse_pe_ranges(args.image.read_bytes())
+        ranges, executable_sections = parse_pe_ranges(args.image.read_bytes())
         completed = subprocess.run(
-            [args.objdump, "-d", "--no-show-raw-insn", "--x86-asm-syntax=intel", str(args.image)],
+            [args.objdump, "-d", "--x86-asm-syntax=intel", str(args.image)],
             check=False,
             capture_output=True,
             text=True,
@@ -291,13 +379,13 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 f"disassembler failed with {completed.returncode}: {completed.stderr.strip()}"
             )
-        count = audit(completed.stdout, ranges)
+        count = audit(completed.stdout, ranges, executable_sections)
     except (OSError, ValueError) as error:
         print(f"kernel ISA audit: FAIL: {error}", file=sys.stderr)
         return 1
     print(
         "kernel ISA audit: PASS; "
-        f"{count} real instructions checked, six trusted leaf profiles matched, "
+        f"{count} real instructions checked across {len(executable_sections)} fully decoded executable sections, six trusted leaf profiles matched, "
         "ordinary x87/MMX/SSE/AVX rejected"
     )
     return 0

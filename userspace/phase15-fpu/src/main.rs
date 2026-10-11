@@ -297,11 +297,21 @@ global_asm!(
     "ldmxcsr dword ptr [rsp + 0x230]",
     "mov eax, 0xBF800000",
     "movd xmm0, eax",
+    "stmxcsr dword ptr [rsp + 0x238]",
+    "cmp dword ptr [rsp + 0x238], 0x00001F00",
+    "jne .Lphase15_xf_bad_prestate",
     "sqrtss xmm0, xmm0",
-    // Reaching this instruction means QEMU did not deliver the requested
-    // #XF; return the observed MXCSR as a diagnostic status for the harness.
     "stmxcsr dword ptr [rsp + 0x230]",
-    "mov edi, dword ptr [rsp + 0x230]",
+    // Reaching this point is a failure: preserve the exact MXCSR values read
+    // immediately before and after SQRTSS in the 64-bit thread exit status.
+    "mov eax, dword ptr [rsp + 0x238]",
+    "shl rax, 32",
+    "mov ecx, dword ptr [rsp + 0x230]",
+    "or rax, rcx",
+    "mov rdi, rax",
+    "jmp .Lphase15_exit",
+    ".Lphase15_xf_bad_prestate:",
+    "mov edi, 95",
     "jmp .Lphase15_exit",
     ".Lphase15_fault_mf:",
     "mov word ptr [rsp + 0x234], 0x037B",

@@ -50,6 +50,12 @@ if [[ ! -f "$FPU_FIXTURE" ]]; then
     exit 1
 fi
 echo "Phase-15 fixture: ${FPU_FIXTURE#"$REPO_ROOT"/} ($(stat -c%s "$FPU_FIXTURE") bytes)"
+XF_PROBE="$REPO_ROOT/userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe"
+if [[ ! -f "$XF_PROBE" ]]; then
+    echo "error: Phase-15 #XF probe ELF not produced at $XF_PROBE" >&2
+    exit 1
+fi
+echo "Phase-15 #XF probe: ${XF_PROBE#"$REPO_ROOT"/} ($(stat -c%s "$XF_PROBE") bytes)"
 
 # M4.6 (ADR-0020): the minimal shell is embedded the same way —
 # spawn-registry image 1, spawned at boot as the initial service.

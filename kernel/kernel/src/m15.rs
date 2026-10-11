@@ -28,7 +28,7 @@ struct ProcessFixture {
 }
 
 pub fn run_suite() -> bool {
-    let checks: [(&str, fn() -> Result<(), &'static str>); 3] = [
+    let checks: [(&str, fn() -> Result<(), &'static str>); 4] = [
         (
             "thread_isolation_block_yield_preempt",
             test_thread_isolation,
@@ -37,7 +37,8 @@ pub fn run_suite() -> bool {
             "process_isolation_slot_reuse",
             test_process_isolation_and_reuse,
         ),
-        ("fault_containment", test_fault_containment),
+        ("xf_delivery_probe", test_xf_delivery_probe),
+        ("mf_ud_fault_containment", test_fault_containment),
     ];
     let mut passed = 0u32;
     for (name, test) in checks {
@@ -67,11 +68,19 @@ pub fn run_suite() -> bool {
 }
 
 fn prepare_process(name: &'static str, stack_pages: usize) -> Result<ProcessFixture, &'static str> {
+    prepare_process_with_image(name, elf::FPU_TEST_IMAGE, stack_pages)
+}
+
+fn prepare_process_with_image(
+    name: &'static str,
+    image: &[u8],
+    stack_pages: usize,
+) -> Result<ProcessFixture, &'static str> {
     if stack_pages == 0 || stack_pages > 4 {
         return Err("invalid Phase-15 stack-page count");
     }
     let pid = proc::create(name)?;
-    let loaded = elf::load(elf::FPU_TEST_IMAGE, pid)?;
+    let loaded = elf::load(image, pid)?;
     let root = proc::pml4_of(pid).ok_or("Phase-15 process lost its PML4")?;
     let stack_end = USER_STACK_BASE + stack_pages as u64 * USER_PAGE;
     without_interrupts(|| {
@@ -132,6 +141,17 @@ fn spawn_fixture_thread(
 }
 
 fn drive_tasks(tasks: &[(u64, u64)]) -> Result<u64, &'static str> {
+    drive_tasks_inner(tasks, true)
+}
+
+fn drive_short_tasks(tasks: &[(u64, u64)]) -> Result<u64, &'static str> {
+    drive_tasks_inner(tasks, false)
+}
+
+fn drive_tasks_inner(
+    tasks: &[(u64, u64)],
+    require_timer_switch: bool,
+) -> Result<u64, &'static str> {
     let saved_flags = x86_64::read_flags();
     let preempt_before = sched::preempt::total();
     x86_64::cli();
@@ -165,7 +185,7 @@ fn drive_tasks(tasks: &[(u64, u64)]) -> Result<u64, &'static str> {
         return Err("native FP/SIMD guest tasks exceeded the 10-second bound");
     }
     let switches = sched::preempt::total().saturating_sub(preempt_before);
-    if switches == 0 {
+    if require_timer_switch && switches == 0 {
         return Err("FP/SIMD fixture passed without any timer-driven context switch");
     }
     Ok(switches)
@@ -258,7 +278,7 @@ fn test_process_isolation_and_reuse() -> Result<(), &'static str> {
 
 fn test_fault_containment() -> Result<(), &'static str> {
     let mut all_faults_contained = true;
-    for (kind, vector) in [(1u64, 19u64), (2, 16), (3, 6)] {
+    for (kind, vector) in [(2u64, 16u64), (3, 6)] {
         let free_before = frames::free_frames();
         let fault_process = prepare_process("m15Fault", 2)?;
         let peer_process = prepare_process("m15FaultPeer", 1)?;
@@ -304,6 +324,72 @@ fn test_fault_containment() -> Result<(), &'static str> {
     if all_faults_contained {
         Ok(())
     } else {
-        Err("one or more CPL3 FP/SIMD or unsupported-instruction faults were not contained")
+        Err("one or more CPL3 x87 or unsupported-instruction faults were not contained")
     }
+}
+
+fn test_xf_delivery_probe() -> Result<(), &'static str> {
+    const XF_STATUS: u64 = 0x100 + 19;
+    let free_before = frames::free_frames();
+    let threads_before = sched::live_threads();
+    let process = prepare_process_with_image("m15XfProbe", elf::FPU_XF_PROBE_IMAGE, 2)?;
+    let peer_process = prepare_process("m15XfPeer", 1)?;
+    let fault = spawn_fixture_thread(process, 0, 0)?;
+    let sibling = spawn_fixture_thread(process, 1, 1)?;
+    let peer = spawn_fixture_thread(peer_process, 0, 1)?;
+    let fault_slot = sched::slot_of_thread(fault).ok_or("#XF probe has no scheduler slot")?;
+
+    // This short task must not need a timer edge to complete. The sibling and
+    // separate peer remain in the same driven batch to prove containment.
+    let switches = drive_short_tasks(&[(fault, XF_STATUS), (sibling, EXIT_OK), (peer, EXIT_OK)])?;
+    let fault_observed = syscall::exit_status_of(fault);
+    let sibling_observed = syscall::exit_status_of(sibling);
+    let peer_observed = syscall::exit_status_of(peer);
+    if fault_observed != Some(XF_STATUS) {
+        match fault_observed {
+            Some(0x200) => error!(
+                "m15",
+                "minimal #XF probe refused to execute SQRTSS: pre-MXCSR was not exactly 0x1f00"
+            ),
+            Some(status) => error!(
+                "m15",
+                "minimal #XF probe did not receive vector 19: status={status:#018x}, pre-MXCSR={:#010x}, post-MXCSR={:#010x}; expected {XF_STATUS:#x}",
+                (status >> 32) as u32,
+                status as u32
+            ),
+            None => error!("m15", "minimal #XF probe has no recorded exit status"),
+        }
+    }
+    let survivors_ok = sibling_observed == Some(EXIT_OK) && peer_observed == Some(EXIT_OK);
+    if !survivors_ok {
+        error!(
+            "m15",
+            "#XF probe survivor status mismatch: sibling={sibling_observed:x?}, peer={peer_observed:x?}"
+        );
+    }
+
+    destroy_process(process)?;
+    destroy_process(peer_process)?;
+    let fault_slot_released = sched::slot_of_thread(fault).is_none();
+    let resource_baseline_restored =
+        frames::free_frames() == free_before && sched::live_threads() == threads_before;
+    let reclaimed = fault_slot_released && resource_baseline_restored;
+    if !reclaimed {
+        error!(
+            "m15",
+            "minimal #XF probe teardown did not return to exact baselines"
+        );
+    }
+    info!(
+        "m15",
+        "minimal #XF probe receipts: fault={fault_observed:x?}, sibling={sibling_observed:x?}, peer={peer_observed:x?}, sibling_and_peer_survived={survivors_ok}, fault_slot_released={fault_slot_released}, resource_baseline_restored={resource_baseline_restored}"
+    );
+    if fault_observed != Some(XF_STATUS) || !survivors_ok || !reclaimed {
+        return Err("minimal unmasked SQRTSS #XF delivery/containment contract failed");
+    }
+    info!(
+        "m15",
+        "minimal unmasked SQRTSS #XF probe delivered vector 19; same-process sibling and independent peer survived; slot {fault_slot} and resources reclaimed ({switches} scheduler switches)"
+    );
+    Ok(())
 }
