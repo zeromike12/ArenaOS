@@ -4,7 +4,7 @@ CC ?= gcc
 AR ?= ar
 
 CFLAGS_COMMON = -Iinclude -Isrc -Os -Wall -Wextra -Wno-unused-parameter
-CFLAGS_ARENAOS = $(CFLAGS_COMMON) -ffreestanding -fno-builtin -nostdlib -fno-pie -no-pie -mno-sse -mno-sse2
+CFLAGS_ARENAOS = $(CFLAGS_COMMON) -ffreestanding -fno-builtin -nostdlib -fno-pie -no-pie -mgeneral-regs-only -mno-sse -mno-sse2 -mno-80387 -mno-mmx
 LDFLAGS_ARENAOS = -Os -ffreestanding -nostdlib -static -fno-pie -no-pie -Wl,-e,_start -Wl,-Ttext=0x200000 -Wl,--build-id=none
 
 SRCS = \
@@ -48,7 +48,7 @@ $(LIB): $(OBJS)
 $(APP_BIN): ../sdl3-app/src/main.c $(LIB)
 	@mkdir -p ../sdl3-app/build
 	$(CC) $(CFLAGS_ARENAOS) -c ../sdl3-app/src/main.c -o ../sdl3-app/build/main.o
-	$(CC) $(LDFLAGS_ARENAOS) ../sdl3-app/build/main.o -Lbuild -lSDL3 /usr/lib/gcc/x86_64-linux-gnu/12/libgcc.a -o $@
+	$(CC) $(LDFLAGS_ARENAOS) ../sdl3-app/build/main.o -Lbuild -lSDL3 -o $@
 
 $(APP_BUNDLE): $(APP_BIN)
 	python3 -c "import sys; sys.path.insert(0, '../../tools'); import apb1_format; \

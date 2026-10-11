@@ -3,6 +3,22 @@
 #define WINDOW_WIDTH  320
 #define WINDOW_HEIGHT 240
 
+/* Integer-only bitwise conversion from IEEE-754 float bits (0 x87 / 0 SSE) */
+static inline int32_t float_bits_to_int(uint32_t bits) {
+    if (bits == 0) return 0;
+    uint32_t sign = bits & 0x80000000U;
+    int32_t exp = (int32_t)((bits >> 23) & 0xFF) - 127;
+    if (exp < 0) return 0;
+    uint32_t mantissa = (bits & 0x7FFFFFU) | 0x800000U;
+    int32_t val;
+    if (exp >= 23) {
+        val = (int32_t)(mantissa << (exp - 23));
+    } else {
+        val = (int32_t)(mantissa >> (23 - exp));
+    }
+    return sign ? -val : val;
+}
+
 /* Palette of vibrant colors for the bouncing box */
 static const Uint32 palette[] = {
     0x003498DB, /* Dodger Blue */
@@ -31,6 +47,8 @@ static void draw_box(SDL_Surface *surface, int x, int y, int w, int h, Uint32 co
 }
 
 int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
     SDL_Log("[main] Entered main");
 
     /* 1. Initialize SDL video subsystem */
@@ -104,10 +122,14 @@ int main(int argc, char *argv[]) {
                     running = false;
                     break;
 
-                case SDL_EVENT_MOUSE_MOTION:
-                    mouse_x = (int)event.motion.x;
-                    mouse_y = (int)event.motion.y;
+                case SDL_EVENT_MOUSE_MOTION: {
+                    union { float f; uint32_t u; } ux, uy;
+                    ux.f = event.motion.x;
+                    uy.f = event.motion.y;
+                    mouse_x = float_bits_to_int(ux.u);
+                    mouse_y = float_bits_to_int(uy.u);
                     break;
+                }
 
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                     mouse_down = true;

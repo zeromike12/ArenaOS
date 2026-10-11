@@ -21,10 +21,9 @@ void SDL_SYS_DelayNS(Uint64 ns) {
 }
 
 extern void SDL_SendKeyboardKey(Uint64 timestamp, SDL_KeyboardID keyboardID, int rawcode, SDL_Scancode scancode, bool down);
-
-extern void SDL_SendMouseMotion(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, bool relative, float x, float y);
+extern void SDL_SendMouseMotion(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, bool relative, int x, int y);
 extern void SDL_SendMouseButton(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, Uint8 button, bool down);
-extern void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, float x, float y, SDL_MouseWheelDirection direction);
+extern void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, int x, int y, SDL_MouseWheelDirection direction);
 extern void SDL_SendWindowEvent(SDL_Window *window, SDL_EventType windowevent, int data1, int data2);
 
 int main(void) {
@@ -47,7 +46,7 @@ int main(void) {
     printf("[PASS] Keyboard event translation verified\n");
 
     /* 2. Test Mouse Motion Translation */
-    SDL_SendMouseMotion(2000, NULL, 0, false, 150.0f, 220.0f);
+    SDL_SendMouseMotion(2000, NULL, 0, false, 150, 220);
     assert(SDL_PollEvent(&ev) == true);
     assert(ev.type == SDL_EVENT_MOUSE_MOTION);
     assert(ev.motion.x == 150.0f);
@@ -69,7 +68,7 @@ int main(void) {
     printf("[PASS] Mouse button translation verified\n");
 
     /* 4. Test Mouse Wheel Translation */
-    SDL_SendMouseWheel(2300, NULL, 0, 0.0f, -3.0f, SDL_MOUSEWHEEL_NORMAL);
+    SDL_SendMouseWheel(2300, NULL, 0, 0, -3, SDL_MOUSEWHEEL_NORMAL);
     assert(SDL_PollEvent(&ev) == true);
     assert(ev.type == SDL_EVENT_MOUSE_WHEEL);
     assert(ev.wheel.y == -3.0f);

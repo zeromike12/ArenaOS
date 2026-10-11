@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """Reliable, disassembly-based CPU instruction architecture scanner for ArenaOS.
 
-Scans FUNC symbol ranges of ELF binaries for floating-point and SIMD instructions:
+Scans ELF binaries for floating-point and SIMD instructions:
   - SSE / SSE2 / SSE3 / SSSE3 / SSE4 instructions & %xmm operands
   - AVX / AVX2 / AVX-512 instructions & %ymm / %zmm operands
   - MMX instructions & %mm operands
   - Legacy 80387 x87 FPU mnemonics & %st(...) register stack operands
 
-Ignores non-executable data, jump tables, and padding in .text by strictly
-bounding scan ranges to [st_value, st_value + st_size) of defined FUNC symbols.
+Audit Coverage:
+  1. Primary scan: Bounded to [st_value, st_value + st_size) of defined FUNC symbols.
+  2. Fallback scan: If no FUNC symbols exist (e.g. stripped binary), scans the entire
+     executable (.text / RX) section so no code escapes auditing.
+  3. Strict Fail-Closed Policy:
+     - Missing or empty disassembly output fails the audit immediately.
+     - Zero scanned instructions is treated as an error (never reported as clean).
+     - Instruction presence represents an architectural hazard regardless of reachability.
+  4. Handoff Contract:
+     - Distinguishes static instruction presence from proven runtime execution.
+     - Separates CPU instruction enablement from cross-thread state preservation.
 
 Usage:
-  python3 tools/isa_audit.py <elf_path> [--strict-no-fp] [--json]
+  python3 tools/isa_audit.py <elf_path> [--strict] [--json]
   python3 tools/isa_audit.py --self-test
 """
 
@@ -60,7 +69,10 @@ RE_AVX_MNEMONIC = re.compile(r"^v[a-z0-9]+")
 
 def extract_functions(elf_path: Path) -> list[tuple[int, int, str]]:
     cmd = ["readelf", "-sW", str(elf_path)]
-    res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError:
+        return []
     funcs = []
     for line in res.stdout.splitlines():
         parts = line.split()
@@ -77,27 +89,38 @@ def extract_functions(elf_path: Path) -> list[tuple[int, int, str]]:
 
 
 def scan_elf(elf_path: Path) -> dict:
-    funcs = extract_functions(elf_path)
-    if not funcs:
+    if not elf_path.is_file():
         return {
             "file": str(elf_path),
-            "functions_count": 0,
-            "instructions_scanned": 0,
-            "xmm_hits": 0,
-            "ymm_hits": 0,
-            "zmm_hits": 0,
-            "mmx_hits": 0,
-            "x87_hits": 0,
-            "categories": {},
-            "function_breakdown": {},
+            "error": "File not found",
             "all_clean": False,
-            "error": "No FUNC symbols found",
+            "total_prohibited_hits": 999999,
         }
 
+    funcs = extract_functions(elf_path)
+
     cmd = ["objdump", "-d", "--no-show-raw-insn", str(elf_path)]
-    dis_res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    try:
+        dis_res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        return {
+            "file": str(elf_path),
+            "error": f"objdump failed: {e}",
+            "all_clean": False,
+            "total_prohibited_hits": 999999,
+        }
+
+    lines = dis_res.stdout.splitlines()
+    if not lines:
+        return {
+            "file": str(elf_path),
+            "error": "Empty disassembly output",
+            "all_clean": False,
+            "total_prohibited_hits": 999999,
+        }
 
     ranges = [(addr, addr + size, name) for addr, size, name in funcs]
+    fallback_mode = (len(ranges) == 0)
 
     total_scanned = 0
     xmm_count = 0
@@ -111,7 +134,7 @@ def scan_elf(elf_path: Path) -> dict:
     hits_by_fn = {}
     details = []
 
-    for line in dis_res.stdout.splitlines():
+    for line in lines:
         m = re.match(r"^\s*([0-9a-f]+):\t(.*)$", line)
         if not m:
             continue
@@ -120,14 +143,16 @@ def scan_elf(elf_path: Path) -> dict:
         if not body:
             continue
 
-        # Check if instruction is inside a function
         owner = None
-        for lo, hi, name in ranges:
-            if lo <= addr < hi:
-                owner = name
-                break
-        if owner is None:
-            continue
+        if not fallback_mode:
+            for lo, hi, name in ranges:
+                if lo <= addr < hi:
+                    owner = name
+                    break
+            if owner is None:
+                continue
+        else:
+            owner = f"code_0x{addr:x}"
 
         total_scanned += 1
         tokens = body.split()
@@ -169,11 +194,13 @@ def scan_elf(elf_path: Path) -> dict:
                 })
 
     all_fp_simd_hits = xmm_count + ymm_count + zmm_count + mmx_count + x87_count + avx_mnemonic_count
+    # Fail-closed: Must have scanned at least one instruction, and zero hits
     all_clean = (all_fp_simd_hits == 0) and (total_scanned > 0)
 
     return {
         "file": str(elf_path),
-        "functions_count": len(funcs),
+        "functions_count": len(funcs) if not fallback_mode else 1,
+        "fallback_scan": fallback_mode,
         "instructions_scanned": total_scanned,
         "xmm_sse_hits": xmm_count,
         "ymm_avx_hits": ymm_count,
@@ -188,14 +215,24 @@ def scan_elf(elf_path: Path) -> dict:
 
 
 def run_self_test() -> int:
-    print("=== Running ISA Audit Self-Test ===")
-    neg_c = """
+    print("=== Running Comprehensive ISA Audit Self-Test ===")
+    neg_sse_c = """
     __attribute__((noinline)) double sse_math(double x, double y) {
         return x * y + 3.14159;
     }
     int main(int argc, char **argv) {
         (void)argv;
         return sse_math(argc, 2.0) > 0.0 ? 0 : 1;
+    }
+    """
+
+    neg_x87_c = """
+    int main(int argc, char **argv) {
+        (void)argv;
+        volatile double a = (double)argc;
+        volatile double b = 2.71828;
+        volatile double c = a * b;
+        return (int)c;
     }
     """
 
@@ -210,18 +247,24 @@ def run_self_test() -> int:
     """
 
     with tempfile.TemporaryDirectory() as td:
-        neg_src = Path(td) / "neg.c"
-        neg_elf = Path(td) / "neg.elf"
+        neg_sse_src = Path(td) / "neg_sse.c"
+        neg_sse_elf = Path(td) / "neg_sse.elf"
+        neg_x87_src = Path(td) / "neg_x87.c"
+        neg_x87_elf = Path(td) / "neg_x87.elf"
         pos_src = Path(td) / "pos.c"
         pos_elf = Path(td) / "pos.elf"
 
-        neg_src.write_text(neg_c)
+        neg_sse_src.write_text(neg_sse_c)
+        neg_x87_src.write_text(neg_x87_c)
         pos_src.write_text(pos_c)
 
-        # Build negative control (with SSE math)
-        subprocess.run(["gcc", "-O2", "-msse2", "-mfpmath=sse", "-static", str(neg_src), "-o", str(neg_elf)], check=True)
+        # 1. Build SSE negative control (compiled with SSE enabled)
+        subprocess.run(["gcc", "-O2", "-msse2", "-mfpmath=sse", "-static", str(neg_sse_src), "-o", str(neg_sse_elf)], check=True)
 
-        # Build positive control (strictly general-regs-only, no-SSE, no-x87)
+        # 2. Build x87 negative control (compiled with -mno-sse, forcing GCC to emit 80387 x87 code)
+        subprocess.run(["gcc", "-O2", "-mno-sse", "-mfpmath=387", "-static", str(neg_x87_src), "-o", str(neg_x87_elf)], check=True)
+
+        # 3. Build positive control (strictly general-regs-only, no-SSE, no-x87)
         subprocess.run([
             "gcc", "-O2", "-mgeneral-regs-only", "-mno-sse", "-mno-sse2", "-mno-mmx",
             "-mno-80387", "-msoft-float", "-ffreestanding", "-fno-builtin", "-fno-pic",
@@ -229,20 +272,23 @@ def run_self_test() -> int:
             str(pos_src), "-o", str(pos_elf)
         ], check=True)
 
-        neg_res = scan_elf(neg_elf)
+        neg_sse_res = scan_elf(neg_sse_elf)
+        neg_x87_res = scan_elf(neg_x87_elf)
         pos_res = scan_elf(pos_elf)
 
-    neg_detected = (not neg_res["all_clean"]) and (neg_res["xmm_sse_hits"] > 0)
+    neg_sse_ok = (not neg_sse_res["all_clean"]) and (neg_sse_res["xmm_sse_hits"] > 0)
+    neg_x87_ok = (not neg_x87_res["all_clean"]) and (neg_x87_res["x87_fpu_hits"] > 0)
     pos_verified = pos_res["all_clean"] and (pos_res["instructions_scanned"] > 0)
 
-    print(f"Negative control (SSE math present): {'DETECTED (PASS)' if neg_detected else 'MISSED (FAIL)'} [hits: {neg_res['total_prohibited_hits']}]")
-    print(f"Positive control (Integer-only):     {'VERIFIED CLEAN (PASS)' if pos_verified else 'FALSE POSITIVE (FAIL)'} [insns: {pos_res['instructions_scanned']}]")
+    print(f"Control 1 (SSE Math Detection):     {'DETECTED (PASS)' if neg_sse_ok else 'MISSED (FAIL)'} [hits: {neg_sse_res['total_prohibited_hits']}]")
+    print(f"Control 2 (x87 FPU Math Detection): {'DETECTED (PASS)' if neg_x87_ok else 'MISSED (FAIL)'} [x87 hits: {neg_x87_res['x87_fpu_hits']}]")
+    print(f"Control 3 (Integer-Only Clean):     {'VERIFIED CLEAN (PASS)' if pos_verified else 'FALSE POSITIVE (FAIL)'} [insns: {pos_res['instructions_scanned']}]")
 
-    if neg_detected and pos_verified:
-        print("ISA AUDIT SELF-TEST: PASS")
+    if neg_sse_ok and neg_x87_ok and pos_verified:
+        print("ISA AUDIT ALL CONTROLS PASSED!")
         return 0
     else:
-        print("ISA AUDIT SELF-TEST: FAIL")
+        print("ISA AUDIT CONTROL CHECK FAILED!")
         return 1
 
 
@@ -250,7 +296,7 @@ def main():
     parser = argparse.ArgumentParser(description="Deterministic ISA FP/SIMD instruction auditor for ArenaOS.")
     parser.add_argument("elf", nargs="?", type=Path, help="Path to ELF binary")
     parser.add_argument("--self-test", action="store_true", help="Execute positive and negative control self-tests")
-    parser.add_argument("--strict-no-fp", action="store_true", help="Fail (exit 1) if any FP or SIMD instruction is found")
+    parser.add_argument("--strict", "--strict-no-fp", dest="strict", action="store_true", help="Fail closed (exit 1) if any FP or SIMD instruction is found")
     parser.add_argument("--json", action="store_true", help="Emit report in JSON format")
     args = parser.parse_args()
 
@@ -266,6 +312,9 @@ def main():
         sys.exit(1)
 
     report = scan_elf(args.elf)
+    if "error" in report:
+        print(f"ISA AUDIT ERROR: {report['error']}", file=sys.stderr)
+        sys.exit(1)
 
     if args.json:
         print(json.dumps(report, indent=2))
@@ -273,7 +322,7 @@ def main():
         print("=" * 72)
         print(f"ArenaOS CPU Instruction Architecture Audit: {report['file']}")
         print("=" * 72)
-        print(f"Functions Audited:    {report['functions_count']}")
+        print(f"Functions Audited:    {report['functions_count']}{' (fallback .text scan)' if report.get('fallback_scan') else ''}")
         print(f"Instructions Scanned: {report['instructions_scanned']}")
         print(f"SSE / %xmm Hits:      {report['xmm_sse_hits']}")
         print(f"AVX / %ymm/%zmm Hits: {report['ymm_avx_hits'] + report['zmm_avx512_hits']}")
@@ -293,7 +342,7 @@ def main():
                 print(f"  {sample['addr']} [{sample['fn']}]: {sample['insn']} ({','.join(sample['categories'])})")
         print("=" * 72)
 
-    if args.strict_no_fp and not report["all_clean"]:
+    if args.strict and not report["all_clean"]:
         sys.exit(1)
     sys.exit(0)
 
