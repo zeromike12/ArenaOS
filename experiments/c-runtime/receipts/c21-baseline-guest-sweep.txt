@@ -1,0 +1,60 @@
+C2.1.0 baseline guest sweep (source commit e8989c0; runtime tree identical to 6b49ae8)
+== build-clang.log
+== build-gcc.log
+== c1native-clang.log
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+C1.2 guest native app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-native/summary-clang.json)
+== c1native-gcc.log
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=93 failed=0",
+C1.2 guest native app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-native/summary-gcc.json)
+== c2-clang.log
+    "G4 time": "PASS",
+    "G5 threads": "PASS",
+    "G6 threads ext": "PASS",
+    "G7 stdio ext": "PASS",
+    "G8 init": "PASS",
+    "G9 exit": "PASS"
+  "console_result": "[c2-console] RESULT PASS groups=9/9 checks=66 failed=0",
+C2 guest multi-app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-c2/summary-clang.json)
+== c2-gcc.log
+    "G4 time": "PASS",
+    "G5 threads": "PASS",
+    "G6 threads ext": "PASS",
+    "G7 stdio ext": "PASS",
+    "G8 init": "PASS",
+    "G9 exit": "PASS"
+  "console_result": "[c2-console] RESULT PASS groups=9/9 checks=66 failed=0",
+C2 guest multi-app: 5/5 exact PASS (summary: /home/user/ArenaOS/experiments/c-runtime/build/guest-c2/summary-gcc.json)
+== crtprobe-clang.log
+crt-probe: T1 entry-stack-tls PASS
+crt-probe: T2 tls PASS
+crt-probe: T3 format PASS
+crt-probe: T4 memory PASS
+crt-probe: T5 strings PASS
+crt-probe: T6 time PASS
+CRT-PROBE RESULT PASS (6/6)
+== crtprobe-gcc.log
+crt-probe: T1 entry-stack-tls PASS
+crt-probe: T2 tls PASS
+crt-probe: T3 format PASS
+crt-probe: T4 memory PASS
+crt-probe: T5 strings PASS
+crt-probe: T6 time PASS
+CRT-PROBE RESULT PASS (6/6)
+build-gcc rc=0
+c2-gcc rc=0
+c1native-gcc rc=0
+crtprobe-gcc rc=0
+build-clang rc=0
+c2-clang rc=0
+c1native-clang rc=0
+crtprobe-clang rc=0
+DONE

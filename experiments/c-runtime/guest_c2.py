@@ -66,9 +66,17 @@ NEG_XX = dict(key="xx-nostream", app_id=b"org.arenaos.xxnostream", display=b"Opa
 ROW_Y = {"c2-nostream": 58, "xx-nostream": 132, "xx": 206, "c2": 280}
 EXPECTED_EXITS = [58, 58, 61, 63]
 
-GROUP_NAMES = ["G1 stdio", "G2 stdin", "G3 allocator", "G4 time", "G5 threads",
-               "G6 threads ext", "G7 stdio ext", "G8 init", "G9 exit"]
-C2_GROUP_RE = re.compile(r"^\[c2-console\] (G\d [\w ]+?) (PASS|FAIL) checks=(\d+)\r?$", re.M)
+# C2.1.6: exact per-group check counts. Every group prints exactly one line; the
+# RESULT total must equal the sum. G9 has two real assertions (registration accepted,
+# handler not yet run). Changing a count is a deliberate edit here.
+EXPECTED_GROUP_CHECKS = {
+    "G1 stdio": 9, "G2 stdin": 2, "G3 allocator": 9, "G4 time": 5, "G5 threads": 9,
+    "G6 threads ext": 32, "G7 stdio ext": 8, "G8 init": 1, "G9 exit": 2,
+}
+GROUP_NAMES = list(EXPECTED_GROUP_CHECKS)
+EXPECTED_TOTAL = sum(EXPECTED_GROUP_CHECKS.values())
+C2_GROUP_RE = re.compile(r"^\[c2-console\] (G\d+ [\w ]+?) (PASS|FAIL) checks=(\d+)\r?$", re.M)
+C2_GROUP_ANY_RE = re.compile(r"^\[c2-console\] G\d+\b.*$", re.M)
 C2_RESULT_RE = re.compile(r"^\[c2-console\] RESULT PASS groups=9/9 checks=(\d+) failed=0\r?$", re.M)
 C2_ATEXIT_RE = re.compile(r"^\[c2-console\] atexit handler ran\r?$", re.M)
 C2_STDIN_RE = re.compile(r"^\[c2-console\] stdin class=(would-block|eof|data)\r?$", re.M)
@@ -221,19 +229,8 @@ def judge(serial: str) -> dict:
         failures.append(f"exit status sequence is {exits}, expected {EXPECTED_EXITS}")
 
     # --- application A, positive ---
-    groups = {m[0]: (m[1], int(m[2])) for m in C2_GROUP_RE.findall(view)}
-    for name in GROUP_NAMES:
-        if name not in groups:
-            failures.append(f"missing group {name}")
-        elif groups[name][0] != "PASS":
-            failures.append(f"group {name} FAIL")
-    if len(groups) != len(GROUP_NAMES):
-        failures.append(f"group line count {len(groups)}, expected {len(GROUP_NAMES)}")
+    failures.extend(judge_c2_groups(view))
     result = C2_RESULT_RE.search(view)
-    if result is None:
-        failures.append("exact console RESULT PASS line missing")
-    if view.count("[c2-console] RESULT ") != 1:
-        failures.append("console RESULT line count is not exactly 1")
     if C2_ENTER not in view:
         failures.append("console entry line missing")
     if view.count(C2_ENTER) != 1:
@@ -259,7 +256,7 @@ def judge(serial: str) -> dict:
         failures.append("a check failed line was printed")
     return {
         "exit_lines": exits,
-        "console_groups": {k: v[0] for k, v in groups.items()},
+        "console_groups": {m[0]: m[1] for m in C2_GROUP_RE.findall(view)},
         "console_checks": int(result.group(1)) if result else None,
         "console_result": result.group(0) if result else None,
         "xxhash_digest_ok": XX_DIGEST_RE.search(view) is not None,
@@ -303,11 +300,87 @@ def one_run(cc: str, bundles: dict, identity: dict, index: int) -> dict:
     return verdict
 
 
+def judge_c2_groups(view: str) -> list[str]:
+    """Judge application A's group lines and RESULT line. Pure: no serial, no boot."""
+    failures: list[str] = []
+    lines = C2_GROUP_RE.findall(view)
+    by_name: dict[str, list[tuple[str, int]]] = {}
+    for name, verdict, count in lines:
+        by_name.setdefault(name, []).append((verdict, int(count)))
+    for name in GROUP_NAMES:
+        entries = by_name.get(name, [])
+        if not entries:
+            failures.append(f"missing group {name}")
+            continue
+        if len(entries) != 1:
+            failures.append(f"group {name} printed {len(entries)} times, exactly 1 required "
+                            f"(verdicts {[v for v, _ in entries]})")
+            continue
+        verdict, count = entries[0]
+        if verdict != "PASS":
+            failures.append(f"group {name} FAIL")
+        if count != EXPECTED_GROUP_CHECKS[name]:
+            failures.append(f"group {name} checks={count}, expected {EXPECTED_GROUP_CHECKS[name]}")
+    for name in by_name:
+        if name not in EXPECTED_GROUP_CHECKS:
+            failures.append(f"unexpected group line {name}")
+    malformed = len(C2_GROUP_ANY_RE.findall(view)) - len(lines)
+    if malformed:
+        failures.append(f"{malformed} malformed group line(s) (not 'G<n> <name> PASS|FAIL checks=<n>')")
+    if len(lines) != len(GROUP_NAMES):
+        failures.append(f"group line count {len(lines)}, expected {len(GROUP_NAMES)}")
+    results = C2_RESULT_RE.findall(view)
+    if len(results) != 1:
+        failures.append(f"exact console RESULT PASS line count {len(results)}, expected 1")
+    elif int(results[0]) != EXPECTED_TOTAL:
+        failures.append(f"RESULT checks={results[0]}, expected exactly {EXPECTED_TOTAL}")
+    if view.count("[c2-console] RESULT ") != 1:
+        failures.append("console RESULT line count is not exactly 1")
+    return failures
+
+
+def _synthetic_c2_view(counts: dict[str, int] | None = None, total: int | None = None,
+                       extra: list[str] | None = None, drop: str | None = None) -> str:
+    counts = dict(EXPECTED_GROUP_CHECKS, **(counts or {}))
+    lines = [f"[c2-console] {name} PASS checks={n}" for name, n in counts.items() if name != drop]
+    lines += extra or []
+    lines.append(f"[c2-console] RESULT PASS groups=9/9 checks={EXPECTED_TOTAL if total is None else total} failed=0")
+    return "\n".join(lines) + "\n"
+
+
+def self_test() -> int:
+    """Negative controls: the judge must accept the exact view and reject each mutation."""
+    cases = [
+        ("exact view accepted", _synthetic_c2_view(), False),
+        ("reduced G6 count rejected", _synthetic_c2_view(counts={"G6 threads ext": 31}), True),
+        ("reduced total rejected", _synthetic_c2_view(total=EXPECTED_TOTAL - 1), True),
+        ("duplicate PASS line rejected", _synthetic_c2_view(extra=["[c2-console] G1 stdio PASS checks=9"]), True),
+        ("missing group rejected", _synthetic_c2_view(drop="G7 stdio ext"), True),
+        ("FAIL verdict rejected", _synthetic_c2_view(extra=[]).replace("G5 threads PASS", "G5 threads FAIL"), True),
+        ("contradictory PASS/FAIL rejected",
+         _synthetic_c2_view(extra=["[c2-console] G3 allocator FAIL checks=9"]), True),
+        ("unexpected group rejected", _synthetic_c2_view(extra=["[c2-console] G10 extra PASS checks=1"]), True),
+        ("duplicate RESULT rejected",
+         _synthetic_c2_view() + f"[c2-console] RESULT PASS groups=9/9 checks={EXPECTED_TOTAL} failed=0\n", True),
+    ]
+    bad = 0
+    for label, view, want_fail in cases:
+        got = bool(judge_c2_groups(view))
+        ok = got == want_fail
+        bad += 0 if ok else 1
+        print(f"self-test {'ok  ' if ok else 'BAD '} {label} (failures={judge_c2_groups(view)[:1]})")
+    print(f"C2 judge self-test: {len(cases) - bad}/{len(cases)} controls behave as required")
+    return 0 if bad == 0 else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cc", default="clang", choices=list(crun.COMPILERS))
     ap.add_argument("--runs", type=int, default=1)
+    ap.add_argument("--self-test", action="store_true", help="judge negative controls only (no boot)")
     args = ap.parse_args()
+    if args.self_test:
+        return self_test()
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     bundles, identity = build_c2_bundles(args.cc)
     (BUILD_DIR / f"bundle-identity-{args.cc}.json").write_text(json.dumps(identity, indent=2))
