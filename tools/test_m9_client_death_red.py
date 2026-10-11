@@ -30,18 +30,41 @@ def build(log: Path) -> None:
                        stdout=f, stderr=subprocess.STDOUT, check=True)
 
 
-def red_picture() -> bytes:
-    path = arena_env.build_dir() / f'{LABEL}.ppm'
+def red_picture(name: str) -> None:
+    path = arena_env.build_dir() / f'{LABEL}-{name}.ppm'
     conn = qmp.Qmp(str(arena_env.build_dir() / f'qmp-{LABEL}.sock'))
     try:
         conn.command('screendump', filename=str(path), format='ppm')
     finally:
         conn.close()
+
+
+def before_exit() -> bytes:
+    # Match the production lifecycle witness: capture the focused surface
+    # before typing the exit key. The QMP round trip also lets kernel boot
+    # finish its initial live-client check before the mutation is exercised.
+    red_picture('before')
+    conn = qmp.Qmp(str(arena_env.build_dir() / f'qmp-{LABEL}.sock'))
+    try:
+        conn.key('x')
+    finally:
+        conn.close()
+    return b''
+
+
+def after_exit() -> bytes:
+    # Process liveness is checked with a bounded deadline after exit. Capture
+    # the still-owned pixels while that deadline is active, not from an old
+    # artifact left by a previous run.
+    red_picture('after')
     return b''
 
 
 def still_stale() -> bool:
-    data = (arena_env.build_dir() / f'{LABEL}.ppm').read_bytes()
+    path = arena_env.build_dir() / f'{LABEL}-after.ppm'
+    if not path.is_file():
+        return False
+    data = path.read_bytes()
     h = re.match(rb'P6\s+800\s+600\s+255\s', data)
     if not h or len(data) - h.end() != 800 * 600 * 3:
         return False
@@ -53,6 +76,8 @@ def main() -> int:
     original = SOURCE.read_bytes()
     assert original.count(NEEDLE) == 1 and MUTANT not in original
     bdir = arena_env.build_dir()
+    for name in ('before', 'after'):
+        (bdir / f'{LABEL}-{name}.ppm').unlink(missing_ok=True)
     build(bdir / f'{LABEL}-original-build.log')
     artifacts = {p: p.read_bytes() for p in (EFI, ESP)}
     sha = hashlib.sha256(original).hexdigest()
@@ -62,10 +87,11 @@ def main() -> int:
         esp = mtest.build(LABEL)
         rc, serial, _ = mtest.run_qemu(
             LABEL, esp,
-            feed=[(b'[window_b] original child exiting without DESTROY', 1, red_picture)],
-            keys=mtest.DEFAULT_KEYS + [(b'[window_b] held-cap focused surface painted', 1, 'x')])
+            feed=[(b'[window_b] held-cap focused surface painted', 1, before_exit),
+                  (b'[window_b] original child exiting without DESTROY', 1, after_exit)])
         (bdir / f'{LABEL}-serial.log').write_text(serial)
         red = ('m7: RESULT PASS (2/2)' in serial
+               and '[arena INFO  m9] compositor: live processes ' in serial
                and still_stale()
                and '[arena ERROR halt]' in serial
                and 'graphics: dead original child never retired its copied region' in serial

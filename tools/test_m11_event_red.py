@@ -27,7 +27,12 @@ CONTROLS = [
     # Destroying a notification leaves endpoints bound to its index.
     (IPC, b'                if ep.bound.is_some_and(|b| b.nid == nid) {',
      b'                if ep.bound.is_some_and(|b| b.nid == nid) && false {',
-     'notif-destroy-unbind', 'm11:test:notif_destroy_unbinds: FAIL'),
+     # M7's timer-facility check runs before M11 and exercises the same
+     # notification teardown path. This global mutant is therefore first
+     # observed there as a late timer delivery; retain that specific earlier
+     # guest failure as a valid RED oracle as well as the direct M11 check.
+     'notif-destroy-unbind', ('m11:test:notif_destroy_unbinds: FAIL',
+                              'm7:test:timer_facility: FAIL')),
     # Orphaning (server death) keeps the dead server's binding.
     (IPC, b'                // Its binding described that server\'s wait; a successor\n'
           b'                // binds its own notification (ADR-0071).\n'

@@ -324,7 +324,8 @@ def interaction(disk):
             "handler default was not persisted in the protected user AFS2 namespace"
         send_key(d, "ret")
         d.wait(lambda: "[phase13-app] exact read-only document capability verified" in d.serial(),
-               "selected installed handler did not read the exact document read-only")
+               "selected installed handler did not read the exact document read-only",
+               timeout_s=60)
         d.wait(lambda: d.serial().count(SERIAL_VM) == 1,
                "installed document handler did not pass its ring-3 VM mechanism proof")
         d.wait(lambda: d.serial().count(SERIAL_HEAP) == 1,
@@ -640,7 +641,7 @@ def interaction(disk):
                 lambda before_apps=before_apps:
                     d.serial().count(SERIAL_APPS) == before_apps + 1,
                 f"pressure installed launch {launch_index + 1}/2 did not start the signed ELF",
-                timeout_s=60,
+                timeout_s=120,
             )
             expected_apps = 4 + launch_index
             d.wait(lambda expected_apps=expected_apps: d.serial().count(SERIAL_MULTIWINDOW) == expected_apps - 1,

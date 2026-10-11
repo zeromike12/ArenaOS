@@ -22,8 +22,12 @@ struct Entry {
     state: State,
     id: u32,
     len: usize,
+    kind: elf::ImageKind,
     entry: u64,
     load_base: u64,
+    image_end: u64,
+    rela_offset: u64,
+    rela_count: usize,
     refs: u32,
     pins: u32,
 }
@@ -33,8 +37,12 @@ impl Entry {
         state: State::Free,
         id: 0,
         len: 0,
+        kind: elf::ImageKind::FixedExec,
         entry: 0,
         load_base: 0,
+        image_end: 0,
+        rela_offset: 0,
+        rela_count: 0,
         refs: 0,
         pins: 0,
     };
@@ -43,8 +51,12 @@ impl Entry {
         self.state = State::Free;
         self.id = 0;
         self.len = 0;
+        self.kind = elf::ImageKind::FixedExec;
         self.entry = 0;
         self.load_base = 0;
+        self.image_end = 0;
+        self.rela_offset = 0;
+        self.rela_count = 0;
         self.refs = 0;
         self.pins = 0;
     }
@@ -196,9 +208,41 @@ pub fn validate_reserved(idx: usize) -> bool {
             return false;
         }
         let e = &mut (*REG.get()).entries[idx];
+        e.kind = parsed.kind;
         e.entry = parsed.entry;
-        e.load_base = load_base;
+        e.load_base = parsed.image_start.min(load_base);
+        e.image_end = parsed.image_end;
+        e.rela_offset = parsed.rela_offset;
+        e.rela_count = parsed.rela_count;
         true
+    })
+}
+
+/// The executable type recorded by production validation; no randomized
+/// per-launch address is stored in this immutable Image metadata.
+pub fn kind(id: u32) -> Option<elf::ImageKind> {
+    without_interrupts(|| unsafe {
+        (*REG.get())
+            .entries
+            .iter()
+            .find(|e| e.state == State::Live && e.id == id)
+            .map(|e| e.kind)
+    })
+}
+
+/// Bounded validation facts retained beside the immutable Image bytes.
+pub fn pie_layout(id: u32) -> Option<(u64, u64, u64, usize)> {
+    without_interrupts(|| unsafe {
+        let e = (*REG.get())
+            .entries
+            .iter()
+            .find(|e| e.state == State::Live && e.id == id)?;
+        (e.kind == elf::ImageKind::StaticPie).then_some((
+            e.load_base,
+            e.image_end,
+            e.rela_offset,
+            e.rela_count,
+        ))
     })
 }
 

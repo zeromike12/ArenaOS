@@ -210,6 +210,30 @@ fn test_elf_parse() -> Result<(), &'static str> {
         m_msg_va,
         m_exit_ok
     );
+
+    let pie = elf::validate(elf::PIE_TEST_IMAGE)?;
+    if pie.kind != elf::ImageKind::StaticPie
+        || pie.entry != 0x160
+        || pie.nsegs != 3
+        || pie.image_start != 0
+        || pie.image_end != 0xb000
+        || pie.rela_count != 30
+        || pie.rela_offset != 0x3328
+        || pie.segs[0].flags != PF_R | PF_X
+        || pie.segs[1].flags != PF_R
+        || pie.segs[2].flags != PF_R | PF_W
+    {
+        return Err("static PIE fixture disagrees with its inspected ELF profile");
+    }
+    info!(
+        "m4",
+        "elf_parse: genuine static PIE artifact — entry {:#x}, {} PT_LOADs, {} R_X86_64_RELATIVE records, image span {:#x}..{:#x}",
+        pie.entry,
+        pie.nsegs,
+        pie.rela_count,
+        pie.image_start,
+        pie.image_end
+    );
     Ok(())
 }
 
@@ -217,7 +241,7 @@ fn test_elf_parse() -> Result<(), &'static str> {
 
 /// Scratch space for mutated image copies (single CPU, IF=0 — a plain
 /// SyncCell is the house pattern for test statics).
-static SCRATCH: SyncCell<[u8; 16 * 1024]> = SyncCell::new([0; 16 * 1024]);
+static SCRATCH: SyncCell<[u8; 32 * 1024]> = SyncCell::new([0; 32 * 1024]);
 
 /// Copy the pristine image into `scratch`, apply one mutation, and
 /// require that validation refuses the result.
@@ -240,7 +264,7 @@ fn mutate_reject(
 /// rejections are untested is decoration.
 fn test_elf_reject() -> Result<(), &'static str> {
     let img = elf::TEST_IMAGE;
-    if img.len() > 16 * 1024 {
+    if img.len() > 32 * 1024 {
         return Err("scratch buffer too small for the payload image");
     }
     // Phdr positions parsed from the image itself — no assumption beyond
@@ -264,7 +288,9 @@ fn test_elf_reject() -> Result<(), &'static str> {
     rej!("big-endian encoding", |b: &mut [u8]| b[5] = 2);
     rej!("EI_VERSION != 1", |b: &mut [u8]| b[6] = 9);
     rej!("e_version != 1", |b: &mut [u8]| put32(b, 20, 2));
-    rej!("ET_DYN (PIE)", |b: &mut [u8]| put16(b, 16, 3));
+    rej!("ET_DYN with non-PIE metadata", |b: &mut [u8]| put16(
+        b, 16, 3
+    ));
     rej!("EM_386", |b: &mut [u8]| put16(b, 18, 3));
     rej!("e_ehsize != 64", |b: &mut [u8]| put16(b, 52, 65));
     rej!("e_phentsize != 56", |b: &mut [u8]| put16(b, 54, 57));
@@ -321,9 +347,102 @@ fn test_elf_reject() -> Result<(), &'static str> {
         put32(b, ph1, 4);
     });
 
+    let pie = elf::PIE_TEST_IMAGE;
+    let pie_parsed = elf::validate(pie)?;
+    let pie_ph0 = le64_at(pie, 32) as usize;
+    let pie_ph1 = pie_ph0 + 56;
+    let pie_ph2 = pie_ph1 + 56;
+    let pie_dynamic_ph = pie_ph0 + 3 * 56;
+    let pie_dynamic = le64_at(pie, pie_dynamic_ph + 8) as usize;
+    let pie_rela = pie_parsed.rela_offset as usize;
+    if pie.len() > 32 * 1024 || pie_rela + pie_parsed.rela_count * 24 > pie.len() {
+        return Err("PIE mutation fixture exceeds scratch or validated RELA bounds");
+    }
+    macro_rules! pie_rej {
+        ($what:expr, $m:expr) => {
+            mutate_reject(pie, scratch, concat!("PIE mutation ACCEPTED: ", $what), $m)?
+        };
+    }
+    pie_rej!("non-System-V ABI", |b: &mut [u8]| b[7] = 3);
+    pie_rej!("nonzero reserved identification byte", |b: &mut [u8]| b
+        [9] =
+        1);
+    pie_rej!("PT_LOAD not read-only-inclusive", |b: &mut [u8]| put32(
+        b,
+        pie_ph1 + 4,
+        PF_W
+    ));
+    pie_rej!("PT_LOAD W+X", |b: &mut [u8]| put32(
+        b,
+        pie_ph2 + 4,
+        PF_R | PF_W | PF_X
+    ));
+    pie_rej!("PT_LOAD page alignment mismatch", |b: &mut [u8]| put64(
+        b,
+        pie_ph0 + 48,
+        2 * paging::PAGE
+    ));
+    pie_rej!("page-rounded PT_LOAD overlap", |b: &mut [u8]| put64(
+        b,
+        pie_ph1 + 16,
+        0x2000
+    ));
+    pie_rej!("PT_DYNAMIC executable", |b: &mut [u8]| put32(
+        b,
+        pie_dynamic_ph + 4,
+        PF_R | PF_X
+    ));
+    pie_rej!("PT_DYNAMIC VA overflow", |b: &mut [u8]| put64(
+        b,
+        pie_dynamic_ph + 16,
+        u64::MAX - 7
+    ));
+    pie_rej!("PT_INTERP request", |b: &mut [u8]| put32(
+        b,
+        pie_ph0 + 4 * 56,
+        3
+    ));
+    pie_rej!("unsupported DT_NEEDED tag", |b: &mut [u8]| put64(
+        b,
+        pie_dynamic,
+        1
+    ));
+    pie_rej!("unsupported relocation type", |b: &mut [u8]| put64(
+        b,
+        pie_rela + 8,
+        1
+    ));
+    pie_rej!("symbolic relocation", |b: &mut [u8]| put64(
+        b,
+        pie_rela + 8,
+        (1u64 << 32) | 8
+    ));
+    pie_rej!("relocation target outside image", |b: &mut [u8]| put64(
+        b,
+        pie_rela,
+        0x1000_0000
+    ));
+    pie_rej!("unaligned relocation target", |b: &mut [u8]| put64(
+        b, pie_rela, 0x4001
+    ));
+    pie_rej!("duplicate relocation target", |b: &mut [u8]| put64(
+        b,
+        pie_rela + 24,
+        0x4000
+    ));
+    pie_rej!(
+        "RELATIVE addend arithmetic range overflow",
+        |b: &mut [u8]| put64(b, pie_rela + 16, 0x7fff_ffff_ffff_ffff)
+    );
+    pie_rej!("misaligned DT_RELA table", |b: &mut [u8]| put64(
+        b,
+        pie_dynamic + 3 * 16 + 8,
+        0x3329
+    ));
+
     info!(
         "m4",
-        "elf_reject: 25 mutation classes refused — identification (magic/class/endian/versions/type/machine/sizes/phnum/phoff), truncation, W+X, unknown flags, filesz>memsz, zero memsz, unaligned vaddr, kernel-half vaddr, overlap, file-span EOF, entry outside X segment (2 ways), PT_INTERP, no PT_LOAD"
+        "elf_reject: 25 historical ET_EXEC mutation classes plus 17 strict PIE mutations refused by the production validator"
     );
     Ok(())
 }
@@ -484,10 +603,140 @@ fn test_elf_load() -> Result<(), &'static str> {
         return Err("destroy did not reclaim the loaded image exactly");
     }
 
+    // Exercise the production ET_DYN loader at a kernel-chosen test bias.
+    // Random selection is qualified by the real spawn path; this assertion
+    // isolates copy, BSS, relocation, final protection, guard, and cleanup
+    // behavior from the independent entropy service.
+    let pie = elf::validate(elf::PIE_TEST_IMAGE)?;
+    let bias = elf::PIE_ARENA_START + 2 * elf::PIE_BIAS_ALIGN;
+
+    // The production placement preflight accepts a clear envelope, then
+    // refuses both an owned process-region collision and a mapped lower
+    // guard page before it populates any PIE image frame.
+    let collision_baseline = frames::free_frames();
+    let collision_pid = proc::create("elfPieCollision")?;
+    let collision_root = proc::pml4_of(collision_pid).ok_or("collision process lost its pml4")?;
+    let collision_result = (|| -> Result<(), &'static str> {
+        if !spawn::pie_candidate_clear(collision_pid, collision_root, &pie, bias) {
+            return Err("clear static PIE placement envelope was refused");
+        }
+        proc::set_user_regions(collision_pid, &[(bias, bias + paging::PAGE)])?;
+        if spawn::pie_candidate_clear(collision_pid, collision_root, &pie, bias) {
+            return Err("static PIE placement ignored an owned process-region collision");
+        }
+        proc::set_user_regions(collision_pid, &[])?;
+        let guard_frame = frames::alloc().ok_or("no frame for static PIE guard collision")?;
+        // SAFETY: `collision_root` belongs to the live unpublished test
+        // process; `guard_frame` is a fresh private frame and guard_va is a
+        // canonical user page intentionally placed in the candidate envelope.
+        if unsafe {
+            paging::map_user_page_4k(
+                collision_root,
+                bias - paging::PAGE,
+                guard_frame,
+                true,
+                false,
+            )
+        }
+        .is_err()
+        {
+            let _ = frames::free(guard_frame);
+            return Err("could not construct a mapped lower-guard collision");
+        }
+        if spawn::pie_candidate_clear(collision_pid, collision_root, &pie, bias) {
+            return Err("static PIE placement ignored a mapped guard collision");
+        }
+        Ok(())
+    })();
+    proc::destroy(collision_pid)?;
+    if frames::free_frames() != collision_baseline {
+        return Err("static PIE collision preflight test did not reclaim its guard mapping");
+    }
+    collision_result?;
+
+    let pie_pid = proc::create("elfPieLoad")?;
+    let pie_loaded = elf::load_pie(elf::PIE_TEST_IMAGE, pie_pid, bias)?;
+    if pie_loaded.entry != bias + pie.entry
+        || pie_loaded.image_base != bias + pie.image_start
+        || pie_loaded.pages != 11
+    {
+        return Err("static PIE load facts or page count are wrong");
+    }
+    let pie_root = proc::pml4_of(pie_pid).ok_or("PIE process lost its pml4")?;
+    for seg in &pie.segs[..pie.nsegs] {
+        let va = bias + seg.vaddr;
+        // SAFETY: ring 0, IF=0; the PIE process owns the live root.
+        let flags = unsafe { paging::user_pte_flags(pie_root, va) }
+            .ok_or("static PIE PT_LOAD page absent after load")?;
+        let want_write = seg.flags & PF_W != 0;
+        let want_exec = seg.flags & PF_X != 0;
+        if flags & (paging::PTE_PRESENT | paging::PTE_USER)
+            != paging::PTE_PRESENT | paging::PTE_USER
+            || (flags & paging::PTE_WRITE != 0) != want_write
+            || (flags & paging::PTE_NX == 0) != want_exec
+            || (flags & paging::PTE_WRITE != 0 && flags & paging::PTE_NX == 0)
+        {
+            return Err("static PIE final segment protection is not exact W^X");
+        }
+    }
+    for va in [
+        bias - paging::PAGE,
+        bias + pie.image_end,
+        bias + pie.image_end + paging::PAGE,
+    ] {
+        // SAFETY: ring 0, IF=0; the PIE process owns the live root.
+        if unsafe { paging::user_pte_flags(pie_root, va) }.is_some() {
+            return Err("static PIE guard or unallocated stack page is mapped");
+        }
+    }
+    for index in 0..pie.rela_count {
+        let at = pie.rela_offset as usize + index * 24;
+        let target = bias + le64_at(elf::PIE_TEST_IMAGE, at);
+        let expected = bias + le64_at(elf::PIE_TEST_IMAGE, at + 16);
+        // SAFETY: ring 0, IF=0; relocation target belongs to this process.
+        let phys = unsafe { paging::user_pte_phys(pie_root, target & !(paging::PAGE - 1)) }
+            .ok_or("static PIE relocation target page absent")?;
+        let cell = (phys + paging::KERNEL_OFFSET + (target & (paging::PAGE - 1))) as *const u64;
+        // SAFETY: the loader wrote this aligned, private RW relocation cell.
+        if unsafe { core::ptr::read_volatile(cell) } != expected {
+            return Err("static PIE R_X86_64_RELATIVE value is incorrect");
+        }
+    }
+    let data = pie.segs[2];
+    for page_index in 0..data.memsz.div_ceil(paging::PAGE) {
+        let page_va = bias + data.vaddr + page_index * paging::PAGE;
+        // SAFETY: ring 0, IF=0; this page was mapped by the PIE loader.
+        let phys = unsafe { paging::user_pte_phys(pie_root, page_va) }
+            .ok_or("static PIE writable data/BSS page absent")?;
+        let zero_start = data
+            .filesz
+            .saturating_sub(page_index * paging::PAGE)
+            .min(paging::PAGE) as usize;
+        let bytes = (phys + paging::KERNEL_OFFSET) as *const u8;
+        // The linker fixture's zero-fill tail includes its BSS and stack.
+        for offset in zero_start..paging::PAGE as usize {
+            // SAFETY: a complete private page is mapped in this process.
+            if unsafe { core::ptr::read_volatile(bytes.add(offset)) } != 0 {
+                return Err("static PIE zero-initialized writable data is not zero");
+            }
+        }
+    }
+    proc::destroy(pie_pid)?;
+    let pie_after = frames::free_frames();
+    if pie_after != baseline {
+        return Err("static PIE process teardown did not reclaim all frames");
+    }
+
     info!(
         "m4",
         "elf_load: 3 pages into 'elfLoad' (7 frames spent: root+3 tables+3 leaves), PTEs W^X-exact (text RX, data/bss RW+NX), double-load refused at zero cost, dead target refused, {}-byte text span byte-identical to the file + META + 4 KiB zeroed NOLOAD bss read under the target's CR3, teardown exact ({after})",
         text.filesz
+    );
+    info!(
+        "m4",
+        "elf_load: static PIE at test bias {bias:#x} mapped {} pages; all {} R_X86_64_RELATIVE values verified; RX/R/RW final PTEs exact; clear-placement accepted, owned-region and mapped-guard collisions refused; lower/upper/stack guards absent; BSS zeroed; teardown exact ({pie_after})",
+        pie_loaded.pages,
+        pie.rela_count
     );
     Ok(())
 }

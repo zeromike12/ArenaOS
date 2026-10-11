@@ -19,6 +19,7 @@ pub mod cap;
 pub mod console;
 pub mod drivers;
 pub mod elf;
+pub mod entropy;
 pub mod entry;
 pub mod frames;
 pub mod halt;

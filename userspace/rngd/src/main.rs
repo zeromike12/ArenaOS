@@ -53,12 +53,13 @@ const SLOT_DIAG: u64 = 4; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
 /// Optional production-only boot readiness channel (ADR-0037).
 const SLOT_MANAGER_READY: u64 = 3;
+/// Production-only exact kernel CSPRNG seed authority (ADR-0110).
+const SLOT_KERNEL_SEED: u64 = 5;
 
-/// Owned frame slots: ONE frame — the request queue's three ring areas
-/// packed by the shared core's `ring_offsets` (the device's 8-entry
-/// queue needs only ~280 bytes; the frame budget is trivially met).
+/// Owned frame slots: one request-queue frame plus one private seed frame.
+/// The seed frame is used once after DRIVER_OK, then wiped by the kernel.
 const SLOT_FRAME_BASE: u64 = 8;
-const FRAMES_TOTAL: usize = 1;
+const FRAMES_TOTAL: usize = 2;
 
 /// The IRQ badge the relay delivers (only the relay notifies this nid).
 const IRQ_BADGE_RNG: u64 = 0x7201;
@@ -74,6 +75,7 @@ const EXIT_RECV: u64 = 85;
 const EXIT_PHYS: u64 = 86;
 const EXIT_COMPLETE: u64 = 87;
 const EXIT_REPLY: u64 = 88;
+const EXIT_SEED: u64 = 89;
 
 // ---- virtio-rng specifics (the shared 1.0 core lives in userspace/virtio.rs) --
 
@@ -301,8 +303,67 @@ pub unsafe extern "C" fn _start() -> ! {
 
         // Announce only after the queue is DRIVER_OK; the test instance
         // has no slot 3, so its refused optional notify is harmless.
-        let _ = syscall2(SYS_NOTIFY, SLOT_MANAGER_READY, MGR_BADGE_RNGD_READY);
         let mut drv = Drv { q, completions: 0 };
+        let mut ready_descriptor = [0u64; 3];
+        let ready_occupied = syscall6(SYS_CAP_OCCUPIED, SLOT_MANAGER_READY, 0, 0, 0, 0, 0);
+        if ready_occupied < 0 {
+            fail(EXIT_SEED, "rngd manager-ready capability lookup failed");
+        }
+        let production_instance = if ready_occupied == 1 {
+            let ready_cap = syscall2(
+                SYS_CAP_DESCRIBE,
+                SLOT_MANAGER_READY,
+                ready_descriptor.as_mut_ptr() as u64,
+            );
+            if ready_cap != 0
+                || ready_descriptor[0] != 3
+                || (ready_descriptor[2] != RIGHTS_WRITE && ready_descriptor[2] != RIGHTS_READ)
+            {
+                fail(EXIT_SEED, "rngd manager-ready capability layout is invalid");
+            }
+            ready_descriptor[2] == RIGHTS_WRITE
+        } else {
+            false
+        };
+        let seed_cap = syscall6(SYS_CAP_OCCUPIED, SLOT_KERNEL_SEED, 0, 0, 0, 0, 0);
+        if production_instance && seed_cap != 1 {
+            fail(EXIT_SEED, "production rngd lacks its exact kernel seed cap");
+        }
+        if !production_instance && seed_cap == 1 {
+            fail(
+                EXIT_SEED,
+                "test rngd received an unexpected kernel seed cap",
+            );
+        }
+        if production_instance {
+            let written = drv.fill(phys[1], 32).unwrap_or_else(|_| {
+                fail(
+                    EXIT_SEED,
+                    "the initial 32-byte seed request did not complete",
+                )
+            });
+            if written != 32 {
+                fail(EXIT_SEED, "virtio-rng returned a short kernel seed");
+            }
+            let status = syscall6(SYS_ENTROPY_SEED, SLOT_KERNEL_SEED, va[1], 0, 0, 0, 0);
+            if status != 0 {
+                log_line(|o| {
+                    o.str("rngd: kernel entropy seed refused with status ");
+                    o.i64(status);
+                });
+                fail(EXIT_SEED, "the kernel did not accept the virtio-rng seed");
+            }
+            core::ptr::write_bytes(va[1] as *mut u8, 0, 32);
+            log("rngd: submitted a device-filled 256-bit seed to the kernel CSPRNG");
+        } else if seed_cap < 0 {
+            fail(
+                EXIT_SEED,
+                "checking the optional kernel seed capability failed",
+            );
+        }
+        // Production manager readiness is announced only after both the
+        // device DRIVER_OK state and the kernel seed boundary succeeded.
+        let _ = syscall2(SYS_NOTIFY, SLOT_MANAGER_READY, MGR_BADGE_RNGD_READY);
         let mut fault_next_get = false;
         let mut stall_next_get = false;
 

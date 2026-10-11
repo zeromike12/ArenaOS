@@ -722,6 +722,16 @@ pub unsafe fn user_pte_flags(pml4_phys: u64, va: u64) -> Option<u64> {
     }
 }
 
+/// Read the physical frame behind one present user leaf. This stays a
+/// ring-0 introspection helper; the value is used by the ELF relocator
+/// through the kernel's direct map and is never returned to ring 3.
+///
+/// # Safety
+/// As [`user_pte_flags`].
+pub unsafe fn user_pte_phys(pml4_phys: u64, va: u64) -> Option<u64> {
+    unsafe { user_pte_flags(pml4_phys, va).map(|entry| entry & ADDR_MASK) }
+}
+
 /// Create a fresh process PML4 (returns its PHYS): user half empty,
 /// kernel half (entries 256..511) cloned from the live kernel view so
 /// ring-3→ring-0 transitions never need a CR3 switch and every process

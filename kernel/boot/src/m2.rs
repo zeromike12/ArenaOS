@@ -276,7 +276,10 @@ fn test_tsc_frequency() -> Result<(), &'static str> {
     for attempt in 1..=ATTEMPTS {
         // SAFETY: PIT owned post-init; IF=0; periodic tick restored below.
         unsafe { pit::set_calibration_mode() };
-        let (counts, tsc) = unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 50) };
+        // Use the same longer sample scale as boot calibration. This keeps
+        // a short host scheduling pause from creating three consistently
+        // biased 100 ms checks while preserving the independent 5% bound.
+        let (counts, tsc) = unsafe { pit::calibrate_tsc_window(pit::OSCILLATOR_HZ as u32 / 10) };
         unsafe { pit::set_periodic_hz(timekeeping::KERNEL_TICK_HZ) };
 
         if counts == 0 || tsc == 0 {

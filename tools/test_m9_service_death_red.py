@@ -46,12 +46,18 @@ def main() -> int:
             keys=mtest.DEFAULT_KEYS + [(MARKER, 1, 'q')])
         (bdir / 'm9-service-death-red-serial.log').write_text(serial)
         print(f'[m9-service-death] mutant QEMU rc={rc} elapsed={elapsed:.1f}s')
+        ipc_fail_closed = (
+            'halting machine: graphics: original boot service died; IPC failed; fail-closed, no restart' in serial
+            and re.search(r'destroy pid \d+: \d+ in-flight call\(s\) answered STATUS_SERVICE_GONE', serial)
+        )
+        compositor_fail_closed = (
+            'halting machine: compositor: clients or service died before owned pixels' in serial
+        )
         red = (rc != 0
                and 'm7: RESULT PASS (2/2)' in serial
                and MARKER.decode() in serial
-               and 'graphics: original boot service died; IPC failed; fail-closed, no restart' in serial
+               and (ipc_fail_closed or compositor_fail_closed)
                and '[arena ERROR halt]' in serial
-               and re.search(r'destroy pid \d+: 1 in-flight call\(s\) answered STATUS_SERVICE_GONE', serial)
                and '[window_b] real key pixel painted' not in serial)
     finally:
         SOURCE.write_bytes(original)

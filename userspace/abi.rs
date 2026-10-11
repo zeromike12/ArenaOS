@@ -81,6 +81,8 @@ pub const SYS_SYNC_WAKE: u64 = 73;
 pub const SYS_SYNC_INFO: u64 = 74;
 /// Aggregate native thread, IPC, timer, VM and synchronization occupancy.
 pub const SYS_RESOURCE_DETAIL: u64 = 75;
+/// ADR-0110: production rngd submits exactly 32 device-generated seed bytes.
+pub const SYS_ENTROPY_SEED: u64 = 76;
 pub const VM_PROT_READ: u64 = 1;
 pub const VM_PROT_WRITE: u64 = 2;
 pub const VM_PROT_EXEC: u64 = 4;
@@ -126,6 +128,8 @@ pub const STATUS_QUOTA: i64 = -7;
 pub const STATUS_CALLER_GONE: i64 = -6;
 /// ADR-0107: native synchronization wait deadline expired.
 pub const STATUS_TIMEOUT: i64 = -8;
+pub const STATUS_NO_ENTROPY: i64 = -9;
+pub const STATUS_NO_SPACE: i64 = -10;
 pub const SYS_IRQ_RELAY: u64 = 18;
 pub const SYS_CAP_PHYS: u64 = 19;
 pub const SYS_CAP_DESTROY: u64 = 20;

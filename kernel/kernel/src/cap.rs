@@ -165,6 +165,9 @@ pub enum CapObj {
     /// kernel hands both to exactly one process — the production
     /// `consoled`, which needs the pair to be a console.
     ConsoleOutput,
+    /// ADR-0110: exact production rngd authority to seed the kernel's
+    /// placement CSPRNG. WRITE-only, with no COPY/READ/DESTROY operation.
+    KernelEntropySeed,
 }
 
 /// One capability: an object reference plus its rights mask.

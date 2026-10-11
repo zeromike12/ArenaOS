@@ -1517,7 +1517,14 @@ fn application_main(view: StartupView<'_>) -> ! {
                 0
             };
             if resized {
-                client.commit().unwrap_or_else(|_| client::exit(74));
+                if let Err(status) = client.commit() {
+                    if status == client::STATUS_RESIZE_SUPERSEDED {
+                        // A newer Configure is already queued. Keep the
+                        // frame dirty and immediately adopt the current size.
+                        continue;
+                    }
+                    client::exit(74)
+                }
             } else if damage.is_full() {
                 client.damage().unwrap_or_else(|_| client::exit(74));
             } else if tight_n > 0 {

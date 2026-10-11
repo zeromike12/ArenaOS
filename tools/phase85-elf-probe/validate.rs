@@ -4,26 +4,69 @@
 // never invoked: the test calls elf::validate only, not load/spawn.
 #![allow(dead_code)]
 use std::path::PathBuf;
-mod arch { pub mod x86_64 { pub mod paging {
-    pub const PAGE: u64 = 4096;
-    pub const KERNEL_OFFSET: u64 = 0xffff_8000_0000_0000;
-    pub unsafe fn user_pte_flags(_: u64, _: u64) -> Option<u64> { panic!("not called") }
-    pub unsafe fn map_user_page_4k(_: u64, _: u64, _: u64, _: bool, _: bool)
-        -> Result<(), &'static str> { panic!("not called") }
-} } }
-mod frames {
-    pub fn alloc() -> Option<u64> { panic!("not called") }
-    pub fn free(_: u64) -> Result<(), &'static str> { panic!("not called") }
+mod arch {
+    pub mod x86_64 {
+        pub mod paging {
+            pub const PAGE: u64 = 4096;
+            pub const KERNEL_OFFSET: u64 = 0xffff_8000_0000_0000;
+            pub const PTE_PRESENT: u64 = 1;
+            pub const PTE_WRITE: u64 = 2;
+            pub const PTE_USER: u64 = 4;
+            pub const PTE_NX: u64 = 1 << 63;
+            pub unsafe fn user_pte_flags(_: u64, _: u64) -> Option<u64> {
+                panic!("not called")
+            }
+            pub unsafe fn user_pte_phys(_: u64, _: u64) -> Option<u64> {
+                panic!("not called")
+            }
+            pub unsafe fn map_user_page_4k(
+                _: u64,
+                _: u64,
+                _: u64,
+                _: bool,
+                _: bool,
+            ) -> Result<(), &'static str> {
+                panic!("not called")
+            }
+            pub unsafe fn protect_user_page_4k(
+                _: u64,
+                _: u64,
+                _: bool,
+                _: bool,
+            ) -> Result<(), &'static str> {
+                panic!("not called")
+            }
+        }
+    }
 }
-mod proc { pub fn pml4_of(_: u64) -> Option<u64> { panic!("not called") } }
-mod sync { pub fn without_interrupts<R>(f: impl FnOnce() -> R) -> R { f() } }
+mod frames {
+    pub fn alloc() -> Option<u64> {
+        panic!("not called")
+    }
+    pub fn free(_: u64) -> Result<(), &'static str> {
+        panic!("not called")
+    }
+}
+mod proc {
+    pub fn pml4_of(_: u64) -> Option<u64> {
+        panic!("not called")
+    }
+}
+mod sync {
+    pub fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+        f()
+    }
+}
 #[path = "../../kernel/kernel/src/elf.rs"]
 mod elf;
 fn main() {
     let p = PathBuf::from(std::env::args_os().nth(1).expect("ELF path"));
     let bytes = std::fs::read(&p).expect("compiled ELF file");
-    assert!(!bytes.is_empty() && bytes.len() <= 4096,
-            "APKG v1 payload bound: {} bytes", bytes.len());
+    assert!(
+        !bytes.is_empty() && bytes.len() <= 4096,
+        "APKG v1 payload bound: {} bytes",
+        bytes.len()
+    );
     let info = elf::validate(&bytes).expect("production elf::validate refused probe");
     assert_eq!(info.nsegs, 1, "single RX segment, no RW image authority");
     let text = info.segs[0];
@@ -37,7 +80,16 @@ fn main() {
     bad = bytes.clone();
     bad[24..32].copy_from_slice(&0x500000u64.to_le_bytes()); // entry outside RX
     assert!(elf::validate(&bad).is_err(), "foreign entry was accepted");
-    assert!(elf::validate(&bytes[..120]).is_err(), "truncated segment was accepted");
-    println!("production elf::validate: PASS; payload={} bytes <=4096, entry={:#x}, PT_LOAD offset={} filesz={} memsz={} RX; W+X/entry/truncation refused",
-             bytes.len(), info.entry, text.offset, text.filesz, text.memsz);
+    assert!(
+        elf::validate(&bytes[..120]).is_err(),
+        "truncated segment was accepted"
+    );
+    println!(
+        "production elf::validate: PASS; payload={} bytes <=4096, entry={:#x}, PT_LOAD offset={} filesz={} memsz={} RX; W+X/entry/truncation refused",
+        bytes.len(),
+        info.entry,
+        text.offset,
+        text.filesz,
+        text.memsz
+    );
 }
