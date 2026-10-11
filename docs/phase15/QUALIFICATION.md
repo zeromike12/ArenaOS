@@ -8,7 +8,7 @@ claim the T2/T3/T4 or archive gates.
 - Base: merged Phase-14 `main`, `1aa35f4c20c9bb386612298fe21574897cf14159`.
 - Branch: `arena/phase15-fpu-simd`.
 - ADR: ADR-0112, proposed and pending architecture review.
-- Tested source commit: to be filled with the implementation commit before the evidence-only commit.
+- Tested source commit: `0182b5a0b980a2db0f39bcc41aa89ab500c6563b` (Phase-15 implementation; this evidence update is docs-only).
 - EFI SHA-256: `6427d3a29cd11f4eb332c20698595fa98129bf0309fc83c29d75f3752c32d873`.
 - ESP SHA-256: `5024c5e5c60f1484767653d925e549f6d3321765b6458ee9a8fc685a4d884964`.
 - Embedded Phase-15 fixture SHA-256: `948ef296c2666a29a55d9b611de177452adffc54314a4843037bff3bb5304d2d`.
