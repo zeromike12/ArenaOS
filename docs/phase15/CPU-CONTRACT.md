@@ -1,7 +1,9 @@
 # Phase 15 CPU contract
 
 Status: proposed with ADR-0112; CPU setup passed in targeted QEMU boots, while
-the full Phase-15 qualification remains incomplete.
+the full Phase-15 qualification remains incomplete. No new CPU capability is
+release-guaranteed until ADR-0112 is accepted and the `#XF` guest contract
+passes.
 
 ## Required processor profile
 
@@ -9,7 +11,8 @@ Kernel startup requires CPUID.1:EDX.FPU, FXSR, SSE, and SSE2. It records
 additional SSE-family flags only when CPUID reports them. x87, MMX register
 state, XMM0–XMM15, x87 control/status, and MXCSR are covered by the 64-bit
 FXSAVE format. Applications must use CPUID to select optional SSE-family
-instructions.
+instructions. SSE3, SSSE3, SSE4.1, SSE4.2, and AMD SSE4a are not unconditional
+guarantees; each remains usable only when the running processor advertises it.
 
 AVX, AVX2, AVX-512, YMM upper halves, ZMM, and AMX are unsupported. If firmware
 leaves CR4.OSXSAVE enabled, startup verifies CPUID leaf 0xD, restricts XCR0 to
@@ -44,6 +47,23 @@ logged `XCR0=None`; the inherited-OSXSAVE/XCR0 reduction path has host policy
 tests but no guest evidence yet. The tested image read back CR0 `0x80010033`
 and CR4 `0x668` (OSFXSR and OSXMMEXCPT set, OSXSAVE clear). `max` advertised
 AVX, while OSXSAVE remained clear after initialization.
+
+## Exception path and current limitation
+
+The live-IDT audit checks every vector's selector, gate attributes, IST, and
+handler offset. Vector 19 uses a no-error-code exception stub and the common
+frame contract supplies a synthetic zero error code before dispatch. CPL3
+faults use the established per-thread teardown path. Guest `#MF` and `#UD`
+tests verify that a faulting user thread exits while its sibling and an
+independent process survive.
+
+The dedicated unmasked `sqrtss xmm0,xmm0` probe records MXCSR immediately
+before and after the instruction. Both QEMU profiles show clean `0x1F00`
+before, `0x1F01` after, and no vector-19 delivery. QEMU 11.0.2 TCG source
+tracks the SoftFloat exception in MXCSR but has no TCG #XM/#XF raise path.
+The existing host SIGFPE probe corroborates the instruction's native behavior,
+but it does not prove ArenaOS exception delivery. The #XF gate remains failed
+and Phase 15 remains unqualified.
 
 ## Kernel restriction and exceptions
 

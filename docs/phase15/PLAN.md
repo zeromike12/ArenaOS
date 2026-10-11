@@ -37,21 +37,24 @@ this ADR is numbered 0112.
 
 | Gate | Required evidence | Status |
 |---|---|---|
-| T1 | Build, formatting, host tests, feature/template tests, instruction audit and ABI checks | Partial: checks pass; canonical `build.sh --image` stops at the Phase-14 PIE hash guard |
-| Targeted guest | Ring-3 state, process isolation, reuse, and exception cases on two CPU profiles | Partial: state/isolation/reuse, `#MF`, and `#UD` pass; TCG does not deliver `#XF` |
-| T2 | 10/10 fresh QEMU boots | Blocked; not run because the targeted guest suite fails on `#XF` |
-| T3 | 25/25 fresh mixed-workload boots | Blocked; not run because the targeted guest suite fails on `#XF` |
+| T1 | Build, formatting, host tests, feature/template tests, instruction audit and ABI checks | Pass: canonical build and Phase-14 hash/signature checks; rustfmt; kernel host tests 8/8; 120,354-instruction full-section audit with negative controls |
+| Targeted guest | Ring-3 state, process isolation, reuse, and exception cases on two CPU profiles | Partial: thread/process isolation, slot reuse, `#MF`, and `#UD` pass; the isolated `#XF` probe records `pre=0x1F00`, `post=0x1F01`, then falls through on both QEMU TCG profiles |
+| T2 | 10/10 fresh QEMU boots | Not run; targeted guest suite fails on `#XF` |
+| T3 | 25/25 fresh mixed-workload boots | Not run; targeted guest suite fails on `#XF` |
 | T4 | 100/100 fresh boots of one exact release candidate, zero failures | Not run |
 | Archive | Exact EFI/boot image/fixtures, source and toolchain identity, SHA-256 manifest, receipts, clean extraction and boot | Not run; no qualified candidate exists |
 
 Any failed boot invalidates the current run of that gate. The guest failure is
-preserved as a failure; it is not counted toward a pass total. The current
-QEMU TCG build records the unmasked SIMD invalid-operation status in MXCSR but
-does not deliver vector 19 (`#XF`). The available host has no `/dev/kvm`, so a
-hardware-accelerated cross-check was unavailable. The canonical build also
-fails before the kernel build because its Phase-14 PIE fixture hash differs
-from the repository's pinned value. See `QUALIFICATION.md` for receipts and
-hashes.
+preserved as a failure; it is not counted toward a pass total. The standalone
+guest instruction sequence and matching QEMU 11.0.2 TCG source show that the
+available emulator records the MXCSR flag but does not raise vector 19. The
+native host probe corroborates hardware behavior but is not ArenaOS evidence.
+The PIE hash blocker is resolved by using the official Rust 1.97.0 target
+components used by Phase 14; the checked-in guard remains unchanged. See
+`QUALIFICATION.md` and `receipts/phase15-targeted-results.json` for exact
+source, artifact hashes, commands, and receipts. The two targeted guest runs
+were one attempt per profile with no retries; both shut down cleanly but
+returned semantic harness failure because the `#XF` assertion failed.
 
 ## Scope
 

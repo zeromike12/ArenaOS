@@ -1,58 +1,64 @@
 # Phase 15 thread-state isolation
 
-Status: design proposed; implementation and targeted guest evidence are
-present on the Phase-15 branch. Full qualification is blocked by the SIMD
-exception case documented in `QUALIFICATION.md`.
+Status: implementation and focused isolation cases pass on the recorded QEMU
+runs; Phase 15 remains **PARTIAL / UNQUALIFIED** because unmasked SIMD `#XF`
+delivery fails under both tested TCG CPU profiles. ADR-0112 remains proposed.
+See [qualification](QUALIFICATION.md) for artifact identities and raw receipts.
 
-## Ownership
+## Ownership and transition rule
 
-The scheduler slot index owns the FP/SIMD image alongside its saved stack
-context. The fixed table has 64 entries. Each image is exactly 512 bytes and
-16-byte aligned; the table remains kernel-only and has stable lifetime.
+The scheduler slot owns the FP/SIMD image with its saved stack context. The
+fixed table has 64 entries. Each image is exactly 512 bytes and 16-byte
+aligned; the table is kernel-only and has stable lifetime. The bounded state
+cost is `64 × 512 = 32,768` bytes, plus alignment padding.
 
-New threads receive the startup template before they become Ready. A thread's
-state is private even when another thread shares its process address space.
-Different processes use the same scheduler table but retain distinct slot
-images across CR3 changes.
-
-## Transition rule
-
-Every actual context switch stores the outgoing architectural state before
+Every actual context switch saves the outgoing architectural state before
 loading the incoming image. The incoming image is restored before its saved
-RFLAGS/GPR frame resumes. The operation lives in the reviewed assembly leaf;
-no Rust borrow crosses the switch. The scheduler continues to disable
-interrupts while it chooses and commits a transition.
+RFLAGS/GPR frame resumes. This is in the common reviewed assembly leaf; no Rust
+borrow crosses the switch. The scheduler disables interrupts while choosing
+and committing a transition.
 
-The shared path covers voluntary yield, IPC/synchronization blocking and wake,
-timer preemption, user/kernel transitions, process CR3 changes, thread exit,
-and first entry into a new thread. Syscalls that do not switch rely on the
-integer-only kernel and leave user state untouched.
+That shared path covers voluntary yield, IPC and synchronization blocking and
+wake, timer preemption, process CR3 changes, thread exit, and first entry into
+a new thread. Direct syscalls that do not switch rely on the kernel's
+integer-only instruction policy and leave user state untouched.
 
-## Cleanup
+## Initialization and cleanup
 
-An outgoing zombie is saved while its scheduler slot is still allocated. It is
-reaped only after execution has moved to another stack. Reaping clears the FP
-image; slot reuse copies the clean template again before publishing the new
-thread. Process teardown, joined/detached threads, forced cleanup, and failed
-thread creation must not leave an image attached to a later owner.
+The clean image is validated before scheduler startup. New threads receive the
+startup template before becoming Ready. A thread image remains private even
+when other threads share its process address space; separate processes retain
+separate slot images across CR3 changes.
 
-The bounded memory cost is `64 × 512 = 32,768` bytes, excluding alignment
-padding. No dynamic allocation is introduced for architectural state.
+A zombie slot remains allocated until execution has switched to another
+stack. Reaping clears the FP image and saved context; slot reuse copies the
+clean template before publishing the new thread. Process teardown, joined and
+detached threads, forced cleanup, and failed thread creation follow the same
+lifetime rule. Source review found no restore from an uninitialized image or
+save into a freed/recycled slot.
 
-Targeted native guest runs passed two distinct worker contexts across yield,
-syscall, blocking join, and timer preemption (39–42 scheduler switches), with
-all sixteen XMM registers and x87/MXCSR state checked. Two CR3 roots retained
-independent images, a new process entered cleanly in a reused slot, and
-resource accounting returned to baseline. These results passed on both the
-baseline `qemu64` profile and AVX-capable `max` profile. See the qualification
-receipt for the outstanding `#XF` failure and exact image hashes.
+## Guest evidence
 
-## Required guest oracle
+The ring-3 fixture checks x87 arithmetic and control/status, scalar SSE/SSE2
+arithmetic, conversions and comparisons, MXCSR, and independent patterns in
+XMM0–XMM15. It crosses syscalls, yield, a blocking join, timer preemption, and
+separate process address spaces. The two worker contexts passed with 40
+scheduler switches on `max` and 42 on `qemu64`. Distinct CR3 roots retained
+state across 23 and 22 timer switches respectively; a fresh process entered
+cleanly in a recycled slot with 18 switches on each profile. Teardown returned
+frame and thread accounting to baseline.
 
-Independent assembly fixtures must give two or more scheduled threads distinct
-patterns in XMM0–XMM15, x87 stack/control state, and MXCSR. Each must perform
-arithmetic, cross syscalls, yield, block and wake, and be timer-preempted before
-verifying the expected register contents and control/status values. Repeat
-across two process CR3 roots, then launch a fresh process after FP-using threads
-exit and assert the clean initial state. Thread and process teardown must
-return all measured resources to baseline.
+The minimal `#XF` probe uses one faulting thread, a same-process sibling, and a
+separate peer process. On both profiles it records pre-MXCSR `0x1F00`, then
+falls through `sqrtss` with post-MXCSR `0x1F01`; the task returns that encoded
+fallback state instead of vector-19 status `0x113`. The sibling and peer each
+exit with status 42, the fault slot is released, and resource accounting
+returns to baseline. Those receipts prove cleanup and continued execution,
+but the `#XF` case is correctly a failure. `#MF` and `#UD` containment pass
+independently.
+
+The observed switch counts and exact fallback receipts are in
+[`phase15-avx.log`](receipts/phase15-avx.log) and
+[`phase15-qemu64.log`](receipts/phase15-qemu64.log). Neither run proves the
+unobserved inherited-OSXSAVE/XCR0 sanitation path; both entered firmware with
+OSXSAVE clear.

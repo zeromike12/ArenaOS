@@ -5,6 +5,9 @@ FXSAVE64/FXRSTOR64. The user thread owns private x87, MMX, XMM0–XMM15, x87
 control/status, and MXCSR state across direct syscalls, yield, blocking/wake,
 and scheduler switches. Arena 1's SDL3 executable has **not** been run by this
 Phase-15 guest fixture, so this handoff does not claim SDL3 compatibility.
+ADR-0112 remains proposed and Phase 15 is unqualified; these CPU capabilities
+are not yet release guarantees. The unresolved unmasked SIMD `#XF` test fails
+on both recorded QEMU TCG profiles.
 
 ## Supported profile
 

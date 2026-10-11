@@ -124,6 +124,17 @@ containment, Phase-14 compatibility, historical suites, fresh T2/T3/T4 boots,
 and independent extraction of the exact tested archive. T4 requires 100/100
 fresh boots with zero failures. No historical receipt can qualify this change.
 
+Current branch evidence isolates an unmasked `sqrtss` invalid operation with
+MXCSR `0x1F00` immediately before execution. QEMU 11.0.2 TCG returns with
+MXCSR `0x1F01` without delivering vector 19 on both tested CPU profiles;
+matching TCG source lacks the SSE mask-check/vector-19 raise path. The guest
+test remains failed, with sibling/peer and resource-cleanup receipts recorded.
+This observation does not accept the ADR or establish production `#XF`
+containment. The Phase-14 PIE hash mismatch was independently resolved by
+restoring its official Rust 1.97.0 target libraries; the existing hash guard
+and signed package identity remain intact. See `docs/phase15/QUALIFICATION.md`
+for the evidence and limits.
+
 If state ownership, exception containment, the integer-only audit, or a
 required guest gate cannot be proven, do not qualify this phase. The rollback
 is to revert Phase-15 commits and restore the accepted ADR-0012 no-FP execution
