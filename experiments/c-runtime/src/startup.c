@@ -307,14 +307,17 @@ static int parse_record(const uint8_t *page) {
     info.stream_set = found_set;
     info.stream_wake = found_wake;
     info.sync_domain = found_sync;
-    info.notification = ARENA_ARST_NONE;
-    for (unsigned i = 0; i < capc; i++) {
-        if (info.caps[i].role == ARENA_ARST_ROLE_OTHER &&
-            info.caps[i].kind == ARENA_CAP_KIND_NOTIFICATION && info.caps[i].rights == RIGHT_RW) {
-            info.notification = i;
-            break;
-        }
-    }
+    /* Wake notification for blocking stream waits (C2.1.5). A candidate is a verified
+     * descriptor with role OTHER, kind NOTIFICATION, and exact rights READ|WRITE.
+     * Startup ABI v2 carries no protocol identity, so candidates cannot be told apart
+     * by content. Policy:
+     *   - zero candidates (headless, or none granted): NONE; blocking waits return
+     *     ARENA_E_NO_WAITER, which is the defined headless path;
+     *   - exactly one candidate: bound (the grant is the only one; its identity is
+     *     not verified, and the policy says so);
+     *   - two or more: AMBIGUOUS. NONE is recorded and nothing is guessed, so a
+     *     blocking stream wait cannot silently bind to the wrong notification. */
+    info.notification = arena_startup_pick_notification(info.caps, capc);
 
     /* Copy the strings into private NUL-terminated storage. */
     size_t pos = 0;

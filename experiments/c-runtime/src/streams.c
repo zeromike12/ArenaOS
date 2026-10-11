@@ -243,6 +243,9 @@ int arena_stdio_init(void) {
     }
     granted_page = (uint8_t *)(uintptr_t)va;
     wake_slot = wake->slot;
+    /* C2.1.5: NONE covers headless, none granted, AND ambiguous (two or more
+     * candidate notifications). A blocking wait then returns ARENA_E_NO_WAITER and
+     * never binds to a guessed notification. */
     wait_slot = s->notification == ARENA_ARST_NONE ? NO_SLOT : s->caps[s->notification].slot;
     stdio_ready = 1;
     return 0;

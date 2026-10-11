@@ -26,6 +26,11 @@ extern struct arena_file *const arena_stderr_var;
 
 #define ARENA_C_EINVAL 22
 #define ARENA_C_ENOTSUP 95
+#define ARENA_C_EOVERFLOW 75
+/* C2.1.3: printf-family results and field widths/precisions are int-sized. A
+ * request beyond INT_MAX is refused with EOVERFLOW before any byte is written. */
+#define ARENA_C_INT_MAX 2147483647
+#define ARENA_C_IONBF 2 /* _IONBF in include/libc/stdio.h (the only mode implemented) */
 
 struct arena_file {
     int fd;       /* granted stream index: 0 stdin, 1 stdout, 2 stderr */
@@ -85,12 +90,25 @@ static void sink_flush(struct sink *s) {
     s->used = 0;
 }
 
+static void refuse(struct sink *s, int code) {
+    if (s->refused == 0) {
+        s->refused = code;
+    }
+}
+
 static void sink_put_n(struct sink *s, const char *p, size_t n) {
+    if (n > (size_t)ARENA_C_INT_MAX - s->count) {
+        refuse(s, ARENA_C_EOVERFLOW);
+        return;
+    }
     s->count += n;
     if (s->dry) {
         return;
     }
     if (s->fd >= 0) {
+        if (s->err != 0) {
+            return; /* after a write error nothing else is written (C2.1.3) */
+        }
         while (n > 0) {
             size_t room = sizeof(s->fbuf) - s->used;
             size_t take = n < room ? n : room;
@@ -117,6 +135,22 @@ static void sink_put_n(struct sink *s, const char *p, size_t n) {
 static void sink_put(struct sink *s, char c) { sink_put_n(s, &c, 1); }
 
 static void sink_repeat(struct sink *s, char c, size_t n) {
+    if (n > (size_t)ARENA_C_INT_MAX - s->count) {
+        refuse(s, ARENA_C_EOVERFLOW);
+        return;
+    }
+    if (s->fd < 0) {
+        /* Memory or dry sink: bulk-count, and write only what the buffer keeps. */
+        if (!s->dry && s->out != NULL && s->cap > 0) {
+            size_t room = s->cap - 1;
+            if (s->count < room) {
+                size_t take = n < room - s->count ? n : room - s->count;
+                arena_memset(s->out + s->count, c, take);
+            }
+        }
+        s->count += n;
+        return;
+    }
     while (n-- > 0) {
         sink_put(s, c);
     }
@@ -183,6 +217,10 @@ static void vformat(struct sink *s, const char *fmt, va_list ap) {
         size_t width = 0;
         if (*p == '*') {
             int w = va_arg(ap, int);
+            if (w == -ARENA_C_INT_MAX - 1) {
+                refuse(s, ARENA_C_EOVERFLOW); /* -INT_MIN has no int magnitude */
+                return;
+            }
             if (w < 0) {
                 left = 1;
                 w = -w;
@@ -191,7 +229,12 @@ static void vformat(struct sink *s, const char *fmt, va_list ap) {
             p++;
         } else {
             while (*p >= '0' && *p <= '9') {
-                width = width * 10 + (size_t)(*p - '0');
+                size_t d = (size_t)(*p - '0');
+                if (width > ((size_t)ARENA_C_INT_MAX - d) / 10u) {
+                    refuse(s, ARENA_C_EOVERFLOW);
+                    return;
+                }
+                width = width * 10 + d;
                 p++;
             }
         }
@@ -205,7 +248,12 @@ static void vformat(struct sink *s, const char *fmt, va_list ap) {
                 p++;
             } else {
                 while (*p >= '0' && *p <= '9') {
-                    precision = precision * 10 + (size_t)(*p - '0');
+                    size_t d = (size_t)(*p - '0');
+                    if (precision > ((size_t)ARENA_C_INT_MAX - d) / 10u) {
+                        refuse(s, ARENA_C_EOVERFLOW);
+                        return;
+                    }
+                    precision = precision * 10 + d;
                     p++;
                 }
             }
@@ -431,7 +479,6 @@ int arena_printf(const char *fmt, ...) {
 
 #define ARENA_C_EBADF 9
 #define ARENA_C_EPIPE 32
-#define ARENA_C_EOVERFLOW 75
 #define ARENA_C_ENOSYS 38
 
 static int file_usable(struct arena_file *f) {
@@ -464,22 +511,36 @@ static int file_readable(struct arena_file *f) {
     return 1;
 }
 
-/* Write all bytes or report the first error. Returns 0 or a negative status. */
-static long write_all(struct arena_file *f, const void *p, size_t n) {
+/* Write all bytes or report the first error. Returns 0 or a negative status.
+ * *done (if not NULL) receives the number of bytes actually written, which is
+ * exact on error too, so fwrite can report the complete elements it wrote. */
+static long write_all(struct arena_file *f, const void *p, size_t n, size_t *done) {
     size_t off = 0;
+    if (done != NULL) {
+        *done = 0;
+    }
     while (off < n) {
         long w = arena_write(f->fd, (const char *)p + off, n - off);
         if (w < 0) {
             f->err = 1;
             arena_c_set_errno(arena_c_errno_for(w));
+            if (done != NULL) {
+                *done = off;
+            }
             return w;
         }
         if (w == 0) {
             f->err = 1;
             arena_c_set_errno(ARENA_C_EPIPE);
+            if (done != NULL) {
+                *done = off;
+            }
             return ARENA_E_CLOSED;
         }
         off += (size_t)w;
+    }
+    if (done != NULL) {
+        *done = off;
     }
     return 0;
 }
@@ -512,7 +573,7 @@ int arena_fputs(const char *s, struct arena_file *f) {
     if (s == NULL || !file_writable(f)) {
         return -1;
     }
-    return write_all(f, s, arena_strlen(s)) == 0 ? 0 : -1;
+    return write_all(f, s, arena_strlen(s), NULL) == 0 ? 0 : -1;
 }
 
 int arena_puts(const char *s) {
@@ -527,7 +588,7 @@ int arena_fputc(int c, struct arena_file *f) {
     if (!file_writable(f)) {
         return -1;
     }
-    return write_all(f, &b, 1) == 0 ? (int)b : -1;
+    return write_all(f, &b, 1, NULL) == 0 ? (int)b : -1;
 }
 
 int arena_putc(int c, struct arena_file *f) { return arena_fputc(c, f); }
@@ -564,7 +625,10 @@ char *arena_fgets(char *buf, int n, struct arena_file *f) {
     while (i < n - 1) {
         unsigned char b;
         long r = read_one(f, &b);
-        if (r <= 0) {
+        if (r < 0) {
+            return NULL; /* error: null, whatever was read so far (C11) */
+        }
+        if (r == 0) {
             break;
         }
         buf[i++] = (char)b;
@@ -590,10 +654,9 @@ size_t arena_fwrite(const void *p, size_t size, size_t n, struct arena_file *f) 
         arena_c_set_errno(ARENA_C_EOVERFLOW);
         return 0;
     }
-    if (write_all(f, p, size * n) != 0) {
-        return 0;
-    }
-    return n;
+    size_t done = 0;
+    (void)write_all(f, p, size * n, &done);
+    return done / size; /* complete elements only; a partial element is not counted */
 }
 
 size_t arena_fread(void *p, size_t size, size_t n, struct arena_file *f) {
@@ -657,12 +720,18 @@ void arena_clearerr(struct arena_file *f) {
     }
 }
 
-/* Accepted for compatibility. Every stream is unbuffered, which satisfies any
- * requested mode. The caller's buffer is never used. */
+/* C2.1.3 policy. The runtime implements ONLY unbuffered streams (_IONBF). Every
+ * stream writes through immediately, so the caller's buffer is never used. A
+ * request for _IOFBF or _IOLBF (or any other mode) is REFUSED with -1 and EINVAL,
+ * not silently accepted: a buffered mode would promise behaviour the runtime
+ * does not provide. */
 int arena_setvbuf(struct arena_file *f, char *buf, int mode, size_t size) {
     (void)buf;
     (void)size;
-    if (!file_usable(f) || mode < 0 || mode > 2) {
+    if (!file_usable(f)) {
+        return -1; /* EBADF set by file_usable */
+    }
+    if (mode != ARENA_C_IONBF) {
         arena_c_set_errno(ARENA_C_EINVAL);
         return -1;
     }

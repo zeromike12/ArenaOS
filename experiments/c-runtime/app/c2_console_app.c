@@ -233,7 +233,8 @@ static void g5_threads(void) {
 static mtx_t gate_lock;
 static cnd_t gate_cv;
 static int gate_open;
-static volatile int detached_done;
+static int detached_runs;      /* incremented atomically by each detached worker */
+static volatile int exit_worker_ran;
 
 static int gate_waiter(void *arg) {
     (void)arg;
@@ -252,7 +253,26 @@ static int gate_waiter(void *arg) {
 
 static int detached_worker(void *arg) {
     (void)arg;
-    detached_done = 1;
+    (void)__atomic_fetch_add(&detached_runs, 1, __ATOMIC_ACQ_REL);
+    return 0;
+}
+
+/* Calls thrd_exit from a worker: only this thread may end (C2.1.7). */
+static int exit_worker(void *arg) {
+    (void)arg;
+    exit_worker_ran = 1;
+    thrd_exit(7);
+}
+
+/* Termination witness: the kernel's live (non-zombie) thread count returns to
+ * `want`. This is a kernel fact, not a flag the worker sets. Bounded: 5 s. */
+static int wait_thread_count(int want) {
+    for (int spins = 0; spins < 5000; spins++) {
+        if (arena_thread_count() == want) {
+            return 1;
+        }
+        (void)thrd_sleep(&(struct timespec){.tv_sec = 0, .tv_nsec = 1000000L}, NULL);
+    }
     return 0;
 }
 
@@ -272,6 +292,8 @@ static void g6_threads_ext(void) {
     /* Refusals must be explicit errors, never success. */
     EXPECT(mtx_init(&timed_lock, mtx_plain | mtx_recursive) == thrd_error,
            "recursive mutex refused at init");
+    EXPECT(mtx_init(&timed_lock, mtx_timed) == thrd_error,
+           "timed mutex type refused at init (C2.1.1: no capability claimed)");
     EXPECT(mtx_init(&timed_lock, mtx_plain) == thrd_success, "timed-lock mutex init");
     struct timespec soon;
     EXPECT(clock_gettime(CLOCK_MONOTONIC, &soon) == 0, "timed-lock deadline base");
@@ -282,7 +304,7 @@ static void g6_threads_ext(void) {
     }
     EXPECT(mtx_timedlock(&timed_lock, &soon) == thrd_error, "mtx_timedlock is refused");
     mtx_destroy(&timed_lock);
-    tss_t key;
+    tss_t key = 0; /* deterministic: the refused key is never a live key (C2.1.7) */
     EXPECT(tss_create(&key, NULL) == thrd_error, "tss_create is refused");
     EXPECT(tss_get(key) == NULL, "tss_get reports no value (refused key)");
     EXPECT(tss_set(key, (void *)1) == thrd_error, "tss_set is refused");
@@ -304,16 +326,57 @@ static void g6_threads_ext(void) {
     cnd_destroy(&gate_cv);
     mtx_destroy(&gate_lock);
 
-    /* Detach: the thread runs to completion without a join. Bounded wait. */
+    /* Detach: the thread runs and terminates without a join. Termination is
+     * observed through the kernel's live thread count, not a flag. */
+    int base_threads = arena_thread_count();
     thrd_t quiet;
     EXPECT(thrd_create(&quiet, detached_worker, NULL) == thrd_success, "detach candidate created");
     EXPECT(thrd_detach(quiet) == thrd_success, "thrd_detach succeeds");
-    int spins = 0;
-    while (!detached_done && spins < 2000) {
-        (void)thrd_sleep(&(struct timespec){.tv_sec = 0, .tv_nsec = 1000000L}, NULL);
-        spins++;
+    EXPECT(wait_thread_count(base_threads), "detached thread terminated (live threads back to %d)",
+           base_threads);
+    EXPECT(__atomic_load_n(&detached_runs, __ATOMIC_ACQUIRE) == 1, "detached thread ran once");
+
+    /* Stress (C2.1.2): 64 create+detach cycles. Every worker must run and terminate,
+     * the live thread count must return to the baseline, and the allocator must hold
+     * no record that was not released (live blocks back to the baseline). */
+    struct arena_heap_stats hs0, hs1;
+    arena_heap_stats(&hs0);
+    int runs0 = __atomic_load_n(&detached_runs, __ATOMIC_ACQUIRE);
+    /* The kernel caps live user threads per process, so a create can be refused while
+     * earlier workers are still running. A refused create frees its record (C2.1.2);
+     * the loop waits (bounded) for a worker to exit and then retries. */
+    int created = 0, capacity_waits = 0;
+    for (int i = 0; i < 64; i++) {
+        thrd_t d;
+        int attempts = 0;
+        while (thrd_create(&d, detached_worker, NULL) != thrd_success) {
+            if (++attempts > 20000) {
+                break;
+            }
+            capacity_waits++;
+            (void)thrd_sleep(&(struct timespec){.tv_sec = 0, .tv_nsec = 100000L}, NULL);
+        }
+        if (attempts > 20000 || thrd_detach(d) != thrd_success) {
+            break;
+        }
+        created++;
     }
-    EXPECT(detached_done == 1, "detached thread ran (%d spins)", spins);
+    EXPECT(created == 64, "64 create+detach cycles accepted (created %d, capacity waits %d)", created,
+           capacity_waits);
+    EXPECT(wait_thread_count(base_threads), "all detached stress workers terminated");
+    EXPECT(__atomic_load_n(&detached_runs, __ATOMIC_ACQUIRE) - runs0 == 64,
+           "every stress worker ran exactly once");
+    arena_heap_stats(&hs1);
+    EXPECT(hs1.live_blocks == hs0.live_blocks,
+           "no detached record leaked (live blocks %llu -> %llu)",
+           (unsigned long long)hs0.live_blocks, (unsigned long long)hs1.live_blocks);
+
+    /* thrd_exit from a worker ends that worker only; the application continues. */
+    thrd_t exiter;
+    int exit_status = -99;
+    EXPECT(thrd_create(&exiter, exit_worker, NULL) == thrd_success, "thrd_exit worker created");
+    EXPECT(thrd_join(exiter, &exit_status) == thrd_success && exit_status == 7 && exit_worker_ran == 1,
+           "thrd_exit ends only the worker (status %d)", exit_status);
 
     /* thrd_sleep delegates to nanosleep: 1 ms returns success. */
     EXPECT(thrd_sleep(&(struct timespec){.tv_sec = 0, .tv_nsec = 1000000L}, NULL) == thrd_success,
@@ -331,7 +394,10 @@ static void g7_stdio_ext(void) {
     EXPECT(ferror(stdout) == 0 && feof(stdout) == 0, "stdout starts with no error or EOF");
     clearerr(stdout);
     EXPECT(ferror(stdout) == 0, "clearerr leaves no error");
-    EXPECT(setvbuf(stdout, NULL, _IOLBF, 0) == 0, "setvbuf accepts a valid mode");
+    EXPECT(setvbuf(stdout, NULL, _IONBF, 0) == 0, "setvbuf accepts _IONBF (the implemented mode)");
+    errno = 0;
+    EXPECT(setvbuf(stdout, NULL, _IOLBF, 0) == -1 && errno == EINVAL,
+           "setvbuf refuses _IOLBF with EINVAL (C2.1.3: buffered modes not implemented)");
     errno = 0;
     EXPECT(setvbuf(stdout, NULL, 9, 0) == -1 && errno == EINVAL, "setvbuf refuses a bad mode");
     perror("[c2-console] perror probe");
@@ -373,7 +439,10 @@ int main(int argc, char **argv) {
     g8_init();
     /* G9 exit: registration succeeded. The handler runs after main returns; the
      * harness requires its line AFTER the RESULT line (ordering = exit path). */
-    group_result("G9 exit", atexit_registered, 1);
+    int g9_before = failed_checks, g9_n0 = checks;
+    EXPECT(atexit_registered, "atexit registration accepted");
+    EXPECT(atexit_ran == 0, "atexit handler has not run before main returns");
+    group_result("G9 exit", failed_checks == g9_before, checks - g9_n0);
     int pass = groups_passed == GROUPS && failed_checks == 0;
     printf(APP_NAME " RESULT %s groups=%d/%d checks=%d failed=%d\n", pass ? "PASS" : "FAIL",
            groups_passed, GROUPS, checks, failed_checks);

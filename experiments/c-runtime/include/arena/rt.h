@@ -81,7 +81,8 @@ typedef struct arena_startup {
     unsigned stream_set;   /* cap index of StandardStreamSet, or ARENA_ARST_NONE */
     unsigned stream_wake;  /* cap index of StreamWake, or ARENA_ARST_NONE */
     unsigned sync_domain;  /* cap index of SyncDomain, or ARENA_ARST_NONE */
-    unsigned notification; /* cap index of a private RW Notification, or NONE */
+    unsigned notification; /* cap index of the sole private RW Notification (role OTHER), or NONE
+                            * when there are zero or two-or-more candidates (C2.1.5 policy) */
 } arena_startup_t;
 
 /* Verified record (present == 1) after crt start, else present == 0. */

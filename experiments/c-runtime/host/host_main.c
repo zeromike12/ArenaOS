@@ -1,4 +1,5 @@
 /* Host-test glue: the one runtime service the host build must supply. */
+#include <sched.h>
 #include <stddef.h>
 #include <unistd.h>
 
@@ -15,6 +16,10 @@ int arena_host_capture_on = 0;
 char arena_host_capture[512];
 size_t arena_host_capture_n = 0;
 long arena_host_write_calls = 0;
+/* C2.1.3 seam: total bytes the stream accepts before every later write fails with
+ * arena_host_write_fail (or ARENA_E_BROKEN_PIPE if that is 0). -1 = unlimited. This
+ * makes an fwrite of several elements fail part-way, through an element. */
+long arena_host_write_budget = -1;
 
 long arena_write(int fd, const void *buf, size_t len) {
     if (fd != 1 && fd != 2) {
@@ -27,6 +32,15 @@ long arena_write(int fd, const void *buf, size_t len) {
     size_t take = len;
     if (arena_host_write_limit > 0 && take > (size_t)arena_host_write_limit) {
         take = (size_t)arena_host_write_limit;
+    }
+    if (arena_host_write_budget >= 0) {
+        if (arena_host_write_budget == 0) {
+            return arena_host_write_fail != 0 ? arena_host_write_fail : ARENA_E_BROKEN_PIPE;
+        }
+        if (take > (size_t)arena_host_write_budget) {
+            take = (size_t)arena_host_write_budget;
+        }
+        arena_host_write_budget -= (long)take;
     }
     if (arena_host_capture_on) {
         size_t room = sizeof arena_host_capture - arena_host_capture_n;
@@ -48,6 +62,12 @@ long arena_write(int fd, const void *buf, size_t len) {
 const arena_startup_t *arena_startup(void) {
     static const arena_startup_t none;
     return &none;
+}
+
+/* Host stand-in for the scheduler yield (the guest binds it to SYS_YIELD). Used by
+ * the atexit re-entry path, which yields while another thread runs the handlers. */
+void arena_yield(void) {
+    sched_yield();
 }
 
 /* Host stub for the exit syscall path: the host test never returns from it. */

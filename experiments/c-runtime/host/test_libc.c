@@ -11,6 +11,9 @@
  * defines struct timespec on the host). It declares the few prototypes it needs.
  */
 #include <errno.h>
+#include <limits.h>
+#include <pthread.h>
+#include <sys/types.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +23,7 @@
 
 #include "arena/rt.h"
 #include "arena/string.h"
+#include "internal.h"
 #include "libc_internal.h"
 
 /* arena_* prototypes (implementations: stdio.c, libc_stdlib.c, libc_string.c, exit.c) */
@@ -70,6 +74,29 @@ char *arena_fgets(char *buf, int n, struct arena_file *f);
 size_t arena_fread(void *p, size_t size, size_t n, struct arena_file *f);
 int arena_fclose(struct arena_file *f);
 int *__arena_errno_location(void);
+
+/* C2.1 host seams (host/host_main.c). */
+extern long arena_host_write_limit;
+extern long arena_host_write_fail;
+extern long arena_host_write_budget;
+extern int arena_host_capture_on;
+extern char arena_host_capture[512];
+extern size_t arena_host_capture_n;
+extern long arena_host_write_calls;
+/* stdio objects (src/stdio.c) */
+struct arena_file *arena_stdin_object(void);
+struct arena_file *arena_stdout_object(void);
+struct arena_file *arena_stderr_object(void);
+int arena_fputs(const char *s, struct arena_file *f);
+int arena_getchar(void);
+int arena_ungetc(int c, struct arena_file *f);
+size_t arena_fwrite(const void *p, size_t size, size_t n, struct arena_file *f);
+int arena_ferror(struct arena_file *f);
+int arena_feof(struct arena_file *f);
+void arena_clearerr(struct arena_file *f);
+int arena_setvbuf(struct arena_file *f, char *buf, int mode, size_t size);
+int arena_printf(const char *fmt, ...);
+
 void arena_libc_abort(void) __attribute__((noreturn));
 void arena_libc_Exit(int status) __attribute__((noreturn));
 void __arena_assert_fail(const char *expr, const char *file, int line) __attribute__((noreturn));
@@ -430,6 +457,316 @@ static void test_errno_map(void) {
     CHECK(strcmp(strerror(ENOTSUP), strerror(ENOTSUP)) == 0, "strerror stable");
 }
 
+
+/* ---- C2.1.3 stdio contract ------------------------------------------------- */
+
+/* fwrite returns complete elements actually written, on every path. */
+static void test_fwrite_contract(void) {
+    static const char data[] = "0123456789ABCDEF";
+    arena_host_capture_on = 1;
+    arena_host_capture_n = 0;
+    arena_host_write_limit = 0;
+    arena_host_write_fail = 0;
+    arena_host_write_budget = -1;
+    arena_clearerr(arena_stdout_object());
+
+    CHECK(arena_fwrite(data, 1, 4, arena_stdout_object()) == 4 && arena_host_capture_n == 4 &&
+              memcmp(arena_host_capture, "0123", 4) == 0,
+          "fwrite full: 4 one-byte items, bytes in order");
+
+    arena_host_write_limit = 2; /* short writes: the loop retries until the element set is done */
+    arena_host_capture_n = 0;
+    CHECK(arena_fwrite(data, 4, 3, arena_stdout_object()) == 3 && arena_host_capture_n == 12 &&
+              memcmp(arena_host_capture, data, 12) == 0,
+          "fwrite short writes: 3 items reported, 12 bytes intact");
+    arena_host_write_limit = 0;
+
+    /* Incomplete element: budget 6 of 3 x 4-byte items -> item 1 complete, item 2 partial. */
+    arena_host_capture_n = 0;
+    arena_host_write_budget = 6; /* budget exhausts mid-element; fail seam stays 0 (fallback EPIPE) */
+    arena_host_write_fail = 0;
+    arena_c_set_errno(0);
+    size_t got = arena_fwrite(data, 4, 3, arena_stdout_object());
+    CHECK(got == 1, "fwrite incomplete element: reports 1 complete item (got %zu)", got);
+    CHECK(arena_host_capture_n == 6, "fwrite incomplete element: exactly the 6 accepted bytes written");
+    CHECK(arena_ferror(arena_stdout_object()) != 0, "fwrite incomplete element: sticky error flag set");
+    CHECK(arena_c_get_errno() == EPIPE, "fwrite incomplete element: errno EPIPE (got %d)", arena_c_get_errno());
+    arena_host_write_budget = -1;
+
+    /* The error flag is sticky until cleared. */
+    CHECK(arena_ferror(arena_stdout_object()) != 0, "ferror stays set until clearerr");
+    arena_clearerr(arena_stdout_object());
+    CHECK(arena_ferror(arena_stdout_object()) == 0, "clearerr clears ferror");
+
+    /* Failing from the first byte: zero complete items. */
+    arena_host_write_budget = 0;
+    arena_host_write_fail = 0;
+    CHECK(arena_fwrite(data, 1, 4, arena_stdout_object()) == 0 && arena_ferror(arena_stdout_object()) != 0,
+          "fwrite failing: 0 items, error flag");
+    arena_host_write_budget = -1;
+    arena_host_write_fail = 0;
+    arena_clearerr(arena_stdout_object());
+
+    /* Zero size or zero count: 0, no error, no write. */
+    arena_host_capture_n = 0;
+    CHECK(arena_fwrite(data, 0, 5, arena_stdout_object()) == 0 && arena_ferror(arena_stdout_object()) == 0 && arena_host_capture_n == 0,
+          "fwrite zero size: 0, no error, no write");
+    CHECK(arena_fwrite(data, 5, 0, arena_stdout_object()) == 0 && arena_ferror(arena_stdout_object()) == 0 && arena_host_capture_n == 0,
+          "fwrite zero count: 0, no error, no write");
+
+    /* Overflow of size * n: refused before any write, EOVERFLOW, not an I/O error. */
+    arena_c_set_errno(0);
+    CHECK(arena_fwrite(data, (size_t)-1 / 2 + 1, 2, arena_stdout_object()) == 0 && arena_c_get_errno() == 75 &&
+              arena_host_capture_n == 0 && arena_ferror(arena_stdout_object()) == 0,
+          "fwrite size*n overflow: 0, EOVERFLOW, no write, no I/O error");
+
+    /* Not writable: stdin. */
+    arena_c_set_errno(0);
+    CHECK(arena_fwrite(data, 1, 4, arena_stdin_object()) == 0 && arena_c_get_errno() == EBADF,
+          "fwrite on stdin refused (EBADF)");
+
+    arena_host_capture_on = 0;
+    arena_host_capture_n = 0;
+}
+
+/* setvbuf implements _IONBF only. Buffered modes are refused, never ignored. */
+static void test_setvbuf_policy(void) {
+    static char buf[128];
+    /* _IOFBF 0, _IOLBF 1, _IONBF 2 (include/libc/stdio.h). */
+    CHECK(arena_setvbuf(arena_stdout_object(), NULL, 2, 0) == 0, "setvbuf _IONBF accepted (unbuffered)");
+    CHECK(arena_setvbuf(arena_stdout_object(), buf, 2, sizeof buf) == 0, "setvbuf _IONBF with a buffer: buffer ignored, accepted");
+    arena_c_set_errno(0);
+    CHECK(arena_setvbuf(arena_stdout_object(), buf, 0, sizeof buf) == -1 && arena_c_get_errno() == EINVAL,
+          "setvbuf _IOFBF refused with EINVAL");
+    arena_c_set_errno(0);
+    CHECK(arena_setvbuf(arena_stdout_object(), buf, 1, sizeof buf) == -1 && arena_c_get_errno() == EINVAL,
+          "setvbuf _IOLBF refused with EINVAL");
+    arena_c_set_errno(0);
+    CHECK(arena_setvbuf(arena_stdout_object(), NULL, 9, 0) == -1 && arena_c_get_errno() == EINVAL,
+          "setvbuf unknown mode refused with EINVAL");
+    arena_c_set_errno(0);
+    CHECK(arena_setvbuf(NULL, NULL, 2, 0) == -1 && arena_c_get_errno() == EBADF,
+          "setvbuf on NULL stream refused with EBADF");
+}
+
+/* Input: a read error is not end of file; pushback is one byte; no ambient read. */
+static void test_input_contract(void) {
+    char line[16];
+    arena_clearerr(arena_stdin_object());
+    /* No stream grant: the read fails. fgets returns NULL and sets ferror (not feof). */
+    CHECK(arena_fgets(line, sizeof line, arena_stdin_object()) == NULL, "fgets read error returns NULL");
+    CHECK(arena_ferror(arena_stdin_object()) != 0 && arena_feof(arena_stdin_object()) == 0, "fgets read error sets ferror, not feof");
+    arena_clearerr(arena_stdin_object());
+
+    /* ungetc pushback is deterministic: getchar returns it without touching a stream. */
+    CHECK(arena_ungetc('Q', arena_stdin_object()) == 'Q', "ungetc accepts one byte");
+    CHECK(arena_ungetc('R', arena_stdin_object()) == -1, "a second ungetc is refused (one byte of pushback)");
+    CHECK(arena_getchar() == 'Q', "getchar returns the pushed-back byte, no stream read");
+    CHECK(arena_ungetc(-1, arena_stdin_object()) == -1, "ungetc(EOF) refused");
+    CHECK(arena_ungetc(256, arena_stdin_object()) == -1, "ungetc out-of-range refused");
+    arena_clearerr(arena_stdin_object());
+}
+
+/* ---- C2.1.3 formatter bounds (INT_MAX) ----------------------------------- */
+
+static void test_formatter_bounds(void) {
+    char b[16];
+    memset(b, '#', sizeof b);
+    arena_c_set_errno(0);
+    CHECK(arena_snprintf(b, sizeof b, "%*d", -2147483647 - 1, 1) == -1 && arena_c_get_errno() == 75,
+          "* width INT_MIN refused (EOVERFLOW)");
+    arena_c_set_errno(0);
+    CHECK(arena_snprintf(b, sizeof b, "%2147483648d", 1) == -1 && arena_c_get_errno() == 75,
+          "width 2^31 refused (EOVERFLOW)");
+    arena_c_set_errno(0);
+    CHECK(arena_snprintf(b, sizeof b, "%.2147483648d", 1) == -1 && arena_c_get_errno() == 75,
+          "precision 2^31 refused (EOVERFLOW)");
+    arena_c_set_errno(0);
+    CHECK(arena_snprintf(b, sizeof b, "%99999999999999999999d", 1) == -1 && arena_c_get_errno() == 75,
+          "twenty-digit width refused (EOVERFLOW)");
+    CHECK(b[0] == '#' && b[sizeof b - 1] == '#', "refused snprintf writes nothing");
+
+    /* Width exactly INT_MAX: an exact count, bounded output, no per-byte loop. */
+    int n = arena_snprintf(b, sizeof b, "%2147483647d", 1);
+    CHECK(n == 2147483647, "width INT_MAX: exact count (got %d)", n);
+    CHECK(b[0] == ' ' && b[sizeof b - 1] == '\0', "width INT_MAX: buffer padded then terminated");
+
+    /* The total crossing INT_MAX is refused, even though each part is in range. */
+    memset(b, '#', sizeof b);
+    arena_c_set_errno(0);
+    CHECK(arena_snprintf(b, sizeof b, "xxx%2147483647d", 1) == -1 && arena_c_get_errno() == 75,
+          "total above INT_MAX refused (EOVERFLOW)");
+    CHECK(b[0] == '#' && b[sizeof b - 1] == '#', "total above INT_MAX: buffer untouched");
+
+    /* A refused printf writes nothing to the stream. */
+    arena_host_capture_on = 1;
+    arena_host_capture_n = 0;
+    CHECK(arena_printf("never%2147483648d\n", 1) == -1 && arena_host_capture_n == 0,
+          "refused printf: no bytes reach the stream");
+    arena_host_capture_on = 0;
+}
+
+/* ---- C2.1.4 atexit concurrency (forked children; the parent registry stays clean) */
+
+#define AH(i) static void ah_##i(void) { (void)__atomic_fetch_add(&ah_hits[i], 1u, __ATOMIC_ACQ_REL); }
+static unsigned ah_hits[40];
+static int reg_ok[40];
+static unsigned reenter_hits;
+static void reenter_handler(void);
+AH(0) AH(1) AH(2) AH(3) AH(4) AH(5) AH(6) AH(7) AH(8) AH(9)
+AH(10) AH(11) AH(12) AH(13) AH(14) AH(15) AH(16) AH(17) AH(18) AH(19)
+AH(20) AH(21) AH(22) AH(23) AH(24) AH(25) AH(26) AH(27) AH(28) AH(29)
+AH(30) AH(31) AH(32) AH(33) AH(34) AH(35) AH(36) AH(37) AH(38) AH(39)
+#undef AH
+static void (*const ah_fns[40])(void) = {
+    ah_0, ah_1, ah_2, ah_3, ah_4, ah_5, ah_6, ah_7, ah_8, ah_9,
+    ah_10, ah_11, ah_12, ah_13, ah_14, ah_15, ah_16, ah_17, ah_18, ah_19,
+    ah_20, ah_21, ah_22, ah_23, ah_24, ah_25, ah_26, ah_27, ah_28, ah_29,
+    ah_30, ah_31, ah_32, ah_33, ah_34, ah_35, ah_36, ah_37, ah_38, ah_39};
+
+static void reenter_handler(void) {
+    reenter_hits++;
+    arena_c_run_exit_handlers(); /* same thread, inside a handler: must return at once */
+}
+
+static void *registrar(void *arg) {
+    long k = (long)arg;
+    for (int j = 0; j < 10; j++) {
+        int idx = (int)(k * 10 + j); /* 4 x 10 = 40 distinct attempts, capacity 32 */
+        reg_ok[idx] = arena_atexit(ah_fns[idx]) == 0;
+    }
+    return NULL;
+}
+
+static void *runner(void *arg) {
+    (void)arg;
+    arena_c_run_exit_handlers();
+    return NULL;
+}
+
+/* Race: 4 registrars against a runner. Exactly 32 succeed; no handler runs twice;
+ * a handler never runs for a refused registration; no unpublished slot is called. */
+static int child_race(void) {
+    pthread_t reg[4], run;
+    for (long k = 0; k < 4; k++) {
+        if (pthread_create(&reg[k], NULL, registrar, (void *)k) != 0) return 10;
+    }
+    if (pthread_create(&run, NULL, runner, NULL) != 0) return 11;
+    for (int k = 0; k < 4; k++) (void)pthread_join(reg[k], NULL);
+    (void)pthread_join(run, NULL);
+    int ok = 0;
+    for (int i = 0; i < 40; i++) ok += reg_ok[i];
+    if (ok != 32) return 12;
+    arena_c_run_exit_handlers(); /* no-op or the first run: either way once */
+    for (int i = 0; i < 40; i++) {
+        if (ah_hits[i] > 1u) return 13;                 /* at most once */
+        if (!reg_ok[i] && ah_hits[i] != 0u) return 14; /* refused: never runs */
+    }
+    return 0;
+}
+
+/* Ordered: every registration that returned before exit began runs exactly once,
+ * re-entry from a handler is refused, and a second exit run does nothing. */
+static int child_ordered(void) {
+    for (int i = 0; i < 31; i++) reg_ok[i] = arena_atexit(ah_fns[i]) == 0;
+    int reenter_ok = arena_atexit(reenter_handler) == 0;
+    for (int i = 0; i < 31; i++) if (!reg_ok[i]) return 20;
+    if (!reenter_ok) return 21;
+    if (arena_atexit(ah_fns[39]) != -1) return 22; /* registry full: 32 of 32 */
+    arena_c_run_exit_handlers();
+    for (int i = 0; i < 31; i++) if (ah_hits[i] != 1u) return 23;
+    if (reenter_hits != 1u) return 24;
+    arena_c_run_exit_handlers();
+    for (int i = 0; i < 31; i++) if (ah_hits[i] != 1u) return 25;
+    if (reenter_hits != 1u) return 26;
+    return 0;
+}
+
+static int run_child(int (*fn)(void)) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        _exit(fn());
+    }
+    int st = 0;
+    if (pid < 0 || waitpid(pid, &st, 0) != pid || !WIFEXITED(st)) {
+        return -1;
+    }
+    return WEXITSTATUS(st);
+}
+
+static void test_atexit_concurrency(void) {
+    int race = run_child(child_race);
+    CHECK(race == 0, "atexit race: exactly 32 registrations, no double run, no call of a refused slot (child %d)", race);
+    int ordered = run_child(child_ordered);
+    CHECK(ordered == 0, "atexit ordered: registered handlers run once, re-entry refused, no re-run (child %d)", ordered);
+}
+
+/* ---- C2.1.5 notification selection (pure policy, startup_query.c) ----------- */
+
+static arena_cap_desc_t cap_of(uint16_t slot, uint8_t role, uint8_t kind, uint32_t rights) {
+    arena_cap_desc_t d;
+    d.slot = slot;
+    d.role = role;
+    d.kind = kind;
+    d.rights = rights;
+    return d;
+}
+
+static void test_notification_selection(void) {
+    const uint32_t RW = ARENA_RIGHT_READ | ARENA_RIGHT_WRITE;
+    const uint32_t RO = ARENA_RIGHT_READ;
+    arena_cap_desc_t c[6];
+    const unsigned NONE = ARENA_ARST_NONE;
+
+    /* Headless: no caps at all. */
+    CHECK(arena_startup_pick_notification(NULL, 0) == NONE, "notification: headless (no table) -> NONE");
+    CHECK(arena_startup_pick_notification(c, 0) == NONE, "notification: headless (empty table) -> NONE");
+
+    /* Missing: a sync domain and a window surface, no notification. */
+    c[0] = cap_of(1, ARENA_ARST_ROLE_SYNC_DOMAIN, ARENA_CAP_KIND_SYNC_DOMAIN, RW);
+    c[1] = cap_of(2, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_SHARED_REGION, RW);
+    CHECK(arena_startup_pick_notification(c, 2) == NONE, "notification: missing -> NONE");
+
+    /* One valid. */
+    c[2] = cap_of(3, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RW);
+    CHECK(arena_startup_pick_notification(c, 3) == 2, "notification: one valid -> its index");
+
+    /* Two equal: ambiguous, nothing is guessed. */
+    c[3] = cap_of(4, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RW);
+    CHECK(arena_startup_pick_notification(c, 4) == NONE, "notification: two equal candidates -> NONE (no guess)");
+
+    /* Wrong rights: a read-only notification is not a candidate, so the RW one is the sole one. */
+    arena_cap_desc_t w[3];
+    w[0] = cap_of(5, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RO);
+    w[1] = cap_of(6, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RW);
+    w[2] = cap_of(7, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RO);
+    CHECK(arena_startup_pick_notification(w, 3) == 1, "notification: read-only ignored, sole RW chosen");
+    CHECK(arena_startup_pick_notification(w, 1) == NONE, "notification: only a read-only one -> NONE");
+
+    /* Wrong kind: a badged endpoint with RW and role OTHER (a graphical service) is not a notification. */
+    w[0] = cap_of(8, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_BADGED_ENDPOINT, RW);
+    CHECK(arena_startup_pick_notification(w, 1) == NONE, "notification: badged endpoint is not a notification");
+
+    /* Wrong role: a notification that holds the stream-wake role is not an Other candidate. */
+    w[0] = cap_of(9, ARENA_ARST_ROLE_STREAM_WAKE, ARENA_CAP_KIND_NOTIFICATION, RW);
+    CHECK(arena_startup_pick_notification(w, 1) == NONE, "notification: stream-wake role is not a candidate");
+
+    /* Malformed: a kind outside the table, or empty rights. */
+    w[0] = cap_of(10, ARENA_ARST_ROLE_OTHER, 0, RW);
+    CHECK(arena_startup_pick_notification(w, 1) == NONE, "notification: malformed kind 0 is not a candidate");
+    w[0] = cap_of(11, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, 0);
+    CHECK(arena_startup_pick_notification(w, 1) == NONE, "notification: zero rights is not a candidate");
+
+    /* Graphical: a desktop endpoint, a surface, and one notification -> the notification. */
+    arena_cap_desc_t g[3];
+    g[0] = cap_of(12, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_BADGED_ENDPOINT, RW);
+    g[1] = cap_of(13, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_SHARED_REGION, RW);
+    g[2] = cap_of(14, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RW);
+    CHECK(arena_startup_pick_notification(g, 3) == 2, "notification: graphical grants do not confuse the sole notification");
+    g[1] = cap_of(13, ARENA_ARST_ROLE_OTHER, ARENA_CAP_KIND_NOTIFICATION, RW);
+    CHECK(arena_startup_pick_notification(g, 3) == NONE, "notification: two notifications among graphical grants -> NONE");
+}
+
 /* ---- atexit: LAST, it alters process-wide exit state ----------------------- */
 
 static int order[4];
@@ -598,6 +935,16 @@ static void test_refusals_and_exit_paths(void) {
 
 int libc_host_checks;
 
+/* A closed stream: writes fail with EBADF and never reach the stream. */
+static void test_closed_stream(void) {
+    arena_fclose(arena_stderr_object());
+    arena_c_set_errno(0);
+    CHECK(arena_fwrite("x", 1, 1, arena_stderr_object()) == 0 && arena_c_get_errno() == EBADF,
+          "closed stream: fwrite returns 0 with EBADF");
+    arena_c_set_errno(0);
+    CHECK(arena_fputs("x", arena_stderr_object()) == -1, "closed stream: fputs refused");
+}
+
 int libc_host_tests(void) {
     checks = 0;
     failures = 0;
@@ -613,7 +960,14 @@ int libc_host_tests(void) {
     test_pure_additions();
     test_startup_count();
     test_refusals_and_exit_paths();
-    test_atexit(); /* keep last */
+    test_fwrite_contract();
+    test_setvbuf_policy();
+    test_input_contract();
+    test_formatter_bounds();
+    test_notification_selection();
+    test_atexit_concurrency(); /* forks: must run before the parent's atexit state is used */
+    test_atexit();
+    test_closed_stream(); /* LAST: closes stderr for the rest of the process */
     libc_host_checks = checks;
     printf("LIBC-HOST checks=%d failures=%d\n", checks, failures);
     return failures;
