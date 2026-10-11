@@ -46,7 +46,7 @@ No symbols were added or removed in C2.1. The table covers the surface Arena 1 w
 | Threads | `thrd_create join detach current equal sleep yield`, `thrd_exit` | guest-verified (G5, G6) | guest |
 | Mutex | `mtx_init` (`mtx_plain` only), `mtx_lock unlock trylock destroy` | guest-verified (G5, G6) | guest |
 | Mutex | recursive mutex, `mtx_timed`, `mtx_timedlock` | unsupported (`thrd_error`) | guest (G6) |
-| Condition | `cnd_init wait signal broadcast destroy`, `cnd_timedwait` | guest-verified (G5); timed refusals and expiry guest-verified (G6) | guest |
+| Condition | `cnd_init wait signal broadcast destroy`, `cnd_timedwait` | guest-verified (G5, timeout). G6 verifies: over-bound wait refused with the mutex still held; `tv_nsec` = 10^9 refused; expired deadline returns `thrd_timedout` with the mutex reacquired. **Not guest-verified:** the seconds-to-microseconds overflow refusal and the negative-seconds refusal (code-inspected only) | guest |
 | Once | `call_once` | guest-verified (G5) | guest |
 | Thread-specific | `tss_create`, `tss_set`, `tss_get` | unsupported (`thrd_error`, or NULL from `tss_get`); `tss_delete` is a no-op because no key can exist | guest (G6) |
 | Floating point and SIMD | any | **blocked** (no FP state in the kernel; no soft-float path; see section 9) | static (ISA audit) |
@@ -171,20 +171,24 @@ The authoritative list is `experiments/c-runtime/compat/c2-compat-report.json`
 Evidence is guest (App A G5 and G6) unless noted. The labels follow section 0.
 
 - **Available and guest-verified:** `thrd_create`, `thrd_join`, `thrd_detach`, `thrd_current`,
-  `thrd_equal`, `thrd_sleep`, `thrd_yield`, `thrd_exit`. `mtx_init` (`mtx_plain` only),
+  `thrd_equal`, `thrd_sleep`, `thrd_exit`. `thrd_yield` is called by G5 but its effect is not
+  asserted. `mtx_init` (`mtx_plain` only),
   `mtx_lock`, `mtx_unlock`, `mtx_trylock` (free succeeds; self-held returns `thrd_busy`),
   `mtx_destroy`; `cnd_init`, `cnd_wait`, `cnd_signal`, `cnd_broadcast`, `cnd_destroy`,
   `cnd_timedwait`; `call_once`.
 - **C2.1 corrections (static, then guest):**
   - `mtx_init` accepts only `mtx_plain`. Other types return `thrd_error` (no capability is faked).
-  - `cnd_timedwait` refuses a field out of range, seconds-to-microseconds overflow, and a wait
-    longer than the kernel bound `ARENA_SYNC_MAX_TIMEOUT_US` (86 400 000 000 µs). The refusal
-    happens **before** the mutex is released. An expired deadline becomes a 1 µs wait and
-    returns `thrd_timedout` after the mutex is reacquired. A zero wait is never passed to the
-    kernel (zero means infinite there).
+  - `cnd_timedwait` refuses a wait longer than the kernel bound `ARENA_SYNC_MAX_TIMEOUT_US`
+    (86 400 000 000 µs), and a field out of range (`tv_nsec` ≥ 10^9). **Guest-verified (G6):**
+    both refusals happen **before** the mutex is released (the mutex is still held afterwards),
+    and an expired deadline returns `thrd_timedout` with the mutex reacquired.
+    **Code-inspected only (no test):** the refusal of a negative `tv_sec` and of a
+    seconds-to-microseconds overflow, and the rule that an expired deadline is submitted as a
+    1 µs wait, so zero never reaches the kernel (zero means infinite there).
   - Detached threads: the thread record is reference counted (handle and worker). A detached
     worker is released when it finishes, with no use after free and no double free. A refused
-    detach keeps the handle valid. Stress (64 create-and-detach cycles, App A G6) checks that
+    detach keeps the handle valid (**code-inspected only**: the record is released only after a
+    successful detach). Stress (64 create-and-detach cycles, App A G6) checks that
     every worker ran, the live thread count returns to baseline, and the allocator's live blocks
     return to baseline. Termination is observed through the kernel thread count, not a flag.
   - `thrd_exit` ends only the calling worker (App A G6: status 7, application continues).

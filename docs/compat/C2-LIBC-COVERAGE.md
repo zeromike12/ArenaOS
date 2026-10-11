@@ -23,21 +23,25 @@ comments, string literals, and `#include` lines before matching, so prose such a
 and overstated coverage; that has been fixed.) Execution is shown only by the
 exact-PASS runs listed in `docs/compat/C2-FINAL-REPORT.md`.
 
-## Summary (report generated at the commit that adds this document)
+## Summary (C2.1; report generated at commit `9c93f8c`, verification in `C2.1-VERIFICATION.md`)
 
 - Declared SDK functions: **110**. Defined in both GCC and Clang archives: **110**.
   Missing: **0**. GCC and Clang export the same symbol set: **yes**.
-- Referenced by a host test: **69**. Referenced by a guest app: **48**.
+- Referenced by a host test: **78** (was 69 before C2.1). Referenced by a guest app: **49** (was 48).
 - Refused by design: **10** (listed in the threads and streams sections).
-- No test reference at all: **5** — `clock`, `time` (both refused, see Time),
-  `getchar` (blocks on an idle stdin), `thrd_exit`, `tss_delete` (no-op; no key table).
+- No test reference at all: **1**: `tss_delete`, a documented no-op (no key can exist,
+  because `tss_create` always refuses). `clock`, `time`, `getchar`, and `thrd_exit` now have
+  test references (see the sections below).
 
 ## Memory (`stdlib.h`)
 
 - `malloc`, `calloc`, `realloc`, `free` use the C1 VM allocator. No second allocator.
-- `aligned_alloc`: power-of-two alignment. `align <= 16` uses the normal path.
-  `32 <= align <= 65536` uses validated aligned blocks. Larger, or non-power-of-two,
-  is refused with NULL and `errno`: `EINVAL` for a bad alignment, `ENOMEM` otherwise.
+- `aligned_alloc` (C2.1.7): power-of-two alignment **and** a size that is an integral
+  multiple of the alignment (C11 7.22.3.1). A violation of either is refused with NULL and
+  `EINVAL`. `align <= 16` uses the normal path. `32 <= align <= 65536` uses validated aligned
+  blocks. Larger alignments are refused with NULL and `ENOMEM`. Host-tested
+  (`test_aligned_alloc_contract`); guest-tested (App A G3 refuses a size of 10000 at
+  alignment 4096).
 - `calloc` overflow and allocation refusal set `ENOMEM`. `realloc` failure leaves the
   original block untouched.
 - Invalid frees are refused and counted. They never reach memory outside the heap.
@@ -93,15 +97,24 @@ strncpy strcat strncat strchr strrchr strstr strpbrk strspn strcspn strtok strer
 - `stdin`, `stdout`, `stderr` are granted through the ARST stream set. They are not
   ambient filesystem authority.
 - Missing grant: `ARENA_E_NO_STREAMS` (App A's negative build exits `58`).
-- `fputc putc fwrite`: **guest** (App A G7). `fputs puts` guest-tested in G1.
-- `feof ferror clearerr setvbuf`: **guest** (App A G7, asserted). `setvbuf` accepts modes 0–2
-  and rejects others with `EINVAL`; the buffer and size arguments are ignored.
+- `fputc putc fwrite` (C2.1.3): **guest** (App A G7) and **host**. `fwrite` returns the number
+  of **complete** elements written. Host tests cover full, short writes, a failing write, an
+  incomplete element (the budget ends mid-element: 1 complete item is reported, the sticky
+  error is set, `errno` is `EPIPE`), zero size, zero count, `size * n` overflow (`EOVERFLOW`,
+  no output, no error flag), and a non-writable stream (`EBADF`). A closed stream returns 0 with
+  `EBADF`. `fputs puts` guest-tested in G1.
+- `feof ferror clearerr`: **guest** (App A G7, asserted). `setvbuf` (C2.1.3): **`_IONBF` only**.
+  `_IOFBF` and `_IOLBF` are **refused** with `EINVAL` (not faked), as is any unknown mode, and a
+  NULL stream returns `EBADF`. Host- and guest-tested (G7 asserts `_IOLBF` refusal).
   `perror`: called in G7; its output appears in the log, not asserted.
-- `fgetc getc fgets fread`: **host-tested for the refusal path only** (NULL stream
-  gives EOF, NULL, or 0 with `EBADF`). A read from a live stdin is not tested in the
-  guest: an idle stdin blocks, so the guest suite uses `arena_stream_read_some` and
-  does not call the blocking `FILE` reads.
-- `getchar`: **no test reference**. It is the blocking form of `fgetc` on stdin.
+- `fgetc getc fgets fread`: **host-tested for the refusal path** (NULL stream gives EOF, NULL,
+  or 0 with `EBADF`). C2.1.3: `fgets` returns NULL and sets `ferror` (not `feof`) on a read
+  error, and the host tests check this with no stream grant.
+- `ungetc` (C2.1.3): **host-tested**. One byte of pushback. A second `ungetc` is refused.
+  `ungetc(EOF)` and an out-of-range value are refused. `getchar` returns the pushed byte with
+  no stream read.
+- `getchar` on a **live** stdin: **untested**. An idle stdin blocks the guest, and no controlled
+  input fixture exists. That is a documented gap, not a claim. Its pushback path is host-tested.
 - `fflush`: host-only.
 - `fclose`: **host-tested for the refusal**: NULL or a closed stream returns `-1` with
   `EBADF`. Closing a granted endpoint is not tested. `fclose` is not refused by design.
@@ -117,12 +130,13 @@ strncpy strcat strncat strchr strrchr strstr strpbrk strspn strcspn strtok strer
 - `nanosleep`: guest-tested (App A G4, 2 ms, with the monotonic clock advancing by at
   least 2 ms).
 - `CLOCK_REALTIME`: **refused** with `ENOSYS` (no wall-clock grant). Guest-tested (G4).
-- `time()`: **refused** with `ENOSYS`, returns `-1`. **No test reference.**
-- `clock()`: **refused** with `ENOSYS`, returns `-1`. No CPU accounting is exposed.
-  **No test reference.**
-- `time()` and `clock()` cannot be linked into the host test: `src/libc_time.c` is not
-  in the host build list. Their refusal is established by source inspection only. This is
-  recorded as remaining work; it is not claimed as tested.
+- `time()`: **refused** with `ENOSYS`, returns `-1`, and leaves `*out` unwritten. **Host-tested**
+  (C2.1.7, `test_time_refusals`).
+- `clock()`: **refused** with `ENOSYS`, returns `-1`. No CPU accounting is exposed. **Host-tested**
+  (C2.1.7).
+- C2.1.7 build change: `src/libc_time.c` is in the host build. Its `nanosleep` busy wait calls
+  `arena_busy_sleep_us`, which is a **host-only seam** (no sleep). No host test sleeps, and
+  `nanosleep` stays guest-verified (G4). The real binding is `src/rt.c`, which talks to the kernel.
 
 ## Errors and exit (`errno.h`, `stdlib.h`, `assert.h`)
 
@@ -132,6 +146,11 @@ strncpy strcat strncat strchr strrchr strstr strpbrk strspn strcspn strtok strer
 - `exit`: runs the atexit handlers in reverse registration order (up to 32), flushes
   `stdout` and `stderr`, closes fds 1 and 2, then ends with the given status. Host-tested
   (ordering). Guest-tested (App A G9): the atexit line is printed after the RESULT line.
+- `atexit` (C2.1.4): a registration reserves a slot by compare-and-swap and publishes it with a
+  release store. Overflow is refused. The run is one-shot per process. Same-thread re-entry is a
+  no-op. Another thread that calls the run waits for it. Host tests (forked children, 4 registrars
+  racing a runner, exactly 32 succeed; a deterministic child checks ordering, re-entry, and no
+  re-run). Guest: G9 has two real assertions.
 - `_Exit`: ends immediately with the given status and runs no handlers. Host-tested
   (forked child exits with status 7).
 - `abort`: ends with status 134 and runs no handlers. Host-tested (forked child, status 134).
@@ -148,16 +167,16 @@ Implemented as thin bindings over `SYS_THREAD_*` and `SYS_SYNC_*`. This is not p
 |---|---|---|
 | `thrd_create`, `thrd_join` | implemented | guest (App A G5, C1 native) |
 | `thrd_yield` | implemented | called by App A G5; not asserted |
-| `thrd_detach` | implemented | guest (App A G6). See the detach caveat below. |
-| `thrd_exit` | implemented | **no test reference** |
+| `thrd_detach` | implemented (C2.1.2 reference-counted record) | guest (App A G6: 64 create-and-detach cycles, every worker runs, live thread count and allocator live blocks return to baseline) |
+| `thrd_exit` | implemented | guest (App A G6): ends only the worker, status 7, application continues |
 | `thrd_current`, `thrd_equal` | implemented | guest (App A G6) |
 | `thrd_sleep` | implemented over `nanosleep` | guest (App A G6, 1 ms) |
-| `mtx_init` (plain), `mtx_lock`, `mtx_unlock` | implemented | guest (G5) |
+| `mtx_init` (plain only), `mtx_lock`, `mtx_unlock` | implemented (C2.1.1: other types refused) | guest (G5) |
 | `mtx_trylock` | implemented | guest (G6): free succeeds, self-held returns `thrd_busy` |
 | `mtx_destroy` | implemented | called in G6; not asserted |
-| `mtx_timedlock` | **refused**, `thrd_error` | guest (G6) |
+| `mtx_timedlock`, `mtx_init(mtx_timed)` | **refused**, `thrd_error` | guest (G6) |
 | recursive mutexes (`mtx_recursive`) | **refused** at `mtx_init` | guest (G6) |
-| `cnd_init`, `cnd_timedwait` | implemented | guest (G5, timeout case) |
+| `cnd_init`, `cnd_timedwait` | implemented (C2.1.1 field, overflow, and bound checks before unlock) | guest (G5, timeout case; G6 timed-wait audit: over-bound refused with mutex held, expired deadline gives `thrd_timedout` with mutex reacquired, `tv_nsec` = 10^9 refused). Deadlines use the **monotonic** base (no wall-clock grant) |
 | `cnd_wait`, `cnd_broadcast` | implemented | guest (G6): a waiter parked on `cnd_wait` is woken by `cnd_broadcast` and returns its status |
 | `cnd_signal` | implemented | guest (G6, no waiters: succeeds) |
 | `cnd_destroy` | implemented | called in G6; not asserted |
@@ -178,26 +197,20 @@ Rules that apply:
 - Thread-local storage (`_Thread_local`) is isolated per thread. Tested by C1 native
   group T8 on both compilers. C2 App A does not exercise TLS directly.
 
-### Known caveats in App A's thread test (documented; not fixed in this evidence set)
+### Resolved in C2.1 (were caveats at C2)
 
-- **Detach and exit status.** G6 creates a detached thread that sets a flag and returns.
-  The main thread waits on the flag with a bounded sleep loop, then continues. The flag
-  is set before that thread has finished exiting, so if the detached thread's exit landed
-  after main's exit, the last-thread rule could change the process status. In the C2 guest
-  runs at the source commit `7b27c67` (5 gcc and 5 clang runs), App A's exit status was
-  61 in every run. That is observation, not a proof. There is no join-free way in the current runtime to observe
-  a detached thread's termination. This is recorded as remaining work.
-- **Uninitialized key read.** G6 calls `tss_get(key)` on a `tss_t` whose `tss_create`
-  call was refused, so the key is never initialized. The call is harmless, but it passes
-  an indeterminate value. The fix is an initializer on the key. This is recorded as
-  remaining work for the next App A change.
+- **Detach and exit status (C2.1.2).** The detached worker is now reference counted (handle and
+  worker). G6 no longer relies on a flag. It observes termination through the kernel thread count
+  and checks the allocator's live blocks. The kernel caps live user threads at four per process,
+  so the stress loop waits (bounded) for a worker to exit before each create. The loop reports
+  capacity waits, which were 15 to 18 per run in the C2.1 guest sweep (`C2.1-VERIFICATION.md`).
+- **Uninitialized key read (C2.1.7).** G6 initializes the key to 0. A refused key is never live.
 
-## Symbols with no test reference (5)
+## Symbols with no test reference (1)
 
-`clock`, `time`, `getchar`, `thrd_exit`, `tss_delete`. Of these, `clock` and `time`
-are refused by design (source inspection only). The others are implemented but
-unverified. `getchar` is blocked by the idle stdin in the guest, and the host build
-has no stdin fixture. Closing these is recorded as remaining work in the final report.
+`tss_delete`. It is a documented no-op. `tss_create` always refuses, so no key can exist and
+`tss_delete` has nothing to delete. Its behavior is a refusal by construction, not a test.
+(`clock`, `time`, `getchar`, and `thrd_exit` had no reference at C2 and now do; see above.)
 
 ## Not provided (explicit)
 
