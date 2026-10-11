@@ -1,13 +1,12 @@
 //! Thread context switch (M3.1, ADR-0012) — quarantined unsafe leaf.
 //!
-//! The switch frame is exactly the Win64 callee-saved set plus RFLAGS:
+//! The switch frame is exactly the Win64 callee-saved GPR set plus RFLAGS:
 //! `rbx, rbp, rdi, rsi, r12–r15` (8 × 8 B) + `pushfq` (8 B) + the return
-//! address the `call` pushed (8 B) = 80 bytes. Caller-saved registers
-//! need no frame: `switch_context` is an ordinary Win64 call, so the
-//! compiler already spilled everything live around it. No FPU/SSE state
-//! is saved — the kernel image contains zero FPU/SSE/MMX instructions
-//! (soft-float target, integer-only code) and `tools/build.sh` *fails the
-//! build* if that invariant ever breaks (ADR-0012).
+//! address the `call` pushed (8 B) = 80 bytes. Caller-saved GPRs need no
+//! frame: the compiler already spills live integer values around the call.
+//! ADR-0112 adds eager FXSAVE64/FXRSTOR64 through raw state pointers; ordinary
+//! kernel code remains integer-only and the image audit allowlists only this
+//! leaf plus the reviewed initialization leaf.
 //!
 //! A brand-new thread's first context is a synthesized image of the same
 //! 80-byte frame (zeroed registers, RFLAGS=0x202 — reserved bit set,
@@ -47,13 +46,14 @@ const INITIAL_RFLAGS: u64 = 0x202;
 global_asm!(
     ".section .text",
     // ---- the switch ------------------------------------------------------
-    // Win64/"C" arguments: rcx = save slot (*mut u64), rdx = restore RSP.
-    // Both are raw values by contract (ADR-0012: no live borrow may cross
-    // the switch — the scheduler decides, ends its borrow, then calls).
+    // Win64/"C" arguments: rcx = save RSP slot, rdx = restore RSP,
+    // r8 = outgoing FxState, r9 = incoming FxState. All are raw values by
+    // contract (ADR-0012: no live borrow may cross the switch).
     // Push order defines the frame layout new_thread_stack synthesizes.
     ".p2align 4",
     ".globl arena_context_switch",
     "arena_context_switch:",
+    "fxsave64 [r8]",   // preserve outgoing x87/MMX/XMM/MXCSR before any switch
     "push rbx",
     "push rbp",
     "push rdi",
@@ -65,6 +65,7 @@ global_asm!(
     "pushfq",
     "mov [rcx], rsp",   // save outgoing stack
     "mov rsp, rdx",     // ... and become the incoming thread
+    "fxrstor64 [r9]",   // establish incoming architectural state first
     "popfq",
     "pop r15",
     "pop r14",
@@ -76,6 +77,8 @@ global_asm!(
     "pop rbx",
     "ret",              // resume: into the trampoline (first run) or the
                         // return address of the thread's own prior switch
+    ".globl arena_context_switch_end",
+    "arena_context_switch_end:",
     // ---- first-run trampoline --------------------------------------------
     // Entered by `ret` with RSP = the thread's stack top, 16-byte aligned
     // (the 80-byte frame preserves the alignment of a 16-aligned top).
@@ -96,7 +99,13 @@ global_asm!(
 unsafe extern "C" {
     /// The assembly switch (frame layout above). Arguments are raw by
     /// contract; neither may point into memory the other thread frees.
-    fn arena_context_switch(save: *mut u64, restore: u64);
+    pub(super) fn arena_context_switch(
+        save: *mut u64,
+        restore: u64,
+        save_fp: *mut super::fpu::FxState,
+        restore_fp: *const super::fpu::FxState,
+    );
+    pub(super) fn arena_context_switch_end();
     /// First-run entry point synthesized into new thread frames.
     fn arena_thread_trampoline();
 }
@@ -117,8 +126,13 @@ unsafe extern "C" {
 /// - Call with interrupts disabled (the scheduler's irqsave section):
 ///   between the decision and the switch no interrupt may observe a
 ///   half-switched scheduler state.
-pub unsafe fn switch_context(save: *mut u64, restore: u64) {
-    unsafe { arena_context_switch(save, restore) };
+pub unsafe fn switch_context(
+    save: *mut u64,
+    restore: u64,
+    save_fp: *mut super::fpu::FxState,
+    restore_fp: *const super::fpu::FxState,
+) {
+    unsafe { arena_context_switch(save, restore, save_fp, restore_fp) };
 }
 
 /// Synthesize a brand-new thread's first switch frame at the top of its

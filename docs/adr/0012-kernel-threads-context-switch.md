@@ -151,3 +151,15 @@ top of this same frame.
   yields, reads them back), two-thread stack isolation with disjoint
   stack ranges and deep recursion, and 64-thread churn with exact
   frame/heap accounting back to baseline.
+
+## Proposed compatibility amendment — ADR-0112
+
+ADR-0112 proposes adding eager per-thread FXSAVE64/FXRSTOR64 state to the
+reviewed architecture switch leaf. Until ADR-0112 is accepted, this ADR remains
+the accepted execution contract and the Phase-15 implementation is
+experimental. If ADR-0112 is accepted, it supersedes only the assertion that
+the context switch carries no FPU/SSE state and the prior deferral of native
+user FP/SSE to a later milestone. Its integer-only rule for ordinary kernel
+computations, GPR/RFLAGS frame layout, interrupt discipline, stable scheduler
+slots, and lifecycle requirements remain in force. AVX-family execution stays
+unsupported unless a later ADR accepts complete extended-state management.

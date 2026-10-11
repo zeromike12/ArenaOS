@@ -389,6 +389,7 @@ def boot(label: str, esp: Path,
          video: str = "default",
          pointer: bool = False,
          extra_args: list[str] | None = None,
+         cpu: str = "qemu64,+nx,+smep,+smap",
          ) -> tuple[int | None, str, float]:
     """One QEMU boot against an EXPLICIT scratch-disk path (M5.4).
 
@@ -421,7 +422,7 @@ def boot(label: str, esp: Path,
         + [
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
-            "-cpu", "qemu64,+nx,+smep,+smap",
+            "-cpu", cpu,
             # Boot the ESP first. OVMF ignores "-boot order"; only bootindex
             # reaches its BootOrder, and without it BDS first tries the raw
             # scratch virtio disk, the point where every pre-kernel firmware

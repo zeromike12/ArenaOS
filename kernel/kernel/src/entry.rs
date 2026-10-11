@@ -149,6 +149,33 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // SAFETY: called exactly once, after the CR3 switch, ring 0, IF=0.
     unsafe { x86_64::paging::note_identity_torn_down() };
 
+    // ADR-0112 proposal: configure x87/FXSAVE/SSE explicitly before any
+    // scheduler, interrupt-driven task, or ring-3 program can run. Do not
+    // trust firmware's inherited CR0/CR4 or FP register contents.
+    let cpu = x86_64::cpu_info();
+    let firmware_osxsave = cpu.has_osxsave;
+    if let Err(reason) = x86_64::fpu::init(&cpu) {
+        error!(
+            "fpu",
+            "native FP/SIMD initialization refused: {reason}; {cpu}"
+        );
+        crate::halt::halt_machine("required x87/FXSAVE/SSE profile unavailable");
+    }
+    let configured_cpu = x86_64::cpu_info();
+    info!(
+        "cpu",
+        "feature discovery after FP setup: {configured_cpu}; firmware OSXSAVE was {firmware_osxsave}"
+    );
+    info!(
+        "fpu",
+        "FXSAVE64 initialized eagerly: CR0={:#x} CR4={:#x} MXCSR={:#x} mask={:#x} XCR0={:?} OSXSAVE=off AVX-state=unsupported",
+        x86_64::read_cr0(),
+        x86_64::read_cr4(),
+        x86_64::fpu::initial_mxcsr(),
+        x86_64::fpu::mxcsr_mask(),
+        x86_64::fpu::sanitized_xcr0()
+    );
+
     // --- record validation: a real ABI check, not ceremony ---------------
     if boot_info.magic != BOOTINFO_MAGIC
         || boot_info.version != BOOTINFO_VERSION
@@ -355,6 +382,14 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // context switch.
     if !crate::m4::run_suite() {
         crate::halt::halt_machine("milestone 4 suite failed");
+    }
+
+    // --- Phase 15: native x87/SSE state contract (proposed ADR-0112) ------
+    // The ring-3 assembly fixture tests the clean template and independent
+    // XMM0-XMM15/x87/MXCSR state across yield, blocking join, timer preemption,
+    // separate process CR3s, slot reuse, and contained user #MF/#XF/#UD.
+    if !crate::m15::run_suite() {
+        crate::halt::halt_machine("Phase-15 FP/SIMD guest suite failed");
     }
 
     // --- M5.1: the driver substrate suite (ADR-0021) ----------------------
