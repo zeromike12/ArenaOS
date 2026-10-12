@@ -46,7 +46,7 @@ strict Phase-15 acceptance image.
 | Hardware-backed or independently verified emulator | Not available; no such result is claimed |
 | Historical regression-tested | 120 groups executed; 115 passed in first aggregate run and all five first-run failures passed focused reruns; aggregate clean-pass limitation retained |
 | Stability-tested | T2 10/10, T3 25/25, and T4 100/100 diagnostic pass on the same image |
-| Independent archive-tested | Extracted-only verification pending; archive is diagnostic-only and cannot close `#XF` |
+| Independent archive-tested | Pass for diagnostic archive contents and extracted workflows; cannot close `#XF` |
 | Blocked/unverified | Genuine vector-19 delivery and containment; official T2/T3/T4; full one-shot historical pass; release qualification |
 
 ## Build, static checks, and compatibility
@@ -135,16 +135,23 @@ the `#XF` acceptance case.
   or retries. All 100 per-boot QMP pixel and lifecycle receipts were retained.
   Its official Phase-15 verdict remains **BLOCKED** because `#XF` is not run in
   the diagnostic image.
-- The archive is a **diagnostic checkpoint**, not a release candidate. It
-  contains the diagnostic image, the strict failing image, source/test
-  fixtures, signed Phase-14 applications, QEMU/OVMF runtime, receipts, and an
-  extracted-only verifier. Independent extraction, boot, and PIE verification
-  is the remaining checkpoint task.
+- The archive is a **diagnostic checkpoint**, not a release candidate:
+  `build/phase15-diagnostic-checkpoint.tar.gz`, 137,994,198 bytes,
+  SHA-256 `8fd857c9c46a6c370fc639bbacaa43c46dcba7a5fb3fe0be2ea2274d00eecc9d`.
+  The extracted-only verifier passed all 3,335 manifest entries, exact image
+  hashes and embedded EFI checks, a diagnostic guest boot with clean shutdown,
+  and the signed Phase-14 PIE workflow with two distinct placements and exact
+  cleanup. The first extraction stopped before boot on a one-character hash
+  pin typo; the verifier and receipt were corrected, the archive was rebuilt,
+  and the next clean extraction passed. The first failed attempt is preserved
+  in the receipts. This does not qualify genuine `#XF`.
 
 The earlier [`phase15-targeted-results.json`](receipts/phase15-targeted-results.json)
 and targeted logs remain immutable receipts for the original focused run; this
 document and [`phase15-qualification-recovery.json`](receipts/phase15-qualification-recovery.json)
-are the recovery/stability summary.
+are the recovery/stability summary. The archive result is recorded in
+[`phase15-diagnostic-checkpoint.json`](receipts/phase15-diagnostic-checkpoint.json)
+with its raw extracted-run log.
 
 ## Gate decision
 

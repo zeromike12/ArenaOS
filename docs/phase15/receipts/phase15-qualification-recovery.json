@@ -188,6 +188,10 @@
   },
   "archive": {
     "type": "diagnostic checkpoint, not release candidate",
+    "path": "build/phase15-diagnostic-checkpoint.tar.gz",
+    "bytes": 137994198,
+    "sha256": "8fd857c9c46a6c370fc639bbacaa43c46dcba7a5fb3fe0be2ea2274d00eecc9d",
+    "source_snapshot_commit": "0fe7f2a07325450a06bbed4768484ccf536d2a99",
     "generator": "tools/make_phase15_diagnostic_checkpoint.py",
     "extracted_only_verifier": "tools/phase15_checkpoint_verify.py",
     "contents": "exact diagnostic/strict EFI and ESP, compiled x87/SSE/MMX/#XF and Phase-14 fixtures, source, QEMU/OVMF runtime, historical/stability receipts",
@@ -199,7 +203,9 @@
         "resolution": "corrected the pinned EFI hash, regenerated T2/T3/T4 receipt JSON, rebuilt the archive, and reran extraction verification"
       }
     ],
-    "independent_verification": "the verifier is included; its extracted-run result and archive SHA are recorded separately after packaging to avoid self-reference"
+    "independent_verification": "PASS: 3335 manifest files, paired EFI/ESP hashes, diagnostic guest boot, signed Phase-14 APB1/PIE placements and teardown; genuine #XF explicitly not run",
+    "verification_receipt": "phase15-diagnostic-checkpoint.json",
+    "raw_verification_log": "build/phase15-checkpoint-verification-attempt2.log"
   },
   "recommendation": "PARTIAL / NOT READY FOR INTEGRATION REVIEW"
 }

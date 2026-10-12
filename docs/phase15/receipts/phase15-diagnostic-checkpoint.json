@@ -1,0 +1,79 @@
+{
+  "record_kind": "independent extracted diagnostic-checkpoint verification",
+  "status": "PASS — diagnostic checkpoint only",
+  "qualified_release_candidate": false,
+  "archive": {
+    "path": "build/phase15-diagnostic-checkpoint.tar.gz",
+    "bytes": 137994198,
+    "sha256": "8fd857c9c46a6c370fc639bbacaa43c46dcba7a5fb3fe0be2ea2274d00eecc9d",
+    "sidecar": "build/phase15-diagnostic-checkpoint.tar.gz.sha256",
+    "source_snapshot_commit": "0fe7f2a07325450a06bbed4768484ccf536d2a99",
+    "manifest_file_count": 3335
+  },
+  "extraction_test": {
+    "path": "/tmp/p15/ArenaOS-Phase15-Diagnostic-Checkpoint",
+    "verifier_command": "env -u PYTHONPATH python3 -I source/tools/phase15_checkpoint_verify.py",
+    "external_checkout_used": false,
+    "external_qemu_used": false,
+    "user_site_packages_used": false,
+    "python_version": "3.12.14",
+    "result": "PASS"
+  },
+  "verified_artifacts": {
+    "diagnostic_efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
+    "diagnostic_esp_sha256": "b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42",
+    "strict_efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "strict_esp_sha256": "33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a",
+    "diagnostic_esp_contains_exact_efi": true,
+    "strict_esp_contains_exact_efi": true,
+    "phase15_state_fixture_sha256": "786808ad21686ace59684f01ed1e69b47bd104c53442b2d7df9e646b9103b32b",
+    "phase15_xf_probe_sha256": "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3",
+    "phase15_mmx_probe_sha256": "4750c0efc9e20adc90f98829ab76c4ce9ddaabc0b1315dfb9bff427cdd9df785",
+    "phase14_pie_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+    "phase14_signed_apb1_sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+  },
+  "runtime": {
+    "qemu": "11.0.2",
+    "backend": "explicit TCG",
+    "bundle_used": true,
+    "hardware_backend_claimed": false
+  },
+  "guest_results": {
+    "diagnostic_boot": {
+      "result": "PASS",
+      "milestones": "M1-M7 and M11-M12 pass",
+      "phase15": "DIAGNOSTIC PASS (5/5; XF NOT RUN)",
+      "checks": [
+        "thread FP state isolation",
+        "process isolation and scheduler-slot reuse",
+        "optional CPUID feature reporting",
+        "#MF and #UD containment",
+        "MMX state and EMMS"
+      ],
+      "clean_uefi_shutdown": true,
+      "duration_seconds": 9.7
+    },
+    "phase14_signed_pie": {
+      "result": "PASS",
+      "signed_apb1_install": true,
+      "distinct_native_pie_placements": 2,
+      "process_image_resource_teardown": "PASS",
+      "duration_seconds": 12.7,
+      "clean_uefi_shutdown": true
+    },
+    "genuine_xf_delivery": "BLOCKED; the diagnostic verifier explicitly does not execute #XF"
+  },
+  "attempt_history": [
+    {
+      "archive_sha256": "95338fb07bb1f3aa34302f44d37ad471bcec73a9990b0c9126f6ac3c9aff6f94",
+      "result": "FAIL before guest boot due to a one-character verifier EFI hash pin typo (expected c56e..., actual c56c...); archive sidecar and manifest passed",
+      "resolution": "corrected the hash pin and generated fresh stability receipts"
+    },
+    {
+      "archive_sha256": "8fd857c9c46a6c370fc639bbacaa43c46dcba7a5fb3fe0be2ea2274d00eecc9d",
+      "result": "PASS all manifest, artifact, boot, Phase 15 diagnostic, Phase 14 PIE, cleanup, and shutdown checks"
+    }
+  ],
+  "raw_log": "build/phase15-checkpoint-verification-attempt2.log",
+  "qualification_note": "Independent verification qualifies the archive as a reproducible diagnostic checkpoint only; it does not qualify Phase 15 or satisfy genuine #XF acceptance."
+}

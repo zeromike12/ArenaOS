@@ -39,8 +39,8 @@ and qualification.
 6. Ran T2 10/10, T3 25/25, and T4 100/100 on the same immutable diagnostic
    EFI/ESP. These results do not satisfy the official Phase-15 gates because
    the image says `XF NOT RUN`.
-7. Prepared an extracted-only verifier and a self-contained diagnostic
-   checkpoint archive. The archive is still awaiting extracted verification.
+7. Built the self-contained diagnostic checkpoint and ran its verifier from a
+   clean `/tmp` extraction, without a repository checkout or external QEMU.
 
 ## Qualification gates
 
@@ -53,7 +53,7 @@ and qualification.
 | T2 | 10 fresh boots on diagnostic EFI/ESP | Diagnostic pass 10/10; official gate blocked |
 | T3 | 25 fresh boots with desktop, services, lifecycle, FP/MMX test coverage | Diagnostic pass 25/25; official gate blocked |
 | T4 | 100 fresh boots of one immutable diagnostic image | Diagnostic pass 100/100 in 1,326 seconds; official gate blocked |
-| Archive | Exact images, guest fixtures, source, QEMU/OVMF runtime, receipts, extracted-only boot and PIE verifier | Prepared; extracted verification pending; diagnostic checkpoint only |
+| Archive | Exact images, guest fixtures, source, QEMU/OVMF runtime, receipts, extracted-only boot and PIE verifier | Diagnostic checkpoint verified; not a release candidate |
 
 The acceptance gate remains **PARTIAL / UNQUALIFIED** until genuine vector 19
 delivery and containment pass under a supported backend. Diagnostic results do

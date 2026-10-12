@@ -46,3 +46,8 @@ separate peer. QEMU TCG returns MXCSR `0x1F01` instead of delivering vector 19;
 the guest records that failure while the sibling and peer exit 42, the fault
 slot is released, and resources return to baseline. Those cleanup receipts do
 not turn the `#XF` test into a pass. `#MF` and `#UD` containment pass separately.
+
+The immutable diagnostic EFI/ESP completed T2/T3/T4 at 10/10, 25/25, and
+100/100 boots. Each boot exercised the diagnostic Phase-15 thread/process/MMX
+coverage while explicitly reporting `#XF NOT RUN`; these counts do not satisfy
+official exception qualification.

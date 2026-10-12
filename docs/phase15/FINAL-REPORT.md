@@ -70,12 +70,16 @@ containment.
 
 ## Archive and remaining blockers
 
-A reproducible **diagnostic checkpoint**, not a release candidate, is prepared
-with the exact diagnostic and strict images, compiled Phase-15 state/MMX/`#XF`
-fixtures, signed Phase-14 PIE/APB1, source snapshot, bundled QEMU/OVMF runtime,
-historical and stability receipts, manifest, and extracted-only verifier.
-Independent extraction and execution of that verifier is the remaining archive
-step; it cannot change the blocked `#XF` result.
+A reproducible **diagnostic checkpoint**, not a release candidate, is available
+at [phase15-diagnostic-checkpoint.tar.gz](/workspace/ArenaOS/build/phase15-diagnostic-checkpoint.tar.gz).
+It is 137,994,198 bytes with SHA-256
+`8fd857c9c46a6c370fc639bbacaa43c46dcba7a5fb3fe0be2ea2274d00eecc9d`. The
+extracted-only verifier passed 3,335 manifest checks, exact image and fixture
+hashes, a diagnostic boot with clean shutdown, and the signed Phase-14 PIE
+install/launch/teardown workflow. The first extraction caught a one-character
+hash pin typo before guest boot; that receipt is preserved, the pin was
+corrected, the archive rebuilt, and the second extraction passed. Archive
+verification does not change the blocked `#XF` result.
 
 Remaining qualification blockers are genuine vector-19 delivery and
 containment under a trustworthy backend, a clean one-shot 120/120 historical
@@ -86,5 +90,6 @@ or graphics integration is established.
 
 See [the qualification record](QUALIFICATION.md),
 [`phase15-qualification-recovery.json`](receipts/phase15-qualification-recovery.json),
+[`phase15-diagnostic-checkpoint.json`](receipts/phase15-diagnostic-checkpoint.json),
 and [the alternate-backend receipt](receipts/phase15-alternative-backends.json)
 for exact raw and machine-readable evidence.
