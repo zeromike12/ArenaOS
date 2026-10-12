@@ -27,7 +27,7 @@ RANGE_NAMES = (
     "build_clean",
     "install_clean",
     "read_xcr0",
-    "set_legacy_xcr0",
+    "write_xcr0",
 )
 
 EXPECTED = (
@@ -69,7 +69,7 @@ EXPECTED = (
     ),
     collections.Counter({"fxrstor64": 1, "ret": 1}),
     collections.Counter({"xor": 1, "xgetbv": 1, "shl": 1, "or": 1, "ret": 1}),
-    collections.Counter({"xor": 2, "mov": 1, "xsetbv": 1, "ret": 1}),
+    collections.Counter({"xor": 1, "mov": 2, "shr": 1, "xsetbv": 1, "ret": 1}),
 )
 
 ALLOWED = tuple(frozenset(rule) for rule in EXPECTED)

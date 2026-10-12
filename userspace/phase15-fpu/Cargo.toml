@@ -9,6 +9,10 @@ description = "ArenaOS Phase-15 ring-3 x87/SSE isolation and exception fixture"
 name = "arena-phase15-xf-probe"
 path = "src/xf_probe.rs"
 
+[[bin]]
+name = "arena-phase15-mmx-probe"
+path = "src/mmx_probe.rs"
+
 [workspace]
 
 [profile.release]

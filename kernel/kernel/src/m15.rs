@@ -1,9 +1,8 @@
-//! Phase-15 native FP/SIMD guest qualification (proposed ADR-0112).
+//! Phase-15 native FP/SIMD guest qualification (proposed ADR-0113).
 //!
-//! A handwritten ET_EXEC fixture runs at CPL3. It checks the clean FXSAVE64
-//! template on first entry, x87 and scalar/SSE2 arithmetic, rounding modes,
-//! all sixteen XMM registers, cooperative yield, blocking join, timer
-//! preemption, cross-CR3 switches, slot reuse, and contained #MF/#XF/#UD.
+//! Handwritten ET_EXEC fixtures run at CPL3. They check the clean FXSAVE64
+//! template on first entry, x87/SSE2 arithmetic, all XMM registers, MMX
+//! aliases, scheduler ownership, CPU feature reporting, and exception paths.
 
 use crate::arch::x86_64::{self, paging, syscall};
 use crate::elf;
@@ -28,6 +27,30 @@ struct ProcessFixture {
 }
 
 pub fn run_suite() -> bool {
+    let checks: [(&str, fn() -> Result<(), &'static str>); 5] = [
+        (
+            "thread_isolation_block_yield_preempt",
+            test_thread_isolation,
+        ),
+        (
+            "process_isolation_slot_reuse",
+            test_process_isolation_and_reuse,
+        ),
+        (
+            "optional_cpu_feature_reporting",
+            test_optional_cpu_feature_reporting,
+        ),
+        ("xf_delivery_probe", test_xf_delivery_probe),
+        ("mf_ud_fault_containment", test_fault_containment),
+    ];
+    run_checks(&checks, false)
+}
+
+/// Diagnostic-only path for historical regression runs under stock QEMU
+/// TCG. The real #XF probe is deliberately not called and this path emits no
+/// official `m15: RESULT PASS` marker. Default builds always use `run_suite`.
+#[cfg(feature = "phase15-historical-diagnostic")]
+pub fn run_historical_diagnostic() -> bool {
     let checks: [(&str, fn() -> Result<(), &'static str>); 4] = [
         (
             "thread_isolation_block_yield_preempt",
@@ -37,11 +60,20 @@ pub fn run_suite() -> bool {
             "process_isolation_slot_reuse",
             test_process_isolation_and_reuse,
         ),
-        ("xf_delivery_probe", test_xf_delivery_probe),
+        (
+            "optional_cpu_feature_reporting",
+            test_optional_cpu_feature_reporting,
+        ),
         ("mf_ud_fault_containment", test_fault_containment),
     ];
+    run_checks(&checks, true)
+}
+
+fn run_checks(checks: &[(&str, fn() -> Result<(), &'static str>)], diagnostic: bool) -> bool {
+    let has_mmx = x86_64::cpu_info().has_mmx;
+    let total = checks.len() + usize::from(has_mmx);
     let mut passed = 0u32;
-    for (name, test) in checks {
+    for &(name, test) in checks {
         match test() {
             Ok(()) => {
                 passed += 1;
@@ -53,18 +85,104 @@ pub fn run_suite() -> bool {
             }
         }
     }
-    if passed == checks.len() as u32 {
-        info!(
-            "m15",
-            "native x87/SSE state tests passed ({passed}/{})",
-            checks.len()
-        );
-        write_marker(format_args!("m15: RESULT PASS ({passed}/{})", checks.len()));
-        true
+    if has_mmx {
+        match test_mmx_state() {
+            Ok(()) => {
+                passed += 1;
+                write_marker(format_args!("m15:test:mmx_state: PASS"));
+            }
+            Err(reason) => {
+                error!("m15", "test mmx_state failed: {reason}");
+                write_marker(format_args!("m15:test:mmx_state: FAIL ({reason})"));
+            }
+        }
     } else {
-        write_marker(format_args!("m15: RESULT FAIL ({passed}/{})", checks.len()));
+        write_marker(format_args!("m15:test:mmx_state: SKIP (CPUID MMX=0)"));
+    }
+    if passed == total as u32 {
+        if diagnostic {
+            info!(
+                "m15",
+                "historical diagnostic checks passed ({passed}/{total}); #XF not run"
+            );
+            write_marker(format_args!(
+                "m15: DIAGNOSTIC PASS ({passed}/{total}; XF NOT RUN)"
+            ));
+        } else {
+            info!(
+                "m15",
+                "native x87/SSE/MMX state tests passed ({passed}/{total})"
+            );
+            write_marker(format_args!("m15: RESULT PASS ({passed}/{total})"));
+        }
+        true
+    } else if diagnostic {
+        write_marker(format_args!(
+            "m15: DIAGNOSTIC FAIL ({passed}/{total}; XF NOT RUN)"
+        ));
+        false
+    } else {
+        write_marker(format_args!("m15: RESULT FAIL ({passed}/{total})"));
         false
     }
+}
+
+fn test_optional_cpu_feature_reporting() -> Result<(), &'static str> {
+    let cpu = x86_64::cpu_info();
+    let basic = x86_64::cpuid(0);
+    let leaf1 = x86_64::cpuid(1);
+    if basic.eax < 1
+        || cpu.has_mmx != (leaf1.edx & (1 << 23) != 0)
+        || cpu.has_sse3 != (leaf1.ecx & (1 << 0) != 0)
+        || cpu.has_ssse3 != (leaf1.ecx & (1 << 9) != 0)
+        || cpu.has_sse41 != (leaf1.ecx & (1 << 19) != 0)
+        || cpu.has_sse42 != (leaf1.ecx & (1 << 20) != 0)
+        || cpu.has_xsave != (leaf1.ecx & (1 << 26) != 0)
+        || cpu.has_avx != (leaf1.ecx & (1 << 28) != 0)
+        || cpu.has_osxsave != (leaf1.ecx & (1 << 27) != 0)
+    {
+        return Err("optional CPUID.1 MMX/SSE/XSAVE/AVX report disagrees with guest CPUID");
+    }
+    let ext = x86_64::cpuid(0x8000_0000).eax;
+    let sse4a = ext >= 0x8000_0001 && x86_64::cpuid(0x8000_0001).ecx & (1 << 6) != 0;
+    if cpu.has_sse4a != sse4a {
+        return Err("optional AMD SSE4a report disagrees with guest CPUID");
+    }
+    info!(
+        "m15",
+        "optional CPUID feature reporting matches guest bits: MMX={} SSE3={} SSSE3={} SSE4.1={} SSE4.2={} SSE4a={} XSAVE={} AVX={} OSXSAVE={}",
+        cpu.has_mmx,
+        cpu.has_sse3,
+        cpu.has_ssse3,
+        cpu.has_sse41,
+        cpu.has_sse42,
+        cpu.has_sse4a,
+        cpu.has_xsave,
+        cpu.has_avx,
+        cpu.has_osxsave
+    );
+    Ok(())
+}
+
+fn test_mmx_state() -> Result<(), &'static str> {
+    let free_before = frames::free_frames();
+    let threads_before = sched::live_threads();
+    let process_a = prepare_process_with_image("m15MmxA", elf::FPU_MMX_TEST_IMAGE, 1)?;
+    let process_b = prepare_process_with_image("m15MmxB", elf::FPU_MMX_TEST_IMAGE, 1)?;
+    let thread_a = spawn_fixture_thread(process_a, 0, 1)?;
+    let thread_b = spawn_fixture_thread(process_b, 0, 2)?;
+    let switches = drive_tasks(&[(thread_a, EXIT_OK), (thread_b, EXIT_OK)])?;
+    check_exit_statuses(&[(thread_a, EXIT_OK), (thread_b, EXIT_OK)])?;
+    destroy_process(process_a)?;
+    destroy_process(process_b)?;
+    if frames::free_frames() != free_before || sched::live_threads() != threads_before {
+        return Err("MMX fixture teardown did not return to exact resource baselines");
+    }
+    info!(
+        "m15",
+        "MMX MM0-MM7 remained distinct across timer preemption and cooperative yield ({switches} timer switches); EMMS and exact process teardown passed"
+    );
+    Ok(())
 }
 
 fn prepare_process(name: &'static str, stack_pages: usize) -> Result<ProcessFixture, &'static str> {

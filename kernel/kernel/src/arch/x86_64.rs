@@ -384,6 +384,8 @@ pub struct CpuInfo {
     pub stepping: u32,
     /// CPUID.1:EDX[0] — x87 FPU.
     pub has_fpu: bool,
+    /// CPUID.1:EDX[23] — MMX instruction set.
+    pub has_mmx: bool,
     /// CPUID.1:EDX[24] — FXSAVE/FXRSTOR.
     pub has_fxsr: bool,
     /// CPUID.1:EDX[25] — SSE.
@@ -403,7 +405,9 @@ pub struct CpuInfo {
     pub has_sse4a: bool,
     /// CPUID.1:ECX[28] — AVX hardware capability (not enabled by this OS).
     pub has_avx: bool,
-    /// CPUID.1:ECX[27] — OSXSAVE hardware capability (not enabled by this OS).
+    /// CPUID.1:ECX[26] — XSAVE instruction and state-management support.
+    pub has_xsave: bool,
+    /// CPUID.1:ECX[27] — current CR4.OSXSAVE enable state.
     pub has_osxsave: bool,
     /// CPUID.8000_0001h:EDX[20] — NX.
     pub has_nx: bool,
@@ -453,6 +457,7 @@ pub fn cpu_info() -> CpuInfo {
         base_model
     };
     let has_fpu = f.edx & (1 << 0) != 0;
+    let has_mmx = f.edx & (1 << 23) != 0;
     let has_fxsr = f.edx & (1 << 24) != 0;
     let has_sse = f.edx & (1 << 25) != 0;
     let has_sse2 = f.edx & (1 << 26) != 0;
@@ -461,6 +466,7 @@ pub fn cpu_info() -> CpuInfo {
     let has_sse41 = f.ecx & (1 << 19) != 0;
     let has_sse42 = f.ecx & (1 << 20) != 0;
     let has_avx = f.ecx & (1 << 28) != 0;
+    let has_xsave = f.ecx & (1 << 26) != 0;
     let has_osxsave = f.ecx & (1 << 27) != 0;
 
     let ext_max = cpuid(0x8000_0000).eax;
@@ -497,6 +503,7 @@ pub fn cpu_info() -> CpuInfo {
         model,
         stepping,
         has_fpu,
+        has_mmx,
         has_fxsr,
         has_sse,
         has_sse2,
@@ -506,6 +513,7 @@ pub fn cpu_info() -> CpuInfo {
         has_sse42,
         has_sse4a,
         has_avx,
+        has_xsave,
         has_osxsave,
         has_nx,
         has_long_mode,
@@ -520,13 +528,14 @@ impl fmt::Display for CpuInfo {
         let vendor = core::str::from_utf8(&self.vendor).unwrap_or("???");
         write!(
             f,
-            "vendor={} family={} model={} stepping={} physaddr={}bit fpu={} fxsr={} sse={} sse2={} sse3={} ssse3={} sse4.1={} sse4.2={} sse4a={} avx={} osxsave={} nx={} longmode={} smep={} smap={}",
+            "vendor={} family={} model={} stepping={} physaddr={}bit fpu={} mmx={} fxsr={} sse={} sse2={} sse3={} ssse3={} sse4.1={} sse4.2={} sse4a={} xsave={} avx={} osxsave={} nx={} longmode={} smep={} smap={}",
             vendor,
             self.family,
             self.model,
             self.stepping,
             self.phys_addr_bits,
             self.has_fpu,
+            self.has_mmx,
             self.has_fxsr,
             self.has_sse,
             self.has_sse2,
@@ -535,6 +544,7 @@ impl fmt::Display for CpuInfo {
             self.has_sse41,
             self.has_sse42,
             self.has_sse4a,
+            self.has_xsave,
             self.has_avx,
             self.has_osxsave,
             self.has_nx,
@@ -564,6 +574,7 @@ mod tests {
             }
         };
         assert_eq!(info.has_fpu, leaf1.edx & (1 << 0) != 0);
+        assert_eq!(info.has_mmx, leaf1.edx & (1 << 23) != 0);
         assert_eq!(info.has_fxsr, leaf1.edx & (1 << 24) != 0);
         assert_eq!(info.has_sse, leaf1.edx & (1 << 25) != 0);
         assert_eq!(info.has_sse2, leaf1.edx & (1 << 26) != 0);
@@ -572,6 +583,7 @@ mod tests {
         assert_eq!(info.has_sse41, leaf1.ecx & (1 << 19) != 0);
         assert_eq!(info.has_sse42, leaf1.ecx & (1 << 20) != 0);
         assert_eq!(info.has_avx, leaf1.ecx & (1 << 28) != 0);
+        assert_eq!(info.has_xsave, leaf1.ecx & (1 << 26) != 0);
         assert_eq!(info.has_osxsave, leaf1.ecx & (1 << 27) != 0);
         let ext_max = cpuid(0x8000_0000).eax;
         let ext = if ext_max >= 0x8000_0001 {

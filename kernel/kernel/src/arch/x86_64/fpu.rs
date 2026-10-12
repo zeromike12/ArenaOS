@@ -1,9 +1,8 @@
-//! Native x87/SSE setup and the bounded FXSAVE64 state format (proposed ADR-0112).
+//! Native x87/SSE setup and the bounded FXSAVE64 state format (proposed ADR-0113).
 //!
-//! Ordinary Rust kernel code remains integer-only. These three leaf routines
-//! are the complete reviewed instruction surface: two preserve their caller
-//! while probing/building the image, and `arena_fpu_install_clean` is an
-//! explicit architectural state boundary used before scheduler startup.
+//! Ordinary Rust kernel code remains integer-only. The reviewed leaves
+//! probe/build/install the legacy image and access XCR0; context switching is
+//! a separate audited assembly leaf.
 
 use super::{CpuInfo, cr0, cr4, read_cr0, read_cr4, write_cr0, write_cr4};
 use crate::sync::SyncCell;
@@ -150,15 +149,18 @@ global_asm!(
     ".globl arena_fpu_read_xcr0_end",
     "arena_fpu_read_xcr0_end:",
     ".p2align 4",
-    ".globl arena_fpu_set_legacy_xcr0",
-    "arena_fpu_set_legacy_xcr0:",
+    ".globl arena_fpu_write_xcr0",
+    "arena_fpu_write_xcr0:",
+    // Win64 first argument RCX = XCR0 value. Preserve it in EDX:EAX,
+    // then use ECX=0 as the XSETBV register index.
+    "mov rax, rcx",
+    "mov rdx, rcx",
+    "shr rdx, 32",
     "xor ecx, ecx",
-    "mov eax, 3",
-    "xor edx, edx",
     "xsetbv",
     "ret",
-    ".globl arena_fpu_set_legacy_xcr0_end",
-    "arena_fpu_set_legacy_xcr0_end:",
+    ".globl arena_fpu_write_xcr0_end",
+    "arena_fpu_write_xcr0_end:",
 );
 
 unsafe extern "C" {
@@ -170,8 +172,8 @@ unsafe extern "C" {
     pub(super) fn arena_fpu_install_clean_end();
     pub(super) fn arena_fpu_read_xcr0() -> u64;
     pub(super) fn arena_fpu_read_xcr0_end();
-    pub(super) fn arena_fpu_set_legacy_xcr0();
-    pub(super) fn arena_fpu_set_legacy_xcr0_end();
+    pub(super) fn arena_fpu_write_xcr0(value: u64);
+    pub(super) fn arena_fpu_write_xcr0_end();
 }
 
 /// Pure part of the mandatory profile, also exercised by host tests.
@@ -190,6 +192,41 @@ pub const fn inherited_osxsave_is_consistent(cpuid_osxsave: bool, cr4_osxsave: b
 
 pub const fn xcr0_supports_legacy_profile(supported: u64) -> bool {
     supported & 0x3 == 0x3
+}
+
+/// Controlled guest setup for the diagnostic OSXSAVE sanitation test.
+/// The caller invokes this before `init`, only in an explicitly selected
+/// diagnostic image. It models inherited firmware state without changing
+/// the production boot path or executing AVX instructions.
+#[cfg(feature = "phase15-osxsave-seed")]
+pub fn seed_osxsave_xcr0_for_test(cpu: &CpuInfo) -> Result<u64, &'static str> {
+    if !cpu.has_xsave || !cpu.has_avx || cpu.has_osxsave {
+        return Err("OSXSAVE seed requires XSAVE+AVX support and OSXSAVE clear on entry");
+    }
+    if super::cpuid(0).eax < 0xD {
+        return Err("OSXSAVE seed requires CPUID leaf 0xD");
+    }
+    let supported = super::cpuid(0xD);
+    let xcr0_supported = (supported.edx as u64) << 32 | supported.eax as u64;
+    if xcr0_supported & 0x7 != 0x7 {
+        return Err("OSXSAVE seed requires x87/SSE/YMM XCR0 components");
+    }
+    let old_cr4 = read_cr4();
+    if old_cr4 & cr4::OSXSAVE != 0 {
+        return Err("OSXSAVE seed found CR4.OSXSAVE already set");
+    }
+    // SAFETY: CPUID advertises XSAVE/AVX and XCR0 component 2. This test-only
+    // transition is before any user execution and is reversed by `init`.
+    unsafe { write_cr4(old_cr4 | cr4::OSXSAVE) };
+    if read_cr4() & cr4::OSXSAVE == 0 {
+        return Err("OSXSAVE seed CR4 readback mismatch");
+    }
+    unsafe { arena_fpu_write_xcr0(0x7) };
+    let seeded = unsafe { arena_fpu_read_xcr0() };
+    if seeded != 0x7 {
+        return Err("OSXSAVE seed XCR0 readback mismatch");
+    }
+    Ok(seeded)
 }
 
 /// Normalize the architectural FXSAVE MXCSR mask field. A zero field means
@@ -266,7 +303,7 @@ pub fn init(cpu: &CpuInfo) -> Result<(), &'static str> {
         // available at CPL0. Restrict the active state bitmap to the legacy
         // components that FXSAVE64 preserves, then read it back.
         let _firmware_xcr0 = unsafe { arena_fpu_read_xcr0() };
-        unsafe { arena_fpu_set_legacy_xcr0() };
+        unsafe { arena_fpu_write_xcr0(0x3) };
         if unsafe { arena_fpu_read_xcr0() } != 0x3 {
             return Err("XCR0 did not reduce to the x87/SSE legacy profile");
         }

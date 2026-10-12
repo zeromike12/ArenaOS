@@ -130,6 +130,12 @@ pub static FPU_XF_PROBE_IMAGE: &[u8] = include_bytes!(
     "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe"
 );
 
+/// Bounded MMX-only state-switch fixture used to prove the MMX aliases in
+/// each FXSAVE slot are private across timer and cooperative transitions.
+pub static FPU_MMX_TEST_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-mmx-probe"
+);
+
 /// The minimal shell (M4.6, ADR-0020): spawn-registry image 1, built
 /// by `tools/build.sh` from `userspace/shell` with the same
 /// strict-subset contract as the payload — a genuine cargo/rust-lld

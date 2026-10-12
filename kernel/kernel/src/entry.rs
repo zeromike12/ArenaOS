@@ -149,7 +149,21 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // SAFETY: called exactly once, after the CR3 switch, ring 0, IF=0.
     unsafe { x86_64::paging::note_identity_torn_down() };
 
-    // ADR-0112 proposal: configure x87/FXSAVE/SSE explicitly before any
+    // Diagnostic-only setup for the inherited OSXSAVE/XCR0 guest check. It
+    // enters the ordinary initializer with CR4.OSXSAVE set and XCR0=7, then
+    // the production policy must reduce that state to x87+SSE and disable it.
+    #[cfg(feature = "phase15-osxsave-seed")]
+    {
+        let entry_cpu = x86_64::cpu_info();
+        let seeded_xcr0 = x86_64::fpu::seed_osxsave_xcr0_for_test(&entry_cpu)
+            .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+        crate::log::write_marker(format_args!(
+            "m15: OSXSAVE diagnostic entry seeded: CPUID.XSAVE={} AVX={} CR4.OSXSAVE=true XCR0={seeded_xcr0:#x}",
+            entry_cpu.has_xsave, entry_cpu.has_avx
+        ));
+    }
+
+    // ADR-0113 proposal: configure x87/FXSAVE/SSE explicitly before any
     // scheduler, interrupt-driven task, or ring-3 program can run. Do not
     // trust firmware's inherited CR0/CR4 or FP register contents.
     let cpu = x86_64::cpu_info();
@@ -384,11 +398,15 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("milestone 4 suite failed");
     }
 
-    // --- Phase 15: native x87/SSE state contract (proposed ADR-0112) ------
+    // --- Phase 15: native x87/SSE state contract (proposed ADR-0113) ------
     // The ring-3 assembly fixture tests the clean template and independent
     // XMM0-XMM15/x87/MXCSR state across yield, blocking join, timer preemption,
     // separate process CR3s, slot reuse, and contained user #MF/#XF/#UD.
-    if !crate::m15::run_suite() {
+    #[cfg(feature = "phase15-historical-diagnostic")]
+    let m15_ok = crate::m15::run_historical_diagnostic();
+    #[cfg(not(feature = "phase15-historical-diagnostic"))]
+    let m15_ok = crate::m15::run_suite();
+    if !m15_ok {
         crate::halt::halt_machine("Phase-15 FP/SIMD guest suite failed");
     }
 

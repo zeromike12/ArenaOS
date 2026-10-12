@@ -4,7 +4,7 @@
 //! `rbx, rbp, rdi, rsi, r12–r15` (8 × 8 B) + `pushfq` (8 B) + the return
 //! address the `call` pushed (8 B) = 80 bytes. Caller-saved GPRs need no
 //! frame: the compiler already spills live integer values around the call.
-//! ADR-0112 adds eager FXSAVE64/FXRSTOR64 through raw state pointers; ordinary
+//! ADR-0113 adds eager FXSAVE64/FXRSTOR64 through raw state pointers; ordinary
 //! kernel code remains integer-only and the image audit allowlists only this
 //! leaf plus the reviewed initialization leaf.
 //!

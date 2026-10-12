@@ -220,6 +220,7 @@ def run_qemu(label: str, esp: Path,
              console: ConsoleScript | None = None,
              tcp_peer: bool = True,
              disk: bool = True,
+             cpu: str = "qemu64,+nx,+smep,+smap",
              ) -> tuple[int, str, float]:
     bdir = arena_env.build_dir()
     qmp_sock = bdir / f"qmp-{label}.sock"
@@ -242,7 +243,7 @@ def run_qemu(label: str, esp: Path,
         + [
             "-M", "q35",
             "-m", f"{MEM_MIB}M",
-            "-cpu", "qemu64,+nx,+smep,+smap",
+            "-cpu", cpu,
             # Boot the ESP first. OVMF ignores "-boot order"; only bootindex
             # reaches its BootOrder, and without it BDS first tries the raw
             # scratch virtio disk, the point where every pre-kernel firmware

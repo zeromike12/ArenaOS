@@ -2,15 +2,14 @@
 //!
 //! The deterministic EFI image intentionally omits COFF symbols. This small
 //! retained `.rdata` record gives the build audit exact start/end VAs for the
-//! four reviewed instruction leaves without keeping a symbol table or debug
+//! six reviewed instruction leaves without keeping a symbol table or debug
 //! directory in the release artifact.
 
 use super::context::{arena_context_switch, arena_context_switch_end};
 use super::fpu::{
     arena_fpu_build_clean, arena_fpu_build_clean_end, arena_fpu_install_clean,
     arena_fpu_install_clean_end, arena_fpu_probe_image, arena_fpu_probe_image_end,
-    arena_fpu_read_xcr0, arena_fpu_read_xcr0_end, arena_fpu_set_legacy_xcr0,
-    arena_fpu_set_legacy_xcr0_end,
+    arena_fpu_read_xcr0, arena_fpu_read_xcr0_end, arena_fpu_write_xcr0, arena_fpu_write_xcr0_end,
 };
 
 #[repr(transparent)]
@@ -63,8 +62,8 @@ static TABLE: Table = Table {
             end: Address(arena_fpu_read_xcr0_end as *const ()),
         },
         Range {
-            start: Address(arena_fpu_set_legacy_xcr0 as *const ()),
-            end: Address(arena_fpu_set_legacy_xcr0_end as *const ()),
+            start: Address(arena_fpu_write_xcr0 as *const ()),
+            end: Address(arena_fpu_write_xcr0_end as *const ()),
         },
     ],
 };

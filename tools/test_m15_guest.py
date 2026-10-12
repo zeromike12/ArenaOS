@@ -19,6 +19,7 @@ import mtest  # noqa: E402
 EXPECTED = (
     "thread_isolation_block_yield_preempt",
     "process_isolation_slot_reuse",
+    "optional_cpu_feature_reporting",
     "xf_delivery_probe",
     "mf_ud_fault_containment",
 )
@@ -39,7 +40,14 @@ def check_serial(label: str, serial: str, rc: int | None, avx_expected: bool) ->
     for name in EXPECTED:
         marker = f"m15:test:{name}: PASS"
         check(serial.count(marker) == 1, f"guest assertion {name}")
-    check(serial.count("m15: RESULT PASS (4/4)") == 1,
+    if "mmx=true" in serial:
+        check(serial.count("m15:test:mmx_state: PASS") == 1,
+              "MMX MM0-MM7 state preservation and cleanup")
+    else:
+        check(serial.count("m15:test:mmx_state: SKIP (CPUID MMX=0)") == 1,
+              "MMX coverage honestly skipped on a CPU without MMX")
+    expected_total = 6 if "mmx=true" in serial else 5
+    check(serial.count(f"m15: RESULT PASS ({expected_total}/{expected_total})") == 1,
           "all Phase-15 guest cases passed")
     if "m15:test:xf_delivery_probe: FAIL" in serial:
         fallback = re.search(

@@ -290,7 +290,16 @@ cd "$REPO_ROOT/kernel"
 ( cd "$REPO_ROOT/userspace/desktop" && cargo build --offline --locked --release )
 # ADR-0077: filesd, the AFS2 file service (boot image 9).
 ( cd "$REPO_ROOT/userspace/filesd" && cargo build --offline --locked --release )
-cargo build $PROFILE_FLAG
+KERNEL_FEATURE_ARGS=()
+if [[ "${ARENA_PHASE15_HISTORICAL_DIAGNOSTIC:-0}" == "1" ]]; then
+    KERNEL_FEATURE_ARGS+=(--features arena-kernel/phase15-historical-diagnostic)
+    echo "WARNING: building the Phase-15 historical diagnostic image; #XF acceptance is not run and this image is not release-qualified"
+fi
+if [[ "${ARENA_PHASE15_OSXSAVE_SEED:-0}" == "1" ]]; then
+    KERNEL_FEATURE_ARGS+=(--features arena-kernel/phase15-osxsave-seed)
+    echo "WARNING: seeding controlled CR4.OSXSAVE/XCR0=7 state for the diagnostic guest path"
+fi
+cargo build $PROFILE_FLAG "${KERNEL_FEATURE_ARGS[@]}"
 
 EFI_SRC="$REPO_ROOT/kernel/target/x86_64-unknown-uefi/$PROFILE_DIR/arena-boot.efi"
 mkdir -p "$REPO_ROOT/build"
@@ -298,7 +307,7 @@ cp "$EFI_SRC" "$REPO_ROOT/build/arena-boot.efi"
 printf '%s\n' "${ARENA_GRAPHICS_FIXTURE:-desktop}" > "$REPO_ROOT/build/graphics-profile.txt"
 echo "kernel image: build/arena-boot.efi ($(stat -c%s "$REPO_ROOT/build/arena-boot.efi") bytes)"
 
-# ADR-0012 / proposed ADR-0112 invariant: ordinary kernel code remains
+# ADR-0012 / proposed ADR-0113 invariant: ordinary kernel code remains
 # integer-only. The only FP/SIMD instructions allowed in the EFI image are
 # the exact FXSAVE64/FXRSTOR64, initialization, and conditional XCR0
 # sanitation inside six source-bounded architecture leaves. The audit parses real disassembly,
