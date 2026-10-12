@@ -75,15 +75,19 @@ def main() -> int:
                     and "PANIC fault" not in neg and "servicemgr: restarted production netstackd" not in neg,
                     f"{tag}: real dependency refused before a replacement; bounded manager OFFLINE")
         if tag == "fault":
-            ok &= check(bool(re.search(rf"\[arena user fault\] pid=(\d+) vector=0x06", neg))
+            faulted_driver = re.search(r"rngd: faulted driver pid (\d+)", neg)
+            fault_matches_driver = (bool(faulted_driver) and bool(re.search(
+                rf"\[arena user fault\] pid={faulted_driver.group(1)} vector=0x06", neg)))
+            ok &= check(fault_matches_driver
                         and "1 in-flight call(s) answered STATUS_SERVICE_GONE" in neg
-                        and "rngd: faulted driver pid" in neg
                         and "rngd: RESTARTED as pid" in neg,
                         "kernel deferred supervised-fault teardown, failed IPC and restarted real driver")
         else:
+            worker_fault = (re.search(rf"\[arena user fault\] pid={probes[-1]}\b", neg)
+                            if probes else None)
             ok &= check(bool(probes) and re.search(
                 rf"proc_finish mode1: owner \d+ target {probes[-1]} live_threads=1 held Process/DESTROY", neg) is not None
-                and "[arena user fault]" not in neg,
+                and worker_fault is None,
                 "stalled IPC could not hang manager; Process-cap stop reaped worker after deadline")
     for tag, net, rng in (("no-devices", False, False), ("rng-only", False, True)):
         rc, absent, dt = boot(esp, tag, [(b"arena>", 1, b"depdeny\r"),

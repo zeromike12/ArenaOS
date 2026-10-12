@@ -1,8 +1,9 @@
 # Phase 15 architecture audit and decision
 
 Audit baseline: merged Phase-14 `main` at
-`1aa35f4c20c9bb386612298fe21574897cf14159`. ADR-0113 is proposed; this report
-records the source audit and bounded implementation choice before qualification.
+`1aa35f4c20c9bb386612298fe21574897cf14159`. ADR-0113 is Proposed. The final
+source audit is recorded in `receipts/final-kernel-audit.md`; it found no
+context-switch or CPU-policy defect requiring redesign.
 
 ## Verified current contracts
 
@@ -45,6 +46,7 @@ deliver the fault, so that behavior remains unverified. Ordinary kernel code
 stays integer-only.
 
 This decision does not require a security-model change or scheduler redesign.
-It is experimental until ADR-0113 is accepted; failure of any guest, audit, or
-resource gate leaves Phase 15 partial and requires reverting the experimental
-state path before production use.
+Guest isolation, MMX, `#MF`, and `#UD` pass, and the full executable-section ISA
+audit covers 120,911 instructions. The strict `#XF` gate remains failed under
+the available TCG backend, so this proposal remains experimental until
+ADR-0113 is accepted and the gate passes on a credible backend.

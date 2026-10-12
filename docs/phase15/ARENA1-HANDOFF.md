@@ -5,9 +5,10 @@ FXSAVE64/FXRSTOR64. The user thread owns private x87, MMX, XMM0–XMM15, x87
 control/status, and MXCSR state across direct syscalls, yield, blocking/wake,
 and scheduler switches. Arena 1's SDL3 executable has **not** been run by this
 Phase-15 guest fixture, so this handoff does not claim SDL3 compatibility.
-ADR-0113 remains proposed and Phase 15 is unqualified; these CPU capabilities
-are not yet release guarantees. The unresolved unmasked SIMD `#XF` test fails
-on both recorded QEMU TCG profiles.
+ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**; these CPU
+capabilities are not release guarantees. Historical diagnostic T2/T3 and
+MMX/OSXSAVE coverage pass, but strict unmasked SIMD `#XF` delivery still fails
+under the available QEMU TCG backend.
 
 ## Supported profile
 
@@ -18,8 +19,9 @@ on both recorded QEMU TCG profiles.
   OSXSAVE is cleared; unsupported user instructions are delivered as contained
   thread faults.
 - The proposed per-thread context is tested for x87, scalar SSE/SSE2, MXCSR,
-  all sixteen XMM registers, yield, blocking join, timer preemption, and
-  separate address spaces. Consult `QUALIFICATION.md` for actual gate status.
+  all sixteen XMM registers, MMX, yield, blocking join, timer preemption,
+  separate address spaces, fresh slots, and OSXSAVE/XCR0 sanitation. Consult
+  `QUALIFICATION.md` for the strict `#XF` blocker and diagnostic-only status.
 
 ## Compiler and runtime guidance
 

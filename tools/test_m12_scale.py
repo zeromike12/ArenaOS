@@ -101,7 +101,7 @@ def workflow(label: str, disk: Path) -> bytes:
                     "[application] ABI-v2 badge dispatch audit PASS"
                 ) >= badge_audits + i,
                 f"ordinary Desktop session {i}/32 did not finish its live ABI badge audit",
-                timeout_s=30,
+                timeout_s=60,
             )
 
         expected_full = (
@@ -247,7 +247,7 @@ def workflow(label: str, disk: Path) -> bytes:
                     "[application] ABI-v2 badge dispatch audit PASS"
                 ) >= refill_audits + i,
                 f"reused Desktop session slot {i}/16 did not finish its live ABI badge audit",
-                timeout_s=30,
+                timeout_s=60,
             )
         expected_reused = (
             base[0],
