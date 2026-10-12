@@ -1,8 +1,8 @@
 # Phase 15 CPU contract
 
-Status: proposed with ADR-0112; CPU setup passed in targeted QEMU boots, while
+Status: proposed with ADR-0113; CPU setup passed in targeted QEMU boots, while
 the full Phase-15 qualification remains incomplete. No new CPU capability is
-release-guaranteed until ADR-0112 is accepted and the `#XF` guest contract
+release-guaranteed until ADR-0113 is accepted and the `#XF` guest contract
 passes.
 
 ## Required processor profile

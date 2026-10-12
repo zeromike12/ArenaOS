@@ -1,7 +1,7 @@
 # ArenaOS Phase 15 final report
 
 Status: **PARTIAL / UNQUALIFIED**. Source is on
-`arena/phase15-fpu-simd`, based on the merged Phase-14 mainline. ADR-0112
+`arena/phase15-fpu-simd`, based on the merged Phase-14 mainline. ADR-0113
 remains proposed. The branch is pushed for review; no PR, merge, or release was
 created.
 
@@ -107,7 +107,7 @@ identity and raw logs are recorded in [QUALIFICATION.md](QUALIFICATION.md) and
 
 Arena 1 and Arena 2 may use the qualification record to review the proposed
 x87/SSE state contract and compiler policy. They must treat it as experimental
-until ADR-0112 is accepted and the `#XF` guest contract passes. No SDL3,
+until ADR-0113 is accepted and the `#XF` guest contract passes. No SDL3,
 libc/libm, C runtime, graphics/runtime integration, or genuine upstream SDL3
 compatibility is established here. See [Arena 1](ARENA1-HANDOFF.md) and
 [Arena 2](ARENA2-HANDOFF.md).

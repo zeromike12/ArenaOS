@@ -2,7 +2,7 @@
 
 Phase 15 adds a bounded x87/SSE execution contract to the Phase-14 mainline at
 `1aa35f4c20c9bb386612298fe21574897cf14159`. Work is on
-`arena/phase15-fpu-simd`. ADR-0112 is proposed pending architecture review;
+`arena/phase15-fpu-simd`. ADR-0113 is proposed pending architecture review;
 implementation on this branch is experimental.
 
 ## Architecture decision
@@ -11,8 +11,10 @@ The proposal is eager per-thread FXSAVE64/FXRSTOR64. The scheduler has a fixed
 64-slot table and one switch leaf shared by yield, blocking, exit, and timer
 preemption. The per-slot image is 512 bytes aligned to 16 bytes (32 KiB total).
 CPUID x87/FXSAVE/SSE/SSE2 are required. AVX-family state is not enabled.
-ADR-0111 is reserved by the C runtime proposal on its development branch, so
-this ADR is numbered 0112.
+ADR-0113 is used for this proposal to avoid the active C-runtime ADR numbering
+conflict. The Phase-14 accepted ADR-0110 is unchanged; the current Arena 1 and
+Arena 2 branch snapshots contain no ADR-0113. See
+`receipts/adr-numbering-review.md` for the inspected branch identities.
 
 ## Work sequence
 

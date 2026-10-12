@@ -6,7 +6,7 @@ private FXSAVE64 image; the common switch saves/restores x87 state, XMM0–XMM15
 and MXCSR during yield, blocking/wake, timer preemption, and address-space
 switching. New and recycled slots receive the clean template. See
 `QUALIFICATION.md` for which behaviors have actually passed guest gates.
-ADR-0112 remains proposed and Phase 15 is unqualified, so this is not yet a
+ADR-0113 remains proposed and Phase 15 is unqualified, so this is not yet a
 release-guaranteed CPU contract. The `#XF` guest test fails on both recorded
 QEMU TCG profiles.
 

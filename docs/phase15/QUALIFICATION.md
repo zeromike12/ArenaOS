@@ -128,5 +128,5 @@ Keep Phase 15 **PARTIAL / UNQUALIFIED**. The test now isolates the actual
 instruction and records independent failure/cleanup evidence, and the canonical
 build blocker is resolved. The `#XF` guest contract still fails under the
 available QEMU TCG, so T2/T3/T4, full historical qualification, and archive
-verification remain unrun. ADR-0112 stays proposed; do not claim production
+verification remain unrun. ADR-0113 stays proposed; do not claim production
 support or SDL3 compatibility from this record.

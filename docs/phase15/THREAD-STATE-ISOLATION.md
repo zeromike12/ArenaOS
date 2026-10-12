@@ -2,7 +2,7 @@
 
 Status: implementation and focused isolation cases pass on the recorded QEMU
 runs; Phase 15 remains **PARTIAL / UNQUALIFIED** because unmasked SIMD `#XF`
-delivery fails under both tested TCG CPU profiles. ADR-0112 remains proposed.
+delivery fails under both tested TCG CPU profiles. ADR-0113 remains proposed.
 See [qualification](QUALIFICATION.md) for artifact identities and raw receipts.
 
 ## Ownership and transition rule

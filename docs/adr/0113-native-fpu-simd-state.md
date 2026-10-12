@@ -1,9 +1,17 @@
-# ADR-0112: Native x87/SSE execution with eager per-thread state
+# ADR-0113: Native x87/SSE execution with eager per-thread state
 
 Status: **Proposed** — implementation on `arena/phase15-fpu-simd` is
 experimental until the architecture-review process accepts this ADR.
 Date: 2026-10-11
 Milestone context: Phase 15
+
+## Numbering
+
+This proposal uses ADR-0113. Phase-14 mainline already accepts ADR-0110, and
+the active C-runtime workstream has a cross-branch reservation in the 0112
+range. The inspected Phase-15 base, Arena 1 head, and Arena 2 head contain no
+ADR-0113. No accepted ADR was renumbered. Branch identities and the decision
+are recorded in `docs/phase15/receipts/adr-numbering-review.md`.
 
 ## Problem
 

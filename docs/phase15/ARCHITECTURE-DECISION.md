@@ -1,7 +1,7 @@
 # Phase 15 architecture audit and decision
 
 Audit baseline: merged Phase-14 `main` at
-`1aa35f4c20c9bb386612298fe21574897cf14159`. ADR-0112 is proposed; this report
+`1aa35f4c20c9bb386612298fe21574897cf14159`. ADR-0113 is proposed; this report
 records the source audit and bounded implementation choice before qualification.
 
 ## Verified current contracts
@@ -45,6 +45,6 @@ deliver the fault, so that behavior remains unverified. Ordinary kernel code
 stays integer-only.
 
 This decision does not require a security-model change or scheduler redesign.
-It is experimental until ADR-0112 is accepted; failure of any guest, audit, or
+It is experimental until ADR-0113 is accepted; failure of any guest, audit, or
 resource gate leaves Phase 15 partial and requires reverting the experimental
 state path before production use.
