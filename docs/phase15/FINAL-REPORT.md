@@ -1,9 +1,31 @@
 # ArenaOS Phase 15 final report
 
-Status: **PHASE 15 — IMPLEMENTED / HISTORICAL REGRESSIONS TESTED / EXCEPTION
-QUALIFICATION BLOCKED**. The branch remains **PARTIAL / UNQUALIFIED** and is
-**NOT READY FOR INTEGRATION REVIEW**. ADR-0113 is Proposed. No PR, merge,
-release, or Phase 16 work was created.
+Status: **PHASE 15 — IMPLEMENTATION COMPLETE / EXTERNAL HARDWARE VERIFICATION
+REQUIRED**. The branch remains **PARTIAL / UNQUALIFIED** and is **NOT READY FOR
+INTEGRATION**. ADR-0113 is Proposed. No PR, merge, release, or Phase 16 work
+was created.
+
+## Current recovery evidence (2026-10-12)
+
+- **SOURCE-REVIEWED** — the external kit preserves the strict test assertions,
+  the CPL3 `SQRTSS` source fixture, and the vector-19 exception/cleanup source.
+- **HOST-TESTED** — strict EFI/ESP and fixture hashes match their pinned
+  identities; the ESP contains the exact EFI; the extracted kit manifest and
+  Windows-mode TCP transport smoke pass. PowerShell is unavailable here, so
+  the PowerShell runner is source-reviewed only.
+- **TCG-GUEST-TESTED** — prior strict TCG trials still fail genuine `#XF`;
+  historical diagnostic coverage remains diagnostic-only.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**. This workspace has no
+  `/dev/kvm`, QEMU executable, OVMF firmware, or Rust toolchain. No hardware
+  trial is claimed.
+- **NOT RUN** — a clean final-source 120/120 aggregate, official strict T2/T3/T4,
+  and a qualified release archive.
+
+The portable runner and kit are under `tools/phase15_external/`. The kit pins
+the strict EFI, ESP, and CPL3 fixture; its Linux and Windows runners require
+explicit KVM or WHPX and save raw serial, QEMU stderr, actual process exits,
+and a structured receipt. The kit is an execution aid, not a qualification
+archive.
 
 ## Source and images
 
@@ -47,10 +69,15 @@ signed APB1 remains at `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456
   vector 19 on the `max` and `qemu64` profiles. The sibling and peer survive
   and resources return to baseline, but delivery remains failed. No kernel
   workaround or synthetic `int 19` was added.
-- **Backend search:** `/dev/kvm` is absent. Explicit QEMU `-accel kvm`, `mshv`,
-  and `nitro` each failed because the required host device/backend is absent.
+- **Earlier backend search:** that QEMU host lacked `/dev/kvm`. Explicit QEMU
+  `-accel kvm`, `mshv`, and `nitro` each failed because the required host
+  device/backend was absent.
   WHPX/HVF do not apply to this Linux host. TCG is the only available backend;
   no hardware-backed run is claimed.
+- **Final-source aggregate rerun:** **NOT RUN** in the current workspace
+  because QEMU, OVMF, `cargo`, and `rustc` are absent. The previously recorded
+  115/120 aggregate and five focused recoveries remain historical evidence;
+  they are not upgraded to a clean 120/120 result.
 
 ## Stability evidence
 
@@ -83,10 +110,12 @@ verification does not change the blocked `#XF` result.
 
 Remaining qualification blockers are genuine vector-19 delivery and
 containment under a trustworthy backend, a clean one-shot 120/120 historical
-regression run, and official rather than diagnostic T2/T3/T4 evidence. The
-implementation remains experimental. Arena 1's SDL3 application and Arena 2's
-runtime were not run or modified; no SDL3 compatibility, C runtime, libc/libm,
-or graphics integration is established.
+regression run, and official rather than diagnostic T2/T3/T4 evidence. Run the
+external strict test on an x86-64 KVM or WHPX host, independently verify its
+receipt, then complete the full regression and official qualification gates
+with the final immutable image before requesting integration review. Arena 1's
+SDL3 application and Arena 2's runtime were not run or modified; no SDL3
+compatibility, C runtime, libc/libm, or graphics integration is established.
 
 See [the qualification record](QUALIFICATION.md),
 [`phase15-qualification-recovery.json`](receipts/phase15-qualification-recovery.json),

@@ -55,10 +55,30 @@ corroborating evidence only and does not satisfy the guest gate.
 The historical qualification diagnostic intentionally omits #XF and prints
 `m15: DIAGNOSTIC PASS (5/5; XF NOT RUN)`; it is not the official M15 PASS
 marker. Diagnostic T2 10/10, T3 25/25, and T4 100/100 used that image; none
-qualifies the official gate. QEMU advertised KVM, MSHV, and Nitro, but explicit
-startup probes failed because this Linux host lacks their device backends.
+qualifies the official gate. The earlier QEMU host advertised KVM, MSHV, and
+Nitro, but explicit startup probes failed because that host lacked their
+device backends.
 Official T2/T3/T4 and release qualification remain blocked until a suitable
 backend delivers and contains `#XF`.
+
+## Current qualification labels
+
+- **SOURCE-REVIEWED** — x87/SSE/SSE2 state policy, the CPL3 `SQRTSS` probe,
+  vector-19 dispatch, and cleanup assertions are preserved in the external kit.
+- **HOST-TESTED** — pinned strict EFI/ESP/fixture identity and the ESP's
+  embedded EFI are checked before any guest boot.
+- **TCG-GUEST-TESTED** — strict `#XF` remains a TCG failure; the prior
+  diagnostic x87/SSE/SSE2, MMX, `#MF`, and `#UD` results remain diagnostic.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** until Linux/KVM or Windows/WHPX
+  completes the genuine vector-19 guest test.
+- **NOT RUN** — official strict T2/T3/T4 and final-source aggregate regression.
+
+The external runners use the existing two M15 CPU profiles. Their successful
+receipt must show `fault=0x113`, the ring-3 vector-19 dispatch, sibling and
+independent-peer survival, fault-slot release, resource-baseline restoration,
+and clean UEFI shutdown. x87/SSE/SSE2 remain the ArenaOS application profile;
+the AVX-capable first QEMU profile is a test requirement, while AVX execution
+inside ArenaOS remains unsupported.
 
 ## Kernel restriction and memory
 

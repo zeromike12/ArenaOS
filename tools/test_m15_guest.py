@@ -8,6 +8,7 @@ workflow.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -93,8 +94,10 @@ def check_serial(label: str, serial: str, rc: int | None, avx_expected: bool) ->
 
 
 def main() -> int:
-    esp = arena_env.REPO_ROOT / "build/arena-esp.img"
-    efi = arena_env.REPO_ROOT / "build/arena-boot.efi"
+    esp = Path(os.environ.get(
+        "ARENA_PHASE15_ESP", arena_env.REPO_ROOT / "build/arena-esp.img"))
+    efi = Path(os.environ.get(
+        "ARENA_PHASE15_EFI", arena_env.REPO_ROOT / "build/arena-boot.efi"))
     if not esp.is_file() or not efi.is_file():
         print("error: build/arena-boot.efi and build/arena-esp.img must exist; build first",
               file=sys.stderr)

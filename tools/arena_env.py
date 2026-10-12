@@ -19,7 +19,9 @@ Environment overrides (highest priority):
 """
 
 import os
+import shlex
 import shutil
+import socket
 import sys
 from pathlib import Path
 
@@ -40,6 +42,7 @@ OVMF_SEARCH_DIRS = [
 ]
 OVMF_CODE_NAMES = ["edk2-x86_64-code.fd", "OVMF_CODE.fd", "OVMF_CODE-pure-efi.fd", "ovmf_code_x64.bin"]
 OVMF_VARS_NAMES = ["edk2-i386-vars.fd", "OVMF_VARS.fd", "OVMF_VARS-pure-efi.fd", "ovmf_vars_x64.bin"]
+_TCP_ENDPOINTS: dict[tuple[str, str], int] = {}
 
 
 def rust_bin() -> Path:
@@ -64,7 +67,7 @@ def qemu_cmd() -> list[str]:
     """Full command prefix that launches qemu-system-x86_64."""
     env = os.environ.get("ARENA_QEMU")
     if env:
-        return env.split()
+        return shlex.split(env)
     if SANDBOX_QEMU_BIN.exists() and SANDBOX_MUSL_LOADER.exists():
         # Static musl QEMU: launch through musl's libc.so, which doubles as
         # the dynamic loader; vendored libs come from /opt/qemu/lib.
@@ -241,6 +244,13 @@ def input_args() -> list[str]:
 
 def console_args(sock: Path) -> list[str]:
     """QEMU args attaching the virtio-console port (M6.4 fixture)."""
+    if os.environ.get("ARENA_PHASE15_SOCKET_MODE") == "tcp":
+        host, port = tcp_endpoint("vcon", sock)
+        return [
+            "-chardev", f"socket,id=vcon0,host={host},port={port},server=on,wait=on",
+            "-device", "virtio-serial-pci,max_ports=1",
+            "-device", "virtconsole,chardev=vcon0",
+        ]
     sock.unlink(missing_ok=True)
     return [
         "-chardev", f"socket,id=vcon0,path={sock},server=on,wait=on",
@@ -255,9 +265,24 @@ def qmp_args(sock: Path) -> list[str]:
     Test-only: nothing inside ArenaOS is aware of it. `wait=off` keeps
     the boot from blocking on a client that may never connect.
     """
+    if os.environ.get("ARENA_PHASE15_SOCKET_MODE") == "tcp":
+        host, port = tcp_endpoint("qmp", sock)
+        return ["-qmp", f"tcp:{host}:{port},server=on,wait=off"]
     if sock.exists():
         sock.unlink()
     return ["-qmp", f"unix:{sock},server=on,wait=off"]
+
+
+def tcp_endpoint(kind: str, identity: Path | str) -> tuple[str, int]:
+    """Reserve a loopback port for the opt-in Windows TCP socket transport."""
+    key = (kind, str(identity))
+    port = _TCP_ENDPOINTS.get(key)
+    if port is None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        _TCP_ENDPOINTS[key] = port
+    return "127.0.0.1", port
 
 
 if __name__ == "__main__":

@@ -8,6 +8,27 @@ T2/T3/T4 passed on one immutable EFI/ESP, and genuine SIMD `#XF` remains blocked
 because no hardware-backed or independently verified emulator backend is
 available.
 
+## Final recovery attempt (2026-10-12)
+
+Evidence labels for this revision:
+
+- **SOURCE-REVIEWED** — portable KVM/WHPX runners preserve the existing strict
+  M15 assertions and pin the original strict EFI/ESP and CPL3 fixture.
+- **HOST-TESTED** — image identity/embedded-EFI checks, kit assembly and
+  extracted manifest checks, and Windows-mode TCP transport smoke pass.
+  PowerShell is unavailable here; its runner is source-reviewed only.
+- **TCG-GUEST-TESTED** — prior strict TCG trials fail vector 19; prior
+  diagnostic coverage remains explicitly separate.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**: no `/dev/kvm`, QEMU, or OVMF
+  is available in this workspace. WHPX is not applicable on this Linux host.
+- **NOT RUN** — final-source aggregate 120/120, strict official T2/T3/T4, and
+  final qualification archive.
+
+The final-source aggregate was not attempted because `cargo`, `rustc`, QEMU,
+and OVMF are absent. This does not replace the recorded initial 115/120 result
+or its focused recoveries. See `tools/phase15_external/README.md` for exact
+setup and run steps on a separate x86-64 host.
+
 ## Source and artifact identity
 
 - Repository: `zeromike12/ArenaOS`.
@@ -38,16 +59,17 @@ strict Phase-15 acceptance image.
 
 ## Evidence classes
 
-| Evidence class | Result |
+| Evidence label | Result |
 |---|---|
-| Source-reviewed | Pass: scheduler ownership, switch paths, thread creation/reaping, CPU policy, exception frame, and integer-only kernel rule; see [`final-kernel-audit.md`](receipts/final-kernel-audit.md) |
-| Host-tested | Pass: kernel host tests 8/8, formatting, policy/template checks, and full-section ISA audit |
-| QEMU TCG guest-tested | Pass for x87/SSE/SSE2 isolation, MMX, OSXSAVE sanitation, `#MF`, and `#UD`; the strict `#XF` test fails |
-| Hardware-backed or independently verified emulator | Not available; no such result is claimed |
-| Historical regression-tested | 120 groups executed; 115 passed in first aggregate run and all five first-run failures passed focused reruns; aggregate clean-pass limitation retained |
-| Stability-tested | T2 10/10, T3 25/25, and T4 100/100 diagnostic pass on the same image |
-| Independent archive-tested | Pass for diagnostic archive contents and extracted workflows; cannot close `#XF` |
-| Blocked/unverified | Genuine vector-19 delivery and containment; official T2/T3/T4; full one-shot historical pass; release qualification |
+| SOURCE-REVIEWED | Scheduler ownership, switch paths, thread creation/reaping, CPU policy, exception frame, integer-only kernel rule, and external runner design; see [`final-kernel-audit.md`](receipts/final-kernel-audit.md). |
+| HOST-TESTED | Prior kernel host tests 8/8, formatting, policy/template checks, and full-section ISA audit passed. Current package/image hash and extraction checks are recorded separately. |
+| TCG-GUEST-TESTED | x87/SSE/SSE2 isolation, MMX, OSXSAVE sanitation, `#MF`, and `#UD` pass; strict `#XF` fails on the tested TCG version. |
+| HARDWARE-BACKED-GUEST-TESTED | BLOCKED. No successful hardware-backed or independently verified emulator trial is claimed. |
+| BLOCKED | Genuine vector-19 delivery/containment and official T2/T3/T4 remain open. |
+| NOT RUN | Clean final-source 120/120 aggregate and final qualified archive. |
+| Historical diagnostic evidence | 120 groups executed; 115 passed in the initial aggregate, and all five first-run failures passed focused reruns. No single clean aggregate pass. |
+| Diagnostic stability evidence | T2 10/10, T3 25/25, and T4 100/100 on the same diagnostic image. |
+| Diagnostic archive evidence | Extracted diagnostic archive workflows pass; this cannot close `#XF` or qualify a release. |
 
 ## Build, static checks, and compatibility
 
@@ -102,15 +124,33 @@ helper updates MXCSR status but does not check the mask and raise vector 19.
 The vector-19 IDT gate and no-error-code stub pass the live-IDT audit. No kernel
 workaround or synthetic `int 19` was added.
 
-The host is x86-64 Linux. QEMU advertises TCG, KVM, MSHV, and Nitro; explicit
-KVM startup failed because the KVM module/device is absent, MSHV failed opening
-`/dev/mshv`, and Nitro failed opening `/dev/nitro_enclaves`. WHPX and HVF are
-not applicable to this Linux host and are not advertised by this QEMU binary.
+The earlier emulator host was x86-64 Linux. Its QEMU advertised TCG, KVM, MSHV,
+and Nitro; explicit KVM startup failed because the KVM module/device is absent,
+MSHV failed opening `/dev/mshv`, and Nitro failed opening
+`/dev/nitro_enclaves`. WHPX and HVF were not applicable to that Linux host and
+were not advertised by its QEMU binary.
 Only TCG was available. See
 [`phase15-alternative-backends.json`](receipts/phase15-alternative-backends.json)
 and the raw startup logs. The same unchanged TCG experiment was not repeated
 for the stability loops; those loops use the diagnostic image and do not run
 the `#XF` acceptance case.
+
+The external qualification runner requires explicit `-accel kvm` or
+`-accel whpx`, verifies accelerator initialization, checks the strict image
+hashes before boot, and captures both CPU-profile trials, actual QEMU exit
+codes, raw serial and stderr, and JSON evidence for vector 19, status `0x113`,
+sibling/peer survival, slot reclamation, resource restoration, and clean
+shutdown. The Linux runner additionally checks `/dev/kvm` and QMP's live
+`query-kvm` result. The Windows runner uses loopback TCP QMP/virtconsole
+transports for the existing harness; it makes no Windows feature changes.
+Neither backend has run successfully here. The external package is not a
+qualified archive.
+
+Linux QEMU/KVM is the primary technically suitable target because guest SSE
+instructions execute through the host virtualization hardware rather than
+QEMU's TCG SSE helpers. It still requires a successful strict guest trial.
+Windows QEMU/WHPX is feasible to evaluate, but no exception-delivery behavior
+is assumed from WHPX startup; only its exact guest receipt can qualify it.
 
 ## Additional architectural coverage
 

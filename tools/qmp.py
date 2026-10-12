@@ -17,6 +17,7 @@ line and read one reply object per line.
 """
 
 import json
+import os
 import socket
 import sys
 import time
@@ -62,10 +63,16 @@ class Qmp:
     def __init__(self, path: str, connect_timeout_s: float = 10.0):
         deadline = time.monotonic() + connect_timeout_s
         last: Exception | None = None
+        tcp = os.environ.get("ARENA_PHASE15_SOCKET_MODE") == "tcp"
+        if tcp:
+            import arena_env
+
+            host, port = arena_env.tcp_endpoint("qmp", path)
         while time.monotonic() < deadline:
             try:
-                self.sock = socket.socket(socket.AF_UNIX)
-                self.sock.connect(path)
+                self.sock = socket.socket(socket.AF_INET if tcp else socket.AF_UNIX,
+                                          socket.SOCK_STREAM)
+                self.sock.connect((host, port) if tcp else path)
                 break
             except OSError as e:  # QEMU may not have bound it yet
                 last = e

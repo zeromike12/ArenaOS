@@ -1,0 +1,2 @@
+pyfatfs==1.1.0
+setuptools==80.10.2

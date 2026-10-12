@@ -51,3 +51,20 @@ The immutable diagnostic EFI/ESP completed T2/T3/T4 at 10/10, 25/25, and
 100/100 boots. Each boot exercised the diagnostic Phase-15 thread/process/MMX
 coverage while explicitly reporting `#XF NOT RUN`; these counts do not satisfy
 official exception qualification.
+
+## External strict verification
+
+- **SOURCE-REVIEWED** — the CPL3 fixture executes unmasked `SQRTSS` with
+  MXCSR `0x1F00`; the kernel expects exit status `0x113` from vector 19.
+- **HOST-TESTED** — the external kit pins the strict EFI, ESP, and compiled
+  fixture hashes and checks the EFI embedded in the ESP.
+- **TCG-GUEST-TESTED** — previous TCG runs show the sticky invalid flag but no
+  vector 19, so the strict case fails.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** until KVM or WHPX produces a
+  passing guest receipt with sibling/peer survival and exact teardown.
+- **NOT RUN** — the final strict run, clean 120/120 aggregate, and official
+  T2/T3/T4 gates.
+
+Run instructions and the receipt verifier are in
+`tools/phase15_external/README.md`. A QEMU accelerator startup by itself does
+not satisfy the `#XF` or state-isolation gate.

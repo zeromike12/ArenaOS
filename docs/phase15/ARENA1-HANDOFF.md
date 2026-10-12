@@ -38,3 +38,20 @@ Phase 15 adds no SDL3 integration and no libc/libm, graphics, threading API, or
 application package changes. Arena 1 must still validate its executable's
 startup/runtime dependencies and run the actual application under the
 Phase-15 qualification image before declaring it compatible.
+
+## Qualification status and constraints
+
+- **SOURCE-REVIEWED** — the proposed x86-64 x87/SSE2 contract and per-thread
+  state ownership are documented; no SDL3 application source was changed.
+- **HOST-TESTED** — strict image identity is pinned in the external test kit.
+- **TCG-GUEST-TESTED** — diagnostic FP/SIMD coverage passes, while strict
+  unmasked `#XF` fails under the previously tested TCG backend.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**; no KVM/WHPX trial is available.
+- **NOT RUN** — Arena 1 SDL3 launch, native library integration, the final
+  120/120 regression, and official strict T2/T3/T4.
+
+Keep distributable code at the x86-64 baseline with CPUID-gated optional SSE
+features and no AVX requirement. Do not advertise Arena 1 compatibility from
+the diagnostic image or from this handoff. The strict external runner's first
+QEMU profile needs a host that exposes AVX, although ArenaOS itself continues
+to disable AVX state.

@@ -148,6 +148,24 @@ official Rust 1.97.0 target libraries; the existing hash guard and signed
 package identity remain intact. See `docs/phase15/QUALIFICATION.md` for exact
 identities and evidence classes.
 
+### External hardware verification status
+
+- **SOURCE-REVIEWED** — the external KVM/WHPX kit runs the unchanged strict
+  M15 test and preserves the exact CPL3 source fixture and images.
+- **HOST-TESTED** — image identity and embedded EFI checks are part of kit
+  creation and receipt verification.
+- **TCG-GUEST-TESTED** — strict `#XF` still fails on the previously tested TCG
+  backend.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**. The current workspace has no
+  `/dev/kvm`, QEMU, or OVMF; WHPX is unavailable on this Linux host.
+- **NOT RUN** — clean final-source aggregate regression and official strict
+  T2/T3/T4.
+
+The portable runner is an evidence collection path, not an architecture
+decision. ADR-0113 remains **Proposed** until the architecture review records
+an explicit decision; successful external `#XF` evidence alone does not accept
+this ADR or qualify integration.
+
 If state ownership, exception containment, the integer-only audit, or a
 required guest gate cannot be proven, do not qualify this phase. The rollback
 is to revert Phase-15 commits and restore the accepted ADR-0012 no-FP execution

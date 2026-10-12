@@ -39,3 +39,20 @@ verified x87 `#MF` and unsupported-instruction `#UD`. SIMD `#XF` delivery
 remains unqualified because QEMU TCG sets the MXCSR status flag but does not
 deliver vector 19. CPL0 exceptions remain fail-stop. AVX-family state is
 unsupported, so binaries that require AVX are not compatible with this profile.
+
+## Qualification status and constraints
+
+- **SOURCE-REVIEWED** — the existing CPL3 invalid-SSE fixture and the
+  scheduler-state lifecycle are included in the external test kit.
+- **HOST-TESTED** — strict EFI/ESP and fixture hashes are pinned and verified.
+- **TCG-GUEST-TESTED** — x87/SSE/SSE2 state, MMX, `#MF`, and `#UD` diagnostic
+  cases pass; the genuine strict `#XF` case remains a TCG failure.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** pending a passing KVM or WHPX
+  trial with complete contained-fault receipts.
+- **NOT RUN** — Arena 2 C runtime/libc integration, clean 120/120 regression,
+  and official strict T2/T3/T4.
+
+Keep Arena 2 code at the baseline x86-64 profile with x87/SSE2 and without AVX
+or AVX-dependent libraries. The external runner requires AVX exposure only
+for its existing `max` CPU-profile check; that is not an ArenaOS AVX support
+promise.
