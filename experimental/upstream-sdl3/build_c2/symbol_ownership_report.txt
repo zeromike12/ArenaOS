@@ -1,0 +1,159 @@
+================================================================================
+Milestone G2.3 Genuine Upstream SDL 3.2.0 + Shared C Runtime Symbol Ownership Report
+================================================================================
+Date: 2026-10-11 20:59:09Z
+Upstream Version: SDL 3.2.0 official release (commit 535d80badefc83c5c527ec5748f2a20d6a9310fe)
+Mainline Commit:  1aa35f4c20c9bb386612298fe21574897cf14159
+C2 Runtime Tip:   84392b8f32a0b1ce26364926185723c7bbf7a3f3 (Evidence: 9c93f8cd3b933978aaa67357beac55a89b6a6bc1)
+Luna Phase 15:    33cd7d7dfec759a2d983156b27306a6f8e69d174 (Implement: 0182b5a1910efdb9d77e489e2467d16a69ef2db4)
+
+Static Archive:   /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/libSDL3_upstream_c2.a (1068052 bytes, 81 modules)
+Executable:       /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_upstream_c2 (243120 bytes)
+Signed Bundle:    /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/SDL3UpstreamC2.apb1 (243904 bytes)
+Linker Map:       /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_upstream_c2.map
+
+1. Subsystem Symbol Ownership Breakdown:
+- Application Layer (demo_main.o):
+000000000020020c t draw_box
+0000000000200282 T main
+0000000000222f40 t palette
+
+- Upstream SDL 3.2.0 Core (libSDL3_upstream_c2.a):
+0000000000216e5e T SDL_CreateWindow
+000000000021467a t SDL_CreateWindowTexture
+00000000002168c6 T SDL_CreateWindowWithProperties
+0000000000212250 T SDL_Delay
+000000000021225e T SDL_DelayNS
+0000000000212263 T SDL_DelayPrecise
+0000000000214f50 T SDL_GetWindowSurface
+00000000002010bf T SDL_Init
+0000000000204cae T SDL_InitEnvironment
+0000000000204a73 T SDL_InitEvents
+0000000000204b75 T SDL_InitFilesystem
+00000000002058e7 T SDL_InitKeyboard
+0000000000206951 T SDL_InitLog
+0000000000200e8d T SDL_InitMainThread
+000000000021cc8a T SDL_InitPen
+000000000020a53d T SDL_InitProperties
+000000000020a680 T SDL_InitQuit
+0000000000200f92 T SDL_InitSubSystem
+0000000000211ba8 T SDL_InitTLSData
+000000000021212d T SDL_InitTicks
+0000000000212347 T SDL_InitTouch
+0000000000210cf6 t SDL_InitializeSurface
+0000000000206ebd T SDL_Log
+000000000020205f t SDL_LogEvent
+0000000000206f5b T SDL_LogInfo
+0000000000206d8d T SDL_LogMessageV
+00000000002068a0 t SDL_LogOutput
+0000000000206d88 t SDL_LoggingChanged
+0000000000204a1c T SDL_PollEvent
+00000000002010c4 T SDL_Quit
+000000000020136b T SDL_QuitAsyncIO
+0000000000201c4b T SDL_QuitCPUInfo
+0000000000204d49 T SDL_QuitEnvironment
+0000000000204ac9 T SDL_QuitEvents
+0000000000204b76 T SDL_QuitFilesystem
+000000000020559c T SDL_QuitHints
+000000000020608c T SDL_QuitKeyboard
+00000000002069c8 T SDL_QuitLog
+000000000020893e T SDL_QuitMouse
+000000000021cc9f T SDL_QuitPen
+0000000000208e9e T SDL_QuitPixelFormatDetails
+000000000020a495 T SDL_QuitProperties
+000000000020a683 T SDL_QuitQuit
+000000000020e095 T SDL_QuitRender
+0000000000200f46 T SDL_QuitSubSystem
+0000000000200da2 t SDL_QuitSubSystem.part.0
+0000000000211d50 T SDL_QuitTLSData
+00000000002121cd T SDL_QuitTicks
+0000000000212043 T SDL_QuitTimers
+0000000000212b02 T SDL_QuitTouch
+00000000002151bf T SDL_UpdateWindowSurface
+000000000021514a T SDL_UpdateWindowSurfaceRects
+
+- ArenaOS Desktop Backend Adapter (arenaos_client.o):
+0000000000200839 T adsk_connect
+00000000002009d7 T adsk_disconnect
+0000000000200bdb T adsk_poll_event
+00000000002007ee T adsk_sleep_ms
+
+- Shared C Runtime & Entry (crt0.o + libarena_c.a):
+000000000021fbd0 T _Exit
+0000000000200000 T _start
+0000000000200190 T arena_crt_start
+000000000021dfa0 T arena_startup
+000000000021ed60 T arena_startup_count_kind
+000000000021dfb0 T arena_startup_gate
+000000000021edc0 T arena_startup_pick_notification
+000000000021df40 T arena_vm_commit
+000000000021deb0 T arena_vm_reserve
+000000000021fb80 T calloc
+000000000021fbc0 T exit
+000000000021fba0 T free
+000000000021cf80 t free_locked
+000000000021fb70 T malloc
+000000000021f860 T memcpy
+000000000021f870 T memmove
+000000000021f880 T memset
+000000000021fb90 T realloc
+
+- POSIX Compatibility Glue (arenaos_c2_glue.o):
+
+
+2. Linker Conflict Resolution Verification:
+- memcpy / memmove / memset: Provided exclusively by libarena_c.a (libc_names.o).
+  Upstream SDL3 compiled with HAVE_LIBC=1 to suppress redundant internal definitions.
+- _exit: Provided by arenaos_c2_glue.o dispatching directly to C11 _Exit in libarena_c.a.
+- Memory Allocation: Provided exclusively by libarena_c.a buddy allocator (alloc.o).
+  No duplicate freestanding allocators linked.
+
+3. ELF Memory Budget Differentiation:
+- Kernel PT_LOAD Image Budget: 256 KiB file size / 128 load pages limit.
+  Binary occupies 243120 bytes across 50 load pages (CONFORMS).
+- Dynamic Virtual Heap Reservation: 16 MiB lazy virtual memory reservation (HEAP_PAGES=4096)
+  reserved dynamically at process startup via arena_vm_reserve (SYS_VM_RESERVE=32).
+  Pages committed on-demand in 64 KiB chunks via arena_vm_commit (SYS_VM_COMMIT=33).
+
+4. ISA Audit Summary:
+========================================================================
+ArenaOS CPU Instruction Architecture Audit: /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_upstream_c2
+========================================================================
+Functions Audited:    870
+Instructions Scanned: 42272 (non-FUNC: 2864)
+SSE / %xmm Hits:      2036
+AVX / %ymm/%zmm Hits: 0
+MMX / %mm Hits:       0
+x87 FPU / %st Hits:   0
+Total Prohibited:     2042
+------------------------------------------------------------------------
+ISA AUDIT VERDICT: PROHIBITED FP/SIMD INSTRUCTIONS DETECTED
+Top Offending Functions / Regions:
+  SDL_Blit_Slow_Float                  :  486 hits
+  SDL_uclibc_pow                       :  214 hits
+  ReadFloatPixel                       :  133 hits
+  UpdateLogicalPresentation            :   94 hits
+  SDL_PrivateSendMouseMotion           :   74 hits
+  SDL_LogEvent                         :   71 hits
+  SDL_RenderPresent                    :   53 hits
+  SDL_RenderTextureInternal            :   45 hits
+  SDL_SendTouchMotion                  :   45 hits
+  SDL_SendTouch                        :   39 hits
+  SDL_GetClosestFullscreenDisplayMode  :   34 hits
+  SDL_GetRectIntersectionFloat         :   31 hits
+  SDL_ConvertColorPrimaries            :   27 hits
+  SDL_PrivateSendMouseButton           :   25 hits
+  SDL_PrintFloat                       :   25 hits
+Sample Instruction Hits:
+  0x200425 [main]: cvttss2si 0x4c(%rsp),%eax (SSE)
+  0x20042f [main]: cvttss2si 0x50(%rsp),%eax (SSE)
+  0x2013ce [debug_print]: movaps %xmm0,0x50(%rsp) (SSE)
+  0x2013d3 [debug_print]: movaps %xmm1,0x60(%rsp) (SSE)
+  0x2013d8 [debug_print]: movaps %xmm2,0x70(%rsp) (SSE)
+========================================================================
+
+5. SHA-256 Hashes:
+7a368a6be1973a5f993b6193c61409423473b7762a1957a95fbf5c021bb51d28  /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/libSDL3_upstream_c2.a
+feab1258f3ebee67902b2b8ac8dda42b8b8c1e3ea7b5bef4b435d33b01a55606  /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_upstream_c2
+d274d91cd3a0671ff9a082cdf624e510302b90bfbed0704c197fa7d8ef9f83f9  /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/SDL3UpstreamC2.apb1
+================================================================================

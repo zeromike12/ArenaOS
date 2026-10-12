@@ -1,0 +1,14 @@
+# C2 artifact identity (sha256). Source commit for these binaries: 7b27c67 (guest inputs unchanged since).
+# Generated 2026-10-08T20:41:29 by the C2.8 receipt pass.
+f19cc80e8c054252e13aec4e873fc5e867a0d69406bf0337f5bdbec885ae259b  build/guest-gcc/crt0.o
+9d8a0acd1d987d69289b0cda27fec846e1d269b7fcc923399f85d377ba79ca12  build/guest-gcc/lib/libarena_c.a
+76be1e5f05d3b7609c7c5d2221a04ac186b0be9372347bd7a35e0b23a526e0fd  build/guest-gcc/c-native-gcc.elf
+db9c8ac2a83262d0a29c3608d4cbfa11e21cd4389c4f72fcfbf03c1b118a57ca  build/guest-gcc/c2-console-gcc.elf
+1956ab24072bea5bb8bf1925e726686faf917cba2078f6ed9d211529fafa9e2a  build/guest-gcc/crt-probe-gcc.elf
+ba86127bc7e0dc69d57592f2f90f4e771d8f5d6b595b4df26bc0a9a5b4600f8a  build/guest-gcc/xxhash-app-gcc.elf
+1724ae40e7f0481569723a5bca63cc8401ae0ba604d520ca65a246bfba60429f  build/guest-clang/crt0.o
+03f72ec00fac558e5fabf6d6139932384b052bab6d475163fc8eb4d007681caf  build/guest-clang/lib/libarena_c.a
+4f777962a5f3757f9f82f1c572e969b3b9108d911ea20096b8063ad18e4e515b  build/guest-clang/c-native-clang.elf
+46b56dd8d84b65ce96e76c171acc0f66a19a94edafd703a926e224e2c140958a  build/guest-clang/c2-console-clang.elf
+c2d6071ecde14de899068dce1def7c8f1a5e3a6008a8d929878d96b4430a7ba2  build/guest-clang/crt-probe-clang.elf
+471a4860de1cb4c7a4634c8fc023c39d0e958ab6ea6aac3cd06f157518610521  build/guest-clang/xxhash-app-clang.elf

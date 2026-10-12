@@ -33,4 +33,12 @@ gcc -O2 -Wall -Wextra \
 rm -f /tmp/test_timer
 
 echo ""
+echo "=== Running ArenaOS IEEE-754 Safe Bitwise Conversion Tests ==="
+gcc -O2 -Wall -Wextra \
+    "${SCRIPT_DIR}/test_ieee754.c" \
+    -o /tmp/test_ieee754
+/tmp/test_ieee754
+rm -f /tmp/test_ieee754
+
+echo ""
 echo "ALL HOST TESTS COMPLETED SUCCESSFULLY!"

@@ -1,0 +1,13 @@
+========================================================================
+ArenaOS ELF Loader Audit: /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_upstream_c2
+========================================================================
+SHA-256 Digest:       feab1258f3ebee67902b2b8ac8dda42b8b8c1e3ea7b5bef4b435d33b01a55606
+File Size:            243120 bytes (Budget: 262144 B, Headroom: 19024 B)
+Entry Point:          0x200000
+Total Load Pages:     50 pages (Budget: 128 pages, Headroom: 78 pages)
+Load Segments (2):
+  [0] VA=0x200000 FileSiz=179974 MemSiz=179974 (RX ) BSS=     0 -> 44 pages
+  [1] VA=0x22c000 FileSiz=   348 MemSiz= 20808 (RW ) BSS= 20460 ->  6 pages
+------------------------------------------------------------------------
+AUDIT VERDICT: PASS (Conforms to ArenaOS kernel loader constraints)
+========================================================================

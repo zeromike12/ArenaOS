@@ -1,25 +1,16 @@
 #include <SDL3/SDL.h>
+#include "arenaos_ieee754.h"
 
 #define WINDOW_WIDTH  320
 #define WINDOW_HEIGHT 240
 
-/* Integer-only bitwise conversion from IEEE-754 float bits (0 x87 / 0 SSE) */
-static inline int32_t float_bits_to_int(uint32_t bits) {
-    if (bits == 0) return 0;
-    uint32_t sign = bits & 0x80000000U;
-    int32_t exp = (int32_t)((bits >> 23) & 0xFF) - 127;
-    if (exp < 0) return 0;
-    uint32_t mantissa = (bits & 0x7FFFFFU) | 0x800000U;
-    int32_t val;
-    if (exp >= 23) {
-        val = (int32_t)(mantissa << (exp - 23));
-    } else {
-        val = (int32_t)(mantissa >> (23 - exp));
-    }
-    return sign ? -val : val;
-}
-
-/* Palette of vibrant colors for the bouncing box */
+/* Palette of vibrant colors for the bouncing box:
+   0: Dodger Blue
+   1: Crimson Red
+   2: Emerald Green
+   3: Orange
+   4: Amethyst Purple
+*/
 static const Uint32 palette[] = {
     0x003498DB, /* Dodger Blue */
     0x00E94560, /* Crimson Red */
@@ -92,7 +83,7 @@ int main(int argc, char *argv[]) {
     int box_dx = 3;
     int box_dy = 2;
     int color_index = 0;
-    int num_colors = sizeof(palette) / sizeof(palette[0]);
+    int num_colors = (int)(sizeof(palette) / sizeof(palette[0]));
 
     int mouse_x = WINDOW_WIDTH / 2;
     int mouse_y = WINDOW_HEIGHT / 2;
@@ -102,7 +93,7 @@ int main(int argc, char *argv[]) {
     Uint64 total_render_ns = 0;
     Uint64 total_present_ns = 0;
     int frame_count = 0;
-    const int max_frames = 60;
+    const int max_frames = 120;
     bool running = true;
 
     SDL_Log("[sdl3-app] Entering interactive frame loop (running for %d frames)...", max_frames);
@@ -126,25 +117,28 @@ int main(int argc, char *argv[]) {
                     union { float f; uint32_t u; } ux, uy;
                     ux.f = event.motion.x;
                     uy.f = event.motion.y;
-                    mouse_x = float_bits_to_int(ux.u);
-                    mouse_y = float_bits_to_int(uy.u);
+                    mouse_x = arenaos_float_bits_to_int32(ux.u);
+                    mouse_y = arenaos_float_bits_to_int32(uy.u);
+                    SDL_Log("[sdl3-app] Event: Mouse motion to (%d, %d)", mouse_x, mouse_y);
                     break;
                 }
 
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                     mouse_down = true;
                     color_index = (color_index + 1) % num_colors;
-                    SDL_Log("[sdl3-app] Event: Mouse button down at (%d, %d)", mouse_x, mouse_y);
+                    SDL_Log("[sdl3-app] Event: Mouse button down at (%d, %d) -> state transition color=%d",
+                            mouse_x, mouse_y, color_index);
                     break;
 
                 case SDL_EVENT_MOUSE_BUTTON_UP:
                     mouse_down = false;
+                    SDL_Log("[sdl3-app] Event: Mouse button up at (%d, %d)", mouse_x, mouse_y);
                     break;
 
                 case SDL_EVENT_KEY_DOWN:
                     if (event.key.scancode == SDL_SCANCODE_SPACE) {
                         color_index = (color_index + 1) % num_colors;
-                        SDL_Log("[sdl3-app] Event: Spacebar pressed -> cycling color");
+                        SDL_Log("[sdl3-app] Event: Spacebar pressed -> state transition color=%d", color_index);
                     } else if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                         SDL_Log("[sdl3-app] Event: Escape pressed -> exiting");
                         running = false;
@@ -204,9 +198,9 @@ int main(int argc, char *argv[]) {
         Uint64 t2 = SDL_GetTicksNS();
         total_present_ns += (t2 - t1);
 
-        if (frame_count == 0 || frame_count == 25 || frame_count == 59) {
-            SDL_Log("[sdl3-app] frame rendered; damage published; frame=%d (box at %d,%d)",
-                    frame_count, box_x, box_y);
+        if (frame_count == 0 || frame_count == 25 || frame_count == 60 || frame_count == 90 || frame_count == 119) {
+            SDL_Log("[sdl3-app] frame rendered; damage published; frame=%d (box at %d,%d, color=%d)",
+                    frame_count, box_x, box_y, color_index);
         }
 
         /* 7. Frame pacing */

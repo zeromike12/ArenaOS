@@ -1,0 +1,35 @@
+========================================================================
+ArenaOS CPU Instruction Architecture Audit: /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_upstream_c2
+========================================================================
+Functions Audited:    870
+Instructions Scanned: 42272 (non-FUNC: 2864)
+SSE / %xmm Hits:      2036
+AVX / %ymm/%zmm Hits: 0
+MMX / %mm Hits:       0
+x87 FPU / %st Hits:   0
+Total Prohibited:     2042
+------------------------------------------------------------------------
+ISA AUDIT VERDICT: PROHIBITED FP/SIMD INSTRUCTIONS DETECTED
+Top Offending Functions / Regions:
+  SDL_Blit_Slow_Float                  :  486 hits
+  SDL_uclibc_pow                       :  214 hits
+  ReadFloatPixel                       :  133 hits
+  UpdateLogicalPresentation            :   94 hits
+  SDL_PrivateSendMouseMotion           :   74 hits
+  SDL_LogEvent                         :   71 hits
+  SDL_RenderPresent                    :   53 hits
+  SDL_RenderTextureInternal            :   45 hits
+  SDL_SendTouchMotion                  :   45 hits
+  SDL_SendTouch                        :   39 hits
+  SDL_GetClosestFullscreenDisplayMode  :   34 hits
+  SDL_GetRectIntersectionFloat         :   31 hits
+  SDL_ConvertColorPrimaries            :   27 hits
+  SDL_PrivateSendMouseButton           :   25 hits
+  SDL_PrintFloat                       :   25 hits
+Sample Instruction Hits:
+  0x200425 [main]: cvttss2si 0x4c(%rsp),%eax (SSE)
+  0x20042f [main]: cvttss2si 0x50(%rsp),%eax (SSE)
+  0x2013ce [debug_print]: movaps %xmm0,0x50(%rsp) (SSE)
+  0x2013d3 [debug_print]: movaps %xmm1,0x60(%rsp) (SSE)
+  0x2013d8 [debug_print]: movaps %xmm2,0x70(%rsp) (SSE)
+========================================================================

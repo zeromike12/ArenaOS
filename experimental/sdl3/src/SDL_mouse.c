@@ -1,28 +1,10 @@
 #include "SDL_internal.h"
 #include "video/SDL_sysvideo.h"
+#include "arenaos_ieee754.h"
 
 static int s_mouse_x = 0;
 static int s_mouse_y = 0;
 static SDL_MouseButtonFlags s_mouse_buttons = 0;
-
-/* Pure integer bit manipulation for IEEE-754 single precision float (0 FPU / 0 SSE) */
-static inline uint32_t int_to_float_bits(int32_t val) {
-    if (val == 0) return 0;
-    uint32_t sign = 0;
-    if (val < 0) {
-        sign = 0x80000000U;
-        val = -val;
-    }
-    int msb = 31 - __builtin_clz((uint32_t)val);
-    uint32_t exp = (uint32_t)(msb + 127) << 23;
-    uint32_t mantissa;
-    if (msb >= 23) {
-        mantissa = ((uint32_t)val >> (msb - 23)) & 0x7FFFFFU;
-    } else {
-        mantissa = ((uint32_t)val << (23 - msb)) & 0x7FFFFFU;
-    }
-    return sign | exp | mantissa;
-}
 
 void SDL_SendMouseMotion(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, bool relative, int x, int y) {
     (void)relative;
@@ -41,10 +23,10 @@ void SDL_SendMouseMotion(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouse
     event.motion.state = s_mouse_buttons;
 
     union { float f; uint32_t u; } ux, uy, urx, ury;
-    ux.u = int_to_float_bits(x);
-    uy.u = int_to_float_bits(y);
-    urx.u = int_to_float_bits(rel_x);
-    ury.u = int_to_float_bits(rel_y);
+    ux.u = arenaos_int32_to_float_bits(x);
+    uy.u = arenaos_int32_to_float_bits(y);
+    urx.u = arenaos_int32_to_float_bits(rel_x);
+    ury.u = arenaos_int32_to_float_bits(rel_y);
 
     event.motion.x = ux.f;
     event.motion.y = uy.f;
@@ -72,8 +54,8 @@ void SDL_SendMouseButton(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouse
     event.button.down = down;
     event.button.clicks = 1;
 
-    union { float f; uint32_t u; } ux = { .u = int_to_float_bits(s_mouse_x) };
-    union { float f; uint32_t u; } uy = { .u = int_to_float_bits(s_mouse_y) };
+    union { float f; uint32_t u; } ux = { .u = arenaos_int32_to_float_bits(s_mouse_x) };
+    union { float f; uint32_t u; } uy = { .u = arenaos_int32_to_float_bits(s_mouse_y) };
     event.button.x = ux.f;
     event.button.y = uy.f;
 
@@ -90,10 +72,10 @@ void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseI
     event.wheel.which = mouseID;
     event.wheel.direction = direction;
 
-    union { float f; uint32_t u; } ux = { .u = int_to_float_bits(x) };
-    union { float f; uint32_t u; } uy = { .u = int_to_float_bits(y) };
-    union { float f; uint32_t u; } umx = { .u = int_to_float_bits(s_mouse_x) };
-    union { float f; uint32_t u; } umy = { .u = int_to_float_bits(s_mouse_y) };
+    union { float f; uint32_t u; } ux = { .u = arenaos_int32_to_float_bits(x) };
+    union { float f; uint32_t u; } uy = { .u = arenaos_int32_to_float_bits(y) };
+    union { float f; uint32_t u; } umx = { .u = arenaos_int32_to_float_bits(s_mouse_x) };
+    union { float f; uint32_t u; } umy = { .u = arenaos_int32_to_float_bits(s_mouse_y) };
 
     event.wheel.x = ux.f;
     event.wheel.y = uy.f;
@@ -105,11 +87,11 @@ void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseI
 
 SDL_MouseButtonFlags SDLCALL SDL_GetMouseState(float *x, float *y) {
     if (x) {
-        union { float f; uint32_t u; } ux = { .u = int_to_float_bits(s_mouse_x) };
+        union { float f; uint32_t u; } ux = { .u = arenaos_int32_to_float_bits(s_mouse_x) };
         *x = ux.f;
     }
     if (y) {
-        union { float f; uint32_t u; } uy = { .u = int_to_float_bits(s_mouse_y) };
+        union { float f; uint32_t u; } uy = { .u = arenaos_int32_to_float_bits(s_mouse_y) };
         *y = uy.f;
     }
     return s_mouse_buttons;

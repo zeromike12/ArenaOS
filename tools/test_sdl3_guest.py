@@ -68,10 +68,11 @@ WORK_DIR = ROOT / "build/sdl3-test-work"
 
 CHECKPOINT_TAR = ROOT / "releases/checkpoints/phase13-complete/arenaos-phase13-complete-qemu-x86_64.tar.gz"
 AFS2_BASE = 8 * 1024 * 1024
+WAIT_TIMEOUT_OVERRIDE = None
 
-# Pinned Reference Digests (Milestone G2.2.1)
-PINNED_BASELINE_EXE_SHA = "0ee2dcdcec79bf1b2d3ff32974075af2d1ba36d6b8c836e445f386bb776cf3c1"
-PINNED_BASELINE_BUNDLE_SHA = "cd74325915b275f15fe6bc9d3f8687b3704bde670a012b9781d4e0138f152c20"
+# Pinned Reference Digests (Milestone G2.2.2 Candidate)
+PINNED_BASELINE_EXE_SHA = "d760da0fd3695a40aa0c501b1c9c6267e823e64dfc104cf43e9489050207017f"
+PINNED_BASELINE_BUNDLE_SHA = "e91281b03ec4b2de6fcb3baaf389cae2d129bb02899f790ddf34fb5732cf2ed0"
 PINNED_UPSTREAM_LIB_SHA = "b552de687d6585acfe15abe8330d807441a097bb3b45196373cc7fd2332e23d9"
 PINNED_UPSTREAM_EXE_SHA = "66e2ba921d3a10cf191ffa71e3022dae1a0dc0feb78280a9784e5ab2052cf613"
 PINNED_UPSTREAM_BUNDLE_SHA = "8bda5df0f8e56d1d9328ef04fbe920da6d7a80cf5d00c87deae87ede13cde7b9"
@@ -90,6 +91,13 @@ HISTORICAL_DIGESTS = {
         "upstream_bundle": "1fea77642e503898b5b524b25915c25ae88e0df1a3d79560393d396a5210c892",
     },
     "G2.2.1": {
+        "baseline_exe": "0ee2dcdcec79bf1b2d3ff32974075af2d1ba36d6b8c836e445f386bb776cf3c1",
+        "baseline_bundle": "cd74325915b275f15fe6bc9d3f8687b3704bde670a012b9781d4e0138f152c20",
+        "upstream_lib": "b552de687d6585acfe15abe8330d807441a097bb3b45196373cc7fd2332e23d9",
+        "upstream_exe": "66e2ba921d3a10cf191ffa71e3022dae1a0dc0feb78280a9784e5ab2052cf613",
+        "upstream_bundle": "8bda5df0f8e56d1d9328ef04fbe920da6d7a80cf5d00c87deae87ede13cde7b9",
+    },
+    "G2.2.2": {
         "baseline_exe": PINNED_BASELINE_EXE_SHA,
         "baseline_bundle": PINNED_BASELINE_BUNDLE_SHA,
         "upstream_lib": PINNED_UPSTREAM_LIB_SHA,
@@ -512,11 +520,12 @@ def run_qemu_test(target: str = "baseline") -> int:
                 return serial.read_text(errors="replace") if serial.exists() else ""
 
             def wait_for(pred, desc, timeout_s=60):
-                deadline = time.monotonic() + timeout_s
+                eff_timeout = WAIT_TIMEOUT_OVERRIDE if WAIT_TIMEOUT_OVERRIDE is not None else timeout_s
+                deadline = time.monotonic() + eff_timeout
                 while time.monotonic() < deadline:
                     if pred():
                         return
-                    time.sleep(0.1)
+                    time.sleep(0.01 if WAIT_TIMEOUT_OVERRIDE is not None else 0.1)
                 raise TimeoutError(f"Timed out waiting for: {desc}\nTail:\n{log_text()[-2000:]}")
 
             def point(x, y, button=None, down=None):
@@ -593,27 +602,78 @@ def run_qemu_test(target: str = "baseline") -> int:
 
             # Step 11: Interactive Input Injection & Multi-Frame Visual Verification
             print("\n[Step 11/12] Injecting interactive mouse and keyboard events & visual check...")
-            # Allow initial frame rendering
+            # Wait for frame milestones 0 and 25
             wait_for(
-                lambda: "[sdl3-app] frame rendered; damage published; frame=15" in log_text(),
-                "SDL3 initial 15 frames rendered",
+                lambda: "[sdl3-app] Frame milestone reached: frame=0" in log_text(),
+                "SDL3 initial frame 0 rendered",
+                timeout_s=30,
+            )
+            wait_for(
+                lambda: "[sdl3-app] Frame milestone reached: frame=25" in log_text(),
+                "SDL3 frame 25 reached",
                 timeout_s=30,
             )
 
-            # Capture desktop screenshot via QMP
+            # Capture initial desktop screenshot via QMP
             conn.command("screendump", filename=str(screen), format="ppm")
             shutil.copyfile(screen, SDL3_DIR / "guest_sdl3_desktop.ppm")
-            subprocess.run(["convert", str(screen), str(SDL3_DIR / "guest_sdl3_desktop.png")], check=True)
-            print(f"[sdl3-guest] Captured guest desktop screenshot ({screen.stat().st_size} bytes)")
+            try:
+                subprocess.run(["convert", str(screen), str(SDL3_DIR / "guest_sdl3_desktop.png")], check=True)
+            except Exception as e:
+                print(f"[sdl3-guest] Note: PPM to PNG conversion warning: {e}")
+            print(f"[sdl3-guest] Captured initial guest desktop screenshot ({screen.stat().st_size} bytes)")
             verify_screenshot_pixels(screen)
 
-            # Inject interactive events
+            # Inject interactive mouse click event
+            print("[sdl3-guest] Injecting interactive mouse click event at (200, 200)...")
             point(200, 200)
             time.sleep(0.1)
             click(200, 200)
+
+            # Verify application received and processed mouse click event
+            wait_for(
+                lambda: "[sdl3-app] Event: Mouse button pressed" in log_text(),
+                "SDL3 application received and processed mouse button press event",
+                timeout_s=20,
+            )
+            print("[sdl3-guest] Confirmed SDL3 application processed mouse button press event!")
+
+            # Inject interactive spacebar keyboard event
+            print("[sdl3-guest] Injecting interactive spacebar key event...")
             time.sleep(0.1)
             conn.key("spc")
-            time.sleep(0.1)
+
+            # Verify application received and processed spacebar event
+            wait_for(
+                lambda: "[sdl3-app] Event: Spacebar pressed" in log_text(),
+                "SDL3 application received and processed spacebar key event",
+                timeout_s=20,
+            )
+            print("[sdl3-guest] Confirmed SDL3 application processed spacebar key event!")
+
+            # Capture second desktop screenshot demonstrating continued rendering after input
+            screen_after = work / "screen_after_input.ppm"
+            conn.command("screendump", filename=str(screen_after), format="ppm")
+            verify_screenshot_pixels(screen_after)
+            print(f"[sdl3-guest] Captured second guest desktop screenshot after input ({screen_after.stat().st_size} bytes)")
+
+            # Verify application continues rendering frames after input events through milestones
+            wait_for(
+                lambda: "[sdl3-app] Frame milestone reached: frame=60" in log_text(),
+                "SDL3 frame 60 progression after input",
+                timeout_s=30,
+            )
+            wait_for(
+                lambda: "[sdl3-app] Frame milestone reached: frame=90" in log_text(),
+                "SDL3 frame 90 progression continued",
+                timeout_s=30,
+            )
+            wait_for(
+                lambda: "[sdl3-app] Frame milestone reached: frame=119" in log_text(),
+                "SDL3 final frame 119 reached",
+                timeout_s=30,
+            )
+            print("[sdl3-guest] Confirmed SDL3 application continued frame rendering through all 120 frames!")
 
             # Step 12: Clean Application Termination & Kernel Powerdown
             print("\n[Step 12/12] Waiting for clean termination and kernel shutdown...")
@@ -664,8 +724,8 @@ def run_qemu_test(target: str = "baseline") -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="ArenaOS SDL3 Guest Qualification & Audit Harness")
-    parser.add_argument("--mode", choices=["auto", "guest", "audit"], default="auto",
-                        help="Execution mode: auto (default), guest (force QEMU), or audit (static audit)")
+    parser.add_argument("--mode", choices=["auto", "guest", "audit"], default="guest",
+                        help="Execution mode: guest (default, run QEMU guest test), audit (static audit only), or auto")
     parser.add_argument("--target", choices=["baseline", "upstream", "all"], default="all",
                         help="Qualification target: baseline (Target A), upstream (Target B), or all (default)")
     args = parser.parse_args()
@@ -682,9 +742,11 @@ def main():
             rc = run_qemu_test(args.target)
             sys.exit(rc)
         except FileNotFoundError:
-            print("[sdl3-guest] Note: QEMU binary not present on host. Running audit mode.")
-            rc = run_audit_mode(args.target)
-            sys.exit(rc)
+            print("[sdl3-guest] Host QEMU binary 'qemu-system-x86_64' not present.", file=sys.stderr)
+            print("[sdl3-guest] Executing static audit checks for requested target(s)...", file=sys.stderr)
+            audit_rc = run_audit_mode(args.target)
+            print("[sdl3-guest] Guest execution NOT RUN due to missing 'qemu-system-x86_64'. Failing closed.", file=sys.stderr)
+            sys.exit(2 if audit_rc == 0 else 1)
 
 
 if __name__ == "__main__":
