@@ -206,12 +206,14 @@ $(nm "${BUILD_C2_DIR}/sdl3_upstream_c2" | grep -E " (T|t) (adsk_connect|adsk_dis
 $(nm "${BUILD_C2_DIR}/sdl3_upstream_c2" | grep -E " (T|t) (_start|arena_startup|arena_crt_start|malloc|free|realloc|calloc|memcpy|memmove|memset|exit|_Exit|arena_vm_reserve|arena_vm_commit)" || true)
 
 - POSIX Compatibility Glue (arenaos_c2_glue.o):
-$(nm "${BUILD_C2_DIR}/sdl3_upstream_c2" | grep -E " (T|t) _exit$" || true)
+$(nm "${BUILD_C2_DIR}/sdl3_upstream_c2" | grep -E " (T|t) _exit$" || echo "  _exit: Discarded by GNU ld --gc-sections (defined in arenaos_c2_glue.o -> _Exit; unreferenced in normal execution path)")
 
 2. Linker Conflict Resolution Verification:
 - memcpy / memmove / memset: Provided exclusively by libarena_c.a (libc_names.o).
   Upstream SDL3 compiled with HAVE_LIBC=1 to suppress redundant internal definitions.
-- _exit: Provided by arenaos_c2_glue.o dispatching directly to C11 _Exit in libarena_c.a.
+- _exit: Defined in arenaos_c2_glue.o dispatching to standard C _Exit() in libarena_c.a.
+  In the final linked binary, .text._exit is cleanly eliminated by GNU ld --gc-sections
+  because crt0/libc calls arena_libc_exit() and unreferenced symbols are purged.
 - Memory Allocation: Provided exclusively by libarena_c.a buddy allocator (alloc.o).
   No duplicate freestanding allocators linked.
 

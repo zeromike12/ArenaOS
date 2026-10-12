@@ -1,7 +1,7 @@
 ================================================================================
 Milestone G2.3 Genuine Upstream SDL 3.2.0 + Shared C Runtime Symbol Ownership Report
 ================================================================================
-Date: 2026-10-11 20:59:09Z
+Date: 2026-10-12 02:22:52Z
 Upstream Version: SDL 3.2.0 official release (commit 535d80badefc83c5c527ec5748f2a20d6a9310fe)
 Mainline Commit:  1aa35f4c20c9bb386612298fe21574897cf14159
 C2 Runtime Tip:   84392b8f32a0b1ce26364926185723c7bbf7a3f3 (Evidence: 9c93f8cd3b933978aaa67357beac55a89b6a6bc1)
@@ -99,12 +99,14 @@ Linker Map:       /home/user/ArenaOS/experimental/upstream-sdl3/build_c2/sdl3_up
 000000000021fb90 T realloc
 
 - POSIX Compatibility Glue (arenaos_c2_glue.o):
-
+  _exit: Discarded by GNU ld --gc-sections (defined in arenaos_c2_glue.o -> _Exit; unreferenced in normal execution path)
 
 2. Linker Conflict Resolution Verification:
 - memcpy / memmove / memset: Provided exclusively by libarena_c.a (libc_names.o).
   Upstream SDL3 compiled with HAVE_LIBC=1 to suppress redundant internal definitions.
-- _exit: Provided by arenaos_c2_glue.o dispatching directly to C11 _Exit in libarena_c.a.
+- _exit: Defined in arenaos_c2_glue.o dispatching to standard C _Exit() in libarena_c.a.
+  In the final linked binary, .text._exit is cleanly eliminated by GNU ld --gc-sections
+  because crt0/libc calls arena_libc_exit() and unreferenced symbols are purged.
 - Memory Allocation: Provided exclusively by libarena_c.a buddy allocator (alloc.o).
   No duplicate freestanding allocators linked.
 

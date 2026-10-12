@@ -199,7 +199,7 @@ int main(int argc, char *argv[]) {
         total_present_ns += (t2 - t1);
 
         if (frame_count == 0 || frame_count == 25 || frame_count == 60 || frame_count == 90 || frame_count == 119) {
-            SDL_Log("[sdl3-app] frame rendered; damage published; frame=%d (box at %d,%d, color=%d)",
+            SDL_Log("[sdl3-app] Frame milestone reached: frame=%d; damage published (box at %d,%d, color=%d)",
                     frame_count, box_x, box_y, color_index);
         }
 

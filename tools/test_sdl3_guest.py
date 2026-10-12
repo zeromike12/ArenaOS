@@ -70,9 +70,9 @@ CHECKPOINT_TAR = ROOT / "releases/checkpoints/phase13-complete/arenaos-phase13-c
 AFS2_BASE = 8 * 1024 * 1024
 WAIT_TIMEOUT_OVERRIDE = None
 
-# Pinned Reference Digests (Milestone G2.2.2 Candidate)
-PINNED_BASELINE_EXE_SHA = "d760da0fd3695a40aa0c501b1c9c6267e823e64dfc104cf43e9489050207017f"
-PINNED_BASELINE_BUNDLE_SHA = "e91281b03ec4b2de6fcb3baaf389cae2d129bb02899f790ddf34fb5732cf2ed0"
+# Pinned Reference Digests (Milestone G2.3.1 Candidate)
+PINNED_BASELINE_EXE_SHA = "e14665c143f423f3b73720d152c02765d22330fe30724278777ad6322cc649d2"
+PINNED_BASELINE_BUNDLE_SHA = "226ec84113df45aa4ddd37969cef500814b8854a59d0849c9891eacabcf0137e"
 PINNED_UPSTREAM_LIB_SHA = "b552de687d6585acfe15abe8330d807441a097bb3b45196373cc7fd2332e23d9"
 PINNED_UPSTREAM_EXE_SHA = "66e2ba921d3a10cf191ffa71e3022dae1a0dc0feb78280a9784e5ab2052cf613"
 PINNED_UPSTREAM_BUNDLE_SHA = "8bda5df0f8e56d1d9328ef04fbe920da6d7a80cf5d00c87deae87ede13cde7b9"
@@ -98,6 +98,13 @@ HISTORICAL_DIGESTS = {
         "upstream_bundle": "8bda5df0f8e56d1d9328ef04fbe920da6d7a80cf5d00c87deae87ede13cde7b9",
     },
     "G2.2.2": {
+        "baseline_exe": "d760da0fd3695a40aa0c501b1c9c6267e823e64dfc104cf43e9489050207017f",
+        "baseline_bundle": "e91281b03ec4b2de6fcb3baaf389cae2d129bb02899f790ddf34fb5732cf2ed0",
+        "upstream_lib": "b552de687d6585acfe15abe8330d807441a097bb3b45196373cc7fd2332e23d9",
+        "upstream_exe": "66e2ba921d3a10cf191ffa71e3022dae1a0dc0feb78280a9784e5ab2052cf613",
+        "upstream_bundle": "8bda5df0f8e56d1d9328ef04fbe920da6d7a80cf5d00c87deae87ede13cde7b9",
+    },
+    "G2.3.1": {
         "baseline_exe": PINNED_BASELINE_EXE_SHA,
         "baseline_bundle": PINNED_BASELINE_BUNDLE_SHA,
         "upstream_lib": PINNED_UPSTREAM_LIB_SHA,
@@ -223,6 +230,37 @@ def seed_disk(disk_path: Path, bundle: bytes, bundle_name: bytes):
     raw[AFS2_BASE:] = volume.image()
     disk_path.write_bytes(raw)
     print(f"[sdl3-guest] Successfully placed {bundle_name.decode()} as primary Desktop item")
+
+
+def verify_baseline_contract_sequence(log_text: str) -> None:
+    """Verify that all baseline observable log events occur and appear in strict chronological order."""
+    markers = [
+        ("[desktop] desktop surface shows /Users/user/Desktop", "Desktop surface shows /Users/user/Desktop"),
+        ("[desktop] APB1 installed; signed version=1", "Desktop APB1 installation"),
+        ("[sdl3-app] SDL3 video subsystem initialized successfully!", "SDL3 video init"),
+        ("[sdl3-app] SDL_Window created:", "SDL window created"),
+        ("[sdl3-app] Surface acquired:", "Surface acquired"),
+        ("[sdl3-app] Entering interactive frame loop", "Frame loop entered"),
+        ("[sdl3-app] Frame milestone reached: frame=0", "Frame milestone 0"),
+        ("[sdl3-app] Frame milestone reached: frame=25", "Frame milestone 25"),
+        ("[sdl3-app] Event: Mouse button down at", "Mouse button down event"),
+        ("[sdl3-app] Event: Spacebar pressed -> state transition color=", "Spacebar event"),
+        ("[sdl3-app] Frame milestone reached: frame=60", "Frame milestone 60"),
+        ("[sdl3-app] Frame milestone reached: frame=90", "Frame milestone 90"),
+        ("[sdl3-app] Frame milestone reached: frame=119", "Frame milestone 119"),
+        ("[sdl3-app] Clean termination with exit code 0", "Clean termination exit code 0"),
+        ("[desktop] child Process-cap exit status=0", "Desktop child process exit status 0"),
+        ("halting via UEFI ResetSystem(shutdown)", "UEFI shutdown halt"),
+    ]
+
+    last_idx = -1
+    for marker, desc in markers:
+        idx = log_text.find(marker)
+        if idx == -1:
+            raise AssertionError(f"Missing required contract log marker: {desc} ({marker!r})")
+        if idx < last_idx:
+            raise AssertionError(f"Contract log marker out of chronological order: {desc} ({marker!r}) at pos {idx} appeared before previous marker at pos {last_idx}")
+        last_idx = idx
 
 
 def parse_ppm(path: Path) -> tuple[int, int, bytes]:
@@ -632,11 +670,11 @@ def run_qemu_test(target: str = "baseline") -> int:
 
             # Verify application received and processed mouse click event
             wait_for(
-                lambda: "[sdl3-app] Event: Mouse button pressed" in log_text(),
-                "SDL3 application received and processed mouse button press event",
+                lambda: "[sdl3-app] Event: Mouse button down at" in log_text() and "state transition color=" in log_text(),
+                "SDL3 application received and processed mouse button down event with state transition",
                 timeout_s=20,
             )
-            print("[sdl3-guest] Confirmed SDL3 application processed mouse button press event!")
+            print("[sdl3-guest] Confirmed SDL3 application processed mouse button down event!")
 
             # Inject interactive spacebar keyboard event
             print("[sdl3-guest] Injecting interactive spacebar key event...")
@@ -645,8 +683,8 @@ def run_qemu_test(target: str = "baseline") -> int:
 
             # Verify application received and processed spacebar event
             wait_for(
-                lambda: "[sdl3-app] Event: Spacebar pressed" in log_text(),
-                "SDL3 application received and processed spacebar key event",
+                lambda: "[sdl3-app] Event: Spacebar pressed -> state transition color=" in log_text(),
+                "SDL3 application received and processed spacebar key event with state transition",
                 timeout_s=20,
             )
             print("[sdl3-guest] Confirmed SDL3 application processed spacebar key event!")
@@ -700,6 +738,9 @@ def run_qemu_test(target: str = "baseline") -> int:
         text = serial.read_text(errors="replace")
         assert "[desktop] child Process-cap exit status=0" in text, "Missing clean process exit status 0"
         assert "halting via UEFI ResetSystem(shutdown)" in text, "Missing UEFI ResetSystem confirmation"
+
+        # Strictly verify complete chronological log contract sequence
+        verify_baseline_contract_sequence(text)
 
         print("\n" + "=" * 70)
         print("=== TARGET A 12-STEP GUEST QUALIFICATION: SUCCESS (PASS) ===")
