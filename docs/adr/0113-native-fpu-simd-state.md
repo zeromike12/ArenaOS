@@ -138,10 +138,15 @@ MXCSR `0x1F01` without delivering vector 19 on both tested CPU profiles;
 matching TCG source lacks the SSE mask-check/vector-19 raise path. The guest
 test remains failed, with sibling/peer and resource-cleanup receipts recorded.
 This observation does not accept the ADR or establish production `#XF`
-containment. The Phase-14 PIE hash mismatch was independently resolved by
-restoring its official Rust 1.97.0 target libraries; the existing hash guard
-and signed package identity remain intact. See `docs/phase15/QUALIFICATION.md`
-for the evidence and limits.
+containment. T2/T3/T4 diagnostic runs reached 10/10, 25/25, and 100/100 on the
+diagnostic image, which explicitly does not run `#XF`; the official stability
+gates remain open. The 120-group historical diagnostic runner had five first-
+run failures (115/120 first-run pass); each affected suite passed its focused
+recovery rerun, but no clean 120/120 aggregate rerun was completed. The
+Phase-14 PIE hash mismatch was independently resolved by restoring its
+official Rust 1.97.0 target libraries; the existing hash guard and signed
+package identity remain intact. See `docs/phase15/QUALIFICATION.md` for exact
+identities and evidence classes.
 
 If state ownership, exception containment, the integer-only audit, or a
 required guest gate cannot be proven, do not qualify this phase. The rollback

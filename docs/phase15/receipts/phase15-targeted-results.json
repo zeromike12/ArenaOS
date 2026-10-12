@@ -1,5 +1,8 @@
 {
   "qualification_status": "PARTIAL / UNQUALIFIED",
+  "record_kind": "historical initial targeted-run receipt",
+  "superseded_by": "phase15-qualification-recovery.json",
+  "unrun_gates_scope": "The unrun_gates below describe only the original focused run recorded in this file; later suite and stability evidence is in the recovery receipt.",
   "repository": "https://github.com/zeromike12/ArenaOS",
   "branch": "arena/phase15-fpu-simd",
   "base_commit": "1aa35f4c20c9bb386612298fe21574897cf14159",

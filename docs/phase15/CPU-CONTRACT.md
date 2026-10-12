@@ -54,9 +54,11 @@ corroborating evidence only and does not satisfy the guest gate.
 
 The historical qualification diagnostic intentionally omits #XF and prints
 `m15: DIAGNOSTIC PASS (5/5; XF NOT RUN)`; it is not the official M15 PASS
-marker. T2/T3 results on that image qualify the diagnostic only. T4 and
-release qualification remain blocked until a suitable backend delivers and
-contains #XF.
+marker. Diagnostic T2 10/10, T3 25/25, and T4 100/100 used that image; none
+qualifies the official gate. QEMU advertised KVM, MSHV, and Nitro, but explicit
+startup probes failed because this Linux host lacks their device backends.
+Official T2/T3/T4 and release qualification remain blocked until a suitable
+backend delivers and contains `#XF`.
 
 ## Kernel restriction and memory
 

@@ -47,6 +47,7 @@ stays integer-only.
 
 This decision does not require a security-model change or scheduler redesign.
 Guest isolation, MMX, `#MF`, and `#UD` pass, and the full executable-section ISA
-audit covers 120,911 instructions. The strict `#XF` gate remains failed under
-the available TCG backend, so this proposal remains experimental until
-ADR-0113 is accepted and the gate passes on a credible backend.
+audit covers 120,911 instructions. Diagnostic T2/T3/T4 achieved 10/10, 25/25,
+and 100/100 boots on one immutable image. The strict `#XF` gate remains failed
+under the available TCG backend, so diagnostic stability does not qualify the
+proposal; ADR-0113 remains Proposed until the gate passes on a credible backend.

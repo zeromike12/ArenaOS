@@ -7,9 +7,10 @@ and MXCSR during yield, blocking/wake, timer preemption, and address-space
 switching. New and recycled slots receive the clean template. See
 `QUALIFICATION.md` for which behaviors have actually passed guest gates.
 ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**, so this is
-not yet a release-guaranteed CPU contract. Historical diagnostic T2/T3, MMX,
-and seeded OSXSAVE tests pass; strict `#XF` guest delivery still fails on the
-available QEMU TCG backend.
+not yet a release-guaranteed CPU contract. Historical diagnostic T2/T3/T4,
+MMX, and seeded OSXSAVE tests pass; T4 was 100/100 diagnostic boots. Strict
+`#XF` guest delivery still fails on the available QEMU TCG backend, so the
+official stability gates remain blocked.
 
 ## C compiler profile
 

@@ -1,132 +1,155 @@
 # Phase 15 qualification record
 
-Status: **PARTIAL / UNQUALIFIED**. The canonical build and focused state
-isolation tests pass. The required unmasked SIMD `#XF` guest test fails on both
-available QEMU TCG profiles. The full historical suite, T2, T3, T4, and
-independent archive verification were not run and are not claimed.
+Status: **PARTIAL / UNQUALIFIED**. The implementation and diagnostic guest
+coverage are complete. The historical runner exercised all 120 groups but had
+five failures in its first aggregate run; each failed group passed when rerun
+individually. No clean one-shot 120/120 aggregate run was completed. Diagnostic
+T2/T3/T4 passed on one immutable EFI/ESP, and genuine SIMD `#XF` remains blocked
+because no hardware-backed or independently verified emulator backend is
+available.
 
 ## Source and artifact identity
 
 - Repository: `zeromike12/ArenaOS`.
 - Branch: `arena/phase15-fpu-simd`.
-- Starting point: merged Phase-14 mainline `1aa35f4c20c9bb386612298fe21574897cf14159`.
-- Tested source commit: `ad87bee8d199b285ca1a2f3a31c5dbdcf4994faa`. This is the code/test commit; subsequent changes in this documentation commit do not alter build or test inputs.
-- Canonical command: `tools/build.sh --image`, using official Rust 1.97.0 `x86_64-unknown-none` and `x86_64-unknown-uefi` target components.
-- Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, Cargo `1.97.0 (c980f4866 2026-06-30)`, LLVM/LLD `22.1.6`.
-- `rustc` SHA-256: `df13f58759c0662831983e3a6501c63c1fc12ea60ec4e1d1ac35e5fe43c500c0`; `rust-lld`: `8e5130a02d8f3473ed4c4b971d43c301205c89854bb467257e64eafe4bf21ca8`.
-- QEMU: `11.0.2`, TCG. Recorded QEMU executable SHA-256: `0539587908d9a9b83ccdce7a48d968b50f827476b9852814e07445e9402df562`; matching upstream source tag `v11.0.2`, peeled commit `e545d8bb9d63e9dd61542b88463183314cff9482`.
-- `/dev/kvm` is absent. No KVM-backed claim is made.
+- Base: merged Phase-14 mainline `1aa35f4c20c9bb386612298fe21574897cf14159`.
+- Core implementation: `ad87bee8d199b285ca1a2f3a31c5dbdcf4994faa`.
+- Image and diagnostic fixture source: `6586a0a18981932ae7048ca267fa425411f8e463`.
+- M8 diagnostic parser correction: `87208dd6113e8970d3096601cde422d4fd91a104`.
+- ADR: ADR-0113, **Proposed**.
+- Rust: `1.97.0 (2d8144b78 2026-07-07)`; Cargo `1.97.0
+  (c980f4866 2026-06-30)`; LLVM/LLD `22.1.6`.
+- `rustc` SHA-256: `df13f58759c0662831983e3a6501c63c1fc12ea60ec4e1d1ac35e5fe43c500c0`.
+- `rust-lld` SHA-256: `8e5130a02d8f3473ed4c4b971d43c301205c89854bb467257e64eafe4bf21ca8`.
+- QEMU: `11.0.2`, TCG, binary SHA-256
+  `0539587908d9a9b83ccdce7a48d968b50f827476b9852814e07445e9402df562`;
+  source tag `v11.0.2`, commit
+  `e545d8bb9d63e9dd61542b88463183314cff9482`.
 
-| Artifact | Size | SHA-256 |
-|---|---:|---|
-| Canonical EFI `build/arena-boot.efi` | 11,029,504 bytes | `04d285b3489fa9d1365c767677c4e98baef91b634c203f5735118f0593b83b1a` |
-| Canonical ESP `build/arena-esp.img` | 16,777,216 bytes | `dc9d09ccbc62bed566459c70673a2d5e4dd1a18d468f877508dacf9fdceee326` |
-| Phase-15 state fixture | 8,824 bytes | `786808ad21686ace59684f01ed1e69b47bd104c53442b2d7df9e646b9103b32b` |
-| Standalone `#XF` probe | 4,744 bytes | `1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3` |
-| Protected Phase-14 PIE | 23,256 bytes | `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e` |
-| Signed Phase-14 APB1 | 24,040 bytes | `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa` |
+| Image identity | EFI bytes | EFI SHA-256 | ESP bytes | ESP SHA-256 |
+|---|---:|---|---:|---|
+| Diagnostic image used by T2/T3/T4 | 11,028,992 | `e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282` | 16,777,216 | `b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42` |
+| Strict acceptance image (`#XF` enabled) | 11,038,208 | `bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e` | 16,777,216 | `33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a` |
 
-Machine-readable run metadata is in
-[`phase15-targeted-results.json`](receipts/phase15-targeted-results.json).
-The complete canonical build log is
-[`phase15-canonical-build.log`](receipts/phase15-canonical-build.log),
-the harness summary is
-[`phase15-targeted-run.log`](receipts/phase15-targeted-run.log), and raw serial
-logs are [`phase15-avx.log`](receipts/phase15-avx.log) and
-[`phase15-qemu64.log`](receipts/phase15-qemu64.log). Each receipt's SHA-256 is
-listed in the JSON record.
+The diagnostic and strict ESPs each contain the byte-identical paired EFI.
+T2/T3/T4 all used the same immutable diagnostic EFI/ESP identity above. That
+image explicitly reports `m15: DIAGNOSTIC PASS (5/5; XF NOT RUN)` and is not a
+strict Phase-15 acceptance image.
 
-## Results
+## Evidence classes
 
-| Gate | Result |
+| Evidence class | Result |
 |---|---|
-| Rust formatting | Pass: kernel workspace and Phase-15 fixture checks |
-| Kernel host tests | Pass: 8/8 |
-| Canonical build | Pass: `tools/build.sh --image`; protected Phase-14 PIE hash and signed APB1 identity unchanged |
-| Kernel instruction audit | Pass: 120,354 decoded machine instructions across the full executable section; six trusted state-management leaf profiles; zero-instruction and prohibited-instruction negative controls fail as required; the audit rejects gaps in actual executable-section coverage |
-| Phase-15 feature/template policy | Pass in host tests; exact clean FXSAVE size/alignment, MXCSR mask handling, required feature checks, and fail-closed inherited OSXSAVE/XCR0 policy checked |
-| QEMU CPU initialization | Pass in both profiles: CR0 `0x80010033`, CR4 `0x668`, OSXSAVE clear. OVMF entered with OSXSAVE clear, so guest XCR0 sanitation was not exercised |
-| Historical in-guest milestones | M1 8/8, M2 21/21, M3 13/13, M4 9/9 in each targeted boot. This is not the full historical regression suite |
-| Thread FP-state isolation | Pass in both profiles across x87/MXCSR/XMM0–XMM15, syscalls, yield, blocking join, and timer preemption |
-| Process isolation and scheduler-slot reuse | Pass in both profiles; clean fresh process state and exact teardown receipts |
-| `#MF` and `#UD` containment | Pass in both profiles; faulting thread exited while sibling and independent process survived |
-| `#XF` containment | **Fail in both profiles**: unmasked `sqrtss` read MXCSR `0x1F00` immediately before execution, fell through with `0x1F01`, and returned fallback status `0x00001f0000001f01` instead of `0x113`. Sibling/peer survival, slot release, and baseline restoration passed; they do not turn the exception gate into a pass |
-| T2: 10 fresh boots | Not run; focused suite has a failed required gate |
-| T3: 25 mixed-workload boots | Not run |
-| T4: 100 fresh boots of one artifact | Not run |
-| Full historical regression | Not run; only M1–M4 results above are included |
-| Independent archive verification | Not run; no qualified release candidate exists |
+| Source-reviewed | Pass: scheduler ownership, switch paths, thread creation/reaping, CPU policy, exception frame, and integer-only kernel rule; see [`final-kernel-audit.md`](receipts/final-kernel-audit.md) |
+| Host-tested | Pass: kernel host tests 8/8, formatting, policy/template checks, and full-section ISA audit |
+| QEMU TCG guest-tested | Pass for x87/SSE/SSE2 isolation, MMX, OSXSAVE sanitation, `#MF`, and `#UD`; the strict `#XF` test fails |
+| Hardware-backed or independently verified emulator | Not available; no such result is claimed |
+| Historical regression-tested | 120 groups executed; 115 passed in first aggregate run and all five first-run failures passed focused reruns; aggregate clean-pass limitation retained |
+| Stability-tested | T2 10/10, T3 25/25, and T4 100/100 diagnostic pass on the same image |
+| Independent archive-tested | Extracted-only verification pending; archive is diagnostic-only and cannot close `#XF` |
+| Blocked/unverified | Genuine vector-19 delivery and containment; official T2/T3/T4; full one-shot historical pass; release qualification |
 
-The targeted runner attempted one boot for each profile, with no retries. Both
-QEMU processes shut down cleanly through UEFI after the guest reported its
-failure. The test harness returned semantic failure code 97 for each boot;
-QEMU's own process return was zero. These are failed targeted qualification
-runs, not passing boots.
+## Build, static checks, and compatibility
 
-### CPU profiles and `#XF` evidence
+- Canonical command `tools/build.sh --image`: pass with the protected
+  Phase-14 PIE and signed APB1 hashes unchanged.
+- Kernel host tests: 8/8 pass. Kernel and fixture rustfmt checks pass.
+- Full executable-section ISA audit: 120,911 decoded instructions with
+  gap-free coverage; six exact reviewed state-management leaves; zero ordinary
+  kernel FP/MMX/SSE/AVX instructions. Empty-disassembly and prohibited-code
+  negative controls pass.
+- Protected Phase-14 PIE: 23,256 bytes,
+  `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`.
+- Signed Phase-14 APB1: 24,040 bytes,
+  `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`.
+- The native syscall ABI, Startup ABI v2, signed APB1 verification, static PIE,
+  address-space isolation, threading contracts, and capability boundaries
+  remain unchanged. Neither Arena 1 nor Arena 2 runtime sources were modified.
 
-The profiles were `max,+nx,+smep,+smap` and
-`qemu64,+nx,+smep,+smap`. The `max` profile advertises AVX, and `qemu64` does
-not; the kernel cleared OSXSAVE in both. Each run reported the same exact
-probe status, with the same-process sibling and separate-process peer exiting
-42, the fault slot released, and frame/thread counts restored to baseline.
+## Historical regression run
 
-The probe ELF disassembles to bytes `f3 0f 51 c0` (`sqrtss xmm0,xmm0`) with
-operand `0xBF800000` (`-1.0f`). It writes MXCSR `0x1F00` (sticky flags clear,
-invalid mask clear), reads it back immediately before the operation, and
-returns the recorded pre/post values if execution falls through. The fixture
-therefore rules out stale flags, a masked invalid exception, an optimized-away
-instruction, and a changed MXCSR setup between the readback and instruction.
+The diagnostic runner executed 120 test groups against the Phase-15 kernel and
+explicitly excluded only the strict M15 `#XF` acceptance case. The initial
+aggregate run finished with **115/120 pass and five failed groups**:
 
-The QEMU 11.0.2 TCG source inspection is recorded in
-[`xf-tcg-analysis.md`](receipts/xf-tcg-analysis.md): the TCG SSE helper merges
-SoftFloat exception flags into MXCSR but does not check the exception mask or
-raise vector 19; the x87 helper separately raises vector 16. This source-level
-finding matches both guest runs. The live IDT audit also passes and checks
-vector 19's no-error-code stub and gate. The host `SIGFPE` probe corroborates
-native host behavior only; it is not evidence of ArenaOS `#XF` delivery.
+| Initially failed group | Focused recovery result | Receipt |
+|---|---|---|
+| `test_phase14_negative_guest.py` | 7 signed malformed/unsupported PIE cases pass | `phase15-rerun-phase14-negative.log` |
+| `test_m10_boundaries_red.py` | 12 production RED controls and restored GREEN guest pass | `phase15-rerun-m10-boundaries-red.log` |
+| `test_m84_stage.py` | targeted guest stage/reboot/refusal result pass | `phase15-rerun-m84-stage.log` |
+| `test_m8_dependencies.py` | active dependency probes pass | `phase15-rerun-m8-dependencies.log` |
+| `test_m8_fault.py` | production fault and absent-device checks pass after correcting interleaved-log parsing | `phase15-rerun-m8-fault.log` |
 
-### Phase 14 reproducibility recovery
+Every group ran at least once. The affected suites were rerun individually and
+passed; the M8 correction changes the test harness only. The five original
+failures remain in the record, and no later 120-group aggregate rerun was
+completed. Therefore this is recovered historical evidence, not a claim that a
+single full runner invocation passed 120/120. Full runner logs and retests are
+preserved in the diagnostic archive and under `build/phase15-*` in the
+qualification workspace.
 
-The initial `2c3720…` PIE difference came from the target standard library,
-not from a changed Phase-14 source, linker script, lockfile, signature, or hash
-guard. The workspace had built `x86_64-unknown-none` libraries from the Rust
-1.97.0 source tree, while Phase 14 recorded official rustup target components.
-The official Rust manifest target component archives matched their published
-hashes; installing those components into the same compiler restored the
-protected `d7b0a8…` PIE. After removing stale Cargo target directories,
-`tools/build.sh --image` passed unchanged. The signed APB1 remains at
-`04add54f…`. Details and component hashes are in
-[`phase14-pie-recovery.md`](receipts/phase14-pie-recovery.md). No reference
-hash, signature check, loader check, or build guard was weakened.
+## `#XF` investigation and backend status
 
-## Supported execution policy and lifecycle review
+The strict ring-3 test still executes `sqrtss xmm0,xmm0` with a negative finite
+operand. MXCSR reads `0x1F00` immediately before the instruction; on both tested
+QEMU TCG CPU profiles it returns with `0x1F01` without delivering vector 19.
+The guest records failure, while the same-process sibling and independent peer
+survive, the fault slot is released, resources return to baseline, and UEFI
+shuts down cleanly. Those containment results do not pass the `#XF` gate.
 
-The proposed guest baseline requires x87, FXSAVE/FXRSTOR, SSE, and SSE2. The
-64-bit FXSAVE image preserves x87 control/status/registers, MMX-aliased legacy
-state, MXCSR, and XMM0–XMM15. Additional SSE-family instructions are usable
-only when the processor advertises them through CPUID; this proposal does not
-make SSE3, SSSE3, SSE4.1/4.2, or SSE4a unconditional. The fixture exercises
-x87 and SSE/SSE2; it does not claim a guest MMX-instruction regression.
-AVX/VEX, YMM upper halves, AVX2, AVX-512, ZMM, and AMX state are unsupported.
+The QEMU 11.0.2 TCG source analysis matches the observed behavior: its SSE TCG
+helper updates MXCSR status but does not check the mask and raise vector 19.
+The vector-19 IDT gate and no-error-code stub pass the live-IDT audit. No kernel
+workaround or synthetic `int 19` was added.
 
-The implementation review checked 64 exact 512-byte, 16-byte-aligned
-slot-owned images; initialization before scheduler startup; bootstrap capture;
-clean state before a thread becomes Ready; one common save/restore leaf for
-cooperative, blocking, process, exit, and timer switches; and retirement only
-after switching away. Reaping clears the image before slot reuse. Kernel
-ordinary code remains integer-only. The ISA audit permits six exact reviewed
-state-management leaf profiles and rejects ordinary x87/MMX/SSE/AVX code.
+The host is x86-64 Linux. QEMU advertises TCG, KVM, MSHV, and Nitro; explicit
+KVM startup failed because the KVM module/device is absent, MSHV failed opening
+`/dev/mshv`, and Nitro failed opening `/dev/nitro_enclaves`. WHPX and HVF are
+not applicable to this Linux host and are not advertised by this QEMU binary.
+Only TCG was available. See
+[`phase15-alternative-backends.json`](receipts/phase15-alternative-backends.json)
+and the raw startup logs. The same unchanged TCG experiment was not repeated
+for the stability loops; those loops use the diagnostic image and do not run
+the `#XF` acceptance case.
 
-The tested firmware started with OSXSAVE clear. Host tests cover the
-conditional inherited-OSXSAVE/XCR0 policy, but no guest receipt demonstrates
-that path on these boots.
+## Additional architectural coverage
+
+- The seeded OSXSAVE diagnostic entered with `CR4.OSXSAVE=1`, CPUID XSAVE/AVX
+  enabled, and XCR0 `0x7`; kernel startup observed XCR0 `0x3`, cleared
+  OSXSAVE, verified readback, and continued to native SSE. One diagnostic boot
+  passed in 8.697 seconds. Receipt: `build/phase15-osxsave-seed-receipt.json`.
+- The bounded MMX fixture checked distinct MM0–MM7 patterns across timer
+  preemption and cooperative yield, executed `EMMS`, and passed exact process
+  teardown. Optional SSE-family reporting follows CPUID; AVX and OSXSAVE are
+  reported disabled after sanitation.
+- The normal firmware boot started with OSXSAVE clear; the separate seeded
+  diagnostic supplies guest evidence for the inherited-on entry path.
+
+## Stability and archive
+
+- T2: **10/10 diagnostic boots**, 134 seconds, zero failures, one immutable
+  diagnostic EFI/ESP identity.
+- T3: **25/25 diagnostic boots**, 318 seconds, zero failures, same EFI/ESP
+  identity and desktop/service/lifecycle checks.
+- T4: **100/100 diagnostic boots** in 1,326 seconds, zero failures, timeouts,
+  or retries. All 100 per-boot QMP pixel and lifecycle receipts were retained.
+  Its official Phase-15 verdict remains **BLOCKED** because `#XF` is not run in
+  the diagnostic image.
+- The archive is a **diagnostic checkpoint**, not a release candidate. It
+  contains the diagnostic image, the strict failing image, source/test
+  fixtures, signed Phase-14 applications, QEMU/OVMF runtime, receipts, and an
+  extracted-only verifier. Independent extraction, boot, and PIE verification
+  is the remaining checkpoint task.
+
+The earlier [`phase15-targeted-results.json`](receipts/phase15-targeted-results.json)
+and targeted logs remain immutable receipts for the original focused run; this
+document and [`phase15-qualification-recovery.json`](receipts/phase15-qualification-recovery.json)
+are the recovery/stability summary.
 
 ## Gate decision
 
-Keep Phase 15 **PARTIAL / UNQUALIFIED**. The test now isolates the actual
-instruction and records independent failure/cleanup evidence, and the canonical
-build blocker is resolved. The `#XF` guest contract still fails under the
-available QEMU TCG, so T2/T3/T4, full historical qualification, and archive
-verification remain unrun. ADR-0113 stays proposed; do not claim production
-support or SDL3 compatibility from this record.
+Report **PHASE 15 — IMPLEMENTED / HISTORICAL REGRESSIONS TESTED / EXCEPTION
+QUALIFICATION BLOCKED**. The historical run and all five focused recoveries
+are preserved, but the aggregate first run is 115/120 and has no clean full
+rerun. Diagnostic stability results do not satisfy official T2/T3/T4.
+ADR-0113 remains Proposed. **PARTIAL / NOT READY FOR INTEGRATION REVIEW.**

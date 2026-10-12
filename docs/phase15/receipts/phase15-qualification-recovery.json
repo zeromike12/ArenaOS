@@ -1,0 +1,197 @@
+{
+  "record_kind": "Phase 15 recovery and qualification summary",
+  "recorded_on": "2026-10-12",
+  "repository": "https://github.com/zeromike12/ArenaOS",
+  "branch": "arena/phase15-fpu-simd",
+  "base_commit": "1aa35f4c20c9bb386612298fe21574897cf14159",
+  "core_implementation_commit": "ad87bee8d199b285ca1a2f3a31c5dbdcf4994faa",
+  "image_and_fixture_source_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
+  "m8_diagnostic_parser_fix_commit": "87208dd6113e8970d3096601cde422d4fd91a104",
+  "adr": {
+    "number": "ADR-0113",
+    "status": "Proposed"
+  },
+  "phase_status": "PHASE 15 — IMPLEMENTED / HISTORICAL REGRESSIONS TESTED / EXCEPTION QUALIFICATION BLOCKED",
+  "recommendation": "PARTIAL / NOT READY FOR INTEGRATION REVIEW",
+  "qualification_status": "PARTIAL / UNQUALIFIED",
+  "toolchain": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "rustc_sha256": "df13f58759c0662831983e3a6501c63c1fc12ea60ec4e1d1ac35e5fe43c500c0",
+    "cargo": "1.97.0 (c980f4866 2026-06-30)",
+    "llvm_lld": "22.1.6",
+    "rust_lld_sha256": "8e5130a02d8f3473ed4c4b971d43c301205c89854bb467257e64eafe4bf21ca8"
+  },
+  "qemu": {
+    "version": "11.0.2",
+    "upstream_source_tag": "v11.0.2",
+    "upstream_source_commit": "e545d8bb9d63e9dd61542b88463183314cff9482",
+    "binary_sha256": "0539587908d9a9b83ccdce7a48d968b50f827476b9852814e07445e9402df562",
+    "selected_backend": "TCG",
+    "cpu_profile": "qemu64,+nx,+smep,+smap"
+  },
+  "artifacts": {
+    "diagnostic_image_used_by_t2_t3_t4": {
+      "source_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
+      "efi_bytes": 11028992,
+      "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282",
+      "esp_bytes": 16777216,
+      "esp_sha256": "b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42",
+      "phase15_verdict": "DIAGNOSTIC PASS (5/5; XF NOT RUN)"
+    },
+    "strict_xf_acceptance_image": {
+      "source_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
+      "efi_bytes": 11038208,
+      "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+      "esp_bytes": 16777216,
+      "esp_sha256": "33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a"
+    },
+    "test_executables": {
+      "phase15_x87_sse_state_fixture": {
+        "bytes": 8824,
+        "sha256": "786808ad21686ace59684f01ed1e69b47bd104c53442b2d7df9e646b9103b32b"
+      },
+      "phase15_strict_xf_probe": {
+        "bytes": 4744,
+        "sha256": "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3"
+      },
+      "phase15_mmx_probe": {
+        "bytes": 4976,
+        "sha256": "4750c0efc9e20adc90f98829ab76c4ce9ddaabc0b1315dfb9bff427cdd9df785"
+      },
+      "phase14_pie_elf": {
+        "bytes": 23256,
+        "sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+      },
+      "phase14_signed_apb1": {
+        "bytes": 24040,
+        "sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+      }
+    }
+  },
+  "source_and_host_checks": {
+    "final_kernel_correctness_audit": "PASS; no ownership, lifecycle, CPU-policy, or exception-frame defect found",
+    "kernel_host_tests": "PASS 8/8",
+    "rustfmt": "PASS for kernel and Phase 15 fixtures",
+    "canonical_build": "PASS; Phase-14 PIE and signed APB1 protected hashes unchanged",
+    "kernel_isa_audit": "PASS 120911 decoded instructions, gap-free executable section, six reviewed leaves, no ordinary FP/MMX/SSE/AVX",
+    "osxsave_seeded_guest": {
+      "result": "PASS diagnostic guest coverage",
+      "attempted_boots": 1,
+      "successful_boots": 1,
+      "duration_seconds": 8.697,
+      "initial_state": "CR4.OSXSAVE=1, XCR0=0x7",
+      "verified_state": "XCR0=0x3, CR4.OSXSAVE=0",
+      "receipt": "build/phase15-osxsave-seed-receipt.json"
+    },
+    "mmx_guest": "PASS: distinct MM0-MM7 patterns across preemption/yield, EMMS, exact process teardown",
+    "optional_sse_reporting": "PASS: CPUID-gated; AVX/OSXSAVE disabled after sanitation"
+  },
+  "test_driver_sha256": {
+    "tools/run_phase15_historical_diagnostic.sh": "881b2c78b2b8bf43551c6170e4f28a94abd848ba8e0f8dcb0f4d653741538cc7",
+    "tools/stability_loop.sh": "6999d5252477852724588ed81ebd16c4a859a22772147f96b1dc6340da6862ca",
+    "tools/test_phase14_negative_guest.py": "4dd2e2f0fd6539f99b54ec61f7bd2499d930cdcd5814b8b2920943e03719359c",
+    "tools/test_m10_boundaries_red.py": "4c1fb975365572c099c56492d65a1e99f228647d58637d6510bf21781337a7ec",
+    "tools/test_m84_stage.py": "555346cab9422fa9996d08f7f03294d084d4e3d771fde6410a00a437273ae966",
+    "tools/test_m8_dependencies.py": "e41a7f532a288020132480c2feab9ca3fcd80163c0b51d177114187d36d4253e",
+    "tools/test_m8_fault.py_after_parser_fix": "78d3a4e9a9226eec324b09c5e6f90047c266827445ec126533cbdef113bc5e20"
+  },
+  "xf": {
+    "status": "BLOCKED",
+    "strict_test_preserved": true,
+    "instruction": "sqrtss xmm0,xmm0 on negative finite input",
+    "pre_mxcsr": "0x1F00",
+    "post_mxcsr_without_vector_19": "0x1F01",
+    "tested_tcg_cpu_profiles": [
+      "max,+nx,+smep,+smap",
+      "qemu64,+nx,+smep,+smap"
+    ],
+    "vector_19_delivered": false,
+    "sibling_peer_slot_resource_cleanup": "PASS, but does not satisfy #XF delivery gate",
+    "qemu_tcg_source_analysis": "TCG SSE helper updates MXCSR exception flags without checking the mask and raising vector 19",
+    "kernel_workaround_or_synthetic_int19": false,
+    "backend_inventory": "receipts/phase15-alternative-backends.json"
+  },
+  "historical_regression": {
+    "mode": "diagnostic; strict #XF acceptance separately preserved",
+    "groups_attempted": 120,
+    "first_aggregate_passed": 115,
+    "first_aggregate_failed": 5,
+    "first_aggregate_result": "FAIL",
+    "failed_groups": [
+      {
+        "name": "test_phase14_negative_guest.py",
+        "focused_rerun": "PASS",
+        "receipt": "build/phase15-rerun-phase14-negative.log"
+      },
+      {
+        "name": "test_m10_boundaries_red.py",
+        "focused_rerun": "PASS",
+        "receipt": "build/phase15-rerun-m10-boundaries-red.log"
+      },
+      {
+        "name": "test_m84_stage.py",
+        "focused_rerun": "PASS",
+        "receipt": "build/phase15-rerun-m84-stage.log"
+      },
+      {
+        "name": "test_m8_dependencies.py",
+        "focused_rerun": "PASS",
+        "receipt": "build/phase15-rerun-m8-dependencies.log"
+      },
+      {
+        "name": "test_m8_fault.py",
+        "focused_rerun": "PASS after M8 diagnostic log parser fix",
+        "receipt": "build/phase15-rerun-m8-fault.log"
+      }
+    ],
+    "post_recovery_aggregate_rerun": false,
+    "status": "all groups exercised and all five affected groups passed focused reruns; no single clean 120/120 aggregate run"
+  },
+  "stability": {
+    "official_t2_t3_t4": "BLOCKED because the diagnostic image omits genuine #XF acceptance",
+    "diagnostic_runs": [
+      {
+        "tier": "T2",
+        "attempted": 10,
+        "passed": 10,
+        "failed": 0,
+        "timeouts": 0,
+        "retries": 0,
+        "duration_seconds": 134,
+        "receipt": "build/phase15-stability-t2-receipt.json"
+      },
+      {
+        "tier": "T3",
+        "attempted": 25,
+        "passed": 25,
+        "failed": 0,
+        "timeouts": 0,
+        "retries": 0,
+        "duration_seconds": 318,
+        "receipt": "build/phase15-stability-t3-receipt.json"
+      },
+      {
+        "tier": "T4",
+        "attempted": 100,
+        "passed": 100,
+        "failed": 0,
+        "timeouts": 0,
+        "retries": 0,
+        "duration_seconds": 1326,
+        "receipt": "build/phase15-stability-t4-diagnostic-receipt.json"
+      }
+    ],
+    "artifact_efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282",
+    "artifact_esp_sha256": "b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42",
+    "t4_log": "build/phase15-stability-t4-diagnostic.log",
+    "t4_pixel_receipts": 100
+  },
+  "archive": {
+    "type": "diagnostic checkpoint, not release candidate",
+    "generator": "tools/make_phase15_diagnostic_checkpoint.py",
+    "extracted_only_verifier": "tools/phase15_checkpoint_verify.py",
+    "contents": "exact diagnostic/strict EFI and ESP, compiled x87/SSE/MMX/#XF and Phase-14 fixtures, source, QEMU/OVMF runtime, historical/stability receipts",
+    "independent_verification": "the verifier is included; its extracted-run result and archive SHA are recorded separately after packaging to avoid self-reference"
+  },
+  "recommendation": "PARTIAL / NOT READY FOR INTEGRATION REVIEW"
+}

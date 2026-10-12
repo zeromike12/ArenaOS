@@ -6,9 +6,10 @@ control/status, and MXCSR state across direct syscalls, yield, blocking/wake,
 and scheduler switches. Arena 1's SDL3 executable has **not** been run by this
 Phase-15 guest fixture, so this handoff does not claim SDL3 compatibility.
 ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**; these CPU
-capabilities are not release guarantees. Historical diagnostic T2/T3 and
+capabilities are not release guarantees. Historical diagnostic T2/T3/T4 and
 MMX/OSXSAVE coverage pass, but strict unmasked SIMD `#XF` delivery still fails
-under the available QEMU TCG backend.
+under the available QEMU TCG backend. T4 was 100/100 diagnostic boots; its
+official gate remains blocked.
 
 ## Supported profile
 

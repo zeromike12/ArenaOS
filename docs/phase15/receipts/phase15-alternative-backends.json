@@ -1,0 +1,50 @@
+{
+  "host": {
+    "architecture": "x86_64",
+    "kernel": "Linux 6.18.44",
+    "qemu_version": "11.0.2",
+    "qemu_binary_sha256": "0539587908d9a9b83ccdce7a48d968b50f827476b9852814e07445e9402df562"
+  },
+  "qemu_accelerators_advertised": [
+    "tcg",
+    "mshv",
+    "nitro",
+    "kvm"
+  ],
+  "hardware_backend_available": false,
+  "probes": {
+    "kvm": {
+      "device_present": false,
+      "explicit_accel_attempted": true,
+      "exit_code": 1,
+      "result": "QEMU could not access the KVM kernel module",
+      "raw_log": "build/phase15-kvm-probe.log"
+    },
+    "mshv": {
+      "device_present": false,
+      "kernel_module_present": false,
+      "explicit_accel_attempted": true,
+      "exit_code": 1,
+      "result": "QEMU failed to open /dev/mshv; no TCG fallback was selected",
+      "raw_log": "build/phase15-mshv-probe.log"
+    },
+    "nitro": {
+      "device_present": false,
+      "kernel_module_present": false,
+      "explicit_accel_attempted": true,
+      "exit_code": 1,
+      "result": "QEMU failed to open /dev/nitro_enclaves; no TCG fallback was selected",
+      "raw_log": "build/phase15-nitro-probe.log"
+    },
+    "whpx": {
+      "applicable": false,
+      "result": "Windows-only backend; host is Linux and QEMU does not advertise WHPX"
+    },
+    "hvf": {
+      "applicable": false,
+      "result": "Apple-only backend; host is Linux and QEMU does not advertise HVF"
+    }
+  },
+  "selected_execution_backend": "QEMU TCG",
+  "xf_result": "BLOCKED: genuine vector 19 delivery was not verified by a hardware-backed or independently verified emulator backend"
+}

@@ -1,66 +1,62 @@
-# ArenaOS Phase 15 plan
+# ArenaOS Phase 15 plan and status
 
 Phase 15 adds a bounded x87/SSE execution contract to the Phase-14 mainline at
 `1aa35f4c20c9bb386612298fe21574897cf14159`. Work is on
-`arena/phase15-fpu-simd`. ADR-0113 is proposed pending architecture review;
-implementation on this branch is experimental.
+`arena/phase15-fpu-simd`. The core implementation is in
+`ad87bee8d199b285ca1a2f3a31c5dbdcf4994faa`; the Phase-15 diagnostic fixtures
+and kernel audit were extended at
+`6586a0a18981932ae7048ca267fa425411f8e463`. ADR-0113 remains Proposed.
 
 ## Architecture decision
 
-The proposal is eager per-thread FXSAVE64/FXRSTOR64. The scheduler has a fixed
-64-slot table and one switch leaf shared by yield, blocking, exit, and timer
-preemption. The per-slot image is 512 bytes aligned to 16 bytes (32 KiB total).
-CPUID x87/FXSAVE/SSE/SSE2 are required. AVX-family state is not enabled.
-ADR-0113 is used for this proposal to avoid the active C-runtime ADR numbering
-conflict. The Phase-14 accepted ADR-0110 is unchanged; the current Arena 1 and
-Arena 2 branch snapshots contain no ADR-0113. See
-`receipts/adr-numbering-review.md` for the inspected branch identities.
+The proposal uses eager per-thread FXSAVE64/FXRSTOR64. The scheduler has a
+fixed 64-slot table and one switch leaf shared by yield, blocking, exit, and
+timer preemption. Each private image is 512 bytes and 16-byte aligned (32 KiB
+total). CPUID x87/FXSAVE/SSE/SSE2 are required. AVX-family state is not enabled.
+ADR-0113 avoids the active C-runtime reservation; ADR-0112 and accepted ADRs
+were not renumbered. The proposal remains Proposed pending architecture review
+and qualification.
 
-## Work sequence
+## Completed work
 
-1. **Audit and ADR:** verify CPU setup, interrupt/syscall paths, scheduler slot
-   lifecycle, faults, Phase-14 initialization, and the existing ISA audit.
-2. **CPU contract:** CPUID feature decoding; inherited OSXSAVE/XCR0 audit;
-   checked CR0/CR4 configuration; clean x87/MXCSR/XMM template; refusal on
-   unsupported or failed setup.
-3. **Thread state:** aligned state storage, clean initialization before Ready,
-   FXSAVE64/FXRSTOR64 in the common switch, and reset during reaping/reuse.
-4. **Guest fixtures:** arithmetic, control-state, syscall, thread, blocking,
-   timer-preemption, process-isolation, fresh-state, and fault cases using the
-   current ET_EXEC/ET_DYN loader rules.
-5. **Kernel ISA audit:** parse actual disassembly instructions, enforce the
-   state-management allowlist, fail closed if disassembly is absent, and test
-   positive and negative controls.
-6. **Regression and evidence:** preserve historical suites and Phase 14, run
-   T1/T2/T3/T4, package exact artifacts/receipts, extract and independently
-   verify the checkpoint archive, then commit the final coherent changes.
+1. Reviewed CPU setup, interrupt/syscall paths, scheduler slot lifecycle,
+   fault teardown, Phase-14 compatibility, and the whole-image ISA audit. The
+   audit found no correctness defect requiring an architecture change.
+2. Verified CR0/CR4 policy, feature checks, clean FXSAVE template, and the
+   inherited OSXSAVE/XCR0 sanitation path. Added a guest entry seeded with
+   OSXSAVE enabled and XCR0 `0x7`; it read back XCR0 `0x3` and OSXSAVE disabled.
+3. Preserved the strict unmasked `sqrtss` vector-19 acceptance test. QEMU
+   11.0.2 TCG updates MXCSR from `0x1F00` to `0x1F01` and does not deliver
+   `#XF`. KVM, MSHV, and Nitro acceleration were explicitly unavailable on the
+   host. No hardware-backed or independent-emulator guest result exists.
+4. Ran all 120 groups in the Phase-14 historical diagnostic runner. The first
+   aggregate run passed 115/120; five affected groups were then rerun alone and
+   all five passed. There is no clean one-shot 120/120 run, so the aggregate is
+   recorded as recovered with a qualification limitation.
+5. Added a bounded MMX test across timer preemption and `EMMS`; optional
+   SSE-family reporting remains CPUID-gated. Both guest checks pass in
+   diagnostic mode.
+6. Ran T2 10/10, T3 25/25, and T4 100/100 on the same immutable diagnostic
+   EFI/ESP. These results do not satisfy the official Phase-15 gates because
+   the image says `XF NOT RUN`.
+7. Prepared an extracted-only verifier and a self-contained diagnostic
+   checkpoint archive. The archive is still awaiting extracted verification.
 
 ## Qualification gates
 
-| Gate | Required evidence | Status |
+| Gate | Evidence | Result |
 |---|---|---|
-| T1 | Build, formatting, host tests, feature/template tests, instruction audit and ABI checks | Pass: canonical build and Phase-14 hash/signature checks; rustfmt; kernel host tests 8/8; 120,354-instruction full-section audit with negative controls |
-| Targeted guest | Ring-3 state, process isolation, reuse, and exception cases on two CPU profiles | Partial: thread/process isolation, slot reuse, `#MF`, and `#UD` pass; the isolated `#XF` probe records `pre=0x1F00`, `post=0x1F01`, then falls through on both QEMU TCG profiles |
-| T2 | 10/10 fresh QEMU boots | Not run; targeted guest suite fails on `#XF` |
-| T3 | 25/25 fresh mixed-workload boots | Not run; targeted guest suite fails on `#XF` |
-| T4 | 100/100 fresh boots of one exact release candidate, zero failures | Not run |
-| Archive | Exact EFI/boot image/fixtures, source and toolchain identity, SHA-256 manifest, receipts, clean extraction and boot | Not run; no qualified candidate exists |
+| T1 | Canonical build, protected Phase-14 PIE and signed APB1, host tests, rustfmt, complete executable-section ISA audit | Pass |
+| Targeted guest | x87/SSE/XMM isolation, process and slot reuse, MMX, `#MF`, `#UD`; genuine `#XF` separately tested on two TCG profiles | Partial; `#XF` failed |
+| Historical Phase-14 suite | 120 groups executed; 115 passed in first aggregate run; all five first-run failures passed focused recovery reruns | Recovered evidence; no single clean 120/120 aggregate |
+| OSXSAVE | Seeded guest entered with OSXSAVE=1/XCR0=7 and verified sanitation to XCR0=3/OSXSAVE=0 | Diagnostic guest pass |
+| T2 | 10 fresh boots on diagnostic EFI/ESP | Diagnostic pass 10/10; official gate blocked |
+| T3 | 25 fresh boots with desktop, services, lifecycle, FP/MMX test coverage | Diagnostic pass 25/25; official gate blocked |
+| T4 | 100 fresh boots of one immutable diagnostic image | Diagnostic pass 100/100 in 1,326 seconds; official gate blocked |
+| Archive | Exact images, guest fixtures, source, QEMU/OVMF runtime, receipts, extracted-only boot and PIE verifier | Prepared; extracted verification pending; diagnostic checkpoint only |
 
-Any failed boot invalidates the current run of that gate. The guest failure is
-preserved as a failure; it is not counted toward a pass total. The standalone
-guest instruction sequence and matching QEMU 11.0.2 TCG source show that the
-available emulator records the MXCSR flag but does not raise vector 19. The
-native host probe corroborates hardware behavior but is not ArenaOS evidence.
-The PIE hash blocker is resolved by using the official Rust 1.97.0 target
-components used by Phase 14; the checked-in guard remains unchanged. See
-`QUALIFICATION.md` and `receipts/phase15-targeted-results.json` for exact
-source, artifact hashes, commands, and receipts. The two targeted guest runs
-were one attempt per profile with no retries; both shut down cleanly but
-returned semantic harness failure because the `#XF` assertion failed.
-
-## Scope
-
-Keep Phase-14 ET_EXEC and bounded ET_DYN support, signed APB1, W^X, capability
-ownership, ABI v2, FS.base, GS/swapgs, SMEP/SMAP, scheduler fairness, and
-resource reclamation. Do not add a dynamic linker, Linux ABI, libc/libm, SDL3,
-GPU support, SMP, AVX/AVX-512, or general compiler SIMD in the kernel.
+The acceptance gate remains **PARTIAL / UNQUALIFIED** until genuine vector 19
+delivery and containment pass under a supported backend. Diagnostic results do
+not become official qualification. No Phase 16 work, merge, pull request, or
+release is part of this plan. See [qualification](QUALIFICATION.md) and the
+[final report](FINAL-REPORT.md) for exact receipts and current gate status.
