@@ -107,6 +107,7 @@ def copy_receipts(build: Path, stage: Path) -> None:
         "phase15-mshv-probe.log",
         "phase15-nitro-probe.log",
         "phase15-kvm-probe.log",
+        "phase15-checkpoint-verification-*.log",
         "stability-expected.txt",
         "stability-receipt.txt",
         "stability-serial.log",

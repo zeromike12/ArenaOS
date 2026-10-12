@@ -33,7 +33,7 @@
     "diagnostic_image_used_by_t2_t3_t4": {
       "source_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
       "efi_bytes": 11028992,
-      "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282",
+      "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
       "esp_bytes": 16777216,
       "esp_sha256": "b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42",
       "phase15_verdict": "DIAGNOSTIC PASS (5/5; XF NOT RUN)"
@@ -181,7 +181,7 @@
         "receipt": "build/phase15-stability-t4-diagnostic-receipt.json"
       }
     ],
-    "artifact_efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282",
+    "artifact_efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
     "artifact_esp_sha256": "b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42",
     "t4_log": "build/phase15-stability-t4-diagnostic.log",
     "t4_pixel_receipts": 100
@@ -191,6 +191,14 @@
     "generator": "tools/make_phase15_diagnostic_checkpoint.py",
     "extracted_only_verifier": "tools/phase15_checkpoint_verify.py",
     "contents": "exact diagnostic/strict EFI and ESP, compiled x87/SSE/MMX/#XF and Phase-14 fixtures, source, QEMU/OVMF runtime, historical/stability receipts",
+    "attempt_history": [
+      {
+        "archive_sha256": "95338fb07bb1f3aa34302f44d37ad471bcec73a9990b0c9126f6ac3c9aff6f94",
+        "source_commit": "c767a9b2e3f8dc5caf6c4169094496fc8f4f28d5",
+        "result": "FAIL before guest boot: verifier expected EFI SHA c56e... while extracted bytes and manifest had c56c...",
+        "resolution": "corrected the pinned EFI hash, regenerated T2/T3/T4 receipt JSON, rebuilt the archive, and reran extraction verification"
+      }
+    ],
     "independent_verification": "the verifier is included; its extracted-run result and archive SHA are recorded separately after packaging to avoid self-reference"
   },
   "recommendation": "PARTIAL / NOT READY FOR INTEGRATION REVIEW"

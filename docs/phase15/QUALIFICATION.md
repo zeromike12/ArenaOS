@@ -28,7 +28,7 @@ available.
 
 | Image identity | EFI bytes | EFI SHA-256 | ESP bytes | ESP SHA-256 |
 |---|---:|---|---:|---|
-| Diagnostic image used by T2/T3/T4 | 11,028,992 | `e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282` | 16,777,216 | `b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42` |
+| Diagnostic image used by T2/T3/T4 | 11,028,992 | `e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282` | 16,777,216 | `b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42` |
 | Strict acceptance image (`#XF` enabled) | 11,038,208 | `bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e` | 16,777,216 | `33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a` |
 
 The diagnostic and strict ESPs each contain the byte-identical paired EFI.

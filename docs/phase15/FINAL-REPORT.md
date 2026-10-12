@@ -15,7 +15,7 @@ release, or Phase 16 work was created.
 
 | Image | EFI SHA-256 | ESP SHA-256 | Use/result |
 |---|---|---|---|
-| Diagnostic | `e85e0b5dd9e96f3129e7f2385d548084c56e16801432a9d41243b9ebc23a2282` | `b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42` | T2/T3/T4; explicitly reports `XF NOT RUN` |
+| Diagnostic | `e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282` | `b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42` | T2/T3/T4; explicitly reports `XF NOT RUN` |
 | Strict acceptance | `bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e` | `33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a` | Preserves the failing genuine `#XF` test |
 
 The Phase-14 PIE remains at SHA-256
