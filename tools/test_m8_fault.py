@@ -60,8 +60,11 @@ def main() -> int:
                                      net=False, rng=False, kbd=False, vcon=False,
                                      tcp_peer=False)
     (arena_env.build_dir() / f"serial-{LABEL}-absent.log").write_text(missing)
-    command_start = missing.find("arena> stackfault")
-    command_end = missing.find("arena> shutdown", command_start)
+    # Asynchronous GUI input diagnostics may be printed after the prompt but
+    # before the serial command echo. Anchor on the unique command text rather
+    # than requiring a contiguous prompt/echo pair.
+    command_start = missing.find("stackfault")
+    command_end = missing.find("shutdown", command_start)
     stackfault_output = (missing[command_start:command_end]
                          if command_start >= 0 and command_end > command_start else "")
     print(f"[{LABEL}] no-device fixture: rc={rc}, {dt:.1f}s")
