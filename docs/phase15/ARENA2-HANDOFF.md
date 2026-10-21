@@ -7,10 +7,11 @@ and MXCSR during yield, blocking/wake, timer preemption, and address-space
 switching. New and recycled slots receive the clean template. See
 `QUALIFICATION.md` for which behaviors have actually passed guest gates.
 ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**, so this is
-not yet a release-guaranteed CPU contract. Historical diagnostic T2/T3/T4,
-MMX, and seeded OSXSAVE tests pass; T4 was 100/100 diagnostic boots. Strict
-`#XF` guest delivery still fails on the available QEMU TCG backend, so the
-official stability gates remain blocked.
+not yet a release-guaranteed CPU contract. The uninterrupted historical
+diagnostic aggregate passed 120/120. Fresh diagnostic T2/T3/T4 passed 10/10,
+25/25, and 100/100 on QEMU 11.1.2 TCG. Strict `#XF` delivery still fails on
+both tested CPU profiles; `/dev/kvm` is absent and Bochs did not reach ArenaOS,
+so the official stability gates remain blocked.
 
 ## C compiler profile
 
@@ -45,12 +46,12 @@ unsupported, so binaries that require AVX are not compatible with this profile.
 - **SOURCE-REVIEWED** — the existing CPL3 invalid-SSE fixture and the
   scheduler-state lifecycle are included in the external test kit.
 - **HOST-TESTED** — strict EFI/ESP and fixture hashes are pinned and verified.
-- **TCG-GUEST-TESTED** — x87/SSE/SSE2 state, MMX, `#MF`, and `#UD` diagnostic
-  cases pass; the genuine strict `#XF` case remains a TCG failure.
+- **TCG-GUEST-TESTED** — the historical diagnostic aggregate passes 120/120,
+  diagnostic T2/T3/T4 pass, and x87/SSE/SSE2 state, MMX, `#MF`, and `#UD`
+  cases pass. The genuine strict `#XF` case remains a TCG failure.
 - **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** pending a passing KVM or WHPX
   trial with complete contained-fault receipts.
-- **NOT RUN** — Arena 2 C runtime/libc integration, clean 120/120 regression,
-  and official strict T2/T3/T4.
+- **NOT RUN** — Arena 2 C runtime/libc integration and official strict T2/T3/T4.
 
 Keep Arena 2 code at the baseline x86-64 profile with x87/SSE2 and without AVX
 or AVX-dependent libraries. The external runner requires AVX exposure only

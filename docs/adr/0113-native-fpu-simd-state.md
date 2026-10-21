@@ -133,20 +133,25 @@ and independent extraction of the exact tested archive. T4 requires 100/100
 fresh boots with zero failures. No historical receipt can qualify this change.
 
 Current branch evidence isolates an unmasked `sqrtss` invalid operation with
-MXCSR `0x1F00` immediately before execution. QEMU 11.0.2 TCG returns with
-MXCSR `0x1F01` without delivering vector 19 on both tested CPU profiles;
-matching TCG source lacks the SSE mask-check/vector-19 raise path. The guest
+MXCSR `0x1F00` immediately before execution. The latest QEMU 11.1.2 TCG run
+returns with MXCSR `0x1F01` without delivering vector 19 on both tested CPU
+profiles; the earlier QEMU 10.0.13 TCG trial also failed. The strict guest
 test remains failed, with sibling/peer and resource-cleanup receipts recorded.
 This observation does not accept the ADR or establish production `#XF`
-containment. T2/T3/T4 diagnostic runs reached 10/10, 25/25, and 100/100 on the
-diagnostic image, which explicitly does not run `#XF`; the official stability
-gates remain open. The 120-group historical diagnostic runner had five first-
-run failures (115/120 first-run pass); each affected suite passed its focused
-recovery rerun, but no clean 120/120 aggregate rerun was completed. The
-Phase-14 PIE hash mismatch was independently resolved by restoring its
-official Rust 1.97.0 target libraries; the existing hash guard and signed
-package identity remain intact. See `docs/phase15/QUALIFICATION.md` for exact
-identities and evidence classes.
+containment.
+
+On 2026-10-21 the local runtime was restored from official Debian packages and
+the official Rust distribution. An uninterrupted historical diagnostic
+aggregate passed 120/120 on commit
+`989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. Fresh diagnostic T2/T3/T4 runs
+passed 10/10, 25/25, and 100/100; the diagnostic image explicitly does not run
+`#XF`, so the official stability gates remain open. QEMU advertises KVM, but
+`/dev/kvm` is absent and explicit `-accel kvm` initialization fails. Bochs 3.1
+was tried under two CPU profiles and page-faulted in OVMF before ArenaOS. No
+hardware-backed or independent-emulator `#XF` result is claimed. See
+[`docs/phase15/QUALIFICATION.md`](../phase15/QUALIFICATION.md) and the
+[`phase15-local-recovery.json`](../phase15/receipts/phase15-local-recovery.json)
+receipt for exact identities and logs.
 
 ### External hardware verification status
 
@@ -154,12 +159,12 @@ identities and evidence classes.
   M15 test and preserves the exact CPL3 source fixture and images.
 - **HOST-TESTED** — image identity and embedded EFI checks are part of kit
   creation and receipt verification.
-- **TCG-GUEST-TESTED** — strict `#XF` still fails on the previously tested TCG
-  backend.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**. The current workspace has no
-  `/dev/kvm`, QEMU, or OVMF; WHPX is unavailable on this Linux host.
-- **NOT RUN** — clean final-source aggregate regression and official strict
-  T2/T3/T4.
+- **TCG-GUEST-TESTED** — the 120/120 historical diagnostic aggregate and
+  diagnostic T2/T3/T4 pass; strict `#XF` fails on QEMU TCG.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**. QEMU and OVMF were restored,
+  but `/dev/kvm` is absent; WHPX is unavailable on this Linux host.
+- **NOT RUN** — official strict T2/T3/T4. The diagnostic stability runs do
+  not satisfy those gates.
 
 The portable runner is an evidence collection path, not an architecture
 decision. ADR-0113 remains **Proposed** until the architecture review records

@@ -1,4 +1,7 @@
 {
+  "recorded_on": "2026-10-12",
+  "snapshot_note": "Historical QEMU 11.0.2 backend search. Current local QEMU 11.1.2, KVM probe, and Bochs trial are recorded in phase15-local-recovery.json.",
+  "superseded_by": "phase15-local-recovery.json",
   "host": {
     "architecture": "x86_64",
     "kernel": "Linux 6.18.44",

@@ -75,3 +75,15 @@ small Linux host probe. On the available x86-64 host it reports
 faulting RIP is the `sqrtss` instruction. This corroborates architectural
 hardware behavior on the host. It is not evidence that ArenaOS handles the
 exception.
+
+## Current local retest (2026-10-21)
+
+After restoring QEMU 11.1.2 and OVMF 2026.08 from official Debian packages, I
+reran `tools/test_m15_guest.py` with explicit `-accel tcg` and the pinned
+strict EFI/ESP. Both `max,+nx,+smep,+smap` and `qemu64,+nx,+smep,+smap` again
+returned MXCSR `0x1F01` without vector 19; each strict run reports M15 `5/6`
+and semantic guest exit 97. The earlier QEMU 10.0.13 TCG trials failed the
+same assertion. `/dev/kvm` is absent, and QEMU's explicit KVM initialization
+fails, so no hardware-backed result is available here. Exact serial, stderr,
+image, and accelerator receipts are linked from
+[`phase15-local-recovery.json`](phase15-local-recovery.json).

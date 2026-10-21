@@ -47,19 +47,20 @@ The live-IDT audit checks selector, gate attributes, IST, and handler offset
 for all vectors. Vectors 16 (`#MF`) and 19 (`#XF`) use no-error-code stubs;
 the common frame adds the synthetic zero error code. CPL3 `#MF` and `#UD`
 tests pass with sibling and separate-process survival. The strict unmasked
-`sqrtss xmm0,xmm0` `#XF` test remains failed: QEMU 11.0.2 TCG changes MXCSR
-from `0x1F00` to `0x1F01` without delivering vector 19. Matching TCG source
-inspection finds no SSE vector-19 raise path. The host `SIGFPE` probe is
-corroborating evidence only and does not satisfy the guest gate.
+`sqrtss xmm0,xmm0` `#XF` test remains failed: the latest QEMU 11.1.2 TCG run
+changes MXCSR from `0x1F00` to `0x1F01` without delivering vector 19 on both
+`max` and `qemu64` profiles. The earlier QEMU 10.0.13 TCG run also failed.
+The host `SIGFPE` probe is corroborating evidence only and does not satisfy the
+guest gate.
 
 The historical qualification diagnostic intentionally omits #XF and prints
 `m15: DIAGNOSTIC PASS (5/5; XF NOT RUN)`; it is not the official M15 PASS
-marker. Diagnostic T2 10/10, T3 25/25, and T4 100/100 used that image; none
-qualifies the official gate. The earlier QEMU host advertised KVM, MSHV, and
-Nitro, but explicit startup probes failed because that host lacked their
-device backends.
-Official T2/T3/T4 and release qualification remain blocked until a suitable
-backend delivers and contains `#XF`.
+marker. The latest QEMU 11.1.2 diagnostic T2 10/10, T3 25/25, and T4 100/100
+used that image; none qualifies the official gate. This host advertises KVM,
+MSHV, and Nitro, but has no `/dev/kvm`; explicit QEMU 11.1.2 KVM initialization
+fails. Bochs 3.1 also failed in OVMF before ArenaOS started. Official T2/T3/T4
+and release qualification remain blocked until a suitable backend delivers
+and contains `#XF`.
 
 ## Current qualification labels
 
@@ -67,11 +68,13 @@ backend delivers and contains `#XF`.
   vector-19 dispatch, and cleanup assertions are preserved in the external kit.
 - **HOST-TESTED** — pinned strict EFI/ESP/fixture identity and the ESP's
   embedded EFI are checked before any guest boot.
-- **TCG-GUEST-TESTED** — strict `#XF` remains a TCG failure; the prior
-  diagnostic x87/SSE/SSE2, MMX, `#MF`, and `#UD` results remain diagnostic.
+- **TCG-GUEST-TESTED** — the uninterrupted historical diagnostic suite passed
+  120/120; fresh diagnostic T2/T3/T4 passed 10/10, 25/25, and 100/100. Strict
+  `#XF` fails on QEMU 11.1.2 TCG under both CPU profiles.
 - **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** until Linux/KVM or Windows/WHPX
   completes the genuine vector-19 guest test.
-- **NOT RUN** — official strict T2/T3/T4 and final-source aggregate regression.
+- **NOT RUN** — official strict T2/T3/T4. The final-source historical
+  diagnostic aggregate passed 120/120, but it excludes strict `#XF`.
 
 The external runners use the existing two M15 CPU profiles. Their successful
 receipt must show `fault=0x113`, the ring-3 vector-19 dispatch, sibling and

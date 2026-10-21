@@ -1,124 +1,87 @@
-# ArenaOS Phase 15 final report
+# ArenaOS Phase 15 local qualification recovery
 
-Status: **PHASE 15 — IMPLEMENTATION COMPLETE / EXTERNAL HARDWARE VERIFICATION
-REQUIRED**. The branch remains **PARTIAL / UNQUALIFIED** and is **NOT READY FOR
-INTEGRATION**. ADR-0113 is Proposed. No PR, merge, release, or Phase 16 work
-was created.
+Phase 15 remains **PARTIAL / UNQUALIFIED**. The local historical diagnostic
+regression now passes 120/120 in one uninterrupted run, and fresh diagnostic
+T2/T3/T4 stability runs pass. Strict SIMD `#XF` delivery still fails under
+QEMU TCG, KVM is unavailable in this host, and Bochs did not reach ArenaOS.
+ADR-0113 remains **Proposed**. No PR, merge, release, or Phase 16 work was
+created.
 
-## Current recovery evidence (2026-10-12)
+## Runtime restored locally
 
-- **SOURCE-REVIEWED** — the external kit preserves the strict test assertions,
-  the CPL3 `SQRTSS` source fixture, and the vector-19 exception/cleanup source.
-- **HOST-TESTED** — strict EFI/ESP and fixture hashes match their pinned
-  identities; the ESP contains the exact EFI; the extracted kit manifest and
-  Windows-mode TCP transport smoke pass. PowerShell is unavailable here, so
-  the PowerShell runner is source-reviewed only.
-- **TCG-GUEST-TESTED** — prior strict TCG trials still fail genuine `#XF`;
-  historical diagnostic coverage remains diagnostic-only.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**. This workspace has no
-  `/dev/kvm`, QEMU executable, OVMF firmware, or Rust toolchain. No hardware
-  trial is claimed.
-- **NOT RUN** — a clean final-source 120/120 aggregate, official strict T2/T3/T4,
-  and a qualified release archive.
+On 2026-10-21 I restored the runtime under the ignored
+`build/phase15-local-qualification/` directory. I used official Debian packages
+from the signed `deb.debian.org` trixie and sid repositories and the official
+Rust distribution bootstrap, whose SHA-256 was verified before use. QEMU,
+OVMF, Rust, and Bochs were extracted locally; no system packages were
+installed, and no host security settings were changed.
 
-The portable runner and kit are under `tools/phase15_external/`. The kit pins
-the strict EFI, ESP, and CPL3 fixture; its Linux and Windows runners require
-explicit KVM or WHPX and save raw serial, QEMU stderr, actual process exits,
-and a structured receipt. The kit is an execution aid, not a qualification
-archive.
+- QEMU **11.1.2** (`qemu-system-x86 1:11.1.2+ds-3`), with OVMF
+  **2026.08+ds-2**.
+- Comparison QEMU **10.0.13** and OVMF **2025.02-8+deb13u1**.
+- Rust **1.97.0**, Cargo **1.97.0**, LLVM **22.1.6**; targets include
+  `x86_64-unknown-none` and `x86_64-unknown-uefi`.
+- Bochs **3.1+dfsg-1** for an independent emulator trial.
+- Existing project Python dependencies were reused from
+  `build/onboarding/python`.
 
-## Source and images
+QEMU 11.1.2 advertises TCG, MSHV, Nitro, and KVM. `/dev/kvm` is absent, and an
+explicit `-accel kvm` initialization exits 1 with “Could not access KVM kernel
+module: No such file or directory.” Every guest test in this recovery used
+`-accel tcg`; the separate Bochs trial used Bochs 3.1. No hardware
+acceleration is claimed.
 
-- Branch: `arena/phase15-fpu-simd`; base: merged Phase-14 mainline
-  `1aa35f4c20c9bb386612298fe21574897cf14159`.
-- Core kernel implementation: `ad87bee8d199b285ca1a2f3a31c5dbdcf4994faa`.
-- Diagnostic fixture/image source: `6586a0a18981932ae7048ca267fa425411f8e463`.
-- ADR-0113: **Proposed**, not accepted.
+## Qualification results
 
-| Image | EFI SHA-256 | ESP SHA-256 | Use/result |
-|---|---|---|---|
-| Diagnostic | `e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282` | `b7a50113498033dd488ccd62acfebeed96d6a483d891cffed997cb79ef09bf42` | T2/T3/T4; explicitly reports `XF NOT RUN` |
-| Strict acceptance | `bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e` | `33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a` | Preserves the failing genuine `#XF` test |
+| Gate | Result | Details |
+|---|---|---|
+| Historical diagnostic regression | **PASS 120/120** | One uninterrupted run on source commit `989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`; strict `#XF` acceptance is intentionally excluded. |
+| Strict `#XF` test | **FAIL** | QEMU 11.1.2 TCG, both `max` and `qemu64` CPU profiles. The guest sets MXCSR to `0x1F00`, `SQRTSS` returns with `0x1F01`, and vector 19 is not delivered; expected status `0x113`. |
+| Diagnostic T2 | **PASS 10/10** | 95 seconds; zero failed boots. |
+| Diagnostic T3 | **PASS 25/25** | 237 seconds; zero failed boots. |
+| Diagnostic T4 | **PASS 100/100** | 952 seconds; zero failed boots, retries, or timeouts. |
+| Bochs 3.1 trial | **NO `#XF` RESULT** | Tiger Lake and Core 2 profiles page-fault in OVMF before an ArenaOS marker. |
 
-The Phase-14 PIE remains at SHA-256
-`d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`; the
-signed APB1 remains at `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`.
+T2/T3/T4 used one fresh Phase 15 diagnostic image and the QEMU CPU profile
+`qemu64,+nx,+smep,+smap`. That image explicitly says `XF NOT RUN`. These are
+useful stability results, but they do not close the official Phase 15 gates.
+The strict test records that the sibling and peer survive, the fault slot is
+released, resources return to baseline, and the guest shuts down cleanly; none
+of those results replaces the missing vector-19 delivery.
 
-## Results
+The diagnostic EFI SHA-256 is
+`e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282`; its fresh
+ESP SHA-256 is
+`e2a06c116fc51a90ffb70a9e14a1e0f714d6bafc10900266782cb1d4e61cbb3f`. The
+strict EFI SHA-256 is
+`bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e`; its
+fresh ESP SHA-256 is
+`631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f`.
 
-- **Source/host:** final ownership and lifecycle audit found no correctness
-  defect; kernel host tests pass 8/8; rustfmt passes; canonical build passes;
-  whole executable-section ISA audit covers 120,911 instructions gap-free
-  with six reviewed state-management leaves and no ordinary kernel FP/MMX/
-  SSE/AVX instructions.
-- **Historical regression:** the complete diagnostic runner executed all 120
-  groups; its initial aggregate result was **FAIL, 115/120**. Five first-run
-  failures were `test_phase14_negative_guest.py`, `test_m10_boundaries_red.py`,
-  `test_m84_stage.py`, `test_m8_dependencies.py`, and `test_m8_fault.py`. Each
-  affected suite passed its isolated recovery run. The M8 correction is a test
-  parser fix. No clean one-shot 120/120 aggregate rerun was completed; the
-  initial failures remain recorded.
-- **Guest FP/SIMD:** diagnostic tests pass x87/SSE/SSE2 and XMM0–XMM15 thread
-  isolation, process isolation and slot reuse, MMX state across timer/yield
-  plus `EMMS`, optional CPUID feature reporting, and `#MF`/`#UD` containment.
-- **OSXSAVE:** one seeded diagnostic boot entered with CR4.OSXSAVE set and
-  XCR0=`0x7`, then verified XCR0=`0x3`, OSXSAVE clear, and native SSE
-  execution. The ordinary firmware entry starts with OSXSAVE clear.
-- **`#XF`: BLOCKED.** The strict guest executes `sqrtss xmm0,xmm0` with MXCSR
-  `0x1F00`; stock QEMU 11.0.2 TCG returns with `0x1F01` and does not deliver
-  vector 19 on the `max` and `qemu64` profiles. The sibling and peer survive
-  and resources return to baseline, but delivery remains failed. No kernel
-  workaround or synthetic `int 19` was added.
-- **Earlier backend search:** that QEMU host lacked `/dev/kvm`. Explicit QEMU
-  `-accel kvm`, `mshv`, and `nitro` each failed because the required host
-  device/backend was absent.
-  WHPX/HVF do not apply to this Linux host. TCG is the only available backend;
-  no hardware-backed run is claimed.
-- **Final-source aggregate rerun:** **NOT RUN** in the current workspace
-  because QEMU, OVMF, `cargo`, and `rustc` are absent. The previously recorded
-  115/120 aggregate and five focused recoveries remain historical evidence;
-  they are not upgraded to a clean 120/120 result.
+## Complete receipts
 
-## Stability evidence
+The machine-readable result is
+[`phase15-local-recovery.json`](receipts/phase15-local-recovery.json). The
+compressed raw evidence bundle is
+[`phase15-local-recovery-2026-10-21.tar.gz`](receipts/phase15-local-recovery-2026-10-21.tar.gz),
+SHA-256
+`fb1ff147b35373be554f0056930d9c7ddeb7ea00877d4a682ee19b17ec2a7033`.
+It contains the 120-suite aggregate and 2,000 per-test artifacts, strict TCG
+serial and stderr receipts for both CPU profiles, exact tested images, all
+T2/T3/T4 per-boot pixel/lifecycle and DNS receipts, the KVM probe, and both
+Bochs trial logs and the QEMU/toolchain version probes. Its internal
+`SHA256SUMS` manifest lists 2,368 files, all verified after extraction.
 
-All three runs used the same immutable diagnostic image, QEMU 11.0.2 TCG, and
-CPU profile `qemu64,+nx,+smep,+smap`.
+## Gate decision
 
-| Gate | Diagnostic result | Duration | Official Phase-15 result |
-|---|---:|---:|---|
-| T2 | 10/10 | 134 seconds | Blocked by `#XF` |
-| T3 | 25/25 | 318 seconds | Blocked by `#XF` |
-| T4 | 100/100 | 1,326 seconds | Blocked by `#XF` |
+Keep Phase 15 **PARTIAL / UNQUALIFIED** and ADR-0113 Proposed. This environment
+cannot satisfy the remaining strict gate: QEMU TCG fails the vector-19 check,
+`/dev/kvm` is unavailable, and Bochs 3.1 did not boot ArenaOS. A strict guest
+run on a host with a successfully initialized hardware accelerator, or on an
+independently functioning emulator, is now required. No exception-delivery
+workaround or synthetic interrupt was added.
 
-All diagnostic stability boots had zero failures, timeouts, and retries. T4
-retained 100 per-boot pixel/lifecycle receipts. These diagnostic runs do not
-satisfy official T2/T3/T4, whose Phase-15 acceptance includes genuine `#XF`
-containment.
-
-## Archive and remaining blockers
-
-A reproducible **diagnostic checkpoint**, not a release candidate, is available
-at [phase15-diagnostic-checkpoint.tar.gz](/workspace/ArenaOS/build/phase15-diagnostic-checkpoint.tar.gz).
-It is 137,994,198 bytes with SHA-256
-`8fd857c9c46a6c370fc639bbacaa43c46dcba7a5fb3fe0be2ea2274d00eecc9d`. The
-extracted-only verifier passed 3,335 manifest checks, exact image and fixture
-hashes, a diagnostic boot with clean shutdown, and the signed Phase-14 PIE
-install/launch/teardown workflow. The first extraction caught a one-character
-hash pin typo before guest boot; that receipt is preserved, the pin was
-corrected, the archive rebuilt, and the second extraction passed. Archive
-verification does not change the blocked `#XF` result.
-
-Remaining qualification blockers are genuine vector-19 delivery and
-containment under a trustworthy backend, a clean one-shot 120/120 historical
-regression run, and official rather than diagnostic T2/T3/T4 evidence. Run the
-external strict test on an x86-64 KVM or WHPX host, independently verify its
-receipt, then complete the full regression and official qualification gates
-with the final immutable image before requesting integration review. Arena 1's
-SDL3 application and Arena 2's runtime were not run or modified; no SDL3
-compatibility, C runtime, libc/libm, or graphics integration is established.
-
-See [the qualification record](QUALIFICATION.md),
-[`phase15-qualification-recovery.json`](receipts/phase15-qualification-recovery.json),
-[`phase15-diagnostic-checkpoint.json`](receipts/phase15-diagnostic-checkpoint.json),
-and [the alternate-backend receipt](receipts/phase15-alternative-backends.json)
-for exact raw and machine-readable evidence.
+Arena 1 SDL3 and Arena 2 runtime integration remain outside the tested scope.
+See the [qualification record](QUALIFICATION.md),
+[CPU contract](CPU-CONTRACT.md), and
+[thread-state isolation notes](THREAD-STATE-ISOLATION.md).

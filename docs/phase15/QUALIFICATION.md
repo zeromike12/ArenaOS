@@ -1,14 +1,49 @@
 # Phase 15 qualification record
 
-Status: **PARTIAL / UNQUALIFIED**. The implementation and diagnostic guest
-coverage are complete. The historical runner exercised all 120 groups but had
-five failures in its first aggregate run; each failed group passed when rerun
-individually. No clean one-shot 120/120 aggregate run was completed. Diagnostic
-T2/T3/T4 passed on one immutable EFI/ESP, and genuine SIMD `#XF` remains blocked
-because no hardware-backed or independently verified emulator backend is
-available.
+Status: **PARTIAL / UNQUALIFIED**. The latest uninterrupted historical
+diagnostic run passed 120/120 suites. Fresh diagnostic T2/T3/T4 runs passed
+10/10, 25/25, and 100/100. Strict `#XF` still fails under QEMU 11.1.2 TCG,
+KVM cannot initialize because `/dev/kvm` is absent, and Bochs 3.1 page-faulted
+in OVMF before reaching ArenaOS. ADR-0113 remains Proposed.
 
-## Final recovery attempt (2026-10-12)
+## Current local recovery (2026-10-21)
+
+- QEMU 11.1.2 and OVMF 2026.08 were recovered from signed official Debian
+  packages into the ignored local qualification directory. Rust 1.97.0 was
+  bootstrapped from `static.rust-lang.org` after its SHA-256 was checked.
+  QEMU 10.0.13/OVMF 2025.02 and Bochs 3.1 were also extracted for comparison.
+  No system packages or host security settings were changed.
+- Every QEMU guest test used explicit `-accel tcg`. QEMU advertises KVM, but
+  `/dev/kvm` is absent and `-accel kvm` exits 1 during initialization.
+- `bash tools/run_phase15_historical_diagnostic.sh` passed **120/120** in one
+  uninterrupted run on source commit
+  `989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. The strict `#XF` case is
+  deliberately excluded by this diagnostic runner.
+- `python3 tools/test_m15_guest.py` failed its strict vector-19 assertion on
+  QEMU 11.1.2 TCG under both `max` and `qemu64` profiles. With MXCSR `0x1F00`,
+  `SQRTSS` returned with `0x1F01` instead of delivering vector 19/status
+  `0x113`. The other Phase-15 guest assertions and fault cleanup receipts
+  passed, but do not qualify `#XF`.
+- Fresh diagnostic stability results on one EFI/ESP were T2 **10/10** in
+  95 seconds, T3 **25/25** in 237 seconds, and T4 **100/100** in 952 seconds.
+  The image says `#XF NOT RUN`; the official Phase-15 stability gates remain
+  blocked.
+- Bochs 3.1 with Tiger Lake and Core 2 profiles page-faulted inside OVMF
+  before an ArenaOS marker. It produced no `#XF` result.
+
+The exact tools, hashes, outcomes, and preserved raw receipts are in
+[`phase15-local-recovery.json`](receipts/phase15-local-recovery.json) and the
+[complete local receipt archive](receipts/phase15-local-recovery-2026-10-21.tar.gz).
+The archive's SHA-256 is
+`fb1ff147b35373be554f0056930d9c7ddeb7ea00877d4a682ee19b17ec2a7033`.
+
+## Previous recovery snapshot (2026-10-12; superseded)
+
+The remaining sections in this snapshot describe evidence available on
+2026-10-12. Current results are summarized above and in the linked local
+recovery receipt.
+
+## Recorded recovery attempt (2026-10-12)
 
 Evidence labels for this revision:
 
@@ -193,7 +228,7 @@ are the recovery/stability summary. The archive result is recorded in
 [`phase15-diagnostic-checkpoint.json`](receipts/phase15-diagnostic-checkpoint.json)
 with its raw extracted-run log.
 
-## Gate decision
+## Gate decision in the 2026-10-12 snapshot (superseded)
 
 Report **PHASE 15 — IMPLEMENTED / HISTORICAL REGRESSIONS TESTED / EXCEPTION
 QUALIFICATION BLOCKED**. The historical run and all five focused recoveries

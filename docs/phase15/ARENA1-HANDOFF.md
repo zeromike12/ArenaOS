@@ -6,10 +6,11 @@ control/status, and MXCSR state across direct syscalls, yield, blocking/wake,
 and scheduler switches. Arena 1's SDL3 executable has **not** been run by this
 Phase-15 guest fixture, so this handoff does not claim SDL3 compatibility.
 ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**; these CPU
-capabilities are not release guarantees. Historical diagnostic T2/T3/T4 and
-MMX/OSXSAVE coverage pass, but strict unmasked SIMD `#XF` delivery still fails
-under the available QEMU TCG backend. T4 was 100/100 diagnostic boots; its
-official gate remains blocked.
+capabilities are not release guarantees. The latest historical diagnostic
+aggregate passed 120/120. Fresh diagnostic T2/T3/T4 passed 10/10, 25/25, and
+100/100 under QEMU 11.1.2 TCG, but strict unmasked SIMD `#XF` delivery failed
+on both CPU profiles. This host has no `/dev/kvm`; Bochs 3.1 stopped in OVMF
+before ArenaOS. The official gates remain blocked.
 
 ## Supported profile
 
@@ -44,11 +45,13 @@ Phase-15 qualification image before declaring it compatible.
 - **SOURCE-REVIEWED** — the proposed x86-64 x87/SSE2 contract and per-thread
   state ownership are documented; no SDL3 application source was changed.
 - **HOST-TESTED** — strict image identity is pinned in the external test kit.
-- **TCG-GUEST-TESTED** — diagnostic FP/SIMD coverage passes, while strict
-  unmasked `#XF` fails under the previously tested TCG backend.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**; no KVM/WHPX trial is available.
-- **NOT RUN** — Arena 1 SDL3 launch, native library integration, the final
-  120/120 regression, and official strict T2/T3/T4.
+- **TCG-GUEST-TESTED** — the uninterrupted 120/120 historical diagnostic
+  aggregate and diagnostic T2/T3/T4 pass; strict unmasked `#XF` fails under
+  QEMU 11.1.2 TCG.
+- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**; `/dev/kvm` is absent and
+  WHPX is not applicable on this Linux host.
+- **NOT RUN** — Arena 1 SDL3 launch, native library integration, and official
+  strict T2/T3/T4 qualification.
 
 Keep distributable code at the x86-64 baseline with CPUID-gated optional SSE
 features and no AVX requirement. Do not advertise Arena 1 compatibility from

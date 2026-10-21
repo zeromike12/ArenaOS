@@ -1,9 +1,12 @@
 # Phase 15 thread-state isolation
 
-Status: thread/process isolation, MMX state, fresh-slot cleanup, `#MF`, and
-`#UD` passed the historical diagnostic guest. Overall Phase 15 remains
-**PARTIAL / UNQUALIFIED** because strict `#XF` delivery has not passed.
-ADR-0113 remains Proposed. See [qualification](QUALIFICATION.md).
+Status: the uninterrupted historical diagnostic aggregate passed **120/120**
+on source commit `989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. Thread/process
+isolation, MMX state, fresh-slot cleanup, `#MF`, and `#UD` passed. Overall
+Phase 15 remains **PARTIAL / UNQUALIFIED** because strict `#XF` delivery has
+not passed. ADR-0113 remains Proposed. See
+[qualification](QUALIFICATION.md) and the
+[current local recovery receipt](receipts/phase15-local-recovery.json).
 
 ## Ownership and transition rule
 
@@ -47,10 +50,11 @@ the guest records that failure while the sibling and peer exit 42, the fault
 slot is released, and resources return to baseline. Those cleanup receipts do
 not turn the `#XF` test into a pass. `#MF` and `#UD` containment pass separately.
 
-The immutable diagnostic EFI/ESP completed T2/T3/T4 at 10/10, 25/25, and
-100/100 boots. Each boot exercised the diagnostic Phase-15 thread/process/MMX
-coverage while explicitly reporting `#XF NOT RUN`; these counts do not satisfy
-official exception qualification.
+The immutable diagnostic EFI/ESP completed T2/T3/T4 at 10/10 in 95 seconds,
+25/25 in 237 seconds, and 100/100 in 952 seconds on QEMU 11.1.2 TCG. Each boot
+exercised the diagnostic Phase-15 thread/process/MMX coverage while explicitly
+reporting `#XF NOT RUN`; these counts do not satisfy official exception
+qualification.
 
 ## External strict verification
 
@@ -58,12 +62,12 @@ official exception qualification.
   MXCSR `0x1F00`; the kernel expects exit status `0x113` from vector 19.
 - **HOST-TESTED** — the external kit pins the strict EFI, ESP, and compiled
   fixture hashes and checks the EFI embedded in the ESP.
-- **TCG-GUEST-TESTED** — previous TCG runs show the sticky invalid flag but no
-  vector 19, so the strict case fails.
+- **TCG-GUEST-TESTED** — the latest QEMU 11.1.2 run, under both CPU profiles,
+  shows the sticky invalid flag but no vector 19, so the strict case fails.
 - **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** until KVM or WHPX produces a
   passing guest receipt with sibling/peer survival and exact teardown.
-- **NOT RUN** — the final strict run, clean 120/120 aggregate, and official
-  T2/T3/T4 gates.
+- **NOT RUN** — official strict T2/T3/T4. KVM cannot initialize because this
+  host has no `/dev/kvm`; the T2/T3/T4 results above are diagnostic-only.
 
 Run instructions and the receipt verifier are in
 `tools/phase15_external/README.md`. A QEMU accelerator startup by itself does
