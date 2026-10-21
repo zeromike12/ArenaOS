@@ -17,8 +17,6 @@ $driver = Join-Path $PSScriptRoot 'run_external.py'
 $verifier = Join-Path $PSScriptRoot 'verify_receipt.py'
 $efi = Join-Path $repoRoot 'artifacts\arena-boot.efi'
 $esp = Join-Path $repoRoot 'artifacts\arena-esp.img'
-if (-not (Test-Path $efi)) { $efi = Join-Path $repoRoot 'build\phase15-strict-efi-6586a0a.efi' }
-if (-not (Test-Path $esp)) { $esp = Join-Path $repoRoot 'build\phase15-strict-esp-6586a0a.img' }
 
 if (-not $Qemu) {
     $found = Get-Command 'qemu-system-x86_64.exe' -ErrorAction SilentlyContinue
@@ -29,28 +27,8 @@ if (-not $Qemu) { $Qemu = 'qemu-system-x86_64.exe' }
 
 if (-not $OvmfCode -and $env:ARENA_OVMF_CODE) { $OvmfCode = $env:ARENA_OVMF_CODE }
 if (-not $OvmfVars -and $env:ARENA_OVMF_VARS) { $OvmfVars = $env:ARENA_OVMF_VARS }
-if ((Test-Path $Qemu -PathType Leaf)) {
-    $qemuDir = Split-Path -Parent (Resolve-Path $Qemu).Path
-    $fwDirs = @((Join-Path $qemuDir 'share'), (Join-Path $qemuDir 'share\qemu'), $qemuDir)
-    if (-not $OvmfCode) {
-        foreach ($dir in $fwDirs) {
-            foreach ($name in @('edk2-x86_64-code.fd', 'OVMF_CODE.fd')) {
-                $candidate = Join-Path $dir $name
-                if (Test-Path $candidate -PathType Leaf) { $OvmfCode = $candidate; break }
-            }
-            if ($OvmfCode) { break }
-        }
-    }
-    if (-not $OvmfVars) {
-        foreach ($dir in $fwDirs) {
-            foreach ($name in @('edk2-i386-vars.fd', 'OVMF_VARS.fd')) {
-                $candidate = Join-Path $dir $name
-                if (Test-Path $candidate -PathType Leaf) { $OvmfVars = $candidate; break }
-            }
-            if ($OvmfVars) { break }
-        }
-    }
-}
+if (-not $OvmfCode) { $OvmfCode = Join-Path $repoRoot 'artifacts\OVMF_CODE_4M.fd' }
+if (-not $OvmfVars) { $OvmfVars = Join-Path $repoRoot 'artifacts\OVMF_VARS_4M.fd' }
 
 Write-Host "QEMU executable: $Qemu"
 if (Test-Path $Qemu) {
@@ -74,6 +52,11 @@ if (-not $OvmfVars -or -not (Test-Path $OvmfVars -PathType Leaf)) {
 if (-not $OutputDirectory) {
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
     $OutputDirectory = Join-Path $repoRoot "build\phase15-external-$stamp"
+}
+
+if (-not (Get-Command $Python -ErrorAction SilentlyContinue)) {
+    Write-Error "Python was not found ('$Python'). Install Python 3.10+ and the kit requirements; no runner receipt can be created without Python."
+    exit 2
 }
 
 $runnerArgs = @(

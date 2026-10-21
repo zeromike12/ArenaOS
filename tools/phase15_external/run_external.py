@@ -25,9 +25,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 EFI_SHA = "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e"
-ESP_SHA = "33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a"
+ESP_SHA = "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f"
 XF_SHA = "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3"
 XF_SOURCE_SHA = "f59c35ed5d5bbe810a9baad573418b9a64a385e2330b23627ebfc7bffa4a9c3a"
+OVMF_CODE_SHA = "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94"
+OVMF_VARS_SHA = "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
 CPU_RUNS = (
     ("phase15-avx", "max,+nx,+smep,+smap", True),
     ("phase15-qemu64", "qemu64,+nx,+smep,+smap", False),
@@ -131,11 +133,18 @@ def verify_kit_manifest(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
     try:
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("format") != "arenaos.phase15.external-kit.v1":
+        if manifest.get("format") != "arenaos.phase15.external-kit.v2":
             errors.append("external kit manifest has an unknown format")
+        identities = manifest.get("strict_artifact_identities", {})
+        expected = {"efi_sha256": EFI_SHA, "esp_sha256": ESP_SHA,
+                    "xf_probe_sha256": XF_SHA}
+        if identities != expected:
+            errors.append("external kit strict artifact identities do not match the accepted pins")
         for relative, record in manifest.get("files", {}).items():
             path = root / relative
-            if not path.is_file():
+            if not path.resolve().is_relative_to(root.resolve()):
+                errors.append(f"kit manifest path escapes the kit root: {relative}")
+            elif not path.is_file():
                 errors.append(f"kit manifest file is missing: {relative}")
             elif path.stat().st_size != record.get("bytes") or sha256(path) != record.get("sha256"):
                 errors.append(f"kit manifest hash mismatch: {relative}")
@@ -297,7 +306,7 @@ def probe_accelerator(prefix: list[str], backend: str) -> dict[str, Any]:
         evidence["probe_output"] = "".join(transcript)
         evidence["initialized"] = True
         return evidence
-    except Exception:
+    except Exception as error:
         if proc.poll() is None:
             proc.kill()
         try:
@@ -306,7 +315,7 @@ def probe_accelerator(prefix: list[str], backend: str) -> dict[str, Any]:
             evidence["qemu_exit_status"] = None
         evidence["probe_output"] = "".join(transcript)
         evidence["initialized"] = False
-        raise
+        raise AcceleratorProbeError(str(error), evidence) from error
 
 
 def verify_embedded_efi(esp: Path, efi: Path) -> bool:
@@ -323,8 +332,15 @@ def choose_firmware(args: argparse.Namespace) -> tuple[Path, Path]:
     code = Path(args.ovmf_code).expanduser().resolve() if args.ovmf_code else None
     vars_path = Path(args.ovmf_vars).expanduser().resolve() if args.ovmf_vars else None
     if code is None or vars_path is None:
-        if os.name == "nt":
-            raise FileNotFoundError("Windows requires explicit --ovmf-code and --ovmf-vars paths")
+        bundled_code = ROOT / "artifacts/OVMF_CODE_4M.fd"
+        bundled_vars = ROOT / "artifacts/OVMF_VARS_4M.fd"
+        if bundled_code.is_file() and bundled_vars.is_file():
+            code = code or bundled_code
+            vars_path = vars_path or bundled_vars
+        elif os.name == "nt":
+            raise FileNotFoundError(
+                "bundled OVMF is missing; Windows requires --ovmf-code and --ovmf-vars")
+    if code is None or vars_path is None:
         sys.path.insert(0, str(ROOT / "tools"))
         import arena_env
 
@@ -336,6 +352,91 @@ def choose_firmware(args: argparse.Namespace) -> tuple[Path, Path]:
     if not code.is_file() or not vars_path.is_file():
         raise FileNotFoundError(f"OVMF code/vars files must exist: {code}, {vars_path}")
     return code, vars_path
+
+
+class AcceleratorProbeError(RuntimeError):
+    def __init__(self, message: str, evidence: dict[str, Any]):
+        super().__init__(message)
+        self.evidence = evidence
+
+
+def classify_trial(serial: str, qemu_exit: int | None,
+                   semantic_exit: int | None,
+                   harness_passed: bool) -> dict[str, Any]:
+    arena_booted = "[arena INFO  boot] ArenaOS boot stage" in serial
+    firmware_started = arena_booted or "BdsDxe: starting Boot" in serial
+    fault_receipt = re.search(r"minimal #XF probe receipts: fault=Some\(([^)]+)\), "
+                              r"sibling=Some\(([^)]+)\), peer=Some\(([^)]+)\), "
+                              r"sibling_and_peer_survived=(true|false), "
+                              r"fault_slot_released=(true|false), "
+                              r"resource_baseline_restored=(true|false)", serial)
+    vector19 = re.search(
+        r"\[arena user fault\] pid=\d+ vector=0x13 \(#XF SIMD Floating Point\)",
+        serial) is not None
+    expected_fault = bool(fault_receipt and fault_receipt.group(1).lower() == "113")
+    both_survived = bool(fault_receipt and fault_receipt.group(2).lower() == "2a"
+                         and fault_receipt.group(3).lower() == "2a"
+                         and fault_receipt.group(4) == "true")
+    sibling_survived = both_survived
+    peer_survived = both_survived
+    slot_released = bool(fault_receipt and fault_receipt.group(5) == "true")
+    resources_restored = bool(fault_receipt and fault_receipt.group(6) == "true")
+    xf_attempted = "m15:test:xf_delivery_probe:" in serial
+    historical_complete = all(marker in serial for marker in (
+        "m3: RESULT PASS (13/13)", "m4: RESULT PASS (9/9)"))
+    clean_shutdown = "halting via UEFI ResetSystem(shutdown)" in serial
+    kernel_continued = "m15:test:mf_ud_fault_containment: PASS" in serial
+    containment_ok = all((expected_fault, sibling_survived, peer_survived,
+                          slot_released, resources_restored))
+    if qemu_exit not in (0, None) and not serial:
+        boundary = "qemu_process_or_firmware_startup"
+    elif not firmware_started:
+        boundary = "firmware_boot_not_observed"
+    elif not arena_booted:
+        boundary = "firmware_did_not_transfer_to_arenaos"
+    elif not xf_attempted:
+        boundary = "arenaos_did_not_reach_xf_probe"
+    elif not vector19:
+        boundary = "vector_19_delivery"
+    elif not containment_ok:
+        boundary = "exception_containment"
+    elif not (historical_complete and kernel_continued and clean_shutdown
+              and harness_passed and qemu_exit == 0 and semantic_exit == 0):
+        boundary = "other_strict_guest_assertion"
+    else:
+        boundary = "complete"
+    return {
+        "qemu_process_exit": "PASS" if qemu_exit == 0 else "FAIL",
+        "semantic_guest_exit": "PASS" if semantic_exit == 0 else "FAIL",
+        "firmware_boot": "PASS" if firmware_started else "NOT_OBSERVED",
+        "arenaos_boot": "PASS" if arena_booted else "NOT_OBSERVED",
+        "historical_guest_suites": ("PASS" if historical_complete else
+                                    "FAIL" if arena_booted else "NOT_OBSERVED"),
+        "xf_probe_attempted": xf_attempted,
+        "vector_19_delivery": ("PASS" if vector19 else
+                               "FAIL" if xf_attempted else "NOT_REACHED"),
+        "faulting_thread_terminated_with_0x113": expected_fault,
+        "same_process_sibling_survived": sibling_survived,
+        "independent_process_survived": peer_survived,
+        "scheduler_slot_reclaimed": slot_released,
+        "resource_baseline_restored": resources_restored,
+        "containment": ("PASS" if all((expected_fault, sibling_survived,
+                                        peer_survived, slot_released,
+                                        resources_restored)) else
+                        "FAIL" if xf_attempted else "NOT_REACHED"),
+        "kernel_continued_operation": ("PASS" if kernel_continued else
+                                       "FAIL" if xf_attempted else "NOT_OBSERVED"),
+        "clean_shutdown": "PASS" if clean_shutdown else
+                         "FAIL" if arena_booted else "NOT_OBSERVED",
+        "failure_boundary": boundary,
+        "strict_harness": "PASS" if harness_passed else "FAIL",
+        "trial": ("PASS" if qemu_exit == 0 and semantic_exit == 0
+                  and harness_passed and vector19 and expected_fault
+                  and sibling_survived and peer_survived and slot_released
+                  and resources_restored and historical_complete
+                  and kernel_continued and clean_shutdown
+                  else "FAIL"),
+    }
 
 
 def strict_xf_evidence(serial: str) -> dict[str, bool]:
@@ -400,6 +501,8 @@ def main() -> int:
             "efi_expected_sha256": EFI_SHA,
             "esp_expected_sha256": ESP_SHA,
             "xf_probe_expected_sha256": XF_SHA,
+            "ovmf_code_expected_sha256": OVMF_CODE_SHA,
+            "ovmf_vars_expected_sha256": OVMF_VARS_SHA,
             "strict_image_build_source_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
             "required_cpu_profiles": [
                 {"label": label, "cpu": cpu, "avx_expected": avx}
@@ -453,7 +556,8 @@ def main() -> int:
                     status = "FAIL"
             except Exception as error:  # recorded as a failed artifact preflight
                 reasons.append(f"could not verify the ESP EFI entry: {error}")
-                status = "FAIL"
+                status = ("BLOCKED" if isinstance(error, ImportError)
+                          and status != "FAIL" else "FAIL")
 
     xf_probe = (Path(args.xf_probe).expanduser().resolve() if args.xf_probe
                 else ROOT / "userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe")
@@ -555,7 +659,21 @@ def main() -> int:
 
     try:
         code, vars_path = choose_firmware(args)
-        receipt["firmware"] = {"code": file_record(code), "vars_template": file_record(vars_path)}
+        code_copy = out / "artifacts/OVMF_CODE_4M.fd"
+        vars_copy = out / "artifacts/OVMF_VARS_4M.fd"
+        shutil.copyfile(code, code_copy)
+        shutil.copyfile(vars_path, vars_copy)
+        receipt["firmware"] = {
+            "code": output_file_record(code_copy, out),
+            "vars_template": output_file_record(vars_copy, out),
+            "bundled_code_identity_matches": sha256(code) == OVMF_CODE_SHA,
+            "bundled_vars_identity_matches": sha256(vars_path) == OVMF_VARS_SHA,
+        }
+        firmware_source = ROOT / "FIRMWARE-SOURCE.json"
+        if firmware_source.is_file():
+            shutil.copyfile(firmware_source, out / "artifacts/FIRMWARE-SOURCE.json")
+            receipt["firmware"]["source_record"] = output_file_record(
+                out / "artifacts/FIRMWARE-SOURCE.json", out)
     except Exception as error:
         reasons.append(f"OVMF firmware preflight failed: {error}")
         status = "BLOCKED" if status != "FAIL" else status
@@ -574,6 +692,11 @@ def main() -> int:
         try:
             receipt["accelerator_probe"] = probe_accelerator(prefix, args.backend)
             status = "FAIL"  # a boot trial must promote this only after every assertion passes
+        except AcceleratorProbeError as error:
+            receipt["accelerator_probe"] = error.evidence
+            reasons.append(
+                f"requested accelerator failed its QMP initialization probe: {error}")
+            status = "BLOCKED"
         except Exception as error:
             receipt["accelerator_probe"] = {"initialized": False,
                                              "error": str(error)}
@@ -604,10 +727,13 @@ def main() -> int:
             qmp = importlib.import_module("qmp")
             test = importlib.import_module("test_m15_guest")
             original_semantic = mtest.semantic_exit_rc
+            semantic_exits: dict[str, int | None] = {}
 
             def capture_exit(rc: int | None, serial: str, label: str) -> int | None:
                 actual_exits[label] = rc
-                return original_semantic(rc, serial, label)
+                semantic_rc = original_semantic(rc, serial, label)
+                semantic_exits[label] = semantic_rc
+                return semantic_rc
 
             mtest.semantic_exit_rc = capture_exit
             original_qmp = qmp.Qmp
@@ -635,6 +761,10 @@ def main() -> int:
 
             test.check_serial = record_check
             start = time.monotonic()
+            for label, _, _ in CPU_RUNS:
+                for suffix in ("serial", "qemu-stderr"):
+                    stale = ROOT / "build" / f"{suffix}-{label}.log"
+                    stale.unlink(missing_ok=True)
             real_popen = subprocess.Popen
             process_index = 0
 
@@ -671,6 +801,7 @@ def main() -> int:
                 item: dict[str, Any] = {
                     "label": label, "cpu": cpu, "avx_expected": avx,
                     "qemu_exit_status": actual_exits.get(label),
+                    "semantic_guest_exit_status": semantic_exits.get(label),
                     "strict_harness_checks_passed": profile_checks.get(label, False),
                 }
                 if serial_src.is_file():
@@ -679,6 +810,9 @@ def main() -> int:
                     serial = serial_copy.read_text(errors="replace")
                     item["serial_log"] = output_file_record(serial_copy, out)
                     item["strict_xf_evidence"] = strict_xf_evidence(serial)
+                    item["stage_outcomes"] = classify_trial(
+                        serial, actual_exits.get(label), semantic_exits.get(label),
+                        profile_checks.get(label, False))
                 else:
                     item["strict_xf_evidence"] = {}
                 if stderr_src.is_file():
@@ -693,6 +827,8 @@ def main() -> int:
                 all(item.get("strict_xf_evidence", {}).values())
                 and item.get("strict_harness_checks_passed") is True
                 and item.get("qemu_exit_status") == 0
+                and item.get("semantic_guest_exit_status") == 0
+                and item.get("stage_outcomes", {}).get("trial") == "PASS"
                 for item in trials
             )
             kvm_records_ok = (args.backend != "kvm" or
@@ -715,6 +851,7 @@ def main() -> int:
                 item: dict[str, Any] = {
                     "label": label,
                     "qemu_exit_status": actual_exits.get(label),
+                    "semantic_guest_exit_status": semantic_exits.get(label),
                     "strict_harness_checks_passed": profile_checks.get(label, False),
                     "strict_xf_evidence": {},
                 }
@@ -724,6 +861,9 @@ def main() -> int:
                     serial = serial_copy.read_text(errors="replace")
                     item["serial_log"] = output_file_record(serial_copy, out)
                     item["strict_xf_evidence"] = strict_xf_evidence(serial)
+                    item["stage_outcomes"] = classify_trial(
+                        serial, actual_exits.get(label), semantic_exits.get(label),
+                        profile_checks.get(label, False))
                 if stderr_src.is_file():
                     stderr_copy = logs_dir / f"qemu-stderr-{label}.log"
                     shutil.copyfile(stderr_src, stderr_copy)

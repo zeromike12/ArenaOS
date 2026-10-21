@@ -15,8 +15,15 @@ from typing import Any
 
 
 EFI_SHA = "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e"
-ESP_SHA = "33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a"
+ESP_SHA = "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f"
 XF_SHA = "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3"
+OVMF_CODE_SHA = "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94"
+OVMF_VARS_SHA = "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+OVMF_PACKAGE_SHA = "05c1593998ba58700ff86c062bde306321af1f5a2943ea9ceef6c2332f3f3374"
+OVMF_PACKAGE_URL = (
+    "https://deb.debian.org/debian/pool/main/e/edk2/"
+    "ovmf-generic_2026.08+ds-2_all.deb"
+)
 TOOLS = (
     "phase15_external/README.md",
     "phase15_external/requirements.txt",
@@ -25,6 +32,8 @@ TOOLS = (
     "phase15_external/run_external.py",
     "phase15_external/verify_receipt.py",
     "phase15_external/make_kit.py",
+    "phase15_external/test_kit.py",
+    "phase15_external/OVMF-COPYRIGHT.txt",
     "test_m15_guest.py", "mtest.py", "arena_env.py", "qmp.py", "vcon.py",
     "afs1.py", "tcp_fixture.py", "udp_dns_fixture.py",
 )
@@ -87,16 +96,25 @@ def main() -> int:
     parser.add_argument("--efi", type=Path, required=True)
     parser.add_argument("--esp", type=Path, required=True)
     parser.add_argument("--xf-probe", type=Path, required=True)
+    parser.add_argument("--ovmf-code", type=Path, required=True)
+    parser.add_argument("--ovmf-vars", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     root = args.source_root.resolve()
-    efi, esp, xf = (path.expanduser().resolve() for path in
-                    (args.efi, args.esp, args.xf_probe))
+    efi, esp, xf, ovmf_code, ovmf_vars = (path.expanduser().resolve() for path in
+                    (args.efi, args.esp, args.xf_probe,
+                     args.ovmf_code, args.ovmf_vars))
     for path, expected, name in ((efi, EFI_SHA, "strict EFI"),
                                  (esp, ESP_SHA, "strict ESP"),
                                  (xf, XF_SHA, "CPL3 #XF fixture")):
         if not path.is_file() or digest(path) != expected:
             raise SystemExit(f"{name} is missing or does not match the pinned SHA-256: {path}")
+    for path, expected, name in (
+            (ovmf_code, OVMF_CODE_SHA, "OVMF code firmware"),
+            (ovmf_vars, OVMF_VARS_SHA, "OVMF vars template")):
+        if not path.is_file() or digest(path) != expected:
+            raise SystemExit(
+                f"{name} is missing or does not match the bundled official firmware: {path}")
     try:
         from pyfatfs.PyFatFS import PyFatFS
     except ImportError as error:
@@ -119,6 +137,11 @@ def main() -> int:
         add_file(root, stage, efi, "artifacts/arena-boot.efi")
         add_file(root, stage, esp, "artifacts/arena-esp.img")
         add_file(root, stage, xf, "artifacts/arena-phase15-xf-probe")
+        add_file(root, stage, ovmf_code, "artifacts/OVMF_CODE_4M.fd")
+        add_file(root, stage, ovmf_vars, "artifacts/OVMF_VARS_4M.fd")
+        add_file(root / "tools", stage,
+                 root / "tools/phase15_external/OVMF-COPYRIGHT.txt",
+                 "licenses/ovmf-generic-copyright.txt")
         license_path = root / "LICENSE"
         if license_path.is_file():
             add_file(root, stage, license_path, "LICENSE")
@@ -127,13 +150,32 @@ def main() -> int:
         branch = git_value(root, "branch", "--show-current")
         status = git_value(root, "status", "--porcelain")
         clean = status == "" if status is not None else None
+        firmware_source = {
+            "name": "OVMF x86_64 4 MiB code and vars",
+            "source": "official Debian sid package ovmf-generic 2026.08+ds-2",
+            "package_url": OVMF_PACKAGE_URL,
+            "package_sha256": OVMF_PACKAGE_SHA,
+            "code_path": "artifacts/OVMF_CODE_4M.fd",
+            "code_sha256": OVMF_CODE_SHA,
+            "vars_path": "artifacts/OVMF_VARS_4M.fd",
+            "vars_sha256": OVMF_VARS_SHA,
+            "secure_boot": False,
+        }
+        (stage / "FIRMWARE-SOURCE.json").write_text(
+            json.dumps(firmware_source, indent=2, sort_keys=True) + "\n")
         files = manifest_files(stage)
         manifest = {
-            "format": "arenaos.phase15.external-kit.v1",
+            "format": "arenaos.phase15.external-kit.v2",
             "source_commit": commit,
             "source_branch": branch,
             "source_clean": clean,
             "strict_image_build_source_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
+            "strict_artifact_identities": {
+                "efi_sha256": EFI_SHA,
+                "esp_sha256": ESP_SHA,
+                "xf_probe_sha256": XF_SHA,
+            },
+            "firmware": firmware_source,
             "qualified_release": False,
             "files": files,
         }

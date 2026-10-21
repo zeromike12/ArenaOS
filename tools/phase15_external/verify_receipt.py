@@ -10,11 +10,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from run_external import classify_trial
+
 
 EFI_SHA = "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e"
-ESP_SHA = "33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a"
+ESP_SHA = "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f"
 XF_SHA = "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3"
 XF_SOURCE_SHA = "f59c35ed5d5bbe810a9baad573418b9a64a385e2330b23627ebfc7bffa4a9c3a"
+OVMF_CODE_SHA = "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94"
+OVMF_VARS_SHA = "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
 STRICT_SOURCE_COMMIT = "6586a0a18981932ae7048ca267fa425411f8e463"
 PROFILES = {"phase15-avx", "phase15-qemu64"}
 
@@ -153,6 +157,11 @@ def verify(receipt_path: Path) -> tuple[bool, list[str], list[str]]:
         included_file(record, root)
     if "tools/test_m15_guest.py" not in receipt.get("source_review_files", {}):
         raise ReceiptError("exact strict guest test source was not preserved")
+    kit_record = receipt.get("kit_manifest")
+    if not isinstance(kit_record, dict) or kit_record.get("verified") is not True:
+        raise ReceiptError("external kit manifest was absent or failed its integrity check")
+    if kit_record.get("format") != "arenaos.phase15.external-kit.v2":
+        raise ReceiptError("external kit manifest format is unsupported")
     source_files = receipt.get("source_review_files", {})
     m15_record = source_files.get("kernel/kernel/src/m15.rs")
     idt_record = source_files.get("kernel/kernel/src/arch/x86_64/idt.rs")
@@ -184,9 +193,7 @@ def verify(receipt_path: Path) -> tuple[bool, list[str], list[str]]:
         raise ReceiptError("QEMU accelerator-list probe did not complete")
     if re.search(r"\btc[g]\b", " ".join(qemu.get("command_prefix", [])), re.I):
         raise ReceiptError("receipt command prefix includes TCG")
-    for label, record in (("QEMU binary", qemu.get("binary")),
-                          ("OVMF code", receipt.get("firmware", {}).get("code")),
-                          ("OVMF vars", receipt.get("firmware", {}).get("vars_template"))):
+    for label, record in (("QEMU binary", qemu.get("binary")),):
         if not isinstance(record, dict) or not re.fullmatch(r"[0-9a-f]{64}", record.get("sha256", "")):
             raise ReceiptError(f"{label} SHA-256 identity is missing")
         dependency = Path(record.get("path", ""))
@@ -195,6 +202,38 @@ def verify(receipt_path: Path) -> tuple[bool, list[str], list[str]]:
                 raise ReceiptError(f"{label} hash differs from its recorded identity")
         else:
             notes.append(f"{label} binary is external to this receipt; recorded SHA-256 retained")
+    firmware = receipt.get("firmware", {})
+    for label, key, expected in (("OVMF code", "code", OVMF_CODE_SHA),
+                                 ("OVMF vars", "vars_template", OVMF_VARS_SHA)):
+        record = firmware.get(key)
+        if not isinstance(record, dict):
+            raise ReceiptError(f"{label} identity is missing")
+        included_file(record, root)
+        if record.get("sha256") != expected:
+            notes.append(f"{label} differs from the bundled Debian OVMF 2026.08 identity")
+    firmware_source = firmware.get("source_record")
+    if not isinstance(firmware_source, dict):
+        raise ReceiptError("OVMF source provenance record is missing")
+    firmware_source_path = included_file(firmware_source, root)
+    firmware_source_data = json.loads(firmware_source_path.read_text())
+    if firmware_source_data.get("package_url", "").startswith(
+            "https://deb.debian.org/debian/") is not True:
+        raise ReceiptError("bundled OVMF provenance is not from the official Debian archive")
+    if firmware_source_data.get("package_sha256") != \
+            "05c1593998ba58700ff86c062bde306321af1f5a2943ea9ceef6c2332f3f3374":
+        raise ReceiptError("bundled OVMF package identity is unexpected")
+    if firmware_source_data.get("secure_boot") is not False:
+        raise ReceiptError("kit firmware unexpectedly enables Secure Boot")
+    for key, expected in (("code_sha256", OVMF_CODE_SHA),
+                          ("vars_sha256", OVMF_VARS_SHA)):
+        if firmware_source_data.get(key) != expected:
+            raise ReceiptError(f"bundled OVMF source record has an unexpected {key}")
+    if firmware.get("bundled_code_identity_matches") != \
+            (firmware["code"].get("sha256") == OVMF_CODE_SHA):
+        raise ReceiptError("OVMF code identity flag does not match the copied firmware")
+    if firmware.get("bundled_vars_identity_matches") != \
+            (firmware["vars_template"].get("sha256") == OVMF_VARS_SHA):
+        raise ReceiptError("OVMF vars identity flag does not match the copied firmware")
     if not receipt.get("accelerator_probe", {}).get("initialized"):
         raise ReceiptError("hardware accelerator initialization probe did not pass")
     probe = receipt["accelerator_probe"]
@@ -230,6 +269,9 @@ def verify(receipt_path: Path) -> tuple[bool, list[str], list[str]]:
             raise ReceiptError(f"{trial.get('label')} did not use its pinned CPU profile")
         if trial.get("qemu_exit_status") != 0:
             raise ReceiptError(f"{trial.get('label')} actual QEMU exit was not zero")
+        if trial.get("semantic_guest_exit_status") != 0:
+            raise ReceiptError(
+                f"{trial.get('label')} semantic guest exit was not zero despite QEMU process status")
         if trial.get("strict_harness_checks_passed") is not True:
             raise ReceiptError(f"{trial.get('label')} strict harness checks failed")
         record = trial.get("serial_log")
@@ -240,6 +282,15 @@ def verify(receipt_path: Path) -> tuple[bool, list[str], list[str]]:
         check_guest_log(log)
         if not all(trial.get("strict_xf_evidence", {}).values()):
             raise ReceiptError(f"{trial.get('label')} structured #XF evidence is incomplete")
+        computed_stages = classify_trial(
+            log, trial.get("qemu_exit_status"),
+            trial.get("semantic_guest_exit_status"),
+            trial.get("strict_harness_checks_passed") is True)
+        if trial.get("stage_outcomes") != computed_stages:
+            raise ReceiptError(
+                f"{trial.get('label')} stage receipt does not match its raw guest log and exits")
+        if computed_stages.get("trial") != "PASS":
+            raise ReceiptError(f"{trial.get('label')} classified a strict qualification stage as failed")
         stderr = trial.get("qemu_stderr_log")
         if not isinstance(stderr, dict):
             raise ReceiptError(f"{trial.get('label')} QEMU stderr log was not preserved")
@@ -247,6 +298,8 @@ def verify(receipt_path: Path) -> tuple[bool, list[str], list[str]]:
     if not isinstance(receipt.get("runner_log"), dict):
         raise ReceiptError("test runner output log was not preserved")
     included_file(receipt["runner_log"], root)
+    if receipt.get("test_runner_exit_status") != 0:
+        raise ReceiptError("strict guest harness exit was not zero")
     if receipt.get("status") != "PASS":
         issues.append(f"qualification outcome is {receipt.get('status')}, not PASS")
     if receipt.get("issues"):

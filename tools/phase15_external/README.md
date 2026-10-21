@@ -1,61 +1,67 @@
-# Phase 15 external hardware qualification kit
+# ArenaOS Phase 15 strict external qualification kit
 
-This kit runs the existing strict Phase 15 guest test on Linux/QEMU/KVM or
-Windows/QEMU/WHPX. It pins the strict image pair and preserves full serial
-logs, QEMU stderr, QEMU's real process exit codes, backend initialization
-evidence, firmware and emulator hashes, and a machine-readable receipt.
+This portable kit runs the existing strict Phase 15 guest test on an x86-64
+Linux/KVM or Windows/WHPX host. It contains the reviewed strict EFI and ESP,
+the compiled CPL3 `SQRTSS` fixture, the runner and verifier, required test
+fixtures, and the exact OVMF code and vars firmware. It does not contain QEMU;
+install QEMU from the host OS's official package source or the official QEMU
+download page.
 
-The acceptance authority remains `tools/test_m15_guest.py`. It has optional
-EFI/ESP path overrides so the runner can test the pinned copies; its expected
-markers, verdicts, fixtures, and two CPU profiles are unchanged. The runner
-does not replace `SQRTSS` or accept TCG as hardware evidence. Both existing
-profiles (`max,+nx,+smep,+smap` and `qemu64,+nx,+smep,+smap`) must pass.
+The strict acceptance test remains `tools/test_m15_guest.py`. Its assertions,
+CPU profiles, and unmasked invalid-operation `SQRTSS` probe are unchanged. The
+runner explicitly selects KVM or WHPX, initializes it before guest startup,
+and records QEMU's process exit separately from the guest's semantic result.
+The kit does not credit TCG, diagnostic images, host exceptions, or synthetic
+interrupts as qualification.
 
-## Pinned strict image
+## Pinned artifacts
 
 | File | SHA-256 |
 |---|---|
 | `artifacts/arena-boot.efi` | `bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e` |
-| `artifacts/arena-esp.img` | `33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a` |
+| `artifacts/arena-esp.img` | `631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f` |
 | `artifacts/arena-phase15-xf-probe` | `1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3` |
+| `artifacts/OVMF_CODE_4M.fd` | `7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94` |
+| `artifacts/OVMF_VARS_4M.fd` | `5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e` |
 
-The ESP must contain the byte-identical EFI above. The runner checks both
-hashes and that embedded copy before starting QEMU. If the input differs, it
-refuses to boot it.
+The ESP must embed the exact EFI above. The builder, runner, and verifier each
+check the identities and the embedded EFI. The prior kit ESP identity
+`33dd1576ab597a7d0b3e9a9100bc618e9b251a7a645e77e79d8852a404c40a6a` is a
+superseded image and is rejected.
 
-## Requirements
+The bundled OVMF code and vars are from the official Debian `ovmf-generic`
+2026.08+ds-2 package. `FIRMWARE-SOURCE.json` records the official package URL
+and package SHA-256; the Debian copyright file is included under `licenses/`.
+The files are non-Secure-Boot x86-64 4 MiB firmware. QEMU, Python, and the
+Python dependencies must come from official sources as described below.
 
-- x86-64 host with x87, SSE, SSE2, and AVX exposed to the first pinned CPU profile.
-- Python 3.10 or newer and `pyfatfs==1.1.0` plus `setuptools==80.10.2` from
-  PyPI (the pinned setuptools release retains the `pkg_resources` shim used by
-  PyFilesystem).
-- Official QEMU build with the requested accelerator.
-- Matching x86-64 OVMF/EDK2 code firmware and a writable-vars template.
-- Linux: working `/dev/kvm` and KVM enabled by the host administrator.
-- Windows: QEMU built with WHPX and Windows Hypervisor Platform available.
+## Host requirements
 
-Use QEMU and firmware packages from the host operating system's official
-package repository, or sources linked by [QEMU's download page](https://www.qemu.org/download/)
-and the [TianoCore EDK II project](https://github.com/tianocore/edk2).
-The runner does not download or install host software. It never changes BIOS,
-Hyper-V, WHPX, Secure Boot, drivers, or security settings. Enabling host
-virtualization may require an administrator and a reboot; make that change
-manually only if you choose to.
+- x86-64 Linux with a working `/dev/kvm`, or 64-bit Windows with WHPX available.
+- QEMU's x86-64 system emulator built with the selected accelerator.
+- Python 3.10 or newer.
+- `pyfatfs==1.1.0` and `setuptools==80.10.2` from PyPI.
+- A host CPU exposing x87, SSE, SSE2, and AVX for the existing `max` profile.
 
-Linux QEMU/KVM is the primary technically suitable target: `-accel kvm` runs
-the guest on the host's virtualization hardware, and the runner confirms KVM
-is active through QMP. It still qualifies only if the exact strict guest
-receives vector 19. Windows QEMU/WHPX is a candidate execution target; a
-successful WHPX startup does not establish SIMD exception behavior, so the
-same strict guest result is required there. No alternate emulator is credited
-without a verifiable vector-19 guest trial.
+The ArenaOS kernel continues to use eager per-thread FXSAVE64/FXRSTOR64 and
+the existing x87/MMX/SSE state profile. OSXSAVE stays off and AVX state stays
+unsupported in the guest. The AVX-capable CPU profile is an existing strict
+test input; it is not an ArenaOS feature enablement or exception workaround.
 
-## Prepare the kit
+The runner does not install host software or change BIOS, Hyper-V, WHPX,
+drivers, Secure Boot, or security settings. Do not change host security or
+virtualization settings to make a run proceed. A missing or unusable
+accelerator produces a BLOCKED receipt and starts no guest.
 
-The self-contained `phase15-external-qualification-kit.tar.gz` is the
-transfer package. Extract it on the host that will run qualification; the
-destination does not need the ArenaOS Rust toolchain or a configured build
-workspace:
+## Download and verify
+
+Download the committed `phase15-external-qualification-kit.tar.gz` from the
+Phase 15 artifact link recorded in `docs/phase15/EXTERNAL-KIT.md`. Verify its
+SHA-256 against that document before extraction. The archive contains
+`KIT-MANIFEST.json`; the runner verifies every packaged path, size, and hash
+before it will start QEMU.
+
+Extract into a writable directory and change into it:
 
 ```sh
 mkdir phase15-external
@@ -63,24 +69,8 @@ tar -xzf phase15-external-qualification-kit.tar.gz -C phase15-external
 cd phase15-external
 ```
 
-The archive contains the exact strict artifacts. It contains no QEMU or UEFI
-firmware; those come from the host's official package source. To assemble the
-same kit again from a repository checkout with the original pinned artifacts,
-run:
-
-```sh
-python3 tools/phase15_external/make_kit.py \
-  --efi build/phase15-strict-efi-6586a0a.efi \
-  --esp build/phase15-strict-esp-6586a0a.img \
-  --xf-probe userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe \
-  --output build/phase15-external-qualification-kit.tar.gz
-```
-
-Extract the kit to a writable local directory. It contains the exact strict
-image pair, the standalone CPL3 `SQRTSS` fixture and its source, the minimal
-existing test harness, runners, requirements, and source identity. It does
-not contain firmware or QEMU. Install Python requirements in a virtual
-environment using the official Python package index:
+Install the pinned Python dependencies from the official PyPI index in a
+virtual environment:
 
 ```sh
 python3 -m venv .phase15-venv
@@ -88,61 +78,87 @@ python3 -m venv .phase15-venv
 python -m pip install -r tools/phase15_external/requirements.txt
 ```
 
-On Windows PowerShell, use `py -3 -m venv .phase15-venv`, activate with
-`.\.phase15-venv\Scripts\Activate.ps1`, then run `python -m pip install -r
-tools/phase15_external/requirements.txt`.
+On Windows PowerShell:
+
+```powershell
+py -3 -m venv .phase15-venv
+.\.phase15-venv\Scripts\Activate.ps1
+python -m pip install -r tools/phase15_external/requirements.txt
+```
 
 ## Linux with KVM
 
-From the extracted kit root:
+Install QEMU from the Linux distribution's official repository. Run from the
+kit root:
 
 ```sh
-tools/phase15_external/run_linux.sh \
-  --ovmf-code /usr/share/OVMF/OVMF_CODE.fd \
-  --ovmf-vars /usr/share/OVMF/OVMF_VARS.fd
+tools/phase15_external/run_linux.sh
 ```
 
-Pass `--qemu /path/to/qemu-system-x86_64` if it is not on `PATH`. The runner
-checks `/dev/kvm`, verifies QEMU advertises KVM, initializes a q35 guest with
-`-accel kvm`, confirms QMP reports KVM enabled, then runs the strict guest
-test. `-accel kvm` is explicit, so QEMU cannot silently fall back to TCG.
+Pass `--qemu /path/to/qemu-system-x86_64` if QEMU is not on `PATH`. The runner
+checks `/dev/kvm`, QEMU's advertised backend, and an actual QMP KVM
+initialization (`query-kvm` must report present and enabled). It then runs
+both existing CPU profiles with explicit `-accel kvm`; it cannot fall back to
+TCG.
 
 ## Windows with WHPX
 
-Open PowerShell 7 in the extracted kit root and run:
+Install an official QEMU build that includes WHPX and enable Windows Hypervisor
+Platform only through your normal administrator-controlled process. Open
+PowerShell 7 in the kit root and run:
 
 ```powershell
-.\tools\phase15_external\run_windows.ps1 `
-  -OvmfCode 'C:\QEMU\share\edk2-x86_64-code.fd' `
-  -OvmfVars 'C:\QEMU\share\edk2-i386-vars.fd'
+pwsh -NoProfile -File .\tools\phase15_external\run_windows.ps1
 ```
 
-Pass `-Qemu 'C:\path\to\qemu-system-x86_64.exe'` when QEMU is not on `PATH`.
-The script checks QEMU's WHPX accelerator list and performs an actual
-accelerator initialization probe before boot. It never toggles Windows
-features. If QEMU or WHPX cannot initialize, it writes a BLOCKED receipt and
-does not start the guest.
+Pass `-Qemu 'C:\path\to\qemu-system-x86_64.exe'` if needed. Bundled firmware
+is selected by default; optional `-OvmfCode` and `-OvmfVars` overrides are
+recorded in the receipt. The script checks WHPX support, then the Python
+runner initializes `-accel whpx` through QMP before guest startup. It never
+enables Windows features or changes security policy. The Windows path is
+source-reviewed, but has not been executed in this Linux environment.
 
-## Results and independent receipt check
+## Receipts and verification
 
-Each invocation creates a new `build/phase15-external-<UTC timestamp>/`
-directory containing the exact tested EFI/ESP, `receipt.json`, the complete
-serial logs for both CPU profiles, QEMU stderr logs, and accelerator-probe
-output. Run:
+Every invocation creates a new `build/phase15-external-<UTC timestamp>/`
+directory. It includes the exact tested EFI/ESP and firmware copies, fixture,
+`receipt.json`, complete serial logs, QEMU stderr logs, accelerator-probe
+transcript, runner output, source review, and the reported QEMU/firmware hashes.
+The receipt separates QEMU exit status from semantic guest status and marks
+firmware boot, ArenaOS boot, vector 19, fault-thread termination, sibling and
+peer survival, slot reclamation, resource restoration, continued kernel
+operation, and shutdown independently.
+
+Verify the result from the kit root:
 
 ```sh
 python tools/phase15_external/verify_receipt.py \
   --receipt build/phase15-external-<UTC timestamp>/receipt.json
 ```
 
-The verifier recomputes image, firmware, emulator, source-fixture, and log
-hashes; confirms both QEMU exits were zero; and checks each guest log for the
-real CPL3 vector-19 path, `fault=0x113`, sibling and peer survival, scheduler
-slot reclamation, restored resource baselines, all historical result lines,
-and clean UEFI shutdown. A failing test produces a failing receipt.
+The verifier recomputes hashes, opens the ESP and compares its embedded EFI,
+checks the unmodified fixture source and guest logs, and requires both CPU
+profiles to pass with zero QEMU and semantic exits. A QEMU process exit of zero
+with a failed guest assertion remains a failed qualification. A strict guest
+pass is only the vector-19 gate; official Phase 15 T2/T3/T4 stability and the
+final source, protected Phase 14, ISA, and qualification-archive gates remain
+separate.
 
-WHPX remains a candidate until this strict guest actually passes there. A
-successful QEMU startup alone is not a `#XF` pass. Linux TCG, diagnostic
-images, host `SIGFPE`, synthetic interrupts, and log-only claims are not
-accepted. The kit does not provide official T2/T3/T4 qualification or a final
-release archive.
+## Rebuilding the package from the repository
+
+From a checkout containing the preserved recovery artifacts, use the exact
+strict pair and official Debian firmware:
+
+```sh
+python3 tools/phase15_external/make_kit.py \
+  --efi build/phase15-local-qualification/final-receipts/strict-image/arena-boot.efi \
+  --esp build/phase15-local-qualification/final-receipts/strict-image/arena-esp.img \
+  --xf-probe userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe \
+  --ovmf-code build/phase15-local-qualification/qemu-11-root/usr/share/OVMF/OVMF_CODE_4M.fd \
+  --ovmf-vars build/phase15-local-qualification/qemu-11-root/usr/share/OVMF/OVMF_VARS_4M.fd \
+  --output phase15-external-qualification-kit.tar.gz
+```
+
+The builder refuses a missing or wrong hash, including the superseded ESP,
+and refuses to package an ESP that does not embed the exact strict EFI.
+Rebuilding requires `pyfatfs==1.1.0` to perform the embedded EFI check.
