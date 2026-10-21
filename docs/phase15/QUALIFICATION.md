@@ -37,6 +37,19 @@ The exact tools, hashes, outcomes, and preserved raw receipts are in
 The archive's SHA-256 is
 `fb1ff147b35373be554f0056930d9c7ddeb7ea00877d4a682ee19b17ec2a7033`.
 
+## External execution kit (2026-10-21)
+
+The portable [external kit handoff](EXTERNAL-KIT.md) now pins the current strict
+EFI and recovery ESP (`bbbc63df…` and `631cc645…`), includes the CPL3 fixture
+and official Debian OVMF code/vars, and provides Linux/KVM and
+Windows/WHPX runners plus an independent receipt verifier. Its committed
+archive SHA-256, direct download URL, source identity, and fresh-extraction
+checks are recorded in that handoff. This execution host has no QEMU, KVM
+device, PowerShell, or Bochs; the packaged KVM runner returned BLOCKED and
+started no guest. The Windows path is source-reviewed and not executed.
+Phase 15 remains **PARTIAL / UNQUALIFIED**; genuine vector 19 and official
+strict T2/T3/T4 remain unqualified.
+
 ## Previous recovery snapshot (2026-10-12; superseded)
 
 The remaining sections in this snapshot describe evidence available on

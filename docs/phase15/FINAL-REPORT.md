@@ -72,6 +72,17 @@ T2/T3/T4 per-boot pixel/lifecycle and DNS receipts, the KVM probe, and both
 Bochs trial logs and the QEMU/toolchain version probes. Its internal
 `SHA256SUMS` manifest lists 2,368 files, all verified after extraction.
 
+## External execution handoff
+
+A self-contained strict-runner kit is available from the
+[external kit handoff](EXTERNAL-KIT.md). It pins the recovery strict EFI and
+ESP, includes their fixture and exact OVMF code/vars, and is downloadable as a
+committed archive with its SHA-256 recorded there. A fresh extraction
+verified all manifest entries and passed five host-only negative controls.
+The current execution environment has no QEMU binary or `/dev/kvm`; the
+external runner correctly returned BLOCKED without starting a guest. The
+Windows/PowerShell path remains unexecuted here.
+
 ## Gate decision
 
 Keep Phase 15 **PARTIAL / UNQUALIFIED** and ADR-0113 Proposed. This environment

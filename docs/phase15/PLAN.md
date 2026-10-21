@@ -41,6 +41,11 @@ and qualification.
 8. Preserved the aggregate, per-test logs, strict serial/stderr, image pairs,
    per-boot stability receipts, KVM probe, and Bochs logs in the recovery
    archive linked below.
+9. Reconciled the external strict kit to the recovery ESP, bundled the exact
+   strict pair, CPL3 fixture, and official OVMF code/vars, and verified a
+   fresh extraction with five host-only negative controls. The current host
+   has no QEMU or `/dev/kvm`; its external-runner preflight is BLOCKED and
+   starts no guest. See [the downloadable kit handoff](EXTERNAL-KIT.md).
 
 ## Qualification gates
 
