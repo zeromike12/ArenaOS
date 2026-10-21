@@ -312,7 +312,8 @@ echo "kernel image: build/arena-boot.efi ($(stat -c%s "$REPO_ROOT/build/arena-bo
 # the exact FXSAVE64/FXRSTOR64, initialization, and conditional XCR0
 # sanitation inside six source-bounded architecture leaves. The audit parses real disassembly,
 # verifies those leaf ranges independently, and fails closed.
-RUSTLIB_BIN="$(dirname "$(dirname "$(command -v rustc)")")/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+RUST_SYSROOT="$(rustc --print sysroot)"
+RUSTLIB_BIN="$RUST_SYSROOT/lib/rustlib/x86_64-unknown-linux-gnu/bin"
 DISASM=""
 if [[ -x "$RUSTLIB_BIN/llvm-objdump" ]]; then
     DISASM="$RUSTLIB_BIN/llvm-objdump"
