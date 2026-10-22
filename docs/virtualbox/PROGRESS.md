@@ -109,6 +109,18 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   registered VM. To make the new package unmistakable, it now has a unique
   `ArenaOS-VDI.vbox` filename, `ArenaOS VDI` VM name, and machine UUID. Open
   that file from a fresh extraction; do not start the old `ArenaOS` entry.
+- C then reported `E_INVALIDARG` while opening `ArenaOS-VDI.vbox`. Inspection
+  showed that the new machine UUID alone was not enough: its VDI UUIDs were
+  still identical to the preceding package, while the new extraction had a
+  different path. VirtualBox 7.2's [`i_checkMediaForConflicts`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Main/src-server/VirtualBoxImpl.cpp#L4950-L5005)
+  and [`i_registerMedium`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Main/src-server/VirtualBoxImpl.cpp#L5599-L5608)
+  detect a registered disk UUID/path conflict and return `E_INVALIDARG`.
+  This matches the reported open-time error and repeated extraction pattern.
+- The package now derives machine UUID, both VDI UUIDs, and the adapter MAC
+  from the package generator commit as well as the EFI/ESP identities. The
+  offline verifier checks these values and their embedded VDI identities.
+  Open one extraction; use its registered VM entry for later starts instead
+  of opening duplicate copies of the same ZIP.
 
 ## Final downloadable artifact
 

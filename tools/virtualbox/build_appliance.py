@@ -205,7 +205,12 @@ def write_vdi(path: Path, raw_path: Path, image_id: uuid.UUID) -> None:
                 output.write(chunk)
 
 
-def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> str:
+def vbox_xml(
+    machine_id: uuid.UUID,
+    data_id: uuid.UUID,
+    boot_id: uuid.UUID,
+    network_mac: str,
+) -> str:
     return f'''<?xml version="1.0"?>
 <!-- ArenaOS interactive VirtualBox profile; generated from the recorded build identity. -->
 <VirtualBox xmlns="http://www.virtualbox.org/" version="1.20-linux">
@@ -253,7 +258,7 @@ def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> s
       </BIOS>
       <Firmware type="EFI" secureBootEnabled="false"/>
       <Network>
-        <Adapter slot="0" enabled="true" MACAddress="080027A11514" cable="true" type="virtio" promiscuousModePolicy="Deny">
+        <Adapter slot="0" enabled="true" MACAddress="{network_mac}" cable="true" type="virtio" promiscuousModePolicy="Deny">
           <NAT/>
         </Adapter>
         <Adapter slot="1" enabled="false" type="82540EM"/>
@@ -354,12 +359,20 @@ def build(output: Path, allow_dirty: bool) -> None:
     if identity.get("graphics_profile") != graphics_profile:
         raise SystemExit("interactive build identity has a different graphics profile")
     artifact_id = f"{source_commit}:{efi_hash}:{esp_hash}"
-    boot_id = uuid_for("boot-vdi", artifact_id)
-    data_id = uuid_for("data-vdi", artifact_id)
+    # A disk UUID is registered globally by VirtualBox. Bind all VM identities
+    # to the package source commit so separately published revisions can be
+    # opened from different extraction folders without UUID collisions.
+    package_identity = f"{artifact_id}:{package_source_commit}"
+    package_identity_sha256 = hashlib.sha256(package_identity.encode("utf-8")).hexdigest()
+    boot_id = uuid_for("boot-vdi", package_identity)
+    data_id = uuid_for("data-vdi", package_identity)
     # Give the VDI package its own VirtualBox registration identity. Earlier
     # releases used the same VM name, settings filename, and machine UUID as
     # the VMDK package, so VirtualBox could keep opening the old registration.
-    machine_id = uuid_for("machine-vdi", artifact_id)
+    machine_id = uuid_for("machine-vdi", package_identity)
+    network_mac = "080027" + hashlib.sha256(
+        f"arenaos-vbox-mac:{package_identity}".encode("utf-8")
+    ).hexdigest()[:6].upper()
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="arenaos-vbox-") as temp_name:
@@ -376,7 +389,11 @@ def build(output: Path, allow_dirty: bool) -> None:
         write_vdi(boot_vdi, boot_raw, boot_id)
         write_vdi(data_vdi, data_raw, data_id)
         vbox_path = temp / "ArenaOS-VDI.vbox"
-        vbox_path.write_text(vbox_xml(machine_id, data_id, boot_id), encoding="utf-8", newline="\n")
+        vbox_path.write_text(
+            vbox_xml(machine_id, data_id, boot_id, network_mac),
+            encoding="utf-8",
+            newline="\n",
+        )
 
         manifest = {
             "package_status": "ready_for_external_virtualbox_testing",
@@ -390,6 +407,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             ).stdout.strip(),
             "source_commit": source_commit,
             "package_source_commit": package_source_commit,
+            "package_identity": package_identity,
+            "package_identity_sha256": package_identity_sha256,
             "source_tree_dirty": bool(status),
             "build_identity": identity,
             "graphics_profile": graphics_profile,
@@ -425,6 +444,10 @@ def build(output: Path, allow_dirty: bool) -> None:
                 "input": "PS/2 keyboard and mouse",
                 "storage": "AHCI SATA with fixed VDI 1.1 disks; data disk port 0; GPT/FAT EFI disk port 1",
                 "network": "VirtualBox paravirtualized VirtIO adapter, NAT",
+                "machine_uuid": str(machine_id),
+                "boot_disk_uuid": str(boot_id),
+                "data_disk_uuid": str(data_id),
+                "network_mac": network_mac,
                 "guest_additions": False,
             },
             "package_file_sha256": {},
@@ -443,6 +466,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             "3. Select ArenaOS VDI and click Start.\n\n"
             "Use this new VDI settings file, not an older ArenaOS entry or .vbox file.\n"
             "If the VM list still shows ArenaOS, open ArenaOS-VDI.vbox from this folder to add this separate VM.\n\n"
+            "Register one extracted copy of this package. For later starts, select ArenaOS VDI in the VM list\n"
+            "instead of opening another extracted copy; VirtualBox registers disk UUIDs globally.\n\n"
             f"Interactive image source commit: {source_commit}\n"
             f"Package generator source commit: {package_source_commit}\n\n"
             "The VM is configured with one CPU, 1024 MiB RAM, ICH9, EFI, VGA, PS/2 input,\n"

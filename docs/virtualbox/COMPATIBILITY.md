@@ -93,6 +93,12 @@ configuration; the current package contains `ArenaOS-Data.vdi` only. Open
 `ArenaOS-VDI.vbox` from the fresh extraction instead of starting the older
 **ArenaOS** entry in the VM list.
 
+VirtualBox registers disk UUIDs globally. Each package revision now derives
+its machine and VDI UUIDs, plus the network MAC, from that package revision.
+Extract one copy and open it once; for later launches, choose **ArenaOS VDI**
+from VirtualBox's VM list rather than registering another extraction of the
+same ZIP.
+
 The selected host must run 64-bit VirtualBox 7.2.22 with hardware
 virtualization available to the hypervisor and a CPU whose RDRAND source is
 exposed to the guest. Other VirtualBox versions remain unverified. No

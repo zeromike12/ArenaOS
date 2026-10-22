@@ -239,12 +239,13 @@ def verify_vdi(path: Path, expected_size: int) -> tuple[bytes, uuid.UUID]:
     return image[off_data:], image_uuid
 
 
-def verify_xml(path: Path) -> dict[str, uuid.UUID]:
+def verify_xml(path: Path, vm_configuration: dict) -> dict[str, uuid.UUID]:
     root = ElementTree.parse(path).getroot()
     require(root.tag == VBOX_NS + "VirtualBox", "VirtualBox XML root namespace mismatch")
     require(root.attrib.get("version") == "1.20-linux", "VirtualBox settings version mismatch")
     machine = root.find(VBOX_NS + "Machine")
     require(machine is not None and machine.attrib.get("name") == "ArenaOS VDI" and machine.attrib.get("OSType") == "Other_64", "machine identity mismatch")
+    require(uuid.UUID(machine.attrib["uuid"].strip("{}")) == uuid.UUID(vm_configuration["machine_uuid"]), "machine UUID does not match manifest")
     platform = machine.find(VBOX_NS + "Platform")
     require(platform is not None, "machine Platform element is missing")
     require(platform.attrib.get("architecture") == "x86", "machine platform architecture mismatch")
@@ -292,6 +293,7 @@ def verify_xml(path: Path) -> dict[str, uuid.UUID]:
     network = hardware.find(VBOX_NS + "Network")
     adapter = network.find(VBOX_NS + "Adapter") if network is not None else None
     require(adapter is not None and adapter.attrib.get("enabled") == "true" and adapter.attrib.get("type") == "virtio", "VM network adapter mismatch")
+    require(adapter.attrib.get("MACAddress") == vm_configuration.get("network_mac"), "VM network MAC does not match manifest")
     require(adapter.find(VBOX_NS + "NAT") is not None, "VM network adapter is not using NAT")
 
     registry = machine.find(VBOX_NS + "MediaRegistry")
@@ -325,6 +327,27 @@ def verify_directory(root: Path) -> None:
     require(manifest.get("graphics_profile") == "desktop", "interactive desktop graphics profile mismatch")
     require(re.fullmatch(r"[0-9a-f]{40}", manifest.get("source_commit", "")) is not None, "source commit identity invalid")
     require(re.fullmatch(r"[0-9a-f]{40}", manifest.get("package_source_commit", "")) is not None, "package source commit identity invalid")
+    package_identity = ":".join((
+        manifest["source_commit"],
+        manifest["interactive_efi_sha256"],
+        manifest["interactive_esp_sha256"],
+        manifest["package_source_commit"],
+    ))
+    require(manifest.get("package_identity") == package_identity, "package identity does not match source/artifact commits")
+    require(
+        manifest.get("package_identity_sha256") == hashlib.sha256(package_identity.encode("utf-8")).hexdigest(),
+        "package identity hash mismatch",
+    )
+    expected_uuids = {
+        name: uuid.uuid5(uuid.NAMESPACE_URL, f"https://arenaos.invalid/{name}/{package_identity}")
+        for name in ("machine-vdi", "boot-vdi", "data-vdi")
+    }
+    vm_configuration = manifest.get("vm_configuration") or {}
+    require(vm_configuration.get("machine_uuid") == str(expected_uuids["machine-vdi"]), "machine UUID is not unique to this package identity")
+    require(vm_configuration.get("boot_disk_uuid") == str(expected_uuids["boot-vdi"]), "boot disk UUID is not unique to this package identity")
+    require(vm_configuration.get("data_disk_uuid") == str(expected_uuids["data-vdi"]), "data disk UUID is not unique to this package identity")
+    expected_mac = "080027" + hashlib.sha256(f"arenaos-vbox-mac:{package_identity}".encode("utf-8")).hexdigest()[:6].upper()
+    require(vm_configuration.get("network_mac") == expected_mac, "network MAC is not unique to this package identity")
     build_identity = manifest.get("build_identity") or {}
     require(build_identity.get("source_commit") == manifest.get("source_commit"), "interactive image source commit mismatch")
     require(build_identity.get("efi_sha256") == manifest.get("interactive_efi_sha256"), "interactive EFI build identity mismatch")
@@ -340,9 +363,11 @@ def verify_directory(root: Path) -> None:
     data, data_uuid = verify_vdi(root / "ArenaOS-Data.vdi", manifest["persistent_data_disk"]["size_bytes"])
     require(sha256(boot) == manifest["boot_disk"]["disk_sha256"], "boot logical disk identity mismatch")
     require(sha256(data) == manifest["persistent_data_disk"]["disk_sha256"], "data logical disk identity mismatch")
-    xml_uuids = verify_xml(root / "ArenaOS-VDI.vbox")
+    xml_uuids = verify_xml(root / "ArenaOS-VDI.vbox", vm_configuration)
     require(xml_uuids["ArenaOS-Boot.vdi"] == boot_uuid, "boot VDI UUID does not match ArenaOS-VDI.vbox")
     require(xml_uuids["ArenaOS-Data.vdi"] == data_uuid, "data VDI UUID does not match ArenaOS-VDI.vbox")
+    require(boot_uuid == expected_uuids["boot-vdi"], "boot VDI UUID is not unique to this package identity")
+    require(data_uuid == expected_uuids["data-vdi"], "data VDI UUID is not unique to this package identity")
     verify_gpt(boot, manifest)
     verify_afs1_and_afs2(data)
     readme = (root / "README.txt").read_text(encoding="utf-8")
