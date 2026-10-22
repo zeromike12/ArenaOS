@@ -26,12 +26,19 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
 
 ## Build and host checks
 
-- Interactive build: `tools/build.sh --virtualbox-interactive --image` passed.
-  EFI size: 10,668,032 bytes. Kernel ISA audit: 75,163 decoded instructions;
-  x87/MMX/SSE/AVX exclusion and audit negative controls passed.
-- Qualification build: `tools/build.sh --image` passed. EFI size:
-  11,042,816 bytes. Kernel ISA audit: 122,182 decoded instructions;
-  x87/MMX/SSE/AVX exclusion and audit negative controls passed.
+- Source commit: `6a2635a898e074575f9b62935d2fe710cc0be442`.
+- Interactive build: `tools/build.sh --virtualbox-interactive --image` passed
+  from that clean commit. EFI size: 10,668,032 bytes; SHA-256
+  `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`.
+  ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
+  Kernel ISA audit: 75,163 decoded instructions; x87/MMX/SSE/AVX exclusion
+  and audit negative controls passed.
+- Qualification build: `tools/build.sh --image` passed from the same clean
+  commit. EFI size: 11,042,816 bytes; SHA-256
+  `7b4ddb99007cc4e31d36586d52944a0a24ad062c4ee7dd9597e6cbc78271ab30`.
+  ESP SHA-256 `f14a7931e6cd4d1a1774178f6a1fc983430c4c0daacba45d28e9f9d20658cf2f`.
+  Kernel ISA audit: 122,182 decoded instructions; x87/MMX/SSE/AVX exclusion
+  and audit negative controls passed.
 - AHCI command encoder host tests: 3/3 passed. PS/2 decoder host tests: 3/3
   passed. All modified Rust files passed `rustfmt --check`; Python compile,
   shell syntax, and `git diff --check` passed.
@@ -55,10 +62,26 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
 - QEMU guest regressions were not rerun because no QEMU executable is
   installed in this environment. The original Phase 15 evidence remains on
   the base branch and was not restarted.
-- The final appliance is being assembled from the committed interactive
-  source. Its exact ZIP hash and source/EFI/ESP identities will be recorded
-  below after clean-source packaging.
+- The interactive image identity is `profile=virtualbox-interactive`; the
+  qualification image identity is `profile=qualification`. Both record the
+  same clean source commit and distinct EFI/ESP hashes.
 
 ## Final downloadable artifact
 
-Pending final clean-source package and independent extraction verification.
+`docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` is the native
+`.vbox` package with portable relative disk files. It is 907,771 bytes with
+SHA-256
+`9823317f7b18e374ce8e3c48f074d8796470a9bf05c77d009032337ec68d23c8`.
+Its manifest pins source commit `6a2635a898e074575f9b62935d2fe710cc0be442`,
+EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
+and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
+
+The exact ZIP was freshly extracted under `/tmp/arenaos-vbox-final`, outside
+the working checkout. The standard-library verifier passed. Negative controls
+rejected a missing disk descriptor, a mismatched EFI hash, and an IDE
+controller substitution even after the modified `.vbox` file hash was
+recomputed. These checks validate package integrity and intended settings;
+they do not validate VirtualBox parsing or guest execution.
+
+The download URL after this branch is pushed is:
+`https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
