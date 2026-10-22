@@ -214,6 +214,26 @@ def verify_vmdk(descriptor: Path, extent: Path) -> None:
     require(extent_name == extent.name and offset == 0, f"{descriptor.name} extent path mismatch")
     require(sectors * SECTOR == extent.stat().st_size, f"{descriptor.name} extent size mismatch")
     require('createType="monolithicFlat"' in text, f"{descriptor.name} is not a flat VMDK")
+    uuid_entries = re.findall(
+        r'^(ddb\.uuid\.(?:image|modification|parent|parentmodification))\s*=\s*"([^"]*)"\s*$',
+        text,
+        re.MULTILINE,
+    )
+    uuid_fields = dict(uuid_entries)
+    expected_fields = {
+        "ddb.uuid.image",
+        "ddb.uuid.modification",
+        "ddb.uuid.parent",
+        "ddb.uuid.parentmodification",
+    }
+    require(len(uuid_entries) == 4 and set(uuid_fields) == expected_fields, f"{descriptor.name} UUID fields are missing or duplicated")
+    canonical_uuid = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    for key, value in uuid_fields.items():
+        require(canonical_uuid.fullmatch(value) is not None, f"{descriptor.name} {key} is not a canonical UUID")
+        try:
+            require(str(uuid.UUID(value)) == value, f"{descriptor.name} {key} is not a canonical UUID")
+        except ValueError:
+            fail(f"{descriptor.name} {key} is not a valid UUID")
 
 
 def verify_xml(path: Path) -> None:

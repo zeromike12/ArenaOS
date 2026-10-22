@@ -161,18 +161,11 @@ def make_data_disk(path: Path) -> None:
         stream.truncate(DATA_DISK_MIB * 1024 * 1024)
 
 
-def vmware_uuid(value: uuid.UUID) -> str:
-    raw = value.bytes
-    return " ".join(f"{b:02x}" for b in raw[:8]) + "-" + " ".join(
-        f"{b:02x}" for b in raw[8:]
-    )
-
-
 def write_vmdk_descriptor(path: Path, flat_name: str, raw_path: Path, image_id: uuid.UUID) -> None:
     sectors = raw_path.stat().st_size // SECTOR
     cid = sha256(raw_path)[:8]
-    image_uuid = vmware_uuid(image_id)
-    modification = vmware_uuid(uuid_for("vmdk-modification", sha256(raw_path)))
+    image_uuid = str(image_id)
+    modification = str(uuid_for("vmdk-modification", sha256(raw_path)))
     descriptor = (
         "# Disk DescriptorFile\n"
         "version=1\n"
