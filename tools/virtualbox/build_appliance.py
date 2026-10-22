@@ -254,16 +254,13 @@ def vbox_xml(
         <Order position="4" device="None"/>
       </Boot>
       <Display controller="VBoxVGA" VRAMSize="16" monitorCount="1" accelerate3D="false" accelerate2DVideo="false"/>
-      <BIOS>
+      <Firmware type="EFI" secureBootEnabled="false">
         <ACPI enabled="true"/>
         <IOAPIC enabled="true"/>
         <Logo fadeIn="false" fadeOut="false" displayTime="0"/>
         <BootMenu mode="MessageAndMenu"/>
         <TimeOffset value="0"/>
-        <KeyboardDevice enabled="true"/>
-        <PointingDevice enabled="true"/>
-      </BIOS>
-      <Firmware type="EFI" secureBootEnabled="false"/>
+      </Firmware>
       <Network>
         <Adapter slot="0" enabled="true" MACAddress="{network_mac}" cable="true" type="virtio" promiscuousModePolicy="Deny">
           <NAT/>

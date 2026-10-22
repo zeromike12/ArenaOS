@@ -130,6 +130,30 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   The writer now emits a deterministic nonzero modification UUID for each disk,
   and the verifier checks both UUID fields against the package manifest.
 
+## ICH9 / I/O APIC startup failure follow-up
+
+- The new `VBox.log` from VirtualBox 7.2.22 r175245 shows that the package
+  passed settings loading and firmware initialization, then failed during
+  device construction. At `00:00:04.092613`, `DevPciIch9.cpp(3364)` reports
+  `Must use IO-APIC with ICH9 chipset`; the following `VERR_PDM_NO_PCI_BUS`
+  occurs because device construction aborts. No ArenaOS guest code ran.
+- The generated settings declare version `1.20-linux` but put `IOAPIC` under
+  `Hardware/BIOS`. Oracle's 7.2.22 `Settings.cpp` reads `IOAPIC` from
+  `Hardware/Firmware` when the settings version is 1.20 or newer
+  ([reader](https://github.com/VirtualBox/virtualbox/blob/v7.2.22/src/VBox/Main/xml/Settings.cpp#L5900-L5920));
+  it only reads the `BIOS` child for older settings versions. The ICH9 check
+  therefore saw IOAPIC disabled, despite the misplaced XML element.
+- The generator now stores IOAPIC and the other supported firmware options
+  inside the version 1.20 `Firmware` element. It removes the legacy `BIOS`
+  element and redundant keyboard/pointing-device fields; the actual PS/2
+  devices remain configured under `Hardware/HID`. The offline verifier now
+  requires IOAPIC under `Firmware` and rejects the legacy `BIOS` node. Oracle's
+  7.2.22 writer uses the same location
+  ([writer](https://github.com/VirtualBox/virtualbox/blob/v7.2.22/src/VBox/Main/xml/Settings.cpp#L7910-L7925)).
+- This is a host-appliance configuration correction based on the exact logged
+  failure. It does not change ArenaOS source or establish a successful VM
+  start; the corrected package still needs a Windows VirtualBox 7.2.22 launch.
+
 ## Final downloadable artifact
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` contains the
