@@ -207,6 +207,7 @@ def write_vdi(path: Path, raw_path: Path, image_id: uuid.UUID) -> None:
 
 def vbox_xml(
     machine_id: uuid.UUID,
+    machine_name: str,
     data_id: uuid.UUID,
     boot_id: uuid.UUID,
     network_mac: str,
@@ -214,7 +215,7 @@ def vbox_xml(
     return f'''<?xml version="1.0"?>
 <!-- ArenaOS interactive VirtualBox profile; generated from the recorded build identity. -->
 <VirtualBox xmlns="http://www.virtualbox.org/" version="1.20-linux">
-  <Machine uuid="{guid(machine_id)}" name="ArenaOS VDI" OSType="Other_64" snapshotFolder="Snapshots" lastStateChange="2026-10-22T00:00:00Z">
+  <Machine uuid="{guid(machine_id)}" name="{machine_name}" OSType="Other_64" snapshotFolder="Snapshots" lastStateChange="2026-10-22T00:00:00Z">
     <MediaRegistry>
       <HardDisks>
         <HardDisk uuid="{guid(data_id)}" location="ArenaOS-Data.vdi" format="VDI" type="Normal"/>
@@ -370,6 +371,7 @@ def build(output: Path, allow_dirty: bool) -> None:
     # releases used the same VM name, settings filename, and machine UUID as
     # the VMDK package, so VirtualBox could keep opening the old registration.
     machine_id = uuid_for("machine-vdi", package_identity)
+    machine_name = f"ArenaOS VDI {package_source_commit[:7]}"
     network_mac = "080027" + hashlib.sha256(
         f"arenaos-vbox-mac:{package_identity}".encode("utf-8")
     ).hexdigest()[:6].upper()
@@ -390,7 +392,7 @@ def build(output: Path, allow_dirty: bool) -> None:
         write_vdi(data_vdi, data_raw, data_id)
         vbox_path = temp / "ArenaOS-VDI.vbox"
         vbox_path.write_text(
-            vbox_xml(machine_id, data_id, boot_id, network_mac),
+            vbox_xml(machine_id, machine_name, data_id, boot_id, network_mac),
             encoding="utf-8",
             newline="\n",
         )
@@ -445,6 +447,7 @@ def build(output: Path, allow_dirty: bool) -> None:
                 "storage": "AHCI SATA with fixed VDI 1.1 disks; data disk port 0; GPT/FAT EFI disk port 1",
                 "network": "VirtualBox paravirtualized VirtIO adapter, NAT",
                 "machine_uuid": str(machine_id),
+                "machine_name": machine_name,
                 "boot_disk_uuid": str(boot_id),
                 "data_disk_uuid": str(data_id),
                 "network_mac": network_mac,
@@ -463,10 +466,10 @@ def build(output: Path, allow_dirty: bool) -> None:
             "Other VirtualBox versions are unverified. No guest additions or host tools are needed.\n\n"
             "1. Extract this ZIP file.\n"
             "2. Open ArenaOS-VDI.vbox in VirtualBox.\n"
-            "3. Select ArenaOS VDI and click Start.\n\n"
+            f"3. Select {machine_name} and click Start.\n\n"
             "Use this new VDI settings file, not an older ArenaOS entry or .vbox file.\n"
-            "If the VM list still shows ArenaOS, open ArenaOS-VDI.vbox from this folder to add this separate VM.\n\n"
-            "Register one extracted copy of this package. For later starts, select ArenaOS VDI in the VM list\n"
+            f"If the VM list still shows ArenaOS, open ArenaOS-VDI.vbox from this folder to add {machine_name}.\n\n"
+            f"Register one extracted copy of this package. For later starts, select {machine_name} in the VM list\n"
             "instead of opening another extracted copy; VirtualBox registers disk UUIDs globally.\n\n"
             f"Interactive image source commit: {source_commit}\n"
             f"Package generator source commit: {package_source_commit}\n\n"

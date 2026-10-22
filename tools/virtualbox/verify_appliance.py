@@ -244,7 +244,7 @@ def verify_xml(path: Path, vm_configuration: dict) -> dict[str, uuid.UUID]:
     require(root.tag == VBOX_NS + "VirtualBox", "VirtualBox XML root namespace mismatch")
     require(root.attrib.get("version") == "1.20-linux", "VirtualBox settings version mismatch")
     machine = root.find(VBOX_NS + "Machine")
-    require(machine is not None and machine.attrib.get("name") == "ArenaOS VDI" and machine.attrib.get("OSType") == "Other_64", "machine identity mismatch")
+    require(machine is not None and machine.attrib.get("name") == vm_configuration.get("machine_name") and machine.attrib.get("OSType") == "Other_64", "machine identity mismatch")
     require(uuid.UUID(machine.attrib["uuid"].strip("{}")) == uuid.UUID(vm_configuration["machine_uuid"]), "machine UUID does not match manifest")
     platform = machine.find(VBOX_NS + "Platform")
     require(platform is not None, "machine Platform element is missing")
@@ -343,6 +343,10 @@ def verify_directory(root: Path) -> None:
         for name in ("machine-vdi", "boot-vdi", "data-vdi")
     }
     vm_configuration = manifest.get("vm_configuration") or {}
+    require(
+        vm_configuration.get("machine_name") == f"ArenaOS VDI {manifest['package_source_commit'][:7]}",
+        "machine name is not unique to this package revision",
+    )
     require(vm_configuration.get("machine_uuid") == str(expected_uuids["machine-vdi"]), "machine UUID is not unique to this package identity")
     require(vm_configuration.get("boot_disk_uuid") == str(expected_uuids["boot-vdi"]), "boot disk UUID is not unique to this package identity")
     require(vm_configuration.get("data_disk_uuid") == str(expected_uuids["data-vdi"]), "data disk UUID is not unique to this package identity")
@@ -371,7 +375,13 @@ def verify_directory(root: Path) -> None:
     verify_gpt(boot, manifest)
     verify_afs1_and_afs2(data)
     readme = (root / "README.txt").read_text(encoding="utf-8")
-    require("Open ArenaOS-VDI.vbox in VirtualBox" in readme and "Select ArenaOS VDI" in readme and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme, "README instructions or Phase 15 status missing")
+    require(
+        "Open ArenaOS-VDI.vbox in VirtualBox" in readme
+        and f"Select {vm_configuration['machine_name']}" in readme
+        and "VirtualBox registers disk UUIDs globally" in readme
+        and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme,
+        "README instructions or Phase 15 status missing",
+    )
     print("PASS: package identities, relative VM configuration, fixed VDI images, GPT/EFI, AFS1, and blank AFS2 region")
     print(f"source commit: {manifest['source_commit']}")
     print(f"EFI SHA-256: {manifest['interactive_efi_sha256']}")

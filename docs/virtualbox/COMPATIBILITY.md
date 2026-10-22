@@ -85,7 +85,7 @@ guest boots.
 
 1. Download the latest `ArenaOS-VirtualBox-Interactive.zip` and extract it into a new folder.
 2. Open `ArenaOS-VDI.vbox` from that folder in VirtualBox.
-3. Select **ArenaOS VDI** and click **Start**.
+3. Select the VM named **ArenaOS VDI** followed by the package commit's short ID, then click **Start**. The exact name appears in the ZIP's `README.txt`.
 
 This package uses a new settings filename, VM name, and machine UUID. If an
 error still names `ArenaOS-Data.vmdk`, VirtualBox opened an older VM
@@ -95,9 +95,9 @@ configuration; the current package contains `ArenaOS-Data.vdi` only. Open
 
 VirtualBox registers disk UUIDs globally. Each package revision now derives
 its machine and VDI UUIDs, plus the network MAC, from that package revision.
-Extract one copy and open it once; for later launches, choose **ArenaOS VDI**
-from VirtualBox's VM list rather than registering another extraction of the
-same ZIP.
+Extract one copy and open it once; for later launches, choose the matching
+**ArenaOS VDI** entry from VirtualBox's VM list rather than registering
+another extraction of the same ZIP.
 
 The selected host must run 64-bit VirtualBox 7.2.22 with hardware
 virtualization available to the hypervisor and a CPU whose RDRAND source is

@@ -127,9 +127,9 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` contains the
 `ArenaOS-VDI.vbox` configuration and fixed VDI boot/data disks. Its manifest pins
 interactive image source commit `6a2635a898e074575f9b62935d2fe710cc0be442`
-and package generator commit `b023d85ede78b25cbfd8d2491af70670636c0c90`.
-The ZIP is 908,969 bytes with SHA-256
-`07492401392988129092a530a4bcea07079a5ec582d3a9a1b94cc0b433c7d24c`.
+and package generator commit `b53bf07a7a2a984259c3f4ca703e9d277f8e63f1`.
+The ZIP is 909,225 bytes with SHA-256
+`daa2eae2b0fce75ab6e57284568c1d2483e61d01b4b0da2aac543f5a2f9df517`.
 The VDI packaging change does not rebuild the EFI or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
@@ -138,7 +138,9 @@ The VDI ZIP was generated and checked by the standard-library verifier. These
 offline checks validate package identities and disk structures; they do not
 validate a VirtualBox GUI start or guest execution. Extract the latest ZIP
 into a new folder and open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. The VM list
-should show `ArenaOS VDI`.
+should show `ArenaOS VDI`. Register only one extraction of this exact ZIP and
+use that entry for later starts; this release's machine UUID, VDI UUIDs, and
+network MAC are unique from earlier package revisions.
 
-The download URL after this branch is pushed is:
+The download URL at this branch is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
