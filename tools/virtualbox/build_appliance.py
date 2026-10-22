@@ -168,7 +168,12 @@ def make_data_disk(path: Path) -> None:
         stream.truncate(DATA_DISK_MIB * 1024 * 1024)
 
 
-def write_vdi(path: Path, raw_path: Path, image_id: uuid.UUID) -> None:
+def write_vdi(
+    path: Path,
+    raw_path: Path,
+    image_id: uuid.UUID,
+    modification_id: uuid.UUID,
+) -> None:
     """Write a fixed VDI 1.1 image around a sector-aligned raw disk.
 
     The layout follows VirtualBox 7.2.22's VDICore.h and VDI.cpp structures:
@@ -191,6 +196,7 @@ def write_vdi(path: Path, raw_path: Path, image_id: uuid.UUID) -> None:
     struct.pack_into("<I", header, 292, 0)
     struct.pack_into("<QIIII", header, 296, disk_size, VDI_BLOCK_SIZE, 0, blocks, blocks)
     header[320:336] = image_id.bytes_le
+    header[336:352] = modification_id.bytes_le
     struct.pack_into("<IIII", header, 384, 0, 0, 0, SECTOR)
 
     preheader = VDI_FILE_INFO.ljust(64, b"\0") + struct.pack("<II", VDI_SIGNATURE, VDI_VERSION)
@@ -367,6 +373,8 @@ def build(output: Path, allow_dirty: bool) -> None:
     package_identity_sha256 = hashlib.sha256(package_identity.encode("utf-8")).hexdigest()
     boot_id = uuid_for("boot-vdi", package_identity)
     data_id = uuid_for("data-vdi", package_identity)
+    boot_modification_id = uuid_for("boot-vdi-modify", package_identity)
+    data_modification_id = uuid_for("data-vdi-modify", package_identity)
     # Give the VDI package its own VirtualBox registration identity. Earlier
     # releases used the same VM name, settings filename, and machine UUID as
     # the VMDK package, so VirtualBox could keep opening the old registration.
@@ -388,8 +396,8 @@ def build(output: Path, allow_dirty: bool) -> None:
 
         boot_vdi = temp / "ArenaOS-Boot.vdi"
         data_vdi = temp / "ArenaOS-Data.vdi"
-        write_vdi(boot_vdi, boot_raw, boot_id)
-        write_vdi(data_vdi, data_raw, data_id)
+        write_vdi(boot_vdi, boot_raw, boot_id, boot_modification_id)
+        write_vdi(data_vdi, data_raw, data_id, data_modification_id)
         vbox_path = temp / "ArenaOS-VDI.vbox"
         vbox_path.write_text(
             vbox_xml(machine_id, machine_name, data_id, boot_id, network_mac),
@@ -420,6 +428,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             "boot_disk": {
                 "size_bytes": boot_raw.stat().st_size,
                 "container_format": "VDI 1.1 fixed",
+                "image_uuid": str(boot_id),
+                "modification_uuid": str(boot_modification_id),
                 "esp_partition_start_lba": ESP_START_LBA,
                 "esp_partition_sectors": ESP_SECTORS,
                 "disk_sha256": sha256(boot_raw),
@@ -428,6 +438,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             "persistent_data_disk": {
                 "size_bytes": data_raw.stat().st_size,
                 "container_format": "VDI 1.1 fixed",
+                "image_uuid": str(data_id),
+                "modification_uuid": str(data_modification_id),
                 "afs1_size_bytes": AFS1_MIB * 1024 * 1024,
                 "afs2_start_sector": AFS2_BASE_SECTOR,
                 "afs2_region_initially_blank": True,

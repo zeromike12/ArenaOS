@@ -210,8 +210,8 @@ def verify_afs1_and_afs2(data: bytes) -> None:
     require(not any(data[AFS1_SIZE:]), "initial AFS2 region must be blank for first-boot import")
 
 
-def verify_vdi(path: Path, expected_size: int) -> tuple[bytes, uuid.UUID]:
-    """Validate a fixed VDI 1.1 image and return its raw sectors and image UUID."""
+def verify_vdi(path: Path, expected_size: int) -> tuple[bytes, uuid.UUID, uuid.UUID]:
+    """Validate a fixed VDI 1.1 image and return raw data and both UUIDs."""
     image = path.read_bytes()
     info = b"<<< Oracle VirtualBox Disk Image >>>\n".ljust(64, b"\0")
     require(image[:64] == info, f"{path.name} VDI file info mismatch")
@@ -236,7 +236,10 @@ def verify_vdi(path: Path, expected_size: int) -> tuple[bytes, uuid.UUID]:
     lchs_sector_size = struct.unpack_from("<I", image, 72 + 384 + 12)[0]
     require(legacy_sector_size == SECTOR and lchs_sector_size == SECTOR, f"{path.name} VDI sector geometry mismatch")
     image_uuid = uuid.UUID(bytes_le=image[72 + 320 : 72 + 336])
-    return image[off_data:], image_uuid
+    modification_uuid = uuid.UUID(bytes_le=image[72 + 336 : 72 + 352])
+    require(image_uuid.int != 0, f"{path.name} VDI creation UUID is zero")
+    require(modification_uuid.int != 0, f"{path.name} VDI modification UUID is zero")
+    return image[off_data:], image_uuid, modification_uuid
 
 
 def verify_xml(path: Path, vm_configuration: dict) -> dict[str, uuid.UUID]:
@@ -340,7 +343,13 @@ def verify_directory(root: Path) -> None:
     )
     expected_uuids = {
         name: uuid.uuid5(uuid.NAMESPACE_URL, f"https://arenaos.invalid/{name}/{package_identity}")
-        for name in ("machine-vdi", "boot-vdi", "data-vdi")
+        for name in (
+            "machine-vdi",
+            "boot-vdi",
+            "data-vdi",
+            "boot-vdi-modify",
+            "data-vdi-modify",
+        )
     }
     vm_configuration = manifest.get("vm_configuration") or {}
     require(
@@ -363,15 +372,21 @@ def verify_directory(root: Path) -> None:
 
     require(manifest["boot_disk"].get("container_format") == "VDI 1.1 fixed", "boot disk format mismatch")
     require(manifest["persistent_data_disk"].get("container_format") == "VDI 1.1 fixed", "persistent data disk format mismatch")
-    boot, boot_uuid = verify_vdi(root / "ArenaOS-Boot.vdi", manifest["boot_disk"]["size_bytes"])
-    data, data_uuid = verify_vdi(root / "ArenaOS-Data.vdi", manifest["persistent_data_disk"]["size_bytes"])
+    boot, boot_uuid, boot_modification_uuid = verify_vdi(root / "ArenaOS-Boot.vdi", manifest["boot_disk"]["size_bytes"])
+    data, data_uuid, data_modification_uuid = verify_vdi(root / "ArenaOS-Data.vdi", manifest["persistent_data_disk"]["size_bytes"])
     require(sha256(boot) == manifest["boot_disk"]["disk_sha256"], "boot logical disk identity mismatch")
     require(sha256(data) == manifest["persistent_data_disk"]["disk_sha256"], "data logical disk identity mismatch")
+    require(boot_uuid == expected_uuids["boot-vdi"], "boot VDI creation UUID is not unique to this package identity")
+    require(data_uuid == expected_uuids["data-vdi"], "data VDI creation UUID is not unique to this package identity")
+    require(boot_modification_uuid == expected_uuids["boot-vdi-modify"], "boot VDI modification UUID mismatch")
+    require(data_modification_uuid == expected_uuids["data-vdi-modify"], "data VDI modification UUID mismatch")
+    require(str(boot_uuid) == manifest["boot_disk"]["image_uuid"], "boot VDI creation UUID manifest mismatch")
+    require(str(data_uuid) == manifest["persistent_data_disk"]["image_uuid"], "data VDI creation UUID manifest mismatch")
+    require(str(boot_modification_uuid) == manifest["boot_disk"]["modification_uuid"], "boot VDI modification UUID manifest mismatch")
+    require(str(data_modification_uuid) == manifest["persistent_data_disk"]["modification_uuid"], "data VDI modification UUID manifest mismatch")
     xml_uuids = verify_xml(root / "ArenaOS-VDI.vbox", vm_configuration)
     require(xml_uuids["ArenaOS-Boot.vdi"] == boot_uuid, "boot VDI UUID does not match ArenaOS-VDI.vbox")
     require(xml_uuids["ArenaOS-Data.vdi"] == data_uuid, "data VDI UUID does not match ArenaOS-VDI.vbox")
-    require(boot_uuid == expected_uuids["boot-vdi"], "boot VDI UUID is not unique to this package identity")
-    require(data_uuid == expected_uuids["data-vdi"], "data VDI UUID is not unique to this package identity")
     verify_gpt(boot, manifest)
     verify_afs1_and_afs2(data)
     readme = (root / "README.txt").read_text(encoding="utf-8")

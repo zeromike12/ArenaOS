@@ -122,6 +122,13 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   offline verifier checks these values and their embedded VDI identities.
   Open one extraction; use its registered VM entry for later starts instead
   of opening duplicate copies of the same ZIP.
+- C reported `VERR_VD_VDI_INVALID_HEADER` opening the new data disk. The VDI
+  writer stored a valid creation UUID but left the modification UUID zero.
+  Oracle's [`vdiValidateHeader`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Storage/VDI.cpp#L423-L535)
+  explicitly rejects a null modification UUID; the official creator generates
+  one at [`vdiCreateImage`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Storage/VDI.cpp#L766-L768).
+  The writer now emits a deterministic nonzero modification UUID for each disk,
+  and the verifier checks both UUID fields against the package manifest.
 
 ## Final downloadable artifact
 
