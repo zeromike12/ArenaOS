@@ -169,19 +169,27 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   VirtualBox log cannot identify why that service was called. The screen was
   black, and the appliance did not route COM1 anywhere, so the guest's exact
   startup or halt message was not preserved.
-- The next package enables the guest's existing 38400-baud COM1 output and
-  writes it to `ArenaOS-serial.log` beside the `.vbox` file. The README asks
-  the operator to send this file if the screen remains black. This changes
-  only VM diagnostics; it does not change ArenaOS or count as a boot pass.
+- Package `3207d7f` enabled the guest's existing 38400-baud COM1 through
+  VirtualBox's `RawFile` driver and named a relative path. C's next run used
+  that exact VM identity; `VBox.log` confirms the driver attached as
+  `ArenaOS-serial.log`, but C found no such file and only observed the normal
+  firmware `ArenaOS-VDI.nvram` state file. The log does not resolve the raw
+  file path, so the package's claim that output would be beside the settings
+  file was not substantiated.
+- The replacement package includes Windows and Linux launchers. They register
+  the packaged VM if needed, set COM1 using an absolute path derived from the
+  extracted package directory, and start the GUI VM. This is a host-side
+  diagnostic routing change; it does not change ArenaOS or count as a boot
+  pass. A successful serial file still needs confirmation from C's host.
 
 ## Final downloadable artifact
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` contains the
-`ArenaOS-VDI.vbox` configuration and fixed VDI boot/data disks. Its manifest pins
-interactive image source commit `6a2635a898e074575f9b62935d2fe710cc0be442`
-and package generator commit `2c32009a87ecc0a611d395aa4680c33d1bbb6d31`.
-The ZIP is 909,553 bytes with SHA-256
-`478de033118c9f632f28ff4466cf6a0059eaac4438f2cb5ff0845dfe0d6b9315`.
+`ArenaOS-VDI.vbox` configuration, fixed VDI boot/data disks, and Windows/Linux
+launchers. Its manifest pins interactive image source commit
+`6a2635a898e074575f9b62935d2fe710cc0be442` and package generator commit
+`ff4adb5c7d2743f57e546b4a393110206178c10b`. The ZIP is 910,784 bytes with
+SHA-256 `278ae7822222738dcf9a6fe87aa3ae90d091db23abd3f1cbc67440c59ca15b02`.
 The VDI packaging change does not rebuild the EFI or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
@@ -189,12 +197,12 @@ and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a
 The VDI ZIP is generated and checked by the standard-library verifier. Offline
 checks validate package identities and disk structures; the external
 VirtualBox attempt confirms settings acceptance and early guest execution but
-not a successful desktop boot. Extract the latest ZIP into a new folder and
-open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. It will register as
-`ArenaOS VDI 2c32009`. The README explains how to send `ArenaOS-serial.log` if
-the screen stays black. Each release's machine UUID, VDI UUIDs, and network MAC
-are unique from earlier package revisions. The settings enable IOAPIC in the
-1.20 `Firmware` element and capture COM1 output to a package-local log.
+not a successful desktop boot. Use `Start-ArenaOS.cmd` on Windows or
+`sh Start-ArenaOS.sh` on Linux so COM1 is routed to an absolute package-local
+log path. Each release's machine UUID, VDI UUIDs, and network MAC are unique
+from earlier package revisions. The settings enable IOAPIC in the 1.20
+`Firmware` element. A host run must still confirm the launcher creates useful
+serial output and diagnose the black screen.
 
 The download URL at this branch is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
