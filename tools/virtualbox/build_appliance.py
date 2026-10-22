@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build a self-contained VirtualBox .vbox package from the interactive EFI.
 
-The archive contains only the native VM configuration, VMDK descriptors and
-disk extents, a persistent ArenaOS data disk, a concise README, and a hash
-manifest. It does not contain VirtualBox firmware: VirtualBox supplies the EFI
-firmware on the host. Building the package does not test guest execution.
+The archive contains the native VM configuration, fixed VDI disks, a concise
+README, and a hash manifest. It does not contain VirtualBox firmware:
+VirtualBox supplies the EFI firmware on the host. Building the package does
+not test guest execution.
 """
 
 from __future__ import annotations
@@ -36,6 +36,13 @@ AFS1_MIB = 8
 AFS2_BASE_SECTOR = 16384
 VBOX_VERSION = "7.2.22"
 EFI_PARTITION_TYPE = uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b")
+VDI_FILE_INFO = b"<<< Oracle VirtualBox Disk Image >>>\n"
+VDI_SIGNATURE = 0xBEDA107F
+VDI_VERSION = 0x00010001
+VDI_HEADER_SIZE = 400
+VDI_BLOCK_SIZE = 1024 * 1024
+VDI_DATA_ALIGNMENT = 1024 * 1024
+VDI_IMAGE_TYPE_FIXED = 2
 
 
 def sha256(path: Path) -> str:
@@ -161,29 +168,41 @@ def make_data_disk(path: Path) -> None:
         stream.truncate(DATA_DISK_MIB * 1024 * 1024)
 
 
-def write_vmdk_descriptor(path: Path, flat_name: str, raw_path: Path, image_id: uuid.UUID) -> None:
-    sectors = raw_path.stat().st_size // SECTOR
-    cid = sha256(raw_path)[:8]
-    image_uuid = str(image_id)
-    modification = str(uuid_for("vmdk-modification", sha256(raw_path)))
-    descriptor = (
-        "# Disk DescriptorFile\n"
-        "version=1\n"
-        'encoding="UTF-8"\n'
-        f"CID={cid}\n"
-        "parentCID=ffffffff\n"
-        'createType="monolithicFlat"\n\n'
-        "# Extent description\n"
-        f'RW {sectors} FLAT "{flat_name}" 0\n\n'
-        "# The Disk Data Base\n"
-        "#DDB\n"
-        'ddb.virtualHWVersion = "4"\n'
-        f'ddb.uuid.image = "{image_uuid}"\n'
-        f'ddb.uuid.modification = "{modification}"\n'
-        'ddb.uuid.parent = "00000000-0000-0000-0000-000000000000"\n'
-        'ddb.uuid.parentmodification = "00000000-0000-0000-0000-000000000000"\n'
-    )
-    path.write_text(descriptor, encoding="ascii", newline="\n")
+def write_vdi(path: Path, raw_path: Path, image_id: uuid.UUID) -> None:
+    """Write a fixed VDI 1.1 image around a sector-aligned raw disk.
+
+    The layout follows VirtualBox 7.2.22's VDICore.h and VDI.cpp structures:
+    a 72-byte preheader, 400-byte VDIHEADER1PLUS, 1 MiB-aligned block map and
+    data area, and native RTUUID bytes for the image UUID.
+    """
+    disk_size = raw_path.stat().st_size
+    if disk_size == 0 or disk_size % SECTOR:
+        raise SystemExit(f"raw disk size is not a nonzero multiple of {SECTOR}: {raw_path}")
+    if disk_size % VDI_BLOCK_SIZE:
+        raise SystemExit(f"raw disk size is not a multiple of the VDI block size: {raw_path}")
+    blocks = disk_size // VDI_BLOCK_SIZE
+    off_blocks = (72 + VDI_HEADER_SIZE + VDI_DATA_ALIGNMENT - 1) // VDI_DATA_ALIGNMENT * VDI_DATA_ALIGNMENT
+    off_data = (off_blocks + blocks * 4 + VDI_DATA_ALIGNMENT - 1) // VDI_DATA_ALIGNMENT * VDI_DATA_ALIGNMENT
+
+    header = bytearray(VDI_HEADER_SIZE)
+    struct.pack_into("<III", header, 0, VDI_HEADER_SIZE, VDI_IMAGE_TYPE_FIXED, 0)
+    struct.pack_into("<II", header, 268, off_blocks, off_data)
+    struct.pack_into("<IIII", header, 276, 0, 0, 0, SECTOR)
+    struct.pack_into("<I", header, 292, 0)
+    struct.pack_into("<QIIII", header, 296, disk_size, VDI_BLOCK_SIZE, 0, blocks, blocks)
+    header[320:336] = image_id.bytes_le
+    struct.pack_into("<IIII", header, 384, 0, 0, 0, SECTOR)
+
+    preheader = VDI_FILE_INFO.ljust(64, b"\0") + struct.pack("<II", VDI_SIGNATURE, VDI_VERSION)
+    with path.open("wb") as output:
+        output.write(preheader)
+        output.write(header)
+        output.write(b"\0" * (off_blocks - output.tell()))
+        output.write(struct.pack(f"<{blocks}I", *range(blocks)))
+        output.write(b"\0" * (off_data - output.tell()))
+        with raw_path.open("rb") as raw:
+            for chunk in iter(lambda: raw.read(1024 * 1024), b""):
+                output.write(chunk)
 
 
 def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> str:
@@ -193,8 +212,8 @@ def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> s
   <Machine uuid="{guid(machine_id)}" name="ArenaOS" OSType="Other_64" snapshotFolder="Snapshots" lastStateChange="2026-10-22T00:00:00Z">
     <MediaRegistry>
       <HardDisks>
-        <HardDisk uuid="{guid(data_id)}" location="ArenaOS-Data.vmdk" format="VMDK" type="Normal"/>
-        <HardDisk uuid="{guid(boot_id)}" location="ArenaOS-Boot.vmdk" format="VMDK" type="Normal"/>
+        <HardDisk uuid="{guid(data_id)}" location="ArenaOS-Data.vdi" format="VDI" type="Normal"/>
+        <HardDisk uuid="{guid(boot_id)}" location="ArenaOS-Boot.vdi" format="VDI" type="Normal"/>
       </HardDisks>
     </MediaRegistry>
     <Platform architecture="x86">
@@ -335,24 +354,24 @@ def build(output: Path, allow_dirty: bool) -> None:
     if identity.get("graphics_profile") != graphics_profile:
         raise SystemExit("interactive build identity has a different graphics profile")
     artifact_id = f"{source_commit}:{efi_hash}:{esp_hash}"
-    boot_id = uuid_for("boot-vmdk", artifact_id)
-    data_id = uuid_for("data-vmdk", artifact_id)
+    boot_id = uuid_for("boot-vdi", artifact_id)
+    data_id = uuid_for("data-vdi", artifact_id)
     machine_id = uuid_for("machine", artifact_id)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="arenaos-vbox-") as temp_name:
         temp = Path(temp_name)
-        boot_raw = temp / "ArenaOS-Boot-flat.vmdk"
-        data_raw = temp / "ArenaOS-Data-flat.vmdk"
+        boot_raw = temp / "ArenaOS-Boot.raw"
+        data_raw = temp / "ArenaOS-Data.raw"
         make_boot_disk(ESP.read_bytes(), artifact_id, boot_raw)
         make_data_disk(data_raw)
         if data_raw.stat().st_size != DATA_DISK_MIB * 1024 * 1024:
             raise SystemExit("formatted ArenaOS data disk has the wrong size")
 
-        boot_desc = temp / "ArenaOS-Boot.vmdk"
-        data_desc = temp / "ArenaOS-Data.vmdk"
-        write_vmdk_descriptor(boot_desc, boot_raw.name, boot_raw, boot_id)
-        write_vmdk_descriptor(data_desc, data_raw.name, data_raw, data_id)
+        boot_vdi = temp / "ArenaOS-Boot.vdi"
+        data_vdi = temp / "ArenaOS-Data.vdi"
+        write_vdi(boot_vdi, boot_raw, boot_id)
+        write_vdi(data_vdi, data_raw, data_id)
         vbox_path = temp / "ArenaOS.vbox"
         vbox_path.write_text(vbox_xml(machine_id, data_id, boot_id), encoding="utf-8", newline="\n")
 
@@ -376,6 +395,7 @@ def build(output: Path, allow_dirty: bool) -> None:
             "phase15_status": "PARTIAL / UNQUALIFIED",
             "boot_disk": {
                 "size_bytes": boot_raw.stat().st_size,
+                "container_format": "VDI 1.1 fixed",
                 "esp_partition_start_lba": ESP_START_LBA,
                 "esp_partition_sectors": ESP_SECTORS,
                 "disk_sha256": sha256(boot_raw),
@@ -383,6 +403,7 @@ def build(output: Path, allow_dirty: bool) -> None:
             },
             "persistent_data_disk": {
                 "size_bytes": data_raw.stat().st_size,
+                "container_format": "VDI 1.1 fixed",
                 "afs1_size_bytes": AFS1_MIB * 1024 * 1024,
                 "afs2_start_sector": AFS2_BASE_SECTOR,
                 "afs2_region_initially_blank": True,
@@ -399,7 +420,7 @@ def build(output: Path, allow_dirty: bool) -> None:
                 "secure_boot": False,
                 "display": "VBoxVGA, 16 MiB VRAM, 3D acceleration disabled",
                 "input": "PS/2 keyboard and mouse",
-                "storage": "AHCI SATA; data disk port 0; GPT/FAT EFI disk port 1",
+                "storage": "AHCI SATA with fixed VDI 1.1 disks; data disk port 0; GPT/FAT EFI disk port 1",
                 "network": "VirtualBox paravirtualized VirtIO adapter, NAT",
                 "guest_additions": False,
             },
@@ -421,7 +442,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             f"Package generator source commit: {package_source_commit}\n\n"
             "The VM is configured with one CPU, 1024 MiB RAM, ICH9, EFI, VGA, PS/2 input,\n"
             "an AHCI persistent data disk, and one VirtIO network adapter using NAT. The\n"
-            "first SATA disk is the 72 MiB writable data disk; the second contains the EFI\n"
+            "The disks are VirtualBox native fixed VDI 1.1 images. The first SATA disk is\n"
+            "the 72 MiB writable data disk; the second contains the EFI\n"
             "system partition. User files belong on the data disk and persist across boots.\n\n"
             "This package is ready for external VirtualBox testing. Its exact guest has not\n"
             "been started in the packaging environment. Display, input, storage persistence,\n"
@@ -433,16 +455,14 @@ def build(output: Path, allow_dirty: bool) -> None:
 
         manifest["package_file_sha256"] = {
             "ArenaOS.vbox": sha256(vbox_path),
-            "ArenaOS-Boot.vmdk": sha256(boot_desc),
-            "ArenaOS-Boot-flat.vmdk": sha256(boot_raw),
-            "ArenaOS-Data.vmdk": sha256(data_desc),
-            "ArenaOS-Data-flat.vmdk": sha256(data_raw),
+            "ArenaOS-Boot.vdi": sha256(boot_vdi),
+            "ArenaOS-Data.vdi": sha256(data_vdi),
             "README.txt": sha256(readme),
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-            files = [vbox_path, boot_desc, boot_raw, data_desc, data_raw, manifest_path, readme]
+            files = [vbox_path, boot_vdi, data_vdi, manifest_path, readme]
             for file_path in files:
                 info = zipfile.ZipInfo(file_path.name, date_time=(2026, 10, 22, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED

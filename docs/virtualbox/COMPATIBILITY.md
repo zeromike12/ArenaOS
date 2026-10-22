@@ -58,8 +58,8 @@ No AVX state or Phase 15 test behavior was changed.
 ## Appliance and first boot
 
 The artifact at `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`
-contains the `.vbox` configuration, relative-path flat VMDK descriptors and
-extents, README, and JSON manifest. It is intended to be opened from
+contains the `.vbox` configuration, fixed VDI 1.1 boot and data disks, README,
+and JSON manifest. It is intended to be opened from
 VirtualBox's normal interface after extraction; no host-side Python, Rust,
 QEMU, scripts, or Guest Additions are required. The boot disk has a 16 MiB
 FAT16 ESP containing
@@ -75,8 +75,8 @@ layout and rejects the older `Hardware/CPU`, `Hardware/Chipset`, and
 `BIOS/RTCUseUTC` locations.
 
 The package verifier uses Python's standard library and checks every file
-hash, the `.vbox` device configuration, relative disk references, VMDK
-extent paths and canonical UUID fields, GPT headers/tables, exact embedded EFI
+hash, the `.vbox` device configuration, relative disk references, VDI 1.1
+headers, fixed block maps, image UUID matches, GPT headers/tables, exact embedded EFI
 and ESP hashes, AFS1 geometry, and the blank AFS2 region. This offline
 validation does not prove that VirtualBox accepts the native XML or that a
 guest boots.
@@ -101,7 +101,7 @@ administrator script or host security change is needed.
 | AHCI protocol encoding | Three host tests passed; userspace driver compiled | Host/build verified; no HBA execution |
 | PS/2 decoding | Three host tests passed; input service compiled | Host/build verified; no controller execution |
 | EFI and package identities | Freshly extracted package verifier checked EFI/ESP hashes and GPT/FAT layout | Offline verified |
-| VM settings and storage files | XML, relative paths, VMDKs, AFS1, blank AFS2 validated offline | Offline verified; not accepted by VirtualBox yet |
+| VM settings and storage files | XML, relative paths, fixed VDI 1.1 disks, AFS1, blank AFS2 validated offline | Offline verified; not accepted by VirtualBox yet |
 | UEFI boot and desktop rendering | No VirtualBox guest run | Unexecuted |
 | Keyboard/mouse and window interaction | No VirtualBox guest run | Unexecuted |
 | AFS2 first boot, file edits, and persistence | No VirtualBox guest run | Unexecuted |

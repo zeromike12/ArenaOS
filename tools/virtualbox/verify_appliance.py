@@ -2,8 +2,8 @@
 """Independently verify the contents of an ArenaOS VirtualBox package.
 
 This verifier uses only Python's standard library. It checks the package's
-file identities, native VirtualBox XML settings, VMDK extents, GPT/ESP, and
-the AFS1 + blank AFS2 data-disk layout. It does not validate VirtualBox's
+file identities, native VirtualBox XML settings, fixed VDI layout, GPT/ESP,
+and the AFS1 + blank AFS2 data-disk layout. It does not validate VirtualBox's
 ability to open the configuration or execute the guest.
 """
 
@@ -23,10 +23,8 @@ from xml.etree import ElementTree
 
 EXPECTED_FILES = {
     "ArenaOS.vbox",
-    "ArenaOS-Boot.vmdk",
-    "ArenaOS-Boot-flat.vmdk",
-    "ArenaOS-Data.vmdk",
-    "ArenaOS-Data-flat.vmdk",
+    "ArenaOS-Boot.vdi",
+    "ArenaOS-Data.vdi",
     "README.txt",
     "manifest.json",
 }
@@ -37,6 +35,12 @@ AFS1_SIZE = 8 * MIB
 DATA_SIZE = 72 * MIB
 ESP_START_LBA = 2048
 ESP_SIZE = 16 * MIB
+VDI_SIGNATURE = 0xBEDA107F
+VDI_VERSION = 0x00010001
+VDI_HEADER_SIZE = 400
+VDI_BLOCK_SIZE = MIB
+VDI_DATA_ALIGNMENT = MIB
+VDI_IMAGE_TYPE_FIXED = 2
 
 
 def fail(message: str) -> None:
@@ -206,37 +210,36 @@ def verify_afs1_and_afs2(data: bytes) -> None:
     require(not any(data[AFS1_SIZE:]), "initial AFS2 region must be blank for first-boot import")
 
 
-def verify_vmdk(descriptor: Path, extent: Path) -> None:
-    text = descriptor.read_text(encoding="ascii")
-    match = re.search(r'^RW\s+(\d+)\s+FLAT\s+"([^"]+)"\s+(\d+)\s*$', text, re.MULTILINE)
-    require(match is not None, f"{descriptor.name} has no supported flat extent")
-    sectors, extent_name, offset = int(match.group(1)), match.group(2), int(match.group(3))
-    require(extent_name == extent.name and offset == 0, f"{descriptor.name} extent path mismatch")
-    require(sectors * SECTOR == extent.stat().st_size, f"{descriptor.name} extent size mismatch")
-    require('createType="monolithicFlat"' in text, f"{descriptor.name} is not a flat VMDK")
-    uuid_entries = re.findall(
-        r'^(ddb\.uuid\.(?:image|modification|parent|parentmodification))\s*=\s*"([^"]*)"\s*$',
-        text,
-        re.MULTILINE,
-    )
-    uuid_fields = dict(uuid_entries)
-    expected_fields = {
-        "ddb.uuid.image",
-        "ddb.uuid.modification",
-        "ddb.uuid.parent",
-        "ddb.uuid.parentmodification",
-    }
-    require(len(uuid_entries) == 4 and set(uuid_fields) == expected_fields, f"{descriptor.name} UUID fields are missing or duplicated")
-    canonical_uuid = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-    for key, value in uuid_fields.items():
-        require(canonical_uuid.fullmatch(value) is not None, f"{descriptor.name} {key} is not a canonical UUID")
-        try:
-            require(str(uuid.UUID(value)) == value, f"{descriptor.name} {key} is not a canonical UUID")
-        except ValueError:
-            fail(f"{descriptor.name} {key} is not a valid UUID")
+def verify_vdi(path: Path, expected_size: int) -> tuple[bytes, uuid.UUID]:
+    """Validate a fixed VDI 1.1 image and return its raw sectors and image UUID."""
+    image = path.read_bytes()
+    info = b"<<< Oracle VirtualBox Disk Image >>>\n".ljust(64, b"\0")
+    require(image[:64] == info, f"{path.name} VDI file info mismatch")
+    signature, version = struct.unpack_from("<II", image, 64)
+    require(signature == VDI_SIGNATURE and version == VDI_VERSION, f"{path.name} VDI signature/version mismatch")
+    require(len(image) >= 72 + VDI_HEADER_SIZE, f"{path.name} VDI header is truncated")
+    header_size, image_type, flags = struct.unpack_from("<III", image, 72)
+    require(header_size == VDI_HEADER_SIZE, f"{path.name} VDI header size mismatch")
+    require(image_type == VDI_IMAGE_TYPE_FIXED and flags == 0, f"{path.name} is not a normal fixed VDI image")
+    off_blocks, off_data = struct.unpack_from("<II", image, 72 + 268)
+    disk_size, block_size, block_extra, block_count, allocated_count = struct.unpack_from("<QIIII", image, 72 + 296)
+    require(disk_size == expected_size and disk_size % SECTOR == 0, f"{path.name} logical disk size mismatch")
+    require(block_size == VDI_BLOCK_SIZE and block_extra == 0, f"{path.name} VDI block geometry mismatch")
+    expected_blocks = (disk_size + block_size - 1) // block_size
+    require(block_count == expected_blocks and allocated_count == block_count, f"{path.name} VDI allocation count mismatch")
+    require(off_blocks % VDI_DATA_ALIGNMENT == 0 and off_data % VDI_DATA_ALIGNMENT == 0, f"{path.name} VDI offsets are not aligned")
+    require(off_blocks >= 72 + VDI_HEADER_SIZE, f"{path.name} block map overlaps its header")
+    require(off_data >= off_blocks + block_count * 4, f"{path.name} data overlaps its block map")
+    require(len(image) == off_data + disk_size, f"{path.name} VDI file length mismatch")
+    require(image[off_blocks : off_blocks + block_count * 4] == struct.pack(f"<{block_count}I", *range(block_count)), f"{path.name} fixed VDI block map is invalid")
+    legacy_sector_size = struct.unpack_from("<I", image, 72 + 276 + 12)[0]
+    lchs_sector_size = struct.unpack_from("<I", image, 72 + 384 + 12)[0]
+    require(legacy_sector_size == SECTOR and lchs_sector_size == SECTOR, f"{path.name} VDI sector geometry mismatch")
+    image_uuid = uuid.UUID(bytes_le=image[72 + 320 : 72 + 336])
+    return image[off_data:], image_uuid
 
 
-def verify_xml(path: Path) -> None:
+def verify_xml(path: Path) -> dict[str, uuid.UUID]:
     root = ElementTree.parse(path).getroot()
     require(root.tag == VBOX_NS + "VirtualBox", "VirtualBox XML root namespace mismatch")
     require(root.attrib.get("version") == "1.20-linux", "VirtualBox settings version mismatch")
@@ -295,13 +298,18 @@ def verify_xml(path: Path) -> None:
     hard_disks = registry.find(VBOX_NS + "HardDisks") if registry is not None else None
     disks = hard_disks.findall(VBOX_NS + "HardDisk") if hard_disks is not None else []
     by_name = {Path(item.attrib["location"]).name: item for item in disks}
-    require(set(by_name) == {"ArenaOS-Data.vmdk", "ArenaOS-Boot.vmdk"}, "registered disk set mismatch")
+    require(set(by_name) == {"ArenaOS-Data.vdi", "ArenaOS-Boot.vdi"}, "registered disk set mismatch")
+    require(all(item.attrib.get("format") == "VDI" for item in by_name.values()), "registered disks must use native VDI format")
     storage = hardware.find(VBOX_NS + "StorageControllers")
     controller = storage.find(VBOX_NS + "StorageController") if storage is not None else None
     require(controller is not None and controller.attrib.get("type") == "AHCI" and controller.attrib.get("PortCount") == "2", "VM AHCI controller mismatch")
     attached = controller.findall(VBOX_NS + "AttachedDevice")
     ports = {item.attrib.get("port"): item.find(VBOX_NS + "Image").attrib.get("uuid") for item in attached}
-    require(ports == {"0": by_name["ArenaOS-Data.vmdk"].attrib["uuid"], "1": by_name["ArenaOS-Boot.vmdk"].attrib["uuid"]}, "AHCI disk port assignments mismatch")
+    require(ports == {"0": by_name["ArenaOS-Data.vdi"].attrib["uuid"], "1": by_name["ArenaOS-Boot.vdi"].attrib["uuid"]}, "AHCI disk port assignments mismatch")
+    return {
+        name: uuid.UUID(item.attrib["uuid"].strip("{}"))
+        for name, item in by_name.items()
+    }
 
 
 def verify_directory(root: Path) -> None:
@@ -326,18 +334,20 @@ def verify_directory(root: Path) -> None:
     for name, digest in hashes.items():
         require(file_hash(root / name) == digest, f"package file SHA-256 mismatch: {name}")
 
-    verify_vmdk(root / "ArenaOS-Boot.vmdk", root / "ArenaOS-Boot-flat.vmdk")
-    verify_vmdk(root / "ArenaOS-Data.vmdk", root / "ArenaOS-Data-flat.vmdk")
-    boot = (root / "ArenaOS-Boot-flat.vmdk").read_bytes()
-    data = (root / "ArenaOS-Data-flat.vmdk").read_bytes()
-    require(file_hash(root / "ArenaOS-Boot-flat.vmdk") == manifest["boot_disk"]["disk_sha256"], "boot extent identity mismatch")
-    require(file_hash(root / "ArenaOS-Data-flat.vmdk") == manifest["persistent_data_disk"]["disk_sha256"], "data extent identity mismatch")
+    require(manifest["boot_disk"].get("container_format") == "VDI 1.1 fixed", "boot disk format mismatch")
+    require(manifest["persistent_data_disk"].get("container_format") == "VDI 1.1 fixed", "persistent data disk format mismatch")
+    boot, boot_uuid = verify_vdi(root / "ArenaOS-Boot.vdi", manifest["boot_disk"]["size_bytes"])
+    data, data_uuid = verify_vdi(root / "ArenaOS-Data.vdi", manifest["persistent_data_disk"]["size_bytes"])
+    require(sha256(boot) == manifest["boot_disk"]["disk_sha256"], "boot logical disk identity mismatch")
+    require(sha256(data) == manifest["persistent_data_disk"]["disk_sha256"], "data logical disk identity mismatch")
+    xml_uuids = verify_xml(root / "ArenaOS.vbox")
+    require(xml_uuids["ArenaOS-Boot.vdi"] == boot_uuid, "boot VDI UUID does not match ArenaOS.vbox")
+    require(xml_uuids["ArenaOS-Data.vdi"] == data_uuid, "data VDI UUID does not match ArenaOS.vbox")
     verify_gpt(boot, manifest)
     verify_afs1_and_afs2(data)
-    verify_xml(root / "ArenaOS.vbox")
     readme = (root / "README.txt").read_text(encoding="utf-8")
     require("Open ArenaOS.vbox in VirtualBox" in readme and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme, "README instructions or Phase 15 status missing")
-    print("PASS: package identities, relative VM configuration, GPT/EFI, VMDK extents, AFS1, and blank AFS2 region")
+    print("PASS: package identities, relative VM configuration, fixed VDI images, GPT/EFI, AFS1, and blank AFS2 region")
     print(f"source commit: {manifest['source_commit']}")
     print(f"EFI SHA-256: {manifest['interactive_efi_sha256']}")
     print(f"ESP SHA-256: {manifest['interactive_esp_sha256']}")
