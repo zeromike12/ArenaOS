@@ -179,9 +179,9 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` contains the
 `ArenaOS-VDI.vbox` configuration and fixed VDI boot/data disks. Its manifest pins
 interactive image source commit `6a2635a898e074575f9b62935d2fe710cc0be442`
-and package generator commit `8825a48dc9e78165b36c2ef3144e11d45ed01a87`.
-The ZIP is 909,359 bytes with SHA-256
-`13427a35c7874747bc0766f54b9d083d152fdd524460f1f327ce59b7713e3c46`.
+and package generator commit `2c32009a87ecc0a611d395aa4680c33d1bbb6d31`.
+The ZIP is 909,553 bytes with SHA-256
+`478de033118c9f632f28ff4466cf6a0059eaac4438f2cb5ff0845dfe0d6b9315`.
 The VDI packaging change does not rebuild the EFI or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
@@ -190,11 +190,11 @@ The VDI ZIP is generated and checked by the standard-library verifier. Offline
 checks validate package identities and disk structures; the external
 VirtualBox attempt confirms settings acceptance and early guest execution but
 not a successful desktop boot. Extract the latest ZIP into a new folder and
-open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. Use the exact VM name and
-diagnostic instructions in the ZIP's README. Each release's machine UUID, VDI
-UUIDs, and network MAC are unique from earlier package revisions. The settings
-enable IOAPIC in the 1.20 `Firmware` element and capture COM1 output to a
-package-local log.
+open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. It will register as
+`ArenaOS VDI 2c32009`. The README explains how to send `ArenaOS-serial.log` if
+the screen stays black. Each release's machine UUID, VDI UUIDs, and network MAC
+are unique from earlier package revisions. The settings enable IOAPIC in the
+1.20 `Firmware` element and capture COM1 output to a package-local log.
 
 The download URL at this branch is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
