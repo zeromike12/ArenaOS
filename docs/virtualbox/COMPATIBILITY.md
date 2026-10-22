@@ -9,7 +9,7 @@ stability is incomplete, and ADR-0113 remains Proposed.
 ## Interactive VM target
 
 The appliance targets Oracle VirtualBox 7.2.22 on an x86-64 host. The
-configuration in `ArenaOS.vbox` is self-contained with relative disk paths and
+configuration in `ArenaOS-VDI.vbox` is self-contained with relative disk paths and
 sets:
 
 | Setting | Value |
@@ -58,7 +58,7 @@ No AVX state or Phase 15 test behavior was changed.
 ## Appliance and first boot
 
 The artifact at `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`
-contains the `.vbox` configuration, fixed VDI 1.1 boot and data disks, README,
+contains the `ArenaOS-VDI.vbox` configuration, fixed VDI 1.1 boot and data disks, README,
 and JSON manifest. It is intended to be opened from
 VirtualBox's normal interface after extraction; no host-side Python, Rust,
 QEMU, scripts, or Guest Additions are required. The boot disk has a 16 MiB
@@ -83,9 +83,15 @@ guest boots.
 
 ### Run
 
-1. Download and extract `ArenaOS-VirtualBox-Interactive.zip`.
-2. Open `ArenaOS.vbox` in VirtualBox.
-3. Select ArenaOS and click **Start**.
+1. Download the latest `ArenaOS-VirtualBox-Interactive.zip` and extract it into a new folder.
+2. Open `ArenaOS-VDI.vbox` from that folder in VirtualBox.
+3. Select **ArenaOS VDI** and click **Start**.
+
+This package uses a new settings filename, VM name, and machine UUID. If an
+error still names `ArenaOS-Data.vmdk`, VirtualBox opened an older VM
+configuration; the current package contains `ArenaOS-Data.vdi` only. Open
+`ArenaOS-VDI.vbox` from the fresh extraction instead of starting the older
+**ArenaOS** entry in the VM list.
 
 The selected host must run 64-bit VirtualBox 7.2.22 with hardware
 virtualization available to the hypervisor and a CPU whose RDRAND source is

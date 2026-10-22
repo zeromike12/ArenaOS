@@ -209,7 +209,7 @@ def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> s
     return f'''<?xml version="1.0"?>
 <!-- ArenaOS interactive VirtualBox profile; generated from the recorded build identity. -->
 <VirtualBox xmlns="http://www.virtualbox.org/" version="1.20-linux">
-  <Machine uuid="{guid(machine_id)}" name="ArenaOS" OSType="Other_64" snapshotFolder="Snapshots" lastStateChange="2026-10-22T00:00:00Z">
+  <Machine uuid="{guid(machine_id)}" name="ArenaOS VDI" OSType="Other_64" snapshotFolder="Snapshots" lastStateChange="2026-10-22T00:00:00Z">
     <MediaRegistry>
       <HardDisks>
         <HardDisk uuid="{guid(data_id)}" location="ArenaOS-Data.vdi" format="VDI" type="Normal"/>
@@ -356,7 +356,10 @@ def build(output: Path, allow_dirty: bool) -> None:
     artifact_id = f"{source_commit}:{efi_hash}:{esp_hash}"
     boot_id = uuid_for("boot-vdi", artifact_id)
     data_id = uuid_for("data-vdi", artifact_id)
-    machine_id = uuid_for("machine", artifact_id)
+    # Give the VDI package its own VirtualBox registration identity. Earlier
+    # releases used the same VM name, settings filename, and machine UUID as
+    # the VMDK package, so VirtualBox could keep opening the old registration.
+    machine_id = uuid_for("machine-vdi", artifact_id)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="arenaos-vbox-") as temp_name:
@@ -372,7 +375,7 @@ def build(output: Path, allow_dirty: bool) -> None:
         data_vdi = temp / "ArenaOS-Data.vdi"
         write_vdi(boot_vdi, boot_raw, boot_id)
         write_vdi(data_vdi, data_raw, data_id)
-        vbox_path = temp / "ArenaOS.vbox"
+        vbox_path = temp / "ArenaOS-VDI.vbox"
         vbox_path.write_text(vbox_xml(machine_id, data_id, boot_id), encoding="utf-8", newline="\n")
 
         manifest = {
@@ -436,8 +439,10 @@ def build(output: Path, allow_dirty: bool) -> None:
             "Requirement: x86-64 Oracle VirtualBox 7.2.22 with host hardware virtualization enabled.\n"
             "Other VirtualBox versions are unverified. No guest additions or host tools are needed.\n\n"
             "1. Extract this ZIP file.\n"
-            "2. Open ArenaOS.vbox in VirtualBox.\n"
-            "3. Select ArenaOS and click Start.\n\n"
+            "2. Open ArenaOS-VDI.vbox in VirtualBox.\n"
+            "3. Select ArenaOS VDI and click Start.\n\n"
+            "Use this new VDI settings file, not an older ArenaOS entry or .vbox file.\n"
+            "If the VM list still shows ArenaOS, open ArenaOS-VDI.vbox from this folder to add this separate VM.\n\n"
             f"Interactive image source commit: {source_commit}\n"
             f"Package generator source commit: {package_source_commit}\n\n"
             "The VM is configured with one CPU, 1024 MiB RAM, ICH9, EFI, VGA, PS/2 input,\n"
@@ -454,7 +459,7 @@ def build(output: Path, allow_dirty: bool) -> None:
         )
 
         manifest["package_file_sha256"] = {
-            "ArenaOS.vbox": sha256(vbox_path),
+            "ArenaOS-VDI.vbox": sha256(vbox_path),
             "ArenaOS-Boot.vdi": sha256(boot_vdi),
             "ArenaOS-Data.vdi": sha256(data_vdi),
             "README.txt": sha256(readme),

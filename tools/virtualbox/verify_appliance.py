@@ -22,7 +22,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 EXPECTED_FILES = {
-    "ArenaOS.vbox",
+    "ArenaOS-VDI.vbox",
     "ArenaOS-Boot.vdi",
     "ArenaOS-Data.vdi",
     "README.txt",
@@ -244,7 +244,7 @@ def verify_xml(path: Path) -> dict[str, uuid.UUID]:
     require(root.tag == VBOX_NS + "VirtualBox", "VirtualBox XML root namespace mismatch")
     require(root.attrib.get("version") == "1.20-linux", "VirtualBox settings version mismatch")
     machine = root.find(VBOX_NS + "Machine")
-    require(machine is not None and machine.attrib.get("name") == "ArenaOS" and machine.attrib.get("OSType") == "Other_64", "machine identity mismatch")
+    require(machine is not None and machine.attrib.get("name") == "ArenaOS VDI" and machine.attrib.get("OSType") == "Other_64", "machine identity mismatch")
     platform = machine.find(VBOX_NS + "Platform")
     require(platform is not None, "machine Platform element is missing")
     require(platform.attrib.get("architecture") == "x86", "machine platform architecture mismatch")
@@ -340,13 +340,13 @@ def verify_directory(root: Path) -> None:
     data, data_uuid = verify_vdi(root / "ArenaOS-Data.vdi", manifest["persistent_data_disk"]["size_bytes"])
     require(sha256(boot) == manifest["boot_disk"]["disk_sha256"], "boot logical disk identity mismatch")
     require(sha256(data) == manifest["persistent_data_disk"]["disk_sha256"], "data logical disk identity mismatch")
-    xml_uuids = verify_xml(root / "ArenaOS.vbox")
-    require(xml_uuids["ArenaOS-Boot.vdi"] == boot_uuid, "boot VDI UUID does not match ArenaOS.vbox")
-    require(xml_uuids["ArenaOS-Data.vdi"] == data_uuid, "data VDI UUID does not match ArenaOS.vbox")
+    xml_uuids = verify_xml(root / "ArenaOS-VDI.vbox")
+    require(xml_uuids["ArenaOS-Boot.vdi"] == boot_uuid, "boot VDI UUID does not match ArenaOS-VDI.vbox")
+    require(xml_uuids["ArenaOS-Data.vdi"] == data_uuid, "data VDI UUID does not match ArenaOS-VDI.vbox")
     verify_gpt(boot, manifest)
     verify_afs1_and_afs2(data)
     readme = (root / "README.txt").read_text(encoding="utf-8")
-    require("Open ArenaOS.vbox in VirtualBox" in readme and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme, "README instructions or Phase 15 status missing")
+    require("Open ArenaOS-VDI.vbox in VirtualBox" in readme and "Select ArenaOS VDI" in readme and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme, "README instructions or Phase 15 status missing")
     print("PASS: package identities, relative VM configuration, fixed VDI images, GPT/EFI, AFS1, and blank AFS2 region")
     print(f"source commit: {manifest['source_commit']}")
     print(f"EFI SHA-256: {manifest['interactive_efi_sha256']}")
