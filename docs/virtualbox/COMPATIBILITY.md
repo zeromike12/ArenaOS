@@ -67,6 +67,12 @@ AFS1 format followed by a blank 64 MiB AFS2 region; `filesd` initializes AFS2
 and imports the AFS1 contents on first boot. User-created files then use the
 existing persistent AFS2 service.
 
+The `.vbox` file uses the VirtualBox settings 1.20 platform layout. Its x86
+architecture, CPU profile, chipset, and UTC clock are stored in `Machine/Platform`
+as required by VirtualBox 7.1 and later. The offline verifier enforces that
+layout and rejects the older `Hardware/CPU`, `Hardware/Chipset`, and
+`BIOS/RTCUseUTC` locations.
+
 The package verifier uses Python's standard library and checks every file
 hash, the `.vbox` device configuration, relative disk references, VMDK
 extents, GPT headers/tables, exact embedded EFI and ESP hashes, AFS1 geometry,

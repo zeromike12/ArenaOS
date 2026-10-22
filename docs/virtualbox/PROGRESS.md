@@ -66,13 +66,32 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   qualification image identity is `profile=qualification`. Both record the
   same clean source commit and distinct EFI/ESP hashes.
 
+## Native settings parse correction
+
+- The initial ZIP put CPU, chipset, and UTC clock settings in the pre-7.1
+  `Hardware`/`BIOS` layout while declaring settings version `1.20-linux`.
+  VirtualBox 7.1+ requires `Machine/Platform` for that version; the parser
+  explicitly throws `Required Machine/@Platform element is missing` when it
+  is absent. Its x86 settings also require `Platform/@architecture="x86"`
+  and a `Platform/x86` child. This matches the error reported while opening
+  the original download.
+- The generator now writes generic CPU, ICH9 chipset, and UTC clock settings
+  under `Platform`, and the x86 CPU controls under `Platform/x86/CPU`. The
+  offline verifier checks the required nodes, values, and absence of their
+  obsolete locations. This corrects the reported parser error; it does not
+  establish that the VM opens or boots on VirtualBox, which remains untested
+  in this managed environment.
+
 ## Final downloadable artifact
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` is the native
 `.vbox` package with portable relative disk files. It is 907,771 bytes with
-SHA-256
+SHA-256 to be updated after the schema correction is rebuilt. Its manifest
+will pin the correction source commit and matching interactive EFI/ESP
+identities.
+The prior archive SHA-256 was
 `9823317f7b18e374ce8e3c48f074d8796470a9bf05c77d009032337ec68d23c8`.
-Its manifest pins source commit `6a2635a898e074575f9b62935d2fe710cc0be442`,
+Its manifest pinned source commit `6a2635a898e074575f9b62935d2fe710cc0be442`,
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
 

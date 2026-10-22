@@ -204,19 +204,25 @@ def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> s
         <HardDisk uuid="{guid(boot_id)}" location="ArenaOS-Boot.vmdk" format="VMDK" type="Normal"/>
       </HardDisks>
     </MediaRegistry>
+    <Platform architecture="x86">
+      <RTC localOrUTC="UTC"/>
+      <Chipset type="ICH9"/>
+      <CPU count="1" hotplug="false"/>
+      <x86>
+        <CPU>
+          <HardwareVirtExLargePages enabled="false"/>
+          <HardwareVirtExNestedPaging enabled="true"/>
+          <HardwareVirtExVPID enabled="true"/>
+          <HardwareVirtExUX enabled="true"/>
+          <PAE enabled="false"/>
+          <LongMode enabled="true"/>
+          <X2APIC enabled="false"/>
+        </CPU>
+      </x86>
+    </Platform>
     <Hardware version="2">
-      <CPU count="1" hotplug="false">
-        <PAE enabled="false"/>
-        <LongMode enabled="true"/>
-        <X2APIC enabled="false"/>
-        <HardwareVirtExLargePages enabled="false"/>
-        <HardwareVirtExNestedPaging enabled="true"/>
-        <HardwareVirtExVPID enabled="true"/>
-        <HardwareVirtExUX enabled="true"/>
-      </CPU>
       <Memory RAMSize="1024" PageFusion="false"/>
       <HID Pointing="PS2Mouse" Keyboard="PS2Keyboard"/>
-      <Chipset type="ICH9"/>
       <Boot>
         <Order position="1" device="HardDisk"/>
         <Order position="2" device="None"/>
@@ -232,7 +238,6 @@ def vbox_xml(machine_id: uuid.UUID, data_id: uuid.UUID, boot_id: uuid.UUID) -> s
         <TimeOffset value="0"/>
         <KeyboardDevice enabled="true"/>
         <PointingDevice enabled="true"/>
-        <RTCUseUTC enabled="true"/>
       </BIOS>
       <Firmware type="EFI" secureBootEnabled="false"/>
       <Network>
@@ -296,16 +301,39 @@ def build(output: Path, allow_dirty: bool) -> None:
     if source_status and not allow_dirty:
         raise SystemExit("source tree has tracked changes; commit sources before making the release artifact")
 
-    source_commit = subprocess.run(
+    package_source_commit = subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+    source_commit = identity.get("source_commit", "")
+    if len(source_commit) != 40 or any(char not in "0123456789abcdef" for char in source_commit):
+        raise SystemExit("interactive build identity has an invalid source commit")
+    ancestry = subprocess.run(
+        ["git", "-C", str(ROOT), "merge-base", "--is-ancestor", source_commit, package_source_commit],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if ancestry.returncode != 0:
+        raise SystemExit("interactive build source commit is not an ancestor of the package source commit")
+    image_source_changes = subprocess.run(
+        ["git", "-C", str(ROOT), "diff", "--name-only", f"{source_commit}..HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    image_relevant_changes = [
+        path for path in image_source_changes
+        if not path.startswith("docs/virtualbox/") and not path.startswith("tools/virtualbox/")
+    ]
+    if image_relevant_changes:
+        raise SystemExit(
+            "interactive build identity is stale; rebuild after changes outside the VirtualBox packaging and documentation paths"
+        )
     efi_hash = sha256(EFI)
     esp_hash = sha256(ESP)
-    if identity.get("source_commit") != source_commit:
-        raise SystemExit("interactive build identity is stale; rebuild after committing the source tree")
     if identity.get("efi_sha256") != efi_hash or identity.get("esp_sha256") != esp_hash:
         raise SystemExit("interactive build identity does not match the EFI and ESP files")
     graphics_profile = (BUILD / "graphics-profile.txt").read_text(encoding="utf-8").strip()
@@ -346,6 +374,7 @@ def build(output: Path, allow_dirty: bool) -> None:
                 text=True,
             ).stdout.strip(),
             "source_commit": source_commit,
+            "package_source_commit": package_source_commit,
             "source_tree_dirty": bool(status),
             "build_identity": identity,
             "graphics_profile": graphics_profile,
@@ -395,6 +424,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             "1. Extract this ZIP file.\n"
             "2. Open ArenaOS.vbox in VirtualBox.\n"
             "3. Select ArenaOS and click Start.\n\n"
+            f"Interactive image source commit: {source_commit}\n"
+            f"Package generator source commit: {package_source_commit}\n\n"
             "The VM is configured with one CPU, 1024 MiB RAM, ICH9, EFI, VGA, PS/2 input,\n"
             "an AHCI persistent data disk, and one VirtIO network adapter using NAT. The\n"
             "first SATA disk is the 72 MiB writable data disk; the second contains the EFI\n"

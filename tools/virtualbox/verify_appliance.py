@@ -219,25 +219,50 @@ def verify_vmdk(descriptor: Path, extent: Path) -> None:
 def verify_xml(path: Path) -> None:
     root = ElementTree.parse(path).getroot()
     require(root.tag == VBOX_NS + "VirtualBox", "VirtualBox XML root namespace mismatch")
+    require(root.attrib.get("version") == "1.20-linux", "VirtualBox settings version mismatch")
     machine = root.find(VBOX_NS + "Machine")
     require(machine is not None and machine.attrib.get("name") == "ArenaOS" and machine.attrib.get("OSType") == "Other_64", "machine identity mismatch")
+    platform = machine.find(VBOX_NS + "Platform")
+    require(platform is not None, "machine Platform element is missing")
+    require(platform.attrib.get("architecture") == "x86", "machine platform architecture mismatch")
+    platform_cpu = platform.find(VBOX_NS + "CPU")
+    require(platform_cpu is not None and platform_cpu.attrib.get("count") == "1" and platform_cpu.attrib.get("hotplug") == "false", "VM platform CPU settings mismatch")
+    chipset = platform.find(VBOX_NS + "Chipset")
+    require(chipset is not None and chipset.attrib.get("type") == "ICH9", "VM chipset mismatch")
+    rtc = platform.find(VBOX_NS + "RTC")
+    require(rtc is not None and rtc.attrib.get("localOrUTC") == "UTC", "VM RTC settings mismatch")
+    x86 = platform.find(VBOX_NS + "x86")
+    require(x86 is not None, "machine x86 platform element is missing")
+    x86_cpu = x86.find(VBOX_NS + "CPU")
+    require(x86_cpu is not None, "machine x86 CPU settings are missing")
+    for name, expected in {
+        "PAE": "false",
+        "LongMode": "true",
+        "X2APIC": "false",
+        "HardwareVirtExLargePages": "false",
+        "HardwareVirtExNestedPaging": "true",
+        "HardwareVirtExVPID": "true",
+        "HardwareVirtExUX": "true",
+    }.items():
+        setting = x86_cpu.find(VBOX_NS + name)
+        require(setting is not None and setting.attrib.get("enabled") == expected, f"VM x86 {name} setting mismatch")
+
     hardware = machine.find(VBOX_NS + "Hardware")
     require(hardware is not None, "machine hardware block is missing")
-    cpu = hardware.find(VBOX_NS + "CPU")
     memory = hardware.find(VBOX_NS + "Memory")
-    chipset = hardware.find(VBOX_NS + "Chipset")
     firmware = hardware.find(VBOX_NS + "Firmware")
     display = hardware.find(VBOX_NS + "Display")
     hid = hardware.find(VBOX_NS + "HID")
     bios = hardware.find(VBOX_NS + "BIOS")
-    require(cpu is not None and cpu.attrib.get("count") == "1", "VM must have one CPU")
+    require(hardware.find(VBOX_NS + "CPU") is None, "legacy Hardware/CPU settings must be stored under Platform")
     require(memory is not None and memory.attrib.get("RAMSize") == "1024", "VM must have 1024 MiB RAM")
-    require(chipset is not None and chipset.attrib.get("type") == "ICH9", "VM chipset mismatch")
+    require(hardware.find(VBOX_NS + "Chipset") is None, "legacy Hardware/Chipset setting must be stored under Platform")
     require(firmware is not None and firmware.attrib.get("type") == "EFI" and firmware.attrib.get("secureBootEnabled") == "false", "VM EFI settings mismatch")
     require(display is not None and display.attrib.get("controller") == "VBoxVGA", "VM display controller mismatch")
     require(hid is not None and hid.attrib.get("Keyboard") == "PS2Keyboard" and hid.attrib.get("Pointing") == "PS2Mouse", "VM input devices mismatch")
     ioapic = bios.find(VBOX_NS + "IOAPIC") if bios is not None else None
     require(ioapic is not None and ioapic.attrib.get("enabled") == "true", "VM I/O APIC is disabled")
+    require(bios is None or bios.find(VBOX_NS + "RTCUseUTC") is None, "legacy BIOS/RTCUseUTC setting must be stored under Platform")
 
     boot = hardware.find(VBOX_NS + "Boot")
     require(boot is not None and boot.find(VBOX_NS + "Order").attrib.get("device") == "HardDisk", "VM must boot from a hard disk")
@@ -271,6 +296,11 @@ def verify_directory(root: Path) -> None:
     require(manifest.get("virtualbox_target_version") == "7.2.22", "VirtualBox target version mismatch")
     require(manifest.get("graphics_profile") == "desktop", "interactive desktop graphics profile mismatch")
     require(re.fullmatch(r"[0-9a-f]{40}", manifest.get("source_commit", "")) is not None, "source commit identity invalid")
+    require(re.fullmatch(r"[0-9a-f]{40}", manifest.get("package_source_commit", "")) is not None, "package source commit identity invalid")
+    build_identity = manifest.get("build_identity") or {}
+    require(build_identity.get("source_commit") == manifest.get("source_commit"), "interactive image source commit mismatch")
+    require(build_identity.get("efi_sha256") == manifest.get("interactive_efi_sha256"), "interactive EFI build identity mismatch")
+    require(build_identity.get("esp_sha256") == manifest.get("interactive_esp_sha256"), "interactive ESP build identity mismatch")
     hashes = manifest.get("package_file_sha256")
     require(set(hashes or {}) == EXPECTED_FILES - {"manifest.json"}, "package manifest hash set mismatch")
     for name, digest in hashes.items():
