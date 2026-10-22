@@ -25,6 +25,8 @@ EXPECTED_FILES = {
     "ArenaOS-VDI.vbox",
     "ArenaOS-Boot.vdi",
     "ArenaOS-Data.vdi",
+    "Start-ArenaOS.cmd",
+    "Start-ArenaOS.sh",
     "README.txt",
     "manifest.json",
 }
@@ -309,7 +311,7 @@ def verify_xml(path: Path, vm_configuration: dict) -> dict[str, uuid.UUID]:
         and serial_ports[0].attrib.get("IRQ") == "4"
         and serial_ports[0].attrib.get("hostMode") == "RawFile"
         and serial_ports[0].attrib.get("path") == "ArenaOS-serial.log"
-        and vm_configuration.get("serial_output") == "COM1, 38400 8N1, ArenaOS-serial.log",
+        and vm_configuration.get("serial_output") == "COM1, 38400 8N1, absolute package-local ArenaOS-serial.log set by launcher",
         "VM COM1 raw-file diagnostic output mismatch",
     )
 
@@ -403,13 +405,31 @@ def verify_directory(root: Path) -> None:
     require(xml_uuids["ArenaOS-Data.vdi"] == data_uuid, "data VDI UUID does not match ArenaOS-VDI.vbox")
     verify_gpt(boot, manifest)
     verify_afs1_and_afs2(data)
+    windows_launcher = (root / "Start-ArenaOS.cmd").read_text(encoding="utf-8")
+    linux_launcher = (root / "Start-ArenaOS.sh").read_text(encoding="utf-8")
+    vm_uuid = vm_configuration["machine_uuid"]
+    require(
+        vm_uuid in windows_launcher
+        and "--uartmode1 file \"%~dp0ArenaOS-serial.log\"" in windows_launcher
+        and "registervm \"%~dp0ArenaOS-VDI.vbox\"" in windows_launcher
+        and "startvm \"%VM_UUID%\" --type gui" in windows_launcher,
+        "Windows launcher does not register, pin the absolute serial path, and start the expected VM",
+    )
+    require(
+        f"VM_UUID='{{{vm_uuid}}}'" in linux_launcher
+        and '--uartmode1 file "$SCRIPT_DIR/ArenaOS-serial.log"' in linux_launcher
+        and 'registervm "$SCRIPT_DIR/ArenaOS-VDI.vbox"' in linux_launcher
+        and 'startvm "$VM_UUID" --type gui' in linux_launcher,
+        "Linux launcher does not register, pin the absolute serial path, and start the expected VM",
+    )
     readme = (root / "README.txt").read_text(encoding="utf-8")
     require(
-        "Open ArenaOS-VDI.vbox in VirtualBox" in readme
-        and f"Select {vm_configuration['machine_name']}" in readme
+        "double-click Start-ArenaOS.cmd" in readme
+        and "sh Start-ArenaOS.sh" in readme
+        and f"The launcher targets {vm_configuration['machine_name']}" in readme
         and "VirtualBox registers disk UUIDs globally" in readme
         and "ArenaOS-serial.log" in readme
-        and "send that file" in readme
+        and "send ArenaOS-serial.log" in readme
         and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme,
         "README instructions or Phase 15 status missing",
     )

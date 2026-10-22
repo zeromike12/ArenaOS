@@ -291,6 +291,58 @@ def vbox_xml(
 '''
 
 
+def windows_launcher(machine_id: uuid.UUID) -> str:
+    return f'''@echo off
+setlocal
+set "VBOXMANAGE=%ProgramFiles%\\Oracle\\VirtualBox\\VBoxManage.exe"
+if not exist "%VBOXMANAGE%" (
+  where VBoxManage >nul 2>&1
+  if errorlevel 1 (
+    echo VBoxManage.exe was not found. Install Oracle VirtualBox or add its folder to PATH.
+    pause
+    exit /b 1
+  )
+  set "VBOXMANAGE=VBoxManage"
+)
+set "VM_UUID={machine_id}"
+"%VBOXMANAGE%" showvminfo "%VM_UUID%" >nul 2>&1
+if errorlevel 1 (
+  "%VBOXMANAGE%" registervm "%~dp0ArenaOS-VDI.vbox"
+  if errorlevel 1 goto failed
+)
+"%VBOXMANAGE%" modifyvm "%VM_UUID%" --uartmode1 file "%~dp0ArenaOS-serial.log"
+if errorlevel 1 goto failed
+echo Serial output will be saved to "%~dp0ArenaOS-serial.log".
+"%VBOXMANAGE%" startvm "%VM_UUID%" --type gui
+if errorlevel 1 goto failed
+exit /b 0
+
+:failed
+echo Could not configure or start the ArenaOS VM. Check that it is powered off and VirtualBox is installed.
+pause
+exit /b 1
+'''
+
+
+def linux_launcher(machine_id: uuid.UUID) -> str:
+    return f'''#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VBOXMANAGE=$(command -v VBoxManage || true)
+if [ -z "$VBOXMANAGE" ]; then
+    echo "VBoxManage was not found. Install Oracle VirtualBox and put VBoxManage on PATH." >&2
+    exit 1
+fi
+VM_UUID='{{{machine_id}}}'
+if ! "$VBOXMANAGE" showvminfo "$VM_UUID" >/dev/null 2>&1; then
+    "$VBOXMANAGE" registervm "$SCRIPT_DIR/ArenaOS-VDI.vbox"
+fi
+"$VBOXMANAGE" modifyvm "$VM_UUID" --uartmode1 file "$SCRIPT_DIR/ArenaOS-serial.log"
+echo "Serial output will be saved to $SCRIPT_DIR/ArenaOS-serial.log."
+exec "$VBOXMANAGE" startvm "$VM_UUID" --type gui
+'''
+
+
 def read_identity() -> dict[str, str]:
     if not IDENTITY.is_file():
         raise SystemExit("build the interactive EFI first: tools/build.sh --virtualbox-interactive --image")
@@ -404,6 +456,10 @@ def build(output: Path, allow_dirty: bool) -> None:
             encoding="utf-8",
             newline="\n",
         )
+        windows_launcher_path = temp / "Start-ArenaOS.cmd"
+        windows_launcher_path.write_text(windows_launcher(machine_id), encoding="utf-8", newline="\r\n")
+        linux_launcher_path = temp / "Start-ArenaOS.sh"
+        linux_launcher_path.write_text(linux_launcher(machine_id), encoding="utf-8", newline="\n")
 
         manifest = {
             "package_status": "ready_for_external_virtualbox_testing",
@@ -458,7 +514,7 @@ def build(output: Path, allow_dirty: bool) -> None:
                 "input": "PS/2 keyboard and mouse",
                 "storage": "AHCI SATA with fixed VDI 1.1 disks; data disk port 0; GPT/FAT EFI disk port 1",
                 "network": "VirtualBox paravirtualized VirtIO adapter, NAT",
-                "serial_output": "COM1, 38400 8N1, ArenaOS-serial.log",
+                "serial_output": "COM1, 38400 8N1, absolute package-local ArenaOS-serial.log set by launcher",
                 "machine_uuid": str(machine_id),
                 "machine_name": machine_name,
                 "boot_disk_uuid": str(boot_id),
@@ -478,19 +534,18 @@ def build(output: Path, allow_dirty: bool) -> None:
             "Requirement: x86-64 Oracle VirtualBox 7.2.22 with host hardware virtualization enabled.\n"
             "Other VirtualBox versions are unverified. No guest additions or host tools are needed.\n\n"
             "1. Extract this ZIP file.\n"
-            "2. Open ArenaOS-VDI.vbox in VirtualBox.\n"
-            f"3. Select {machine_name} and click Start.\n\n"
-            "ArenaOS boot diagnostics are captured automatically in ArenaOS-serial.log beside this file.\n"
-            "If the screen stays black or startup stops, power off the VM and send that file.\n\n"
-            "Use this new VDI settings file, not an older ArenaOS entry or .vbox file.\n"
-            f"If the VM list still shows ArenaOS, open ArenaOS-VDI.vbox from this folder to add {machine_name}.\n\n"
-            f"Register one extracted copy of this package. For later starts, select {machine_name} in the VM list\n"
-            "instead of opening another extracted copy; VirtualBox registers disk UUIDs globally.\n\n"
+            "2. On Windows, double-click Start-ArenaOS.cmd. On Linux, run sh Start-ArenaOS.sh.\n"
+            "   The launcher registers this VM if needed, sets COM1 to an absolute log path in this folder, and starts the GUI.\n\n"
+            "If the screen stays black or startup stops, power off the VM and send ArenaOS-serial.log from this folder.\n\n"
+            "Use this package's launcher; do not start an older ArenaOS VM entry.\n"
+            f"The launcher targets {machine_name}; if you registered the VM by opening ArenaOS-VDI.vbox, it will use that same VM.\n\n"
+            "Register one extracted copy of this package; VirtualBox registers disk UUIDs globally.\n"
+            "Use the launcher for every start so the serial log path matches this extraction folder.\n\n"
             f"Interactive image source commit: {source_commit}\n"
             f"Package generator source commit: {package_source_commit}\n\n"
             "The VM is configured with one CPU, 1024 MiB RAM, ICH9, EFI, VGA, PS/2 input,\n"
             "an AHCI persistent data disk, one VirtIO network adapter using NAT, and\n"
-            "COM1 serial output captured in ArenaOS-serial.log beside this file.\n"
+            "COM1 serial output saved to ArenaOS-serial.log beside this file by the launcher.\n"
             "The disks are VirtualBox native fixed VDI 1.1 images. The first SATA disk is\n"
             "the 72 MiB writable data disk; the second contains the EFI\n"
             "system partition. User files belong on the data disk and persist across boots.\n\n"
@@ -506,16 +561,19 @@ def build(output: Path, allow_dirty: bool) -> None:
             "ArenaOS-VDI.vbox": sha256(vbox_path),
             "ArenaOS-Boot.vdi": sha256(boot_vdi),
             "ArenaOS-Data.vdi": sha256(data_vdi),
+            "Start-ArenaOS.cmd": sha256(windows_launcher_path),
+            "Start-ArenaOS.sh": sha256(linux_launcher_path),
             "README.txt": sha256(readme),
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-            files = [vbox_path, boot_vdi, data_vdi, manifest_path, readme]
+            files = [vbox_path, boot_vdi, data_vdi, windows_launcher_path, linux_launcher_path, manifest_path, readme]
             for file_path in files:
                 info = zipfile.ZipInfo(file_path.name, date_time=(2026, 10, 22, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED
-                info.external_attr = 0o100644 << 16
+                mode = 0o100755 if file_path == linux_launcher_path else 0o100644
+                info.external_attr = mode << 16
                 archive.writestr(info, file_path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
     verifier = ROOT / "tools/virtualbox/verify_appliance.py"

@@ -24,7 +24,7 @@ sets:
 | Data storage | AHCI SATA: persistent 72 MiB disk, port 0 |
 | Boot storage | AHCI SATA: GPT/FAT EFI disk, port 1 |
 | Network | VirtualBox paravirtualized VirtIO adapter, NAT |
-| Boot diagnostics | COM1, 38400 8N1, captured to `ArenaOS-serial.log` beside the VM settings |
+| Boot diagnostics | COM1, 38400 8N1, launcher sets an absolute package-local `ArenaOS-serial.log` path |
 | Guest Additions | Not required or used |
 | Audio, clipboard, drag/drop, 3D | Disabled; not part of this profile |
 
@@ -63,9 +63,9 @@ No AVX state or Phase 15 test behavior was changed.
 
 The artifact at `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`
 contains the `ArenaOS-VDI.vbox` configuration, fixed VDI 1.1 boot and data disks, README,
-and JSON manifest. It is intended to be opened from
-VirtualBox's normal interface after extraction; no host-side Python, Rust,
-QEMU, scripts, or Guest Additions are required. The boot disk has a 16 MiB
+launchers, and JSON manifest. Use the included launcher after extraction to
+set an absolute COM1 output path and start the VM; no host-side Python, Rust,
+QEMU, or Guest Additions are required. The boot disk has a 16 MiB
 FAT16 ESP containing
 the exact interactive EFI. The 72 MiB data disk contains the existing 8 MiB
 AFS1 format followed by a blank 64 MiB AFS2 region; `filesd` initializes AFS2
@@ -89,9 +89,13 @@ guest boots.
 ### Run
 
 1. Download the latest `ArenaOS-VirtualBox-Interactive.zip` and extract it into a new folder.
-2. Open `ArenaOS-VDI.vbox` from that folder in VirtualBox.
-3. Select the VM named **ArenaOS VDI** followed by the package commit's short ID, then click **Start**. The exact name appears in the ZIP's `README.txt`.
-4. If the screen stays black or startup stops, power off the VM, then send `ArenaOS-serial.log` from the same folder. It contains ArenaOS's boot and failure messages.
+2. On Windows, double-click `Start-ArenaOS.cmd`. On Linux, run `sh Start-ArenaOS.sh` from the extracted folder.
+3. The launcher registers this VM if needed, sets COM1 to an absolute log path in the extracted folder, and starts the VM in the GUI. It requires VirtualBox's `VBoxManage` command.
+4. If the screen stays black or startup stops, power off the VM, then send `ArenaOS-serial.log` from the extracted folder.
+
+Opening `ArenaOS-VDI.vbox` manually still starts the same VM, but the serial
+path may remain relative to VirtualBox's working directory. Use the launcher
+when capturing diagnostics.
 
 This package uses a new settings filename, VM name, and machine UUID. If an
 error still names `ArenaOS-Data.vmdk`, VirtualBox opened an older VM
