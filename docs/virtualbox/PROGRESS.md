@@ -103,23 +103,30 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   identity against the `.vbox`, GPT/ESP, and AFS1/AFS2 data. The new VDI package
   is not yet opened on a Windows host, so its GUI import and guest boot remain
   unverified.
+- C reported the same `.vmdk` error after trying the VDI package. That exact
+  disk path is absent from the VDI archive, whose settings refer only to
+  `.vdi` disks, so VirtualBox was still opening the earlier VMDK settings or
+  registered VM. To make the new package unmistakable, it now has a unique
+  `ArenaOS-VDI.vbox` filename, `ArenaOS VDI` VM name, and machine UUID. Open
+  that file from a fresh extraction; do not start the old `ArenaOS` entry.
 
 ## Final downloadable artifact
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` contains the
-native `.vbox` configuration and fixed VDI boot/data disks. Its manifest pins
+`ArenaOS-VDI.vbox` configuration and fixed VDI boot/data disks. Its manifest pins
 interactive image source commit `6a2635a898e074575f9b62935d2fe710cc0be442`
-and package generator commit `0cfee34378d4d5dd01b2036592eb3ff2936454ff`.
-The ZIP is 908,878 bytes with SHA-256
-`75cc48022cd0d9a82a5e0885b9edca8ac79c4979e9caca6508e86c03f89e284b`.
+and package generator commit `b023d85ede78b25cbfd8d2491af70670636c0c90`.
+The ZIP is 908,969 bytes with SHA-256
+`07492401392988129092a530a4bcea07079a5ec582d3a9a1b94cc0b433c7d24c`.
 The VDI packaging change does not rebuild the EFI or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
 
-The VDI ZIP is freshly extracted and checked by the standard-library verifier.
-These offline checks validate package identities and disk structures; they do
-not validate a VirtualBox GUI start or guest execution. C should extract the
-new ZIP into a new folder and open its `ArenaOS.vbox` in VirtualBox 7.2.22.
+The VDI ZIP was generated and checked by the standard-library verifier. These
+offline checks validate package identities and disk structures; they do not
+validate a VirtualBox GUI start or guest execution. Extract the latest ZIP
+into a new folder and open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. The VM list
+should show `ArenaOS VDI`.
 
 The download URL after this branch is pushed is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
