@@ -108,7 +108,10 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` contains the
 native `.vbox` configuration and fixed VDI boot/data disks. Its manifest pins
-interactive image source commit `6a2635a898e074575f9b62935d2fe710cc0be442`.
+interactive image source commit `6a2635a898e074575f9b62935d2fe710cc0be442`
+and package generator commit `0cfee34378d4d5dd01b2036592eb3ff2936454ff`.
+The ZIP is 908,878 bytes with SHA-256
+`75cc48022cd0d9a82a5e0885b9edca8ac79c4979e9caca6508e86c03f89e284b`.
 The VDI packaging change does not rebuild the EFI or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
