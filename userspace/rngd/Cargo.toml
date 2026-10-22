@@ -10,6 +10,10 @@ description = "ArenaOS entropy service (M6.2, ADR-0025) — the userspace virtio
 # cargo from walking up into any parent workspace.
 [workspace]
 
+[features]
+default = []
+virtualbox-interactive = []
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

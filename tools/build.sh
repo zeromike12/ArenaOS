@@ -10,6 +10,31 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${ARENA_BUILD_PROFILE:-release}"
+BUILD_KIND="qualification"
+MAKE_IMAGE=0
+for BUILD_ARG in "$@"; do
+    case "$BUILD_ARG" in
+        --virtualbox-interactive) BUILD_KIND="virtualbox-interactive" ;;
+        --image) MAKE_IMAGE=1 ;;
+        *) echo "error: unknown build option: $BUILD_ARG" >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$BUILD_KIND" == "virtualbox-interactive" ]]; then
+    if [[ "${ARENA_PHASE15_HISTORICAL_DIAGNOSTIC:-0}" == "1" || "${ARENA_PHASE15_OSXSAVE_SEED:-0}" == "1" ]]; then
+        echo "error: diagnostic Phase-15 profiles cannot be combined with the interactive image" >&2
+        exit 2
+    fi
+    if [[ "${ARENA_GRAPHICS_FIXTURE:-desktop}" != "desktop" ]]; then
+        echo "error: the interactive image requires the production desktop graphics profile" >&2
+        exit 2
+    fi
+    OUTPUT_EFI="$REPO_ROOT/build/arena-virtualbox-interactive.efi"
+    OUTPUT_ESP="$REPO_ROOT/build/arena-virtualbox-interactive-esp.img"
+else
+    OUTPUT_EFI="$REPO_ROOT/build/arena-boot.efi"
+    OUTPUT_ESP="$REPO_ROOT/build/arena-esp.img"
+fi
 
 if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
     # shellcheck disable=SC1091
@@ -73,7 +98,11 @@ echo "shell image: ${SHELL_ELF#"$REPO_ROOT"/} ($(stat -c%s "$SHELL_ELF") bytes)"
 # (image 3, the m5 suite's service-boundary client). Both embed into the
 # kernel via include_bytes!, so both must exist before it compiles.
 echo "== building userspace storaged (userspace/storaged, x86_64-unknown-none) =="
-( cd "$REPO_ROOT/userspace/storaged" && cargo build --release )
+if [[ "$BUILD_KIND" == "virtualbox-interactive" ]]; then
+    ( cd "$REPO_ROOT/userspace/storaged" && cargo build --release --features virtualbox-interactive )
+else
+    ( cd "$REPO_ROOT/userspace/storaged" && cargo build --release )
+fi
 for STORAGED_ELF in \
     "$REPO_ROOT/userspace/storaged/target/x86_64-unknown-none/release/arena-storaged" \
     "$REPO_ROOT/userspace/storaged/target/x86_64-unknown-none/release/blktest"; do
@@ -121,7 +150,11 @@ done
 # virtio core) and rngtest (image 9, the m6 suite's variance probe).
 # Both embed into the kernel via include_bytes!.
 echo "== building userspace rngd (userspace/rngd, x86_64-unknown-none) =="
-( cd "$REPO_ROOT/userspace/rngd" && cargo build --release )
+if [[ "$BUILD_KIND" == "virtualbox-interactive" ]]; then
+    ( cd "$REPO_ROOT/userspace/rngd" && cargo build --release --features virtualbox-interactive )
+else
+    ( cd "$REPO_ROOT/userspace/rngd" && cargo build --release )
+fi
 for RNGD_ELF in \
     "$REPO_ROOT/userspace/rngd/target/x86_64-unknown-none/release/arena-rngd" \
     "$REPO_ROOT/userspace/rngd/target/x86_64-unknown-none/release/rngtest"; do
@@ -138,7 +171,11 @@ done
 # suite's decoded-keystroke client). Both embed into the kernel via
 # include_bytes!.
 echo "== building userspace inputd (userspace/inputd, x86_64-unknown-none) =="
-( cd "$REPO_ROOT/userspace/inputd" && cargo build --release )
+if [[ "$BUILD_KIND" == "virtualbox-interactive" ]]; then
+    ( cd "$REPO_ROOT/userspace/inputd" && cargo build --release --features virtualbox-interactive )
+else
+    ( cd "$REPO_ROOT/userspace/inputd" && cargo build --release )
+fi
 for INPUTD_ELF in \
     "$REPO_ROOT/userspace/inputd/target/x86_64-unknown-none/release/arena-inputd" \
     "$REPO_ROOT/userspace/inputd/target/x86_64-unknown-none/release/inputtest"; do
@@ -291,6 +328,10 @@ cd "$REPO_ROOT/kernel"
 # ADR-0077: filesd, the AFS2 file service (boot image 9).
 ( cd "$REPO_ROOT/userspace/filesd" && cargo build --offline --locked --release )
 KERNEL_FEATURE_ARGS=()
+if [[ "$BUILD_KIND" == "virtualbox-interactive" ]]; then
+    KERNEL_FEATURE_ARGS+=(--features arena-kernel/virtualbox-interactive,arena-boot/virtualbox-interactive)
+    echo "WARNING: building the separate interactive VirtualBox image; qualification suites are omitted and this image does not qualify Phase 15"
+fi
 if [[ "${ARENA_PHASE15_HISTORICAL_DIAGNOSTIC:-0}" == "1" ]]; then
     KERNEL_FEATURE_ARGS+=(--features arena-kernel/phase15-historical-diagnostic)
     echo "WARNING: building the Phase-15 historical diagnostic image; #XF acceptance is not run and this image is not release-qualified"
@@ -303,9 +344,9 @@ cargo build $PROFILE_FLAG "${KERNEL_FEATURE_ARGS[@]}"
 
 EFI_SRC="$REPO_ROOT/kernel/target/x86_64-unknown-uefi/$PROFILE_DIR/arena-boot.efi"
 mkdir -p "$REPO_ROOT/build"
-cp "$EFI_SRC" "$REPO_ROOT/build/arena-boot.efi"
+cp "$EFI_SRC" "$OUTPUT_EFI"
 printf '%s\n' "${ARENA_GRAPHICS_FIXTURE:-desktop}" > "$REPO_ROOT/build/graphics-profile.txt"
-echo "kernel image: build/arena-boot.efi ($(stat -c%s "$REPO_ROOT/build/arena-boot.efi") bytes)"
+echo "kernel image: ${OUTPUT_EFI#"$REPO_ROOT"/} ($(stat -c%s "$OUTPUT_EFI") bytes)"
 
 # ADR-0012 / proposed ADR-0113 invariant: ordinary kernel code remains
 # integer-only. The only FP/SIMD instructions allowed in the EFI image are
@@ -326,8 +367,33 @@ if [[ -z "$DISASM" ]]; then
 fi
 python3 "$REPO_ROOT/tools/audit_kernel_isa.py" --self-test
 python3 "$REPO_ROOT/tools/audit_kernel_isa.py" \
-    --objdump "$DISASM" --image "$REPO_ROOT/build/arena-boot.efi"
+    --objdump "$DISASM" --image "$OUTPUT_EFI"
 
-if [[ "${1:-}" == "--image" ]]; then
-    python3 "$REPO_ROOT/tools/espimg.py" "$REPO_ROOT/build/arena-boot.efi" "$REPO_ROOT/build/arena-esp.img"
+if [[ "$MAKE_IMAGE" == "1" ]]; then
+    python3 "$REPO_ROOT/tools/espimg.py" "$OUTPUT_EFI" "$OUTPUT_ESP"
 fi
+
+IDENTITY_PROFILE="$BUILD_KIND"
+IDENTITY_FILE="$REPO_ROOT/build/arena-qualification.identity"
+if [[ "$BUILD_KIND" == "virtualbox-interactive" ]]; then
+    IDENTITY_FILE="$REPO_ROOT/build/arena-virtualbox-interactive.identity"
+elif [[ "${ARENA_PHASE15_OSXSAVE_SEED:-0}" == "1" ]]; then
+    IDENTITY_PROFILE="phase15-osxsave-seed-diagnostic"
+elif [[ "${ARENA_PHASE15_HISTORICAL_DIAGNOSTIC:-0}" == "1" ]]; then
+    IDENTITY_PROFILE="phase15-historical-diagnostic"
+fi
+{
+    printf 'profile=%s\n' "$IDENTITY_PROFILE"
+    printf 'source_commit=%s\n' "$(git -C "$REPO_ROOT" rev-parse HEAD)"
+    if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+        printf 'source_tree=dirty\n'
+    else
+        printf 'source_tree=clean\n'
+    fi
+    printf 'efi_sha256=%s\n' "$(sha256sum "$OUTPUT_EFI" | cut -d' ' -f1)"
+    if [[ "$MAKE_IMAGE" == "1" ]]; then
+        printf 'esp_sha256=%s\n' "$(sha256sum "$OUTPUT_ESP" | cut -d' ' -f1)"
+    fi
+    printf 'graphics_profile=%s\n' "${ARENA_GRAPHICS_FIXTURE:-desktop}"
+} > "$IDENTITY_FILE"
+echo "build identity: ${IDENTITY_FILE#"$REPO_ROOT"/}"

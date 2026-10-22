@@ -10,6 +10,10 @@ description = "ArenaOS block service (M5.2, ADR-0022) — the userspace virtio-b
 # cargo from walking up into any parent workspace.
 [workspace]
 
+[features]
+default = []
+virtualbox-interactive = []
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

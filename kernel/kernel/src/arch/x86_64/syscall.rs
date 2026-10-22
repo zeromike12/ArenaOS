@@ -228,6 +228,13 @@ pub const SYS_RESOURCE_DETAIL: u64 = 75;
 /// ADR-0110: submit one exact 32-byte virtio-rng seed through the private
 /// production rngd capability; (cap slot, readable 32-byte user buffer).
 pub const SYS_ENTROPY_SEED: u64 = 76;
+/// ADR-0114: capability-gated PS/2 status/data transactions; never grants
+/// CPL3 IOPL or an arbitrary port number.
+pub const SYS_PS2_IO: u64 = 77;
+/// ADR-0114: rngd may fill a caller-lent frame from the seeded kernel CSPRNG.
+pub const SYS_ENTROPY_DRAW: u64 = 78;
+/// ADR-0114: rngd requests an initial seed from the validated RDRAND source.
+pub const SYS_ENTROPY_SEED_RDRAND: u64 = 79;
 
 /// Largest `SYS_DEBUG_WRITE` the dispatcher accepts (bytes). The console
 /// is a diagnostic surface; a real byte-stream API arrives with the FS
@@ -765,6 +772,11 @@ extern "C" fn syscall_dispatch(
         SYS_CONSOLE_PUSH => sys_console_push(a0, a1, a2) as u64,
         SYS_CONSOLE_ATTACH => sys_console_attach(a0, a1, a2) as u64,
         SYS_CONSOLE_PULL => sys_console_pull(a0, a1, a2) as u64,
+        SYS_PS2_IO if [a3, a4, a5] == [0; 3] => sys_ps2_io(a0, a1, a2) as u64,
+        SYS_ENTROPY_DRAW if [a4, a5] == [0; 2] => sys_entropy_draw(a0, a1, a2, a3) as u64,
+        SYS_ENTROPY_SEED_RDRAND if [a2, a3, a4, a5] == [0; 4] => {
+            sys_entropy_seed_rdrand(a0, a1) as u64
+        }
         SYS_CLOCK_NOW => sys_clock_now() as u64,
         SYS_TIMER_ARM => sys_timer_arm(a0, a1, a2) as u64,
         SYS_TIMER_CANCEL => sys_timer_cancel(a0) as u64,
@@ -1920,6 +1932,57 @@ fn sys_shutdown(a0: u64) -> Status {
 /// copy lands in a fixed stack buffer with no allocator and no
 /// unbounded loop under IF=0.
 pub const CONSOLE_PUSH_MAX: u64 = 64;
+
+/// Capability-gated PS/2 I/O operations. The caller chooses only one of the
+/// two fixed controller ports and one of four byte transactions.
+const PS2_READ_STATUS: u64 = 0;
+const PS2_READ_DATA: u64 = 1;
+const PS2_WRITE_COMMAND: u64 = 2;
+const PS2_WRITE_DATA: u64 = 3;
+
+/// SYS_PS2_IO(cap_slot, operation, value): mediate byte operations on the
+/// standard 8042-compatible controller. This intentionally avoids changing
+/// CPL3 IOPL or exposing an arbitrary port number. The boot-root grants the
+/// object only to inputd in the interactive VirtualBox profile.
+fn sys_ps2_io(slot: u64, operation: u64, value: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if slot >= crate::cap::CAP_SLOTS as u64 || value > u64::from(u8::MAX) {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(capability) = crate::cap::read(pid, slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if capability.obj != crate::cap::CapObj::Ps2Controller {
+        return STATUS_BAD_ARG;
+    }
+    let result = match operation {
+        PS2_READ_STATUS if value == 0 && capability.rights & crate::cap::RIGHTS_READ != 0 => {
+            // SAFETY: the exact PS/2 capability authorizes the controller's
+            // read-only status register; no user-selected port is accepted.
+            unsafe { crate::arch::x86_64::inb(0x64) as Status }
+        }
+        PS2_READ_DATA if value == 0 && capability.rights & crate::cap::RIGHTS_READ != 0 => {
+            // SAFETY: the exact PS/2 capability authorizes consuming one byte
+            // from the controller data register after the caller checks OBF.
+            unsafe { crate::arch::x86_64::inb(0x60) as Status }
+        }
+        PS2_WRITE_COMMAND if capability.rights & crate::cap::RIGHTS_WRITE != 0 => {
+            // SAFETY: the exact PS/2 capability authorizes controller commands.
+            unsafe { crate::arch::x86_64::outb(0x64, value as u8) };
+            STATUS_OK
+        }
+        PS2_WRITE_DATA if capability.rights & crate::cap::RIGHTS_WRITE != 0 => {
+            // SAFETY: the exact PS/2 capability authorizes a controller/device
+            // data byte; device semantics remain in the ring-3 input service.
+            unsafe { crate::arch::x86_64::outb(0x60, value as u8) };
+            STATUS_OK
+        }
+        _ => STATUS_BAD_ARG,
+    };
+    result
+}
 
 /// SYS_CONSOLE_PUSH(slot, buf, len): feed `len` bytes from the
 /// caller's buffer into the console's line discipline — byte for byte
@@ -3512,6 +3575,100 @@ fn sys_entropy_seed(slot: u64, pointer: u64) -> Status {
     let seeded = crate::entropy::seed(&seed);
     seed.fill(0);
     if seeded { STATUS_OK } else { STATUS_NO_ENTROPY }
+}
+
+/// SYS_ENTROPY_SEED_RDRAND(source_slot, seed_slot): use the CPU RDRAND
+/// instruction as an alternative 256-bit seed source. Both the kernel-minted
+/// RdrandSource marker and the exact rngd-only KernelEntropySeed capability
+/// are required. Availability and carry/health failures are checked inside
+/// entropy::seed_from_rdrand and return STATUS_NO_ENTROPY.
+fn sys_entropy_seed_rdrand(source_slot: u64, seed_slot: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if source_slot >= crate::cap::CAP_SLOTS as u64 || seed_slot >= crate::cap::CAP_SLOTS as u64 {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(source) = crate::cap::read(pid, source_slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let Ok(seed_cap) = crate::cap::read(pid, seed_slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if source.obj != crate::cap::CapObj::RdrandSource
+        || source.rights != crate::cap::RIGHTS_READ
+        || seed_cap.obj != crate::cap::CapObj::KernelEntropySeed
+        || seed_cap.rights != crate::cap::RIGHTS_WRITE
+    {
+        return STATUS_BAD_ARG;
+    }
+    if crate::entropy::seed_from_rdrand() {
+        STATUS_OK
+    } else {
+        STATUS_NO_ENTROPY
+    }
+}
+
+/// SYS_ENTROPY_DRAW(seed_slot, lent_frame_slot, offset, length): fill a bounded
+/// caller-owned frame slice from the kernel CSPRNG. This complements the
+/// initial rngd-only seed operation for systems whose trusted hardware source
+/// is CPU RDRAND. The destination must be a writable, IPC-landed reference to
+/// one Untyped frame; no physical address arrives in a message or syscall arg.
+fn sys_entropy_draw(seed_slot: u64, frame_slot: u64, offset: u64, length: u64) -> Status {
+    let Some(pid) = crate::sched::current_proc_id() else {
+        return STATUS_BAD_ARG;
+    };
+    if seed_slot >= crate::cap::CAP_SLOTS as u64
+        || frame_slot >= crate::cap::CAP_SLOTS as u64
+        || length == 0
+        || length > 4096
+        || offset.checked_add(length).is_none_or(|end| end > 4096)
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(seed_cap) = crate::cap::read(pid, seed_slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    if seed_cap.obj != crate::cap::CapObj::KernelEntropySeed
+        || seed_cap.rights != crate::cap::RIGHTS_WRITE
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Ok(frame_cap) = crate::cap::read(pid, frame_slot as usize) else {
+        return STATUS_BAD_ARG;
+    };
+    let crate::cap::CapObj::Untyped { phys, owned: false } = frame_cap.obj else {
+        return STATUS_BAD_ARG;
+    };
+    if frame_cap.rights & crate::cap::RIGHTS_WRITE == 0
+        || !crate::cap::is_ipc_landed(pid, frame_slot as usize)
+    {
+        return STATUS_BAD_ARG;
+    }
+    let Some(destination_phys) = phys.checked_add(offset) else {
+        return STATUS_BAD_ARG;
+    };
+    let Some(destination_end) = destination_phys.checked_add(length) else {
+        return STATUS_BAD_ARG;
+    };
+    if destination_end > crate::arch::x86_64::paging::DIRECT_MAP_BYTES {
+        return STATUS_BAD_ARG;
+    }
+    let Some(destination_va) =
+        destination_phys.checked_add(crate::arch::x86_64::paging::KERNEL_OFFSET)
+    else {
+        return STATUS_BAD_ARG;
+    };
+    // SAFETY: the allocator minted this one-page physical frame; the live
+    // IPC-landed WRITE cap pins it for this synchronous call. The checked
+    // offset/length fit within that frame and within the kernel RAM direct map.
+    let destination =
+        unsafe { core::slice::from_raw_parts_mut(destination_va as *mut u8, length as usize) };
+    if crate::entropy::fill(destination) {
+        STATUS_OK
+    } else {
+        STATUS_NO_ENTROPY
+    }
 }
 
 /// SYS_RTC_READ(slot, out): the held `Rtc` cap with READ; writes the wall

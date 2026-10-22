@@ -10,6 +10,10 @@ description = "ArenaOS input service (M6.3, ADR-0026) — the userspace virtio-i
 # cargo from walking up into any parent workspace.
 [workspace]
 
+[features]
+default = []
+virtualbox-interactive = []
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

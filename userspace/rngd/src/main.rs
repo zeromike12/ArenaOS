@@ -239,14 +239,21 @@ pub unsafe extern "C" fn _start() -> ! {
         //    MSI-X table for the relay, VERSION_1 and nothing else
         //    (virtio-rng defines no class feature bits), one
         //    virtqueue minimum (the request queue).
-        let info = virtio::discover(
+        let info = match virtio::discover(
             "rngd",
             "virtio-rng",
             DEV_ID_RNG_MODERN,
             DEV_ID_RNG_TRANSITIONAL,
             1,
-        )
-        .unwrap_or_else(|e| vfail(e));
+        ) {
+            Ok(info) => info,
+            Err(_e) => {
+                #[cfg(feature = "virtualbox-interactive")]
+                rdrand_service();
+                #[cfg(not(feature = "virtualbox-interactive"))]
+                vfail(_e);
+            }
+        };
         let w =
             virtio::map_window("rngd", "virtio-rng", &info, SLOT_MMIO).unwrap_or_else(|e| vfail(e));
         virtio::handshake("rngd", &w, 0, FEATURE_VERSION_1, 1).unwrap_or_else(|e| vfail(e));
@@ -502,6 +509,110 @@ pub unsafe extern "C" fn _start() -> ! {
                     }
                     reply_err(RNG_S_BAD_OP);
                 }
+            }
+        }
+    }
+}
+
+/// Interactive-profile service using the kernel's capability-checked
+/// RDRAND seed operation and CSPRNG draw operation. Device discovery and
+/// every request still cross explicit capabilities; no timestamps or
+/// predictable fallback values are accepted.
+#[cfg(feature = "virtualbox-interactive")]
+fn rdrand_service() -> ! {
+    log("rngd: no VirtIO-RNG record; validating the explicit RDRAND source capability");
+    let source = unsafe { syscall6(SYS_CAP_OCCUPIED, SLOT_MMIO, 0, 0, 0, 0, 0) };
+    let ready = unsafe { syscall6(SYS_CAP_OCCUPIED, SLOT_MANAGER_READY, 0, 0, 0, 0, 0) };
+    let seed = unsafe { syscall6(SYS_CAP_OCCUPIED, SLOT_KERNEL_SEED, 0, 0, 0, 0, 0) };
+    if source != 1 || ready != 1 || seed != 1 {
+        fail(
+            EXIT_SEED,
+            "RDRAND source/readiness/seed capability layout is incomplete",
+        );
+    }
+    let mut ready_description = [0u64; 3];
+    if unsafe {
+        syscall2(
+            SYS_CAP_DESCRIBE,
+            SLOT_MANAGER_READY,
+            ready_description.as_mut_ptr() as u64,
+        )
+    } != 0
+        || ready_description[0] != 3
+        || ready_description[2] != RIGHTS_WRITE
+    {
+        fail(
+            EXIT_SEED,
+            "RDRAND rngd lacks its exact manager-ready notification",
+        );
+    }
+    let seeded = unsafe { syscall2(SYS_ENTROPY_SEED_RDRAND, SLOT_MMIO, SLOT_KERNEL_SEED) };
+    if seeded != 0 {
+        log_line(|o| {
+            o.str("rngd: checked RDRAND seed source refused with status ");
+            o.i64(seeded);
+        });
+        fail(
+            EXIT_SEED,
+            "CPUID, bounded RDRAND carry, health, or kernel seeding failed",
+        );
+    }
+    log("rngd: checked 256-bit RDRAND seed mixed into the kernel CSPRNG");
+    if unsafe { syscall2(SYS_NOTIFY, SLOT_MANAGER_READY, MGR_BADGE_RNGD_READY) } < 0 {
+        fail(
+            EXIT_SEED,
+            "manager-ready notification was refused after CSPRNG seed",
+        );
+    }
+
+    let mut draws = 0u64;
+    let mut message = [0u64; 3];
+    loop {
+        let received = unsafe { syscall3(SYS_IPC_RECV, SLOT_EP, message.as_mut_ptr() as u64, 0) };
+        if received < 0 {
+            fail(EXIT_RECV, "SYS_IPC_RECV refused on RDRAND-backed rngd");
+        }
+        let (length, operation, landed) = (message[0], message[1], message[2]);
+        match operation {
+            RNG_OP_SHUTDOWN => {
+                if !take_diagnostic(landed, SLOT_DIAG) {
+                    reply_err(RNG_S_BAD_OP);
+                    continue;
+                }
+                reply_ok(draws);
+                unsafe { syscall1(SYS_THREAD_EXIT, EXIT_OK) };
+                fail(EXIT_REPLY, "thread_exit returned after rngd shutdown");
+            }
+            RNG_OP_GET => {
+                if landed == CAP_NONE {
+                    reply_err(RNG_S_NO_BUF);
+                    continue;
+                }
+                if !(1..=RNG_DRAW_MAX).contains(&length) {
+                    unsafe { syscall1(SYS_CAP_DESTROY, landed) };
+                    reply_err(RNG_S_BAD_LEN);
+                    continue;
+                }
+                let status =
+                    unsafe { syscall4(SYS_ENTROPY_DRAW, SLOT_KERNEL_SEED, landed, 0, length) };
+                if unsafe { syscall1(SYS_CAP_DESTROY, landed) } < 0 {
+                    fail(
+                        EXIT_PHYS,
+                        "caller-lent output frame cap could not be discarded",
+                    );
+                }
+                if status != 0 {
+                    reply_err(RNG_S_NO_ENTROPY);
+                    fail(EXIT_COMPLETE, "kernel CSPRNG refused an entropy draw");
+                }
+                draws = draws.saturating_add(1);
+                reply_ok(length);
+            }
+            _ => {
+                if landed != CAP_NONE {
+                    unsafe { syscall1(SYS_CAP_DESTROY, landed) };
+                }
+                reply_err(RNG_S_BAD_OP);
             }
         }
     }

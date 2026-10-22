@@ -94,11 +94,73 @@ pub fn seed(bytes: &[u8; 32]) -> bool {
     without_interrupts(|| unsafe { (*GENERATOR.get()).reseed(bytes) })
 }
 
+/// Read and health-check exactly 256 bits from architectural RDRAND, then mix
+/// them into the kernel CSPRNG. This is an explicit alternative seed source
+/// for the interactive VirtualBox profile, not evidence about Phase 15's
+/// VirtIO-RNG or strict qualification. CPUID.01H:ECX[30] is checked before
+/// executing the instruction; each word has a finite retry bound; repeated,
+/// zero, or all-one words fail closed.
+pub fn seed_from_rdrand() -> bool {
+    let features = core::arch::x86_64::__cpuid(1);
+    if features.ecx & (1 << 30) == 0 {
+        return false;
+    }
+    let mut words = [0u64; 4];
+    for index in 0..words.len() {
+        let mut candidate = None;
+        for _ in 0..10 {
+            let mut value = 0u64;
+            let success: u8;
+            // SAFETY: CPUID advertised RDRAND above. The instruction writes
+            // only this local register and status flag; bounded carry retries
+            // handle the architecturally permitted temporary unavailability.
+            unsafe {
+                core::arch::asm!(
+                    "rdrand {value}",
+                    "setc {success}",
+                    value = lateout(reg) value,
+                    success = lateout(reg_byte) success,
+                    options(nostack, nomem),
+                );
+            }
+            if success != 0 {
+                candidate = Some(value);
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        let Some(value) = candidate else {
+            words.fill(0);
+            return false;
+        };
+        if value == 0 || value == u64::MAX || words[..index].contains(&value) {
+            words.fill(0);
+            return false;
+        }
+        words[index] = value;
+    }
+    let mut bytes = [0u8; 32];
+    for (index, word) in words.iter().enumerate() {
+        bytes[index * 8..index * 8 + 8].copy_from_slice(&word.to_le_bytes());
+    }
+    words.fill(0);
+    let accepted = seed(&bytes);
+    bytes.fill(0);
+    accepted
+}
+
 pub fn is_ready() -> bool {
     without_interrupts(|| unsafe {
         let generator = &*GENERATOR.get();
         generator.seeded && generator.next_counter <= u32::MAX as u64
     })
+}
+
+/// Fill a bounded kernel-owned destination from the already-seeded generator.
+/// Callers must first pass the exact entropy capability and caller-lent frame
+/// checks at the syscall boundary; the generator itself never sees a user VA.
+pub fn fill(out: &mut [u8]) -> bool {
+    without_interrupts(|| unsafe { (*GENERATOR.get()).fill(out) })
 }
 
 fn random_u64(generator: &mut Generator) -> Option<u64> {

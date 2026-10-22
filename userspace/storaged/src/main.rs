@@ -35,12 +35,17 @@ use abi::*;
 mod virtio;
 use virtio::*;
 
+#[cfg(feature = "virtualbox-interactive")]
+mod ahci;
+
 // ---- the grant layout (kernel-literal: entry.rs / m5.rs) --------------------
 
 const SLOT_MMIO: u64 = 0;
 const SLOT_EP: u64 = 1;
 const SLOT_DIAG: u64 = 3; // ADR-0047 boot-granted proof
 const SLOT_NOTIF: u64 = 2;
+#[cfg(feature = "virtualbox-interactive")]
+const SLOT_READY: u64 = 4;
 /// Scratch slots for the four owned ring frames — self-map CONSUMES the
 /// cap, so these go empty again; a landed caller-buffer cap takes the
 /// first free slot (3) and is destroyed after every request.
@@ -275,14 +280,21 @@ pub unsafe extern "C" fn _start() -> ! {
         //    order on the QEMU command line is not load-bearing. The
         //    core asserts virtio-BLOCK from the device_id: a mis-spawn
         //    must fail loudly, not drive the wrong device.
-        let info = virtio::discover(
+        let info = match virtio::discover(
             "storaged",
             "virtio-blk",
             DEV_ID_BLK_MODERN,
             DEV_ID_BLK_TRANSITIONAL,
             1,
-        )
-        .unwrap_or_else(|e| vfail(e));
+        ) {
+            Ok(info) => info,
+            Err(_e) => {
+                #[cfg(feature = "virtualbox-interactive")]
+                ahci::run();
+                #[cfg(not(feature = "virtualbox-interactive"))]
+                vfail(_e);
+            }
+        };
 
         // 2. The device window: self-map the granted Mmio cap WRITABLE
         //    (the handshake writes registers; access mode decides the
@@ -335,6 +347,8 @@ pub unsafe extern "C" fn _start() -> ! {
         )
         .unwrap_or_else(|e| vfail(e));
         virtio::driver_ok(&w);
+        #[cfg(feature = "virtualbox-interactive")]
+        signal_storage_ready();
         let (qsz, doorbell) = (vq.qsz, vq.doorbell);
         log_line(|o| {
             o.str("storaged: virtio-blk ready — DRIVER_OK, queue 0 size ");
@@ -491,5 +505,15 @@ pub unsafe extern "C" fn _start() -> ! {
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn signal_storage_ready() {
+    if unsafe { syscall2(SYS_NOTIFY, SLOT_READY, 1) } < 0 {
+        fail(
+            EXIT_QUEUE,
+            "kernel refused the storage readiness notification",
+        );
     }
 }

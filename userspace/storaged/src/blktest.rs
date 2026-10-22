@@ -234,7 +234,13 @@ pub unsafe extern "C" fn _start() -> ! {
 
         // 7. Poison: the driver replies, then exits cleanly by its own
         //    hand (a service is never destroyed with parked threads).
-        if !diagnostic_refused(SLOT_EP, u64::MAX, block_req_w1(OP_SHUTDOWN, 0), CAP_NONE, VIRTIO_BLK_S_UNSUPP) {
+        if !diagnostic_refused(
+            SLOT_EP,
+            u64::MAX,
+            block_req_w1(OP_SHUTDOWN, 0),
+            CAP_NONE,
+            VIRTIO_BLK_S_UNSUPP,
+        ) {
             fail(EXIT_POISON, "ordinary block endpoint authorized poison");
         }
         log_line(|o| o.str("blktest: missing diagnostic authority refused by storaged"));

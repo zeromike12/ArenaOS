@@ -15,7 +15,7 @@ reachable sources).
 | QEMU (qemu-system-x86_64, qemu-img) | 11.0.2 (static musl build) | npm `qemu-portable-linux-x64-musl@0.2.1` | `/opt/qemu` |
 | musl libc (loader for the QEMU build; host glibc 2.36 < required 2.38) | v1.2.5 | GitHub `ifduyue/musl` (mirror) | `/opt/musl` |
 | UEFI firmware (EDK2/OVMF `edk2-x86_64-code.fd`, `edk2-i386-vars.fd`) | bundled with QEMU 11.0.2 | npm package above | `/opt/qemu/share/qemu` |
-| FAT image tooling (ESP creation) | `pyfatfs==1.1.0` | PyPI | `~/.local` |
+| FAT image tooling (ESP creation) | `pyfatfs==1.1.0`, `setuptools==80.9.0` | PyPI | `~/.local` |
 | zstd extraction helper | `zstandard` (pip) | PyPI | `~/.local` |
 | Host compiler (for musl + misc) | gcc 12 (Debian bookworm) | preinstalled | `/usr/bin` |
 
@@ -32,7 +32,7 @@ tools/run_tests.sh                # builds + boots + asserts M1
 
 `bootstrap.sh` performs (skipping anything already present):
 
-1. `pip install --user zstandard pyfatfs`
+1. `pip install --user setuptools==80.9.0 zstandard pyfatfs==1.1.0`
 2. Downloads `arena-rust-toolchain` wheels from PyPI, reassembles the split
    `tar.zst`, extracts to `/opt/rust/prefix`.
 3. Partial-clones `rust-lang/rust` (tag `1.97.0`, `library/` only) and runs

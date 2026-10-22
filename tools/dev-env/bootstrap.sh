@@ -39,9 +39,12 @@ $SUDO mkdir -p /opt/rust "$BUILD_DIR"
 $SUDO chown -R "$(id -u):$(id -g)" /opt/rust "$BUILD_DIR" 2>/dev/null || true
 
 # ------------------------------------------------------------------- python
-log "python packages (zstandard, pyfatfs)"
-if ! python3 -c "import zstandard, pyfatfs" 2>/dev/null; then
-    pip3 install --user --break-system-packages -q zstandard pyfatfs
+log "python packages (zstandard, pyfatfs, pinned setuptools compatibility)"
+if ! python3 -c "import zstandard, pyfatfs, pkg_resources" 2>/dev/null; then
+    # pyfatfs 1.1.0's `fs` dependency imports pkg_resources, which setuptools
+    # removed in 81. Keep the development ESP tool working on fresh Python
+    # environments while that dependency remains in use.
+    pip3 install --user --break-system-packages -q setuptools==80.9.0 zstandard pyfatfs==1.1.0
 fi
 
 # --------------------------------------------------------------------- rust

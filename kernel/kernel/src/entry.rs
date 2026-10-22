@@ -312,38 +312,67 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
 
     // --- kernel-phase M2 tests (observable effects only) ------------------
     let mut passed = 0u32;
-    let checks: [(&str, fn(&BootInfo) -> Result<(), &'static str>); 4] = [
-        ("kernel_entry", test_kernel_entry),
-        ("identity_torn_down", test_identity_torn_down),
-        ("kernel_heap_live", test_kernel_heap_live),
-        ("kernel_irq_live", test_kernel_irq_live),
-    ];
+    let checks: &[(&str, fn(&BootInfo) -> Result<(), &'static str>)] =
+        if cfg!(feature = "virtualbox-interactive") {
+            // Keep the live-kernel, heap, and IRQ sanity checks. The
+            // identity test deliberately faults and belongs to qualification.
+            &[
+                ("kernel_entry", test_kernel_entry),
+                ("kernel_heap_live", test_kernel_heap_live),
+                ("kernel_irq_live", test_kernel_irq_live),
+            ]
+        } else {
+            &[
+                ("kernel_entry", test_kernel_entry),
+                ("identity_torn_down", test_identity_torn_down),
+                ("kernel_heap_live", test_kernel_heap_live),
+                ("kernel_irq_live", test_kernel_irq_live),
+            ]
+        };
     for (name, test) in checks {
         match test(boot_info) {
             Ok(()) => {
                 passed += 1;
-                write_marker(format_args!("m2:test:{name}: PASS"));
+                if !cfg!(feature = "virtualbox-interactive") {
+                    write_marker(format_args!("m2:test:{name}: PASS"));
+                }
             }
             Err(reason) => {
                 error!("kernel", "test {name} failed: {reason}");
-                write_marker(format_args!("m2:test:{name}: FAIL ({reason})"));
+                if cfg!(feature = "virtualbox-interactive") {
+                    crate::halt::halt_machine("interactive live-kernel startup check failed");
+                } else {
+                    write_marker(format_args!("m2:test:{name}: FAIL ({reason})"));
+                }
             }
         }
     }
     let total = checks.len() as u32;
     let all_passed = boot_info.pre_entry_passed + passed;
     let all_total = boot_info.pre_entry_total + total;
-    if all_passed == all_total {
+    if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "kernel",
+            "interactive startup checks: {passed}/{total} live-kernel checks passed; qualification marker omitted"
+        );
+    } else if all_passed == all_total {
         write_marker(format_args!("m2: RESULT PASS ({all_passed}/{all_total})"));
     } else {
         write_marker(format_args!("m2: RESULT FAIL ({all_passed}/{all_total})"));
         crate::halt::halt_machine("kernel-entry test suite failed");
     }
 
-    info!(
-        "kernel",
-        "milestone 2 complete — starting the milestone 3 suite"
-    );
+    if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "kernel",
+            "interactive startup checks complete — continuing ordinary boot"
+        );
+    } else {
+        info!(
+            "kernel",
+            "milestone 2 complete — starting the milestone 3 suite"
+        );
+    }
 
     // --- M3.1: kernel threads + context switch (ADR-0012) ----------------
     // The bootstrap thread is kmain itself; init is a real ABI step and a
@@ -377,7 +406,14 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine("syscall boundary init failed");
     }
 
-    if !crate::m3::run_suite() {
+    if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "kernel",
+            "interactive boot profile selected: automated qualification suites and deliberate fault probes are omitted; capability, isolation, loading, teardown, and service checks remain active"
+        );
+    }
+
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m3::run_suite() {
         crate::halt::halt_machine("milestone 3 suite failed");
     }
 
@@ -394,7 +430,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // blocking call/reply, a transferred capability, badged
     // notifications — with the GS-side invariant now part of the
     // context switch.
-    if !crate::m4::run_suite() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m4::run_suite() {
         crate::halt::halt_machine("milestone 4 suite failed");
     }
 
@@ -402,9 +438,23 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // The ring-3 assembly fixture tests the clean template and independent
     // XMM0-XMM15/x87/MXCSR state across yield, blocking join, timer preemption,
     // separate process CR3s, slot reuse, and contained user #MF/#XF/#UD.
-    #[cfg(feature = "phase15-historical-diagnostic")]
+    #[cfg(feature = "virtualbox-interactive")]
+    let m15_ok = {
+        info!(
+            "m15",
+            "interactive image: Phase-15 strict and diagnostic suites were not run; qualification remains PARTIAL / UNQUALIFIED"
+        );
+        true
+    };
+    #[cfg(all(
+        not(feature = "virtualbox-interactive"),
+        feature = "phase15-historical-diagnostic"
+    ))]
     let m15_ok = crate::m15::run_historical_diagnostic();
-    #[cfg(not(feature = "phase15-historical-diagnostic"))]
+    #[cfg(all(
+        not(feature = "virtualbox-interactive"),
+        not(feature = "phase15-historical-diagnostic")
+    ))]
     let m15_ok = crate::m15::run_suite();
     if !m15_ok {
         crate::halt::halt_machine("Phase-15 FP/SIMD guest suite failed");
@@ -416,7 +466,7 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // destroy-returns-frame / exact teardown), a kernel-minted Mmio cap
     // putting the HPET counter under ring-3 eyes, and the IRQ relay's
     // live stub→notify→wake chain proven with a LAPIC self-IPI.
-    if !crate::m5::run_suite() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m5::run_suite() {
         crate::halt::halt_machine("milestone 5 suite failed");
     }
 
@@ -437,11 +487,11 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         crate::halt::halt_machine(e);
     }
     crate::timer::log_ready();
-    if !crate::m6::run_suite() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m6::run_suite() {
         crate::halt::halt_machine("milestone 6 suite failed");
     }
 
-    if !crate::m7::run_suite() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m7::run_suite() {
         crate::halt::halt_machine("milestone 7 suite failed");
     }
 
@@ -450,26 +500,28 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
     // per-process timer quota and direct IPC handoff, proven on the real
     // objects before any production resident exists (every object minted
     // here is destroyed again).
-    if !crate::m11::run_suite() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m11::run_suite() {
         crate::halt::halt_machine("milestone 11 suite failed");
     }
 
     // ADR-0083: an independently linked native runtime consumes a real
     // read-only startup SharedRegion, validates actual cap slots, and proves
     // both valid entry and fail-closed hostile startup cases before residents.
-    if !crate::m12::run_suite() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m12::run_suite() {
         crate::halt::halt_machine("milestone 12 startup ABI suite failed");
     }
     // ADR-0089: prove the 32-deep IPC queue admits the simultaneous
     // Phase-12 client burst and refuses caller 33 without losing requests.
-    if !crate::m12::run_ipc_queue_capacity_test() {
+    if !cfg!(feature = "virtualbox-interactive") && !crate::m12::run_ipc_queue_capacity_test() {
         crate::halt::halt_machine("milestone 12 IPC queue capacity proof failed");
     }
 
     // ADR-0056: run the bounded ring-3 SharedRegion capacity/teardown
     // probe before ANY production residents start. Exact resource delta
     // then belongs to this process, not asynchronously starting drivers.
-    run_shared_probe();
+    if !cfg!(feature = "virtualbox-interactive") {
+        run_shared_probe();
+    }
 
     // --- M5.2: the production block service (ADR-0022) ----------------------
     // storaged — the userspace virtio-blk driver — starts at boot as a
@@ -603,10 +655,17 @@ pub extern "C" fn kmain(boot_info: &'static BootInfo) -> ! {
         Err(reason) => crate::halt::halt_machine(reason),
     };
 
-    info!(
-        "kernel",
-        "milestones 5–6.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own + supervised restart: a destroyed service answers its callers with a typed status and comes back with its capabilities replayed) — spawning the shell"
-    );
+    if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "kernel",
+            "interactive boot dependencies initialized; qualification and diagnostic guest suites were omitted — spawning the desktop and shell"
+        );
+    } else {
+        info!(
+            "kernel",
+            "milestones 5–6.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own + supervised restart: a destroyed service answers its callers with a typed status and comes back with its capabilities replayed) — spawning the shell"
+        );
+    }
 
     // --- M4.6: the hand-off (ADR-0020) -----------------------------------
     // The shell is the initial service: spawned through the M4.5
@@ -1436,60 +1495,67 @@ fn start_boot_display(
     // global shared/cap conservation. Other production workers may be
     // born/die concurrently, so a global frame delta is not an isolated
     // client credit. The presented pixel stays in displayd's scanout.
-    let shared_before = crate::shared::usage_snapshot();
-    let display_caps_before = crate::cap::occupancy(display_pid);
-    let grants = [
-        crate::cap::Cap {
-            obj: crate::cap::CapObj::Endpoint { eid },
-            rights: crate::cap::RIGHTS_WRITE,
-        },
-        crate::cap::Cap {
-            obj: crate::cap::CapObj::MemoryPool,
-            rights: crate::cap::RIGHTS_WRITE,
-        },
-    ];
-    let client = crate::spawn::spawn_init_boot(2, &grants, None)
-        .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
-    let tid = crate::spawn::records_snapshot()
-        .iter()
-        .flatten()
-        .find_map(|&(child, thread)| (child == client).then_some(thread))
-        .unwrap_or_else(|| crate::halt::halt_machine("displayprobe: missing spawn record"));
-    let was_if = crate::arch::x86_64::interrupts_enabled();
-    crate::arch::x86_64::sti();
-    let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
-    while crate::sched::proc_live_threads(client) != 0 {
-        if crate::timekeeping::now_us() >= deadline {
-            crate::halt::halt_machine("displayprobe: ring-3 client deadline expired");
-        }
-        crate::sched::yield_now();
-    }
-    crate::sched::yield_now();
-    if !was_if {
-        crate::arch::x86_64::cli();
-    }
-    let observed = crate::arch::x86_64::syscall::exit_status_of(tid);
-    if observed != Some(42) {
-        error!("m9", "displayprobe ring-3 exit code: {observed:?}");
-        crate::halt::halt_machine("displayprobe: typed present/cap refusal failed");
-    }
-    crate::proc::destroy(client).unwrap_or_else(|e| crate::halt::halt_machine(e));
-    crate::spawn::forget(client).unwrap_or_else(|e| crate::halt::halt_machine(e));
-    crate::shared::assert_conservation();
-    if crate::proc::pml4_of(client).is_some()
-        || crate::spawn::records_snapshot()
+    if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "m9",
+            "interactive profile: display protocol fixture omitted; displayd's painted, parked readiness remains required"
+        );
+    } else {
+        let shared_before = crate::shared::usage_snapshot();
+        let display_caps_before = crate::cap::occupancy(display_pid);
+        let grants = [
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Endpoint { eid },
+                rights: crate::cap::RIGHTS_WRITE,
+            },
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::MemoryPool,
+                rights: crate::cap::RIGHTS_WRITE,
+            },
+        ];
+        let client = crate::spawn::spawn_init_boot(2, &grants, None)
+            .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+        let tid = crate::spawn::records_snapshot()
             .iter()
             .flatten()
-            .any(|&(pid, _)| pid == client)
-        || crate::shared::usage_snapshot() != shared_before
-        || crate::cap::occupancy(display_pid) != display_caps_before
-    {
-        crate::halt::halt_machine("displayprobe: client record/shared cap teardown mismatch");
+            .find_map(|&(child, thread)| (child == client).then_some(thread))
+            .unwrap_or_else(|| crate::halt::halt_machine("displayprobe: missing spawn record"));
+        let was_if = crate::arch::x86_64::interrupts_enabled();
+        crate::arch::x86_64::sti();
+        let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+        while crate::sched::proc_live_threads(client) != 0 {
+            if crate::timekeeping::now_us() >= deadline {
+                crate::halt::halt_machine("displayprobe: ring-3 client deadline expired");
+            }
+            crate::sched::yield_now();
+        }
+        crate::sched::yield_now();
+        if !was_if {
+            crate::arch::x86_64::cli();
+        }
+        let observed = crate::arch::x86_64::syscall::exit_status_of(tid);
+        if observed != Some(42) {
+            error!("m9", "displayprobe ring-3 exit code: {observed:?}");
+            crate::halt::halt_machine("displayprobe: typed present/cap refusal failed");
+        }
+        crate::proc::destroy(client).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::spawn::forget(client).unwrap_or_else(|e| crate::halt::halt_machine(e));
+        crate::shared::assert_conservation();
+        if crate::proc::pml4_of(client).is_some()
+            || crate::spawn::records_snapshot()
+                .iter()
+                .flatten()
+                .any(|&(pid, _)| pid == client)
+            || crate::shared::usage_snapshot() != shared_before
+            || crate::cap::occupancy(display_pid) != display_caps_before
+        {
+            crate::halt::halt_machine("displayprobe: client record/shared cap teardown mismatch");
+        }
+        info!(
+            "m9",
+            "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
+        );
     }
-    info!(
-        "m9",
-        "displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS"
-    );
     // Explicit historical graphics fixture, independent of device names/counts.
     // Shipping builds start the desktop with either keyboard alone or tablet.
     if option_env!("ARENA_GRAPHICS_FIXTURE") != Some("phase9") {
@@ -2059,8 +2125,50 @@ fn audit_manager_child(
 /// PCI scan; the driver re-discovers the structure offsets itself
 /// through `SYS_DEV_INFO` (config space is never exposed to ring 3).
 fn spawn_storaged() -> Result<(u64, u32), &'static str> {
-    let v = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_BLOCK)
-        .ok_or("storaged: no virtio-block function on bus 0")?;
+    let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_BLOCK) else {
+        if cfg!(feature = "virtualbox-interactive") {
+            let (_index, f) = crate::drivers::pci::ahci_function()
+                .ok_or("storaged: interactive profile has neither virtio-blk nor validated AHCI")?;
+            let bar = 5usize;
+            if f.bar_is_io[bar]
+                || f.bar_base[bar] == 0
+                || f.bar_base[bar] & 4095 != 0
+                || f.bar_size[bar] < 4096
+                || f.bar_size[bar] > 64 * 1024
+            {
+                return Err("storaged: validated AHCI ABAR changed shape");
+            }
+            let eid = crate::ipc::create_endpoint().map_err(|_| "storaged: endpoint table full")?;
+            let nid = crate::ipc::create_notification()
+                .map_err(|_| "storaged: notification table full")?;
+            let grants = [
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Mmio {
+                        phys: f.bar_base[bar],
+                        pages: f.bar_size[bar].div_ceil(4096) as u32,
+                    },
+                    rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Endpoint { eid },
+                    rights: crate::cap::RIGHTS_READ,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Notification { nid },
+                    rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+                },
+            ];
+            let pid = spawn_storaged_service(grants)?;
+            info!(
+                "kernel",
+                "storaged spawned: pid {pid} with exact AHCI BAR5 {:#x}+{:#x} capability; AHCI mechanism remains in ring 3",
+                f.bar_base[bar],
+                f.bar_size[bar]
+            );
+            return Ok((pid, eid));
+        }
+        return Err("storaged: no virtio-block function on bus 0");
+    };
     let f = crate::drivers::pci::pci_function(v.pci_index)
         .ok_or("storaged: recorded function vanished from the table")?;
     let bar = v.common.bar as usize;
@@ -2086,13 +2194,86 @@ fn spawn_storaged() -> Result<(u64, u32), &'static str> {
             rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
         },
     ];
-    let pid = crate::spawn::spawn_init(2, &grants, None)?;
+    let pid = spawn_storaged_service(grants)?;
     info!(
         "kernel",
         "storaged spawned: pid {pid} (caps: 0=Mmio bar{bar} phys {:#x} RW, 1=Endpoint{eid}/R, 2=Notif{nid}/RW) — the block service is live; fsd is its first production client",
         f.bar_base[bar]
     );
     Ok((pid, eid))
+}
+
+/// Start the ordinary block service and, in the interactive profile, wait
+/// until its actual controller and storage path have initialized. This keeps
+/// fsd from presenting a shell over a disk driver that started but never
+/// became usable.
+fn spawn_storaged_service(device_grants: [crate::cap::Cap; 3]) -> Result<u64, &'static str> {
+    if !cfg!(feature = "virtualbox-interactive") {
+        return crate::spawn::spawn_init(2, &device_grants, None);
+    }
+    let ready_nid =
+        crate::ipc::create_notification().map_err(|_| "storaged: readiness table full")?;
+    let grants = [
+        device_grants[0],
+        device_grants[1],
+        device_grants[2],
+        crate::cap::Cap {
+            obj: crate::cap::CapObj::Notification { nid: ready_nid },
+            rights: crate::cap::RIGHTS_WRITE,
+        },
+    ];
+    let pid = match crate::spawn::spawn_init(2, &grants, None) {
+        Ok(pid) => pid,
+        Err(error) => {
+            crate::ipc::destroy_notification(ready_nid)
+                .unwrap_or_else(|_| crate::halt::halt_machine("storaged readiness cleanup failed"));
+            return Err(error);
+        }
+    };
+    await_storaged_ready(pid, ready_nid);
+    Ok(pid)
+}
+
+/// Consume a latched storage-ready notification only after the userspace
+/// driver has completed its controller handshake and a real disk operation.
+fn await_storaged_ready(pid: u64, ready_nid: u32) {
+    const STORAGE_READY_BADGE: u64 = 1;
+    let tid = crate::spawn::records_snapshot()
+        .iter()
+        .flatten()
+        .find_map(|&(child, thread)| (child == pid).then_some(thread))
+        .unwrap_or_else(|| crate::halt::halt_machine("storaged: readiness spawn record missing"));
+    let before = crate::arch::x86_64::interrupts_enabled();
+    let deadline = crate::timekeeping::now_us().saturating_add(15_000_000);
+    crate::arch::x86_64::sti();
+    loop {
+        if crate::ipc::try_wait(ready_nid) == Ok(STORAGE_READY_BADGE) {
+            break;
+        }
+        if crate::sched::proc_live_threads(pid) == 0 {
+            let status = crate::arch::x86_64::syscall::exit_status_of(tid);
+            crate::halt::halt_machine(if status == Some(69) {
+                "storaged: AHCI controller or disk readiness probe failed"
+            } else {
+                "storaged: service exited before controller readiness"
+            });
+        }
+        if crate::timekeeping::now_us() >= deadline {
+            crate::halt::halt_machine("storaged: controller readiness deadline expired");
+        }
+        crate::sched::yield_now();
+    }
+    if !before {
+        crate::arch::x86_64::cli();
+    }
+    crate::cap::consume(pid, 3).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::ipc::destroy_notification(ready_nid).unwrap_or_else(|_| {
+        crate::halt::halt_machine("storaged readiness notification cleanup failed")
+    });
+    info!(
+        "kernel",
+        "storaged: actual controller and sector I/O readiness acknowledged before fsd start"
+    );
 }
 
 /// Spawn the 8.1 resident config reader with no delegated updater.
@@ -2268,6 +2449,53 @@ fn spawn_netd(manager_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
 /// logs the absence).
 fn spawn_rngd(rng_ready_nid: u32, rng_diag_nid: u32) -> Result<Option<(u64, u32)>, &'static str> {
     let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_ENTROPY) else {
+        if cfg!(feature = "virtualbox-interactive") {
+            // A different source object selects the fallback in ring 3; it
+            // does not weaken the exact, separate CSPRNG seed authority.
+            // The driver and syscall independently check CPUID/RDRAND carry
+            // and health before announcing readiness.
+            let features = core::arch::x86_64::__cpuid(1);
+            if features.ecx & (1 << 30) == 0 {
+                return Err("rngd: no virtio-rng and CPUID does not advertise RDRAND");
+            }
+            let eid = crate::ipc::create_endpoint().map_err(|_| "rngd: endpoint table full")?;
+            let nid =
+                crate::ipc::create_notification().map_err(|_| "rngd: notification table full")?;
+            let grants = [
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::RdrandSource,
+                    rights: crate::cap::RIGHTS_READ,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Endpoint { eid },
+                    rights: crate::cap::RIGHTS_READ,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Notification { nid },
+                    rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Notification { nid: rng_ready_nid },
+                    rights: crate::cap::RIGHTS_WRITE,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Notification { nid: rng_diag_nid },
+                    rights: crate::cap::RIGHTS_READ,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::KernelEntropySeed,
+                    rights: crate::cap::RIGHTS_WRITE,
+                },
+            ];
+            let pid = crate::spawn::spawn_init(8, &grants, None)?;
+            crate::supervise::register("rngd", 8, &grants, pid)
+                .map_err(|_| "rngd: production supervisor registration refused")?;
+            info!(
+                "kernel",
+                "rngd spawned: pid {pid} using the capability-gated RDRAND seed source; CPUID advertises RDRAND, startup carry/health checks and kernel CSPRNG seed must pass before manager readiness"
+            );
+            return Ok(Some((pid, eid)));
+        }
         return Ok(None);
     };
     let f = crate::drivers::pci::pci_function(v.pci_index)
@@ -2339,6 +2567,47 @@ fn spawn_rngd(rng_ready_nid: u32, rng_diag_nid: u32) -> Result<Option<(u64, u32)
 /// and the serial console keeps the machine fully usable without it.
 fn spawn_inputd() -> Result<Option<u64>, &'static str> {
     let Some(v) = crate::drivers::pci::find_virtio(crate::drivers::pci::VIRTIO_TYPE_INPUT) else {
+        if cfg!(feature = "virtualbox-interactive") {
+            let eid = crate::ipc::create_endpoint().map_err(|_| "inputd: endpoint table full")?;
+            let nid =
+                crate::ipc::create_notification().map_err(|_| "inputd: notification table full")?;
+            let grants = [
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Ps2Controller,
+                    rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Endpoint { eid },
+                    rights: crate::cap::RIGHTS_READ,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Notification { nid },
+                    rights: crate::cap::RIGHTS_READ | crate::cap::RIGHTS_WRITE,
+                },
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::ConsoleInput,
+                    rights: crate::cap::RIGHTS_WRITE,
+                },
+            ];
+            let pid = crate::spawn::spawn_init(10, &grants, None)?;
+            let ready_nid = crate::ipc::create_notification()
+                .map_err(|_| "inputd: readiness notification table full")?;
+            crate::cap::issue(
+                pid,
+                6,
+                crate::cap::Cap {
+                    obj: crate::cap::CapObj::Notification { nid: ready_nid },
+                    rights: crate::cap::RIGHTS_WRITE,
+                },
+            )
+            .map_err(|_| "inputd: readiness capability issue refused")?;
+            await_inputd_ready(pid, ready_nid);
+            info!(
+                "kernel",
+                "inputd spawned: pid {pid} with a capability-gated PS/2 controller and timer notification; no port privilege or VirtIO input device required"
+            );
+            return Ok(Some(pid));
+        }
         return Ok(None);
     };
     let f = crate::drivers::pci::pci_function(v.pci_index)
@@ -2371,6 +2640,20 @@ fn spawn_inputd() -> Result<Option<u64>, &'static str> {
         },
     ];
     let pid = crate::spawn::spawn_init(10, &grants, None)?;
+    if cfg!(feature = "virtualbox-interactive") {
+        let ready_nid = crate::ipc::create_notification()
+            .map_err(|_| "inputd: readiness notification table full")?;
+        crate::cap::issue(
+            pid,
+            6,
+            crate::cap::Cap {
+                obj: crate::cap::CapObj::Notification { nid: ready_nid },
+                rights: crate::cap::RIGHTS_WRITE,
+            },
+        )
+        .map_err(|_| "inputd: readiness capability issue refused")?;
+        await_inputd_ready(pid, ready_nid);
+    }
     // A single input service owns both queues and consumes their common
     // IRQ notification. The second MMIO cap never reaches applications.
     if let Some(second) = (0..crate::drivers::pci::virtio_count())
@@ -2403,6 +2686,49 @@ fn spawn_inputd() -> Result<Option<u64>, &'static str> {
         f.bar_base[bar]
     );
     Ok(Some(pid))
+}
+
+/// Interactive boot requires the input service to prove that it initialized
+/// its actual device. A process start or a desktop-ready log alone would not
+/// catch a PS/2 handshake failure that leaves the UI unusable.
+fn await_inputd_ready(pid: u64, ready_nid: u32) {
+    const INPUT_READY_BADGE: u64 = 1;
+    let tid = crate::spawn::records_snapshot()
+        .iter()
+        .flatten()
+        .find_map(|&(child, thread)| (child == pid).then_some(thread))
+        .unwrap_or_else(|| crate::halt::halt_machine("inputd: readiness spawn record missing"));
+    let before = crate::arch::x86_64::interrupts_enabled();
+    let deadline = crate::timekeeping::now_us().saturating_add(5_000_000);
+    crate::arch::x86_64::sti();
+    loop {
+        if crate::ipc::try_wait(ready_nid) == Ok(INPUT_READY_BADGE) {
+            break;
+        }
+        if crate::sched::proc_live_threads(pid) == 0 {
+            let status = crate::arch::x86_64::syscall::exit_status_of(tid);
+            crate::halt::halt_machine(if status == Some(86) {
+                "inputd: actual input device initialization failed"
+            } else {
+                "inputd: service exited before device readiness"
+            });
+        }
+        if crate::timekeeping::now_us() >= deadline {
+            crate::halt::halt_machine("inputd: device readiness deadline expired");
+        }
+        crate::sched::yield_now();
+    }
+    if !before {
+        crate::arch::x86_64::cli();
+    }
+    crate::cap::consume(pid, 6).unwrap_or_else(|e| crate::halt::halt_machine(e));
+    crate::ipc::destroy_notification(ready_nid).unwrap_or_else(|_| {
+        crate::halt::halt_machine("inputd: readiness notification cleanup failed")
+    });
+    info!(
+        "kernel",
+        "inputd: actual device initialization acknowledged before desktop start"
+    );
 }
 
 /// Spawn the production console channel service (M6.4, ADR-0027).

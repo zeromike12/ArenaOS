@@ -140,6 +140,10 @@ pub enum CapObj {
     /// ADR-0055: possession of WRITE, not process identity, authorizes
     /// exact copied-image registration and full-ID revocation.
     ImageRegistrar,
+    /// ADR-0114: permission to request a bounded seed from the CPU's RDRAND
+    /// instruction. This is distinct from the seed cap: rngd must hold both
+    /// this source marker and KernelEntropySeed/WRITE to initialize the CSPRNG.
+    RdrandSource,
     /// The machine-power singleton (ADR-0020): WRITE = may halt the
     /// machine through `SYS_SHUTDOWN`. One kernel object, no identity —
     /// holding the cap with the right IS the authority. The kernel's
@@ -155,6 +159,10 @@ pub enum CapObj {
     /// keystrokes the shell trusts; the kernel's own UART RX ISR feeds
     /// the same discipline as a ring-0 internal, not an invoke.
     ConsoleInput,
+    /// Narrow authority to issue the four PS/2 controller transactions
+    /// accepted by SYS_PS2_IO. It conveys no general port-I/O privilege and
+    /// is granted only to the ring-3 input service in the VirtualBox profile.
+    Ps2Controller,
     /// The console-OUTPUT singleton (M6.4, ADR-0027): READ = may
     /// attach a mirror of the kernel's console output stream
     /// (`SYS_CONSOLE_ATTACH`) and drain it (`SYS_CONSOLE_PULL`). The
@@ -248,6 +256,16 @@ pub fn slot_occupied(pid: u64, slot: usize) -> Option<bool> {
             cs.get(slot).map(|cap| !matches!(cap.obj, CapObj::None))
         })
         .flatten()
+    })
+}
+
+/// Whether this exact slot currently contains a reference installed by an
+/// IPC transfer. Narrow device services use this to distinguish a caller-lent
+/// frame from a copied or inherited descriptive reference.
+pub fn is_ipc_landed(pid: u64, slot: usize) -> bool {
+    without_interrupts(|| {
+        proc::with_caps(pid, |cs| cs.ipc_landed.get(slot).copied().unwrap_or(false))
+            .unwrap_or(false)
     })
 }
 

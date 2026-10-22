@@ -13,6 +13,9 @@ phase15-historical-diagnostic = []
 # Seed a controlled, AVX-capable XSAVE state immediately before FPU init so
 # the sanitizer path can be guest-tested. This also selects diagnostic mode.
 phase15-osxsave-seed = ["phase15-historical-diagnostic"]
+# Separate everyday startup profile for the VirtualBox appliance. It changes
+# boot-time test execution only; the default/qualification profile is intact.
+virtualbox-interactive = []
 
 [dependencies]
 # Zero third-party crates (ADR-0004); workspace-internal only:

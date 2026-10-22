@@ -58,6 +58,8 @@ mod graphics_wire;
 mod input_wire;
 #[allow(dead_code)]
 mod pointer;
+#[cfg(feature = "virtualbox-interactive")]
+mod ps2_decode;
 const DESKTOP_INPUT_TOKEN: u64 = 0x4152_454e_5031_3049;
 
 #[path = "../../virtio.rs"]
@@ -73,6 +75,8 @@ const SLOT_NOTIF: u64 = 2;
 /// The console-input authority — present ONLY in the production
 /// instance. Its absence is what puts this image in service mode.
 const SLOT_CONSOLE: u64 = 3;
+#[cfg(feature = "virtualbox-interactive")]
+const SLOT_READY: u64 = 6;
 
 /// Owned frame slots: ONE frame holds both the event queue's three
 /// ring areas (at the shared core's `ring_offsets`) and the posted
@@ -85,6 +89,10 @@ const FRAMES_TOTAL: usize = 1;
 
 /// The IRQ badge the relay delivers (only the relay notifies this nid).
 const IRQ_BADGE_INPUT: u64 = 1 << 16;
+#[cfg(feature = "virtualbox-interactive")]
+const PS2_TIMER_BADGE: u64 = 1;
+#[cfg(feature = "virtualbox-interactive")]
+const PS2_POLL_US: u64 = 10_000;
 
 // ---- the diagnostic exit contract (m6.rs maps every code) --------------------
 
@@ -491,6 +499,15 @@ pub unsafe extern "C" fn _start() -> ! {
     unsafe {
         log("inputd: starting — ArenaOS input service (M6.3, ADR-0026)");
 
+        #[cfg(feature = "virtualbox-interactive")]
+        if syscall1(SYS_CAP_PHYS, SLOT_MMIO) <= 0 {
+            // The interactive profile grants either an exact VirtIO-input
+            // Mmio capability or the narrow Ps2Controller capability at
+            // slot 0. A failed phys query selects only the latter path; the
+            // kernel syscall still checks its exact object and rights.
+            ps2_run();
+        }
+
         // 1. Order-independent discovery + the window map + the §3.1
         //    handshake — the shared virtio core (userspace/virtio.rs).
         //    inputd's demands: a virtio-INPUT function (a mis-spawn
@@ -596,15 +613,271 @@ pub unsafe extern "C" fn _start() -> ! {
 
         if syscall1(SYS_CAP_PHYS, 5) > 0 {
             let mut tablet = Tablet::start();
+            #[cfg(feature = "virtualbox-interactive")]
+            signal_input_ready();
             desktop_loop(&mut drv, &mut tablet);
         }
         // 5. Which service is this? A zero-length push asks the
         //    kernel whether slot 3 really holds the ConsoleInput
         //    authority — the capability IS the mode (ADR-0026).
         if syscall3(SYS_CONSOLE_PUSH, SLOT_CONSOLE, 0, 0) >= 0 {
+            #[cfg(feature = "virtualbox-interactive")]
+            signal_input_ready();
             console_loop(&mut drv);
         }
         service_loop(&mut drv);
+    }
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_run() -> ! {
+    let mut drv = Drv {
+        q: Queue {
+            qsz: 0,
+            desc_va: 0,
+            avail_va: 0,
+            used_va: 0,
+            doorbell: 0,
+            avail_idx: 0,
+            used_seen: 0,
+        },
+        bufs_va: 0,
+        bufs_phys: 0,
+        keys: [0; KEY_RING],
+        head: 0,
+        len: 0,
+        shift: false,
+        held: 0,
+        batches: 0,
+        events: 0,
+        bytes: 0,
+        dropped: 0,
+        give_ups: 0,
+    };
+    let mut mouse = ps2_decode::Mouse::new();
+    let mut keyboard = ps2_decode::Keyboard::new();
+    ps2_initialize();
+    if unsafe { syscall3(SYS_CONSOLE_PUSH, SLOT_CONSOLE, 0, 0) } < 0 {
+        fail(EXIT_PUSH, "PS/2 profile lacks the ConsoleInput capability");
+    }
+    signal_input_ready();
+    log("inputd: capability-gated PS/2 keyboard/mouse ready; polling at 100 Hz");
+    let mut text = [0u8; CONSOLE_PUSH_MAX as usize];
+    loop {
+        // Use ArenaOS's one-shot timer facility instead of a busy input poll.
+        let timer = unsafe { syscall3(SYS_TIMER_ARM, SLOT_NOTIF, PS2_TIMER_BADGE, PS2_POLL_US) };
+        if timer <= 0 {
+            fail(EXIT_WAIT, "PS/2 polling timer arm refused");
+        }
+        let badge = unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) };
+        if badge < 0 || badge as u64 & PS2_TIMER_BADGE == 0 {
+            fail(EXIT_WAIT, "PS/2 polling timer wait refused");
+        }
+        drv.batches = drv.batches.saturating_add(1);
+        for _ in 0..256 {
+            let status = ps2_status();
+            if status & 1 == 0 {
+                break;
+            }
+            let Some((byte, auxiliary)) = ps2_read_output() else {
+                break;
+            };
+            if auxiliary {
+                if let Some(event) = mouse.byte(byte) {
+                    if desktop_mode() {
+                        unsafe {
+                            forward_desktop(input_wire::Frame::Pointer {
+                                x: event.x as u16,
+                                y: event.y as u16,
+                                buttons: event.buttons,
+                                wheel: 0,
+                            })
+                        };
+                    }
+                }
+            } else if let Some((code, value)) = keyboard.byte(byte) {
+                drv.events = drv.events.saturating_add(1);
+                drv.decode(EV_KEY, code, value);
+            }
+        }
+        if desktop_mode() {
+            while let Some((code, pressed, mods)) = drv.next_key() {
+                unsafe {
+                    forward_desktop(input_wire::Frame::Key {
+                        code,
+                        pressed,
+                        mods,
+                    })
+                };
+            }
+        } else {
+            loop {
+                let n = drv.take(&mut text);
+                if n == 0 {
+                    break;
+                }
+                let pushed = unsafe {
+                    syscall3(
+                        SYS_CONSOLE_PUSH,
+                        SLOT_CONSOLE,
+                        text.as_ptr() as u64,
+                        n as u64,
+                    )
+                };
+                if pushed != n as i64 {
+                    fail(
+                        EXIT_PUSH,
+                        "PS/2 keystrokes were refused by the console line discipline",
+                    );
+                }
+                for &key in &text[..n] {
+                    unsafe { forward_graphical_key(key) };
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn signal_input_ready() {
+    for _ in 0..400 {
+        let occupied = unsafe { syscall6(SYS_CAP_OCCUPIED, SLOT_READY, 0, 0, 0, 0, 0) };
+        if occupied == 1 {
+            let sent = unsafe { syscall2(SYS_NOTIFY, SLOT_READY, 1) };
+            if sent < 0 {
+                fail(EXIT_WAIT, "inputd readiness notification was refused");
+            }
+            return;
+        }
+        if occupied < 0 {
+            fail(EXIT_WAIT, "inputd readiness capability query failed");
+        }
+        let timer = unsafe { syscall3(SYS_TIMER_ARM, SLOT_NOTIF, 1, PS2_POLL_US) };
+        if timer <= 0 || unsafe { syscall1(SYS_WAIT, SLOT_NOTIF) } != 1 {
+            fail(
+                EXIT_WAIT,
+                "inputd readiness wait could not yield for kernel grant",
+            );
+        }
+    }
+    fail(EXIT_WAIT, "inputd readiness capability was not installed");
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_sys(operation: u64, value: u64) -> i64 {
+    unsafe { syscall3(SYS_PS2_IO, SLOT_MMIO, operation, value) }
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_status() -> u8 {
+    let status = ps2_sys(0, 0);
+    if status < 0 {
+        fail(EXIT_WAIT, "PS/2 status read refused by the capability gate");
+    }
+    status as u8
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_wait_input_clear() -> bool {
+    for _ in 0..1_000_000usize {
+        if ps2_status() & 2 == 0 {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+    false
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_read_output() -> Option<(u8, bool)> {
+    for _ in 0..1_000_000usize {
+        let status = ps2_status();
+        if status & 1 != 0 {
+            let value = ps2_sys(1, 0);
+            if value < 0 {
+                fail(EXIT_WAIT, "PS/2 data read refused by the capability gate");
+            }
+            return Some((value as u8, status & 0x20 != 0));
+        }
+        core::hint::spin_loop();
+    }
+    None
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_write(operation: u64, value: u8) -> bool {
+    ps2_wait_input_clear() && ps2_sys(operation, u64::from(value)) == 0
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_controller(command: u8) -> bool {
+    ps2_write(2, command)
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_data(value: u8) -> bool {
+    ps2_write(3, value)
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_device(auxiliary: bool, command: u8) -> bool {
+    if auxiliary && !ps2_controller(0xD4) {
+        return false;
+    }
+    if !ps2_data(command) {
+        return false;
+    }
+    for _ in 0..3 {
+        let Some((response, from_aux)) = ps2_read_output() else {
+            return false;
+        };
+        if from_aux == auxiliary && response == 0xFA {
+            return true;
+        }
+        if from_aux == auxiliary && response == 0xFE {
+            if auxiliary && !ps2_controller(0xD4) {
+                return false;
+            }
+            if !ps2_data(command) {
+                return false;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(feature = "virtualbox-interactive")]
+fn ps2_initialize() {
+    if !ps2_controller(0xAD) || !ps2_controller(0xA7) {
+        fail(
+            EXIT_WAIT,
+            "PS/2 ports could not be disabled for initialization",
+        );
+    }
+    while ps2_status() & 1 != 0 {
+        let _ = ps2_sys(1, 0);
+    }
+    if !ps2_controller(0x20) {
+        fail(EXIT_WAIT, "PS/2 configuration read command refused");
+    }
+    let Some((mut config, _)) = ps2_read_output() else {
+        fail(EXIT_WAIT, "PS/2 configuration read timed out");
+    };
+    config = (config & !0x03) | (1 << 6); // polling, translated Set-1 keyboard
+    if !ps2_controller(0x60) || !ps2_data(config) {
+        fail(EXIT_WAIT, "PS/2 polling configuration refused");
+    }
+    if !ps2_controller(0xAE) || !ps2_controller(0xA8) {
+        fail(
+            EXIT_WAIT,
+            "PS/2 keyboard or auxiliary port could not be enabled",
+        );
+    }
+    if !ps2_device(false, 0xF4) {
+        fail(EXIT_WAIT, "PS/2 keyboard scan-enable handshake failed");
+    }
+    if !ps2_device(true, 0xF6) || !ps2_device(true, 0xF4) {
+        fail(EXIT_WAIT, "PS/2 mouse defaults/enable handshake failed");
     }
 }
 

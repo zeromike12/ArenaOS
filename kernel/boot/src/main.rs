@@ -187,8 +187,16 @@ pub extern "efiapi" fn efi_main(
     }
 
     // --- Step 3: verified diagnostics -------------------------------------
-    info!("m1", "running milestone-1 self-tests");
-    let (passed, total) = m1::run_all();
+    let (passed, total) = if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "m1",
+            "interactive image: boot qualification self-tests omitted"
+        );
+        (0, 0)
+    } else {
+        info!("m1", "running milestone-1 self-tests");
+        m1::run_all()
+    };
 
     // --- Step 3.5: take over timekeeping (M2.2) ----------------------------
     // After the M1 suite (which observes firmware-owned hardware state) and
@@ -248,7 +256,15 @@ pub extern "efiapi" fn efi_main(
     // always on at boot stage, chunks grown lazily on first allocation.
     heap::init();
 
-    let (passed2, total2) = m2::run_all();
+    let (passed2, total2) = if cfg!(feature = "virtualbox-interactive") {
+        info!(
+            "m2",
+            "interactive image: boot qualification self-tests omitted"
+        );
+        (0, 0)
+    } else {
+        m2::run_all()
+    };
 
     // --- Step 4: ExitBootServices (M2.7) ------------------------------------
     info!("boot", "exiting UEFI boot services (M2.7 handover)");

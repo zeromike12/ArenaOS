@@ -1,70 +1,123 @@
 # ArenaOS VirtualBox compatibility
 
-Status: implementation in progress; no VirtualBox guest execution has been
-completed. This branch is based on Phase 15 checkpoint
-`13986b3dcf007b1721d85ef3509945131f8c6584`. Phase 15 remains PARTIAL /
-UNQUALIFIED, with the #XF gate unresolved and ADR-0113 Proposed.
+Status: **implementation package built; guest compatibility is ready for
+external testing and is not yet verified**. This branch is based on Phase 15
+checkpoint `13986b3dcf007b1721d85ef3509945131f8c6584`. Phase 15 remains
+PARTIAL / UNQUALIFIED: the strict #XF gate is unresolved, official strict
+stability is incomplete, and ADR-0113 remains Proposed.
 
-## Compatibility inventory
+## Interactive VM target
 
-The Phase 15 source currently assumes modern VirtIO PCI for block, network,
-entropy, and input. Its display service already has a capability-owned UEFI
-GOP fallback. The kernel owns PCI enumeration, DMA authorization, and interrupt
-routing; device protocol drivers run in ring 3.
+The appliance targets Oracle VirtualBox 7.2.22 on an x86-64 host. The
+configuration in `ArenaOS.vbox` is self-contained with relative disk paths and
+sets:
 
-| Subsystem | Current implementation | VirtualBox profile | Work needed |
-| --- | --- | --- | --- |
-| Firmware | x86-64 UEFI application; firmware facts cross `ExitBootServices` as scalars | VirtualBox EFI, Secure Boot off | Verify the firmware handoff and boot order in VirtualBox |
-| Display | Ring-3 GOP scanout or VirtIO-GPU; no VBoxSVGA driver | 800×600 EFI GOP, VGA-compatible controller | Use GOP; confirm mode and framebuffer mapping in VirtualBox |
-| Storage | Ring-3 VirtIO-blk; no VirtIO-SCSI or AHCI | SATA AHCI disk | Add AHCI support in `storaged`, retain block-service IPC |
-| Keyboard/mouse | Ring-3 VirtIO-input keyboard/tablet | Built-in PS/2 keyboard and mouse | Add narrowly mediated PS/2 port access and ring-3 event decoding |
-| Network | Ring-3 modern VirtIO-net, including MSI-X relay | Paravirtualized VirtIO-net, VirtualBox NAT | Confirm VirtualBox's exposed PCI transport, MSI-X, and real packet path |
-| Entropy | Ring-3 VirtIO-RNG seeds the kernel CSPRNG | CPU RDRAND when VirtualBox exposes it | Add a checked RDRAND source; fail closed if unavailable or unhealthy |
-| Timer/interrupts | PIT, LAPIC, IOAPIC, HPET, one CPU | ICH9, I/O APIC, one CPU | Verify routing, monotonic time, sleep, and scheduler under VirtualBox |
-| Shutdown | Capability-gated UEFI `ResetSystem` | VirtualBox EFI shutdown | Verify a clean guest shutdown and reboot |
-| Startup | Boot path runs qualification and diagnostic workloads, including strict #XF | Dedicated interactive image | Separate ordinary startup from test and failure-injection workloads |
+| Setting | Value |
+| --- | --- |
+| Virtual CPUs | 1 |
+| Memory | 1024 MiB |
+| Chipset / interrupt controller | ICH9 / I/O APIC |
+| Firmware | VirtualBox EFI; Secure Boot off |
+| Boot device | Included GPT disk with FAT EFI System Partition |
+| Display | VBoxVGA, 16 MiB, 3D disabled; guest uses UEFI GOP |
+| Input | PS/2 keyboard and mouse |
+| Data storage | AHCI SATA: persistent 72 MiB disk, port 0 |
+| Boot storage | AHCI SATA: GPT/FAT EFI disk, port 1 |
+| Network | VirtualBox paravirtualized VirtIO adapter, NAT |
+| Guest Additions | Not required or used |
+| Audio, clipboard, drag/drop, 3D | Disabled; not part of this profile |
 
-## Selected reproducible target
+VirtualBox supplies its own EFI firmware. The current managed environment
+could not open the VM in VirtualBox, so the actual EFI behavior, PCI device
+identity, GOP mode, AHCI execution, PS/2 I/O, VirtIO-net, RDRAND exposure,
+timer behavior, application workflow, shutdown, and disk persistence remain
+unverified. The profile relies on the host CPU and VirtualBox exposing RDRAND;
+ArenaOS fails closed if its checked entropy source is unavailable.
 
-Use Oracle VirtualBox **7.2.22**, the official stable version listed on
-2026-10-22 by `https://download.oracle.com/virtualbox/LATEST-STABLE.TXT`.
-The official 7.2 User Guide was downloaded from
-`https://download.oracle.com/virtualbox/7.2.22/UserManual.pdf`; its SHA-256 is
-`044213c16850ea2b247247e6b6c483611f7ac99b91d17af63b94f274cbdabf2a`.
-Relevant sections are 5.8, 5.13.1, 5.14.1, 5.22, 8.1, 9.2, and 16.1.5.
-That guide documents EFI GOP resolution selection, PS/2 input, AHCI, and
-VirtualBox's paravirtualized VirtIO network card. It labels VirtIO-SCSI an
-experimental feature, so the target profile uses AHCI and requires a distinct
-AHCI implementation; it does not treat VirtIO-SCSI as VirtIO-blk.
+## Compatibility implementation
 
-Initial machine target (external execution still required): x86-64 guest, one
-vCPU, 1024 MiB RAM, ICH9 chipset, I/O APIC enabled, VirtualBox EFI with Secure
-Boot disabled, boot from the bundled disk, 800×600×32 EFI GOP, VGA-compatible
-graphics controller, PS/2 keyboard/mouse, SATA AHCI persistent disk, one
-paravirtualized VirtIO-net adapter in NAT mode, and no Guest Additions. The
-final `.vbox`/OVA must encode these settings. The exact VirtualBox PCI identity,
-interrupt behavior, and GOP mapping must be recorded from a real run before
-calling this profile supported.
+The build profiles have separate names and output identities:
 
-## Implementation sequence
+- `tools/build.sh --image` builds the existing qualification image and does
+  not enable VirtualBox fallbacks. Its separate identity is written to
+  `build/arena-qualification.identity`.
+- `tools/build.sh --virtualbox-interactive --image` builds a distinct
+  ordinary-use image and writes `build/arena-virtualbox-interactive.identity`.
+  It omits automated qualification suites and deliberate fault probes while
+  keeping live-kernel startup checks, process/capability validation, service
+  readiness checks, and fail-closed initialization.
 
-1. Preserve the reviewed Phase 15 checkpoint on its existing branch; use this
-   dedicated branch for compatibility work.
-2. Add the Proposed architecture decision and the separate interactive build
-   profile while retaining the existing strict qualification build.
-3. Implement userspace AHCI block I/O, capability-mediated PS/2 input, and an
-   explicit fail-closed entropy fallback. Preserve the existing service APIs.
-4. Build the interactive EFI and persistent-disk package, then validate the
-   package structure and host-side invariants.
-5. Run the exact imported appliance in VirtualBox 7.2.22 when a host with the
-   official VirtualBox runtime and kernel backend is available. Until then,
-   label the package ready for external testing, not verified support.
+The interactive profile adds a ring-3 AHCI storage driver behind the existing
+block IPC contract, a capability-gated PS/2 controller syscall and ring-3
+decoder, and a checked RDRAND-to-kernel-CSPRNG path. The kernel authorizes one
+bounded native AHCI BAR and exact PS/2/RDRAND source capabilities; it does not
+give userspace arbitrary PCI configuration or I/O-port access. Network and
+display continue through the existing userspace VirtIO-net and UEFI GOP paths.
+No AVX state or Phase 15 test behavior was changed.
+
+## Appliance and first boot
+
+The artifact at `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`
+contains the `.vbox` configuration, relative-path flat VMDK descriptors and
+extents, README, and JSON manifest. It can be opened from VirtualBox's normal
+interface after extraction; no host-side Python, Rust, QEMU, scripts, or
+Guest Additions are required. The boot disk has a 16 MiB FAT16 ESP containing
+the exact interactive EFI. The 72 MiB data disk contains the existing 8 MiB
+AFS1 format followed by a blank 64 MiB AFS2 region; `filesd` initializes AFS2
+and imports the AFS1 contents on first boot. User-created files then use the
+existing persistent AFS2 service.
+
+The package verifier uses Python's standard library and checks every file
+hash, the `.vbox` device configuration, relative disk references, VMDK
+extents, GPT headers/tables, exact embedded EFI and ESP hashes, AFS1 geometry,
+and the blank AFS2 region. This offline validation does not prove that
+VirtualBox accepts the native XML or that a guest boots.
+
+### Run
+
+1. Download and extract `ArenaOS-VirtualBox-Interactive.zip`.
+2. Open `ArenaOS.vbox` in VirtualBox.
+3. Select ArenaOS and click **Start**.
+
+The selected host must run 64-bit VirtualBox 7.2.22 with hardware
+virtualization available to the hypervisor and a CPU whose RDRAND source is
+exposed to the guest. Other VirtualBox versions remain unverified. No
+administrator script or host security change is needed.
+
+## Verification matrix
+
+| Area | Current evidence | Status |
+| --- | --- | --- |
+| Qualification and interactive build separation | Both profiles compiled; qualification profile unchanged | Build verified |
+| Kernel instruction profile | Interactive kernel ISA audit: 75,303 decoded instructions; x87/MMX/SSE/AVX policy passed | Build verified |
+| AHCI protocol encoding | Three host tests passed; userspace driver compiled | Host/build verified; no HBA execution |
+| PS/2 decoding | Three host tests passed; input service compiled | Host/build verified; no controller execution |
+| EFI and package identities | Freshly extracted package verifier checked EFI/ESP hashes and GPT/FAT layout | Offline verified |
+| VM settings and storage files | XML, relative paths, VMDKs, AFS1, blank AFS2 validated offline | Offline verified; not accepted by VirtualBox yet |
+| UEFI boot and desktop rendering | No VirtualBox guest run | Unexecuted |
+| Keyboard/mouse and window interaction | No VirtualBox guest run | Unexecuted |
+| AFS2 first boot, file edits, and persistence | No VirtualBox guest run | Unexecuted |
+| VirtIO-net/NAT and existing network workflows | No VirtualBox guest run | Unexecuted |
+| Timers, application lifecycle, shutdown/reboot | No VirtualBox guest run | Unexecuted |
+| 100 fresh successful boots | No VirtualBox guest run | Unexecuted |
+| Phase 15 genuine vector 19 and strict stability | No qualifying result from this work | PARTIAL / UNQUALIFIED |
 
 ## Host execution limitation
 
-The current managed Linux environment has no `VBoxManage`, `/dev/vboxdrv`, or
-`/dev/kvm`, and the current user cannot install or load the VirtualBox host
-kernel module. Source builds, package inspection, and QEMU regression tests do
-not establish VirtualBox guest compatibility. Keep VirtualBox boot, desktop,
-input, storage persistence, network, lifecycle, and 100/100 fresh-boot evidence
-explicitly unexecuted until tested on an actual supported VirtualBox host.
+This managed Linux environment has no `/dev/vboxdrv` or `/dev/kvm`. An
+official Debian-signed VirtualBox 7.2.22 package was inspected and its version
+binary runs from an isolated extraction, but the COM service fails to start
+and `VBoxSVC` crashes in that unsupported isolated runtime. Oracle's direct
+binary download endpoint returned HTTP 403. This did not reach VM creation,
+firmware, or ArenaOS boot. There are no screenshots or guest logs, and no
+VirtualBox compatibility claim is made.
+
+The exact package is ready for M to open on an ordinary x86-64 host with the
+specified official VirtualBox runtime. After opening it, verify the desktop,
+keyboard/mouse, application launch/exit, create/edit/read a user file, restart
+and confirm persistence, confirm a network request, and shut down from ArenaOS.
+Save the VirtualBox version, host CPU/RDRAND availability, imported settings,
+`VBox.log`, guest serial/debug output, screenshots, and test results. A
+qualified compatibility milestone still needs 100/100 fresh successful
+ArenaOS boots. These are compatibility checks and do not satisfy Phase 15's
+strict #XF gate.

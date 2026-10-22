@@ -141,6 +141,12 @@ pub const SYS_CONSOLE_PULL: u64 = 25;
 pub const SYS_CLOCK_NOW: u64 = 26;
 pub const SYS_TIMER_ARM: u64 = 27;
 pub const SYS_TIMER_CANCEL: u64 = 28;
+/// ADR-0114: four capability-gated PS/2 controller byte operations.
+pub const SYS_PS2_IO: u64 = 77;
+/// ADR-0114: draw from the seeded kernel CSPRNG into a caller-lent block.
+pub const SYS_ENTROPY_DRAW: u64 = 78;
+/// ADR-0114: rngd requests exactly one checked RDRAND kernel seed.
+pub const SYS_ENTROPY_SEED_RDRAND: u64 = 79;
 /// Inspect an already-held cap into [kind, object, rights] (24 bytes).
 pub const SYS_CAP_DESCRIBE: u64 = 29;
 /// Finish a child by Process-cap slot: 0=reap exited, 1=explicit stop/reap.
@@ -619,6 +625,7 @@ pub const RNG_S_OK: u64 = 0;
 pub const RNG_S_BAD_OP: u64 = (-1i64) as u64;
 pub const RNG_S_BAD_LEN: u64 = (-2i64) as u64;
 pub const RNG_S_NO_BUF: u64 = (-3i64) as u64;
+pub const RNG_S_NO_ENTROPY: u64 = (-4i64) as u64;
 
 /// The largest single draw RNG_GET accepts — one frame: the caller
 /// LENDs a 4 KiB page and the descriptor covers at most all of it.

@@ -54,6 +54,11 @@ const STATUS_CAP_LIST: u16 = 1 << 4;
 /// Header type: multifunction device.
 const HEADER_MULTIFUNCTION: u8 = 1 << 7;
 
+/// PCI class/subclass/prog-if for a native AHCI 1.0 controller.
+const AHCI_CLASS_CODE: u32 = 0x01_06_01;
+/// The largest MMIO BAR shape we expose to the isolated AHCI service.
+const AHCI_ABAR_MIN_BYTES: u64 = 4096;
+
 // ---- VirtIO constants (OASIS virtio 1.0, §4.1) -----------------------------
 
 /// The VirtIO vendor ID.
@@ -228,6 +233,7 @@ static PCI_COUNT: SyncCell<usize> = SyncCell::new(0);
 static VIRTIO_DEVS: SyncCell<[VirtioDevice; MAX_VIRTIO_DEVICES]> =
     SyncCell::new([NO_VIRTIO; MAX_VIRTIO_DEVICES]);
 static VIRTIO_COUNT: SyncCell<usize> = SyncCell::new(0);
+static AHCI_PCI_INDEX: SyncCell<usize> = SyncCell::new(usize::MAX);
 static ENUMERATED: SyncCell<bool> = SyncCell::new(false);
 
 // ---- config access ----------------------------------------------------------
@@ -654,6 +660,61 @@ fn log_virtio(v: &VirtioDevice) {
     }
 }
 
+/// Recognize and authorize one native AHCI controller for the interactive
+/// VirtualBox profile. The controller is not handed unrestricted PCI config
+/// access: the kernel validates class/prog-if and BAR5, enables only memory
+/// decode and bus mastering, and later grants this exact BAR to storaged.
+///
+/// # Safety
+/// Caller holds the enumeration's IF=0 config-space critical section.
+unsafe fn record_ahci(pci_index: usize, f: &PciFunction) {
+    if ((f.class_rev >> 8) & 0x00FF_FFFF) != AHCI_CLASS_CODE {
+        return;
+    }
+    let abar = 5;
+    if f.bar_is_io[abar]
+        || f.bar_base[abar] == 0
+        || f.bar_base[abar] & 0xFFF != 0
+        || f.bar_size[abar] < AHCI_ABAR_MIN_BYTES
+        || f.bar_base[abar] > u64::from(u32::MAX)
+        || f.bar_size[abar] > 64 * 1024
+    {
+        log_info!(
+            "pci",
+            "  AHCI candidate refused: BAR5 is not a bounded aligned ABAR"
+        );
+        return;
+    }
+    // SAFETY: exact AHCI class and bounded BAR validated above; only this
+    // controller receives the kernel's device-DMA authorization.
+    unsafe {
+        let cs = config_read32(0, f.dev, f.func, REG_COMMAND_STATUS);
+        let command = cs as u16;
+        let want = command | COMMAND_MEM | COMMAND_BUS_MASTER;
+        if want != command {
+            config_write32(
+                0,
+                f.dev,
+                f.func,
+                REG_COMMAND_STATUS,
+                (cs & 0xFFFF_0000) | u32::from(want),
+            );
+        }
+        let now = config_read16(0, f.dev, f.func, REG_COMMAND_STATUS);
+        if now & (COMMAND_MEM | COMMAND_BUS_MASTER) != (COMMAND_MEM | COMMAND_BUS_MASTER) {
+            log_info!("pci", "  AHCI refused: MEM|BUS MASTER did not stick");
+            return;
+        }
+        *AHCI_PCI_INDEX.get() = pci_index;
+        log_info!(
+            "pci",
+            "  native AHCI authorized by kernel: BAR5 {:#x}+{:#x}, command {command:#06x}->{now:#06x}",
+            f.bar_base[abar],
+            f.bar_size[abar]
+        );
+    }
+}
+
 /// Walk bus 0, recording functions and VirtIO structures. Runs once
 /// (repeat calls return the recorded counts); the whole scan holds IF=0
 /// — config PIO is a shared two-port window that must not interleave
@@ -736,6 +797,10 @@ pub fn enumerate() -> (usize, usize) {
                     } else {
                         log_info!("pci", "virtio table full — device not recorded");
                     }
+                } else if cfg!(feature = "virtualbox-interactive") {
+                    // SAFETY: same IF=0 scan; no ring-3 config access is
+                    // created, only a bounded BAR capability later.
+                    unsafe { record_ahci(pci_n - 1, &f) };
                 }
             }
         }
@@ -764,6 +829,20 @@ pub fn pci_function(i: usize) -> Option<PciFunction> {
     without_interrupts(|| {
         // SAFETY: single reader under IF=0.
         unsafe { (i < *PCI_COUNT.get()).then(|| (*PCI_FUNCS.get())[i]) }
+    })
+}
+
+/// Return the one validated native AHCI function prepared by the
+/// VirtualBox-interactive PCI policy.
+pub fn ahci_function() -> Option<(usize, PciFunction)> {
+    without_interrupts(|| {
+        // SAFETY: table snapshot under IF=0; `usize::MAX` means no validated
+        // AHCI controller was authorized.
+        unsafe {
+            let index = *AHCI_PCI_INDEX.get();
+            (index != usize::MAX && index < *PCI_COUNT.get())
+                .then(|| (index, (*PCI_FUNCS.get())[index]))
+        }
     })
 }
 
