@@ -59,9 +59,10 @@ No AVX state or Phase 15 test behavior was changed.
 
 The artifact at `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`
 contains the `.vbox` configuration, relative-path flat VMDK descriptors and
-extents, README, and JSON manifest. It can be opened from VirtualBox's normal
-interface after extraction; no host-side Python, Rust, QEMU, scripts, or
-Guest Additions are required. The boot disk has a 16 MiB FAT16 ESP containing
+extents, README, and JSON manifest. It is intended to be opened from
+VirtualBox's normal interface after extraction; no host-side Python, Rust,
+QEMU, scripts, or Guest Additions are required. The boot disk has a 16 MiB
+FAT16 ESP containing
 the exact interactive EFI. The 72 MiB data disk contains the existing 8 MiB
 AFS1 format followed by a blank 64 MiB AFS2 region; `filesd` initializes AFS2
 and imports the AFS1 contents on first boot. User-created files then use the

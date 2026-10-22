@@ -74,7 +74,10 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   explicitly throws `Required Machine/@Platform element is missing` when it
   is absent. Its x86 settings also require `Platform/@architecture="x86"`
   and a `Platform/x86` child. This matches the error reported while opening
-  the original download.
+  the original download. Oracle's upstream parser implements this in
+  [`Settings.cpp`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Main/xml/Settings.cpp#L7258-L7272)
+  and requires the architecture and x86 child in
+  [`readPlatform`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Main/xml/Settings.cpp#L5599-L5635).
 - The generator now writes generic CPU, ICH9 chipset, and UTC clock settings
   under `Platform`, and the x86 CPU controls under `Platform/x86/CPU`. The
   offline verifier checks the required nodes, values, and absence of their
@@ -85,22 +88,24 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
 ## Final downloadable artifact
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` is the native
-`.vbox` package with portable relative disk files. It is 907,771 bytes with
-SHA-256 to be updated after the schema correction is rebuilt. Its manifest
-will pin the correction source commit and matching interactive EFI/ESP
-identities.
-The prior archive SHA-256 was
-`9823317f7b18e374ce8e3c48f074d8796470a9bf05c77d009032337ec68d23c8`.
-Its manifest pinned source commit `6a2635a898e074575f9b62935d2fe710cc0be442`,
+`.vbox` package with portable relative disk files. The corrected package is
+907,934 bytes with SHA-256
+`862cbd0c185a8f8daf2379a058390ee820359b0927bfa95e6a6c16c2ef71fec9`.
+Its manifest pins interactive image source commit
+`6a2635a898e074575f9b62935d2fe710cc0be442` and package generator source commit
+`b05359e586d0f641302aaafa342ce887c723cd4c`. The EFI and ESP were not rebuilt
+or modified for this XML-only correction; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
 
-The exact ZIP was freshly extracted under `/tmp/arenaos-vbox-final`, outside
-the working checkout. The standard-library verifier passed. Negative controls
-rejected a missing disk descriptor, a mismatched EFI hash, and an IDE
-controller substitution even after the modified `.vbox` file hash was
-recomputed. These checks validate package integrity and intended settings;
-they do not validate VirtualBox parsing or guest execution.
+The exact corrected ZIP was freshly extracted to a temporary directory outside
+the working checkout, and the standard-library verifier passed. Negative
+controls rejected a missing `Platform` node, the wrong platform architecture,
+and CPU settings left in the legacy `Hardware` location, with the package file
+hash recomputed so each case reached the XML checks. These checks validate
+package integrity and intended settings; they do not validate VirtualBox
+parsing or guest execution. The exact file still needs to be opened in
+VirtualBox 7.2.22 on the user's host.
 
 The download URL after this branch is pushed is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
