@@ -261,6 +261,9 @@ def vbox_xml(
         <BootMenu mode="MessageAndMenu"/>
         <TimeOffset value="0"/>
       </Firmware>
+      <UART>
+        <Port slot="0" enabled="true" IOAddress="0x3f8" IRQ="4" hostMode="RawFile" path="ArenaOS-serial.log"/>
+      </UART>
       <Network>
         <Adapter slot="0" enabled="true" MACAddress="{network_mac}" cable="true" type="virtio" promiscuousModePolicy="Deny">
           <NAT/>
@@ -455,6 +458,7 @@ def build(output: Path, allow_dirty: bool) -> None:
                 "input": "PS/2 keyboard and mouse",
                 "storage": "AHCI SATA with fixed VDI 1.1 disks; data disk port 0; GPT/FAT EFI disk port 1",
                 "network": "VirtualBox paravirtualized VirtIO adapter, NAT",
+                "serial_output": "COM1, 38400 8N1, ArenaOS-serial.log",
                 "machine_uuid": str(machine_id),
                 "machine_name": machine_name,
                 "boot_disk_uuid": str(boot_id),
@@ -476,6 +480,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             "1. Extract this ZIP file.\n"
             "2. Open ArenaOS-VDI.vbox in VirtualBox.\n"
             f"3. Select {machine_name} and click Start.\n\n"
+            "ArenaOS boot diagnostics are captured automatically in ArenaOS-serial.log beside this file.\n"
+            "If the screen stays black or startup stops, power off the VM and send that file.\n\n"
             "Use this new VDI settings file, not an older ArenaOS entry or .vbox file.\n"
             f"If the VM list still shows ArenaOS, open ArenaOS-VDI.vbox from this folder to add {machine_name}.\n\n"
             f"Register one extracted copy of this package. For later starts, select {machine_name} in the VM list\n"
@@ -483,7 +489,8 @@ def build(output: Path, allow_dirty: bool) -> None:
             f"Interactive image source commit: {source_commit}\n"
             f"Package generator source commit: {package_source_commit}\n\n"
             "The VM is configured with one CPU, 1024 MiB RAM, ICH9, EFI, VGA, PS/2 input,\n"
-            "an AHCI persistent data disk, and one VirtIO network adapter using NAT. The\n"
+            "an AHCI persistent data disk, one VirtIO network adapter using NAT, and\n"
+            "COM1 serial output captured in ArenaOS-serial.log beside this file.\n"
             "The disks are VirtualBox native fixed VDI 1.1 images. The first SATA disk is\n"
             "the 72 MiB writable data disk; the second contains the EFI\n"
             "system partition. User files belong on the data disk and persist across boots.\n\n"

@@ -299,6 +299,19 @@ def verify_xml(path: Path, vm_configuration: dict) -> dict[str, uuid.UUID]:
     require(adapter is not None and adapter.attrib.get("enabled") == "true" and adapter.attrib.get("type") == "virtio", "VM network adapter mismatch")
     require(adapter.attrib.get("MACAddress") == vm_configuration.get("network_mac"), "VM network MAC does not match manifest")
     require(adapter.find(VBOX_NS + "NAT") is not None, "VM network adapter is not using NAT")
+    uart = hardware.find(VBOX_NS + "UART")
+    serial_ports = uart.findall(VBOX_NS + "Port") if uart is not None else []
+    require(
+        len(serial_ports) == 1
+        and serial_ports[0].attrib.get("slot") == "0"
+        and serial_ports[0].attrib.get("enabled") == "true"
+        and serial_ports[0].attrib.get("IOAddress") == "0x3f8"
+        and serial_ports[0].attrib.get("IRQ") == "4"
+        and serial_ports[0].attrib.get("hostMode") == "RawFile"
+        and serial_ports[0].attrib.get("path") == "ArenaOS-serial.log"
+        and vm_configuration.get("serial_output") == "COM1, 38400 8N1, ArenaOS-serial.log",
+        "VM COM1 raw-file diagnostic output mismatch",
+    )
 
     registry = machine.find(VBOX_NS + "MediaRegistry")
     hard_disks = registry.find(VBOX_NS + "HardDisks") if registry is not None else None
@@ -395,6 +408,8 @@ def verify_directory(root: Path) -> None:
         "Open ArenaOS-VDI.vbox in VirtualBox" in readme
         and f"Select {vm_configuration['machine_name']}" in readme
         and "VirtualBox registers disk UUIDs globally" in readme
+        and "ArenaOS-serial.log" in readme
+        and "send that file" in readme
         and "Phase 15 remains PARTIAL / UNQUALIFIED" in readme,
         "README instructions or Phase 15 status missing",
     )

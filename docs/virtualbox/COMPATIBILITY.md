@@ -24,15 +24,19 @@ sets:
 | Data storage | AHCI SATA: persistent 72 MiB disk, port 0 |
 | Boot storage | AHCI SATA: GPT/FAT EFI disk, port 1 |
 | Network | VirtualBox paravirtualized VirtIO adapter, NAT |
+| Boot diagnostics | COM1, 38400 8N1, captured to `ArenaOS-serial.log` beside the VM settings |
 | Guest Additions | Not required or used |
 | Audio, clipboard, drag/drop, 3D | Disabled; not part of this profile |
 
-VirtualBox supplies its own EFI firmware. The current managed environment
-could not open the VM in VirtualBox, so the actual EFI behavior, PCI device
-identity, GOP mode, AHCI execution, PS/2 I/O, VirtIO-net, RDRAND exposure,
-timer behavior, application workflow, shutdown, and disk persistence remain
-unverified. The profile relies on the host CPU and VirtualBox exposing RDRAND;
-ArenaOS fails closed if its checked entropy source is unavailable.
+VirtualBox supplies its own EFI firmware. An external Windows run on VirtualBox
+7.2.22 r175245 opened the corrected configuration, read the EFI disk, and
+entered 64-bit guest execution, but showed a black screen and was stopped from
+the VirtualBox UI. The package did not capture guest COM1 output, so the exact
+boot result is unknown. Desktop rendering, PCI and GOP use, AHCI execution,
+PS/2 I/O, VirtIO-net, RDRAND exposure, timer behavior, application workflow,
+shutdown, and disk persistence remain unverified. The profile relies on the
+host CPU and VirtualBox exposing RDRAND; ArenaOS fails closed if its checked
+entropy source is unavailable.
 
 ## Compatibility implementation
 
@@ -87,6 +91,7 @@ guest boots.
 1. Download the latest `ArenaOS-VirtualBox-Interactive.zip` and extract it into a new folder.
 2. Open `ArenaOS-VDI.vbox` from that folder in VirtualBox.
 3. Select the VM named **ArenaOS VDI** followed by the package commit's short ID, then click **Start**. The exact name appears in the ZIP's `README.txt`.
+4. If the screen stays black or startup stops, power off the VM, then send `ArenaOS-serial.log` from the same folder. It contains ArenaOS's boot and failure messages.
 
 This package uses a new settings filename, VM name, and machine UUID. If an
 error still names `ArenaOS-Data.vmdk`, VirtualBox opened an older VM
@@ -114,8 +119,8 @@ administrator script or host security change is needed.
 | AHCI protocol encoding | Three host tests passed; userspace driver compiled | Host/build verified; no HBA execution |
 | PS/2 decoding | Three host tests passed; input service compiled | Host/build verified; no controller execution |
 | EFI and package identities | Freshly extracted package verifier checked EFI/ESP hashes and GPT/FAT layout | Offline verified |
-| VM settings and storage files | XML, relative paths, fixed VDI 1.1 disks, AFS1, blank AFS2 validated offline | Offline verified; not accepted by VirtualBox yet |
-| UEFI boot and desktop rendering | No VirtualBox guest run | Unexecuted |
+| VM settings and storage files | Opened and ran on VirtualBox 7.2.22; EFI VDI was read | Runtime startup passed; guest boot incomplete |
+| UEFI boot and desktop rendering | EFI image loaded and guest entered 64-bit state; user saw a black screen; no serial output was captured | Boot progress observed; desktop unverified |
 | Keyboard/mouse and window interaction | No VirtualBox guest run | Unexecuted |
 | AFS2 first boot, file edits, and persistence | No VirtualBox guest run | Unexecuted |
 | VirtIO-net/NAT and existing network workflows | No VirtualBox guest run | Unexecuted |
@@ -129,9 +134,10 @@ This managed Linux environment has no `/dev/vboxdrv` or `/dev/kvm`. An
 official Debian-signed VirtualBox 7.2.22 package was inspected and its version
 binary runs from an isolated extraction, but the COM service fails to start
 and `VBoxSVC` crashes in that unsupported isolated runtime. Oracle's direct
-binary download endpoint returned HTTP 403. This did not reach VM creation,
-firmware, or ArenaOS boot. There are no screenshots or guest logs, and no
-VirtualBox compatibility claim is made.
+binary download endpoint returned HTTP 403. This environment did not reach VM
+creation or guest boot. C's external Windows `VBox.log` confirms firmware and
+kernel entry, but there is no screenshot or guest serial log, and no
+successful-boot or VirtualBox compatibility claim is made.
 
 The exact package is ready for M to open on an ordinary x86-64 host with the
 specified official VirtualBox runtime. After opening it, verify the desktop,

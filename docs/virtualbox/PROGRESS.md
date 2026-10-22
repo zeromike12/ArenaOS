@@ -151,8 +151,28 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   7.2.22 writer uses the same location
   ([writer](https://github.com/VirtualBox/virtualbox/blob/v7.2.22/src/VBox/Main/xml/Settings.cpp#L7910-L7925)).
 - This is a host-appliance configuration correction based on the exact logged
-  failure. It does not change ArenaOS source or establish a successful VM
-  start; the corrected package still needs a Windows VirtualBox 7.2.22 launch.
+  failure. It does not change ArenaOS source; the following Windows trial
+  confirms that the corrected VM configuration now starts.
+
+## Black-screen guest run follow-up
+
+- C's next `VBox.log` is from Windows 11 and VirtualBox 7.2.22 r175245. The
+  corrected `ArenaOS VDI 8825a48` VM starts without the prior ICH9/IOAPIC
+  error. UEFI loads the disk EFI image at `00:00:05.163548`, changes the
+  display mode to 800x600, and VirtualBox records successful AHCI reads from
+  both included VDIs. The guest remains running until the host pauses and
+  powers it off; no VM device-construction error is logged.
+- The CPU snapshot at host power-off has long mode enabled and GDT/IDT bases
+  in ArenaOS's high kernel address range. RIP is `0x3e8e4302`, inside the
+  loaded `ResetSystemRuntimeDxe.efi` image. This is consistent with execution
+  reaching ArenaOS and then entering the firmware reset service, but the
+  VirtualBox log cannot identify why that service was called. The screen was
+  black, and the appliance did not route COM1 anywhere, so the guest's exact
+  startup or halt message was not preserved.
+- The next package enables the guest's existing 38400-baud COM1 output and
+  writes it to `ArenaOS-serial.log` beside the `.vbox` file. The README asks
+  the operator to send this file if the screen remains black. This changes
+  only VM diagnostics; it does not change ArenaOS or count as a boot pass.
 
 ## Final downloadable artifact
 
@@ -166,15 +186,15 @@ The VDI packaging change does not rebuild the EFI or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
 
-The VDI ZIP was generated and checked by the standard-library verifier. These
-offline checks validate package identities and disk structures; they do not
-validate a VirtualBox GUI start or guest execution. Extract the latest ZIP
-into a new folder and open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. The VM list
-should show the exact entry `ArenaOS VDI 8825a48`. Register only one
-extraction of this exact ZIP and use that entry for later starts; this
-release's machine UUID, VDI UUIDs, and network MAC are unique from earlier
-package revisions. The settings now enable IOAPIC in the 1.20 `Firmware`
-element, as required by VirtualBox 7.2 with the ICH9 chipset.
+The VDI ZIP is generated and checked by the standard-library verifier. Offline
+checks validate package identities and disk structures; the external
+VirtualBox attempt confirms settings acceptance and early guest execution but
+not a successful desktop boot. Extract the latest ZIP into a new folder and
+open `ArenaOS-VDI.vbox` in VirtualBox 7.2.22. Use the exact VM name and
+diagnostic instructions in the ZIP's README. Each release's machine UUID, VDI
+UUIDs, and network MAC are unique from earlier package revisions. The settings
+enable IOAPIC in the 1.20 `Firmware` element and capture COM1 output to a
+package-local log.
 
 The download URL at this branch is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
