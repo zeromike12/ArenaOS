@@ -157,3 +157,4 @@ What this constrains or enables later; what would trigger revisiting.
 | [0107](0107-native-synchronization-domains.md) | Capability-backed native wait domains for Mutex, Condvar, and Once | Accepted and implemented; T1 guest proof and 20/20 T3 preservation passed |
 | [0110](0110-static-native-pie-and-kernel-placement.md) | Bounded static PIE, relative relocations, and RNG-backed kernel placement | Accepted and qualified; 119/119 suite groups, fresh 100/100 stability, and extracted signed-APB1 QEMU witness pass |
 | [0113](0113-native-fpu-simd-state.md) | Native x87/SSE execution with eager per-thread state | Proposed; implementation and qualification pending |
+| [0114](0114-virtualbox-guest-profile.md) | Proposed VirtualBox interactive guest profile | Proposed; implementation and real VirtualBox execution pending |
