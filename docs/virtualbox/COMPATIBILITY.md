@@ -76,9 +76,10 @@ layout and rejects the older `Hardware/CPU`, `Hardware/Chipset`, and
 
 The package verifier uses Python's standard library and checks every file
 hash, the `.vbox` device configuration, relative disk references, VMDK
-extents, GPT headers/tables, exact embedded EFI and ESP hashes, AFS1 geometry,
-and the blank AFS2 region. This offline validation does not prove that
-VirtualBox accepts the native XML or that a guest boots.
+extent paths and canonical UUID fields, GPT headers/tables, exact embedded EFI
+and ESP hashes, AFS1 geometry, and the blank AFS2 region. This offline
+validation does not prove that VirtualBox accepts the native XML or that a
+guest boots.
 
 ### Run
 

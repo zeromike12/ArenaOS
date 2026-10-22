@@ -85,27 +85,38 @@ strict stability is incomplete, and ADR-0113 remains Proposed.
   establish that the VM opens or boots on VirtualBox, which remains untested
   in this managed environment.
 
+## VMDK UUID parse correction
+
+- The next startup failure was `VERR_INVALID_UUID_FORMAT` while opening
+  `ArenaOS-Data.vmdk`. Its `ddb.uuid.image` and `ddb.uuid.modification` values
+  used VMware's spaced-byte form. VirtualBox's VMDK reader parses these fields
+  with `RTUuidFromStr`, and its writer formats them with `%RTuuid`; both require
+  canonical UUID strings. The behavior is in Oracle's upstream
+  [`VMDK.cpp`](https://github.com/VirtualBox/virtualbox/blob/main/src/VBox/Storage/VMDK.cpp#L1962-L2011).
+- Both generated VMDKs now store canonical UUIDs. The offline verifier checks
+  that all four VMDK UUID fields are present, unique, and canonical. The disk
+  extents and EFI/ESP contents are unchanged.
+
 ## Final downloadable artifact
 
 `docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip` is the native
-`.vbox` package with portable relative disk files. The corrected package is
-907,934 bytes with SHA-256
-`862cbd0c185a8f8daf2379a058390ee820359b0927bfa95e6a6c16c2ef71fec9`.
+`.vbox` package with portable relative disk files. The current corrected ZIP is
+907,915 bytes with SHA-256
+`47335eb8cc3886ff04627036f69a9feaf3e002888fffd2a31fa2e8bcf400bebe`.
 Its manifest pins interactive image source commit
 `6a2635a898e074575f9b62935d2fe710cc0be442` and package generator source commit
-`b05359e586d0f641302aaafa342ce887c723cd4c`. The EFI and ESP were not rebuilt
-or modified for this XML-only correction; their hashes remain:
+`92371869c897d38e46bd1f20ae166dd97fe1264e`. Neither correction rebuilt the EFI
+or ESP; their hashes remain:
 EFI SHA-256 `58b9917f78766ff00412666b016858ebf5badb20aa2782af8c1a8a88f6355fb8`,
 and ESP SHA-256 `334faed46322e48f4967d3cf844c991c07be91c07a044104aa390d634cc686a0`.
 
-The exact corrected ZIP was freshly extracted to a temporary directory outside
-the working checkout, and the standard-library verifier passed. Negative
-controls rejected a missing `Platform` node, the wrong platform architecture,
-and CPU settings left in the legacy `Hardware` location, with the package file
-hash recomputed so each case reached the XML checks. These checks validate
-package integrity and intended settings; they do not validate VirtualBox
-parsing or guest execution. The exact file still needs to be opened in
-VirtualBox 7.2.22 on the user's host.
+The exact current ZIP was freshly extracted outside the working checkout and
+the standard-library verifier passed. Its negative controls rejected a missing
+`Platform`, wrong platform architecture, legacy CPU placement, and VMware
+spaced-byte UUID syntax after recomputing the altered file's manifest hash.
+These checks validate package integrity and intended settings; they do not
+validate a VirtualBox GUI start or guest execution. The current ZIP still needs
+to be opened in VirtualBox 7.2.22 on the user's host.
 
 The download URL after this branch is pushed is:
 `https://raw.githubusercontent.com/zeromike12/ArenaOS/arena/virtualbox-support/docs/virtualbox/artifacts/ArenaOS-VirtualBox-Interactive.zip`.
