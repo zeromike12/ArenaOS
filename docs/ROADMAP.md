@@ -1217,6 +1217,49 @@ qualification, the artifact-bound 100-boot run and extracted final archive
 remain open. See [the Phase-12 plan](phase12/PLAN.md) and [progress
 ledger](phase12/PROGRESS.md).
 
+## Phase 13–14 — Installed-application platform (complete)
+
+Capability-gated dynamic Image registry cutover, APB1 installed-application
+discovery/launch, headless helpers, native VM ownership, and the static-PIE
+profile (ADR-0092–0110) landed with qualified checkpoints
+(`releases/checkpoints/phase13-complete`, `phase14-complete`). See
+`docs/phase14/`, the Phase-13/14 ADRs, and `docs/RUNNING.md`.
+
+## Phase 15 — Native FPU/SIMD state ✅ (accepted 2026-10-24)
+
+ADR-0113 (accepted by M): eager per-thread FXSAVE64/FXRSTOR64 state for the
+baseline x87/MMX/SSE/SSE2 profile; AVX remains unsupported; the kernel stays
+integer-only outside the reviewed state-management leaves. Qualification
+**accepted by M and C** for the exact locally modified QEMU 11.1.2 TCG
+backend (strict guest 6/6 on both CPU profiles with genuine vector 19,
+T2/T3/T4 10/10 · 25/25 · 100/100, registered regression 121/121).
+Merged to `main` via PR #4 at `f103926`. Records:
+[docs/phase15/ACCEPTANCE.md](phase15/ACCEPTANCE.md),
+[QUALIFICATION.md](phase15/QUALIFICATION.md). Arena 1/2 integration was
+explicitly *not* qualified by Phase 15.
+
+## Phase 16 — Native C runtime integration 🔨 (bounded, in progress)
+
+Integrate Arena 2's existing C runtime as one canonical runtime on the
+Phase 15 foundation: validated ARST v2 startup → stack/TLS/argv/`main`,
+shared allocator over native VM bindings, the documented C library subset,
+capability-backed standard streams, C11-subset threads/synchronization,
+exit-status/cleanup, and baseline x87/SSE2 execution under ADR-0113 —
+demonstrated through the signed APB1 launch path. Explicitly out of scope:
+full POSIX/C11, C++, dynamic linking, audio/GPU, major ports. Proposed
+ADR-0111 (stream ring wrap) and ADR-0112 (C runtime profile) await M/C
+decisions and are not adopted by starting this phase. Plan, baseline,
+provenance, and issue register: [docs/phase16/PLAN.md](phase16/PLAN.md).
+Acceptance remains M's; nothing in this section pre-accepts it.
+
+## Phase 17 — Genuine SDL3 execution ⬜ (proposed)
+
+Build and run unmodified upstream SDL3 on the Phase 16 runtime via a native
+ArenaOS video/audio/event backend, per the Arena 1 handoff. Depends on
+Phase 16 acceptance and on the B-GFX-1 graphical-service-identification
+decision (`docs/compat/C2.1-B-GFX-1-HANDOFF.md`). **Proposed only — not
+started.**
+
 ---
 
 ## Explicitly NOT building yet (scope firewall)
