@@ -7,10 +7,11 @@
 #include "arena/rt.h"
 #include "internal.h"
 
-/* Set only by arena_legacy_serial_enable (legacy_debug.c). Ordinary images never
- * set it, and never reference arena_legacy_write (weak below), so they do not
- * link the SYS_DEBUG_WRITE path at all. */
+/* Legacy SYS_DEBUG_WRITE dispatch. Both variables are written only by
+ * arena_legacy_serial_enable (legacy_debug.c). Ordinary images never call it,
+ * so the hook stays NULL and no SYS_DEBUG_WRITE path is linked or referenced. */
 int arena_legacy_serial_active;
+arena_legacy_write_fn arena_legacy_write_hook;
 
 void arena_exit(int status) {
     /* Kernel: SYS_THREAD_EXIT diverges for the last thread; the process ends
@@ -22,8 +23,8 @@ void arena_exit(int status) {
 }
 
 long arena_write(int fd, const void *buf, size_t len) {
-    if (arena_legacy_serial_active && arena_legacy_write != NULL) {
-        return arena_legacy_write(fd, buf, len);
+    if (arena_legacy_serial_active && arena_legacy_write_hook != NULL) {
+        return arena_legacy_write_hook(fd, buf, len);
     }
     if (fd != 1 && fd != 2) {
         return ARENA_E_INVALID;

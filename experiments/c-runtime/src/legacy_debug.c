@@ -13,7 +13,10 @@
 
 extern int arena_legacy_serial_active;
 
+long arena_legacy_write(int fd, const void *buf, size_t len);
+
 void arena_legacy_serial_enable(void) {
+    arena_legacy_write_hook = arena_legacy_write;
     arena_legacy_serial_active = 1;
 }
 
