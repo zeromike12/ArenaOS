@@ -1,0 +1,295 @@
+{
+  "archive": {
+    "artifact_path": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz",
+    "checksum_sidecar": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz.sha256",
+    "verification_entrypoint": "tools/verify_phase15_patched_tcg_archive.py"
+  },
+  "backend_id": "arenaos-qemu-11.1.2-local-patched-tcg-xm",
+  "build": {
+    "auto_features": "disabled",
+    "build_dependencies": {
+      "glib": "2.84.4",
+      "pixman": "0.44.0",
+      "slirp": "4.8.0"
+    },
+    "builder_script": "tools/build_phase15_patched_qemu.sh",
+    "command": "../source/configure --target-list=x86_64-softmmu --enable-tcg --disable-kvm --without-default-features --enable-pixman --enable-slirp --disable-fdt --disable-docs --disable-werror --prefix=<fresh-output>/install",
+    "compiler": "Debian GCC 14.2.0-19",
+    "configure_target": "x86_64-softmmu",
+    "docs": "disabled",
+    "fdt": "disabled",
+    "kvm": "disabled",
+    "meson_version": "1.6.1",
+    "ninja_version": "1.11.1.git.kitware.jobserver-1",
+    "rebuild_note": "Builds from the hash-pinned official release archive with the listed configure flags. Use the distributed emulator binary for this qualification; a rebuild with a different SHA-256 is a different backend and requires new qualification.",
+    "rebuild_smoke": {
+      "advertised_accelerators": [
+        "tcg"
+      ],
+      "identity_note": "Clean-source rebuild validated the committed procedure and TCG-only configuration. Its hash differs from the selected qualification binary, so it is a separate build identity and was not used in qualification.",
+      "official_source_archive_sha256": "fc3d810fc6b27f60df77eaf6748004ca76de2edc2c4ff3a9f9a9ada33066c242",
+      "output_binary_sha256": "2ff8e8896de96cbba3fc368a39e45e4394ff174495d45cbae2452ca192941450",
+      "qemu_version": "QEMU emulator version 11.1.2",
+      "qualification_use": false
+    },
+    "werror": false
+  },
+  "claims": {
+    "arenaos_kernel_modified_for_exception_delivery": false,
+    "build_procedure_smoke": "PASS; distinct binary identity, not qualification-tested",
+    "final_acceptance_by": "M, after C review",
+    "full_registered_regression_completed": true,
+    "hardware_acceleration": false,
+    "official_strict_t2_t3_t4_completed": true,
+    "phase15_status": "PARTIAL / UNQUALIFIED pending final M/C review; qualification candidate using locally modified QEMU TCG",
+    "qualification_candidate": true,
+    "strict_t2_t3_t4_completed": true,
+    "upstream_qemu_result": false
+  },
+  "emulator": {
+    "accelerator": "tcg",
+    "accelerator_must_be_explicit": true,
+    "binary_name": "qemu-system-x86_64-patched",
+    "binary_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "patch_file": "qemu-tcg-xm.patch",
+    "patch_sha256": "c2909ea974f4ccaa9526bd5b70aef5599971bc567dd87d6ba8d9b06b327c8dd2",
+    "peeled_source_commit": "4fc49f46dc95d4a27de2509e7fceb2931e91faeb",
+    "project": "QEMU",
+    "source_archive": "qemu-official-11.1.2-gitlab.tar.gz",
+    "source_archive_sha256": "fc3d810fc6b27f60df77eaf6748004ca76de2edc2c4ff3a9f9a9ada33066c242",
+    "source_archive_url": "https://gitlab.com/qemu-project/qemu/-/archive/v11.1.2/qemu-v11.1.2.tar.gz",
+    "supported_accelerators": [
+      "tcg"
+    ],
+    "tag": "v11.1.2",
+    "tag_commit": "ceaea6cb3e2a7d966f9ca97c7ebb5b88cd764dd0",
+    "unpatched_binary_name": "qemu-system-x86_64-unpatched",
+    "unpatched_binary_sha256": "443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284",
+    "upstream_url": "https://gitlab.com/qemu-project/qemu",
+    "version_output": "QEMU emulator version 11.1.2"
+  },
+  "final_source_checks": {
+    "canonical_build": "PASS",
+    "canonical_build_log": "evidence/final-source/canonical-build.log",
+    "host_tests": "PASS (within 121/121 registered regression suites)",
+    "kernel_isa_audit": "PASS; 120911 decoded instructions; ordinary x87/MMX/SSE/AVX rejected",
+    "kernel_isa_audit_log": "evidence/final-source/final-kernel-isa-audit-image.log",
+    "pie_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+    "signed_apb1_sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+  },
+  "firmware": {
+    "code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "source": "official Debian ovmf-generic package",
+    "vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "independent_controls": {
+    "efi_sha256": "dfc8290126cec91f4c98f655ae91d0044c96e55d23335f19c343bd80b764ed82",
+    "esp_sha256": "46c0aeb21e61b3cd392d847f225e71f3d3a33ebb68db8460c089a87d6bf7369c",
+    "patched_checks": [
+      "valid SQRTSS with invalid unmasked does not fault",
+      "masked invalid SQRTSS sets IE without vector 19",
+      "previous masked IE is unmasked; later valid SQRTSS does not fault and preserves IE",
+      "new invalid SQRTSS faults even when IE was already sticky",
+      "saved RIP equals the actual SQRTSS, #UD, DIVSS, sticky DIVSS, and SQRTPS instruction addresses before frame modification",
+      "all 128 XMM destination bits survive scalar SQRTSS and DIVSS faults",
+      "CR4.OSXMMEXCPT clear selects vector 6",
+      "sticky IE plus newly raised unmasked ZE delivers vector 19 and leaves MXCSR status 0x1d05",
+      "packed SQRTPS exceptional lane causes no partial 128-bit destination commit"
+    ],
+    "patched_exit_status": 33,
+    "patched_semantic_result": "RESULT PASS: expanded independent TCG #XM controls",
+    "raw_receipts": {
+      "machine_receipt": "experiments/qemu-tcg-xm-prototype/logs/expanded-controls-receipt.json",
+      "patched_qemu_stderr": "experiments/qemu-tcg-xm-prototype/logs/patched-expanded-controls.qemu-stderr.log",
+      "patched_serial": "experiments/qemu-tcg-xm-prototype/logs/patched-expanded-controls.serial.log",
+      "unpatched_qemu_stderr": "experiments/qemu-tcg-xm-prototype/logs/unpatched-expanded-controls.qemu-stderr.log",
+      "unpatched_serial": "experiments/qemu-tcg-xm-prototype/logs/unpatched-expanded-controls.serial.log"
+    },
+    "source": "experiments/qemu-tcg-xm-prototype/source/independent-xm-controls.s",
+    "source_sha256": "6dac2f295ac5b19be9ca77abba900cd0cfac8630b63b9edf7702485e884a72ba",
+    "unpatched_checks": {
+      "fail": [
+        "new invalid SQRTSS does not fault when IE was already sticky",
+        "clean unmasked SQRTSS does not deliver vector 19 or preserve the fault destination",
+        "OSXMMEXCPT-disabled behavior does not deliver #UD",
+        "unmasked DIVSS does not deliver vector 19",
+        "new ZE with old sticky IE does not deliver vector 19",
+        "packed SQRTPS does not deliver vector 19 or preserve the complete destination"
+      ],
+      "pass": [
+        "valid SQRTSS",
+        "masked invalid SQRTSS status update",
+        "valid SQRTSS with an existing unmasked IE sticky flag"
+      ],
+      "source_matched_build": true
+    },
+    "unpatched_exit_status": 35,
+    "unpatched_semantic_result": "expected failure: vector-19, OSXMMEXCPT #UD, and precise destination checks",
+    "wrapper_source": "experiments/qemu-tcg-xm-prototype/source/controls.rs",
+    "wrapper_source_sha256": "80bef48f5109fe9e0b7a37b88784119c0e293e4296a65aa0496683440c93ec43"
+  },
+  "qualification_label": "locally modified QEMU TCG; not upstream-QEMU or hardware-backed",
+  "registered_regression": {
+    "accelerator": "explicit -accel tcg",
+    "backend_label": "locally modified QEMU TCG; not upstream-QEMU or hardware-backed",
+    "failed": 0,
+    "log": "evidence/registered-regression/full-suite.log",
+    "machine_receipt": "evidence/registered-regression/run.json",
+    "passed": 121,
+    "runner": "tools/run_tests.sh (default official mode)",
+    "source_clean": true,
+    "source_commit": "f54797f2fb5bac0b3440f986d2120382b3611ecc",
+    "suite_count": 121,
+    "verdict": "PASS"
+  },
+  "runtime": {
+    "host_architecture": "x86_64-linux-gnu",
+    "packaged_runtime_libraries": [
+      {
+        "name": "libpixman-1.so.0.44.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd",
+        "version": "0.44.0-3"
+      },
+      {
+        "name": "libslirp.so.0.4.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3",
+        "version": "4.8.0-1+deb13u1"
+      },
+      {
+        "name": "libglib-2.0.so.0.8400.4",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d",
+        "version": "2.84.4-3~deb13u5"
+      }
+    ],
+    "qemu_rom_directory": "pc-bios",
+    "required_shared_libraries": [
+      "libpixman-1.so.0",
+      "libslirp.so.0",
+      "libglib-2.0.so.0",
+      "libpcre2-8.so.0",
+      "libz.so.1",
+      "libatomic.so.1",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "required_system": "x86-64 Linux with glibc >= 2.38; Debian 13 is the measured build/runtime environment",
+    "system_libraries": [
+      "libc.so.6 (glibc >= 2.38)",
+      "libm.so.6",
+      "libatomic.so.1",
+      "libpcre2-8.so.0",
+      "libz.so.1",
+      "x86-64 dynamic loader"
+    ]
+  },
+  "schema_version": 1,
+  "source_baseline": {
+    "branch": "arena/phase15-fpu-simd",
+    "latest_reviewed_source_commit": "df4ad9d4622e2e7e7d2b1ce03a57048305dd902a",
+    "repository": "zeromike12/ArenaOS",
+    "source_relation": "The commits between the strict-image source and the last reviewed source change documentation only; kernel and strict guest sources are byte-identical.",
+    "strict_image_source_commit": "13986b3dcf007b1721d85ef3509945131f8c6584"
+  },
+  "strict_arenaos_image": {
+    "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "embedded_efi_must_match": true,
+    "esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "kernel_source_equivalent_through": "df4ad9d4622e2e7e7d2b1ce03a57048305dd902a",
+    "source_commit": "13986b3dcf007b1721d85ef3509945131f8c6584"
+  },
+  "strict_stability": {
+    "backend_label": "locally modified QEMU TCG; not upstream-QEMU or hardware-backed",
+    "cpu_profile": "qemu64,+nx,+smep,+smap",
+    "interrupted_attempt": {
+      "attempted": 93,
+      "evidence_directory": "evidence/attempts/stability-interrupted-93",
+      "failed": 0,
+      "official_gate": "not complete; environment unavailable before completion",
+      "passed": 93,
+      "retries": 0,
+      "timeouts": 0
+    },
+    "setup_refusal_attempt": {
+      "attempted": 0,
+      "evidence_directory": "evidence/attempts/stability-profile-mismatch",
+      "reason": "production desktop profile marker was phase9 before canonical rebuild"
+    },
+    "status": "PASS",
+    "t2": {
+      "failed": 0,
+      "passed": 10,
+      "receipt_directory": "evidence/stability/T2",
+      "required": 10,
+      "retries": 0,
+      "timeouts": 0,
+      "verified": true
+    },
+    "t3": {
+      "failed": 0,
+      "passed": 25,
+      "receipt_directory": "evidence/stability/T3",
+      "required": 25,
+      "retries": 0,
+      "timeouts": 0,
+      "verified": true
+    },
+    "t4": {
+      "duration_seconds": 948,
+      "failed": 0,
+      "passed": 100,
+      "receipt_directory": "evidence/stability/T4",
+      "required": 100,
+      "retries": 0,
+      "timeouts": 0,
+      "verified": true
+    }
+  },
+  "strict_trials": {
+    "patched": {
+      "actual_accelerator": "tcg (explicit -accel tcg)",
+      "cpu_profiles": [
+        "max,+nx,+smep,+smap",
+        "qemu64,+nx,+smep,+smap"
+      ],
+      "explicit_accelerator": "-accel tcg",
+      "qemu_process_exits": [
+        0,
+        0
+      ],
+      "qualification_artifact_identity": {
+        "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+        "esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+        "ovmf_code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+        "ovmf_vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+      },
+      "receipt_directory": "evidence/strict-direct",
+      "runner": "tools/phase15_patched_tcg_qualification.py",
+      "runner_receipt_verified": true,
+      "semantic_guest_verdicts": [
+        "PASS 6/6",
+        "PASS 6/6"
+      ],
+      "source_commit": "f54797f2fb5bac0b3440f986d2120382b3611ecc",
+      "vector_19": true
+    },
+    "same_build_unpatched_control": {
+      "cpu_profiles": [
+        "max,+nx,+smep,+smap",
+        "qemu64,+nx,+smep,+smap"
+      ],
+      "qemu_process_exits": [
+        0,
+        0
+      ],
+      "receipt_directory": "experiments/qemu-tcg-xm-prototype/logs/final-strict-unpatched",
+      "semantic_guest_exits": [
+        97,
+        97
+      ],
+      "semantic_guest_verdicts": [
+        "FAIL 5/6; no vector 19",
+        "FAIL 5/6; no vector 19"
+      ]
+    }
+  }
+}

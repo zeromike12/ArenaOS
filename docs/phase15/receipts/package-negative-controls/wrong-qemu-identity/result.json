@@ -1,0 +1,17 @@
+{
+  "archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+  "case": "wrong-qemu-identity",
+  "command": [
+    "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/overlay/tools/phase15_patched_tcg_qualification.py",
+    "verify",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/evidence/strict-direct",
+    "--manifest",
+    "/workspace/ArenaOS/docs/phase15/receipts/package-negative-controls/wrong-qemu-identity/manifest.json"
+  ],
+  "exit_status": 1,
+  "expected_behavior": "reject a receipt with a changed strict image or emulator identity",
+  "observed_behavior": "rejected changed emulator.binary_sha256; original e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff; test value 64 zeroes",
+  "runner_output_sha256": "95b6763eb056409aa537e2ea991373e83597363c68729f552d91c217ea449a36",
+  "schema_version": 1
+}

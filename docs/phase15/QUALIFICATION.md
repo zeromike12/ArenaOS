@@ -1,29 +1,46 @@
 # Phase 15 qualification record
 
-Status: **PARTIAL / UNQUALIFIED pending strict stability and M/C review**.
-The historical diagnostic aggregate remains 120/120, and diagnostic T2/T3/T4
-remain 10/10, 25/25, and 100/100. Unmodified QEMU TCG fails the unchanged
-strict `#XF` case; KVM cannot initialize because `/dev/kvm` is absent, and the
-previous Bochs 3.1 trial page-faulted in OVMF before reaching ArenaOS.
+Status: **qualification candidate using locally modified QEMU TCG; Phase 15
+remains PARTIAL / UNQUALIFIED pending M/C review and final acceptance**. ADR-0113
+remains Proposed. The Linux backend is locally modified QEMU 11.1.2 TCG with
+explicit `-accel tcg`; results are not upstream-QEMU or hardware-backed.
 
-A local patch to official QEMU 11.1.2 TCG now passes expanded independent
-exception controls and the unchanged strict ArenaOS guest under both required
-CPU profiles. Raw logs record a genuine instruction-generated vector 19,
-status `0x113`, containment, sibling/peer survival, reclamation, restored
-resources, and clean shutdown. The same-source/configuration unpatched QEMU
-fails those exception controls and the strict guest. The TCG result is a
-qualification candidate only: it is modified-emulator evidence, not an
-upstream-QEMU or hardware-backed result. Strict official T2/T3/T4, the final
-registered regression, final archive verification, and M/C review remain
-gates. No ArenaOS kernel source or strict acceptance assertion changed.
+## Current completed evidence (2026-10-24)
 
-See the [modified-QEMU TCG evidence](experiments/qemu-tcg-xm-prototype/README.md),
-the [runnable qualification instructions](PATCHED-TCG-QUALIFICATION.md), the
-[QEMU TCG source review](receipts/qemu-tcg-xf-source-review.md), and the
-[2026-10-21 raw rerun assessment](receipts/phase15-fresh-rerun-2026-10-21.md).
-ADR-0113 remains Proposed.
+- Expanded independent SSE/SSE2 exception controls pass on patched QEMU and
+  fail expected exception cases on the same-source unpatched build. They verify
+  precise fault RIP, all 128 XMM destination bits, packed `SQRTPS` fault
+  atomicity, and sticky exception-flag behavior.
+- The unchanged strict ArenaOS guest passes **6/6** under both
+  `max,+nx,+smep,+smap` and `qemu64,+nx,+smep,+smap`. Logs establish genuine
+  instruction-generated vector 19, expected status `0x113`, containment,
+  survivor processes, slot/resource reclamation, and clean shutdown.
+- The current registered regression completed **121/121** suites on clean
+  source commit `f54797f2fb5bac0b3440f986d2120382b3611ecc`.
+- Official strict stability on the pinned image pair passed T2 **10/10**,
+  T3 **25/25**, and T4 **100/100**, with zero failures, timeouts, and retries.
+  The interrupted T4 attempt (93/100) is retained separately and does not count
+  toward the completed T4 gate.
+- The canonical build, host tests, and integer-only kernel ISA audit pass.
+  Phase 14 PIE `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`
+  and signed APB1
+  `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`
+  are unchanged.
+- The exact backend, image, firmware, commands, semantic/process exits, and
+  per-boot evidence are in the
+  [qualification package](PATCHED-TCG-QUALIFICATION.md) and its SHA-256
+  sidecar. The historical diagnostic 120/120 aggregate remains preserved as
+  separate evidence.
+- Fresh-extraction verification passed for all 2,319 package file hashes; the
+  package negative controls rejected missing evidence, wrong identities, a
+  semantic failure with QEMU exit zero, and failed accelerator initialization.
+  See [package verification receipts](receipts/package-verification/README.md).
 
-## Current local recovery (2026-10-21)
+M is the architecture and final acceptance decision maker; C reviews the
+receipts. VirtualBox remains paused. No merge, release, or Phase 16 work is
+included.
+
+## Historical pre-stability recovery snapshot (2026-10-21)
 
 - QEMU 11.1.2 and OVMF 2026.08 were recovered from signed official Debian
   packages into the ignored local qualification directory. Rust 1.97.0 was

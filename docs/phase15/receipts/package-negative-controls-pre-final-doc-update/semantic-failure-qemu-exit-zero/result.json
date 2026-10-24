@@ -1,0 +1,13 @@
+{
+  "case": "semantic-failure-qemu-exit-zero",
+  "exit_status": 1,
+  "expected_behavior": "semantic guest failure must fail qualification even when QEMU exit is zero",
+  "observed_behavior": "receipt recorded qemu_exit_zero=true and qualification_pass=false",
+  "qemu_exit_zero_check": true,
+  "qualification_pass": false,
+  "receipt_sha256": "2b48d0f9150ab53dcb9f8ceeaebc3ae06b9889b75a95b108bd2f78b625eab12d",
+  "schema_version": 1,
+  "semantic_result": "FAIL or missing",
+  "serial_sha256": "f72a5d2515822186ac0c46e750876af44c82468fc497d937c723ef4b9941b783",
+  "stderr_sha256": "c8a6d211e8e6e498c0c7df4e0519d7c7e9b84d00360034bc32ef3b768551756e"
+}

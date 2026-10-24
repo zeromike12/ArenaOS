@@ -1,0 +1,13 @@
+{
+  "case": "missing-evidence",
+  "command": [
+    "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python",
+    "/tmp/phase15-patched-tcg-negative-missing-evidence/overlay/tools/verify_phase15_patched_tcg_archive.py",
+    "/tmp/phase15-patched-tcg-negative-missing-evidence"
+  ],
+  "exit_status": 1,
+  "expected_behavior": "reject altered package inventory",
+  "observed_behavior": "rejected missing strict serial log before receipt verification",
+  "runner_output_sha256": "ccded5067e49d226ce1cf9cdc7a0925c395731094a95d3d47f408e4da3dfe565",
+  "schema_version": 1
+}
