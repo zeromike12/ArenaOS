@@ -1,0 +1,23 @@
+QEMU emulator version 11.1.2
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+
+Accelerators reported by this binary:
+Accelerators supported in QEMU binary:
+tcg
+
+Runtime dynamic libraries:
+	linux-vdso.so.1 (0x00007f7941cf4000)
+	libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x00007f7940272000)
+	libslirp.so.0 => /tmp/qemu-build-deps/usr/lib/x86_64-linux-gnu/libslirp.so.0 (0x00007f794024d000)
+	libglib-2.0.so.0 => /lib/x86_64-linux-gnu/libglib-2.0.so.0 (0x00007f79400f4000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f7940004000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f793fe0e000)
+	libatomic.so.1 => /lib/x86_64-linux-gnu/libatomic.so.1 (0x00007f793fe04000)
+	libpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x00007f793fd55000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f7941cf6000)
+
+Host KVM node:
+/dev/kvm absent
+Local executable path used for final receipts: /tmp/qemu-tcg-xm-prototype/qemu-system-x86_64
+Local executable SHA-256: 69a91bba3e81c3505575170571888b01e0a585d2a257b2366fe72b3aa983d6cc
+Build note: QEMU source/config directory is named qemu-unpatched-build from its initial baseline build; this final binary was rebuilt from the patched source, and its hash matches the recorded patched build.

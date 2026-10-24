@@ -34,12 +34,18 @@ def connect(sock: Path | str, timeout_s: float = 30.0,
             stop: threading.Event | None = None) -> socket.socket | None:
     """Connect to the chardev socket, retrying while QEMU starts."""
     deadline = time.monotonic() + timeout_s
+    tcp = os.environ.get("ARENA_PHASE15_SOCKET_MODE") == "tcp"
+    if tcp:
+        import arena_env
+
+        host, port = arena_env.tcp_endpoint("vcon", sock)
     while time.monotonic() < deadline:
         if stop is not None and stop.is_set():
             return None
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn = socket.socket(socket.AF_INET if tcp else socket.AF_UNIX,
+                             socket.SOCK_STREAM)
         try:
-            conn.connect(str(sock))
+            conn.connect((host, port) if tcp else str(sock))
             return conn
         except OSError:
             conn.close()

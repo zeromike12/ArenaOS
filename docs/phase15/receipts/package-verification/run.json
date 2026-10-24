@@ -1,0 +1,22 @@
+{
+  "archive": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz",
+  "archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+  "canonical_build": "PASS",
+  "extracted_outside_checkout": true,
+  "fresh_extraction": "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5",
+  "independent_controls": "PASS patched; expected failures observed unpatched",
+  "kernel_isa_audit": "PASS; 120911 instructions",
+  "package_file_hashes_verified": 2319,
+  "package_manifest_sha256": "c49b63fb894781714cba456569b14e0bb06a86b1332f835d53e99d90ec12dc21",
+  "registered_regression": "PASS 121/121",
+  "schema_version": 1,
+  "scope": "Linux host verification only; no Windows or hardware guest execution claimed.",
+  "strict_stability": {
+    "T2": "PASS 10/10",
+    "T3": "PASS 25/25",
+    "T4": "PASS 100/100"
+  },
+  "strict_two_profile": "PASS",
+  "verdict": "PASS",
+  "verifier_exit": 0
+}

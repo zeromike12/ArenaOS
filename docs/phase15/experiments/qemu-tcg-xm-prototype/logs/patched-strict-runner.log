@@ -1,0 +1,37 @@
+/tmp/qemu-test-python/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+[phase15-avx] elapsed 6.9s; serial: build/serial-phase15-avx.log
+[phase15-avx] PASS: guest semantic exit status is zero (rc=0)
+[phase15-avx] PASS: no kernel panic or failed in-guest result
+[phase15-avx] PASS: guest assertion thread_isolation_block_yield_preempt
+[phase15-avx] PASS: guest assertion process_isolation_slot_reuse
+[phase15-avx] PASS: guest assertion optional_cpu_feature_reporting
+[phase15-avx] PASS: guest assertion xf_delivery_probe
+[phase15-avx] PASS: guest assertion mf_ud_fault_containment
+[phase15-avx] PASS: MMX MM0-MM7 state preservation and cleanup
+[phase15-avx] PASS: all Phase-15 guest cases passed
+[phase15-avx] PASS: kernel reached declared clean shutdown
+[phase15-avx] PASS: every reported historical and Phase-15 result passed
+[phase15-avx] PASS: configured CPUID record is present
+[phase15-avx] PASS: QEMU AVX hardware flag is true
+[phase15-avx] PASS: OSXSAVE is clear after kernel initialization
+[phase15-avx] PASS: inherited OSXSAVE state is present
+[phase15-avx] PASS: inherited OSXSAVE has the expected XCR0 policy (XCR0=None)
+[phase15-qemu64] elapsed 7.3s; serial: build/serial-phase15-qemu64.log
+[phase15-qemu64] PASS: guest semantic exit status is zero (rc=0)
+[phase15-qemu64] PASS: no kernel panic or failed in-guest result
+[phase15-qemu64] PASS: guest assertion thread_isolation_block_yield_preempt
+[phase15-qemu64] PASS: guest assertion process_isolation_slot_reuse
+[phase15-qemu64] PASS: guest assertion optional_cpu_feature_reporting
+[phase15-qemu64] PASS: guest assertion xf_delivery_probe
+[phase15-qemu64] PASS: guest assertion mf_ud_fault_containment
+[phase15-qemu64] PASS: MMX MM0-MM7 state preservation and cleanup
+[phase15-qemu64] PASS: all Phase-15 guest cases passed
+[phase15-qemu64] PASS: kernel reached declared clean shutdown
+[phase15-qemu64] PASS: every reported historical and Phase-15 result passed
+[phase15-qemu64] PASS: configured CPUID record is present
+[phase15-qemu64] PASS: QEMU AVX hardware flag is false
+[phase15-qemu64] PASS: OSXSAVE is clear after kernel initialization
+[phase15-qemu64] PASS: inherited OSXSAVE state is present
+[phase15-qemu64] PASS: inherited OSXSAVE has the expected XCR0 policy (XCR0=None)
+Phase-15 native guest qualification: PASS (baseline and AVX-capable CPU profiles)

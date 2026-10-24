@@ -1,0 +1,98 @@
+{
+  "experiment": "QEMU TCG SIMD floating-point exception delivery prototype",
+  "evidence_class": "experimental modified-emulator result",
+  "qualification_status": "PARTIAL / UNQUALIFIED",
+  "source_baseline": {
+    "repository": "zeromike12/ArenaOS",
+    "branch": "arena/phase15-fpu-simd",
+    "strict_image_source_commit": "13986b3dcf007b1721d85ef3509945131f8c6584",
+    "last_reviewed_commit": "df4ad9d4622e2e7e7d2b1ce03a57048305dd902a",
+    "kernel_and_strict_guest_sources_unchanged_between_commits": true
+  },
+  "emulator": {
+    "project": "QEMU",
+    "official_tag": "v11.1.2",
+    "source_archive_sha256": "fc3d810fc6b27f60df77eaf6748004ca76de2edc2c4ff3a9f9a9ada33066c242",
+    "patch_sha256": "c2909ea974f4ccaa9526bd5b70aef5599971bc567dd87d6ba8d9b06b327c8dd2",
+    "unmodified_binary_sha256": "443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284",
+    "patched_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "actual_accelerator": "TCG, explicitly selected with -accel tcg",
+    "reported_accelerators": [
+      "tcg"
+    ],
+    "kvm_build_support": false,
+    "whpx_build_support": false,
+    "host_dev_kvm_present": false,
+    "clean_rebuild_smoke": {
+      "binary_sha256": "2ff8e8896de96cbba3fc368a39e45e4394ff174495d45cbae2452ca192941450",
+      "advertised_accelerators": [
+        "tcg"
+      ],
+      "qualification_use": false,
+      "reason": "The clean build has a distinct binary hash and is not the pinned qualification backend."
+    }
+  },
+  "guest_artifacts": {
+    "strict_efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "strict_esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "ovmf_code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "ovmf_vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+    "strict_image_source_commit": "13986b3dcf007b1721d85ef3509945131f8c6584",
+    "kernel_sources_unchanged_through_reviewed_commit": "df4ad9d4622e2e7e7d2b1ce03a57048305dd902a"
+  },
+  "strict_guest_runs": {
+    "unmodified_qemu": {
+      "max,+nx,+smep,+smap": {
+        "result": "FAIL 5/6; no vector 19; MXCSR 0x1f00 to 0x1f01",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 97,
+        "runner_exit": 1
+      },
+      "qemu64,+nx,+smep,+smap": {
+        "result": "FAIL 5/6; no vector 19; MXCSR 0x1f00 to 0x1f01",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 97,
+        "runner_exit": 1
+      }
+    },
+    "patched_qemu": {
+      "max,+nx,+smep,+smap": {
+        "result": "PASS 6/6",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 0,
+        "runner_exit": 0
+      },
+      "qemu64,+nx,+smep,+smap": {
+        "result": "PASS 6/6",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 0,
+        "runner_exit": 0
+      }
+    }
+  },
+  "independent_controls": {
+    "result": "PASS on patched QEMU; source-matched unpatched controls fail the expected exception cases",
+    "source_sha256": "6dac2f295ac5b19be9ca77abba900cd0cfac8630b63b9edf7702485e884a72ba",
+    "patched_exit": 33,
+    "unpatched_exit": 35,
+    "checks": [
+      "valid SQRTSS with invalid unmasked does not fault",
+      "masked invalid SQRTSS sets IE without vector 19",
+      "previously sticky IE remains preserved after IE is unmasked and a valid SQRTSS executes without fault",
+      "newly raised invalid SQRTSS faults even when IE was already sticky",
+      "saved RIP equals the actual instruction address before exception-frame modification for six faulting instructions",
+      "all 128 destination bits preserved by scalar SQRTSS and DIVSS faults",
+      "CR4.OSXMMEXCPT clear selects vector 6",
+      "existing sticky IE is preserved while new unmasked ZE still delivers vector 19",
+      "packed SQRTPS with an exceptional lane does not commit a partial 128-bit destination"
+    ],
+    "unpatched_failures": "new invalid IE, vector-19/RIP/destination, OSXMMEXCPT-disabled #UD, DIVSS ZE, sticky IE plus new ZE, and packed SQRTPS precise-destination checks"
+  },
+  "limitations": [
+    "The QEMU patch wraps selected SSE_HELPER_S arithmetic families: add/subtract/multiply/divide/min/max, packed and scalar single/double variants, plus sqrtps/sqrtpd/sqrtss/sqrtsd.",
+    "Independent patched controls cover legacy 128-bit SQRTSS, SQRTPS, and DIVSS only; the patch and these tests do not claim complete SIMD exception implementation.",
+    "No AVX/XSTATE behavior is claimed. ArenaOS kernel, strict guest fixture, and acceptance assertions were not modified for exception delivery.",
+    "The selected backend is locally modified QEMU TCG; it is neither upstream QEMU behavior nor hardware-backed qualification."
+  ],
+  "original_full_evidence_bundle_sha256": "a962c27c56d54e0ce67391a0fbc7049539237daf1c21e4698594d389f1265aab"
+}

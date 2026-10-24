@@ -4,6 +4,15 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODE="${1:-official}"
+if [[ "$MODE" != "official" && "$MODE" != "--historical-diagnostic" ]]; then
+    echo "usage: $0 [--historical-diagnostic]" >&2
+    exit 2
+fi
+if [[ "$MODE" == "--historical-diagnostic" ]]; then
+    export ARENA_PHASE15_HISTORICAL_DIAGNOSTIC=1
+    echo "PHASE 15 DIAGNOSTIC MODE: #XF acceptance is excluded and remains blocked; this run cannot qualify a release"
+fi
 # Match build.sh: host-side suites also need the repository's Rust toolchain.
 if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
     # shellcheck disable=SC1091
@@ -271,6 +280,10 @@ for t in \
 done
 
 for t in "$REPO_ROOT"/tools/test_m*.py; do
+    if [[ "$MODE" == "--historical-diagnostic" && "$(basename "$t")" == "test_m15_guest.py" ]]; then
+        echo "EXCLUDED FROM HISTORICAL DIAGNOSTIC: test_m15_guest.py (official #XF acceptance remains strict and separate)"
+        continue
+    fi
     echo "======================================================================"
     echo "== running $(basename "$t")"
     echo "======================================================================"
@@ -291,7 +304,11 @@ if [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" != "$source_commit" || \
 fi
 echo "QUALIFICATION SOURCE END: $(git -C "$REPO_ROOT" rev-parse HEAD)"
 if [[ $failures -eq 0 ]]; then
-    echo "ALL TESTS PASSED ($ran test suites)"
+    if [[ "$MODE" == "--historical-diagnostic" ]]; then
+        echo "ALL HISTORICAL DIAGNOSTIC TESTS PASSED ($ran test suites); #XF acceptance not run"
+    else
+        echo "ALL TESTS PASSED ($ran test suites)"
+    fi
     exit 0
 else
     echo "$failures of $ran test suites FAILED"

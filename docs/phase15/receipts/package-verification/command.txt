@@ -1,0 +1,2 @@
+tar -xzf docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz -C /tmp/phase15-patched-tcg-review-f54797f-20261024-v5
+build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python /tmp/phase15-patched-tcg-review-f54797f-20261024-v5/overlay/tools/verify_phase15_patched_tcg_archive.py /tmp/phase15-patched-tcg-review-f54797f-20261024-v5 --output /tmp/phase15-patched-tcg-archive-verification-v5.json

@@ -1,0 +1,1 @@
+qemu-system-x86_64-unpatched: -chardev socket,id=vcon0,path=/workspace/ArenaOS/build/vcon-phase15-avx.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/workspace/ArenaOS/build/vcon-phase15-avx.sock,server=on

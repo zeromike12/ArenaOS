@@ -4,8 +4,10 @@
 
 pub mod context;
 pub mod faults;
+pub mod fpu;
 pub mod gdt;
 pub mod idt;
+pub mod isa_audit;
 pub mod paging;
 pub mod syscall;
 pub mod tss;
@@ -328,6 +330,10 @@ pub unsafe fn invlpg(va: u64) {
 
 pub mod cr0 {
     pub const PE: u64 = 1 << 0; // Protection Enable
+    pub const MP: u64 = 1 << 1; // Monitor Coprocessor
+    pub const EM: u64 = 1 << 2; // Emulation
+    pub const TS: u64 = 1 << 3; // Task Switched
+    pub const NE: u64 = 1 << 5; // Native x87 error reporting
     pub const WP: u64 = 1 << 16; // Write Protect (ring-0 writes honor RO pages)
     pub const PG: u64 = 1 << 31; // Paging
 }
@@ -335,6 +341,9 @@ pub mod cr0 {
 /// CR4 bit masks — SDM Vol. 3 §2.6.
 pub mod cr4 {
     pub const PAE: u64 = 1 << 5; // Physical Address Extension (required in long mode)
+    pub const OSFXSR: u64 = 1 << 9; // Enable FXSAVE/FXRSTOR and SSE state
+    pub const OSXMMEXCPT: u64 = 1 << 10; // Enable #XM for SIMD exceptions
+    pub const OSXSAVE: u64 = 1 << 18; // OS-enabled XSAVE state management
     pub const SMEP: u64 = 1 << 20; // Supervisor Mode Execution Prevention
     pub const SMAP: u64 = 1 << 21; // Supervisor Mode Access Prevention
 }
@@ -373,9 +382,33 @@ pub struct CpuInfo {
     pub family: u32,
     pub model: u32,
     pub stepping: u32,
+    /// CPUID.1:EDX[0] — x87 FPU.
+    pub has_fpu: bool,
+    /// CPUID.1:EDX[23] — MMX instruction set.
+    pub has_mmx: bool,
+    /// CPUID.1:EDX[24] — FXSAVE/FXRSTOR.
+    pub has_fxsr: bool,
+    /// CPUID.1:EDX[25] — SSE.
+    pub has_sse: bool,
     /// CPUID.1:EDX[26] — SSE2 (architecturally required on x86-64; we log it
     /// anyway because *verification* is the point).
     pub has_sse2: bool,
+    /// CPUID.1:ECX[0] — SSE3.
+    pub has_sse3: bool,
+    /// CPUID.1:ECX[9] — SSSE3.
+    pub has_ssse3: bool,
+    /// CPUID.1:ECX[19] — SSE4.1.
+    pub has_sse41: bool,
+    /// CPUID.1:ECX[20] — SSE4.2.
+    pub has_sse42: bool,
+    /// CPUID.8000_0001h:ECX[6] — SSE4a (AMD extension).
+    pub has_sse4a: bool,
+    /// CPUID.1:ECX[28] — AVX hardware capability (not enabled by this OS).
+    pub has_avx: bool,
+    /// CPUID.1:ECX[26] — XSAVE instruction and state-management support.
+    pub has_xsave: bool,
+    /// CPUID.1:ECX[27] — current CR4.OSXSAVE enable state.
+    pub has_osxsave: bool,
     /// CPUID.8000_0001h:EDX[20] — NX.
     pub has_nx: bool,
     /// CPUID.8000_0001h:EDX[29] — long mode (EM64T/AMD64).
@@ -395,7 +428,17 @@ pub fn cpu_info() -> CpuInfo {
         chunk.copy_from_slice(&reg.to_le_bytes());
     }
 
-    let f = cpuid(1);
+    let max_basic = v.eax;
+    let f = if max_basic >= 1 {
+        cpuid(1)
+    } else {
+        CpuidResult {
+            eax: 0,
+            ebx: 0,
+            ecx: 0,
+            edx: 0,
+        }
+    };
     let stepping = f.eax & 0xF;
     let base_model = (f.eax >> 4) & 0xF;
     let base_family = (f.eax >> 8) & 0xF;
@@ -413,14 +456,29 @@ pub fn cpu_info() -> CpuInfo {
     } else {
         base_model
     };
+    let has_fpu = f.edx & (1 << 0) != 0;
+    let has_mmx = f.edx & (1 << 23) != 0;
+    let has_fxsr = f.edx & (1 << 24) != 0;
+    let has_sse = f.edx & (1 << 25) != 0;
     let has_sse2 = f.edx & (1 << 26) != 0;
+    let has_sse3 = f.ecx & (1 << 0) != 0;
+    let has_ssse3 = f.ecx & (1 << 9) != 0;
+    let has_sse41 = f.ecx & (1 << 19) != 0;
+    let has_sse42 = f.ecx & (1 << 20) != 0;
+    let has_avx = f.ecx & (1 << 28) != 0;
+    let has_xsave = f.ecx & (1 << 26) != 0;
+    let has_osxsave = f.ecx & (1 << 27) != 0;
 
     let ext_max = cpuid(0x8000_0000).eax;
-    let (has_nx, has_long_mode) = if ext_max >= 0x8000_0001 {
+    let (has_nx, has_long_mode, has_sse4a) = if ext_max >= 0x8000_0001 {
         let e = cpuid(0x8000_0001);
-        (e.edx & (1 << 20) != 0, e.edx & (1 << 29) != 0)
+        (
+            e.edx & (1 << 20) != 0,
+            e.edx & (1 << 29) != 0,
+            e.ecx & (1 << 6) != 0,
+        )
     } else {
-        (false, false)
+        (false, false, false)
     };
     let phys_addr_bits = if ext_max >= 0x8000_0008 {
         cpuid(0x8000_0008).eax & 0xFF
@@ -444,7 +502,19 @@ pub fn cpu_info() -> CpuInfo {
         family,
         model,
         stepping,
+        has_fpu,
+        has_mmx,
+        has_fxsr,
+        has_sse,
         has_sse2,
+        has_sse3,
+        has_ssse3,
+        has_sse41,
+        has_sse42,
+        has_sse4a,
+        has_avx,
+        has_xsave,
+        has_osxsave,
         has_nx,
         has_long_mode,
         phys_addr_bits,
@@ -458,17 +528,74 @@ impl fmt::Display for CpuInfo {
         let vendor = core::str::from_utf8(&self.vendor).unwrap_or("???");
         write!(
             f,
-            "vendor={} family={} model={} stepping={} physaddr={}bit sse2={} nx={} longmode={} smep={} smap={}",
+            "vendor={} family={} model={} stepping={} physaddr={}bit fpu={} mmx={} fxsr={} sse={} sse2={} sse3={} ssse3={} sse4.1={} sse4.2={} sse4a={} xsave={} avx={} osxsave={} nx={} longmode={} smep={} smap={}",
             vendor,
             self.family,
             self.model,
             self.stepping,
             self.phys_addr_bits,
+            self.has_fpu,
+            self.has_mmx,
+            self.has_fxsr,
+            self.has_sse,
             self.has_sse2,
+            self.has_sse3,
+            self.has_ssse3,
+            self.has_sse41,
+            self.has_sse42,
+            self.has_sse4a,
+            self.has_xsave,
+            self.has_avx,
+            self.has_osxsave,
             self.has_nx,
             self.has_long_mode,
             self.has_smep,
             self.has_smap
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoded_feature_flags_match_the_advertised_cpuid_bits() {
+        let info = cpu_info();
+        let max_basic = cpuid(0).eax;
+        let leaf1 = if max_basic >= 1 {
+            cpuid(1)
+        } else {
+            CpuidResult {
+                eax: 0,
+                ebx: 0,
+                ecx: 0,
+                edx: 0,
+            }
+        };
+        assert_eq!(info.has_fpu, leaf1.edx & (1 << 0) != 0);
+        assert_eq!(info.has_mmx, leaf1.edx & (1 << 23) != 0);
+        assert_eq!(info.has_fxsr, leaf1.edx & (1 << 24) != 0);
+        assert_eq!(info.has_sse, leaf1.edx & (1 << 25) != 0);
+        assert_eq!(info.has_sse2, leaf1.edx & (1 << 26) != 0);
+        assert_eq!(info.has_sse3, leaf1.ecx & (1 << 0) != 0);
+        assert_eq!(info.has_ssse3, leaf1.ecx & (1 << 9) != 0);
+        assert_eq!(info.has_sse41, leaf1.ecx & (1 << 19) != 0);
+        assert_eq!(info.has_sse42, leaf1.ecx & (1 << 20) != 0);
+        assert_eq!(info.has_avx, leaf1.ecx & (1 << 28) != 0);
+        assert_eq!(info.has_xsave, leaf1.ecx & (1 << 26) != 0);
+        assert_eq!(info.has_osxsave, leaf1.ecx & (1 << 27) != 0);
+        let ext_max = cpuid(0x8000_0000).eax;
+        let ext = if ext_max >= 0x8000_0001 {
+            cpuid(0x8000_0001)
+        } else {
+            CpuidResult {
+                eax: 0,
+                ebx: 0,
+                ecx: 0,
+                edx: 0,
+            }
+        };
+        assert_eq!(info.has_sse4a, ext.ecx & (1 << 6) != 0);
     }
 }

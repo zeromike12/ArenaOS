@@ -245,6 +245,21 @@ static KERNEL_USER_REGIONS: SyncCell<[(u64, u64); USER_REGIONS_MAX]> =
 /// Saved RSP per slot (the switch's save-slot target; raw access by
 /// design — a pointer into here crosses the switch, a borrow must not).
 static CTX: SyncCell<[u64; MAX_THREADS]> = SyncCell::new([0; MAX_THREADS]);
+/// Eager x87/MMX/SSE state, one exact aligned FXSAVE64 image per stable slot.
+/// The array is kernel-only and its 32 KiB footprint is bounded by
+/// `MAX_THREADS`; every assignment to a Ready slot starts from the clean
+/// template and every slot retirement resets it before reuse.
+static FP_CTX: SyncCell<[crate::arch::x86_64::fpu::FxState; MAX_THREADS]> =
+    SyncCell::new([crate::arch::x86_64::fpu::FxState::zeroed(); MAX_THREADS]);
+
+/// Replace one stable scheduler slot's register image with the verified
+/// clean template. Call only from scheduler ownership while IF=0.
+fn reset_fp_slot(index: usize) {
+    let template = crate::arch::x86_64::fpu::clean_state();
+    // SAFETY: callers hold scheduler ownership with interrupts disabled;
+    // `index` comes from a bounded scheduler slot search or current slot.
+    unsafe { crate::arch::x86_64::fpu::reset_state(&mut (*FP_CTX.get())[index], &template) };
+}
 static CPUS: SyncCell<[CpuSched; MAX_CPUS]> = SyncCell::new([CpuSched::new(); MAX_CPUS]);
 static NEXT_ID: SyncCell<u64> = SyncCell::new(1);
 static SWITCH_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -263,6 +278,8 @@ pub fn this_cpu() -> usize {
 pub(super) struct Plan {
     pub save: *mut u64,
     pub restore: u64,
+    pub save_fp: *mut crate::arch::x86_64::fpu::FxState,
+    pub restore_fp: *const crate::arch::x86_64::fpu::FxState,
 }
 
 /// Placeholder entry for the bootstrap thread — never invoked: slot 0 is
@@ -278,6 +295,9 @@ pub fn init() -> Result<(), &'static str> {
         if threads[0].is_some() {
             return Err("scheduler already initialized");
         }
+        // SAFETY: fresh scheduler, slot 0 is the bootstrap thread and the
+        // FPU initialization contract ran before any scheduler operation.
+        reset_fp_slot(0);
         // Kernel threads never inherit firmware/previous-task TLS state.
         // `swapgs` remains exclusively the syscall entry-stack mechanism.
         unsafe { crate::arch::x86_64::wrmsr(MSR_FS_BASE, 0) };
@@ -459,6 +479,7 @@ fn spawn_inner(
         // SAFETY: slot `idx` is free (found above) and stays ours (IF=0).
         unsafe {
             let threads = &mut *THREADS.get();
+            reset_fp_slot(idx);
             threads[idx] = Some(KThread {
                 id,
                 name,
@@ -482,6 +503,8 @@ fn spawn_inner(
                 // Unreachable: ready len ≤ MAX_THREADS-1 while a slot was
                 // free — but leave no leak if the invariant is ever broken.
                 threads[idx] = None;
+                reset_fp_slot(idx);
+                (*CTX.get())[idx] = 0;
                 let _ = crate::frames::free_contiguous(phys, THREAD_STACK_FRAMES);
                 return Err("ready queue overflow");
             }
@@ -527,7 +550,7 @@ pub fn yield_now() {
         // without_interrupts), so no interrupt sees the half-switched
         // state. This call resumes the incoming thread and suspends us
         // until our own frame is switched back to.
-        unsafe { context::switch_context(plan.save, plan.restore) };
+        unsafe { context::switch_context(plan.save, plan.restore, plan.save_fp, plan.restore_fp) };
         // The outgoing Zombie is safe to reclaim only after this context
         // has moved off its kernel stack.
         reap();
@@ -595,7 +618,7 @@ pub fn block_current() {
         // SAFETY: as in yield_now — raw plan values, borrows ended, IF=0.
         // The resume happens when a waker's ring entry brings this thread
         // back; its saved frame (this stack) is intact by construction.
-        unsafe { context::switch_context(plan.save, plan.restore) };
+        unsafe { context::switch_context(plan.save, plan.restore, plan.save_fp, plan.restore_fp) };
         reap();
     });
     // Resumed: put the GS pair back on the side this thread blocked on
@@ -657,7 +680,7 @@ pub(crate) fn try_block_current() -> bool {
     // SAFETY: `plan_switch` ended all scheduler borrows, IF=0, both kernel
     // stacks remain allocated, and the incoming address space has a shared
     // kernel half.
-    unsafe { context::switch_context(plan.save, plan.restore) };
+    unsafe { context::switch_context(plan.save, plan.restore, plan.save_fp, plan.restore_fp) };
     without_interrupts(reap);
     if kernel_side {
         without_interrupts(|| unsafe {
@@ -965,6 +988,8 @@ pub fn complete_user_thread_join(
         thread.join_waiter = 0;
         if thread.stack_frames == 0 {
             threads[slot] = None;
+            reset_fp_slot(slot);
+            (*CTX.get())[slot] = 0;
         }
         Ok(())
     });
@@ -1150,7 +1175,7 @@ fn exit_now() -> ! {
     // SAFETY: as in yield_now. The exiting thread's slot stays allocated
     // (Zombie) until reaped, so its save slot remains valid — but the
     // scheduler never enqueues zombies, so this switch must not return.
-    unsafe { context::switch_context(plan.save, plan.restore) };
+    unsafe { context::switch_context(plan.save, plan.restore, plan.save_fp, plan.restore_fp) };
     // A resumed zombie means the scheduler violated its own invariant.
     error!("sched", "zombie thread was resumed after exit");
     crate::halt::halt_machine("scheduler: zombie resumed");
@@ -1244,6 +1269,8 @@ pub(super) fn plan_switch(enqueue_current: bool) -> Option<Plan> {
         Some(Plan {
             save: (CTX.get() as *mut u64).add(cur),
             restore: (*CTX.get())[next],
+            save_fp: ((*FP_CTX.get()).as_mut_ptr()).add(cur),
+            restore_fp: ((*FP_CTX.get()).as_ptr()).add(next),
         })
     }
 }
@@ -1298,10 +1325,14 @@ fn reap() {
 
             let Some(start) = thread.user_start else {
                 *slot = None;
+                reset_fp_slot(index);
+                (*CTX.get())[index] = 0;
                 continue;
             };
             if thread.joined {
                 *slot = None;
+                reset_fp_slot(index);
+                (*CTX.get())[index] = 0;
             } else if thread.detached {
                 detached[detached_count] = (
                     index,
@@ -1321,7 +1352,11 @@ fn reap() {
         if crate::proc::pml4_of(pid).is_none() {
             // Process teardown already reclaimed the entire user half and
             // dropped its capspace; only the kernel scheduler record remains.
-            unsafe { (*THREADS.get())[index] = None };
+            unsafe {
+                (*THREADS.get())[index] = None;
+                reset_fp_slot(index);
+                (*CTX.get())[index] = 0;
+            }
             continue;
         }
         let cap_matches = crate::cap::read(pid, usize::from(cap_slot))
@@ -1342,7 +1377,11 @@ fn reap() {
             );
             crate::halt::halt_machine("detached user-thread stack authority mismatch");
         }
-        unsafe { (*THREADS.get())[index] = None };
+        unsafe {
+            (*THREADS.get())[index] = None;
+            reset_fp_slot(index);
+            (*CTX.get())[index] = 0;
+        }
     }
 }
 
@@ -1487,6 +1526,16 @@ pub fn current_thread_id() -> u64 {
             let cur = (*CPUS.get())[this_cpu()].current;
             (*THREADS.get())[cur].expect("current thread vanished").id
         }
+    })
+}
+
+/// Scheduler-slot identity used by the Phase-15 lifecycle test to prove an
+/// exited task's stable slot is actually recycled for a fresh FPU owner.
+pub(crate) fn slot_of_thread(id: u64) -> Option<usize> {
+    without_interrupts(|| unsafe {
+        (*THREADS.get())
+            .iter()
+            .position(|slot| matches!(slot, Some(thread) if thread.id == id))
     })
 }
 

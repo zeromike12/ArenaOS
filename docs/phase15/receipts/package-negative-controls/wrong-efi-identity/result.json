@@ -1,0 +1,17 @@
+{
+  "archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+  "case": "wrong-efi-identity",
+  "command": [
+    "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/overlay/tools/phase15_patched_tcg_qualification.py",
+    "verify",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/evidence/strict-direct",
+    "--manifest",
+    "/workspace/ArenaOS/docs/phase15/receipts/package-negative-controls/wrong-efi-identity/manifest.json"
+  ],
+  "exit_status": 1,
+  "expected_behavior": "reject a receipt with a changed strict image or emulator identity",
+  "observed_behavior": "rejected changed strict_arenaos_image.efi_sha256; original bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e; test value 64 zeroes",
+  "runner_output_sha256": "e3681b4e666e957c320bc0844497d5e5a7c2687887d27e3266d6c73bd2574e1d",
+  "schema_version": 1
+}

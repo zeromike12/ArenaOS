@@ -1,0 +1,41 @@
+Phase 15 QEMU local-TCG qualification identities
+Evidence class: locally modified QEMU TCG; not upstream-QEMU or hardware-backed.
+
+Official source:
+  QEMU tag: v11.1.2
+  Tag commit: ceaea6cb3e2a7d966f9ca97c7ebb5b88cd764dd0
+  Peeled commit: 4fc49f46dc95d4a27de2509e7fceb2931e91faeb
+  Official archive:
+    https://gitlab.com/qemu-project/qemu/-/archive/v11.1.2/qemu-v11.1.2.tar.gz
+  Archive SHA-256: fc3d810fc6b27f60df77eaf6748004ca76de2edc2c4ff3a9f9a9ada33066c242
+  Patch SHA-256: c2909ea974f4ccaa9526bd5b70aef5599971bc567dd87d6ba8d9b06b327c8dd2
+
+Qualification binaries:
+  Patched QEMU 11.1.2 SHA-256:
+    e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff
+  Same-source/config unpatched QEMU SHA-256:
+    443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284
+  Patched QEMU --version: QEMU emulator version 11.1.2
+  Patched QEMU -accel help: tcg only; KVM disabled in build.
+  Actual selected accelerator: -accel tcg. QMP initialization smoke passed.
+  /dev/kvm: absent.
+
+Measured build configuration:
+  ../source/configure --target-list=x86_64-softmmu --enable-tcg --disable-kvm
+    --without-default-features --enable-pixman --enable-slirp --disable-fdt
+    --disable-docs --disable-werror
+    --prefix=<fresh-output>/install
+  Meson 1.6.1; Ninja 1.11.1.git.kitware.jobserver-1; Debian GCC 14.2.0-19.
+  GLib 2.84.4; Pixman 0.44.0; libslirp 4.8.0.
+  Rebuild procedure: tools/build_phase15_patched_qemu.sh.
+
+Firmware and strict images:
+  OVMF code SHA-256: 7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94
+  OVMF vars template SHA-256: 5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e
+  Strict EFI SHA-256: bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e
+  Exact strict ESP SHA-256: 631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f
+
+Expanded independent control images:
+  Source SHA-256: 6dac2f295ac5b19be9ca77abba900cd0cfac8630b63b9edf7702485e884a72ba
+  EFI SHA-256: dfc8290126cec91f4c98f655ae91d0044c96e55d23335f19c343bd80b764ed82
+  ESP SHA-256: 46c0aeb21e61b3cd392d847f225e71f3d3a33ebb68db8460c089a87d6bf7369c

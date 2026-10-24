@@ -1,0 +1,16 @@
+{
+  "case": "wrong-esp-identity",
+  "command": [
+    "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v3/overlay/tools/phase15_patched_tcg_qualification.py",
+    "verify",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v3/evidence/strict-direct",
+    "--manifest",
+    "/workspace/ArenaOS/docs/phase15/receipts/package-negative-controls/wrong-esp-identity/manifest.json"
+  ],
+  "exit_status": 1,
+  "expected_behavior": "reject a receipt whose pinned artifact identity differs",
+  "observed_behavior": "rejected changed strict_arenaos_image.esp_sha256; manifest value was 631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f, test value was 64 zeroes",
+  "runner_output_sha256": "f8c59be0dfb5fa89e424aa5558af941f52b245ae12b828ea67182b91b565d3a1",
+  "schema_version": 1
+}

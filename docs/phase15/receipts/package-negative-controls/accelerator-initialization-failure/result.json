@@ -1,0 +1,33 @@
+{
+  "accelerator_wrapper_sha256": "6e2caaaa5ac1d0e685de8c7fe11e5fc6395e1c26f34b8dcb0f7bbc56d36a1041",
+  "archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+  "case": "accelerator-initialization-failure",
+  "command": [
+    "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/overlay/tools/phase15_patched_tcg_qualification.py",
+    "preflight",
+    "--manifest",
+    "/workspace/ArenaOS/docs/phase15/receipts/package-negative-controls/accelerator-initialization-failure/manifest.json",
+    "--qemu-binary",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/overlay/docs/phase15/experiments/qemu-tcg-xm-prototype/source/fail-accelerator-init-wrapper.sh",
+    "--lib-dir",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/backend/runtime/lib",
+    "--rom-dir",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/backend/pc-bios",
+    "--efi",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/artifacts/arena-boot.efi",
+    "--esp",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/artifacts/arena-esp.img",
+    "--ovmf-code",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/firmware/OVMF_CODE_4M.fd",
+    "--ovmf-vars",
+    "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5/firmware/OVMF_VARS_4M.fd"
+  ],
+  "exit_status": 1,
+  "expected_behavior": "reject failed accelerator initialization before ArenaOS guest start",
+  "guest_started": false,
+  "host_kvm_available": false,
+  "observed_behavior": "mock wrapper substituted unavailable KVM in the QMP smoke; the preflight rejected initialization",
+  "runner_output_sha256": "5926fe9e783cff812531a41a257f56b28456c84ec14655b6445ff60f6341ed3d",
+  "schema_version": 1
+}

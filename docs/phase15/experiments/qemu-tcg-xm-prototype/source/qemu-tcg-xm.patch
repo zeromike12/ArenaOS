@@ -1,0 +1,177 @@
+diff --git a/target/i386/cpu.h b/target/i386/cpu.h
+index e6a1976..e359ede 100644
+--- a/target/i386/cpu.h
++++ b/target/i386/cpu.h
+@@ -1503,6 +1503,7 @@ uint64_t x86_cpu_get_supported_feature_word(X86CPU *cpu, FeatureWord w);
+ #define EXCP10_COPR     16
+ #define EXCP11_ALGN     17
+ #define EXCP12_MCHK     18
++#define EXCP19_XM       19 /* SIMD floating-point exception (#XM/#XF) */
+ 
+ #define EXCP_VMEXIT     0x100 /* only for system emulation */
+ #define EXCP_SYSCALL    0x101 /* only for user emulation */
+diff --git a/target/i386/ops_sse.h b/target/i386/ops_sse.h
+index 5176a9f..38c0f95 100644
+--- a/target/i386/ops_sse.h
++++ b/target/i386/ops_sse.h
+@@ -463,23 +463,33 @@ void glue(helper_pshufhw, SUFFIX)(Reg *d, Reg *s, int order)
+ /* FPU ops */
+ /* XXX: not accurate */
+ 
++#define SSE_BEGIN_INSN \
++    int old_flags = sse_begin_instruction(env); \
++    Reg old_d = *d
++#define SSE_END_INSN \
++    sse_finish_instruction(env, old_flags, d, old_d, GETPC())
++
+ #define SSE_HELPER_P(name, F)                                           \
+     void glue(helper_ ## name ## ps, SUFFIX)(CPUX86State *env,          \
+             Reg *d, Reg *v, Reg *s)                                     \
+     {                                                                   \
++        SSE_BEGIN_INSN;                                                 \
+         int i;                                                          \
+         for (i = 0; i < 2 << SHIFT; i++) {                              \
+             d->ZMM_S(i) = F(32, v->ZMM_S(i), s->ZMM_S(i));              \
+         }                                                               \
++        SSE_END_INSN;                                                   \
+     }                                                                   \
+                                                                         \
+     void glue(helper_ ## name ## pd, SUFFIX)(CPUX86State *env,          \
+             Reg *d, Reg *v, Reg *s)                                     \
+     {                                                                   \
++        SSE_BEGIN_INSN;                                                 \
+         int i;                                                          \
+         for (i = 0; i < 1 << SHIFT; i++) {                              \
+             d->ZMM_D(i) = F(64, v->ZMM_D(i), s->ZMM_D(i));              \
+         }                                                               \
++        SSE_END_INSN;                                                   \
+     }
+ 
+ #if SHIFT == 1
+@@ -489,20 +499,24 @@ void glue(helper_pshufhw, SUFFIX)(Reg *d, Reg *s, int order)
+                                                                         \
+     void helper_ ## name ## ss(CPUX86State *env, Reg *d, Reg *v, Reg *s)\
+     {                                                                   \
++        SSE_BEGIN_INSN;                                                 \
+         int i;                                                          \
+         d->ZMM_S(0) = F(32, v->ZMM_S(0), s->ZMM_S(0));                  \
+         for (i = 1; i < 2 << SHIFT; i++) {                              \
+             d->ZMM_L(i) = v->ZMM_L(i);                                  \
+         }                                                               \
++        SSE_END_INSN;                                                   \
+     }                                                                   \
+                                                                         \
+     void helper_ ## name ## sd(CPUX86State *env, Reg *d, Reg *v, Reg *s)\
+     {                                                                   \
++        SSE_BEGIN_INSN;                                                 \
+         int i;                                                          \
+         d->ZMM_D(0) = F(64, v->ZMM_D(0), s->ZMM_D(0));                  \
+         for (i = 1; i < 1 << SHIFT; i++) {                              \
+             d->ZMM_Q(i) = v->ZMM_Q(i);                                  \
+         }                                                               \
++        SSE_END_INSN;                                                   \
+     }
+ 
+ #else
+@@ -534,40 +548,51 @@ SSE_HELPER_S(max, FPU_MAX)
+ 
+ void glue(helper_sqrtps, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
+ {
++    SSE_BEGIN_INSN;
+     int i;
+     for (i = 0; i < 2 << SHIFT; i++) {
+         d->ZMM_S(i) = float32_sqrt(s->ZMM_S(i), &env->sse_status);
+     }
++    SSE_END_INSN;
+ }
+ 
+ void glue(helper_sqrtpd, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
+ {
++    SSE_BEGIN_INSN;
+     int i;
+     for (i = 0; i < 1 << SHIFT; i++) {
+         d->ZMM_D(i) = float64_sqrt(s->ZMM_D(i), &env->sse_status);
+     }
++    SSE_END_INSN;
+ }
+ 
+ #if SHIFT == 1
+ void helper_sqrtss(CPUX86State *env, Reg *d, Reg *v, Reg *s)
+ {
++    SSE_BEGIN_INSN;
+     int i;
+     d->ZMM_S(0) = float32_sqrt(s->ZMM_S(0), &env->sse_status);
+     for (i = 1; i < 2 << SHIFT; i++) {
+         d->ZMM_L(i) = v->ZMM_L(i);
+     }
++    SSE_END_INSN;
+ }
+ 
+ void helper_sqrtsd(CPUX86State *env, Reg *d, Reg *v, Reg *s)
+ {
++    SSE_BEGIN_INSN;
+     int i;
+     d->ZMM_D(0) = float64_sqrt(s->ZMM_D(0), &env->sse_status);
+     for (i = 1; i < 1 << SHIFT; i++) {
+         d->ZMM_Q(i) = v->ZMM_Q(i);
+     }
++    SSE_END_INSN;
+ }
+ #endif
+ 
++#undef SSE_BEGIN_INSN
++#undef SSE_END_INSN
++
+ /* float to float conversions */
+ void glue(helper_cvtps2pd, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
+ {
+diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
+index 58e46d8..616f0c8 100644
+--- a/target/i386/tcg/fpu_helper.c
++++ b/target/i386/tcg/fpu_helper.c
+@@ -3304,6 +3304,45 @@ void helper_ldmxcsr(CPUX86State *env, uint32_t val)
+     cpu_set_mxcsr(env, val);
+ }
+ 
++/*
++ * TCG records SSE arithmetic exceptions in softfloat state. Convert the flags
++ * raised by each instruction into the architectural unmasked #XM/#UD fault.
++ * The destination snapshot lets SIMD instructions roll back all lanes before
++ * the synchronous fault is delivered.
++ */
++static inline int sse_begin_instruction(CPUX86State *env)
++{
++    int old_flags = get_float_exception_flags(&env->sse_status);
++    set_float_exception_flags(0, &env->sse_status);
++    return old_flags;
++}
++
++static void sse_finish_instruction(CPUX86State *env, int old_flags,
++                                   ZMMReg *dst, ZMMReg old_dst,
++                                   uintptr_t retaddr)
++{
++    int new_flags = get_float_exception_flags(&env->sse_status);
++    uint32_t status =
++        ((new_flags & float_flag_invalid) ? FPUS_IE : 0) |
++        ((new_flags & float_flag_input_denormal_used) ? FPUS_DE : 0) |
++        ((new_flags & float_flag_divbyzero) ? FPUS_ZE : 0) |
++        ((new_flags & float_flag_overflow) ? FPUS_OE : 0) |
++        ((new_flags & float_flag_underflow) ? FPUS_UE : 0) |
++        ((new_flags & float_flag_inexact) ? FPUS_PE : 0) |
++        ((new_flags & float_flag_output_denormal_flushed) ? FPUS_UE | FPUS_PE : 0);
++    uint32_t unmasked = status & ~((env->mxcsr >> 7) & 0x3f);
++
++    set_float_exception_flags(old_flags | new_flags, &env->sse_status);
++    if (unmasked) {
++        *dst = old_dst;
++        update_mxcsr_from_sse_status(env);
++        if (!(env->cr[4] & CR4_OSXMMEXCPT_MASK)) {
++            raise_exception_ra(env, EXCP06_ILLOP, retaddr);
++        }
++        raise_exception_ra(env, EXCP19_XM, retaddr);
++    }
++}
++
+ void helper_enter_mmx(CPUX86State *env)
+ {
+     env->fpstt = 0;

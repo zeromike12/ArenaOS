@@ -1,0 +1,7 @@
+PHASE15_PYTHON=/workspace/scratch/e078634cacf3/phase15-rerun-20261021/.venv/bin/python
+ARENA_QEMU=env LD_LIBRARY_PATH=/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/runtime/lib /workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/qemu-system-x86_64-patched -accel tcg -L /workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/pc-bios
+ARENA_OVMF_CODE=/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/firmware/OVMF_CODE_4M.fd
+ARENA_OVMF_VARS=/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/firmware/OVMF_VARS_4M.fd
+ARENA_PHASE15_EFI=/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/artifacts/arena-boot.efi
+ARENA_PHASE15_ESP=/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/artifacts/arena-esp.img
+/workspace/scratch/e078634cacf3/phase15-rerun-20261021/.venv/bin/python /workspace/scratch/e078634cacf3/phase15-c-review-checkout/tools/test_m15_guest.py

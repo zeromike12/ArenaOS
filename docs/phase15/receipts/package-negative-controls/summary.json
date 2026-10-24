@@ -1,0 +1,16 @@
+{
+  "archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+  "cases": {
+    "accelerator-initialization-failure": "mock wrapper substituted unavailable KVM in the QMP smoke; the preflight rejected initialization",
+    "missing-evidence": "rejected missing strict serial log before receipt checks",
+    "semantic-failure-qemu-exit-zero": "qemu_exit_zero=true and qualification_pass=false",
+    "wrong-efi-identity": "rejected changed strict_arenaos_image.efi_sha256; original bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e; test value 64 zeroes",
+    "wrong-esp-identity": "rejected changed strict_arenaos_image.esp_sha256; original 631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f; test value 64 zeroes",
+    "wrong-qemu-identity": "rejected changed emulator.binary_sha256; original e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff; test value 64 zeroes"
+  },
+  "environment": "Linux host; accelerator-init uses included mock wrapper; no Windows or hardware guest execution claimed",
+  "extracted_outside_checkout": true,
+  "fresh_extraction": "/tmp/phase15-patched-tcg-review-f54797f-20261024-v5",
+  "overall": "PASS; every negative control rejected as intended",
+  "schema_version": 1
+}

@@ -1,0 +1,8 @@
+env LD_LIBRARY_PATH=/tmp/qemu-build-deps/usr/lib/x86_64-linux-gnu /tmp/qemu-unpatched-upstream-11.1.2 \
+  -accel tcg -L /tmp/qemu-official-source/pc-bios -machine q35 -m 128M \
+  -cpu qemu64,+nx,+smep,+smap \
+  -drive if=pflash,format=raw,readonly=on,file=artifacts/OVMF_CODE_4M.fd \
+  -drive if=pflash,format=raw,file=artifacts/qemu-xm-controls-vars.img \
+  -drive if=none,id=esp0,format=raw,file=artifacts/qemu-xm-controls-esp.img \
+  -device ide-hd,drive=esp0,bootindex=0 -display none -serial stdio -monitor none \
+  -no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04

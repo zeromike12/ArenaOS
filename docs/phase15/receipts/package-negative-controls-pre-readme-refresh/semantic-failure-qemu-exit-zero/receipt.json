@@ -1,0 +1,39 @@
+{
+  "accelerator": "tcg (explicit -accel tcg)",
+  "backend_id": "arenaos-qemu-11.1.2-local-patched-tcg-xm",
+  "boot": 1,
+  "checks": {
+    "all_strict_assertions_once": false,
+    "declared_clean_shutdown": true,
+    "expected_fault_status_0x113": false,
+    "fault_thread_and_scheduler_slot_reclaimed": true,
+    "genuine_vector_19_recorded": false,
+    "no_guest_failure_or_panic": false,
+    "qemu_exit_zero": true,
+    "resource_baseline_restored": true,
+    "same_process_sibling_and_independent_peer_survived": true,
+    "strict_result_pass_6_of_6_once": false
+  },
+  "cpu_profile": "qemu64,+nx,+smep,+smap",
+  "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+  "emulator": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+  "esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+  "fault_status": null,
+  "ovmf_code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+  "ovmf_vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+  "qemu_exit_status": 0,
+  "qemu_stderr_log": {
+    "path": "qemu-stderr-unpatched.log",
+    "sha256": "c8a6d211e8e6e498c0c7df4e0519d7c7e9b84d00360034bc32ef3b768551756e"
+  },
+  "qualification_pass": false,
+  "schema_version": 1,
+  "semantic_guest_result": "FAIL or missing",
+  "serial_log": {
+    "path": "serial-unpatched.log",
+    "sha256": "f72a5d2515822186ac0c46e750876af44c82468fc497d937c723ef4b9941b783"
+  },
+  "stability_failure_reason": "negative control: unpatched semantic failure with QEMU exit zero",
+  "stability_verdict": "PASS",
+  "vector_19_instruction_generated": false
+}

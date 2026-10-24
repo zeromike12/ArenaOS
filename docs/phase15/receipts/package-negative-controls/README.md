@@ -1,0 +1,5 @@
+# Final archive negative controls
+
+These negative controls ran against the final archive (`63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73`) freshly extracted to `/tmp/phase15-patched-tcg-review-f54797f-20261024-v5`, outside the development checkout. Each case preserves the command, combined output, exit status, and machine-readable result. The missing-evidence case uses a hard-linked copy and unlinks one file only in that copy. Identity cases change EFI, ESP, or QEMU hashes in separate manifests. The semantic case feeds the real unpatched strict guest log to the receipt tool with QEMU exit zero and confirms qualification remains false. The accelerator case uses the included wrapper to substitute KVM only in the preflight QMP smoke; it never starts ArenaOS.
+
+These are Linux host and mocked negative controls, not Windows or hardware guest execution. Two earlier package assembly errors are preserved under `../package-negative-controls-pre-final-doc-update/assembly-iterations.json`; both were corrected before the final archive.

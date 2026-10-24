@@ -1,0 +1,1 @@
+/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python /tmp/phase15-patched-tcg-review-f54797f-20261024-v4/overlay/tools/phase15_patched_tcg_qualification.py verify /tmp/phase15-patched-tcg-review-f54797f-20261024-v4/evidence/strict-direct --manifest /workspace/ArenaOS/docs/phase15/receipts/package-negative-controls/wrong-qemu-identity/manifest.json

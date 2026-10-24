@@ -39,6 +39,24 @@ echo "payload image: ${PAYLOAD_ELF#"$REPO_ROOT"/} ($(stat -c%s "$PAYLOAD_ELF") b
 echo "== building native static PIE fixture (userspace/phase14-pie) =="
 "$REPO_ROOT/tools/build_phase14_pie.sh"
 
+# Phase 15: handwritten native ring-3 x87/SSE/FXSAVE fixture. It is embedded
+# in the kernel only for the independent m15 guest suite; executable loading
+# rules remain the existing ET_EXEC profile.
+echo "== building Phase-15 native FP/SIMD fixture (userspace/phase15-fpu) =="
+( cd "$REPO_ROOT/userspace/phase15-fpu" && cargo build --release )
+FPU_FIXTURE="$REPO_ROOT/userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-fpu-fixture"
+if [[ ! -f "$FPU_FIXTURE" ]]; then
+    echo "error: Phase-15 fixture ELF not produced at $FPU_FIXTURE" >&2
+    exit 1
+fi
+echo "Phase-15 fixture: ${FPU_FIXTURE#"$REPO_ROOT"/} ($(stat -c%s "$FPU_FIXTURE") bytes)"
+XF_PROBE="$REPO_ROOT/userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe"
+if [[ ! -f "$XF_PROBE" ]]; then
+    echo "error: Phase-15 #XF probe ELF not produced at $XF_PROBE" >&2
+    exit 1
+fi
+echo "Phase-15 #XF probe: ${XF_PROBE#"$REPO_ROOT"/} ($(stat -c%s "$XF_PROBE") bytes)"
+
 # M4.6 (ADR-0020): the minimal shell is embedded the same way —
 # spawn-registry image 1, spawned at boot as the initial service.
 echo "== building userspace shell (userspace/shell, x86_64-unknown-none) =="
@@ -272,7 +290,16 @@ cd "$REPO_ROOT/kernel"
 ( cd "$REPO_ROOT/userspace/desktop" && cargo build --offline --locked --release )
 # ADR-0077: filesd, the AFS2 file service (boot image 9).
 ( cd "$REPO_ROOT/userspace/filesd" && cargo build --offline --locked --release )
-cargo build $PROFILE_FLAG
+KERNEL_FEATURE_ARGS=()
+if [[ "${ARENA_PHASE15_HISTORICAL_DIAGNOSTIC:-0}" == "1" ]]; then
+    KERNEL_FEATURE_ARGS+=(--features arena-kernel/phase15-historical-diagnostic)
+    echo "WARNING: building the Phase-15 historical diagnostic image; #XF acceptance is not run and this image is not release-qualified"
+fi
+if [[ "${ARENA_PHASE15_OSXSAVE_SEED:-0}" == "1" ]]; then
+    KERNEL_FEATURE_ARGS+=(--features arena-kernel/phase15-osxsave-seed)
+    echo "WARNING: seeding controlled CR4.OSXSAVE/XCR0=7 state for the diagnostic guest path"
+fi
+cargo build $PROFILE_FLAG "${KERNEL_FEATURE_ARGS[@]}"
 
 EFI_SRC="$REPO_ROOT/kernel/target/x86_64-unknown-uefi/$PROFILE_DIR/arena-boot.efi"
 mkdir -p "$REPO_ROOT/build"
@@ -280,29 +307,26 @@ cp "$EFI_SRC" "$REPO_ROOT/build/arena-boot.efi"
 printf '%s\n' "${ARENA_GRAPHICS_FIXTURE:-desktop}" > "$REPO_ROOT/build/graphics-profile.txt"
 echo "kernel image: build/arena-boot.efi ($(stat -c%s "$REPO_ROOT/build/arena-boot.efi") bytes)"
 
-# ADR-0012 invariant: the kernel image contains NO FPU/SSE/MMX
-# instructions — the context switch saves callee-saved GPRs + RFLAGS
-# only, which is sound exactly while this holds. The audit runs on every
-# build (release gate included); if it ever fires, the ADR's escalation
-# path applies (-C target-feature=-sse,-sse2,-mmx first, xsave second).
-RUSTLIB_BIN="$(dirname "$(dirname "$(command -v rustc)")")/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+# ADR-0012 / proposed ADR-0113 invariant: ordinary kernel code remains
+# integer-only. The only FP/SIMD instructions allowed in the EFI image are
+# the exact FXSAVE64/FXRSTOR64, initialization, and conditional XCR0
+# sanitation inside six source-bounded architecture leaves. The audit parses real disassembly,
+# verifies those leaf ranges independently, and fails closed.
+RUST_SYSROOT="$(rustc --print sysroot)"
+RUSTLIB_BIN="$RUST_SYSROOT/lib/rustlib/x86_64-unknown-linux-gnu/bin"
 DISASM=""
 if [[ -x "$RUSTLIB_BIN/llvm-objdump" ]]; then
     DISASM="$RUSTLIB_BIN/llvm-objdump"
 elif command -v objdump >/dev/null 2>&1; then
     DISASM="$(command -v objdump)"
 fi
-if [[ -n "$DISASM" ]]; then
-    if "$DISASM" -d "$REPO_ROOT/build/arena-boot.efi" | grep -qE '\bx?mm[0-7]\b'; then
-        echo "error: FPU/SSE/MMX instruction found in the kernel image —" >&2
-        echo "       the ADR-0012 context-switch invariant is violated." >&2
-        echo "       See docs/adr/0012-kernel-threads-context-switch.md." >&2
-        exit 1
-    fi
-    echo "ADR-0012 audit: no FPU/SSE/MMX instructions in the image"
-else
-    echo "warning: no disassembler found — ADR-0012 no-SSE audit SKIPPED" >&2
+if [[ -z "$DISASM" ]]; then
+    echo "error: no disassembler found — kernel ISA audit cannot be skipped" >&2
+    exit 1
 fi
+python3 "$REPO_ROOT/tools/audit_kernel_isa.py" --self-test
+python3 "$REPO_ROOT/tools/audit_kernel_isa.py" \
+    --objdump "$DISASM" --image "$REPO_ROOT/build/arena-boot.efi"
 
 if [[ "${1:-}" == "--image" ]]; then
     python3 "$REPO_ROOT/tools/espimg.py" "$REPO_ROOT/build/arena-boot.efi" "$REPO_ROOT/build/arena-esp.img"

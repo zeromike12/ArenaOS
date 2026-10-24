@@ -1,0 +1,7 @@
+PATH=build/phase15-qemu-tcg-xm-qual/build-venv/bin:$PATH
+PKG_CONFIG_LIBDIR=build/phase15-qemu-tcg-xm-qual/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:build/phase15-qemu-tcg-xm-qual/sysroot/usr/share/pkgconfig
+PKG_CONFIG_SYSROOT_DIR=build/phase15-qemu-tcg-xm-qual/sysroot
+LD_LIBRARY_PATH=build/phase15-qemu-tcg-xm-qual/sysroot/usr/lib/x86_64-linux-gnu
+PHASE15_JOBS=8 tools/build_phase15_patched_qemu.sh patched build/phase15-qemu-rebuild-final
+
+This clean-source build used the official QEMU v11.1.2 archive verified against SHA-256 fc3d810fc6b27f60df77eaf6748004ca76de2edc2c4ff3a9f9a9ada33066c242. It produced QEMU 11.1.2 with TCG only and SHA-256 2ff8e8896de96cbba3fc368a39e45e4394ff174495d45cbae2452ca192941450. The different binary hash is not used for Phase 15 qualification; all qualification uses the separately pinned e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff.

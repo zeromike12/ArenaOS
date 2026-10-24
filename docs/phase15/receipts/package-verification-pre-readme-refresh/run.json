@@ -1,0 +1,13 @@
+{
+  "archive": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz",
+  "archive_sha256": "fe56383e9cc17280e3061486b2ebca06c933ad3951ac9d8e3b424dcf86be8512",
+  "extracted_outside_checkout": true,
+  "fresh_extraction": "/tmp/phase15-patched-tcg-review-f54797f-20261024-v4",
+  "package_file_hashes_verified": 2319,
+  "package_manifest_sha256": "eff791af027c8392e3cc9cd2213226079c76d6c3f5d063ec11df6560e00111b0",
+  "schema_version": 1,
+  "scope": "Strict evidence and included controls verified on Linux host; no Windows or hardware guest execution claimed.",
+  "verdict": "PASS",
+  "verification_receipt": "verification.json",
+  "verifier_exit": 0
+}

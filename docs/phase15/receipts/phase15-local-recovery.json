@@ -1,0 +1,241 @@
+{
+  "accelerator": {
+    "actual_accelerator_for_guest_runs": "TCG, explicitly selected with -accel tcg",
+    "dev_kvm_present": false,
+    "explicit_kvm_exit_code": 1,
+    "explicit_kvm_initialization_attempted": true,
+    "explicit_kvm_stderr": [
+      "Could not access KVM kernel module: No such file or directory",
+      "failed to initialize kvm: No such file or directory"
+    ],
+    "qemu_11_1_2_advertised": [
+      "tcg",
+      "mshv",
+      "nitro",
+      "kvm"
+    ],
+    "whpx_applicable": false
+  },
+  "adr_0113_status": "Proposed",
+  "diagnostic_stability": {
+    "backend": "QEMU 11.1.2 TCG",
+    "cpu_profile": "qemu64,+nx,+smep,+smap",
+    "diagnostic_mode": "Phase 15 historical diagnostic image; strict #XF explicitly not run",
+    "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
+    "esp_sha256": "e2a06c116fc51a90ffb70a9e14a1e0f714d6bafc10900266782cb1d4e61cbb3f",
+    "official_phase15_stability_status": "BLOCKED by strict #XF acceptance",
+    "ovmf_code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "tiers": {
+      "T2": {
+        "attempted_boots": 10,
+        "dns_receipts": 10,
+        "duration_seconds": 95,
+        "failed_boots": 0,
+        "image": {
+          "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
+          "esp_sha256": "e2a06c116fc51a90ffb70a9e14a1e0f714d6bafc10900266782cb1d4e61cbb3f"
+        },
+        "loop_exit": 0,
+        "loop_log_sha256": "e945ceb85f2d64896c172b9d6a6f2016476cfbcbcc4f8238e8a89a1834a175fc",
+        "mode": "diagnostic-only; #XF not run",
+        "official_phase15_gate": "BLOCKED",
+        "pixel_lifecycle_receipts": 10,
+        "receipts_directory": "final-receipts/stability/T2/",
+        "result": "PASS",
+        "successful_boots": 10
+      },
+      "T3": {
+        "attempted_boots": 25,
+        "dns_receipts": 25,
+        "duration_seconds": 237,
+        "failed_boots": 0,
+        "image": {
+          "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
+          "esp_sha256": "e2a06c116fc51a90ffb70a9e14a1e0f714d6bafc10900266782cb1d4e61cbb3f"
+        },
+        "loop_exit": 0,
+        "loop_log_sha256": "843e43a3a8dd901b2f92d22e4cca6ca31ec9e7df83cc0ca2ca1c6f2fd220b7a9",
+        "mode": "diagnostic-only; #XF not run",
+        "official_phase15_gate": "BLOCKED",
+        "pixel_lifecycle_receipts": 25,
+        "receipts_directory": "final-receipts/stability/T3/",
+        "result": "PASS",
+        "successful_boots": 25
+      },
+      "T4": {
+        "attempted_boots": 100,
+        "dns_receipts": 100,
+        "duration_seconds": 952,
+        "failed_boots": 0,
+        "image": {
+          "efi_sha256": "e85e0b5dd9e96f3129e7f2385d548084c56c16801432a9d41243b9ebc23a2282",
+          "esp_sha256": "e2a06c116fc51a90ffb70a9e14a1e0f714d6bafc10900266782cb1d4e61cbb3f"
+        },
+        "loop_exit": 0,
+        "loop_log_sha256": "4f3865bbf4e96680b4f84b3f8b471c17c741d5fcaba64e3f2e009d715a160c65",
+        "mode": "diagnostic-only; #XF not run",
+        "official_phase15_gate": "BLOCKED",
+        "pixel_lifecycle_receipts": 100,
+        "receipts_directory": "final-receipts/stability/T4/",
+        "result": "PASS",
+        "successful_boots": 100
+      }
+    }
+  },
+  "historical_regression": {
+    "aggregate_log": {
+      "path_in_archive": "final-receipts/historical/historical-rerun2-qemu-11.1.2.log",
+      "sha256": "dc9d042c0ad82402a431e1fa52e8004d7d5977d9f7dd27a0f33b8b6cbe426680"
+    },
+    "backend": "QEMU 11.1.2 TCG",
+    "command": "bash tools/run_phase15_historical_diagnostic.sh",
+    "complete_raw_files": 2000,
+    "failed": 0,
+    "notes": "Single uninterrupted run; source commit at start and end is identical; the diagnostic runner explicitly excludes strict #XF acceptance.",
+    "passed": 120,
+    "runner_exit_code": 0,
+    "strict_xf_acceptance_included": false,
+    "suite_count": 120
+  },
+  "host": {
+    "architecture": "x86_64",
+    "kernel": "6.18.44",
+    "local_runtime_root": "build/phase15-local-qualification/",
+    "official_debian_sources": [
+      "https://deb.debian.org/debian trixie main (signed by /usr/share/keyrings/debian-archive-keyring.gpg)",
+      "https://deb.debian.org/debian sid main (signed by /usr/share/keyrings/debian-archive-keyring.gpg)"
+    ],
+    "os": "Debian GNU/Linux 13 on Linux",
+    "security_settings_changed": false,
+    "system_packages_installed": false
+  },
+  "independent_emulator_trial": {
+    "core2_cr2": "0x000000001ea6b000",
+    "cpu_profiles": [
+      "tigerlake",
+      "core2_penryn_t9600"
+    ],
+    "emulator": "Bochs 3.1+dfsg-1",
+    "outcome": "OVMF page fault before any ArenaOS marker; strict serial matcher and #XF result absent",
+    "receipt_directory_in_archive": "final-receipts/bochs/",
+    "tigerlake_cr2": "0x000000001e95c000",
+    "xf_result": "NOT REACHED; no pass or failure claim"
+  },
+  "qualification_status": "PARTIAL / UNQUALIFIED",
+  "receipt_archive": {
+    "archived_files": 2369,
+    "contents": "Complete 120-suite per-test artifacts, strict QEMU TCG attempts and exact images, T2/T3/T4 per-boot receipts, QEMU/KVM probes, Bochs trial logs, firmware and source provenance.",
+    "path": "docs/phase15/receipts/phase15-local-recovery-2026-10-21.tar.gz",
+    "sha256": "fb1ff147b35373be554f0056930d9c7ddeb7ea00877d4a682ee19b17ec2a7033",
+    "sha256_manifest": "final-receipts/SHA256SUMS",
+    "size_bytes": 16497772
+  },
+  "record_kind": "Phase 15 local runtime recovery and qualification evidence",
+  "recorded_date_utc": "2026-10-21",
+  "release_decision": "Keep Phase 15 PARTIAL / UNQUALIFIED; ADR-0113 remains Proposed.",
+  "remaining_blocker": "A strict #XF guest test under an initialized hardware-backed accelerator or independently functioning emulator is required. This execution environment has no KVM device; TCG fails the assertion; Bochs did not reach ArenaOS.",
+  "restored_tools": {
+    "comparison_runtime": {
+      "ovmf_package_sha256": "78e0d54df11fc77406cb7a0bc9a39e5bca6d1cbe06556b91d9a73491c52decdf",
+      "ovmf_version": "2025.02-8+deb13u1",
+      "qemu_package": "qemu-system-x86 1:10.0.13+ds-0+deb13u1",
+      "qemu_package_sha256": "5e841d0723a657fd8bc2e9e1a085d24f47fcb3e4a0f94762e6c38b429f22fbb1",
+      "qemu_version": "10.0.13",
+      "source": "official Debian trixie repository"
+    },
+    "independent_emulator": {
+      "name": "Bochs",
+      "package_sha256": "fd931f19cf7d018f003841f6625602357d9a37f58d4de117a82d44eb80cf57e2",
+      "source": "official Debian package repository",
+      "version": "3.1+dfsg-1"
+    },
+    "ovmf_current": {
+      "code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "package": "ovmf-generic",
+      "package_sha256": "05c1593998ba58700ff86c062bde306321af1f5a2943ea9ceef6c2332f3f3374",
+      "vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+      "version": "2026.08+ds-2"
+    },
+    "python_dependencies": {
+      "fs": "2.4.16",
+      "pyfatfs": "1.1.0",
+      "status": "already available in the project's build/onboarding/python path; reused, not installed",
+      "zstandard": "0.25.0"
+    },
+    "qemu_current": {
+      "accelerator_modules": "extracted official package modules selected with QEMU_MODULE_DIR",
+      "binary_sha256": "0d45188135c07fbcf99c8bae979958ddb89a16f5b048a69492f9464657b2fd56",
+      "package": "qemu-system-x86 1:11.1.2+ds-3",
+      "package_sha256": "64d9bbbd6e27a4495f9774b66e11d821edc789f4d84dd47821e17b43b37e0c2a",
+      "version": "11.1.2",
+      "wrapper_sha256": "18a1ff63cd12461a53393cdf55d1d1d2f7e023629234bc378d75fc6b82dca251"
+    },
+    "rust": {
+      "cargo": "1.97.0 (c980f4866 2026-06-30)",
+      "install_root": "build/phase15-local-qualification/rustup/",
+      "installed_targets": [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-none",
+        "x86_64-unknown-uefi"
+      ],
+      "llvm": "22.1.6",
+      "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+      "rustup_init_sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+      "rustup_init_source": "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
+    }
+  },
+  "source": {
+    "branch": "arena/phase15-fpu-simd",
+    "commit": "989646771a0e288cefdaf0dabc5f5baa9bf1ed5c",
+    "historical_run_source_end": "989646771a0e288cefdaf0dabc5f5baa9bf1ed5c",
+    "historical_run_source_start": "989646771a0e288cefdaf0dabc5f5baa9bf1ed5c",
+    "repository": "zeromike12/ArenaOS",
+    "tracked_source_changes_during_test_runs": false
+  },
+  "strict_xf": {
+    "backend": "QEMU 11.1.2 TCG",
+    "cleanup": "Fault-thread, sibling, peer, slot-release, resource-baseline and clean firmware shutdown receipts recorded; cleanup does not pass the vector-19 assertion.",
+    "command": "python3 tools/test_m15_guest.py",
+    "expected_fault_status": "0x00000113",
+    "observed_fault_status": "0x00001f0000001f01",
+    "observed_mxcsr_after": "0x00001f01",
+    "observed_mxcsr_before": "0x00001f00",
+    "profile_receipts": {
+      "avx": {
+        "m15_result": "FAIL (5/6)",
+        "qemu_process_exit": 0,
+        "qemu_stderr": {
+          "path_in_archive": "final-receipts/strict-tcg-qemu-11.1.2-final/qemu-stderr-phase15-avx.log",
+          "sha256": "0f98a5baaede82677e4987cde577e8a7ac460365cc74496354f65bc7c15d51fc"
+        },
+        "semantic_guest_exit": 97,
+        "serial": {
+          "path_in_archive": "final-receipts/strict-tcg-qemu-11.1.2-final/serial-phase15-avx.log",
+          "sha256": "892dca2bd606fab6d79372e99ecae22aef7154d596877d6604369511c247ff9c"
+        }
+      },
+      "qemu64": {
+        "m15_result": "FAIL (5/6)",
+        "qemu_process_exit": 0,
+        "qemu_stderr": {
+          "path_in_archive": "final-receipts/strict-tcg-qemu-11.1.2-final/qemu-stderr-phase15-qemu64.log",
+          "sha256": "58f7e11337acc444d818e7f736c8ddda4f6c7ae067e466baf532595b9dbd244d"
+        },
+        "semantic_guest_exit": 97,
+        "serial": {
+          "path_in_archive": "final-receipts/strict-tcg-qemu-11.1.2-final/serial-phase15-qemu64.log",
+          "sha256": "a6788b217f19ed22013dbdb7b8d730ec4303448cb2d8eedd327aff0bf8f0693e"
+        }
+      }
+    },
+    "profiles": {
+      "avx": "max,+nx,+smep,+smap",
+      "qemu64": "qemu64,+nx,+smep,+smap"
+    },
+    "result": "FAIL: strict vector-19 #XF delivery gate not met",
+    "runner_exit_code": 1,
+    "strict_efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "strict_esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "workaround_or_synthetic_exception_added": false
+  }
+}

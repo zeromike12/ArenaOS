@@ -116,6 +116,26 @@ pub static TEST_IMAGE: &[u8] =
 /// reproducible source crate and build receipt are under userspace/phase14-pie.
 pub static PIE_TEST_IMAGE: &[u8] = include_bytes!("../../../userspace/phase14-pie/fixture.elf");
 
+/// Phase-15 native x87/SSE fixture: handwritten ring-3 assembly exercises
+/// clean entry state, all sixteen XMM registers, x87 stack/control state,
+/// MXCSR, yield/join, timer preemption, and contained #MF/#XF/#UD faults.
+pub static FPU_TEST_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-fpu-fixture"
+);
+
+/// Minimal Phase-15 ring-3 #XF probe. Its only FP/SIMD operation is an
+/// unmasked SQRTSS invalid operation; the pre/post-MXCSR fallback status
+/// makes missing exception delivery observable to the kernel harness.
+pub static FPU_XF_PROBE_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-xf-probe"
+);
+
+/// Bounded MMX-only state-switch fixture used to prove the MMX aliases in
+/// each FXSAVE slot are private across timer and cooperative transitions.
+pub static FPU_MMX_TEST_IMAGE: &[u8] = include_bytes!(
+    "../../../userspace/phase15-fpu/target/x86_64-unknown-none/release/arena-phase15-mmx-probe"
+);
+
 /// The minimal shell (M4.6, ADR-0020): spawn-registry image 1, built
 /// by `tools/build.sh` from `userspace/shell` with the same
 /// strict-subset contract as the payload — a genuine cargo/rust-lld

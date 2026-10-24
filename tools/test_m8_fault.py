@@ -60,9 +60,17 @@ def main() -> int:
                                      net=False, rng=False, kbd=False, vcon=False,
                                      tcp_peer=False)
     (arena_env.build_dir() / f"serial-{LABEL}-absent.log").write_text(missing)
+    # Asynchronous GUI input diagnostics may be printed after the prompt but
+    # before the serial command echo. Anchor on the unique command text rather
+    # than requiring a contiguous prompt/echo pair.
+    command_start = missing.find("stackfault")
+    command_end = missing.find("shutdown", command_start)
+    stackfault_output = (missing[command_start:command_end]
+                         if command_start >= 0 and command_end > command_start else "")
     print(f"[{LABEL}] no-device fixture: rc={rc}, {dt:.1f}s")
     ok &= check(rc == 0 and "m8: stackfault SKIP (no production client cap)" in missing
-                and "servicemgr: OFFLINE" in missing and "[arena user fault]" not in missing,
+                and "servicemgr: OFFLINE" in missing and bool(stackfault_output)
+                and "[arena user fault]" not in stackfault_output,
                 "absent dependencies grant no fault-injection authority")
     print(f"[{LABEL}] UNEXPECTED-CRASH SUBSTRATE: {'PASS' if ok else 'FAIL'} (individual proof; full suite closes 8.0)")
     return 0 if ok else 1

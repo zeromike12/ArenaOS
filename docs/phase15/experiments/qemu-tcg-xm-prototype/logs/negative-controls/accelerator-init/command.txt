@@ -1,0 +1,11 @@
+PHASE15_NEGATIVE_CONTROL_QEMU=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/qemu-system-x86_64-patched \
+build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python tools/phase15_patched_tcg_qualification.py strict \
+  --manifest docs/phase15/experiments/qemu-tcg-xm-prototype/logs/negative-controls/accelerator-init/manifest.json \
+  --qemu-binary docs/phase15/experiments/qemu-tcg-xm-prototype/source/fail-accelerator-init-wrapper.sh \
+  --lib-dir build/phase15-qemu-tcg-xm-qual/sysroot/usr/lib/x86_64-linux-gnu \
+  --rom-dir build/phase15-qemu-tcg-xm-qual/source/pc-bios \
+  --efi build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/arena-boot.efi \
+  --esp build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/arena-esp.img \
+  --ovmf-code build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/OVMF_CODE_4M.fd \
+  --ovmf-vars build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/OVMF_VARS_4M.fd \
+  --receipts docs/phase15/experiments/qemu-tcg-xm-prototype/logs/negative-controls/accelerator-init/receipts

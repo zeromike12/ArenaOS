@@ -1,0 +1,19 @@
+Independent control source build:
+  ARENA_RUST_BIN=build/onboarding/rust/prefix/bin tools/build_phase15_xm_controls.sh build/phase15-qemu-tcg-xm-qual/controls/reproducible
+
+QEMU control command, run once with each binary shown below (fresh OVMF vars copied from the pinned template for each trial):
+  env LD_LIBRARY_PATH=build/phase15-qemu-tcg-xm-qual/sysroot/usr/lib/x86_64-linux-gnu QEMU_BINARY \
+    -accel tcg -L build/phase15-qemu-tcg-xm-qual/source/pc-bios \
+    -machine q35 -m 128M -cpu qemu64,+nx,+smep,+smap \
+    -drive if=pflash,format=raw,readonly=on,file=build/phase15-qemu-tcg-xm-20261023/artifacts/OVMF_CODE_4M.fd \
+    -drive if=pflash,format=raw,file=FRESH_OVMF_VARS \
+    -drive if=none,id=esp0,format=raw,file=build/phase15-qemu-tcg-xm-qual/controls/reproducible/independent-xm-controls-esp.img \
+    -device ide-hd,drive=esp0,bootindex=0 -display none -serial stdio -monitor none -no-reboot \
+    -device isa-debug-exit,iobase=0xf4,iosize=0x04
+
+The patched control used build/phase15-qemu-tcg-xm-qual/qemu-system-x86_64-patched and exited 33
+(isa-debug-exit PASS token 0x10). The source-matched unpatched control used
+build/phase15-qemu-tcg-xm-qual/qemu-system-x86_64-unpatched and exited 35
+(isa-debug-exit expected-failure token 0x11). Both ran the same control EFI/ESP,
+OVMF code, CPU profile and explicit TCG configuration. QEMU stderr is retained
+separately from guest serial output.

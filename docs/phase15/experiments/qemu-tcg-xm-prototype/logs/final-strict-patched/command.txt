@@ -1,0 +1,6 @@
+ARENA_QEMU=env LD_LIBRARY_PATH=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/sysroot/usr/lib/x86_64-linux-gnu /workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/qemu-system-x86_64-patched -accel tcg -L /workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/source/pc-bios
+ARENA_OVMF_CODE=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/OVMF_CODE_4M.fd
+ARENA_OVMF_VARS=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/OVMF_VARS_4M.fd
+ARENA_PHASE15_EFI=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/arena-boot.efi
+ARENA_PHASE15_ESP=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/arena-esp.img
+/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/bin/python /workspace/ArenaOS/tools/test_m15_guest.py

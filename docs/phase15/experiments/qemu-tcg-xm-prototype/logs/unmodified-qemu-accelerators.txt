@@ -1,0 +1,5 @@
+Accelerators supported in QEMU binary:
+tcg
+mshv
+nitro
+kvm

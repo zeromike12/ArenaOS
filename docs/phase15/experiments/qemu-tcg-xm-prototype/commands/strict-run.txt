@@ -1,0 +1,7 @@
+PYTHONPATH=/tmp/qemu-test-python
+ARENA_QEMU='env LD_LIBRARY_PATH=/tmp/qemu-build-deps/usr/lib/x86_64-linux-gnu /tmp/qemu-tcg-xm-prototype/qemu-system-x86_64 -accel tcg -L /tmp/qemu-official-source/pc-bios'
+ARENA_OVMF_CODE=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/artifacts/OVMF_CODE_4M.fd
+ARENA_OVMF_VARS=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/artifacts/OVMF_VARS_4M.fd
+ARENA_PHASE15_EFI=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/artifacts/arena-boot.efi
+ARENA_PHASE15_ESP=/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/artifacts/arena-esp.img
+python3 tools/test_m15_guest.py

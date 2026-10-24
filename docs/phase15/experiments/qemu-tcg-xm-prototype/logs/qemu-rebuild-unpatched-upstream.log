@@ -1,0 +1,60 @@
+ninja: Entering directory `/tmp/qemu-unpatched-build'
+[1/59] Generating qemu-version.h with a custom command (wrapped by meson to capture output)
+fatal: No names found, cannot describe anything.
+
+[2/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_arch_memory_mapping.c.o
+[3/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_arch_dump.c.o
+[4/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_machine.c.o
+[5/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_cpu-apic.c.o
+[6/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_cpu-system.c.o
+[7/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_kvm_hyperv-stub.c.o
+[8/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_monitor.c.o
+[9/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_tcg-cpu.c.o
+[10/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_excp_helper.c.o
+[11/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_smm_helper.c.o
+[12/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_bpt_helper.c.o
+[13/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_fpu_helper.c.o
+[14/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_misc_helper.c.o
+[15/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_fw_cfg.c.o
+[16/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_seg_helper.c.o
+[17/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_system_svm_helper.c.o
+[18/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_multiboot.c.o
+[19/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_x86-cpu.c.o
+[20/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_x86.c.o
+[21/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_vapic.c.o
+[22/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_x86-iommu.c.o
+[23/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_isapc.c.o
+[24/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_pc_piix.c.o
+[25/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_vmmouse.c.o
+[26/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_amd_iommu.c.o
+[27/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_pc_q35.c.o
+[28/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_vmport.c.o
+[29/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_acpi-common.c.o
+[30/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_x86-common.c.o
+[31/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_pc_sysfw.c.o
+[32/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_pc.c.o
+[33/57] Compiling C object libqemu-x86_64-softmmu.a.p/target-info-stub.c.o
+[34/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_acpi-build.c.o
+[35/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_i386_intel_iommu.c.o
+[36/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_gdbstub.c.o
+[37/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_helper.c.o
+[38/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_cpu-dump.c.o
+[39/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_cpu.c.o
+[40/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_access.c.o
+[41/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_bpt_helper.c.o
+[42/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_excp_helper.c.o
+[43/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_cc_helper.c.o
+[44/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_int_helper.c.o
+[45/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_mem_helper.c.o
+[46/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_mpx_helper.c.o
+[47/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_misc_helper.c.o
+[48/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_tcg-cpu.c.o
+[49/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_seg_helper.c.o
+[50/57] Compiling C object libqemu-x86_64-softmmu.a.p/dump_win_dump-x86.c.o
+[51/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_intc_apic.c.o
+[52/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_intc_apic_common.c.o
+[53/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_intc_ioapic.c.o
+[54/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_fpu_helper.c.o
+[55/57] Compiling C object libqemu-x86_64-softmmu.a.p/hw_isa_lpc_ich9.c.o
+[56/57] Compiling C object libqemu-x86_64-softmmu.a.p/target_i386_tcg_translate.c.o
+[57/57] Linking target qemu-system-x86_64

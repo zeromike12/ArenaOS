@@ -5,6 +5,15 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "ArenaOS kernel proper: machine-level subsystems (arch, drivers, frames, heap glue, logging, timekeeping, halt). Split from the boot stage at M2.7 (ADR-0011). No UEFI dependencies — firmware facts arrive through the handoff record."
 
+[features]
+default = []
+# Separate diagnostic image used only to run historical tests on stock QEMU
+# after its known TCG #XF limitation. It never changes the official runner.
+phase15-historical-diagnostic = []
+# Seed a controlled, AVX-capable XSAVE state immediately before FPU init so
+# the sanitizer path can be guest-tested. This also selects diagnostic mode.
+phase15-osxsave-seed = ["phase15-historical-diagnostic"]
+
 [dependencies]
 # Zero third-party crates (ADR-0004); workspace-internal only:
 arena-heap = { path = "../libs/heap" }

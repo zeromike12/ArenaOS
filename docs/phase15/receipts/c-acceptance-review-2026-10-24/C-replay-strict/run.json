@@ -1,0 +1,103 @@
+{
+  "accelerator": "tcg (explicit -accel tcg)",
+  "backend_id": "arenaos-qemu-11.1.2-local-patched-tcg-xm",
+  "backend_label": "locally modified QEMU TCG; not upstream-QEMU or hardware-backed",
+  "command": "env LD_LIBRARY_PATH=/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/runtime/lib /workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/qemu-system-x86_64-patched -accel tcg -L /workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/pc-bios /workspace/scratch/e078634cacf3/phase15-rerun-20261021/.venv/bin/python /workspace/scratch/e078634cacf3/phase15-c-review-checkout/tools/test_m15_guest.py",
+  "created_utc": "2026-10-24T20:44:23.619081+00:00",
+  "emulator": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+  "harness_process_exit": 0,
+  "paths": {
+    "efi": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/artifacts/arena-boot.efi",
+    "esp": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/artifacts/arena-esp.img",
+    "lib_dir": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/runtime/lib",
+    "ovmf_code": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/firmware/OVMF_CODE_4M.fd",
+    "ovmf_vars": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/firmware/OVMF_VARS_4M.fd",
+    "qemu": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/qemu-system-x86_64-patched",
+    "rom_dir": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/pc-bios"
+  },
+  "preflight_pass": true,
+  "profile_receipts": [
+    {
+      "checks": {
+        "all_strict_assertions_once": true,
+        "declared_clean_shutdown": true,
+        "expected_fault_status_0x113": true,
+        "fault_thread_and_scheduler_slot_reclaimed": true,
+        "genuine_vector_19_recorded": true,
+        "no_guest_failure_or_panic": true,
+        "qemu_exit_zero": true,
+        "resource_baseline_restored": true,
+        "same_process_sibling_and_independent_peer_survived": true,
+        "strict_result_pass_6_of_6_once": true
+      },
+      "profile": "max,+nx,+smep,+smap",
+      "qemu_exit_status": 0,
+      "qemu_stderr_log": {
+        "path": "qemu-stderr-phase15-avx.log",
+        "sha256": "676adb4e829092df3428c0c17be8a2373313575ad4b2fe1497539077cd67a5b9"
+      },
+      "qualification_pass": true,
+      "semantic_guest_result": "m15: RESULT PASS (6/6)",
+      "serial_log": {
+        "path": "serial-phase15-avx.log",
+        "sha256": "fe77215f7f46721eca90f951829e48b60d640ec7913c9e73b89af92d26d1e522"
+      }
+    },
+    {
+      "checks": {
+        "all_strict_assertions_once": true,
+        "declared_clean_shutdown": true,
+        "expected_fault_status_0x113": true,
+        "fault_thread_and_scheduler_slot_reclaimed": true,
+        "genuine_vector_19_recorded": true,
+        "no_guest_failure_or_panic": true,
+        "qemu_exit_zero": true,
+        "resource_baseline_restored": true,
+        "same_process_sibling_and_independent_peer_survived": true,
+        "strict_result_pass_6_of_6_once": true
+      },
+      "profile": "qemu64,+nx,+smep,+smap",
+      "qemu_exit_status": 0,
+      "qemu_stderr_log": {
+        "path": "qemu-stderr-phase15-qemu64.log",
+        "sha256": "d60d8c43f90923c81e0fe6f4dc82057a329e701991028c809a84010022255b76"
+      },
+      "qualification_pass": true,
+      "semantic_guest_result": "m15: RESULT PASS (6/6)",
+      "serial_log": {
+        "path": "serial-phase15-qemu64.log",
+        "sha256": "9239f3c15c8aaf9265c3863798e51da9a15031c89a492501943474c81ec6fbfc"
+      }
+    }
+  ],
+  "python_executable": "/workspace/scratch/e078634cacf3/phase15-rerun-20261021/.venv/bin/python",
+  "python_version": "3.12.14",
+  "qemu_process_exits": {
+    "phase15-avx": 0,
+    "phase15-qemu64": 0
+  },
+  "qualification_pass": true,
+  "qualification_script_sha256": {
+    "mtest.py": "a66a2da5e5353105c69b1fcbfcb6d8b45f601921d568b6dc773488186ee00490",
+    "phase15_boot_receipt.py": "8d5e080a845b042ea545aaaed0fac18f99f2177b96c0b93cf717f77ed662060e",
+    "stability_loop.sh": "6eecedc93c43f6bc465a729096d5a2b6546a177e407e474efa33967a56b9550d",
+    "test_m15_guest.py": "e191e40883fcf3a827e8a5a38df7c7d45e419eab5927cd0d4238f7a8ea34d6ad"
+  },
+  "run_kind": "strict-two-profile",
+  "run_log_sha256": "1e6ffba6eeb5fa1f7b77800a9ba775c07ff542c1ace02bd85574fc61d075cd2a",
+  "runtime_library_sha256": {
+    "libglib-2.0.so.0.8400.4": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d",
+    "libpixman-1.so.0.44.0": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd",
+    "libslirp.so.0.4.0": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3"
+  },
+  "schema_version": 1,
+  "sha256": {
+    "efi": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "esp": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "ovmf_code": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "ovmf_vars": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+    "qemu": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff"
+  },
+  "source_commit": "f54797f2fb5bac0b3440f986d2120382b3611ecc",
+  "strict_guest_verdict": "PASS"
+}

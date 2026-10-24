@@ -1,0 +1,2 @@
+qemu-system-x86_64-patched: -chardev socket,id=vcon0,host=127.0.0.1,port=37653,server=on,wait=on: info: QEMU waiting for connection on: disconnected:tcp:127.0.0.1:37653,server=on
+qemu-system-x86_64-patched: Guest moved used index from 17 to 0

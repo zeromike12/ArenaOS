@@ -30,6 +30,7 @@ pub mod ipc;
 pub mod log;
 pub mod m11;
 pub mod m12;
+pub mod m15;
 pub mod m3;
 pub mod m4;
 pub mod m5;

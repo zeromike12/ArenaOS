@@ -1,0 +1,123 @@
+{
+  "qualification_status": "PARTIAL / UNQUALIFIED",
+  "record_kind": "historical initial targeted-run receipt",
+  "superseded_by": "phase15-qualification-recovery.json",
+  "unrun_gates_scope": "The unrun_gates below describe only the original focused run recorded in this file; later suite and stability evidence is in the recovery receipt.",
+  "repository": "https://github.com/zeromike12/ArenaOS",
+  "branch": "arena/phase15-fpu-simd",
+  "base_commit": "1aa35f4c20c9bb386612298fe21574897cf14159",
+  "tested_source_commit": "ad87bee8d199b285ca1a2f3a31c5dbdcf4994faa",
+  "toolchain": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "rustc_sha256": "df13f58759c0662831983e3a6501c63c1fc12ea60ec4e1d1ac35e5fe43c500c0",
+    "cargo": "1.97.0 (c980f4866 2026-06-30)",
+    "llvm_lld": "22.1.6",
+    "rust_lld_sha256": "8e5130a02d8f3473ed4c4b971d43c301205c89854bb467257e64eafe4bf21ca8",
+    "rust_std_x86_64_unknown_none_archive_sha256": "5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a",
+    "rust_std_x86_64_unknown_uefi_archive_sha256": "2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0"
+  },
+  "qemu": {
+    "version": "11.0.2",
+    "mode": "TCG",
+    "runtime_binary_sha256": "0539587908d9a9b83ccdce7a48d968b50f827476b9852814e07445e9402df562",
+    "upstream_source_tag": "v11.0.2",
+    "upstream_source_commit": "e545d8bb9d63e9dd61542b88463183314cff9482",
+    "kvm_device_available": false
+  },
+  "artifacts": {
+    "efi": {
+      "path": "build/arena-boot.efi",
+      "bytes": 11029504,
+      "sha256": "04d285b3489fa9d1365c767677c4e98baef91b634c203f5735118f0593b83b1a"
+    },
+    "esp": {
+      "path": "build/arena-esp.img",
+      "bytes": 16777216,
+      "sha256": "dc9d09ccbc62bed566459c70673a2d5e4dd1a18d468f877508dacf9fdceee326"
+    },
+    "phase15_state_fixture": {
+      "bytes": 8824,
+      "sha256": "786808ad21686ace59684f01ed1e69b47bd104c53442b2d7df9e646b9103b32b"
+    },
+    "phase15_xf_probe": {
+      "bytes": 4744,
+      "sha256": "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3"
+    },
+    "phase14_pie": {
+      "bytes": 23256,
+      "sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+    },
+    "phase14_signed_apb1": {
+      "bytes": 24040,
+      "sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+    }
+  },
+  "test_source_sha256": {
+    "userspace/phase15-fpu/src/main.rs": "d86dc147cb93cc1f74f43168204a99318fef3f9b4600581c60e9348bc7d6b200",
+    "userspace/phase15-fpu/src/xf_probe.rs": "f59c35ed5d5bbe810a9baad573418b9a64a385e2330b23627ebfc7bffa4a9c3a",
+    "kernel/kernel/src/m15.rs": "c75e02a3ab746612210e6bdb16e76c701f8941ea53d42a9a99e930631c195e5d",
+    "tools/test_m15_guest.py": "22a50e9141710a8dba6e0d86dad4ea9920b99849d1f625cc660b219d390e8ab5",
+    "tools/audit_kernel_isa.py": "194fca1f42a7d23d1e84bc513a81168cd929b92d37feb51433c6fa815b0ff806",
+    "docs/phase15/fixtures/phase15-xf-host-probe.c": "39227d30873e008a47b205c346c66f043af6a41ba85078b1c13efde2d2b1ee6b"
+  },
+  "targeted_guest_runs": [
+    {
+      "cpu": "max,+nx,+smep,+smap",
+      "attempted": 1,
+      "passed": 0,
+      "retries": 0,
+      "duration_seconds": 5.2,
+      "qemu_exit_code": 0,
+      "harness_exit_code": 97,
+      "clean_uefi_shutdown": true,
+      "historical_m1_m4": "PASS (8/8, 21/21, 13/13, 9/9)",
+      "phase15": "FAIL (3/4)",
+      "xf_fault_exit_status": "0x00001f0000001f01",
+      "xf_pre_mxcsr": "0x00001f00",
+      "xf_post_mxcsr": "0x00001f01",
+      "xf_sibling_exit_status": "0x2a",
+      "xf_peer_exit_status": "0x2a",
+      "xf_slot_released": true,
+      "xf_resource_baseline_restored": true
+    },
+    {
+      "cpu": "qemu64,+nx,+smep,+smap",
+      "attempted": 1,
+      "passed": 0,
+      "retries": 0,
+      "duration_seconds": 5.6,
+      "qemu_exit_code": 0,
+      "harness_exit_code": 97,
+      "clean_uefi_shutdown": true,
+      "historical_m1_m4": "PASS (8/8, 21/21, 13/13, 9/9)",
+      "phase15": "FAIL (3/4)",
+      "xf_fault_exit_status": "0x00001f0000001f01",
+      "xf_pre_mxcsr": "0x00001f00",
+      "xf_post_mxcsr": "0x00001f01",
+      "xf_sibling_exit_status": "0x2a",
+      "xf_peer_exit_status": "0x2a",
+      "xf_slot_released": true,
+      "xf_resource_baseline_restored": true
+    }
+  ],
+  "static_checks": {
+    "kernel_host_tests": "PASS 8/8",
+    "kernel_rustfmt": "PASS",
+    "phase15_fixture_rustfmt": "PASS",
+    "kernel_isa_audit": "PASS 120354 decoded instructions across 1 complete executable section; empty-disassembly and prohibited-instruction negative controls pass; actual coverage must be gap-free",
+    "canonical_build": "PASS tools/build.sh --image"
+  },
+  "unrun_gates": {
+    "full_historical_regression": "NOT RUN",
+    "t2_10_boots": "NOT RUN",
+    "t3_25_boots": "NOT RUN",
+    "t4_100_boots": "NOT RUN",
+    "independent_archive_verification": "NOT RUN"
+  },
+  "receipts": {
+    "canonical_build_log_sha256": "3288d6b987649e95d772fa90df7674c5b14bcddec1a8083e3078459d602a72e7",
+    "targeted_run_log_sha256": "5536cfa065f90b52644aaca8068304c41e5a98e150f6501e0b084dfc143867fe",
+    "max_serial_log_sha256": "23f9e44c43336949c946c4dd5c0ead438b2ee0aaa38dc5d639617fa887481cef",
+    "qemu64_serial_log_sha256": "521d97fafc802e7eafaebe023e94f350f26b84c545e78e374a910502f9d7ac16"
+  }
+}

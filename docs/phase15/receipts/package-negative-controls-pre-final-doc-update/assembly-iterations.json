@@ -1,0 +1,23 @@
+{
+  "classification": "packaging-only defects found before the final archive; no guest qualification data changed",
+  "iterations": [
+    {
+      "attempt": "initial extraction inventory check",
+      "correction": "Include every nested manifest.json in the top-level hash map; exclude only the root package manifest.",
+      "exact_output": "package file inventory differs; missing=[], unlisted=['overlay/docs/phase15/experiments/qemu-tcg-xm-prototype/logs/negative-controls/accelerator-init/manifest.json', 'overlay/docs/phase15/experiments/qemu-tcg-xm-prototype/manifest.json']",
+      "result": "FAIL; package verifier found no missing listed files but found two unlisted nested manifest.json files"
+    },
+    {
+      "attempt": "second fresh extraction semantic verification",
+      "correction": "Copy verify_phase15_xm_controls.py into the overlay and package.",
+      "exact_output": "expanded independent control verification failed (exit 2):\\npython: can't open file '<fresh-extraction>/overlay/tools/verify_phase15_xm_controls.py': [Errno 2] No such file or directory",
+      "result": "FAIL; expanded independent-control verification could not open the helper"
+    },
+    {
+      "attempt": "final fresh extraction",
+      "correction": "No further correction required.",
+      "result": "PASS; 2,319 package file hashes and all verifier gates passed"
+    }
+  ],
+  "schema_version": 1
+}
