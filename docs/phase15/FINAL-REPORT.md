@@ -1,9 +1,9 @@
 # ArenaOS Phase 15 qualification acceptance
 
 Phase 15 qualification was **accepted by M and C on 2026-10-24** for the pinned
-locally modified QEMU 11.1.2 TCG backend. ADR-0113 remains Proposed as a separate
-architecture decision. The accepted scope is not upstream-QEMU or hardware-backed.
-See the [acceptance record](ACCEPTANCE.md).
+locally modified QEMU 11.1.2 TCG backend. M accepted ADR-0113 on 2026-10-24.
+The accepted scope is not upstream-QEMU or hardware-backed. See the
+[acceptance record](ACCEPTANCE.md) and [ADR-0113](../adr/0113-native-fpu-simd-state.md).
 
 ## Results
 
@@ -29,7 +29,9 @@ external kit retains its separate meaning.
 
 No ArenaOS kernel exception-delivery workaround, synthetic interrupt, relaxed
 assertion, or extended-state enablement was used. Arena 1 and Arena 2 sources
-were not modified. No PR, merge, release, or Phase 16 work was created.
+were not modified. PR [#4](https://github.com/zeromike12/ArenaOS/pull/4) is
+open against `main` and has not been merged. No release or Phase 16 work was
+created.
 
 ## Review package
 

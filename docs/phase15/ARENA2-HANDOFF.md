@@ -4,7 +4,8 @@ Phase 15 qualification is accepted by M and C for the pinned locally modified
 QEMU 11.1.2 TCG backend. The native x87/SSE-family profile preserves each
 scheduler thread's private FXSAVE64 image across yield, blocking/wake, timer
 preemption, and address-space switching. See `QUALIFICATION.md` and
-[the scoped acceptance record](ACCEPTANCE.md). ADR-0113 remains Proposed.
+[the scoped acceptance record](ACCEPTANCE.md). M accepted ADR-0113 on
+2026-10-24.
 This acceptance does not qualify Arena 2 libc/runtime integration, application
 packages, upstream QEMU, or hardware execution.
 

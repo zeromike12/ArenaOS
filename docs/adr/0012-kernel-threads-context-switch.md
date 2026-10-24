@@ -1,9 +1,10 @@
-# ADR-0012: Kernel threads and the context switch — callee-saved frame, no FPU state (build-enforced)
+# ADR-0012: Kernel threads and the context switch — callee-saved frame, original no-FPU-state rule
 
 Status: accepted (M3.1, 2026-09); amended by ADR-0013 (M3.2): a brand-new
 thread's synthesized frame now carries RFLAGS=0x202 (IF=1) instead of 0x2,
-so threads are preemptible from their first instruction. Everything else
-stands.
+so threads are preemptible from their first instruction. Partially superseded
+by accepted ADR-0113 (2026-10-24): the original no-FPU-state context-switch
+assumption is superseded as described below; unrelated requirements remain.
 
 ## Problem
 
@@ -35,7 +36,7 @@ therefore has *no* FPU/SSE state of its own to preserve across a
 switch — and this ADR converts that observation into a standing,
 build-enforced invariant (below) rather than a hope.
 
-## Decision
+## Original M3.1 decision (partially superseded by ADR-0113)
 
 **Switch frame: the eight Win64 callee-saved registers + RFLAGS + RSP,
 nothing else.** `arch/x86_64/context.rs` (the quarantined unsafe leaf)
@@ -58,18 +59,21 @@ the kernel — return address = `arena_thread_trampoline`, RSP 16-byte
 aligned at the trampoline entry per Win64). The trampoline runs the
 thread's Rust entry point and then the exit path; it never returns.
 
-**No FPU/SSE state in the switch — enforced at build time.**
-`tools/build.sh` disassembles the freshly linked image and **fails the
-build** if any `xmm`/`mm[0-7]` instruction appears (ADR-0012 invariant).
-If that guard ever fires — e.g. LLVM lowering a large `memcpy` to SIMD —
-the build stops and this ADR is revisited in order: (1) add
-`-C target-feature=-sse,-sse2,-mmx` (cheapest, keeps the frame), (2)
-extend the switch with `fxsave`/`fxrstor` or XSAVE area swaps (512 B–4
-KiB per thread, only if (1) is ever unacceptable). User-thread FPU state
-is explicitly *not* this switch's problem: it crosses the kernel
-boundary at syscall/interrupt entry and is an M4 concern (the kernel
-preserves the *user's* state around the whole kernel excursion, not
-around kernel-thread switches that by invariant use no FPU).
+**Original M3.1 decision, amended by ADR-0113: no FPU/SSE state in the
+switch — enforced at build time.** At M3.1, the switch carried no FPU/SSE
+state. ADR-0113 now supersedes that specific assumption and the related
+deferral of native user FP/SSE. Its accepted implementation eagerly saves and
+restores each thread's legacy state with FXSAVE64/FXRSTOR64. The historical
+M3.1 rationale and implementation record follow.
+
+The original M3.1 build rule disassembled the freshly linked image and
+**failed the build** if any `xmm`/`mm[0-7]` instruction appeared. If that guard
+fired — for example, if LLVM lowered a large `memcpy` to SIMD — the original
+plan was to first disable those target features, then revisit the switch frame
+and add FXSAVE/FXRSTOR or XSAVE if disabling them proved unacceptable. ADR-0113
+has since selected eager per-thread FXSAVE64/FXRSTOR64. The M3.1 decision also
+deferred user-thread FPU state to a later milestone; ADR-0113 supersedes that
+deferral. The integer-only ordinary-kernel rule remains in force.
 
 **Threads, stacks, lifetime.**
 
@@ -152,14 +156,14 @@ top of this same frame.
   stack ranges and deep recursion, and 64-thread churn with exact
   frame/heap accounting back to baseline.
 
-## Proposed compatibility amendment — ADR-0113
+## Accepted compatibility amendment — ADR-0113 (2026-10-24)
 
-ADR-0113 proposes adding eager per-thread FXSAVE64/FXRSTOR64 state to the
-reviewed architecture switch leaf. Until ADR-0113 is accepted, this ADR remains
-the accepted execution contract and the Phase-15 implementation is
-experimental. If ADR-0113 is accepted, it supersedes only the assertion that
-the context switch carries no FPU/SSE state and the prior deferral of native
-user FP/SSE to a later milestone. Its integer-only rule for ordinary kernel
-computations, GPR/RFLAGS frame layout, interrupt discipline, stable scheduler
-slots, and lifecycle requirements remain in force. AVX-family execution stays
+M accepted ADR-0113's eager per-thread FXSAVE64/FXRSTOR64 architecture. It
+supersedes only this ADR's assertion that the context switch carries no
+FPU/SSE state and its prior deferral of native user FP/SSE to a later
+milestone. The integer-only rule for ordinary kernel computations,
+GPR/RFLAGS frame layout, interrupt discipline, stable scheduler slots, and
+lifecycle requirements remain in force. AVX-family execution stays
 unsupported unless a later ADR accepts complete extended-state management.
+Phase 15's qualification scope and backend limits are recorded in
+[`../phase15/ACCEPTANCE.md`](../phase15/ACCEPTANCE.md).

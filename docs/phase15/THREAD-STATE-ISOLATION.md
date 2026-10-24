@@ -4,7 +4,7 @@ Status: M and C accepted Phase 15 qualification for the pinned locally
 modified QEMU 11.1.2 TCG backend. Strict `#XF` delivery passed on both CPU
 profiles with containment and cleanup. The historical 120/120 diagnostic
 aggregate remains separate, and the accepted result does not claim upstream or
-hardware execution. ADR-0113 remains Proposed. See
+hardware execution. M accepted ADR-0113 on 2026-10-24. See
 [qualification](QUALIFICATION.md) and [the acceptance record](ACCEPTANCE.md).
 
 ## Ownership and transition rule

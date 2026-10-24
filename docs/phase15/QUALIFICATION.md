@@ -1,10 +1,10 @@
 # Phase 15 qualification record
 
 Status: **Phase 15 qualification ACCEPTED by M and C for the pinned, locally
-modified QEMU 11.1.2 TCG backend**. ADR-0113 remains Proposed as a separate
-architecture decision. The acceptance is scoped to explicit `-accel tcg`; it is
-not upstream-QEMU or hardware-backed qualification. See
-[the acceptance record](ACCEPTANCE.md).
+modified QEMU 11.1.2 TCG backend**. M accepted ADR-0113 on 2026-10-24. The
+qualification is scoped to explicit `-accel tcg`; it is not upstream-QEMU or
+hardware-backed qualification. See [the acceptance record](ACCEPTANCE.md) and
+[ADR-0113](../adr/0113-native-fpu-simd-state.md).
 
 ## Current completed evidence (2026-10-24)
 
@@ -37,9 +37,10 @@ not upstream-QEMU or hardware-backed qualification. See
   semantic failure with QEMU exit zero, and failed accelerator initialization.
   See [package verification receipts](receipts/package-verification/README.md).
 
-M and C accepted the scoped qualification after C's independent review.
-VirtualBox remains paused. ADR-0113 remains Proposed; no merge, release, or
-Phase 16 work is included.
+M and C accepted the scoped qualification after C's independent review, and M
+accepted ADR-0113 on 2026-10-24. VirtualBox remains paused. PR
+[#4](https://github.com/zeromike12/ArenaOS/pull/4) is open against `main` and
+has not been merged. No release or Phase 16 work is included.
 
 ## Historical pre-stability recovery snapshot (2026-10-21)
 

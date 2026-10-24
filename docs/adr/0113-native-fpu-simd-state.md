@@ -1,8 +1,7 @@
 # ADR-0113: Native x87/SSE execution with eager per-thread state
 
-Status: **Proposed** — implementation on `arena/phase15-fpu-simd` is
-experimental until the architecture-review process accepts this ADR.
-Date: 2026-10-11
+Status: **Accepted** by M on 2026-10-24.
+Date proposed: 2026-10-11; date accepted: 2026-10-24.
 Milestone context: Phase 15
 
 ## Numbering
@@ -38,7 +37,9 @@ profile `0x3`, verifies it, and then clears CR4.OSXSAVE. When firmware already
 has OSXSAVE clear, XCR0 is not accessible and is left untouched; extended
 vector execution remains disabled by the cleared CR4 bit.
 
-This is a proposed decision, not an accepted production architecture.
+M accepted this architecture on 2026-10-24. The decision is scoped to the
+documented x87/MMX/SSE/SSE2 state profile; AVX-family execution remains
+unsupported. Qualification evidence and backend limits are recorded below.
 
 ## CPU initialization and refusal
 
@@ -132,46 +133,39 @@ containment, Phase-14 compatibility, historical suites, fresh T2/T3/T4 boots,
 and independent extraction of the exact tested archive. T4 requires 100/100
 fresh boots with zero failures. No historical receipt can qualify this change.
 
-Current branch evidence isolates an unmasked `sqrtss` invalid operation with
-MXCSR `0x1F00` immediately before execution. The latest QEMU 11.1.2 TCG run
-returns with MXCSR `0x1F01` without delivering vector 19 on both tested CPU
-profiles; the earlier QEMU 10.0.13 TCG trial also failed. The strict guest
-test remains failed, with sibling/peer and resource-cleanup receipts recorded.
-This observation does not accept the ADR or establish production `#XF`
-containment.
+**Current decision and qualification (2026-10-24).** M accepted ADR-0113.
+Phase 15 qualification was accepted by M and C for the exact locally modified
+QEMU 11.1.2 TCG backend, using explicit `-accel tcg`. The unchanged strict guest
+passed 6/6 under both `max,+nx,+smep,+smap` and `qemu64,+nx,+smep,+smap`, with
+genuine instruction-generated vector 19, status `0x113`, fault-thread
+termination, sibling and independent-process survival, scheduler-slot and
+resource reclamation, continued kernel operation, and clean shutdown. The
+strict T2/T3/T4 gates passed 10/10, 25/25, and 100/100; the current registered
+suite passed 121/121. Expanded independent legacy SSE/SSE2 controls, canonical
+build, host checks, and the integer-only kernel ISA audit passed. C reviewed the
+evidence and confirmed the PR-head kernel, userspace, and tools match qualified
+source commit `f54797f2fb5bac0b3440f986d2120382b3611ecc`. See
+[`docs/phase15/QUALIFICATION.md`](../phase15/QUALIFICATION.md) and
+[`docs/phase15/ACCEPTANCE.md`](../phase15/ACCEPTANCE.md) for the review record,
+artifact identities, and receipts.
 
-On 2026-10-21 the local runtime was restored from official Debian packages and
-the official Rust distribution. An uninterrupted historical diagnostic
-aggregate passed 120/120 on commit
-`989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. Fresh diagnostic T2/T3/T4 runs
-passed 10/10, 25/25, and 100/100; the diagnostic image explicitly does not run
-`#XF`, so the official stability gates remain open. QEMU advertises KVM, but
-`/dev/kvm` is absent and explicit `-accel kvm` initialization fails. Bochs 3.1
-was tried under two CPU profiles and page-faulted in OVMF before ArenaOS. No
-hardware-backed or independent-emulator `#XF` result is claimed. See
-[`docs/phase15/QUALIFICATION.md`](../phase15/QUALIFICATION.md) and the
-[`phase15-local-recovery.json`](../phase15/receipts/phase15-local-recovery.json)
-receipt for exact identities and logs.
+This acceptance is limited to the exact pinned, locally modified TCG backend
+and tested instruction subset. It is not upstream-QEMU, hardware-backed,
+Windows/WHPX, or comprehensive SIMD qualification. KVM was unavailable because
+`/dev/kvm` was absent. The external KVM/WHPX kit remains a separate optional
+hardware execution path and did not produce the accepted result.
 
-### External hardware verification status
+**Historical unsuccessful attempts (superseded by the results above).**
+Unmodified QEMU 8.2.2, 10.0.13, and 11.1.2 TCG trials failed the strict
+unmasked `SQRTSS` delivery check: with MXCSR `0x1F00` before execution, the
+instruction returned with `0x1F01` rather than delivering vector 19. Diagnostic
+stability on the earlier image passed 10/10, 25/25, and 100/100 but omitted
+`#XF` and did not satisfy strict stability. Bochs 3.1 faulted inside OVMF
+before reaching ArenaOS. These results remain preserved as historical evidence
+in the qualification record and receipts; they are not the final pinned-backend
+result.
 
-- **SOURCE-REVIEWED** — the external KVM/WHPX kit runs the unchanged strict
-  M15 test and preserves the exact CPL3 source fixture and images.
-- **HOST-TESTED** — image identity and embedded EFI checks are part of kit
-  creation and receipt verification.
-- **TCG-GUEST-TESTED** — the 120/120 historical diagnostic aggregate and
-  diagnostic T2/T3/T4 pass; strict `#XF` fails on QEMU TCG.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**. QEMU and OVMF were restored,
-  but `/dev/kvm` is absent; WHPX is unavailable on this Linux host.
-- **NOT RUN** — official strict T2/T3/T4. The diagnostic stability runs do
-  not satisfy those gates.
-
-The portable runner is an evidence collection path, not an architecture
-decision. ADR-0113 remains **Proposed** until the architecture review records
-an explicit decision; successful external `#XF` evidence alone does not accept
-this ADR or qualify integration.
-
-If state ownership, exception containment, the integer-only audit, or a
-required guest gate cannot be proven, do not qualify this phase. The rollback
-is to revert Phase-15 commits and restore the accepted ADR-0012 no-FP execution
-contract; do not ship a build that partially enables the facilities.
+If future evidence invalidates state ownership, exception containment, the
+integer-only audit, or a required gate, suspend qualification and revise this
+accepted decision through a new ADR. Do not ship a build that partially enables
+the facilities.

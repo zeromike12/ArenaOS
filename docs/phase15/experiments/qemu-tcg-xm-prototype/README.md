@@ -3,7 +3,8 @@
 **Current Phase 15 status: ACCEPTED by M and C for this exact locally modified
 QEMU TCG backend.** This prototype record preserves the experiment and its
 pre-acceptance evidence; it is not an upstream-QEMU or hardware-backed result.
-ADR-0113 remains Proposed. See [`../../ACCEPTANCE.md`](../../ACCEPTANCE.md).
+M accepted ADR-0113 on 2026-10-24. See [`../../ACCEPTANCE.md`](../../ACCEPTANCE.md)
+and [the accepted ADR](../../../adr/0113-native-fpu-simd-state.md).
 
 ## Current results
 
@@ -188,5 +189,6 @@ strict test under both CPU profiles, and reran the expanded controls. M and C
 accepted Phase 15 on 2026-10-24 for the exact pinned locally modified TCG
 backend; see [`../../ACCEPTANCE.md`](../../ACCEPTANCE.md). The historic
 120/120 diagnostic aggregate remains separate and does not substitute for the
-strict gates. ADR-0113 remains Proposed; this acceptance does not merge or
-release the milestone.
+strict gates. M accepted ADR-0113. PR
+[#4](https://github.com/zeromike12/ArenaOS/pull/4) is open against `main` and
+has not been merged; this evidence record does not publish a release.

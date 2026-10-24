@@ -24,6 +24,11 @@ instruction, SDL3 compatibility, or the Arena 2 C runtime.
   the patched/unpatched controls. C inspected the existing regression and
   stability evidence; C did not rerun those long suites. Its strict replay used
   the existing TCP transport and changed no guest or test-tool source.
+- For PR closeout, C reviewed PR head
+  `511e69dc35a7ed51f8f75118853f797ee04a8694` and confirmed that `kernel/`,
+  `userspace/`, and `tools/` match qualified source commit
+  `f54797f2fb5bac0b3440f986d2120382b3611ecc`. The closeout commit is limited to
+  documentation and does not alter those trees.
 - The immutable qualification package SHA-256 is
   `63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73`.
   C's independent acceptance-review ZIP SHA-256 is
@@ -51,10 +56,13 @@ claim complete SIMD exception emulation. KVM and WHPX were not used.
 
 ## Decision boundary
 
-ADR-0113 remains **Proposed** pending a separate architecture decision. This
-acceptance does not merge a branch, approve Arena 1 or Arena 2 integration,
-publish a release, or begin Phase 16. Arena 1 SDL3 execution and Arena 2 C
-runtime/libc integration were not qualified by these tests.
+M separately accepted ADR-0113 on 2026-10-24. The architecture decision and
+Phase 15 qualification remain scoped to the documented x87/MMX/SSE/SSE2
+profile and exact pinned locally modified TCG backend. PR
+[#4](https://github.com/zeromike12/ArenaOS/pull/4) is open against `main` and
+has not been merged. This record does not approve Arena 1 or Arena 2
+integration, publish a release, or begin Phase 16. Arena 1 SDL3 execution and
+Arena 2 C runtime/libc integration were not qualified by these tests.
 
 See the [complete qualification record](QUALIFICATION.md),
 [backend report](PATCHED-TCG-QUALIFICATION.md),

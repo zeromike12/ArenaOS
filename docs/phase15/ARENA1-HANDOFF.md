@@ -5,7 +5,7 @@ QEMU 11.1.2 TCG backend. The native x86-64 contract uses eager per-thread
 FXSAVE64/FXRSTOR64 and private x87, MMX, XMM0–XMM15, x87 control/status, and
 MXCSR state across syscalls and scheduler switches. Arena 1's SDL3 executable
 has **not** been run by this Phase-15 guest fixture, so this handoff does not
-claim SDL3 compatibility. ADR-0113 remains Proposed; see
+claim SDL3 compatibility. ADR-0113 was accepted by M on 2026-10-24; see
 [the scoped acceptance record](ACCEPTANCE.md). No hardware-backed result or
 application integration is implied.
 

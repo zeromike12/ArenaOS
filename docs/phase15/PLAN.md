@@ -3,18 +3,20 @@
 ## Current qualification status (2026-10-24)
 
 Phase 15 qualification is **ACCEPTED by M and C** for the exact pinned, locally
-modified QEMU 11.1.2 TCG backend. See [the acceptance record](ACCEPTANCE.md) and
-[current qualification report](QUALIFICATION.md). ADR-0113 remains Proposed;
-this does not imply upstream-QEMU, hardware, Windows, SDL3, or C-runtime
-qualification. The implementation plan below records the earlier recovery
-baseline and is retained as historical context.
+modified QEMU 11.1.2 TCG backend. M accepted ADR-0113 on 2026-10-24. See
+[the acceptance record](ACCEPTANCE.md), [ADR-0113](../adr/0113-native-fpu-simd-state.md),
+and [current qualification report](QUALIFICATION.md). This does not imply
+upstream-QEMU, hardware, Windows, SDL3, or C-runtime qualification. The
+implementation plan below records the earlier recovery baseline and is retained
+as historical context.
 
 ## Historical implementation plan and gates
 
 Phase 15 adds a bounded x87/SSE execution contract to the Phase-14 mainline at
 `1aa35f4c20c9bb386612298fe21574897cf14159`. Work is on
 `arena/phase15-fpu-simd`; source tested in the latest local recovery is
-`989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. ADR-0113 remains Proposed.
+`989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. At that recovery point ADR-0113
+was Proposed; M accepted it on 2026-10-24 as recorded above.
 
 ## Architecture decision
 
@@ -23,8 +25,8 @@ fixed 64-slot table and one switch leaf shared by yield, blocking, exit, and
 timer preemption. Each private image is 512 bytes and 16-byte aligned (32 KiB
 total). CPUID x87/FXSAVE/SSE/SSE2 are required. AVX-family state is not enabled.
 ADR-0113 avoids the active C-runtime reservation; ADR-0112 and accepted ADRs
-were not renumbered. The proposal remains Proposed pending architecture review
-and qualification.
+were not renumbered. At the time of this historical plan, the proposal awaited
+architecture review and qualification. The current decision is recorded above.
 
 ## Completed work and latest local evidence
 
@@ -58,7 +60,7 @@ and qualification.
    has no QEMU or `/dev/kvm`; its external-runner preflight is BLOCKED and
    starts no guest. See [the downloadable kit handoff](EXTERNAL-KIT.md).
 
-## Qualification gates
+## Historical qualification gates at the recovery baseline (2026-10-21)
 
 | Gate | Evidence | Result |
 |---|---|---|
@@ -72,8 +74,9 @@ and qualification.
 | Archive | Raw current-run receipts, exact images, probes, firmware identity, and checksums | Verified diagnostic evidence; not a release candidate |
 | Strict hardware-backed `#XF` | No KVM device; TCG fails; Bochs did not reach ArenaOS | Blocked; external capable host required |
 
-The acceptance gate remains **PARTIAL / UNQUALIFIED** until genuine vector 19
-delivery and containment pass under a supported backend. Diagnostic stability
-does not qualify Phase 15. No Phase 16 work, merge, pull request, or release is
-part of this plan. See [qualification](QUALIFICATION.md) and the
-[final report](FINAL-REPORT.md) for exact receipts and current gate status.
+At that recovery baseline the acceptance gate remained **PARTIAL / UNQUALIFIED**:
+genuine vector 19 and strict stability had not passed. Diagnostic stability did
+not qualify Phase 15. PR [#4](https://github.com/zeromike12/ArenaOS/pull/4) is
+now open against `main` and has not been merged. No release or Phase 16 work has
+begun. See [current qualification](QUALIFICATION.md) and the [final
+report](FINAL-REPORT.md) for the accepted results and exact receipts.

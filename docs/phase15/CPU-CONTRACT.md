@@ -1,8 +1,8 @@
 # Phase 15 CPU contract
 
 Status: Phase 15 is **qualified and accepted by M and C** for the pinned,
-locally modified QEMU 11.1.2 TCG backend. ADR-0113 remains Proposed as a separate
-architecture decision. The accepted profile is the existing x87/MMX/SSE/SSE2
+locally modified QEMU 11.1.2 TCG backend. M accepted ADR-0113 on 2026-10-24.
+The accepted profile is the existing x87/MMX/SSE/SSE2
 contract; it does not establish upstream-QEMU, hardware, SDL3, or C-runtime
 compatibility. See [the acceptance record](ACCEPTANCE.md).
 

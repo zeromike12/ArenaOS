@@ -1,10 +1,10 @@
 # Phase 15 locally modified QEMU TCG qualification
 
 Phase 15 qualification was **ACCEPTED by M and C on 2026-10-24** for the
-explicitly pinned, locally modified QEMU TCG backend. ADR-0113 remains Proposed
-as a separate architecture decision. No ArenaOS kernel source or strict
-acceptance assertion was changed for exception delivery. This result is neither
-upstream-QEMU nor hardware-backed; see the [acceptance record](ACCEPTANCE.md).
+explicitly pinned, locally modified QEMU TCG backend. M accepted ADR-0113 on
+2026-10-24. No ArenaOS kernel source or strict acceptance assertion was changed
+for exception delivery. This result is neither upstream-QEMU nor
+hardware-backed; see the [acceptance record](ACCEPTANCE.md).
 
 ## Tested backend and immutable artifacts
 
@@ -122,5 +122,6 @@ the final fresh extraction passed. These did not change guest evidence.
 
 This archive is distinct from the hardware-only KVM/WHPX external kit in
 [`EXTERNAL-KIT.md`](EXTERNAL-KIT.md). Windows guest execution and hardware
-acceleration were not tested. M and C accepted this scoped backend result; ADR-0113
-remains Proposed, and no branch merge or release is included.
+acceleration were not tested. M and C accepted this scoped backend result, and
+M accepted ADR-0113. PR [#4](https://github.com/zeromike12/ArenaOS/pull/4) is
+open against `main` and has not been merged; no release is included.
