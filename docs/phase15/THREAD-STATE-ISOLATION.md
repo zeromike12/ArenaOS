@@ -1,12 +1,11 @@
 # Phase 15 thread-state isolation
 
-Status: the uninterrupted historical diagnostic aggregate passed **120/120**
-on source commit `989646771a0e288cefdaf0dabc5f5baa9bf1ed5c`. Thread/process
-isolation, MMX state, fresh-slot cleanup, `#MF`, and `#UD` passed. Overall
-Phase 15 remains **PARTIAL / UNQUALIFIED** because strict `#XF` delivery has
-not passed. ADR-0113 remains Proposed. See
-[qualification](QUALIFICATION.md) and the
-[current local recovery receipt](receipts/phase15-local-recovery.json).
+Status: M and C accepted Phase 15 qualification for the pinned locally
+modified QEMU 11.1.2 TCG backend. Strict `#XF` delivery passed on both CPU
+profiles with containment and cleanup. The historical 120/120 diagnostic
+aggregate remains separate, and the accepted result does not claim upstream or
+hardware execution. ADR-0113 remains Proposed. See
+[qualification](QUALIFICATION.md) and [the acceptance record](ACCEPTANCE.md).
 
 ## Ownership and transition rule
 
@@ -45,29 +44,28 @@ OSXSAVE diagnostic entered with XCR0 `0x7` and verified sanitation to `0x3`.
 The M15 diagnostic reports 5/5 while explicitly saying `#XF NOT RUN`.
 
 The strict `#XF` probe uses one faulting thread, a same-process sibling, and a
-separate peer. QEMU TCG returns MXCSR `0x1F01` instead of delivering vector 19;
-the guest records that failure while the sibling and peer exit 42, the fault
-slot is released, and resources return to baseline. Those cleanup receipts do
-not turn the `#XF` test into a pass. `#MF` and `#UD` containment pass separately.
+separate peer. On the pinned patched QEMU TCG backend, it delivered vector 19
+with status `0x113`; the faulting thread terminated, sibling and peer survived,
+the scheduler slot was reclaimed, resources returned to baseline, and the
+kernel shut down cleanly. C independently replayed both profiles and inspected
+the existing per-boot receipts. See [the acceptance record](ACCEPTANCE.md).
 
-The immutable diagnostic EFI/ESP completed T2/T3/T4 at 10/10 in 95 seconds,
-25/25 in 237 seconds, and 100/100 in 952 seconds on QEMU 11.1.2 TCG. Each boot
-exercised the diagnostic Phase-15 thread/process/MMX coverage while explicitly
-reporting `#XF NOT RUN`; these counts do not satisfy official exception
-qualification.
+The diagnostic EFI/ESP still explicitly reports `#XF NOT RUN`; its 120/120
+aggregate and earlier diagnostic stability remain separate from the strict
+qualification. Official strict T2/T3/T4 passed on the immutable strict image
+pair under the pinned patched backend.
 
-## External strict verification
+## Independent review and qualification scope
 
 - **SOURCE-REVIEWED** — the CPL3 fixture executes unmasked `SQRTSS` with
   MXCSR `0x1F00`; the kernel expects exit status `0x113` from vector 19.
 - **HOST-TESTED** — the external kit pins the strict EFI, ESP, and compiled
   fixture hashes and checks the EFI embedded in the ESP.
-- **TCG-GUEST-TESTED** — the latest QEMU 11.1.2 run, under both CPU profiles,
-  shows the sticky invalid flag but no vector 19, so the strict case fails.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** until KVM or WHPX produces a
-  passing guest receipt with sibling/peer survival and exact teardown.
-- **NOT RUN** — official strict T2/T3/T4. KVM cannot initialize because this
-  host has no `/dev/kvm`; the T2/T3/T4 results above are diagnostic-only.
+- **LOCALLY-MODIFIED-TCG-GUEST-QUALIFIED** — the strict guest passed on both
+  CPU profiles and official strict T2/T3/T4 passed 10/10, 25/25, and 100/100.
+- **HARDWARE-BACKED-GUEST-TESTED** — not claimed; KVM or WHPX was not used.
+- **NOT RUN** — Windows/WHPX guest execution and application-level SDL3/C
+  runtime compatibility.
 
 Run instructions and the receipt verifier are in
 `tools/phase15_external/README.md`. A QEMU accelerator startup by itself does

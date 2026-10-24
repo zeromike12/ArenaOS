@@ -1,0 +1,35 @@
+{
+  "accelerator_initialized": true,
+  "accelerator_requested": "-accel tcg",
+  "accelerators_advertised": [
+    "tcg"
+  ],
+  "backend_id": "arenaos-qemu-11.1.2-local-patched-tcg-xm",
+  "hardware_acceleration": false,
+  "label": "locally modified QEMU TCG",
+  "paths": {
+    "efi": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/artifacts/arena-boot.efi",
+    "esp": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/artifacts/arena-esp.img",
+    "lib_dir": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/runtime/lib",
+    "ovmf_code": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/firmware/OVMF_CODE_4M.fd",
+    "ovmf_vars": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/firmware/OVMF_VARS_4M.fd",
+    "qemu": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/qemu-system-x86_64-patched",
+    "rom_dir": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/pc-bios"
+  },
+  "qemu_version": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+  "runtime_library_sha256": {
+    "libglib-2.0.so.0.8400.4": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d",
+    "libpixman-1.so.0.44.0": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd",
+    "libslirp.so.0.4.0": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3"
+  },
+  "sha256": {
+    "efi": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "esp": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "ovmf_code": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "ovmf_vars": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+    "qemu": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff"
+  },
+  "smoke_command": "/workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/qemu-system-x86_64-patched -accel tcg -L /workspace/scratch/e078634cacf3/phase15-qualification-review-20261024/extracted/backend/pc-bios -machine q35 -m 64M -cpu qemu64,+nx,+smep,+smap -nodefaults -display none -serial none -monitor none -S -qmp stdio",
+  "smoke_exit": 0,
+  "smoke_output": "{\"QMP\": {\"version\": {\"qemu\": {\"micro\": 2, \"minor\": 1, \"major\": 11}, \"package\": \"\"}, \"capabilities\": [\"oob\"]}}\n{\"return\": {}}\n{\"timestamp\": {\"seconds\": 1792874663, \"microseconds\": 615393}, \"event\": \"SHUTDOWN\", \"data\": {\"guest\": false, \"reason\": \"host-qmp-quit\"}}\n{\"return\": {}}\n"
+}

@@ -1,16 +1,13 @@
 # Arena 1 CPU handoff
 
-Phase 15 proposes a native x86-64 execution profile with eager per-thread
-FXSAVE64/FXRSTOR64. The user thread owns private x87, MMX, XMM0–XMM15, x87
-control/status, and MXCSR state across direct syscalls, yield, blocking/wake,
-and scheduler switches. Arena 1's SDL3 executable has **not** been run by this
-Phase-15 guest fixture, so this handoff does not claim SDL3 compatibility.
-ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**; these CPU
-capabilities are not release guarantees. The latest historical diagnostic
-aggregate passed 120/120. Fresh diagnostic T2/T3/T4 passed 10/10, 25/25, and
-100/100 under QEMU 11.1.2 TCG, but strict unmasked SIMD `#XF` delivery failed
-on both CPU profiles. This host has no `/dev/kvm`; Bochs 3.1 stopped in OVMF
-before ArenaOS. The official gates remain blocked.
+Phase 15 qualification is accepted by M and C for the pinned locally modified
+QEMU 11.1.2 TCG backend. The native x86-64 contract uses eager per-thread
+FXSAVE64/FXRSTOR64 and private x87, MMX, XMM0–XMM15, x87 control/status, and
+MXCSR state across syscalls and scheduler switches. Arena 1's SDL3 executable
+has **not** been run by this Phase-15 guest fixture, so this handoff does not
+claim SDL3 compatibility. ADR-0113 remains Proposed; see
+[the scoped acceptance record](ACCEPTANCE.md). No hardware-backed result or
+application integration is implied.
 
 ## Supported profile
 
@@ -20,10 +17,9 @@ before ArenaOS. The official gates remain blocked.
 - AVX/VEX, YMM upper halves, AVX2, AVX-512, ZMM, and AMX are unsupported.
   OSXSAVE is cleared; unsupported user instructions are delivered as contained
   thread faults.
-- The proposed per-thread context is tested for x87, scalar SSE/SSE2, MXCSR,
-  all sixteen XMM registers, MMX, yield, blocking join, timer preemption,
-  separate address spaces, fresh slots, and OSXSAVE/XCR0 sanitation. Consult
-  `QUALIFICATION.md` for the strict `#XF` blocker and diagnostic-only status.
+- The per-thread context is qualified for the scoped x87/SSE state contract
+  and tested genuine vector-19 path on the pinned modified TCG backend. Consult
+  `QUALIFICATION.md` for backend limits and the untested SDL3 integration.
 
 ## Compiler and runtime guidance
 
@@ -45,13 +41,11 @@ Phase-15 qualification image before declaring it compatible.
 - **SOURCE-REVIEWED** — the proposed x86-64 x87/SSE2 contract and per-thread
   state ownership are documented; no SDL3 application source was changed.
 - **HOST-TESTED** — strict image identity is pinned in the external test kit.
-- **TCG-GUEST-TESTED** — the uninterrupted 120/120 historical diagnostic
-  aggregate and diagnostic T2/T3/T4 pass; strict unmasked `#XF` fails under
-  QEMU 11.1.2 TCG.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED**; `/dev/kvm` is absent and
-  WHPX is not applicable on this Linux host.
-- **NOT RUN** — Arena 1 SDL3 launch, native library integration, and official
-  strict T2/T3/T4 qualification.
+- **LOCALLY-MODIFIED-TCG-GUEST-QUALIFIED** — strict `#XF` passed on both CPU
+  profiles and T2/T3/T4 passed 10/10, 25/25, and 100/100 on the pinned backend.
+- **HARDWARE-BACKED-GUEST-TESTED** — not claimed; `/dev/kvm` is absent and
+  Windows/WHPX was not run.
+- **NOT RUN** — Arena 1 SDL3 launch and native library/application integration.
 
 Keep distributable code at the x86-64 baseline with CPUID-gated optional SSE
 features and no AVX requirement. Do not advertise Arena 1 compatibility from

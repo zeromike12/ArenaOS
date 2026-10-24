@@ -1,8 +1,10 @@
 # Phase 15 external execution kit handoff
 
-Phase 15 remains **PARTIAL / UNQUALIFIED**. This archive is a runnable strict
-`#XF` handoff for a suitable external host; it is not a qualification result,
-release, or approval of ADR-0113.
+Phase 15 qualification is **ACCEPTED by M and C** for the pinned locally
+modified QEMU TCG backend documented in [the acceptance record](ACCEPTANCE.md).
+This separate archive is an optional KVM/WHPX strict-test handoff for a suitable
+external host; it is not the backend used for that acceptance and does not
+establish a hardware result or approve ADR-0113.
 
 ## Download
 
@@ -109,12 +111,9 @@ guest test whose semantic exit or strict assertion failed.
   tests do not establish Windows guest execution.
 
 At the time of this handoff check, the environment had no QEMU binary,
-`/dev/kvm`, PowerShell, or Bochs; the runner started no guest. A later local
-experiment using a modified QEMU 11.1.2 TCG build delivered vector 19 in the
-unchanged strict ArenaOS test and passed separate exception controls. That
-prototype remains experimental and is not accepted Phase 15 qualification;
-see the [QEMU TCG prototype record](experiments/qemu-tcg-xm-prototype/README.md).
-This kit does not complete the official strict T2/T3/T4 gates, final-source
-build and ISA checks, protected Phase 14 identity checks, or final qualification
-archive. See [qualification status](QUALIFICATION.md) for the remaining gates
-and preserved evidence.
+`/dev/kvm`, PowerShell, or Bochs; the runner started no guest. The later pinned
+modified-TCG qualification and M/C acceptance are documented in
+[the QEMU TCG record](PATCHED-TCG-QUALIFICATION.md). This external kit remains
+unexecuted as a hardware-backed workflow; Windows/WHPX was not tested. See
+[the current qualification record](QUALIFICATION.md) for the accepted backend
+scope and preserved evidence.

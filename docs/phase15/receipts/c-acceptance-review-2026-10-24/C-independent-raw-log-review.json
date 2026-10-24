@@ -1,0 +1,32 @@
+{
+  "file_hashes_verified": 2319,
+  "strict_stability": {
+    "T2": {
+      "boots": 10,
+      "unique_serial_hashes": 10,
+      "all_strict_markers": true,
+      "attempted": 10,
+      "failed": 0,
+      "timeouts": 0,
+      "retries": 0
+    },
+    "T3": {
+      "boots": 25,
+      "unique_serial_hashes": 25,
+      "all_strict_markers": true,
+      "attempted": 25,
+      "failed": 0,
+      "timeouts": 0,
+      "retries": 0
+    },
+    "T4": {
+      "boots": 100,
+      "unique_serial_hashes": 100,
+      "all_strict_markers": true,
+      "attempted": 100,
+      "failed": 0,
+      "timeouts": 0,
+      "retries": 0
+    }
+  }
+}

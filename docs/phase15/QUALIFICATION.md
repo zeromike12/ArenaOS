@@ -1,9 +1,10 @@
 # Phase 15 qualification record
 
-Status: **qualification candidate using locally modified QEMU TCG; Phase 15
-remains PARTIAL / UNQUALIFIED pending M/C review and final acceptance**. ADR-0113
-remains Proposed. The Linux backend is locally modified QEMU 11.1.2 TCG with
-explicit `-accel tcg`; results are not upstream-QEMU or hardware-backed.
+Status: **Phase 15 qualification ACCEPTED by M and C for the pinned, locally
+modified QEMU 11.1.2 TCG backend**. ADR-0113 remains Proposed as a separate
+architecture decision. The acceptance is scoped to explicit `-accel tcg`; it is
+not upstream-QEMU or hardware-backed qualification. See
+[the acceptance record](ACCEPTANCE.md).
 
 ## Current completed evidence (2026-10-24)
 
@@ -36,9 +37,9 @@ explicit `-accel tcg`; results are not upstream-QEMU or hardware-backed.
   semantic failure with QEMU exit zero, and failed accelerator initialization.
   See [package verification receipts](receipts/package-verification/README.md).
 
-M is the architecture and final acceptance decision maker; C reviews the
-receipts. VirtualBox remains paused. No merge, release, or Phase 16 work is
-included.
+M and C accepted the scoped qualification after C's independent review.
+VirtualBox remains paused. ADR-0113 remains Proposed; no merge, release, or
+Phase 16 work is included.
 
 ## Historical pre-stability recovery snapshot (2026-10-21)
 
@@ -81,8 +82,10 @@ archive SHA-256, direct download URL, source identity, and fresh-extraction
 checks are recorded in that handoff. This execution host has no QEMU, KVM
 device, PowerShell, or Bochs; the packaged KVM runner returned BLOCKED and
 started no guest. The Windows path is source-reviewed and not executed.
-Phase 15 remains **PARTIAL / UNQUALIFIED**; genuine vector 19 and official
-strict T2/T3/T4 remain unqualified.
+At the time of this 2026-10-21 kit handoff, Phase 15 remained **PARTIAL /
+UNQUALIFIED**; genuine vector 19 and official strict T2/T3/T4 were still open.
+The current acceptance is recorded at the top of this file and in
+[ACCEPTANCE.md](ACCEPTANCE.md).
 
 ## Previous recovery snapshot (2026-10-12; superseded)
 

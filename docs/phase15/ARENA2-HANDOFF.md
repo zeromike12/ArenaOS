@@ -1,17 +1,12 @@
 # Arena 2 C runtime handoff
 
-Phase 15 proposes enabling native x87 and SSE-family execution with eager
-per-thread state preservation. Each scheduler thread receives a clean,
-private FXSAVE64 image; the common switch saves/restores x87 state, XMM0–XMM15,
-and MXCSR during yield, blocking/wake, timer preemption, and address-space
-switching. New and recycled slots receive the clean template. See
-`QUALIFICATION.md` for which behaviors have actually passed guest gates.
-ADR-0113 remains proposed and Phase 15 is **PARTIAL / UNQUALIFIED**, so this is
-not yet a release-guaranteed CPU contract. The uninterrupted historical
-diagnostic aggregate passed 120/120. Fresh diagnostic T2/T3/T4 passed 10/10,
-25/25, and 100/100 on QEMU 11.1.2 TCG. Strict `#XF` delivery still fails on
-both tested CPU profiles; `/dev/kvm` is absent and Bochs did not reach ArenaOS,
-so the official stability gates remain blocked.
+Phase 15 qualification is accepted by M and C for the pinned locally modified
+QEMU 11.1.2 TCG backend. The native x87/SSE-family profile preserves each
+scheduler thread's private FXSAVE64 image across yield, blocking/wake, timer
+preemption, and address-space switching. See `QUALIFICATION.md` and
+[the scoped acceptance record](ACCEPTANCE.md). ADR-0113 remains Proposed.
+This acceptance does not qualify Arena 2 libc/runtime integration, application
+packages, upstream QEMU, or hardware execution.
 
 ## C compiler profile
 
@@ -36,9 +31,9 @@ capability setup, and syscall wrappers.
 
 Delivered unmasked x87 exceptions and unsupported instructions in ring 3 use
 the existing user-thread fault path, with status `0x100 + vector`; guest tests
-verified x87 `#MF` and unsupported-instruction `#UD`. SIMD `#XF` delivery
-remains unqualified because QEMU TCG sets the MXCSR status flag but does not
-deliver vector 19. CPL0 exceptions remain fail-stop. AVX-family state is
+verified x87 `#MF`, `#UD`, and genuine SIMD `#XF` vector-19 delivery on the
+pinned locally modified QEMU TCG backend. This does not claim upstream or
+hardware behavior. CPL0 exceptions remain fail-stop. AVX-family state is
 unsupported, so binaries that require AVX are not compatible with this profile.
 
 ## Qualification status and constraints
@@ -46,12 +41,10 @@ unsupported, so binaries that require AVX are not compatible with this profile.
 - **SOURCE-REVIEWED** — the existing CPL3 invalid-SSE fixture and the
   scheduler-state lifecycle are included in the external test kit.
 - **HOST-TESTED** — strict EFI/ESP and fixture hashes are pinned and verified.
-- **TCG-GUEST-TESTED** — the historical diagnostic aggregate passes 120/120,
-  diagnostic T2/T3/T4 pass, and x87/SSE/SSE2 state, MMX, `#MF`, and `#UD`
-  cases pass. The genuine strict `#XF` case remains a TCG failure.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** pending a passing KVM or WHPX
-  trial with complete contained-fault receipts.
-- **NOT RUN** — Arena 2 C runtime/libc integration and official strict T2/T3/T4.
+- **LOCALLY-MODIFIED-TCG-GUEST-QUALIFIED** — the strict guest passed on both
+  CPU profiles and strict T2/T3/T4 passed 10/10, 25/25, and 100/100.
+- **HARDWARE-BACKED-GUEST-TESTED** — not claimed; KVM/WHPX was not used.
+- **NOT RUN** — Arena 2 C runtime/libc integration or upstream/hardware runs.
 
 Keep Arena 2 code at the baseline x86-64 profile with x87/SSE2 and without AVX
 or AVX-dependent libraries. The external runner requires AVX exposure only

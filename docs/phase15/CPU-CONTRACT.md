@@ -1,9 +1,10 @@
 # Phase 15 CPU contract
 
-Status: the CPU policy and state-management code are implemented on
-`arena/phase15-fpu-simd`; ADR-0113 remains Proposed. The overall phase is
-**PARTIAL / UNQUALIFIED** because unmasked SIMD `#XF` delivery has not passed
-the strict guest gate.
+Status: Phase 15 is **qualified and accepted by M and C** for the pinned,
+locally modified QEMU 11.1.2 TCG backend. ADR-0113 remains Proposed as a separate
+architecture decision. The accepted profile is the existing x87/MMX/SSE/SSE2
+contract; it does not establish upstream-QEMU, hardware, SDL3, or C-runtime
+compatibility. See [the acceptance record](ACCEPTANCE.md).
 
 ## Required processor profile
 
@@ -46,21 +47,18 @@ then observed XCR0 `0x3` and OSXSAVE disabled. See
 The live-IDT audit checks selector, gate attributes, IST, and handler offset
 for all vectors. Vectors 16 (`#MF`) and 19 (`#XF`) use no-error-code stubs;
 the common frame adds the synthetic zero error code. CPL3 `#MF` and `#UD`
-tests pass with sibling and separate-process survival. The strict unmasked
-`sqrtss xmm0,xmm0` `#XF` test remains failed: the latest QEMU 11.1.2 TCG run
-changes MXCSR from `0x1F00` to `0x1F01` without delivering vector 19 on both
-`max` and `qemu64` profiles. The earlier QEMU 10.0.13 TCG run also failed.
-The host `SIGFPE` probe is corroborating evidence only and does not satisfy the
-guest gate.
+tests pass with sibling and separate-process survival. The unmodified QEMU TCG runs failed the strict unmasked
+`sqrtss xmm0,xmm0` probe. The unchanged guest passed on the pinned locally
+modified QEMU 11.1.2 TCG backend, delivering vector 19 on both `max` and
+`qemu64` profiles with expected fault status `0x113`. C independently replayed
+both profiles; see [the acceptance record](ACCEPTANCE.md). The host `SIGFPE`
+probe is corroborating evidence only and is not part of the accepted guest gate.
 
-The historical qualification diagnostic intentionally omits #XF and prints
-`m15: DIAGNOSTIC PASS (5/5; XF NOT RUN)`; it is not the official M15 PASS
-marker. The latest QEMU 11.1.2 diagnostic T2 10/10, T3 25/25, and T4 100/100
-used that image; none qualifies the official gate. This host advertises KVM,
-MSHV, and Nitro, but has no `/dev/kvm`; explicit QEMU 11.1.2 KVM initialization
-fails. Bochs 3.1 also failed in OVMF before ArenaOS started. Official T2/T3/T4
-and release qualification remain blocked until a suitable backend delivers
-and contains `#XF`.
+The historical 120/120 diagnostic aggregate remains distinct from strict
+qualification; its image prints `m15: DIAGNOSTIC PASS (5/5; XF NOT RUN)`. The
+strict image separately passed the official T2 10/10, T3 25/25, and T4 100/100
+gates on pinned modified TCG. This host has no `/dev/kvm`; hardware acceleration
+was not used. Bochs did not reach ArenaOS. No hardware-backed result is claimed.
 
 ## Current qualification labels
 
@@ -68,13 +66,12 @@ and contains `#XF`.
   vector-19 dispatch, and cleanup assertions are preserved in the external kit.
 - **HOST-TESTED** — pinned strict EFI/ESP/fixture identity and the ESP's
   embedded EFI are checked before any guest boot.
-- **TCG-GUEST-TESTED** — the uninterrupted historical diagnostic suite passed
-  120/120; fresh diagnostic T2/T3/T4 passed 10/10, 25/25, and 100/100. Strict
-  `#XF` fails on QEMU 11.1.2 TCG under both CPU profiles.
-- **HARDWARE-BACKED-GUEST-TESTED** — **BLOCKED** until Linux/KVM or Windows/WHPX
-  completes the genuine vector-19 guest test.
-- **NOT RUN** — official strict T2/T3/T4. The final-source historical
-  diagnostic aggregate passed 120/120, but it excludes strict `#XF`.
+- **LOCALLY-MODIFIED-TCG-GUEST-QUALIFIED** — strict 6/6 passed on both CPU
+  profiles; official strict T2/T3/T4 passed 10/10, 25/25, and 100/100; M and C
+  accepted the exact pinned backend after independent review.
+- **HARDWARE-BACKED-GUEST-TESTED** — not claimed; KVM/WHPX guest execution was
+  not part of this accepted backend result.
+- **NOT RUN** — Windows/WHPX and broad SIMD compatibility such as SDL3 workloads.
 
 The external runners use the existing two M15 CPU profiles. Their successful
 receipt must show `fault=0x113`, the ring-3 vector-19 dispatch, sibling and

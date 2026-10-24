@@ -1,0 +1,19 @@
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0002 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+PASS: valid SQRTSS, invalid unmasked, no fault
+PASS: masked invalid SQRTSS sets IE without vector 19
+PASS: old IE unmasked; valid SQRTSS did not fault and kept IE
+PASS: invalid SQRTSS faulted again with IE already sticky; XMM0[127:0] preserved
+PASS: saved RIP matched the exact unmasked SQRTSS opcode
+PASS: unmasked scalar SQRTSS preserved all 128 XMM0 bits
+PASS: CR4.OSXMMEXCPT=0 selected vector 6
+PASS: saved RIP matched the exact OSXMMEXCPT-disabled opcode
+PASS: unmasked DIVSS divide-by-zero delivered vector 19, ZE=1
+PASS: saved RIP matched the exact DIVSS opcode
+PASS: sticky IE=1 was present before the new ZE operation
+PASS: a new unmasked ZE fault delivered vector 19 with old IE already set
+PASS: DIVSS exception preserved all 128 destination bits
+PASS: sticky IE preserved with new ZE; full XMM0 destination preserved
+PASS: packed SQRTPS exceptional lane faulted; all 128 XMM0 bits preserved
+PASS: actual saved RIP matched all six faulting opcode addresses
+RESULT PASS: expanded independent TCG #XM controls

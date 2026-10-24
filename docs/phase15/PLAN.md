@@ -1,5 +1,16 @@
 # ArenaOS Phase 15 plan and status
 
+## Current qualification status (2026-10-24)
+
+Phase 15 qualification is **ACCEPTED by M and C** for the exact pinned, locally
+modified QEMU 11.1.2 TCG backend. See [the acceptance record](ACCEPTANCE.md) and
+[current qualification report](QUALIFICATION.md). ADR-0113 remains Proposed;
+this does not imply upstream-QEMU, hardware, Windows, SDL3, or C-runtime
+qualification. The implementation plan below records the earlier recovery
+baseline and is retained as historical context.
+
+## Historical implementation plan and gates
+
 Phase 15 adds a bounded x87/SSE execution contract to the Phase-14 mainline at
 `1aa35f4c20c9bb386612298fe21574897cf14159`. Work is on
 `arena/phase15-fpu-simd`; source tested in the latest local recovery is

@@ -1,8 +1,9 @@
 # Phase 15 modified-QEMU TCG qualification evidence
 
-**Phase 15 status: PARTIAL / UNQUALIFIED.** The locally modified QEMU TCG
-backend is a qualification candidate for M and C review. Its results are not
-upstream-QEMU or hardware-backed results. ADR-0113 remains Proposed.
+**Current Phase 15 status: ACCEPTED by M and C for this exact locally modified
+QEMU TCG backend.** This prototype record preserves the experiment and its
+pre-acceptance evidence; it is not an upstream-QEMU or hardware-backed result.
+ADR-0113 remains Proposed. See [`../../ACCEPTANCE.md`](../../ACCEPTANCE.md).
 
 ## Current results
 
@@ -178,11 +179,14 @@ The runnable package and concise commands are documented in
 that produces a different QEMU binary hash is a different backend identity;
 do not substitute it without new focused validation and qualification runs.
 
-## Remaining acceptance gates
+## M/C review and acceptance
 
-The historical 120/120 diagnostic aggregate and diagnostic T2/T3/T4
-(10/10, 25/25, 100/100) remain intact and are not strict qualification.
-Strict T2/T3/T4 on the exact strict image pair, the final full registered
-regression run, archive extraction verification, and M/C review remain
-required. Phase 15 stays **PARTIAL / UNQUALIFIED** until M decides after C's
-review. Do not accept ADR-0113 or merge the milestone based on this record.
+The strict two-profile runs, 121-suite registered regression, final-source
+checks, exception controls, and strict T2/T3/T4 gates are complete. C's
+independent review verified the immutable package and raw evidence, replayed the
+strict test under both CPU profiles, and reran the expanded controls. M and C
+accepted Phase 15 on 2026-10-24 for the exact pinned locally modified TCG
+backend; see [`../../ACCEPTANCE.md`](../../ACCEPTANCE.md). The historic
+120/120 diagnostic aggregate remains separate and does not substitute for the
+strict gates. ADR-0113 remains Proposed; this acceptance does not merge or
+release the milestone.

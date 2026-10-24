@@ -1,4 +1,22 @@
 {
+  "acceptance": {
+    "accepted_by": [
+      "M",
+      "C"
+    ],
+    "accepted_on": "2026-10-24",
+    "adr_0113": "Proposed; not accepted by this qualification decision",
+    "archive_snapshot_note": "The immutable qualification archive retains its pre-review candidate status because C independently reviewed that exact archive hash; the current M/C decision is recorded in this repository after review.",
+    "c_review_bundle": "receipts/c-acceptance-review-2026-10-24/",
+    "c_review_bundle_sha256": "095b87e686db628b95bac686241300336db6552623b8500daefb48484b73895c",
+    "decision": "ACCEPTED",
+    "hardware_or_upstream_qualification": false,
+    "qualification_archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+    "record": "ACCEPTANCE.md",
+    "reviewed_head": "da508c6e094b54d5f220621a8d79581ce37f06f1",
+    "scope": "Exact pinned locally modified QEMU 11.1.2 TCG backend with explicit -accel tcg; x87/MMX/SSE state profile and tested genuine CPL3 vector-19 path.",
+    "tested_source_and_tools": "f54797f2fb5bac0b3440f986d2120382b3611ecc"
+  },
   "archive": {
     "artifact_path": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz",
     "checksum_sidecar": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz.sha256",
@@ -41,8 +59,8 @@
     "full_registered_regression_completed": true,
     "hardware_acceleration": false,
     "official_strict_t2_t3_t4_completed": true,
-    "phase15_status": "PARTIAL / UNQUALIFIED pending final M/C review; qualification candidate using locally modified QEMU TCG",
-    "qualification_candidate": true,
+    "phase15_status": "QUALIFIED / ACCEPTED by M and C for the exact pinned locally modified QEMU 11.1.2 TCG backend; no upstream or hardware qualification claim",
+    "qualification_candidate": false,
     "strict_t2_t3_t4_completed": true,
     "upstream_qemu_result": false
   },

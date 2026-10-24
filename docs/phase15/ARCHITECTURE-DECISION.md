@@ -46,8 +46,10 @@ deliver the fault, so that behavior remains unverified. Ordinary kernel code
 stays integer-only.
 
 This decision does not require a security-model change or scheduler redesign.
-Guest isolation, MMX, `#MF`, and `#UD` pass, and the full executable-section ISA
-audit covers 120,911 instructions. Diagnostic T2/T3/T4 achieved 10/10, 25/25,
-and 100/100 boots on one immutable image. The strict `#XF` gate remains failed
-under the available TCG backend, so diagnostic stability does not qualify the
-proposal; ADR-0113 remains Proposed until the gate passes on a credible backend.
+The unchanged strict guest and official strict T2/T3/T4 gates passed on the
+pinned locally modified QEMU TCG backend. M and C accepted Phase 15 qualification
+for that exact backend on 2026-10-24; the detailed evidence is in
+[ACCEPTANCE.md](ACCEPTANCE.md). Unmodified QEMU TCG still lacks the required
+exception delivery, and this result is not upstream or hardware-backed. ADR-0113
+remains Proposed because qualification acceptance does not itself accept the
+architecture decision.
