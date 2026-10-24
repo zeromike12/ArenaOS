@@ -1,0 +1,11 @@
+[options]
+prefix = /tmp/qemu-unpatched-install
+werror = false
+fdt = disabled
+auto_features = disabled
+docs = disabled
+slirp = enabled
+
+[properties]
+native_file = ['/tmp/qemu-unpatched-build/config-meson.cross']
+

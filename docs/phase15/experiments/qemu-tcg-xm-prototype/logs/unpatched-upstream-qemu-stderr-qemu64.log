@@ -1,0 +1,1 @@
+qemu-unpatched-upstream-11.1.2: -chardev socket,id=vcon0,path=/workspace/ArenaOS/build/vcon-phase15-qemu64.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/workspace/ArenaOS/build/vcon-phase15-qemu64.sock,server=on

@@ -2,14 +2,17 @@
 
 Status: **PARTIAL / UNQUALIFIED**. The latest uninterrupted historical
 diagnostic run passed 120/120 suites. Fresh diagnostic T2/T3/T4 runs passed
-10/10, 25/25, and 100/100. Strict `#XF` still fails under QEMU 11.1.2 TCG,
-KVM cannot initialize because `/dev/kvm` is absent, and Bochs 3.1 page-faulted
-in OVMF before reaching ArenaOS. The fresh rerun archive confirms the same
-strict failure under QEMU 8.2.2 TCG on both CPU profiles; its explicit KVM
-attempt was blocked because `/dev/kvm` is absent. Official source review
-identifies the missing TCG SIMD exception-to-vector-19 path in QEMU 8.2.2,
-10.0.13, and 11.1.2; the ArenaOS control setup and containment path show no
-reproduced defect. ADR-0113 remains Proposed. See the
+10/10, 25/25, and 100/100. Unmodified QEMU 8.2.2, 10.0.13, and 11.1.2 TCG
+fail strict `#XF` on the tested profiles; KVM cannot initialize because
+`/dev/kvm` is absent, and Bochs 3.1 page-faulted in OVMF before reaching
+ArenaOS. A local experimental patch to QEMU 11.1.2 TCG passed the unchanged
+strict guest on two profiles and separate exception controls, but does not
+count as official qualification or complete strict stability. No ArenaOS
+kernel source was changed. The experiment, identities, and raw receipts are in
+[`QEMU TCG vector-19 prototype`](experiments/qemu-tcg-xm-prototype/README.md).
+The previous source review identifies the missing upstream TCG SIMD
+exception-to-vector-19 path; the ArenaOS control setup and containment path
+show no reproduced defect. ADR-0113 remains Proposed. See the
 [`QEMU TCG source review`](receipts/qemu-tcg-xf-source-review.md).
 The new raw rerun and its evidence assessment are in
 [`phase15-fresh-rerun-2026-10-21.md`](receipts/phase15-fresh-rerun-2026-10-21.md).

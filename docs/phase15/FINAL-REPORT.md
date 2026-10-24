@@ -1,9 +1,13 @@
 # ArenaOS Phase 15 local qualification recovery
 
 Phase 15 remains **PARTIAL / UNQUALIFIED**. The local historical diagnostic
-regression now passes 120/120 in one uninterrupted run, and fresh diagnostic
-T2/T3/T4 stability runs pass. Strict SIMD `#XF` delivery still fails under
-QEMU TCG, KVM is unavailable in this host, and Bochs did not reach ArenaOS.
+regression passed 120/120 in one uninterrupted run, and fresh diagnostic
+T2/T3/T4 stability runs passed. Unmodified QEMU TCG does not deliver the
+required SIMD `#XF`; KVM is unavailable in this host, and Bochs did not reach
+ArenaOS. A local QEMU 11.1.2 TCG prototype patch passed the unchanged strict
+test on two CPU profiles and separate exception controls, but this modified
+emulator result is experimental and does not complete qualification. See the
+[prototype record and receipts](experiments/qemu-tcg-xm-prototype/README.md).
 ADR-0113 remains **Proposed**. No PR, merge, release, or Phase 16 work was
 created.
 
@@ -79,18 +83,19 @@ A self-contained strict-runner kit is available from the
 ESP, includes their fixture and exact OVMF code/vars, and is downloadable as a
 committed archive with its SHA-256 recorded there. A fresh extraction
 verified all manifest entries and passed five host-only negative controls.
-The current execution environment has no QEMU binary or `/dev/kvm`; the
-external runner correctly returned BLOCKED without starting a guest. The
-Windows/PowerShell path remains unexecuted here.
+At the time of the external-runner check, the execution environment had no
+QEMU binary or `/dev/kvm`; the runner correctly returned BLOCKED without
+starting a guest. A later patched-QEMU experiment is recorded separately above.
+The Windows/PowerShell path remains unexecuted here.
 
 ## Gate decision
 
-Keep Phase 15 **PARTIAL / UNQUALIFIED** and ADR-0113 Proposed. This environment
-cannot satisfy the remaining strict gate: QEMU TCG fails the vector-19 check,
-`/dev/kvm` is unavailable, and Bochs 3.1 did not boot ArenaOS. A strict guest
-run on a host with a successfully initialized hardware accelerator, or on an
-independently functioning emulator, is now required. No exception-delivery
-workaround or synthetic interrupt was added.
+Keep Phase 15 **PARTIAL / UNQUALIFIED** and ADR-0113 Proposed. Unmodified QEMU
+TCG fails the vector-19 check, `/dev/kvm` is unavailable, and Bochs 3.1 did not
+boot ArenaOS. The locally patched QEMU TCG experiment is review evidence only;
+it does not establish qualification on an accepted emulator. M and C should
+review the patch and decide whether it can support further qualification. No
+ArenaOS exception-delivery workaround or synthetic interrupt was added.
 
 Arena 1 SDL3 and Arena 2 runtime integration remain outside the tested scope.
 See the [qualification record](QUALIFICATION.md),

@@ -1,0 +1,75 @@
+{
+  "experiment": "QEMU TCG SIMD floating-point exception delivery prototype",
+  "evidence_class": "experimental modified-emulator result",
+  "qualification_status": "PARTIAL / UNQUALIFIED",
+  "source_baseline": {
+    "repository": "zeromike12/ArenaOS",
+    "branch": "arena/phase15-fpu-simd",
+    "commit": "13986b3dcf007b1721d85ef3509945131f8c6584"
+  },
+  "emulator": {
+    "project": "QEMU",
+    "official_tag": "v11.1.2",
+    "source_archive_sha256": "fc3d810fc6b27f60df77eaf6748004ca76de2edc2c4ff3a9f9a9ada33066c242",
+    "patch_sha256": "c2909ea974f4ccaa9526bd5b70aef5599971bc567dd87d6ba8d9b06b327c8dd2",
+    "unmodified_binary_sha256": "5c79ebb680b564f661c82cee6849428930d12ebf2f77647b252e6cbe8314e7ed",
+    "patched_binary_sha256": "69a91bba3e81c3505575170571888b01e0a585d2a257b2366fe72b3aa983d6cc",
+    "actual_accelerator": "TCG, explicitly selected with -accel tcg",
+    "reported_accelerators": ["tcg"],
+    "kvm_build_support": false,
+    "whpx_build_support": false,
+    "host_dev_kvm_present": false
+  },
+  "guest_artifacts": {
+    "strict_efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "strict_esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "ovmf_code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "ovmf_vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "strict_guest_runs": {
+    "unmodified_qemu": {
+      "max,+nx,+smep,+smap": {
+        "result": "FAIL 5/6; no vector 19; MXCSR 0x1f00 to 0x1f01",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 97,
+        "runner_exit": 1
+      },
+      "qemu64,+nx,+smep,+smap": {
+        "result": "FAIL 5/6; no vector 19; MXCSR 0x1f00 to 0x1f01",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 97,
+        "runner_exit": 1
+      }
+    },
+    "patched_qemu": {
+      "max,+nx,+smep,+smap": {
+        "result": "PASS 6/6",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 0,
+        "runner_exit": 0
+      },
+      "qemu64,+nx,+smep,+smap": {
+        "result": "PASS 6/6",
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 0,
+        "runner_exit": 0
+      }
+    }
+  },
+  "independent_controls": {
+    "result": "PASS on patched QEMU; fails at unmasked invalid SQRTSS on unmodified QEMU",
+    "checks": [
+      "valid SQRTSS with invalid unmasked",
+      "masked invalid SQRTSS updates IE without vector 19",
+      "unmasked invalid SQRTSS delivers vector 19 and preserves destination",
+      "CR4.OSXMMEXCPT=0 selects vector 6",
+      "unmasked DIVSS divide-by-zero delivers vector 19 and sets ZE"
+    ]
+  },
+  "limitations": [
+    "Patch covers selected common SSE arithmetic and square-root helper families only.",
+    "Modified-emulator evidence is not official Phase 15 qualification.",
+    "Official strict T2/T3/T4 stability was not run on the patched emulator."
+  ],
+  "original_full_evidence_bundle_sha256": "a962c27c56d54e0ce67391a0fbc7049539237daf1c21e4698594d389f1265aab"
+}

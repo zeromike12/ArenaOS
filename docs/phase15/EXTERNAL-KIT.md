@@ -108,9 +108,13 @@ guest test whose semantic exit or strict assertion failed.
 - PowerShell and Windows/WHPX guest execution were not run here. Host or mock
   tests do not establish Windows guest execution.
 
-The local environment has no QEMU binary, `/dev/kvm`, PowerShell, or Bochs.
-Therefore genuine vector 19 remains **NOT DELIVERED** in this environment.
-The archive does not complete the official strict T2/T3/T4 gates, final-source
+At the time of this handoff check, the environment had no QEMU binary,
+`/dev/kvm`, PowerShell, or Bochs; the runner started no guest. A later local
+experiment using a modified QEMU 11.1.2 TCG build delivered vector 19 in the
+unchanged strict ArenaOS test and passed separate exception controls. That
+prototype remains experimental and is not accepted Phase 15 qualification;
+see the [QEMU TCG prototype record](experiments/qemu-tcg-xm-prototype/README.md).
+This kit does not complete the official strict T2/T3/T4 gates, final-source
 build and ISA checks, protected Phase 14 identity checks, or final qualification
-archive. See [qualification status](QUALIFICATION.md) for those remaining
-gates and the preserved prior evidence.
+archive. See [qualification status](QUALIFICATION.md) for the remaining gates
+and preserved evidence.

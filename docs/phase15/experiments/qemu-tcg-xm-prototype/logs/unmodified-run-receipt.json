@@ -1,0 +1,190 @@
+{
+  "schema": "arenaos.phase15.local-qemu-run.v1",
+  "run_utc_date": "2026-10-23",
+  "source": {
+    "branch": "arena/phase15-fpu-simd",
+    "commit": "13986b3dcf007b1721d85ef3509945131f8c6584",
+    "source_archive": "source-files.tar.gz",
+    "source_archive_sha256": "ef716751f66f59ca6b45ecb2ae0523e50f01b1008baf73c3b23312c96efd8b91",
+    "strict_image_build_commit": "6586a0a18981932ae7048ca267fa425411f8e463",
+    "kernel_and_phase15_probe_changes_after_image_build_commit": [],
+    "test_harness_sha256": {
+      "tools/test_m15_guest.py": "3a5cdb17843085d6e47435ae0933f7e7ba8e28113865232579e1134cfaf280d7",
+      "tools/mtest.py": "a11fef9986f9d4d7eecc68e8bda73333c0bb53b9cbb5356f867b8d7c29bf9525",
+      "tools/arena_env.py": "98a7bb667fac85ed9733a8db7088d72be6388b8fe58dfca3c706555896499b79",
+      "userspace/phase15-fpu/src/xf_probe.rs": "f59c35ed5d5bbe810a9baad573418b9a64a385e2330b23627ebfc7bffa4a9c3a",
+      "kernel/kernel/src/m15.rs": "891b9dace761adb25145a4f4f23eb05cee5803f594426b3a84b026736097b47d"
+    },
+    "source_archive_scope": [
+      "tools/test_m15_guest.py",
+      "tools/mtest.py",
+      "tools/arena_env.py",
+      "tools/afs1.py",
+      "tools/qmp.py",
+      "tools/vcon.py",
+      "tools/tcp_fixture.py",
+      "tools/udp_dns_fixture.py",
+      "userspace/phase15-fpu/src/xf_probe.rs",
+      "kernel/kernel/src/m15.rs",
+      "kernel/kernel/src/arch/x86_64/idt.rs"
+    ]
+  },
+  "strict_kit": {
+    "archive": "phase15-external-qualification-kit.tar.gz",
+    "archive_sha256": "134cbc228e39508ab93909b87c6f839c59d9e89d3030aae15ce672b651bf4993",
+    "manifest_entries_verified": 28,
+    "embedded_efi_matches_pinned_efi": true,
+    "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "xf_probe_sha256": "1f057068b020baefe06f7f3b36bc0beeafcb879bd93d60c5ea66a3cce616c8d3"
+  },
+  "firmware": {
+    "source_package": "official Debian ovmf-generic 2026.08+ds-2",
+    "source_package_sha256": "05c1593998ba58700ff86c062bde306321af1f5a2943ea9ceef6c2332f3f3374",
+    "code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "vars_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "host": {
+    "architecture": "x86_64",
+    "os": "Debian GNU/Linux 13 (trixie)",
+    "kernel": "6.18.55",
+    "cpu_vendor": "AuthenticAMD",
+    "dev_kvm_present": false,
+    "system_packages_changed_this_run": false,
+    "security_settings_changed": false
+  },
+  "qemu": {
+    "version": "QEMU emulator version 11.1.2 (Debian 1:11.1.2+ds-3)\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+    "package": "qemu-system-x86 1:11.1.2+ds-3 (official Debian sid package)",
+    "package_sha256": "64d9bbbd6e27a4495f9774b66e11d821edc789f4d84dd47821e17b43b37e0c2a",
+    "binary_sha256": "0d45188135c07fbcf99c8bae979958ddb89a16f5b048a69492f9464657b2fd56",
+    "wrapper_sha256": "18a1ff63cd12461a53393cdf55d1d1d2f7e023629234bc378d75fc6b82dca251",
+    "advertised_accelerators": [
+      "tcg",
+      "mshv",
+      "nitro",
+      "kvm"
+    ],
+    "actual_guest_accelerator": "tcg",
+    "explicit_accelerator_argument": "-accel tcg",
+    "accelerator_initialization_probes": {
+      "kvm": {
+        "device_present": false,
+        "attempted": true,
+        "process_exit": 1,
+        "result": "qemu-system-x86_64: -accel kvm: Could not access KVM kernel module: No such file or directory\nqemu-system-x86_64: -accel kvm: failed to initialize kvm: No such file or directory"
+      },
+      "mshv": {
+        "attempted": true,
+        "process_exit": 1,
+        "result": "qemu-system-x86_64: -accel mshv: Failed to open /dev/mshv: No such file or directory\nqemu-system-x86_64: -accel mshv: failed to initialize mshv: Operation not permitted"
+      },
+      "nitro": {
+        "attempted": true,
+        "process_exit": 1,
+        "result": "qemu-system-x86_64: -accel nitro: nitro: failed to open /dev/nitro_enclaves: No such file or directory\nqemu-system-x86_64: -accel nitro: failed to initialize nitro: No such file or directory"
+      }
+    }
+  },
+  "strict_test": {
+    "command": "python3 tools/test_m15_guest.py",
+    "qemu_prefix": "/workspace/ArenaOS/build/phase15-local-qualification/bin/qemu-11.1.2 -accel tcg",
+    "test_runner_exit": 1,
+    "profiles": [
+      {
+        "label": "phase15-avx",
+        "cpu_profile": "max,+nx,+smep,+smap",
+        "qemu_avx_flag": true,
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 97,
+        "guest_m15_result": "FAIL (5/6)",
+        "cr0": "0x80010033",
+        "cr4": "0x668",
+        "cr4_osxmmexcpt_bit10_set": true,
+        "strict_xf": {
+          "probe": "CPL3 SQRTSS xmm0,xmm0 with -1.0f input",
+          "mxcsr_pre": "0x00001f00",
+          "expected_fault_status": "0x113",
+          "probe_return_word": "0x00001f0000001f01",
+          "mxcsr_post": "0x00001f01",
+          "vector19_delivered": false,
+          "faulting_thread_terminated_by_vector19": false
+        },
+        "containment_receipts": {
+          "same_process_sibling_survived": true,
+          "independent_process_survived": true,
+          "fault_slot_released": true,
+          "resource_baseline_restored": true,
+          "mf_ud_containment_passed": true,
+          "mmx_state_passed": true,
+          "clean_shutdown": true
+        },
+        "raw_serial_log": "serial-phase15-avx.log",
+        "raw_serial_sha256": "11d1dbd1f5ddf93c6a25090077a926ff3efdde8fee5fe6872e3072824f0a2cf6",
+        "qemu_stderr_log": "qemu-stderr-phase15-avx.log",
+        "qemu_stderr_sha256": "4c808f22c31dd0e795eada4652a8078a957abc41bd3a13e0886bd0c35e2575d3"
+      },
+      {
+        "label": "phase15-qemu64",
+        "cpu_profile": "qemu64,+nx,+smep,+smap",
+        "qemu_avx_flag": false,
+        "qemu_process_exit": 0,
+        "guest_semantic_exit": 97,
+        "guest_m15_result": "FAIL (5/6)",
+        "cr0": "0x80010033",
+        "cr4": "0x668",
+        "cr4_osxmmexcpt_bit10_set": true,
+        "strict_xf": {
+          "probe": "CPL3 SQRTSS xmm0,xmm0 with -1.0f input",
+          "mxcsr_pre": "0x00001f00",
+          "expected_fault_status": "0x113",
+          "probe_return_word": "0x00001f0000001f01",
+          "mxcsr_post": "0x00001f01",
+          "vector19_delivered": false,
+          "faulting_thread_terminated_by_vector19": false
+        },
+        "containment_receipts": {
+          "same_process_sibling_survived": true,
+          "independent_process_survived": true,
+          "fault_slot_released": true,
+          "resource_baseline_restored": true,
+          "mf_ud_containment_passed": true,
+          "mmx_state_passed": true,
+          "clean_shutdown": true
+        },
+        "raw_serial_log": "serial-phase15-qemu64.log",
+        "raw_serial_sha256": "ccb17d58d3eae620b2d6286cc350a487967a7e7390a676415e2ac2c3ca43f0a5",
+        "qemu_stderr_log": "qemu-stderr-phase15-qemu64.log",
+        "qemu_stderr_sha256": "b90a97a079244e119fbf827a544c343b944f053237ac8329108d3b267ae6ce1f"
+      }
+    ],
+    "vector19_delivered": false,
+    "phase15_result": "FAIL / PARTIAL / UNQUALIFIED",
+    "official_strict_t2_t3_t4": "NOT RUN; strict vector-19 gate failed"
+  },
+  "preserved_prior_evidence": {
+    "historical_diagnostic": "120/120, previously completed; not rerun in this attempt",
+    "diagnostic_stability": {
+      "T2": "10/10",
+      "T3": "25/25",
+      "T4": "100/100"
+    },
+    "qualification_note": "Prior diagnostic stability does not satisfy strict #XF qualification.",
+    "prior_receipt_path": "docs/phase15/receipts/phase15-local-recovery.json",
+    "prior_receipt_sha256": "49c8a0a145082a1391151c045ccc69d8413d97d2ef85e9acaf4894aa6794a26c",
+    "archive_path": "docs/phase15/receipts/phase15-local-recovery-2026-10-21.tar.gz",
+    "archive_sha256": "fb1ff147b35373be554f0056930d9c7ddeb7ea00877d4a682ee19b17ec2a7033"
+  },
+  "raw_evidence": [
+    "strict-runner.log",
+    "strict-runner.exit",
+    "serial-phase15-avx.log",
+    "serial-phase15-qemu64.log",
+    "qemu-stderr-phase15-avx.log",
+    "qemu-stderr-phase15-qemu64.log",
+    "preflight/qemu-accelerators.txt",
+    "preflight/kvm-initialization.txt",
+    "preflight/mshv-initialization.txt",
+    "preflight/nitro-initialization.txt"
+  ]
+}
