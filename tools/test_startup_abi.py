@@ -142,6 +142,67 @@ class TestStartupAbi(unittest.TestCase):
         self.assertIn("pub const MAX_SPAWN_INHERIT: usize = 8;", userspace_abi)
         self.assertIn("pub const MAX_INHERIT: usize = 8;", kernel_spawn)
 
+    def _m9_record(self, caps, flags, refs):
+        app_id = b"com.arena.capp" + bytes(32 - len(b"com.arena.capp"))
+        return abi._encode_record(
+            app_id=app_id,
+            args=(b"com.arena.capp",),
+            env=(),
+            caps=caps,
+            instance=1,
+            generation=9,
+            flags=flags,
+            refs=refs,
+            entry=0x0040_0120,
+            base=0x0040_0000,
+            clock_us=7,
+        )
+
+    def test_m9_seven_descriptor_stream_sync_record_roundtrips(self):
+        # Phase 16 regression (issue I-2): the native validators accept up
+        # to seven descriptors including stream (roles 6/7) and sync
+        # (role 8, kind 16) roles; the Python oracle refused all of them
+        # (CAP_MAX was 4). Indices below are descriptor positions.
+        rw = abi.RIGHT_READ | abi.RIGHT_WRITE
+        caps = (
+            (1, abi.ROLE_STREAM_SET, abi.CAP_SHARED_REGION, rw),
+            (2, abi.ROLE_STREAM_WAKE, abi.CAP_NOTIFICATION, abi.RIGHT_WRITE),
+            (3, abi.ROLE_SYNC_DOMAIN, abi.CAP_SYNC_DOMAIN, rw),
+            (4, abi.ROLE_OTHER, abi.CAP_NOTIFICATION, rw),
+            (5, abi.ROLE_OTHER, abi.CAP_BADGED_ENDPOINT, abi.RIGHT_WRITE),
+            (6, abi.ROLE_OTHER, abi.CAP_SHARED_REGION, rw),
+            (7, abi.ROLE_OTHER, abi.CAP_NOTIFICATION, abi.RIGHT_WRITE),
+        )
+        flags = abi.FLAG_STANDARD_STREAMS | abi.FLAG_NATIVE_SYNC
+        page = self._m9_record(caps, flags, (abi.NONE, 0, 0, 0))
+        view = abi.parse(page)
+        self.assertEqual(view["capabilities"], caps)
+        self.assertEqual(view["flags"], flags)
+        self.assertEqual(view["references"], (abi.NONE, 0, 0, 0))
+
+    def test_m9_over_bound_and_unknown_records_still_refuse(self):
+        rw = abi.RIGHT_READ | abi.RIGHT_WRITE
+        base_caps = tuple(
+            (slot, abi.ROLE_OTHER, abi.CAP_NOTIFICATION, rw) for slot in range(1, 8)
+        )
+        refs = (abi.NONE,) * 4
+        # Eight descriptors exceed the native bound of seven.
+        with self.assertRaises(abi.Refusal):
+            self._m9_record(base_caps + ((8, abi.ROLE_OTHER, 3, rw),), 0, refs)
+        # Kind 14 is in neither native range (1..=13 or 16).
+        bad_kind = ((1, abi.ROLE_OTHER, 14, rw),) + base_caps[1:]
+        with self.assertRaises(abi.Refusal):
+            self._m9_record(bad_kind, 0, refs)
+        # An unknown flag bit refuses.
+        with self.assertRaises(abi.Refusal):
+            self._m9_record(base_caps, 32, refs)
+        # STANDARD_STREAMS without its roles refuses (flag/role agreement).
+        with self.assertRaises(abi.Refusal):
+            self._m9_record(base_caps, abi.FLAG_STANDARD_STREAMS, refs)
+        # NATIVE_SYNC without a SyncDomain role refuses.
+        with self.assertRaises(abi.Refusal):
+            self._m9_record(base_caps, abi.FLAG_NATIVE_SYNC, refs)
+
     def test_slot_zero_transport_requires_exact_read_only_one_page(self):
         self.assertTrue(abi.validate_startup_cap((abi.CAP_SHARED_REGION, 1, 9), 1))
         self.assertFalse(abi.validate_startup_cap((abi.CAP_SHARED_REGION, 1, 11), 1))
