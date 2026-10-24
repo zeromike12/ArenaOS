@@ -1,0 +1,678 @@
+QUALIFICATION SOURCE COMMIT: df4ad9d4622e2e7e7d2b1ce03a57048305dd902a
+QUALIFICATION SOURCE CLEAN: no (development run)
+======================================================================
+== host-side unit tests (arena-heap: cargo test --lib)
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_heap-9c860bc7eac3920c)
+
+running 12 tests
+test tests::core_guards_off ... ok
+test tests::alignment_requests ... ok
+test tests::double_free_rejected ... ok
+test tests::core_guards_on ... ok
+test tests::foreign_and_interior_pointers_rejected ... ok
+test tests::growth_and_exhaustion ... ok
+test tests::many_small_then_coalesce ... ok
+test tests::red_zones_catch_overflow_and_underflow ... ok
+test tests::release_chunks_resets_and_regrows ... ok
+test tests::release_chunks_refuses_nonempty_heap - should panic ... ok
+test tests::zero_size_and_oversize_rejected ... ok
+test tests::stress_lcg_alloc_free_with_reference_model ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+======================================================================
+== host-side unit tests (arena-sync: cargo test --lib)
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_sync-b414257b95d72f0d)
+
+running 6 tests
+test tests::lock_guard_gives_exclusive_value_access ... ok
+test tests::owner_token_tracks_acquirer_across_threads ... ok
+test tests::protects_handoff_of_non_sync_data ... ok
+test tests::recursive_acquire_panics_in_debug_builds - should panic ... ok
+test tests::try_lock_is_none_while_held_and_some_after_drop ... ok
+test tests::mutual_exclusion_under_four_parallel_threads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+== host-side DNS parser tests
+
+running 2 tests
+test tests::bounded_names ... ok
+test tests::compressed_answer_and_negative_space ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side TCP wire/timeout policy tests
+
+running 3 tests
+test tests::no_early_or_unbounded_retransmission ... ok
+test tests::syn_options_and_header_bounds ... ok
+test tests::valid_odd_payload_and_corruption ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side networking API contract tests
+
+running 5 tests
+test address_wire_layout_dns_and_local_validation ... ok
+test ipc::tests::status_transport_and_capability_are_distinct ... ok
+test malformed_replies_are_not_silently_truncated ... ok
+test tcp_async_bearer_state_and_revocation ... ok
+test udp_chunk_offsets_sender_identity_and_bearer_lifecycle ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host and no_std target Phase 8.3 userspace client libraries
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (userspace/arena-lib/target/x86_64-unknown-linux-gnu/debug/deps/arena_lib-625db13177203621)
+
+running 2 tests
+test ipc::tests::status_transport_and_capability_are_distinct ... ok
+test fs::tests::exact_wire_and_no_hidden_retry ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `release` profile [optimized] target(s) in 0.01s
+== host-side service manifest and inventory policy tests
+
+running 15 tests
+test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
+test inventory::tests::observed_authority_goes_directly_to_policy_without_manifest_minting ... ok
+test inventory::tests::missing_or_unsupported_authority_fails_closed ... ok
+test inventory::tests::reads_live_cap_metadata_not_manifest_words ... ok
+test manifest::tests::attenuated_grants_and_actual_source_slots ... ok
+test manifest::tests::dependencies_must_be_present_ready_and_acyclic ... ok
+test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
+test manifest::tests::topological_order_and_duplicate_policy ... ok
+test manifest::tests::rights_may_never_be_broadened_or_quietly_clamped ... ok
+test readiness::tests::coalesced_apb1_wake_is_preserved_but_cannot_complete_readiness ... ok
+test readiness::tests::late_coalesced_ready_is_still_too_late ... ok
+test readiness::tests::requires_both_independent_driver_signals ... ok
+test readiness::tests::timeout_unknown_badge_and_invalid_masks_fail_closed ... ok
+test restart::tests::exact_child_and_bounded_restart_budget ... ok
+test restart::tests::invalid_policy_and_premature_ready_refused ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side Phase 8.1 config record and AFS1 integrity-limit probes
+
+running 4 tests
+test tests::malformed_namespace_and_read_failures ... ok
+test tests::python_reference_vectors_and_roundtrip ... ok
+test tests::pending_contiguous_and_exhausted ... ok
+test tests::visible_corruption_never_falls_back_to_old ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.004s
+
+OK
+ADR-0046 probe PASS: corrupted newer AFS1 commit silently selects older valid metadata
+A config service given only fsd's namespace cannot distinguish this from no newer commit.
+== host-side Phase 8.2 immutable permission decision record
+
+running 3 tests
+test tests::fixed_scope_and_no_authority_in_record ... ok
+test tests::poisoned_scan_never_falls_back_to_allow ... ok
+test tests::request_is_bounded_and_cannot_encode_authority_or_approval ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+POLICY RECORD: PASS (independent vectors, malformed decisions/names, full scan, eight-generation bound)
+== host and no_std target cap/IPC layout audit
+CapObj=16 Cap=24
+16: CapSpace=400 Process=1744 Option<Process>=1744 32-table=55808
+18: CapSpace=456 Process=1800 Option<Process>=1800 32-table=57600
+32: CapSpace=800 Process=2144 Option<Process>=2144 32-table=68608
+64: CapSpace=1600 Process=2944 Option<Process>=2944 32-table=94208
+128: CapSpace=3200 Process=4544 Option<Process>=4544 32-table=145408
+x86_64-unknown-none target cap layout: CapSpace<128>=3200 B, Option<Process<128>>=4544 B with 80 process-owned mapping bounds, 64-process table=290816 B (ADR-0088/0095) PASS
+x86_64-unknown-none IPC: CallSlot=240 Endpoint<32>=7728 Notif=32; 16 endpoints=123648 B, 64 notifications=2048 B (ADR-0089) PASS
+Phase-12 fixed notification table: 64 objects (32 client clocks plus system budget) PASS
+== host-independent Phase 8.5 AINS/AACT records and no_std compile
+Phase 8.5 AINS/AACT accepted wire: 6 independent SHA-256 vectors, 4-generation admission, prefix/corruption/chain/encode refusal PASS (host codec only; no AFS1 CREATE or guest proof)
+== AFS2 host model and Rust engine (crash prefixes, cross-check, RED)
+[afs2] 1040 randomized operations remounted/audited/matched {'write': 206, 'bad': 100, 'create': 83, 'rename': 217, 'truncate': 105, 'unlink': 110, 'mkdir': 106, 'rmdir': 113}
+[afs2] crash prefixes exact old-or-new: {'mkdir': 6, 'create': 6, 'write': 9, 'replace': 4, 'truncate': 7, 'rename': 6, 'move': 8, 'move-dir': 8, 'unlink': 6, 'rmdir': 6}
+[afs2] no-space after 81 blocks, refusals byte-identical; capacity {'blocks': 16384, 'free': 11830, 'objects': 10004, 'max_objects': 15779, 'seq': 10068}; fail-closed PASS
+[afs2-red] in-place-metadata: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] early-free: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] missing-parent-update: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] half-published-rename: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] 4 RED controls; byte-exact restore; GREEN
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.89s
+[afs2-rust] format cross-check both directions PASS (303 namespace lines)
+[afs2-rust-red] in-place-metadata: crash_prefixes_are_exactly_old_or_new FAILED -> RED PASS
+[afs2-rust-red] early-free: crash_prefixes_are_exactly_old_or_new FAILED -> RED PASS
+[afs2-rust-red] missing-parent-update: random_operations_match_a_model_and_survive_remount FAILED -> RED PASS
+[afs2-rust-red] commit-not-last: crash_prefixes_are_exactly_old_or_new FAILED -> RED PASS
+[afs2-rust-red] reformat-damaged: format_prefixes_are_never_committed_or_mountable FAILED -> RED PASS
+[afs2-rust] 5 RED controls (in-place-metadata, early-free, missing-parent-update, commit-not-last, reformat-damaged); byte-exact restore; GREEN
+== Phase 11 directory watches: host table and RED controls
+[watch-red] stale-generation: a_reused_directory_index_never_signals_the_old_watcher FAILED -> RED PASS
+[watch-red] rename-parent: a_rename_changes_both_parents FAILED -> RED PASS
+[watch-red] directory watch table GREEN; stale-generation and rename-parent RED; source restored byte-exact PASS
+== Phase 11.7: Arena Sans 13 art and generated face in sync
+[face13] userspace/gfxkit/src/face13.rs matches tools/face13.txt
+== Phase 12 APB1, startup ABI and native runtime host/target suites
+test_boundaries (__main__.TestRecord.test_boundaries) ... ok
+test_bounded_mutation_fuzz (__main__.TestRecord.test_bounded_mutation_fuzz) ... ok
+test_independent_wire_construction (__main__.TestRecord.test_independent_wire_construction) ... ok
+test_negative_package (__main__.TestRecord.test_negative_package) ... ok
+test_policy_chain_exhaustion (__main__.TestRecord.test_policy_chain_exhaustion) ... ok
+test_rfc_vector2_and_signed_domains (__main__.TestRecord.test_rfc_vector2_and_signed_domains) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 4.851s
+
+OK
+test_bounded_random_mutations_never_upgrade_to_valid_signed_bundle (__main__.TestApb1Reference.test_bounded_random_mutations_never_upgrade_to_valid_signed_bundle) ... ok
+test_checked_in_fixtures_are_reproducible_and_independent_signature_valid (__main__.TestApb1Reference.test_checked_in_fixtures_are_reproducible_and_independent_signature_valid) ... ok
+test_large_bundle_fixture_exercises_a_nontrivial_payload (__main__.TestApb1Reference.test_large_bundle_fixture_exercises_a_nontrivial_payload) ... ok
+test_phase13_stream_and_sync_manifest_hints_are_known_but_unknown_bits_refuse (__main__.TestApb1Reference.test_phase13_stream_and_sync_manifest_hints_are_known_but_unknown_bits_refuse) ... ok
+test_signature_payload_manifest_and_exact_length_mutations_refuse (__main__.TestApb1Reference.test_signature_payload_manifest_and_exact_length_mutations_refuse) ... ok
+test_signed_hostile_metadata_controls_refuse (__main__.TestApb1Reference.test_signed_hostile_metadata_controls_refuse) ... ok
+test_valid_multifile_bundle_exactly_accounts_for_payload (__main__.TestApb1Reference.test_valid_multifile_bundle_exactly_accounts_for_payload) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.179s
+
+OK
+test_32_instance_slots_match_lifecycle_and_manager_without_aliasing (__main__.TestStartupAbi.test_32_instance_slots_match_lifecycle_and_manager_without_aliasing) ... ok
+test_cap_inventory_syscall_number_and_slot_bound_are_mirrored (__main__.TestStartupAbi.test_cap_inventory_syscall_number_and_slot_bound_are_mirrored) ... ok
+test_capability_role_identity_and_bound_mutations_refuse (__main__.TestStartupAbi.test_capability_role_identity_and_bound_mutations_refuse) ... ok
+test_independent_guest_vector_and_live_capability_red_control (__main__.TestStartupAbi.test_independent_guest_vector_and_live_capability_red_control) ... ok
+test_mutated_offsets_padding_and_tail_refuse (__main__.TestStartupAbi.test_mutated_offsets_padding_and_tail_refuse) ... ok
+test_rust_golden_vector_is_canonical_and_roundtrips_independently (__main__.TestStartupAbi.test_rust_golden_vector_is_canonical_and_roundtrips_independently) ... ok
+test_slot_zero_transport_requires_exact_read_only_one_page (__main__.TestStartupAbi.test_slot_zero_transport_requires_exact_read_only_one_page) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.003s
+
+OK
+   Compiling version_check v0.9.5
+   Compiling proc-macro2 v1.0.107
+   Compiling typenum v1.20.1
+   Compiling generic-array v0.14.7
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling semver v1.0.28
+   Compiling crypto-common v0.1.7
+   Compiling rustc_version v0.4.1
+   Compiling block-buffer v0.10.4
+   Compiling curve25519-dalek v4.1.3
+   Compiling syn v2.0.119
+   Compiling digest v0.10.7
+   Compiling cfg-if v1.0.5
+   Compiling cpufeatures v0.2.17
+   Compiling subtle v2.6.1
+   Compiling signature v2.2.0
+   Compiling ed25519 v2.2.3
+   Compiling sha2 v0.10.9
+   Compiling arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling ed25519-dalek v2.2.0
+   Compiling arena-phase84-crypto-audit v0.1.0 (/workspace/ArenaOS/audit/phase84-crypto)
+   Compiling arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.03s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_platform_core-67cc63cc6bef4bbe)
+
+running 39 tests
+test bundle::tests::exact_envelope_rejects_trailing_or_truncated_payload ... ok
+test bundle::tests::large_payload_is_hashed_in_fixed_four_kibibyte_reads ... ok
+test bundle::tests::receiver_rejects_wrong_key_signature_and_tampered_payload ... ok
+test bundle::tests::signed_multi_file_bundle_verifies_and_exposes_only_descriptive_records ... ok
+test helpers::tests::rejects_unknown_flags_noncanonical_paths_and_duplicates ... ok
+test helpers::tests::resolves_only_a_canonical_signed_descriptor ... ok
+test helpers::tests::stream_helpers_require_both_private_wait_and_owner_wake_grants ... ok
+test install::tests::a_source_swap_never_activates_unverified_destination_bytes ... ok
+test bundle::tests::valid_signatures_do_not_excuse_noncanonical_or_unsafe_metadata ... ok
+test install::tests::corrupted_installed_payload_is_not_a_registry_candidate ... ok
+test install::tests::duplicate_version_refusal_does_not_write_or_change_the_afs2_image ... ok
+test install::tests::policy_install_streams_source_from_the_same_afs2_volume ... ok
+test install::tests::policy_preflight_binds_the_exact_bundle_before_mutation ... ok
+test install::tests::protected_candidate_lookup_reverifies_tree_and_resolves_exact_entry ... ok
+test install::tests::receiver_authorization_mismatch_refuses_before_afs2_mutation ... ok
+test install::tests::receiver_authorized_install_binds_the_same_volume_source_and_readback ... ok
+test install::tests::receiver_policy_denial_precedes_all_afs2_mutation ... ok
+test install::tests::registry_rebuild_is_manifest_derived_and_rejects_extra_tree_entries ... ok
+test install::tests::reserved_record_path_refuses_before_afs2_mutation ... ok
+test install::tests::staged_multifile_install_readback_and_atomic_activation ... ok
+test install::tests::volume_source_must_be_a_file_and_refusal_is_mutation_free ... ok
+test install::tests::wrong_signer_is_refused_before_afs2_mutation ... ok
+test lifecycle::tests::app_ids_do_not_authorize_instance_and_stale_generation_never_aliases ... ok
+test lifecycle::tests::exact_process_group_binding_multiwindow_owner_and_stale_window_refusal ... ok
+test lifecycle::tests::instance_retirement_waits_for_exact_process_and_window_cleanup ... ok
+test lifecycle::tests::integrated_target_models_thirty_two_apps_windows_and_a_headless_helper ... ok
+test lifecycle::tests::thirty_two_windows_and_thirty_two_instances_refuse_without_mutation ... ok
+test manifest::tests::bundle_paths_reject_traversal_aliases_and_platform_separators ... ok
+test manifest::tests::canonical_manifest_roundtrips_without_assigning_authority ... ok
+test manifest::tests::native_sync_opt_in_is_descriptive_and_grants_no_capability ... ok
+test manifest::tests::reserved_noncanonical_identity_associations_and_dimensions_refuse ... ok
+test manifest::tests::standard_stream_opt_in_is_descriptive_and_grants_no_capability ... ok
+test policy::tests::root_key_is_test_policy_only_and_namespace_is_checked ... ok
+test policy::tests::subordinate_authority_minimum_and_revocation_are_exact ... ok
+test registry::tests::app_names_and_ids_are_catalog_hints_not_launch_authority ... ok
+test registry::tests::association_resolution_does_not_offer_document_authority ... ok
+test registry::tests::capacity_duplicate_and_uninstall_cleanup_are_explicit ... ok
+test install::tests::every_afs2_write_prefix_is_old_or_a_complete_reverifiable_install ... ok
+test registry::tests::catalog_capacity_refusal_is_mutation_free ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+
+    Checking typenum v1.20.1
+    Checking cfg-if v1.0.5
+    Checking cpufeatures v0.2.17
+    Checking signature v2.2.0
+    Checking subtle v2.6.1
+    Checking ed25519 v2.2.3
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+    Checking generic-array v0.14.7
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking digest v0.10.7
+    Checking sha2 v0.10.9
+    Checking curve25519-dalek v4.1.3
+    Checking ed25519-dalek v2.2.0
+    Checking arena-phase84-crypto-audit v0.1.0 (/workspace/ArenaOS/audit/phase84-crypto)
+    Checking arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.80s
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling generic-array v0.14.7
+   Compiling semver v1.0.28
+   Compiling rustc_version v0.4.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling cfg-if v1.0.5
+   Compiling cpufeatures v0.2.17
+   Compiling subtle v2.6.1
+   Compiling signature v2.2.0
+   Compiling ed25519 v2.2.3
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+   Compiling sha2 v0.10.9
+   Compiling ed25519-dalek v2.2.0
+   Compiling arena-phase84-crypto-audit v0.1.0 (/workspace/ArenaOS/audit/phase84-crypto)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+    Finished `release` profile [optimized] target(s) in 2.66s
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.85s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_runtime-0aff53556ec12099)
+
+running 21 tests
+test capabilities::tests::capability_copy_requires_copy_right_and_strictly_attenuates ... ok
+test capabilities::tests::destroyable_attenuation_preserves_only_requested_rights ... ok
+test heap::tests::blocks_align_reuse_and_coalesce_without_touching_neighbor_pages ... ok
+test heap::tests::capacity_refusal_is_mutation_free_and_a_free_large_block_recovers ... ok
+test heap::tests::unsupported_layouts_and_frame_oom_leave_state_unchanged ... ok
+test heap::tests::scalable_heap_commits_lazily_aligns_reuses_and_refuses_oom ... ok
+test startup::tests::an_unavailable_listed_slot_description_is_fail_closed ... ok
+test startup::tests::extra_unlisted_capability_refuses_even_when_its_kind_is_unavailable ... ok
+test startup::tests::full_cap_table_matches_listed_kinds_and_rights_but_ignores_ids ... ok
+test startup::tests::kind_or_rights_mismatch_refuses_before_application_entry ... ok
+test startup::tests::rejection_discards_only_a_destroyable_shared_region_slot ... ok
+test startup::tests::missing_listed_capability_refuses_before_application_entry ... ok
+test startup::tests::unexpected_startup_slot_zero_and_occupancy_query_errors_refuse ... ok
+test streams::tests::attach_checks_layout_and_corrupt_indices_fail_closed ... ok
+test streams::tests::close_produces_eof_after_queued_bytes_and_detects_consumer_death ... ok
+test streams::tests::counter_wraparound_preserves_fifo_order ... ok
+test streams::tests::each_process_local_endpoint_is_unique_while_held ... ok
+test streams::tests::helper_parent_and_child_use_opposite_ring_endpoints ... ok
+test threads::tests::stack_layout_leaves_metadata_and_guard_pages_outside_stack ... ok
+test streams::tests::three_rings_fit_one_page_and_transfer_partial_bytes_under_backpressure ... ok
+test tls::tests::tcb_layout_is_frozen_for_the_arena_fs_base_contract ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+    Checking arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.51s
+    Finished `release` profile [optimized] target(s) in 0.06s
+== Phase 13 Desktop and service-manager host/target suites
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.94s
+     Running unittests src/lib.rs (userspace/desktop/target/x86_64-unknown-linux-gnu/debug/deps/arena_desktop-3b46cfabf4b1da48)
+
+running 89 tests
+test apps::explorer::tests::history_back_forward_up_and_open_by_type ... ok
+test apps::explorer::tests::copy_cut_paste_and_drag_moves ... ok
+test apps::explorer::tests::listing_sorts_folders_first_and_hides_dotfiles ... ok
+test apps::explorer::tests::new_folder_rename_and_refusals ... ok
+test apps::explorer::tests::trash_restore_and_empty ... ok
+test apps::explorer::tests::type_ahead_change_detection_and_paths ... ok
+test apps::explorer_ctl::tests::double_click_opens_folder_and_text_and_refuses_binary ... ok
+test apps::explorer_ctl::tests::fingerprint_tracks_visible_state_only ... ok
+test apps::explorer_ctl::tests::guest_sequence_on_the_default_window ... ok
+test apps::explorer_ctl::tests::keyboard_rename_clipboard_menu_and_sheet ... ok
+test apps::explorer_view::tests::geometry_hits_every_part ... ok
+test apps::explorer_ctl::tests::shift_ctrl_band_and_drag_into_folder_and_trash ... ok
+test apps::explorer_view::tests::sizes_times_and_columns ... ok
+test apps::layout::tests::controls_keep_tested_interaction_points ... ok
+test apps::layout::tests::default_size_is_the_phase10_geometry ... ok
+test apps::model::tests::editor_full_refuses_without_cursor_or_data_mutation ... ok
+test apps::model::tests::editor_insert_delete_navigation_and_atomic_load_refusal ... ok
+test apps::layout::tests::every_size_lays_out_inside_the_surface ... ok
+test apps::model::tests::terminal_line_edit_and_bounded_scrollback ... ok
+test apps::scene::tests::changed_box_is_exactly_the_changed_pixels ... ok
+test apps::scene::tests::dirty_runs_merge_and_stay_bounded ... ok
+test apps::scene::tests::editor_caret_motion_repaints_old_and_new_rows_only ... ok
+test apps::scene::tests::editor_partial_repaint_equals_full_redraw ... ok
+test apps::scene::tests::partial_repaint_equals_full_redraw_at_every_size ... ok
+test apps::scene::tests::terminal_typing_repaints_only_the_input_line ... ok
+test apps::view::tests::editor_probe_regions_change_only_for_their_events ... ok
+test apps::view::tests::terminal_header_keeps_cascade_probe_strip_plain ... ok
+test associations::tests::canonical_defaults_round_trip_and_corruption_refuses ... ok
+test associations::tests::malformed_preference_fields_are_rejected ... ok
+test associations::tests::replacing_and_pruning_preserve_sorted_canonical_state ... ok
+test compose::tests::a_presented_publication_is_not_damaged_again ... ok
+test compose::tests::additional_surface_publication_and_partial_damage_are_composed ... ok
+test apps::scene::tests::terminal_partial_repaint_equals_full_redraw ... ok
+test compose::tests::damage_list_merges_and_bounds ... ok
+test compose::tests::pointer_motion_damages_only_two_small_rects ... ok
+test desk::tests::a_press_after_a_menu_click_is_a_press ... ok
+test desk::tests::bundle_open_requests_trusted_install_without_content_authority ... ok
+test desk::tests::damage_covers_changed_cells_ghosts_and_menu ... ok
+test desk::tests::desktop_open_with_emits_only_the_selected_document_path ... ok
+test desk::tests::open_drop_into_folder_menu_and_trash ... ok
+test desk::tests::positions_parse_and_persist_and_survive_reload ... ok
+test favorites::tests::built_in_defaults_round_trip_and_user_toggle_is_persistent ... ok
+test favorites::tests::capacity_invalid_ids_duplicates_and_corruption_are_bounded ... ok
+test favorites::tests::stale_ids_are_pruned_without_reordering_survivors ... ok
+test files::tests::components_and_split_are_lexical ... ok
+test filesd_wire::tests::apb1_key_and_digest_share_exactly_one_raw_64_byte_record ... ok
+test input_wire::tests::canonical_control_keys_pointer_and_reserved_fields ... ok
+test model::tests::alt_tab_switcher_cycles_most_recent_first_commits_on_alt_release_and_cancels ... ok
+test model::tests::body_button_release_is_captured_and_retirement_discards_capture ... ok
+test model::tests::capacity_stale_cleanup_and_routed_queue ... ok
+test model::tests::desktop_keyboard_launch_cycle_close_preserves_ordinary_key_focus ... ok
+test model::tests::dock_half_open_bounds_and_screen_edges ... ok
+test model::tests::drag_to_edges_snaps_and_keyboard_places_restores_and_minimizes ... ok
+test model::tests::exhausted_generations_refuse_before_publication ... ok
+test model::tests::focus_change_move_and_retire_dismiss_menus_but_dialogs_are_modal_and_persist ... ok
+test model::tests::frame_edges_resize_with_minimum_work_area_and_bar_clamps ... ok
+test model::tests::hit_focus_drag_release_and_close_exact_content ... ok
+test model::tests::key_repeat_chords_and_host_autorepeat_do_not_stack ... ok
+test model::tests::one_owner_has_multiple_independently_stateful_windows ... ok
+test model::tests::resize_is_opt_in_bounded_and_configure_is_coalesced ... ok
+test model::tests::secondary_press_activates_and_reaches_the_window_without_drag_or_capture ... ok
+test model::tests::small_window_title_and_close_remain_above_dock ... ok
+test model::tests::thirty_two_windows_fit_on_screen_and_the_thirty_third_is_refused ... ok
+test model::tests::title_buttons_minimize_and_maximize_only_where_supported ... ok
+test model::tests::title_drag_has_a_threshold_and_double_click_maximizes_and_restores ... ok
+test model::tests::tooltips_take_no_input_and_any_press_dismisses_without_consuming ... ok
+test model::tests::transient_surfaces_are_owned_focused_stale_safe_and_menu_dismissal_consumes ... ok
+test model::tests::transient_surfaces_stay_on_screen ... ok
+test model::tests::wheel_goes_to_the_window_under_the_pointer ... ok
+test package::manifest::tests::bundle_paths_reject_traversal_aliases_and_platform_separators ... ok
+test package::manifest::tests::canonical_manifest_roundtrips_without_assigning_authority ... ok
+test package::manifest::tests::native_sync_opt_in_is_descriptive_and_grants_no_capability ... ok
+test package::manifest::tests::reserved_noncanonical_identity_associations_and_dimensions_refuse ... ok
+test package::manifest::tests::standard_stream_opt_in_is_descriptive_and_grants_no_capability ... ok
+test perf::tests::long_lines_are_emitted_in_prefixed_pieces ... ok
+test perf::tests::stat_and_line_format ... ok
+test preferences::tests::canonical_durable_choices ... ok
+test scope::tests::explicit_resource_namespace_cannot_write_trust_records ... ok
+test scope::tests::graphics_never_amplifies_and_cross_function_scope_refuses ... ok
+test scope::tests::launch_targets_are_explicit_and_bounded ... ok
+test service_wire::tests::canonical_metadata_and_operations_do_not_accept_reserved_or_names_as_authority ... ok
+test service_wire::tests::titles_with_spaces_and_folders_cross_launch_and_started ... ok
+test session_auth::tests::duplicate_badges_are_ambiguous_even_if_only_one_owner_is_live ... ok
+test session_auth::tests::only_the_unique_live_badge_owner_is_selected ... ok
+test session_auth::tests::zero_unknown_and_dead_badges_never_select_a_session ... ok
+test wire::tests::damage_rectangles_are_bounded_and_canonical ... ok
+test wire::tests::strict_canonical_frames_and_reserved_refusal ... ok
+test wire::tests::surface_and_transient_bounds_refuse ... ok
+test compose::tests::damage_composition_matches_full_redraw ... ok
+
+test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.35s
+
+    Checking arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Checking arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+    Checking arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+    Checking arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+    Checking arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Checking arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.89s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (userspace/servicemgr/target/x86_64-unknown-linux-gnu/debug/deps/arena_servicemgr-371452a59df3117e)
+
+running 15 tests
+test inventory::tests::missing_or_unsupported_authority_fails_closed ... ok
+test inventory::tests::observed_authority_goes_directly_to_policy_without_manifest_minting ... ok
+test inventory::tests::reads_live_cap_metadata_not_manifest_words ... ok
+test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
+test manifest::tests::attenuated_grants_and_actual_source_slots ... ok
+test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
+test manifest::tests::dependencies_must_be_present_ready_and_acyclic ... ok
+test manifest::tests::rights_may_never_be_broadened_or_quietly_clamped ... ok
+test manifest::tests::topological_order_and_duplicate_policy ... ok
+test readiness::tests::coalesced_apb1_wake_is_preserved_but_cannot_complete_readiness ... ok
+test readiness::tests::requires_both_independent_driver_signals ... ok
+test readiness::tests::late_coalesced_ready_is_still_too_late ... ok
+test readiness::tests::timeout_unknown_badge_and_invalid_masks_fail_closed ... ok
+test restart::tests::exact_child_and_bounded_restart_budget ... ok
+test restart::tests::invalid_policy_and_premature_ready_refused ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:49:8
+   |
+49 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:63:12
+   |
+63 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:70:12
+   |
+69 | impl Record {
+   | ----------- methods in this implementation
+70 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+74 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:79:8
+   |
+79 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:86:4
+   |
+86 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:94:8
+   |
+94 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:97:8
+   |
+97 | pub fn decision(allow: bool) -> [u8; 4] {
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+   --> src/../../permission.rs:103:8
+    |
+103 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+    |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:121:8
+    |
+121 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:154:12
+    |
+154 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:163:12
+    |
+163 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:171:12
+    |
+168 | impl Recovery {
+    | ------------- method in this implementation
+...
+171 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:180:18
+    |
+179 | impl Scan {
+    | --------- associated items in this implementation
+180 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+190 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+199 |     pub fn ingest(
+    |            ^^^^^^
+...
+238 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-servicemgr` (bin "arena-servicemgr") generated 22 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+== Phase 13 real installed-application pressure guest
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+   Compiling arena-phase13-installed-app v0.1.0 (/workspace/ArenaOS/userspace/phase13-app)
+    Finished `release` profile [optimized] target(s) in 4.13s
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+   Compiling arena-phase13-headless v0.1.0 (/workspace/ArenaOS/userspace/phase13-headless)
+    Finished `release` profile [optimized] target(s) in 3.60s
+    Finished `release` profile [optimized] target(s) in 0.01s
+[phase13-registry] building kernel image + ESP ...
+[phase13-registry] verified APB1 install -> registry -> keyboard/search/pointer launch of the signed native ELF; five installed instances, 26 mixed AppInstances and 32 windows, five live helpers, two parked user threads, half-close/reuse/full teardown, one headless app, persisted AFS2 favorite reloaded by the next boot, exact identity-resource teardown to baseline; clean shutdown in 306.2s + reload 8.1s PASS
+======================================================================
+== running test_phase14_pie_guest.py
+======================================================================
+[phase14-pie] building kernel image + ESP ...
+[phase14-pie] protected signed APB1 installed and discovered; two native PIE launches passed with distinct kernel-selected bases and exact process/Image teardown in 8.8s PASS
+======================================================================
+== running test_phase14_negative_guest.py
+======================================================================
+[phase14-pie-negative] building kernel image + ESP ...
+[phase14-neg-bad-magic] signed APB1 install retained exact bytes; production launch refused at installed-image-resolve/-2; ownership receipt restored and free-frame cache bounded (8.0s) PASS
+[phase14-neg-unsupported-relocation] signed APB1 install retained exact bytes; production launch refused at installed-image-resolve/-2; ownership receipt restored and free-frame cache bounded (8.3s) PASS
+[phase14-neg-relocation-outside-image] signed APB1 install retained exact bytes; production launch refused at installed-image-resolve/-2; ownership receipt restored and free-frame cache bounded (8.4s) PASS

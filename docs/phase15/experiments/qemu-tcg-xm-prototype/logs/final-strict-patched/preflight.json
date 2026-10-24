@@ -1,0 +1,30 @@
+{
+  "accelerator_initialized": true,
+  "accelerator_requested": "-accel tcg",
+  "accelerators_advertised": [
+    "tcg"
+  ],
+  "backend_id": "arenaos-qemu-11.1.2-local-patched-tcg-xm",
+  "hardware_acceleration": false,
+  "label": "locally modified QEMU TCG",
+  "paths": {
+    "efi": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/arena-boot.efi",
+    "esp": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/arena-esp.img",
+    "lib_dir": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/sysroot/usr/lib/x86_64-linux-gnu",
+    "ovmf_code": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/OVMF_CODE_4M.fd",
+    "ovmf_vars": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-20261023/deliverable/artifacts/OVMF_VARS_4M.fd",
+    "qemu": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/qemu-system-x86_64-patched",
+    "rom_dir": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/source/pc-bios"
+  },
+  "qemu_version": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+  "sha256": {
+    "efi": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "esp": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "ovmf_code": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "ovmf_vars": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+    "qemu": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff"
+  },
+  "smoke_command": "/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/qemu-system-x86_64-patched -accel tcg -L /workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/source/pc-bios -machine q35 -m 64M -cpu qemu64,+nx,+smep,+smap -nodefaults -display none -serial none -monitor none -S -qmp stdio",
+  "smoke_exit": 0,
+  "smoke_output": "{\"QMP\": {\"version\": {\"qemu\": {\"micro\": 2, \"minor\": 1, \"major\": 11}, \"package\": \"\"}, \"capabilities\": [\"oob\"]}}\n{\"return\": {}}\n{\"timestamp\": {\"seconds\": 1792863779, \"microseconds\": 156451}, \"event\": \"SHUTDOWN\", \"data\": {\"guest\": false, \"reason\": \"host-qmp-quit\"}}\n{\"return\": {}}\n"
+}

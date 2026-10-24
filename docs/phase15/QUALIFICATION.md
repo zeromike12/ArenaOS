@@ -1,21 +1,27 @@
 # Phase 15 qualification record
 
-Status: **PARTIAL / UNQUALIFIED**. The latest uninterrupted historical
-diagnostic run passed 120/120 suites. Fresh diagnostic T2/T3/T4 runs passed
-10/10, 25/25, and 100/100. Unmodified QEMU 8.2.2, 10.0.13, and 11.1.2 TCG
-fail strict `#XF` on the tested profiles; KVM cannot initialize because
-`/dev/kvm` is absent, and Bochs 3.1 page-faulted in OVMF before reaching
-ArenaOS. A local experimental patch to QEMU 11.1.2 TCG passed the unchanged
-strict guest on two profiles and separate exception controls, but does not
-count as official qualification or complete strict stability. No ArenaOS
-kernel source was changed. The experiment, identities, and raw receipts are in
-[`QEMU TCG vector-19 prototype`](experiments/qemu-tcg-xm-prototype/README.md).
-The previous source review identifies the missing upstream TCG SIMD
-exception-to-vector-19 path; the ArenaOS control setup and containment path
-show no reproduced defect. ADR-0113 remains Proposed. See the
-[`QEMU TCG source review`](receipts/qemu-tcg-xf-source-review.md).
-The new raw rerun and its evidence assessment are in
-[`phase15-fresh-rerun-2026-10-21.md`](receipts/phase15-fresh-rerun-2026-10-21.md).
+Status: **PARTIAL / UNQUALIFIED pending strict stability and M/C review**.
+The historical diagnostic aggregate remains 120/120, and diagnostic T2/T3/T4
+remain 10/10, 25/25, and 100/100. Unmodified QEMU TCG fails the unchanged
+strict `#XF` case; KVM cannot initialize because `/dev/kvm` is absent, and the
+previous Bochs 3.1 trial page-faulted in OVMF before reaching ArenaOS.
+
+A local patch to official QEMU 11.1.2 TCG now passes expanded independent
+exception controls and the unchanged strict ArenaOS guest under both required
+CPU profiles. Raw logs record a genuine instruction-generated vector 19,
+status `0x113`, containment, sibling/peer survival, reclamation, restored
+resources, and clean shutdown. The same-source/configuration unpatched QEMU
+fails those exception controls and the strict guest. The TCG result is a
+qualification candidate only: it is modified-emulator evidence, not an
+upstream-QEMU or hardware-backed result. Strict official T2/T3/T4, the final
+registered regression, final archive verification, and M/C review remain
+gates. No ArenaOS kernel source or strict acceptance assertion changed.
+
+See the [modified-QEMU TCG evidence](experiments/qemu-tcg-xm-prototype/README.md),
+the [runnable qualification instructions](PATCHED-TCG-QUALIFICATION.md), the
+[QEMU TCG source review](receipts/qemu-tcg-xf-source-review.md), and the
+[2026-10-21 raw rerun assessment](receipts/phase15-fresh-rerun-2026-10-21.md).
+ADR-0113 remains Proposed.
 
 ## Current local recovery (2026-10-21)
 

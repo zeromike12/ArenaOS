@@ -61,6 +61,11 @@ import udp_dns_fixture  # noqa: E402
 TIMEOUT_S = 120  # TCG is slow; a healthy boot takes <10s
 MEM_MIB = 512
 
+# Preserve the emulator's actual process status separately from the
+# semantic harness verdict. A guest may print a failed self-test and then
+# shut down cleanly, yielding QEMU exit 0 with semantic verdict 97.
+LAST_QEMU_EXIT: dict[str, int | None] = {}
+
 
 def semantic_exit_rc(rc: int | None, serial: str, label: str) -> int | None:
     """QEMU ResetSystem is also used by halt_machine: rc=0 is NOT PASS.
@@ -375,6 +380,7 @@ def run_qemu(label: str, esp: Path,
     if dns_thread is not None: dns_thread.join(timeout=2)
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
+    LAST_QEMU_EXIT[label] = rc
     verdict = semantic_exit_rc(rc, serial, label)
     if verdict == 0 and net and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
         print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")
@@ -571,6 +577,7 @@ def boot(label: str, esp: Path,
         rc = None
     dt = time.monotonic() - t0
     serial = serial_log.read_text(errors="replace") if serial_log.exists() else ""
+    LAST_QEMU_EXIT[label] = rc
     verdict = semantic_exit_rc(rc, serial, label)
     if verdict == 0 and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
         print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")

@@ -1,0 +1,5 @@
+/workspace/ArenaOS/build/phase15-qemu-tcg-xm-qual/verify-venv/lib/python3.12/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+explicit TCG initialization smoke failed (exit 1):
+qemu-system-x86_64-patched: -accel kvm: invalid accelerator kvm
+

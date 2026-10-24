@@ -21,19 +21,35 @@ set -euo pipefail
 N="${1:-100}"
 [[ "$N" =~ ^[1-9][0-9]*$ ]] || { echo "error: positive boot count required" >&2; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PHASE15_STRICT_GATE="${PHASE15_STRICT_GATE:-0}"
+PYTHON="${PHASE15_PYTHON:-python3}"
+if [[ "$PHASE15_STRICT_GATE" != 0 && "$PHASE15_STRICT_GATE" != 1 ]]; then
+    echo "error: PHASE15_STRICT_GATE must be 0 or 1" >&2
+    exit 1
+fi
 if [[ -f "$REPO_ROOT/tools/dev-env/env.sh" ]]; then
     # shellcheck disable=SC1091
     source "$REPO_ROOT/tools/dev-env/env.sh"
 fi
 
+EFI="$REPO_ROOT/build/arena-boot.efi"
 ESP="$REPO_ROOT/build/arena-esp.img"
-if [[ ! -f "$ESP" ]]; then
-    echo "error: $ESP missing — run tools/build.sh --image first" >&2
+if [[ "$PHASE15_STRICT_GATE" == 1 ]]; then
+    : "${PHASE15_STRICT_EFI:?strict runner must provide PHASE15_STRICT_EFI}"
+    : "${PHASE15_STRICT_ESP:?strict runner must provide PHASE15_STRICT_ESP}"
+    : "${PHASE15_RECEIPTS_DIR:?strict runner must provide PHASE15_RECEIPTS_DIR}"
+    : "${PHASE15_QEMU_BINARY:?strict runner must provide PHASE15_QEMU_BINARY}"
+    : "${PHASE15_QEMU_SHA256:?strict runner must provide PHASE15_QEMU_SHA256}"
+    EFI="$PHASE15_STRICT_EFI"
+    ESP="$PHASE15_STRICT_ESP"
+fi
+if [[ ! -f "$EFI" || ! -f "$ESP" ]]; then
+    echo "error: EFI/ESP pair is missing: $EFI / $ESP" >&2
     exit 1
 fi
 
 # Resolve QEMU/OVMF exactly like the test harness does.
-eval "$(cd "$REPO_ROOT" && python3 - "$REPO_ROOT/build/vcon-stability.sock" <<'EOF'
+eval "$(cd "$REPO_ROOT" && "$PYTHON" - "$REPO_ROOT/build/vcon-stability.sock" <<'EOF'
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path("tools").resolve()))
@@ -48,6 +64,27 @@ print(f"KBD=({' '.join(repr(x) for x in arena_env.input_args())})")
 print(f"VCON=({' '.join(repr(x) for x in arena_env.console_args(Path(sys.argv[1])))})")
 EOF
 )"
+
+if [[ "$PHASE15_STRICT_GATE" == 1 ]]; then
+    PHASE15_EFI_SHA256="bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e"
+    PHASE15_ESP_SHA256="631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f"
+    PHASE15_OVMF_CODE_SHA256="7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94"
+    PHASE15_OVMF_VARS_SHA256="5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    hash_file() { sha256sum "$1" | cut -d' ' -f1; }
+    [[ "$(hash_file "$EFI")" == "$PHASE15_EFI_SHA256" ]] || { echo 'error: strict EFI identity mismatch' >&2; exit 1; }
+    [[ "$(hash_file "$ESP")" == "$PHASE15_ESP_SHA256" ]] || { echo 'error: strict ESP identity mismatch' >&2; exit 1; }
+    [[ "$(hash_file "$OVMF_CODE")" == "$PHASE15_OVMF_CODE_SHA256" ]] || { echo 'error: OVMF code identity mismatch' >&2; exit 1; }
+    [[ "$(hash_file "$OVMF_VARS")" == "$PHASE15_OVMF_VARS_SHA256" ]] || { echo 'error: OVMF vars identity mismatch' >&2; exit 1; }
+    [[ "$(hash_file "$PHASE15_QEMU_BINARY")" == "$PHASE15_QEMU_SHA256" ]] || { echo 'error: patched QEMU binary identity mismatch' >&2; exit 1; }
+    [[ " ${QEMU[*]} " == *" $PHASE15_QEMU_BINARY "* ]] || { echo 'error: ARENA_QEMU does not invoke the pinned patched binary' >&2; exit 1; }
+    [[ " ${QEMU[*]} " == *" -accel tcg "* ]] || { echo 'error: patched TCG qualification requires explicit -accel tcg' >&2; exit 1; }
+    mkdir -p "$PHASE15_RECEIPTS_DIR/boots"
+    EFI_START_SHA="$(hash_file "$EFI")"
+    ESP_START_SHA="$(hash_file "$ESP")"
+else
+    EFI_START_SHA="$(sha256sum "$EFI" | cut -d' ' -f1)"
+    ESP_START_SHA="$(sha256sum "$ESP" | cut -d' ' -f1)"
+fi
 
 VARS="$REPO_ROOT/build/ovmf-vars-stability.img"
 SERIAL="$REPO_ROOT/build/stability-serial.log"
@@ -89,16 +126,17 @@ if [[ ! -f "$REPO_ROOT/build/graphics-profile.txt" ]] || [[ "$(cat "$REPO_ROOT/b
     echo "error: Phase-10 stability requires the explicit production desktop profile" >&2
     exit 1
 fi
-( cd "$REPO_ROOT" && python3 - <<'PYIMAGE'
+( cd "$REPO_ROOT" && "$PYTHON" - "$ESP" "$EFI" <<'PYIMAGE'
+import sys
 from pathlib import Path
 from pyfatfs.PyFatFS import PyFatFS
-fs = PyFatFS('build/arena-esp.img', read_only=True)
+esp, efi = map(Path, sys.argv[1:])
+fs = PyFatFS(str(esp), read_only=True)
 try:
-    assert fs.getbytes('/EFI/BOOT/BOOTX64.EFI') == Path('build/arena-boot.efi').read_bytes(), 'ESP and exact EFI differ'
+    assert fs.getbytes('/EFI/BOOT/BOOTX64.EFI') == efi.read_bytes(), 'ESP and exact EFI differ'
 finally: fs.close()
 PYIMAGE
 )
-EFI_START_SHA="$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)"
 pass=0
 fail=0
 t_start=$(date +%s)
@@ -119,12 +157,16 @@ for i in $(seq 1 "$N"); do
     # FS_ERR_EXISTS and fails the suite by design). Phase 11: 72 MiB, so
     # filesd formats the AFS2 region and imports AFS1 on every boot and the
     # desktop runs with its file service online.
-    ( cd "$REPO_ROOT" && python3 -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk(afs2=True)' >/dev/null )
+    ( cd "$REPO_ROOT" && "$PYTHON" -c 'import sys; sys.path.insert(0, "tools"); import arena_env; arena_env.make_scratch_disk(afs2=True)' >/dev/null )
     rm -f "$SERIAL" "$QMP_SOCK" "$VCON_SOCK" "$REPO_ROOT/build/tcp-stability.log" "$REPO_ROOT/build/udp-dns-stability.log"
+    QEMU_STDERR=/dev/null
+    if [[ "$PHASE15_STRICT_GATE" == 1 ]]; then
+        QEMU_STDERR="$PHASE15_RECEIPTS_DIR/boots/qemu-stderr-boot-$i.log"
+    fi
     # M7.6: bind the host TCP fixture BEFORE QEMU starts. READY is
     # emitted only after listen() succeeds; no sleep/race and no
     # in-guest fake peer. One actor, one boot, like the typist.
-    coproc TCP_PEER { exec python3 -u "$REPO_ROOT/tools/network_fixture.py" \
+    coproc TCP_PEER { exec "$PYTHON" -u "$REPO_ROOT/tools/network_fixture.py" \
         "$REPO_ROOT/build/tcp-stability.log" \
         "$REPO_ROOT/build/udp-dns-stability.log"; }
     tcp_pid=$TCP_PEER_PID
@@ -141,7 +183,7 @@ for i in $(seq 1 "$N"); do
     # into it — a stray `arena` landing in the same line as the
     # feeder's `shutdown` would hang a perfectly good kernel. One
     # typist, one boot.
-    python3 "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
+    "$PYTHON" "$REPO_ROOT/tools/qmp.py" "$QMP_SOCK" "$SERIAL" \
         "$KEY_MARKER" "$KEY_TEXT" "$BOOT_TIMEOUT" >/dev/null 2>&1 &
     typist_pid=$!
     # Phase-10 actual dock spawn, owned key pixels, exact tablet drag,
@@ -151,12 +193,12 @@ for i in $(seq 1 "$N"); do
     PIXEL_IMAGE="$REPO_ROOT/build/stability-display-boot-$i.ppm"
     PIXEL_ERROR="$PIXEL_RECEIPT.error"
     rm -f "$PIXEL_RECEIPT" "$PIXEL_IMAGE" "$PIXEL_ERROR"
-    python3 "$REPO_ROOT/tools/check_phase10_pixels.py" "$QMP_SOCK" "$SERIAL" \
+    "$PYTHON" "$REPO_ROOT/tools/check_phase10_pixels.py" "$QMP_SOCK" "$SERIAL" \
         "$PIXEL_IMAGE" "$PIXEL_RECEIPT" "$BOOT_TIMEOUT" \
         >"$REPO_ROOT/build/stability-pixel-actor.log" 2>&1 &
     pixel_pid=$!
     # The console actor, reaped with the typist for the same reason.
-    python3 "$REPO_ROOT/tools/vcon.py" "$VCON_SOCK" \
+    "$PYTHON" "$REPO_ROOT/tools/vcon.py" "$VCON_SOCK" \
         "$VCON_MARKER" "$VCON_REPLY" "$BOOT_TIMEOUT" \
         "$REPO_ROOT/build/vcon-port.txt" >/dev/null 2>"$REPO_ROOT/build/vcon-dbg.txt" &
     vcon_pid=$!
@@ -201,7 +243,7 @@ for i in $(seq 1 "$N"); do
         "${VCON[@]}" \
         -qmp unix:"$QMP_SOCK",server=on,wait=off \
         -display none -chardev stdio,id=con0,signal=off -serial chardev:con0 \
-        -no-reboot > "$SERIAL" 2>/dev/null || rc=$?
+        -no-reboot > "$SERIAL" 2>"$QEMU_STDERR" || rc=$?
 
     # Reap this boot's typist before the next one starts.
     kill "$typist_pid" 2>/dev/null || true
@@ -221,6 +263,19 @@ for i in $(seq 1 "$N"); do
     wait "$tcp_pid" 2>/dev/null || true
     cp "$REPO_ROOT/build/udp-dns-stability.log" \
         "$REPO_ROOT/build/udp-dns-stability-boot-$i.log" 2>/dev/null || true
+    if [[ "$PHASE15_STRICT_GATE" == 1 ]]; then
+        cp "$SERIAL" "$PHASE15_RECEIPTS_DIR/boots/serial-boot-$i.log"
+        cp "$REPO_ROOT/build/vcon-port.txt" \
+           "$PHASE15_RECEIPTS_DIR/boots/vcon-boot-$i.txt" 2>/dev/null || true
+        cp "$REPO_ROOT/build/vcon-dbg.txt" \
+           "$PHASE15_RECEIPTS_DIR/boots/vcon-actor-boot-$i.txt" 2>/dev/null || true
+        cp "$PIXEL_RECEIPT" \
+           "$PHASE15_RECEIPTS_DIR/boots/pixels-boot-$i.txt" 2>/dev/null || true
+        cp "$REPO_ROOT/build/tcp-stability.log" \
+           "$PHASE15_RECEIPTS_DIR/boots/tcp-boot-$i.log" 2>/dev/null || true
+        cp "$REPO_ROOT/build/udp-dns-stability-boot-$i.log" \
+           "$PHASE15_RECEIPTS_DIR/boots/udp-dns-boot-$i.log" 2>/dev/null || true
+    fi
 
     why=""
     if (( rc != 0 )); then
@@ -350,6 +405,25 @@ for i in $(seq 1 "$N"); do
     elif ! grep -aqF '[displayd] SharedRegion guest authority/zero/copy/mapping PASS' "$SERIAL" || \
          ! grep -aqF '[displayd] ring3 GOP pixels ready (staged font v2)' "$SERIAL"; then
         why="isolated display service did not paint the verified QMP pixels"
+    elif [[ "$PHASE15_STRICT_GATE" == 1 ]] && \
+         [[ $(grep -acF 'm15: RESULT PASS (6/6)' "$SERIAL" || true) -ne 1 ]]; then
+        why="strict Phase-15 result was not PASS (6/6) exactly once"
+    elif [[ "$PHASE15_STRICT_GATE" == 1 ]] && \
+         [[ $(grep -acF 'm15:test:xf_delivery_probe: PASS' "$SERIAL" || true) -ne 1 ]]; then
+        why="strict vector-19 guest assertion was not PASS exactly once"
+    elif [[ "$PHASE15_STRICT_GATE" == 1 ]] && \
+         ! grep -aqF 'vector=0x13 (#XF SIMD Floating Point)' "$SERIAL"; then
+        why="strict boot did not record genuine vector 19 delivery"
+    elif [[ "$PHASE15_STRICT_GATE" == 1 ]] && \
+         ! grep -aqF 'fault=Some(113), sibling=Some(2a), peer=Some(2a), sibling_and_peer_survived=true, fault_slot_released=true, resource_baseline_restored=true' "$SERIAL"; then
+        why="strict vector-19 containment and cleanup receipt was incomplete"
+    elif [[ "$PHASE15_STRICT_GATE" == 1 ]] && \
+         [[ $(grep -acF 'm15:test:thread_isolation_block_yield_preempt: PASS' "$SERIAL" || true) -ne 1 || \
+            $(grep -acF 'm15:test:process_isolation_slot_reuse: PASS' "$SERIAL" || true) -ne 1 || \
+            $(grep -acF 'm15:test:optional_cpu_feature_reporting: PASS' "$SERIAL" || true) -ne 1 || \
+            $(grep -acF 'm15:test:mf_ud_fault_containment: PASS' "$SERIAL" || true) -ne 1 || \
+            $(grep -acF 'm15:test:mmx_state: PASS' "$SERIAL" || true) -ne 1 ]]; then
+        why="one or more strict Phase-15 assertions were missing or duplicated"
     elif grep -aq 'RESULT FAIL' "$SERIAL"; then
         why="a suite reported RESULT FAIL"
     elif ! grep -aqF "$HALT_LINE" "$SERIAL"; then
@@ -389,8 +463,30 @@ for i in $(seq 1 "$N"); do
         fi
     fi
 
+    if [[ "$PHASE15_STRICT_GATE" == 1 ]]; then
+        saved_serial="$PHASE15_RECEIPTS_DIR/boots/serial-boot-$i.log"
+        saved_stderr="$PHASE15_RECEIPTS_DIR/boots/qemu-stderr-boot-$i.log"
+        receipt_verdict=PASS
+        if [[ -n "$why" ]]; then receipt_verdict=FAIL; fi
+        if ! "$PYTHON" "$REPO_ROOT/tools/phase15_patched_tcg_boot_receipt.py" \
+            --manifest "$REPO_ROOT/docs/phase15/patched-tcg-qualification.json" \
+            --serial "$saved_serial" --qemu-stderr "$saved_stderr" \
+            --output "$PHASE15_RECEIPTS_DIR/boots/boot-$i.json" \
+            --boot "$i" --cpu-profile qemu64,+nx,+smep,+smap \
+            --qemu-exit "$rc" --stability-verdict "$receipt_verdict" \
+            --reason "$why"; then
+            if [[ -z "$why" ]]; then
+                why="strict per-boot receipt verifier rejected this boot"
+            fi
+        fi
+    fi
+
     if [[ -z "$why" ]]; then
         printf 'ABI-V2 2\nAPB1_SLOT127 kind=12 rights=6\n' >> "$PIXEL_RECEIPT"
+        if [[ "$PHASE15_STRICT_GATE" == 1 ]]; then
+            cp "$PIXEL_RECEIPT" \
+               "$PHASE15_RECEIPTS_DIR/boots/pixels-boot-$i.txt"
+        fi
         pass=$((pass + 1))
     else
         fail=$((fail + 1))
@@ -431,9 +527,10 @@ fi
 # second of being written. arena-boot.efi is what actually determines
 # how the machine behaves, and it only changes when the kernel is
 # genuinely relinked.
-[[ "$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)" == "$EFI_START_SHA" ]] || { echo 'error: EFI changed during stability'; exit 1; }
+[[ "$(sha256sum "$EFI" | cut -d' ' -f1)" == "$EFI_START_SHA" ]] || { echo 'error: EFI changed during stability'; exit 1; }
+[[ "$(sha256sum "$ESP" | cut -d' ' -f1)" == "$ESP_START_SHA" ]] || { echo 'error: ESP changed during stability'; exit 1; }
 printf '%s %s/%s\n' \
-    "$(sha256sum "$REPO_ROOT/build/arena-boot.efi" | cut -d' ' -f1)" "$pass" "$N" \
+    "$(sha256sum "$EFI" | cut -d' ' -f1)" "$pass" "$N" \
     > "$REPO_ROOT/build/stability-receipt.txt"
 echo "receipt: build/stability-receipt.txt ($(cat "$REPO_ROOT/build/stability-receipt.txt"))"
 echo "STABILITY: PASS"

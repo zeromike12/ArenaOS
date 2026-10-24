@@ -27,7 +27,8 @@ EXPECTED = (
 SHUTDOWN_FEED = [(b"arena>", 1, b"shutdown\r")]
 
 
-def check_serial(label: str, serial: str, rc: int | None, avx_expected: bool) -> bool:
+def check_serial(label: str, serial: str, semantic_rc: int | None,
+                 qemu_rc: int | None, avx_expected: bool) -> bool:
     ok = True
 
     def check(condition: bool, message: str) -> None:
@@ -35,7 +36,9 @@ def check_serial(label: str, serial: str, rc: int | None, avx_expected: bool) ->
         print(f"[{label}] {'PASS' if condition else 'FAIL'}: {message}")
         ok &= condition
 
-    check(rc == 0, f"guest semantic exit status is zero (rc={rc})")
+    check(qemu_rc == 0, f"QEMU process exited cleanly (rc={qemu_rc})")
+    check(semantic_rc == 0,
+          f"guest semantic result and harness checks passed (verdict={semantic_rc})")
     check("PANIC" not in serial and "RESULT FAIL" not in serial,
           "no kernel panic or failed in-guest result")
     for name in EXPECTED:
@@ -130,7 +133,8 @@ def main() -> int:
         )
         arena_env.build_dir().joinpath(f"serial-{label}.log").write_text(serial)
         print(f"[{label}] elapsed {elapsed:.1f}s; serial: build/serial-{label}.log")
-        ok &= check_serial(label, serial, rc, avx_expected)
+        qemu_rc = mtest.LAST_QEMU_EXIT.get(label)
+        ok &= check_serial(label, serial, rc, qemu_rc, avx_expected)
     if ok:
         print("Phase-15 native guest qualification: PASS (baseline and AVX-capable CPU profiles)")
         return 0
