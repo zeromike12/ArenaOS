@@ -1,36 +1,37 @@
 /*
- * ASTR stream rings and granted stdio (C1.1).
+ * ASTR stream rings and granted stdio (C1.1; ASTR v2 per ADR-0111,
+ * accepted by M 2026-10-25).
  *
- * Wire format (userspace/arena-runtime/src/streams.rs, unchanged):
- *   page: 64-byte header {magic "ASTR", version 1, channels 3, capacity 768,
- *         reserved[48] = 0}, then three 832-byte rings at 64 + 832 * channel.
- *   ring: 64-byte control {write u32 @0, read u32 @4, state u32 @8, pad}, then
- *         768 data bytes at ring + 64. state bits: WRITER_CLOSED 1,
+ * Wire format (userspace/arena-runtime/src/streams.rs):
+ *   page: 64-byte header {magic "ASTR", version 2, channels 3,
+ *         capacity 1024, reserved[48] = 0}, then three 1088-byte rings at
+ *         64 + 1088 * channel (3328 of the 4096-byte page).
+ *   ring: 64-byte control {write u32 @0, read u32 @4, state u32 @8, pad},
+ *         then 1024 data bytes at ring + 64. state bits: WRITER_CLOSED 1,
  *         READER_CLOSED 2.
- * Channel 0 is stdin (the desktop writes, the app reads), 1 stdout and 2 stderr
- * (the app writes, the desktop reads).
+ * Channel 0 is stdin (the desktop writes, the app reads), 1 stdout and
+ * 2 stderr (the app writes, the desktop reads).
  *
  * Protocol rules (identical to the Rust runtime):
  *   - SPSC: one producer and one consumer per ring. The producer publishes
- *     bytes before its release-store to write; the consumer acquire-loads write
- *     before reading.
- *   - write: a short count is valid; a full ring returns WOULD_BLOCK; a closed
- *     reader returns BROKEN_PIPE.
- *   - read: 0 means EOF only after WRITER_CLOSED with the ring drained; an
- *     empty open ring returns WOULD_BLOCK.
+ *     bytes before its release-store to write; the consumer acquire-loads
+ *     write before reading.
+ *   - counters are wrapping u32; occupancy is `write - read` in wrapping
+ *     arithmetic and must be <= capacity; the byte index is
+ *     `counter & 1023`, continuous across every 2^32 wrap because the
+ *     capacity is a power of two. (v1 indexed a 768-byte ring with
+ *     `counter % 768`; 2^32 % 768 = 256 shifted the index at the wrap and
+ *     corrupted unread bytes. v1 pages are refused at check/attach.)
+ *   - write: a short count is valid; a full ring returns WOULD_BLOCK; a
+ *     closed reader returns BROKEN_PIPE.
+ *   - read: 0 means EOF only after WRITER_CLOSED with the ring drained;
+ *     an empty open ring returns WOULD_BLOCK.
  *
- * Granted stdio: fd 0/1/2 are local indices onto the StandardStreamSet and
- * StreamWake capabilities from the verified startup record. They are not
- * authority. Backpressure waits on the granted private Notification
+ * Granted stdio: fd 0/1/2 are local indices onto the StandardStreamSet
+ * and StreamWake capabilities from the verified startup record. They are
+ * not authority. Backpressure waits on the granted private Notification
  * (BADGE_STREAM_READY from the desktop). Writes wake the desktop via the
  * WRITE-only StreamWake notification (badge 1 << 5).
- *
- * Known protocol limit, kept for wire compatibility: the counters are u32 and
- * index the ring with `counter % 768`. The index is not continuous across the
- * 2^32 wrap, because 2^32 is not a multiple of 768. Traffic that crosses the
- * wrap is misordered. Documented in docs/compat/C1-FINAL-REPORT.md (finding
- * F-C1-RING-WRAP) and reproduced by the host test. Fixing it changes the wire
- * format, so it is a proposed ADR, not a change made here.
  */
 #include <stddef.h>
 #include <stdint.h>
@@ -41,8 +42,12 @@
 #include "arena/string.h"
 #include "internal.h"
 
+_Static_assert((ARENA_STREAM_CAPACITY & ARENA_STREAM_MASK) == 0,
+               "stream capacity must be a power of two (ADR-0111)");
 #define HEADER_BYTES 64u
-#define RING_STRIDE 832u
+#define RING_STRIDE 1088u
+_Static_assert(HEADER_BYTES + 3u * RING_STRIDE <= ARENA_STREAM_PAGE_BYTES,
+               "three ASTR v2 rings must fit in one page");
 #define CONTROL_BYTES 64u
 #define WRITER_CLOSED 1u
 #define READER_CLOSED 2u
@@ -135,7 +140,7 @@ long arena_ring_write_some(void *page_v, unsigned channel, const void *buf, size
         return ARENA_E_WOULD_BLOCK;
     }
     size_t count = len < available ? len : available;
-    size_t start = head % ARENA_STREAM_CAPACITY;
+    size_t start = head & ARENA_STREAM_MASK;
     size_t first = count < ARENA_STREAM_CAPACITY - start ? count : ARENA_STREAM_CAPACITY - start;
     uint8_t *data = ring + CONTROL_BYTES;
     arena_memcpy(data + start, buf, first);
@@ -175,7 +180,7 @@ long arena_ring_read_some(void *page_v, unsigned channel, void *buf, size_t len)
         return ARENA_E_CLOSED;
     }
     size_t count = len < available ? len : available;
-    size_t start = tail % ARENA_STREAM_CAPACITY;
+    size_t start = tail & ARENA_STREAM_MASK;
     size_t first = count < ARENA_STREAM_CAPACITY - start ? count : ARENA_STREAM_CAPACITY - start;
     const uint8_t *data = ring + CONTROL_BYTES;
     arena_memcpy(buf, data + start, first);

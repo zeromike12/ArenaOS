@@ -77,17 +77,21 @@
 #define ARENA_ARST_ROLE_STREAM_WAKE 7u
 #define ARENA_ARST_ROLE_SYNC_DOMAIN 8u
 
-/* --- stream page layout (streams.rs) ------------------------------------- */
+/* --- stream page layout (streams.rs; ASTR v2, ADR-0111) ------------------ */
 #define ARENA_STREAM_PAGE_BYTES 4096u
 #define ARENA_STREAM_CHANNELS 3u
-#define ARENA_STREAM_CAPACITY 768u
+/* Power-of-two capacity: `counter & (CAPACITY - 1)` indexing is
+ * continuous across the wrapping-u32 counter boundary. */
+#define ARENA_STREAM_CAPACITY 1024u
+#define ARENA_STREAM_MASK (ARENA_STREAM_CAPACITY - 1u)
 #define ARENA_STREAM_WAKE_BADGE (1u << 5)  /* app -> desktop wake (streams.rs) */
 /* desktop -> app readiness badge on the app's own notification (desktop.rs
  * BADGE_STREAM_READY). Waiters treat every badge as a hint; this is documented
  * here so no runtime code relies on a specific value. */
 #define ARENA_STREAM_READY_BADGE (1u << 2)
 #define ARENA_STREAM_MAGIC 0x52545341u /* "ASTR", little-endian u32 */
-#define ARENA_STREAM_VERSION 1u
+/* v1 (768) pages are refused by arena_ring_page_check. */
+#define ARENA_STREAM_VERSION 2u
 
 /* --- scalars ------------------------------------------------------------- */
 #define ARENA_PAGE_SIZE 4096u

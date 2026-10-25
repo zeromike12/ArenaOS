@@ -22,7 +22,7 @@
 
 static int checks;
 static int failures;
-static int known_defect_reproduced;
+/* (The v1 ring-wrap defect pin lived here until ASTR v2, ADR-0111.) */
 
 #define CHECK(cond, ...)                                                  \
     do {                                                                  \
@@ -440,14 +440,15 @@ static void wr_u32(unsigned char *at, uint32_t v) {
     memcpy(at, &v, 4);
 }
 
-/* Stream ring channel 1 lives at page + 64 + 832; its write counter is at +0,
- * read counter at +4, state at +8, data at +64 (wire layout, streams.c). */
+/* Stream ring channel 1 lives at page + 64 + 1088; its write counter is at
+ * +0, read counter at +4, state at +8, data at +64 (ASTR v2, streams.c). */
 static void test_ring_wrap(void) {
     unsigned char *page = aligned_alloc(4096, 4096);
     CHECK(page != NULL, "ring: page allocation");
     memset(page, 0, 4096);
     CHECK(arena_ring_page_init(page) == 0, "ring: page init");
-    unsigned char *ring = page + 64 + 832;
+    CHECK(arena_ring_page_check(page) == 0, "ring: fresh v2 page accepted");
+    unsigned char *ring = page + 64 + 1088;
 
     /* Positive case: 100 bytes, then 200 bytes whose counter crosses 2^32
      * (0xFFFFFF64 + 200 wraps to 0x2C). Occupancy stays far below capacity, so
@@ -465,29 +466,36 @@ static void test_ring_wrap(void) {
     CHECK(arena_ring_read_some(page, 1, dst + 100, 200) == 200, "ring wrap: read across 2^32");
     CHECK(memcmp(dst, src, sizeof src) == 0, "ring wrap: byte order across 2^32");
 
-    /* Known protocol defect, characterization pin (NOT a pass of the property):
-     * with head and tail at 0xFFFFFF00, a 256-byte write followed by a 512-byte
-     * write straddles the u32 wrap. Both writes use index = counter % 768, and
-     * 2^32 % 768 == 256, so the second write lands on residues still holding
-     * unread bytes of the first. The corruption is reproduced here and reported
-     * as a protocol finding. A fix changes the wire format and needs an ADR. */
-    wr_u32(ring + 0, 0xFFFFFF00u);
-    wr_u32(ring + 4, 0xFFFFFF00u);
-    unsigned char a[256], b[512];
-    memset(a, 0xAA, sizeof a);
-    memset(b, 0xBB, sizeof b);
-    CHECK(arena_ring_write_some(page, 1, a, sizeof a) == 256, "defect pin: first write");
-    CHECK(arena_ring_write_some(page, 1, b, sizeof b) == 512, "defect pin: second write");
-    unsigned char out[768];
-    CHECK(arena_ring_read_some(page, 1, out, sizeof out) == 768, "defect pin: drain");
-    int overwritten = memcmp(out, a, 256) != 0;
-    if (overwritten) {
-        printf("[host] KNOWN-DEFECT ring u32-wrap discontinuity reproduced: "
-               "unread bytes overwritten (protocol ADR required)\n");
-        known_defect_reproduced = 1;
-    } else {
-        CHECK(0, "defect pin: expected overwrite did not reproduce; re-review the ring protocol");
+    /* The historical v1 defect scenario (ADR-0111): a 256-byte write left
+     * UNREAD, then a 512-byte write straddling the wrap. Under v1's %768
+     * indexing the second write overwrote unread bytes. Under v2 mask
+     * indexing the drained stream must be byte-exact, twice in a row. */
+    for (int wrap = 0; wrap < 2; wrap++) {
+        wr_u32(ring + 0, 0xFFFFFF00u);
+        wr_u32(ring + 4, 0xFFFFFF00u);
+        unsigned char a[256], b[512], out[768];
+        for (unsigned i = 0; i < sizeof a; i++) a[i] = (unsigned char)(i ^ 0x5Au);
+        for (unsigned i = 0; i < sizeof b; i++) b[i] = (unsigned char)(i * 3u + 1u);
+        CHECK(arena_ring_write_some(page, 1, a, sizeof a) == 256, "v2 wrap: first write unread");
+        CHECK(arena_ring_write_some(page, 1, b, sizeof b) == 512, "v2 wrap: straddling write");
+        CHECK(arena_ring_read_some(page, 1, out, sizeof out) == 768, "v2 wrap: drain");
+        CHECK(memcmp(out, a, 256) == 0 && memcmp(out + 256, b, 512) == 0,
+              "v2 wrap: unread bytes preserved in order");
     }
+
+    /* Version refusal: a v1 header (and any unknown version) must refuse,
+     * exactly like the Rust attach. */
+    unsigned char saved[16];
+    memcpy(saved, page, 16);
+    wr_u32(page + 4, 1u);
+    CHECK(arena_ring_page_check(page) != 0, "v2: v1 page refused");
+    wr_u32(page + 4, 99u);
+    CHECK(arena_ring_page_check(page) != 0, "v2: unknown version refused");
+    wr_u32(page + 4, ARENA_STREAM_VERSION);
+    wr_u32(page + 12, 768u);
+    CHECK(arena_ring_page_check(page) != 0, "v2: v1 capacity refused");
+    memcpy(page, saved, 16);
+    CHECK(arena_ring_page_check(page) == 0, "v2: restored page accepted");
     free(page);
 }
 
@@ -703,8 +711,8 @@ int main(int argc, char **argv) {
     test_ring_wrap();
     failures += libc_host_tests();
     checks += libc_host_checks;
-    if (failures == 0 && known_defect_reproduced) {
-        fprintf(stdout, "HOST-ONLY RESULT PASS (%d checks, known protocol defect pinned)\n", checks);
+    if (failures == 0) {
+        fprintf(stdout, "HOST-ONLY RESULT PASS (%d checks)\n", checks);
         return 0;
     }
     fprintf(stdout, "HOST-ONLY RESULT FAIL (%d of %d checks)\n", failures, checks);

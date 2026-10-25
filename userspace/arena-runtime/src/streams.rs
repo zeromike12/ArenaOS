@@ -15,10 +15,17 @@ use core::{
 
 pub const STREAM_PAGE_BYTES: usize = 4096;
 pub const STREAM_CHANNELS: usize = 3;
-pub const STREAM_CAPACITY: usize = 768;
+/// ASTR v2 (ADR-0111, accepted by M 2026-10-25): capacity is a power of
+/// two so that `counter & (CAPACITY - 1)` indexing is continuous across
+/// the wrapping-u32 counter boundary. v1 used 768 with `% 768`, which
+/// shifted the byte index by +256 at 2^32 and corrupted unread bytes.
+pub const STREAM_CAPACITY: usize = 1024;
+const _: () = assert!(STREAM_CAPACITY.is_power_of_two());
+const STREAM_MASK: usize = STREAM_CAPACITY - 1;
 pub const STREAM_WAKE_BADGE: u64 = 1 << 5;
 const MAGIC: u32 = u32::from_le_bytes(*b"ASTR");
-const VERSION: u32 = 1;
+/// Pages at any other version (including v1) are refused by `attach`.
+const VERSION: u32 = 2;
 const WRITER_CLOSED: u32 = 1;
 const READER_CLOSED: u32 = 2;
 static STANDARD_STREAMS_ATTACHED: AtomicBool = AtomicBool::new(false);
@@ -237,7 +244,7 @@ impl Writer<'_> {
             return Err(Error::WouldBlock);
         }
         let count = input.len().min(available);
-        let start = head as usize % STREAM_CAPACITY;
+        let start = head as usize & STREAM_MASK;
         let first = count.min(STREAM_CAPACITY - start);
         // SAFETY: SPSC ownership and the acquired read counter prove the
         // selected free range is not being read by the consumer.
@@ -306,7 +313,7 @@ impl Reader<'_> {
             return Err(Error::Closed);
         }
         let count = output.len().min(available as usize);
-        let start = tail as usize % STREAM_CAPACITY;
+        let start = tail as usize & STREAM_MASK;
         let first = count.min(STREAM_CAPACITY - start);
         // SAFETY: the acquired write counter proves initialization; SPSC
         // gives this consumer sole read ownership until it publishes tail.
@@ -658,7 +665,7 @@ mod tests {
 
     #[test]
     fn three_rings_fit_one_page_and_transfer_partial_bytes_under_backpressure() {
-        assert_eq!(REGION_BYTES, 2560);
+        assert_eq!(REGION_BYTES, 3328);
         let (_page, set) = make_page();
         let mut writer = set.writer(Channel::Stdout).unwrap();
         let mut reader = set.reader(Channel::Stdout).unwrap();
@@ -673,8 +680,8 @@ mod tests {
         assert_eq!(first, [0x5a; 513]);
         assert_eq!(writer.write(&source[STREAM_CAPACITY..]), Ok(17));
         let mut rest = [0; STREAM_CAPACITY];
-        assert_eq!(reader.read(&mut rest), Ok(272));
-        assert!(rest[..272].iter().all(|byte| *byte == 0x5a));
+        assert_eq!(reader.read(&mut rest), Ok(528));
+        assert!(rest[..528].iter().all(|byte| *byte == 0x5a));
         assert_eq!(reader.read(&mut rest), Err(Error::WouldBlock));
     }
 
@@ -693,6 +700,95 @@ mod tests {
         let mut result = [0; 11];
         assert_eq!(reader.read(&mut result), Ok(11));
         assert_eq!(&result, b"wrap-around");
+    }
+
+    /// The v1 defect scenario (ADR-0111): bytes still UNREAD when the
+    /// counter wraps, then more writes. Under v1's `% 768` the second
+    /// write landed +256 bytes away and destroyed unread data (proven by
+    /// `v1_indexing_negative_control` below). v2 must preserve content,
+    /// order, and occupancy across repeated wraps.
+    #[test]
+    fn wrap_with_unread_bytes_preserves_content_and_order() {
+        let (_page, set) = make_page();
+        let mut writer = set.writer(Channel::Stdout).unwrap();
+        let mut reader = set.reader(Channel::Stdout).unwrap();
+        let pattern: std::vec::Vec<u8> = (0..600u32).map(|i| (i % 251) as u8).collect();
+        for wrap in 0..2u32 {
+            // Seed both counters just below 2^32, so this iteration's
+            // first write straddles the wrap while data is in flight.
+            // SAFETY: only this test owns the SPSC producer and consumer,
+            // and the ring is empty at each seeding point.
+            unsafe {
+                let ring = set.ring(Channel::Stdout).as_ref();
+                ring.write.store(u32::MAX - 99, Ordering::Relaxed);
+                ring.read.store(u32::MAX - 99, Ordering::Relaxed);
+            }
+            // 200 bytes written and left unread across the wrap...
+            assert_eq!(writer.write(&pattern[..200]), Ok(200));
+            // ...then 400 more bytes after the counter wrapped.
+            assert_eq!(writer.write(&pattern[200..600]), Ok(400));
+            let mut out = [0u8; 600];
+            assert_eq!(reader.read(&mut out), Ok(600), "wrap {wrap}");
+            assert_eq!(&out[..], &pattern[..], "wrap {wrap}");
+            assert_eq!(reader.read(&mut out), Err(Error::WouldBlock));
+        }
+    }
+
+    /// Negative control: the exact v1 arithmetic (capacity 768, index =
+    /// counter % 768) corrupts the scenario above. If this model ever
+    /// stops detecting corruption, the v2 wrap test proves nothing.
+    #[test]
+    fn v1_indexing_negative_control() {
+        const CAP: u32 = 768;
+        let mut ring = [0u8; 768];
+        let mut write: u32 = u32::MAX - 99;
+        let read: u32 = write;
+        let mut put = |ring: &mut [u8; 768], write: &mut u32, bytes: &[u8]| {
+            let start = (*write % CAP) as usize;
+            for (i, b) in bytes.iter().enumerate() {
+                ring[(start + i) % 768] = *b;
+            }
+            *write = write.wrapping_add(bytes.len() as u32);
+        };
+        let pattern: std::vec::Vec<u8> = (0..600u32).map(|i| (i % 251) as u8).collect();
+        put(&mut ring, &mut write, &pattern[..200]);
+        put(&mut ring, &mut write, &pattern[200..600]);
+        let mut out = [0u8; 600];
+        let start = (read % CAP) as usize;
+        for i in 0..600 {
+            out[i] = ring[(start + i) % 768];
+        }
+        assert_ne!(&out[..], &pattern[..], "v1 indexing must corrupt here");
+    }
+
+    #[test]
+    fn attach_refuses_v1_and_unknown_versions() {
+        let (mut page, _set) = make_page();
+        for bad_version in [1u32, 3, 99, u32::MAX] {
+            // SAFETY: test-only header rewrite of its own page.
+            unsafe {
+                let region = page.0.as_mut_ptr().cast::<Region>();
+                (*region).version = bad_version;
+            }
+            // SAFETY: the page is a live one-page mapping.
+            let got = unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) };
+            assert!(
+                matches!(got, Err(Error::BadFormat)),
+                "version {bad_version} must be refused"
+            );
+        }
+        // Wrong capacity field with the right version is also refused.
+        // SAFETY: test-only header rewrite of its own page.
+        unsafe {
+            let region = page.0.as_mut_ptr().cast::<Region>();
+            (*region).version = VERSION;
+            (*region).capacity = 768;
+        }
+        // SAFETY: the page is a live one-page mapping.
+        assert!(matches!(
+            unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) },
+            Err(Error::BadFormat)
+        ));
     }
 
     #[test]
@@ -748,7 +844,7 @@ mod tests {
         // SAFETY: test-only layout inspection while endpoints are idle.
         unsafe {
             let region = page.0.as_mut_ptr().cast::<Region>();
-            (*region).rings[0].write.store(1000, Ordering::Relaxed);
+            (*region).rings[0].write.store(2000, Ordering::Relaxed);
         }
         // SAFETY: the exact initialized page remains readable and mapped.
         let set = unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.unwrap();

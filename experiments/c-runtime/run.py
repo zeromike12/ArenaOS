@@ -411,10 +411,9 @@ def abi_check():
 
 # ---------------------------------------------------------------- host ----
 
-# The only accepted host verdict. The pinned protocol defect (u32 ring wrap,
-# see docs/compat/C1-FINAL-REPORT.md) is required to reproduce; if it stops
-# reproducing, the pin fails and the change needs review.
-HOST_VERDICT = re.compile(r"^HOST-ONLY RESULT PASS \(\d+ checks, known protocol defect pinned\)$", re.M)
+# The only accepted host verdict (ASTR v2, ADR-0111: the former u32
+# ring-wrap defect pin is now a positive preservation test).
+HOST_VERDICT = re.compile(r"^HOST-ONLY RESULT PASS \(\d+ checks\)$", re.M)
 
 
 def host_tests():

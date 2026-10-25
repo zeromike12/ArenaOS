@@ -74,7 +74,7 @@ static void t2_streams(void) {
     static const char line[] = "[c-native] stdout line through the granted ring\n";
     long n = arena_stream_write(1, line, sizeof line - 1);
     EXPECT(n == (long)(sizeof line - 1), "stdout exact write");
-    /* 2 KiB total exceeds the 768-byte ring, so this crosses backpressure
+    /* 2 KiB total exceeds the 1024-byte ring, so this crosses backpressure
      * (WOULD_BLOCK, SYS_WAIT on the granted notification, desktop drain). */
     char chunk[64];
     arena_memset(chunk, 'k', sizeof chunk);
@@ -141,22 +141,22 @@ static void t4_rings(void) {
     for (unsigned i = 0; i < sizeof src; i++) {
         src[i] = (uint8_t)(i * 13u + 1u);
     }
-    /* Partial transfer: 1000 bytes into a 768-byte ring accepts 768. */
-    EXPECT(arena_ring_write_some(loop_page, 1, src, sizeof src) == 768, "partial transfer");
+    /* Partial transfer: 1400 bytes into a 1024-byte ring accepts 1024
+     * (ASTR v2, ADR-0111). */
+    EXPECT(arena_ring_write_some(loop_page, 1, src, sizeof src) == ARENA_STREAM_CAPACITY,
+           "partial transfer");
     EXPECT(arena_ring_write_some(loop_page, 1, src, 1) == ARENA_E_WOULD_BLOCK, "full ring");
-    uint8_t dst[1000];
+    uint8_t dst[1400];
     EXPECT(arena_ring_read_some(loop_page, 1, dst, 100) == 100, "bounded read");
     /* Freed space is 100 bytes: the next write is short-counted to 100. */
-    EXPECT(arena_ring_write_some(loop_page, 1, src + 768, 300) == 100, "short write after drain");
-    /* The ring now holds 668 + 100 = 768 bytes: one read drains all of them. */
-    EXPECT(arena_ring_read_some(loop_page, 1, dst + 100, 768) == 768, "drain remaining");
+    EXPECT(arena_ring_write_some(loop_page, 1, src + ARENA_STREAM_CAPACITY, 300) == 100,
+           "short write after drain");
+    /* The ring now holds 924 + 100 = 1024 bytes: one read drains them. */
+    EXPECT(arena_ring_read_some(loop_page, 1, dst + 100, ARENA_STREAM_CAPACITY) ==
+               (long)ARENA_STREAM_CAPACITY,
+           "drain remaining");
     int ordered = 1;
-    for (unsigned i = 0; i < 768; i++) {
-        if (dst[i] != src[i]) {
-            ordered = 0;
-        }
-    }
-    for (unsigned i = 768; i < 868; i++) {
+    for (unsigned i = 0; i < ARENA_STREAM_CAPACITY + 100; i++) {
         if (dst[i] != src[i]) {
             ordered = 0;
         }
@@ -171,6 +171,29 @@ static void t4_rings(void) {
     EXPECT(arena_ring_page_init(loop_page2) == 0, "second page");
     arena_ring_close_reader(loop_page2, 2);
     EXPECT(arena_ring_write_some(loop_page2, 2, src, 1) == ARENA_E_BROKEN_PIPE, "broken pipe");
+
+    /* ASTR v2 near-wrap, in guest (ADR-0111): seed both counters of
+     * channel 1 just below 2^32 (ring at page + 64 + 1088; write counter
+     * @+0, read @+4), leave 256 bytes UNREAD across the wrap, then write
+     * 512 straddling bytes. v1's `% 768` indexing overwrote unread data
+     * here; the 768-byte drain must now be byte-exact. */
+    EXPECT(arena_ring_page_init(loop_page) == 0, "wrap page reinit");
+    uint32_t seed = 0xFFFFFF00u;
+    arena_memcpy(loop_page + 64 + 1088, &seed, sizeof seed);
+    arena_memcpy(loop_page + 64 + 1088 + 4, &seed, sizeof seed);
+    uint8_t wa[256], wb[512], wout[768];
+    for (unsigned i = 0; i < sizeof wa; i++) {
+        wa[i] = (uint8_t)(i ^ 0x5Au);
+    }
+    for (unsigned i = 0; i < sizeof wb; i++) {
+        wb[i] = (uint8_t)(i * 3u + 1u);
+    }
+    EXPECT(arena_ring_write_some(loop_page, 1, wa, sizeof wa) == 256, "wrap: unread write");
+    EXPECT(arena_ring_write_some(loop_page, 1, wb, sizeof wb) == 512, "wrap: straddling write");
+    EXPECT(arena_ring_read_some(loop_page, 1, wout, sizeof wout) == 768, "wrap: drain");
+    EXPECT(arena_memcmp(wout, wa, sizeof wa) == 0 &&
+               arena_memcmp(wout + sizeof wa, wb, sizeof wb) == 0,
+           "wrap: unread bytes preserved in order");
 
     /* Real concurrency: a producer thread and this thread share loop_page2. */
     arena_ring_page_init(loop_page2);
