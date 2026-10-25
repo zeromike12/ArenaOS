@@ -160,3 +160,77 @@ New items raised by C1 (each has its own record):
   to match (see the final report).
 
 Review question 1 above remains open. Question 3 (`PT_TLS` ownership) remains open.
+
+## Phase 16 reconciliation (2026-10-24)
+
+This addendum reconciles the proposal with current ArenaOS. It does **not**
+accept the ADR; status remains **Proposed** pending M's explicit acceptance.
+Phase 16 imported the runtime to `main` (provenance:
+`docs/phase16/PROVENANCE.md`) and is qualifying it under the contract below.
+
+1. **CPU profile.** ADR-0113 is **Accepted** (M, 2026-10-24, Phase 15,
+   merged via PR #4): eager per-thread FXSAVE64 for x87/MMX/SSE/SSE2; AVX
+   remains unsupported; CPL3 faults (`#MF`/`#XF`/`#UD`) are contained with
+   status `0x100+vector`. The C1-era "no SSE/x87" build profile above is
+   therefore split into two supported-by-evidence profiles under *one*
+   runtime: (a) the **integer profile** (historical flags, mandatory no-FP
+   ISA audit) for the existing runtime and apps, and (b) the **baseline FP
+   profile** for applications that need it: `-march=x86-64 -msse2
+   -mno-avx -mno-avx2 -mno-avx512f` (Clang via zig uses the freestanding
+   target default + AVX refusals), with CPUID gating for anything above
+   SSE2 and an instruction-aware positive audit (SSE2/x87 required, AVX
+   forbidden). `docs/compat/C1-FPSIMD-BOUNDARY.md` "no FP state" statements
+   are historical and superseded by ADR-0113. The *kernel* stays
+   integer-only (ADR-0012/0113); this profile is ring-3 only. Phase 15
+   qualification scope (pinned locally modified QEMU 11.1.2 TCG) does not
+   by itself qualify C applications or upstream/hardware backends.
+2. **Bounded library subset.** The proposed supported set is exactly the
+   110 symbols of `docs/compat/C2-LIBC-COVERAGE.md` (defined in both
+   compilers' archives), with per-function evidence levels recorded there.
+   Unsupported functions refuse (`ENOSYS`/`EINVAL`/`thrd_error`, or are
+   absent, e.g. `_exit`, `%f` formatting, `fopen`, recursive/timed mutexes,
+   `tss_*` keys, `CLOCK_REALTIME`, `time`/`clock`); none returns a fake
+   success. No pthreads, no `setjmp`, no locale, no filesystem authority.
+   This ADR does not propose full POSIX or complete C11.
+3. **Threading subset.** C11 `threads.h` as bounded in the coverage doc,
+   over `SYS_THREAD_*` and sync domains (ADR-0106/0107), 4 user threads
+   per process (kernel bound, measured, not raised). `cnd_timedwait`
+   deadlines are read on `CLOCK_MONOTONIC` (documented deviation from
+   `TIME_UTC`; no wall-clock grant exists).
+4. **TLS remains runtime-managed** (decision 4 above, unchanged):
+   `crt0` installs per-thread TLS (`local-exec`, FS-base via ADR-0085
+   bindings); the loader still ignores `PT_TLS`. Review question 3 stays
+   open and is *not* a Phase 16 blocker because the runtime path is
+   guest-tested (C1 T8).
+5. **Startup validation.** ARST v2 gate as implemented (exit codes
+   120/121/122 for stack/TLS/record failures; live-cap inventory checked
+   against the record; flag↔descriptor agreement for streams/sync). The
+   Phase 16 M9 fix aligned the Python oracle (`tools/startup_abi.py`) to
+   the native validators (7 descriptors, roles 6/7/8, kind 16, flags mask
+   31); no native validation was weakened and the wire format is unchanged.
+   Graphical service identification remains B-GFX-1 (no slot guessing).
+6. **Streams.** Capability-backed stdio over ADR-0104 as implemented;
+   acceptance is gated on ADR-0111 (this ADR's "768-byte ring" downside is
+   superseded by proposed ADR-0111 v2, capacity 1024). Live-stdin guest
+   evidence is a Phase 16 requirement, currently a documented gap.
+7. **No privileged serial fallback in the positive demonstration.**
+   `SYS_DEBUG_WRITE` is reachable only via the explicit legacy opt-in
+   object; Phase 16 removed the last weak reference from ordinary images
+   (hook-pointer dispatch; `nm -u` empty under GCC and Clang). Review
+   question 1 (the syscall's own fate) remains a separate open decision
+   for M; the C path does not depend on its answer.
+8. **Termination semantics (exact).** `exit` runs `atexit` handlers (≤32,
+   reverse order) and flushes; `_Exit`/`abort` skip handlers (statuses
+   given/134). `thrd_exit` ends only the calling worker. **Process exit
+   status is the status of the last thread to exit** (kernel rule; there
+   is no separate whole-process termination syscall — adding one would
+   need its own ADR). Documented consequence: a detached worker that
+   outlives `main`'s return determines the process status; C2.1.2's
+   refcounted detach + thread-count observation is the supported pattern.
+   Detached-thread memory is freed exactly once by the last reference
+   (bounded stress-verified; not a proof for all schedules).
+
+Decision requested from M: accept this ADR (with the Phase 16
+reconciliation as part of the decision text) when the Phase 16 guest
+evidence is presented, or record specific objections. ADR-0111 is decided
+separately; neither acceptance implies the other.
