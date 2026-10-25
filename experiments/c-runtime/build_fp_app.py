@@ -77,10 +77,16 @@ def build(cc: str, out_name: str, extra: list[str] | None = None) -> tuple[Path,
     c2run.run(compiler + flags + ["-c", str(EXP / "app/c_fp_app.c"), "-o", str(app_o)])
     elf = out / f"c-fp-{cc}.elf"
     crt0 = next(o for o in objects if o.name == "crt0.o")
-    rest = [str(o) for o in objects if o.name != "crt0.o"]
+    # Archive the runtime exactly like run.py: on-demand member extraction is
+    # what keeps legacy_debug.o (SYS_DEBUG_WRITE) out of ordinary images.
+    lib = out / "libarena_c_fp.a"
+    if lib.exists():
+        lib.unlink()
+    c2run.run(c2run.ar_cmd(cc) + ["rcs", str(lib)]
+              + [str(o) for o in objects if o.name != "crt0.o"])
     c2run.run(compiler + flags + c2run.LINK_FLAGS
               + ["-Wl,-T," + str(EXP / "link/arena-user.ld"), str(crt0), str(app_o),
-                 str(probe_o)] + rest + ["-o", str(elf)])
+                 str(probe_o), str(lib), "-o", str(elf)])
     return elf, app_o
 
 

@@ -45,3 +45,21 @@ above (any transfer path), or allowlist `static.rust-lang.org`. Hashes
 will be verified against the table before installation; the fixture/APB1
 identities (`d7b0a8cf…`, `04add54f…`) will be reproduced and recorded.
 Independent Phase 16 work continues meanwhile.
+
+## Source-reproduction experiments (2026-10-24, concluded: not reproducible here)
+
+Diffing the committed protected fixture (`userspace/phase14-pie/fixture.elf`)
+against local builds shows: (a) build path `/workspace/ArenaOS` embedded in
+a panic-location string (fixable with `--remap-path-prefix`), and (b)
+different crate disambiguators (official `core` = `CsieveXhe8AWz…`, local =
+`Csi1tY5tVYnWh…`) — i.e. different `core` metadata than the bootstrap-built
+official libraries. Variants tried for `x86_64-unknown-none` (sysroot
+restored afterwards): A) opt2+CGU1+frame-pointers+remap → fixture
+`3cdfecb1…`; B) opt3+CGU1+frame-pointers+remap(+workspace path remap) →
+`7f35deaf…`. Neither reproduces `d7b0a8cf…`; the disambiguator is invariant
+under these flags and is driven by bootstrap-grade library metadata
+(Cargo feature/cfg set), which direct `rustc` sysroot builds do not
+replicate. Conclusion: the official components (table above) are required.
+For development-only guest work, `tools/build_phase16_dev.sh` verifies the
+committed fixture instead of rebuilding it; its artifacts are explicitly
+never qualification evidence.

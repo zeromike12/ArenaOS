@@ -218,7 +218,7 @@ int main(int argc, char **argv) {
     errno = 0;
     EXPECT(snprintf(fbuf, sizeof fbuf, "%f", 1.5) == -1 && errno == ENOTSUP);
 
-    printf(APP_NAME " RESULT %s checks=%d failed=%d skips=%d\n",
+    printf(APP_NAME " VERDICT %s checks=%d failed=%d skips=%d\n",
            failed_checks == 0 ? "PASS" : "FAIL", checks, failed_checks, skips);
     return failed_checks == 0 ? EXIT_PASS : EXIT_FAIL;
 }
