@@ -1,11 +1,13 @@
-# ADR-0111: Native stream ring counter wrap — versioned power-of-two layout (proposal)
+# ADR-0111: Native stream ring counter wrap — versioned power-of-two layout
 
-Status: **Proposed.** Not accepted. Originally prepared by the C1/C2 runtime
-workstream; revised 2026-10-24 during Phase 16 at C's recommendation to
-evaluate a versioned layout with power-of-two capacity. **No production
-wire format is changed by this revision.** Acceptance is M's decision (C
-reviews); Phase 16 stream acceptance is blocked until M decides and the
-chosen fix is implemented and qualified.
+Status: **Accepted by M (2026-10-25).** Architecture approved for
+implementation in Phase 16: three 1,024-byte power-of-two rings, version 2,
+documented offsets/alignment/one-page layout, wrapping `u32` occupancy
+arithmetic with mask-based indexing, coordinated Rust/C cutover, explicit
+refusal of incompatible/unknown versions. This approval accepts the
+contract; it does not accept the implementation, qualify Phase 16, or
+authorize merging. Originally prepared by the C1/C2 runtime workstream;
+revised 2026-10-24 during Phase 16 at C's recommendation.
 
 ## Problem (reproduced, unchanged)
 

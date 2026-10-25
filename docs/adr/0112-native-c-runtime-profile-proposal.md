@@ -1,11 +1,53 @@
-# ADR-0112: Native C runtime profile and C-facing stdio (proposal)
+# ADR-0112: Native C runtime profile and C-facing stdio
 
-Status: Proposed
-Date: 2026-10-08
-Milestone context: Phase 13 baseline (branch `arena/f89ea987-arenaos`). This is a
-proposal only. It does not change the production kernel, the syscall ABI, or
-the ELF loader. Experimental evidence is in `experiments/c-runtime/` and
-`docs/compat/`.
+Status: **Accepted by M (2026-10-25)** — the reconciled Phase 16 bounded
+native C-runtime architecture, including its documented limitations. This
+approval accepts the contract; it does not accept any implementation,
+qualify Phase 16, or authorize merging. The runtime remains on branch
+`arena/2b4ae1a5-arenaos`; it has **not** landed on `main`.
+
+## Current decision (authoritative, 2026-10-25)
+
+Where the historical body below conflicts with this section, this section
+wins. The "Phase 16 reconciliation" section near the end (dated
+2026-10-24) is part of the accepted decision text.
+
+1. **One canonical runtime** (`experiments/c-runtime/`, provenance
+   `docs/phase16/PROVENANCE.md`), two ring-3 CPU profiles: the integer
+   profile (mandatory no-FP ISA audit) and the baseline FP profile
+   (`-march=x86-64 -msse2 -mno-avx -mno-avx2 -mno-avx512f`; Clang via zig:
+   freestanding default + AVX refusals), under ADR-0113 (x87/MMX/SSE/SSE2;
+   AVX unsupported). The kernel stays integer-only.
+2. **Bounded library subset**: exactly the 110 symbols of
+   `docs/compat/C2-LIBC-COVERAGE.md`. Unsupported functions refuse
+   (`ENOSYS`/`EINVAL`/`thrd_error`) or are absent (`_exit`, `%f`,
+   `fopen`, recursive/timed mutexes, `tss_*`, `CLOCK_REALTIME`, `time`,
+   `clock`); none returns fake success. No pthreads, no `setjmp`, no
+   locale, no filesystem authority. Not full POSIX or complete C11.
+3. **Threading**: bounded C11 `threads.h` over ADR-0106/0107; kernel bound
+   of 4 user threads per process (measured, not raised).
+   `cnd_timedwait` reads `CLOCK_MONOTONIC` (documented deviation).
+4. **TLS remains runtime-managed** by `crt0` (`local-exec`); the loader
+   still ignores `PT_TLS`. Not a Phase 16 blocker.
+5. **Startup validation**: ARST v2 as implemented (exit 120/121/122).
+   The Python oracle matches the native validators; no native validation
+   was weakened; the wire format is unchanged.
+6. **Streams**: capability-backed stdio; wire layout per accepted
+   ADR-0111 (ASTR v2, 1024-byte rings). Applications built for the v1
+   layout are refused at stream setup (exit 58), never silently run.
+7. **No privileged serial fallback** in the positive demonstration;
+   `SYS_DEBUG_WRITE` only via explicit legacy opt-in object. The
+   syscall's own fate remains a separate open decision (review question 1).
+8. **Termination**: `exit` runs `atexit` (≤32, reverse) and flushes;
+   `_Exit`=`abort` skip handlers (given/134); `thrd_exit` ends only the
+   caller; **process status = status of the last thread to exit**.
+
+## Historical proposal text (2026-10-08, context only)
+
+Milestone context: Phase 13 baseline (branch `arena/f89ea987-arenaos`). The
+text below is the original proposal and is preserved as historical context;
+statements superseded above (no FP state, 768-byte rings, "proposal only")
+no longer describe the accepted contract.
 
 ## Problem
 
@@ -209,10 +251,10 @@ Phase 16 imported the runtime to `main` (provenance:
    the native validators (7 descriptors, roles 6/7/8, kind 16, flags mask
    31); no native validation was weakened and the wire format is unchanged.
    Graphical service identification remains B-GFX-1 (no slot guessing).
-6. **Streams.** Capability-backed stdio over ADR-0104 as implemented;
-   acceptance is gated on ADR-0111 (this ADR's "768-byte ring" downside is
-   superseded by proposed ADR-0111 v2, capacity 1024). Live-stdin guest
-   evidence is a Phase 16 requirement, currently a documented gap.
+6. **Streams.** Capability-backed stdio over ADR-0104; wire layout per
+   ADR-0111 **Accepted 2026-10-25** (ASTR v2, capacity 1024; supersedes
+   this ADR's historical "768-byte ring" downside). Live-stdin guest
+   evidence is a Phase 16 requirement, in progress.
 7. **No privileged serial fallback in the positive demonstration.**
    `SYS_DEBUG_WRITE` is reachable only via the explicit legacy opt-in
    object; Phase 16 removed the last weak reference from ordinary images
@@ -230,7 +272,6 @@ Phase 16 imported the runtime to `main` (provenance:
    Detached-thread memory is freed exactly once by the last reference
    (bounded stress-verified; not a proof for all schedules).
 
-Decision requested from M: accept this ADR (with the Phase 16
-reconciliation as part of the decision text) when the Phase 16 guest
-evidence is presented, or record specific objections. ADR-0111 is decided
-separately; neither acceptance implies the other.
+Decision: **Accepted by M on 2026-10-25** (architecture approval; see the
+status block). ADR-0111 was approved the same day; neither acceptance
+implies the other, and neither accepts an implementation.
