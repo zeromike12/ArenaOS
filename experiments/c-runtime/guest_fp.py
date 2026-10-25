@@ -10,6 +10,15 @@ launched exactly like guest_c2.py (protected APB1 path, All Applications):
      "[c-fp] VERDICT FAIL", exit 72 (guest negative control: corrupted FP
      state MUST be detected; a mutant PASS fails this suite)
 
+Exact assertion contract (guest_fp.py EXPECTED_RESULTS; changing it is a
+deliberate coverage change): positive checks=66 failed=0 skips=0; mutant
+checks=66 failed=19 skips=0 (every image-comparator check, and only
+those, fails). Zero skips is required on the granted bundles. The
+judge's own negative controls run with --self-test (no guest needed):
+reduced counts, skipped required coverage, missing/duplicate verdicts,
+contradictory verdict/failed fields, and a mutant whose failure count
+does not match its check-failed lines must all be rejected.
+
 Signing: RFC 8032 development fixture (test-only). Evidence label: GUEST.
 Run via guest_phase16_dev.py --suite fp while B1 blocks official builds
 (results are DEVELOPMENT evidence until re-run on an official build).
@@ -45,6 +54,17 @@ EXIT_RE = re.compile(r"^\[desktop\] child Process-cap exit status=(\d+)\r?$", re
 RESULT_RE = re.compile(r"^\[c-fp\] VERDICT (PASS|FAIL) checks=(\d+) failed=(\d+) skips=(\d+)\r?$", re.M)
 HEADLESS_MARK = gn.HEADLESS_MARK
 RETIRED_MARK = gn.RETIRED_MARK
+
+# Exact contract for app/c_fp_app.c. If coverage is intentionally changed
+# there, update these counts deliberately in the same change.
+EXPECTED_EXITS = [58, 71, 72]
+EXPECTED_RESULTS = [("PASS", 66, 0, 0), ("FAIL", 66, 19, 0)]
+EXPECTED_STARTS = 2
+CHECK_FAILED_RE = re.compile(r"^\[c-fp\] check failed line \d+:", re.M)
+# Only a skip reported by the FP app itself is a coverage skip.  The boot
+# serial legitimately contains unrelated service lines such as
+# "configup: SKIP (no trusted test intent; no SET)".
+FP_SKIP_RE = re.compile(r"^\[c-fp\] .*?\bSKIP\b", re.M)
 
 NEG = dict(key="fp-nostream", app_id=b"org.arenaos.fpnostream", display=b"Vega Stream Less",
            search="Vega", flags=20, file=b"aaa-vega.apb1", row=58)
@@ -137,28 +157,98 @@ def interaction(disk: Path, bundles: dict, outcome: dict) -> bytes:
     return b"shutdown\r"
 
 
-def judge(serial: str) -> dict:
-    view = gn.app_stream_view(serial)
+def _judge_view(view: str, exits: list[int]) -> dict:
     failures: list[str] = []
-    exits = [int(v) for v in EXIT_RE.findall(serial)]
-    if exits != [58, 71, 72]:
-        failures.append(f"exit sequence {exits}, expected [58, 71, 72]")
+    if exits != EXPECTED_EXITS:
+        failures.append(f"exit sequence {exits}, expected {EXPECTED_EXITS}")
     results = [(m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)))
                for m in RESULT_RE.finditer(view)]
     if len(results) != 2:
-        failures.append(f"RESULT line count {len(results)}, expected 2 (positive + mutant)")
+        failures.append(f"VERDICT line count {len(results)}, expected 2 "
+                        "(positive + mutant; missing or duplicate verdicts fail)")
     else:
-        (v1, _c1, f1, _s1), (v2, _c2, f2, _s2) = results
-        if v1 != "PASS" or f1 != 0:
-            failures.append(f"positive app did not PASS cleanly: {results[0]}")
-        if v2 != "FAIL" or f2 == 0:
-            failures.append(f"mutant was not detected as FAIL: {results[1]}")
-    if view.count("[c-fp] start") != 2:
+        for label, got, want in (("positive", results[0], EXPECTED_RESULTS[0]),
+                                 ("mutant", results[1], EXPECTED_RESULTS[1])):
+            if got != want:
+                failures.append(
+                    f"{label} verdict {got}, expected exact {want} "
+                    "(verdict, checks, failed, skips)")
+        # Contradictory verdict/failed combinations are failures even if a
+        # future contract change edits the tuple above carelessly.
+        for verdict, _checks, failed, _skips in results:
+            if (verdict == "PASS") != (failed == 0):
+                failures.append(f"contradictory verdict/failed pair: "
+                                f"VERDICT {verdict} failed={failed}")
+        # The mutant's expected failures must be exactly the image checks:
+        # every failed EXPECT prints one check-failed line, the positive
+        # prints none, so any unrelated extra (or missing) failure moves
+        # this count away from the mutant's failed= total.
+        check_failed = len(CHECK_FAILED_RE.findall(view))
+        if check_failed != results[1][2]:
+            failures.append(f"check-failed lines {check_failed} != mutant "
+                            f"failed={results[1][2]} (unrelated failure concealed?)")
+    if view.count("[c-fp] start") != EXPECTED_STARTS:
         failures.append("start line count != 2 (streamless run must be silent)")
-    # The mutant legitimately prints check-failed lines; the positive run's
-    # failed=0 in its VERDICT line is the exact guard for the positive app.
+    if FP_SKIP_RE.search(view):
+        failures.append("a granted bundle printed SKIP (required coverage skipped)")
     return {"exit_lines": exits, "fp_results": results, "failures": failures,
             "pass": not failures}
+
+
+def judge(serial: str) -> dict:
+    return _judge_view(gn.app_stream_view(serial),
+                       [int(v) for v in EXIT_RE.findall(serial)])
+
+
+def self_test() -> int:
+    """Judge negative controls: synthetic verdict streams that must be
+    rejected, plus the one exact stream that must pass. No guest run."""
+    failed_lines = "".join("[c-fp] check failed line 1: probe\n"
+                           for _ in range(EXPECTED_RESULTS[1][2]))
+    good = ("[c-fp] start\n[c-fp] VERDICT PASS checks=66 failed=0 skips=0\n"
+            "[c-fp] start\n" + failed_lines +
+            "[c-fp] VERDICT FAIL checks=66 failed=19 skips=0\n")
+    cases = {
+        "exact stream passes": (good, EXPECTED_EXITS, True),
+        "unrelated boot SKIP ignored": (
+            "configup: SKIP (no trusted test intent; no SET)\n" + good,
+            EXPECTED_EXITS, True),
+        "FP app SKIP line": (
+            good.replace("[c-fp] VERDICT PASS",
+                         "[c-fp] F3c SKIP (no sync domain granted)\n"
+                         "[c-fp] VERDICT PASS"),
+            EXPECTED_EXITS, False),
+        "reduced positive checks": (good.replace("PASS checks=66", "PASS checks=65"),
+                                    EXPECTED_EXITS, False),
+        "skipped required coverage": (good.replace("PASS checks=66 failed=0 skips=0",
+                                                   "PASS checks=66 failed=0 skips=1"),
+                                      EXPECTED_EXITS, False),
+        "missing mutant verdict": (good.split("VERDICT FAIL")[0], EXPECTED_EXITS, False),
+        "duplicate verdict": (good + "[c-fp] VERDICT PASS checks=66 failed=0 skips=0\n",
+                              EXPECTED_EXITS, False),
+        "contradictory PASS with failures": (
+            good.replace("PASS checks=66 failed=0", "PASS checks=66 failed=1"),
+            EXPECTED_EXITS, False),
+        "mutant passes": (good.replace("VERDICT FAIL checks=66 failed=19",
+                                       "VERDICT PASS checks=66 failed=0"),
+                          EXPECTED_EXITS, False),
+        "mutant unrelated extra failure": (
+            good.replace("VERDICT FAIL checks=66 failed=19",
+                         "VERDICT FAIL checks=66 failed=20"),
+            EXPECTED_EXITS, False),
+        "wrong exit sequence": (good, [58, 71, 71], False),
+        "streamless bundle spoke": (good + "[c-fp] start\n", EXPECTED_EXITS, False),
+    }
+    bad = []
+    for name, (view, exits, want_pass) in cases.items():
+        got = _judge_view(view, exits)["pass"]
+        if got != want_pass:
+            bad.append(name)
+    if bad:
+        print(f"guest_fp --self-test: FAIL ({bad})")
+        return 1
+    print(f"guest_fp --self-test: PASS ({len(cases)} judge cases)")
+    return 0
 
 
 def one_run(cc: str, bundles: dict, index: int) -> dict:
@@ -200,7 +290,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cc", default="gcc", choices=["gcc", "clang"])
     ap.add_argument("--runs", type=int, default=1)
+    ap.add_argument("--self-test", action="store_true",
+                    help="run the judge's negative controls and exit (no guest)")
     args = ap.parse_args()
+    if args.self_test:
+        return self_test()
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     bundles, identity = build_bundles(args.cc)
     results = [one_run(args.cc, bundles, i) for i in range(1, args.runs + 1)]

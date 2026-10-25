@@ -69,6 +69,8 @@ fp_probe_run:
     mov rsi, r13
     mov rdx, [rsp]
     mov r10, [rsp + 8]
+    xor r8d, r8d                /* a4/a5 must be zero: the kernel refuses */
+    xor r9d, r9d                /* nonzero unused args as BAD_CALL (-1)   */
     syscall
 .Lcapture:
     fxsave64 [r15]
