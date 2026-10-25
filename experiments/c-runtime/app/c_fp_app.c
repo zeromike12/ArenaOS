@@ -1,26 +1,30 @@
 /*
- * Phase 16 FP/SSE2 preservation app (EXPERIMENTAL).
+ * Phase 16 FP/SSE2 integration app (EXPERIMENTAL, corrected).
  *
- * Deliberately outside the integer-only build: this application is compiled
- * with the ADR-0113 baseline ring-3 profile (-march=x86-64 -msse2, AVX
- * disabled) by build_fp_app.py and proves the Phase 15 contract from C:
+ * Compiled by build_fp_app.py with the ADR-0113 baseline ring-3 profile.
+ * Deliberately separates three claims that a previous version conflated:
  *
- *   F1  SSE2 double arithmetic in main gives exact IEEE-754 results.
- *   F2  Two C11 worker threads hold *different* live double values across
- *       many thrd_yield() points; each must observe only its own sequence
- *       (per-thread FXSAVE64 state, ADR-0113).
- *   F3  x87 long double multiply in main after the workers join (state not
- *       polluted by worker execution).
- *   F4  Integer printf path still exact; FP conversions keep refusing with
- *       ENOTSUP (the runtime formatter is unchanged; FP execution support
- *       does not imply FP formatting).
+ *   F1  High-level C FP *arithmetic correctness* (SSE2 scalar double/float,
+ *       x87 long double). The compiler is free to spill these values; this
+ *       group proves execution and results, NOT register preservation.
+ *   F2  Arithmetic from two C11 threads with thread-owned result slots
+ *       (no shared sink; results are read only after thrd_join, which is
+ *       the synchronization point). Still not a register claim.
+ *   F3  Architectural register preservation via fp_probe.S: xmm0-xmm7 and
+ *       three x87 slots hold distinct patterns across (a) no transition
+ *       (control), (b) a raw SYS_THREAD_YIELD, and (c) a blocking raw
+ *       SYS_SYNC_WAIT with a 1.5 ms timeout. Judged by fp_image_check.h,
+ *       whose corruption detection is host-tested (FP-IMAGE-CONTROL).
+ *   F4  Timer-preemption *exposure*: both workers busy-spin in FP code for
+ *       ~50 ms (several 10 ms quanta) while runnable, then re-run the F3
+ *       probe. Userspace cannot count timer switches directly; the
+ *       mechanism itself is Phase 15's m15 kernel evidence. This group is
+ *       labeled exposure, not a witnessed-switch proof.
+ *   F5  Integer printf exact; FP conversions still refuse (ENOTSUP).
  *
- * All floating-point checks compare exact bit patterns of exactly
- * representable values (products/sums of small binary fractions); there is
- * no rounding tolerance and no libm. Volatile sinks keep every operation
- * live across yields so the compiler cannot constant-fold the proof away.
- *
- * Exit status: 71 pass, 72 fail, 58 if stdio cannot attach.
+ * Thread creation failure is handled: only created handles are joined.
+ * Exit status: 71 pass, 72 fail, 58 if stdio cannot attach. Skips (missing
+ * sync grant) print SKIP and do not count as passes.
  */
 #include <errno.h>
 #include <stddef.h>
@@ -30,18 +34,20 @@
 #include <threads.h>
 
 #include "arena/rt.h"
+#include "fp_image_check.h"
+#include "sysabi.h" /* internal raw-syscall header: deliberate for this probe app */
 
 #define APP_NAME "[c-fp]"
 #define EXIT_PASS 71
 #define EXIT_FAIL 72
 #define EXIT_NO_STREAMS 58
 #define WORKER_ROUNDS 64
+#define PROBE_ROUNDS 8
 
-static int checks;
-static int failed_checks;
-static volatile double fp_sink;
-static volatile long double x87_sink;
+int64_t fp_probe_run(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+                     const void *xmm_vals, void *fxsave_out);
 
+static int checks, failed_checks, skips;
 #define EXPECT(cond)                                                            \
     do {                                                                        \
         checks++;                                                               \
@@ -57,26 +63,69 @@ static uint64_t bits_of(double v) {
     return u;
 }
 
-/* One worker: seed derives from its id; each round advances its own value by
- * an exactly representable step, yields, and re-reads. Any cross-thread
- * FXSAVE mix-up changes the observed sequence and fails the check. */
+/* Distinct 128-byte XMM pattern per owner: byte = owner*37 + index. */
+static void make_pattern(uint8_t xmm[128], unsigned owner) {
+    for (unsigned i = 0; i < 128; i++) {
+        xmm[i] = (uint8_t)(owner * 37u + i);
+    }
+}
+
+/* One probe transition on this thread; returns comparator verdict (0 = ok). */
+static int probe_once(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+                      unsigned owner) {
+    uint8_t xmm[128];
+    _Alignas(16) static _Thread_local uint8_t fx[512];
+    make_pattern(xmm, owner);
+    (void)fp_probe_run(nr, a0, a1, a2, a3, xmm, fx);
+    return fp_image_check(fx, xmm);
+}
+
+struct worker_result {
+    volatile double final_value; /* written only by its owner thread */
+    volatile int probe_failures;
+    volatile int rounds_done;
+};
+static struct worker_result results[2];
+
 static int fp_worker(void *arg) {
-    int id = (int)(intptr_t)arg;
+    int id = (int)(intptr_t)arg; /* 1 or 2 */
+    struct worker_result *r = &results[id - 1];
     volatile double step = id == 1 ? 0.25 : 0.5;
     volatile double acc = id == 1 ? 1.0 : 2.0;
-    int ok = 1;
     for (int round = 0; round < WORKER_ROUNDS; round++) {
-        double expect = (id == 1 ? 1.0 : 2.0) + (double)round * (id == 1 ? 0.25 : 0.5);
-        if (bits_of(acc) != bits_of(expect)) {
-            ok = 0;
-        }
-        double next = acc + step; /* live SSE2 add across the yield */
-        fp_sink = next;
+        acc = acc + step;
         thrd_yield();
-        acc = next;
     }
-    double want = (id == 1 ? 1.0 : 2.0) + WORKER_ROUNDS * (id == 1 ? 0.25 : 0.5);
-    return (ok && bits_of(acc) == bits_of(want)) ? 100 + id : -id;
+    r->final_value = acc;
+    for (int round = 0; round < PROBE_ROUNDS; round++) {
+        if (probe_once(ARENA_SYS_THREAD_YIELD, 0, 0, 0, 0, (unsigned)id) != 0) {
+            r->probe_failures++;
+        }
+        r->rounds_done++;
+    }
+    return 100 + id;
+}
+
+/* Busy-spin in FP code for at least `us` microseconds of wall time. */
+static void spin_fp(uint64_t us) {
+    volatile double v = 1.0;
+    uint64_t start = arena_clock_us();
+    while (arena_clock_us() - start < us) {
+        for (int i = 0; i < 256; i++) {
+            v = v * 1.0 + 0.5;
+        }
+    }
+    if (bits_of(v) == 0) { /* never true; keeps the loop observable */
+        printf(APP_NAME " spin sink\n");
+    }
+}
+
+static int spin_worker(void *arg) {
+    int id = (int)(intptr_t)arg;
+    spin_fp(50000);
+    return probe_once(ARENA_SYS_THREAD_YIELD, 0, 0, 0, 0, (unsigned)id + 2u) == 0
+               ? 120 + id
+               : -id;
 }
 
 int main(int argc, char **argv) {
@@ -87,50 +136,89 @@ int main(int argc, char **argv) {
     }
     printf(APP_NAME " start\n");
 
-    /* F1: SSE2 double arithmetic, exact results. */
+    /* F1: arithmetic correctness (no preservation claim). */
     volatile double a = 1.5, b = 2.25;
-    double product = a * b;              /* 3.375 exactly */
-    double quotient = product / a;       /* 2.25 exactly */
-    fp_sink = product + quotient;
-    EXPECT(bits_of(product) == bits_of(3.375));
-    EXPECT(bits_of(quotient) == bits_of(2.25));
+    EXPECT(bits_of(a * b) == bits_of(3.375));
+    EXPECT(bits_of((a * b) / a) == bits_of(2.25));
     volatile float fa = 0.5f, fb = 0.25f;
-    float fsum = fa + fb;                /* 0.75f exactly (SSE scalar) */
+    float fsum = fa + fb;
     uint32_t fbits;
     memcpy(&fbits, &fsum, sizeof fbits);
     EXPECT(fbits == 0x3F400000u);
-
-    /* F2: per-thread FP state across cooperative switches. */
-    thrd_t t1, t2;
-    int r1 = 0, r2 = 0;
-    EXPECT(thrd_create(&t1, fp_worker, (void *)(intptr_t)1) == thrd_success);
-    EXPECT(thrd_create(&t2, fp_worker, (void *)(intptr_t)2) == thrd_success);
-    /* Main also churns its own FP value while the workers run. */
-    volatile double mine = 8.0;
-    for (int i = 0; i < WORKER_ROUNDS; i++) {
-        mine = mine * 1.0 + 0.125;
-        thrd_yield();
-    }
-    EXPECT(bits_of(mine) == bits_of(8.0 + WORKER_ROUNDS * 0.125));
-    EXPECT(thrd_join(t1, &r1) == thrd_success && r1 == 101);
-    EXPECT(thrd_join(t2, &r2) == thrd_success && r2 == 102);
-
-    /* F3: x87 long double after worker execution (80-bit, exact small values). */
     volatile long double x = 3.0L, y = 0.5L;
-    long double xy = x * y;              /* 1.5 exactly */
-    x87_sink = xy;
-    EXPECT(xy == 1.5L);
+    EXPECT(x * y == 1.5L);
 
-    /* F4: integer formatting exact; FP formatting still refused, no output. */
+    /* F3a/F3b in main: control, then yield transitions. */
+    EXPECT(probe_once(0, 0, 0, 0, 0, 9) == 0);
+    for (int i = 0; i < PROBE_ROUNDS; i++) {
+        EXPECT(probe_once(ARENA_SYS_THREAD_YIELD, 0, 0, 0, 0, 9) == 0);
+    }
+
+    /* F2 (+F3b in workers): arithmetic + probes, results via own slots. */
+    thrd_t t1, t2;
+    int have1 = thrd_create(&t1, fp_worker, (void *)(intptr_t)1) == thrd_success;
+    int have2 = thrd_create(&t2, fp_worker, (void *)(intptr_t)2) == thrd_success;
+    EXPECT(have1 && have2);
+    int r1 = 0, r2 = 0, j1 = thrd_error, j2 = thrd_error;
+    if (have1) {
+        j1 = thrd_join(t1, &r1);
+    }
+    if (have2) {
+        j2 = thrd_join(t2, &r2);
+    }
+    EXPECT(j1 == thrd_success && r1 == 101);
+    EXPECT(j2 == thrd_success && r2 == 102);
+    EXPECT(bits_of(results[0].final_value) == bits_of(1.0 + WORKER_ROUNDS * 0.25));
+    EXPECT(bits_of(results[1].final_value) == bits_of(2.0 + WORKER_ROUNDS * 0.5));
+    EXPECT(results[0].probe_failures == 0 && results[0].rounds_done == PROBE_ROUNDS);
+    EXPECT(results[1].probe_failures == 0 && results[1].rounds_done == PROBE_ROUNDS);
+
+    /* F3c: blocking transition (raw SYS_SYNC_WAIT, timeout 1.5 ms/round). */
+    const arena_startup_t *s = arena_startup();
+    if (s->present && s->sync_domain != ARENA_ARST_NONE && arena_sync_init() == 0) {
+        uint64_t slot = s->caps[s->sync_domain].slot;
+        int64_t token = arena_syscall6(ARENA_SYS_SYNC_KEY_CREATE, slot, 0, 0, 0, 0, 0);
+        EXPECT(token > 0);
+        if (token > 0) {
+            for (int i = 0; i < 4; i++) {
+                int64_t seq = arena_syscall6(ARENA_SYS_SYNC_SEQUENCE, slot,
+                                             (uint64_t)token, 0, 0, 0, 0);
+                EXPECT(seq > 0);
+                EXPECT(probe_once(ARENA_SYS_SYNC_WAIT, slot, (uint64_t)token,
+                                  (uint64_t)seq, 1500, 9) == 0);
+            }
+            (void)arena_syscall6(ARENA_SYS_SYNC_KEY_DESTROY, slot, (uint64_t)token,
+                                 0, 0, 0, 0);
+        }
+    } else {
+        skips++;
+        printf(APP_NAME " F3c SKIP (no sync domain granted)\n");
+    }
+
+    /* F4: preemption exposure (see header for the exact claim). */
+    thrd_t s1, s2;
+    int hs1 = thrd_create(&s1, spin_worker, (void *)(intptr_t)1) == thrd_success;
+    int hs2 = thrd_create(&s2, spin_worker, (void *)(intptr_t)2) == thrd_success;
+    EXPECT(hs1 && hs2);
+    spin_fp(30000);
+    int q1 = 0, q2 = 0;
+    if (hs1) {
+        EXPECT(thrd_join(s1, &q1) == thrd_success && q1 == 121);
+    }
+    if (hs2) {
+        EXPECT(thrd_join(s2, &q2) == thrd_success && q2 == 122);
+    }
+    EXPECT(probe_once(0, 0, 0, 0, 0, 9) == 0); /* main state still exact */
+
+    /* F5: formatting contract unchanged. */
     char buf[64];
     int n = snprintf(buf, sizeof buf, "%d|%x", -7, 48879u);
     EXPECT(n == (int)strlen(buf) && strcmp(buf, "-7|beef") == 0);
     char fbuf[32] = "untouched";
     errno = 0;
-    int fn = snprintf(fbuf, sizeof fbuf, "%f", 1.5);
-    EXPECT(fn == -1 && errno == ENOTSUP);
+    EXPECT(snprintf(fbuf, sizeof fbuf, "%f", 1.5) == -1 && errno == ENOTSUP);
 
-    printf(APP_NAME " RESULT %s checks=%d failed=%d\n",
-           failed_checks == 0 ? "PASS" : "FAIL", checks, failed_checks);
+    printf(APP_NAME " RESULT %s checks=%d failed=%d skips=%d\n",
+           failed_checks == 0 ? "PASS" : "FAIL", checks, failed_checks, skips);
     return failed_checks == 0 ? EXIT_PASS : EXIT_FAIL;
 }
