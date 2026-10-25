@@ -63,3 +63,23 @@ replicate. Conclusion: the official components (table above) are required.
 For development-only guest work, `tools/build_phase16_dev.sh` verifies the
 committed fixture instead of rebuilding it; its artifacts are explicitly
 never qualification evidence.
+
+## Reconstruction and sandbox recovery (2026-10-25)
+
+The later ASTR v2 / FP / live-stdin reconstruction was at one point lost
+from the local worktree by an accidental local reset during sandbox
+recovery; no remote history was rewritten and the pushed session branch
+remained at `87987d4`. The tracked changes were reconstructed and then
+rerun rather than treated as still-valid stale evidence. On a subsequent
+sandbox reset, the local branch pointer was again found at `main`
+(`f103926`) with the worktree edits still present and the external
+toolchain absent. Before touching Git state, the worktree was archived
+and verified (`/home/user/phase16-worktree-before-reattach.tar.gz`,
+SHA-256 `78bdacc857da44c19b6576baea3362189ec4a3af0d9df30eb00c24491f73337c`
+at recovery time); only the branch ref and index were then reattached to
+fetched `87987d4`, leaving exactly the reconstructed 13 tracked
+modifications and 3 untracked files visible. The environment was rebuilt
+with `tools/dev-env/bootstrap.sh`, PyPI `ziglang==0.17.0`, and
+`tools/dev-env/build-isolated-glibc.sh`; host and guest evidence was
+regenerated under `receipts/dev-guest-2026-10-25-reconstructed/`.
+B1 is unchanged by this recovery.

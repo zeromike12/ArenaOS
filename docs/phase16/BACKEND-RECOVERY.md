@@ -15,6 +15,22 @@ environment* is new, so per assignment the combination was re-verified
 rather than inheriting qualification. Verified scope below is what was
 actually run — nothing more is claimed.
 
+**Reproducible-rerun identity (2026-10-25):** after a sandbox reset,
+`tools/dev-env/bootstrap.sh`, PyPI `ziglang==0.17.0`, and
+`tools/dev-env/build-isolated-glibc.sh` were rerun from the committed
+instructions. The pinned emulator remained exact
+(`e0ea2b1f…f26ff`, QEMU 11.1.2, `-accel help` → `tcg`), while that
+rerun's isolated glibc outputs were `libc.so.6`
+`eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f`
+and `ld-linux-x86-64.so.2`
+`63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458`.
+Those are the wrapper identities used by the 2026-10-25 reconstructed
+development receipts. The `3c26ae81…772a` / `24e9a58c…ddb2` values in
+the table above record the earlier recovery build and must not be cited
+for the later wrappers; the important invariant is that the emulator
+binary itself is unchanged and every run records its wrapper/runtime
+hashes in its evidence envelope.
+
 ## Build-tool provenance (glibc chain; tools only, nothing shipped)
 
 apt/Debian mirrors are unreachable in this sandbox. Private build tools

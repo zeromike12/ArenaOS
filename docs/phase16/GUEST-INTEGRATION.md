@@ -8,6 +8,29 @@
 > (`guest_phase16_dev.py`). All results below must be re-run on an official
 > build before they count as qualification evidence.
 
+## Superseding reconstructed runs (2026-10-25)
+
+The 2026-10-24 table below is historical stale-image evidence (including
+the pre-tightening FP counts). After reconstruction, all targeted suites
+were rerun on development EFI `cd32caf4…19c9` / ESP `0524e6c3…4513`.
+Fresh receipts, exact commands, identities, and raw serials are indexed in
+`receipts/dev-guest-2026-10-25-reconstructed/README.md`:
+
+- C1 native GCC/Clang PASS (9/9 groups, 98 checks, exits `[58, 57]`).
+- C2 GCC/Clang PASS (88 console checks, xxHash digest exact,
+  exits `[58, 58, 61, 63]`).
+- FP GCC/Clang PASS under the tightened contract: positive
+  `66/0/0`, mutant `66/19/0`, exits `[58, 71, 72]`.
+- Live stdin GCC/Clang PASS, exits `[58, 73, 73, 58]`, including
+  no-grant refusal, focused-instance isolation, backpressure/burst input,
+  Ctrl-D EOF after queued bytes, and explicit ASTR-v1 refusal.
+- Phase 13 registry and M10 apps PASS on the same development ESP.
+- Phase 15 guest checks PASS on both CPU profiles for the development
+  image and for the unchanged strict package artifacts.
+
+These remain **development evidence only** because B1 is unresolved.
+They do not qualify Phase 16 or authorize merging.
+
 ## Identities
 
 - Backend: pinned patched QEMU `e0ea2b1f…` under isolated glibc 2.40

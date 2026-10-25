@@ -4,6 +4,14 @@ Status: EXPERIMENTAL migration contract. SDL3 is **not** built or tested by C2.
 Nothing here is an SDL3 compatibility claim. Arena 1's branch
 (`arena/13f9221b-arenaos`) was read only and is not modified.
 
+> **Phase 16 update (2026-10-25):** streams are ASTR v2 (1,024-byte
+> rings; v1 pages refused), and live focused stdin has a guest suite at
+> the runtime stream API level. The graphical surface/compositor
+> identification blocker (B-GFX-1) and all unsupported-API refusals in
+> this contract remain unchanged. Current development receipts are in
+> `docs/phase16/receipts/dev-guest-2026-10-25-reconstructed/`; B1 still
+> blocks Phase 16 qualification and no Phase 17 work is started here.
+
 The point of this document: Arena 1's G2 SDL3 path carries its own `_start`, its own
 heap, and its own slot constants. C2 provides one shared runtime that Arena 1 can
 link instead. This file says exactly what that means and which parts are verified.
@@ -37,7 +45,7 @@ No symbols were added or removed in C2.1. The table covers the surface Arena 1 w
 | Strings and memory | `string.h` set | available/verified | host (glibc differential) |
 | Formatting | `printf snprintf sprintf vsnprintf vsprintf vprintf fprintf vfprintf puts putchar fputs` | available/verified (integer conversions); unsupported (floating point) | host, guest (`printf snprintf puts putchar fputs`, G1) |
 | Streams | `fwrite` (complete elements), `fputc putc`, `fgets` (NULL on read error), `ungetc`, `setvbuf` (`_IONBF` only) | available/verified; `setvbuf` `_IOFBF`/`_IOLBF` **unsupported** (EINVAL) | host (C2.1.3 tests), guest (G1, G7) |
-| Input | `getchar`, `fgetc`, `getc`, `fread` | available/verified (pushback, errors); live stdin read **untested** (no controlled input fixture) | host, guest (G2 classification) |
+| Input | `getchar`, `fgetc`, `getc`, `fread` | available/verified (pushback, errors); exact stdio live reads not individually guest-tested, but the underlying focused live-stdin stream path is guest-verified in Phase 16 | host, guest (G2 classification), Phase 16 `guest_stdin.py` |
 | Integers | `strtol` family, `atoi atol atoll abs labs llabs div ldiv lldiv` | available/verified; `abs`/`div` at MIN defined (no UB) | host (glibc differential, boundary tests) |
 | Time | `clock_gettime(CLOCK_MONOTONIC)`, `nanosleep` | guest-verified (G4) | guest |
 | Time | `time`, `clock`, `CLOCK_REALTIME` | unsupported (ENOSYS) | host (`test_time_refusals`) |
@@ -155,7 +163,9 @@ The authoritative list is `experiments/c-runtime/compat/c2-compat-report.json`
 - Integer conversion and math: `strtol` family, `atoi atol atoll labs llabs div ldiv lldiv abs`. Host-tested.
 - `qsort`, `bsearch`, `rand`, `srand`, `getenv` (environment comes only from the verified record). Host-tested.
 - Streams: `fputc putc fwrite feof ferror clearerr setvbuf perror` (guest, App A G7);
-  `fgetc getc fgets fread` refusal paths host-tested; reads from a live stdin untested.
+  `fgetc getc fgets fread` refusal paths host-tested; Phase 16 guest-tests
+  live stdin at the `arena_stream_read`/`arena_stream_read_some` level,
+  not each stdio wrapper individually.
 - Time: `clock_gettime(CLOCK_MONOTONIC)` and `nanosleep` (guest, App A G4).
   `time()` and `clock()` are refused with `ENOSYS`; no test reference.
 - Process: `exit` and `atexit` (32 handlers, reverse order, each run at most once per process;
@@ -255,7 +265,8 @@ Two hazards for Arena 1:
 - Aligned allocation: alignments up to 16 use the normal path. 32 to 65536 use validated
   aligned blocks. Larger, or non-power-of-two, is refused with NULL and `errno`.
 - atexit handlers: 32 (reserved by CAS, published by release store; overflow refused).
-- Streams: ring capacity 768 bytes per direction.
+- Streams: ASTR v2 ring capacity 1,024 bytes per channel (three channels
+  in one page); ASTR-v1 (768-byte) pages are refused.
 - Capability slots: 128 per process. Descriptors per startup record: 7 (`ARENA_ARST_CAPABILITY_MAX`).
 - VM: 8 regions per process, 4096 pages per region, 8192 committed pages per process.
 - Timers: 4 per process. Sync: 64 domains, 32 keys per domain, 2048 keys total.

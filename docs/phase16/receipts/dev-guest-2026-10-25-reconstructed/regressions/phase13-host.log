@@ -1,0 +1,23 @@
+   Compiling arena-lib v0.1.0 (/home/user/ArenaOS/userspace/arena-lib)
+   Compiling arena-gfxkit v0.1.0 (/home/user/ArenaOS/userspace/gfxkit)
+   Compiling arena-process v0.1.0 (/home/user/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/home/user/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-ui v0.1.0 (/home/user/ArenaOS/userspace/ui)
+   Compiling arena-runtime v0.1.0 (/home/user/ArenaOS/userspace/arena-runtime)
+   Compiling arena-compositor-model v0.1.0 (/home/user/ArenaOS/userspace/compositord)
+   Compiling arena-desktop v0.1.0 (/home/user/ArenaOS/userspace/desktop)
+   Compiling arena-phase13-installed-app v0.1.0 (/home/user/ArenaOS/userspace/phase13-app)
+    Finished `release` profile [optimized] target(s) in 4.02s
+   Compiling arena-gfxkit v0.1.0 (/home/user/ArenaOS/userspace/gfxkit)
+   Compiling arena-lib v0.1.0 (/home/user/ArenaOS/userspace/arena-lib)
+   Compiling arena-process v0.1.0 (/home/user/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/home/user/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-compositor-model v0.1.0 (/home/user/ArenaOS/userspace/compositord)
+   Compiling arena-runtime v0.1.0 (/home/user/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/home/user/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/home/user/ArenaOS/userspace/desktop)
+   Compiling arena-phase13-headless v0.1.0 (/home/user/ArenaOS/userspace/phase13-headless)
+    Finished `release` profile [optimized] target(s) in 3.71s
+    Finished `release` profile [optimized] target(s) in 0.01s
+[phase13-registry] verified APB1 install -> registry -> keyboard/search/pointer launch of the signed native ELF; five installed instances, 26 mixed AppInstances and 32 windows, five live helpers, two parked user threads, half-close/reuse/full teardown, one headless app, persisted AFS2 favorite reloaded by the next boot, exact identity-resource teardown to baseline; clean shutdown in 282.6s + reload 8.2s PASS
+PHASE13 REGISTRY PASS (development ESP)

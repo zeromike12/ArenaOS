@@ -1,5 +1,15 @@
 # Phase 16 baseline record (2026-10-24)
 
+> **Update (2026-10-25):** this file remains the starting-baseline record.
+> Since it was written, B2 was resolved by running the exact pinned
+> patched QEMU 11.1.2 through an isolated glibc 2.40 (`libc.so.6`
+> `eef95f26…f35f`, loader `63704534…0458` in the reproducible rerun; host
+> glibc untouched), while **B1 remains unresolved**. Development guest
+> execution therefore continues, but canonical Phase 16 qualification is
+> still blocked. Current development evidence is indexed in
+> `receipts/dev-guest-2026-10-25-reconstructed/README.md`. The B2 text in
+> §4 is historical and superseded by `BACKEND-RECOVERY.md`.
+
 ## 1. Source baseline
 
 | Item | Identity |

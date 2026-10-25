@@ -5,6 +5,21 @@ architecture/acceptance authority; C is technical advisor and independent
 reviewer. This plan does not accept ADR-0111, ADR-0112, or any wire-format,
 capability, or architecture change. Nothing here starts Phase 17.
 
+**Status update (2026-10-25):** M has since accepted ADR-0111 (ASTR v2)
+and ADR-0112 (bounded native C-runtime profile) as architecture/contracts
+only. That acceptance does **not** accept the implementation, qualify
+Phase 16, or authorize merging. ASTR v2, the tightened FP contract, the
+focused live-stdin console path, self-identifying development evidence,
+and a Phase 13 harness synchronization fix are implemented in commits
+`d5b8c00`, `1513ba2`, `0cfb6de`, `faccf87`, and `a7ad4c2`. Fresh
+development-only guest receipts are in
+`receipts/dev-guest-2026-10-25-reconstructed/`; B1 (official Rust target
+components) still blocks canonical qualification. The pinned-QEMU backend
+blocker B2 is resolved through the isolated glibc runtime (host glibc
+untouched). Statements below that call the ADRs merely proposed or both
+blockers unresolved are the original plan text and are superseded by this
+update where they conflict.
+
 ## 0. Branch note (read first)
 
 The assignment directs work onto `main`. This engineering session is pinned

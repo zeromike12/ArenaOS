@@ -1,0 +1,10 @@
+self-test ok   exact view accepted (failures=[])
+self-test ok   reduced G6 count rejected (failures=['group G6 threads ext checks=31, expected 42'])
+self-test ok   reduced total rejected (failures=['RESULT checks=87, expected exactly 88'])
+self-test ok   duplicate PASS line rejected (failures=["group G1 stdio printed 2 times, exactly 1 required (verdicts ['PASS', 'PASS'])"])
+self-test ok   missing group rejected (failures=['missing group G7 stdio ext'])
+self-test ok   FAIL verdict rejected (failures=['group G5 threads FAIL'])
+self-test ok   contradictory PASS/FAIL rejected (failures=["group G3 allocator printed 2 times, exactly 1 required (verdicts ['PASS', 'FAIL'])"])
+self-test ok   unexpected group rejected (failures=['unexpected group line G10 extra'])
+self-test ok   duplicate RESULT rejected (failures=['exact console RESULT PASS line count 2, expected 1'])
+C2 judge self-test: 9/9 controls behave as required
