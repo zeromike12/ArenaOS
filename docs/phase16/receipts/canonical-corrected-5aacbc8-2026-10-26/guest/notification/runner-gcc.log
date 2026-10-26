@@ -1,0 +1,38 @@
+PHASE16 CANONICAL RUNNER: suite=notification — B1 resolved; not acceptance
+[c-notify-production] building kernel image + ESP ...
+{
+  "mode": "production",
+  "exit_lines": [
+    75
+  ],
+  "mutant_marker_count": 0,
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "gcc",
+  "boot_rc": 0,
+  "elapsed_s": 8.2,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-notification/serial-c-notify-production-gcc-run1.log",
+  "image_esp_sha256": "2ff0d708ea867c4a7b01a76326d50531a4b45cb8a22d67b4fae41f92d5ab2edd",
+  "image_efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6"
+}
+[c-notify-mutant] building kernel image + ESP ...
+{
+  "mode": "mutant",
+  "exit_lines": [
+    76
+  ],
+  "mutant_marker_count": 1,
+  "failures": [],
+  "pass": true,
+  "run": 2,
+  "compiler": "gcc",
+  "boot_rc": 0,
+  "elapsed_s": 8.0,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-notification/serial-c-notify-mutant-gcc-run2.log",
+  "image_esp_sha256": "b64f8aa9af2bc1a96eeb23aa69499adaa0c1c85cfb0333943e9156c878d25c68",
+  "image_efi_sha256": "cc5ac6729c767e515099dc84920530dc978f46e98551f6297b5daeb21d81aeaf"
+}
+Phase 16 notification guest: 2/2 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-notification/summary-gcc.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-notification/evidence-envelope-notification.json
+COLLECTED notification/gcc: passed=2/2 efi=7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6 esp=2ff0d708ea867c4a7b01a76326d50531a4b45cb8a22d67b4fae41f92d5ab2edd

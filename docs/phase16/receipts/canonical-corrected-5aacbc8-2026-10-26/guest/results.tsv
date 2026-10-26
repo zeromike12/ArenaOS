@@ -1,0 +1,11 @@
+suite	compiler	exit	seconds	summary	envelope
+native	gcc	0	35	native/summary-gcc.json	native/evidence-envelope-gcc.json
+native	clang	0	35	native/summary-clang.json	native/evidence-envelope-clang.json
+c2	gcc	0	46	c2/summary-gcc.json	c2/evidence-envelope-gcc.json
+c2	clang	0	44	c2/summary-clang.json	c2/evidence-envelope-clang.json
+fp	gcc	0	43	fp/summary-gcc.json	fp/evidence-envelope-gcc.json
+fp	clang	0	40	fp/summary-clang.json	fp/evidence-envelope-clang.json
+stdin	gcc	0	49	stdin/summary-gcc.json	stdin/evidence-envelope-gcc.json
+stdin	clang	0	47	stdin/summary-clang.json	stdin/evidence-envelope-clang.json
+notification	gcc	0	63	notification/summary-gcc.json	notification/evidence-envelope-gcc.json
+notification	clang	0	64	notification/summary-clang.json	notification/evidence-envelope-clang.json

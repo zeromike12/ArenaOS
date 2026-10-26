@@ -1,0 +1,22 @@
+SENSITIVITY C PREVIOUS VALIDATOR
+final_test_source_commit=5aacbc88c50d4565a7bb9f4075be27e40df27779
+previous_production_commit=feaa9b189cb9ed0ac2d078011aa0335385622407
+previous_streams_sha256=166ef9c2bce4a351f53f58ecb5747bf3abdf893e77d1b96ad9908a7bfe7b56df
+expected=nonzero exit with exactly the six ring-reserved and two tail probes failing
+HOST-ONLY arena C runtime tests (ASan+UBSan, glibc differential)
+  stress: 200000 ops, 50225 allocs ok, 79902 frees, 499 refusals (499 over-ceiling), reuse=98683, committed=2064/4096 pages
+[host] reserve-refusal child: refused cleanly
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 76 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 127 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 1164 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 1215 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 2252 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 2303 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 3328 refused
+FAIL experiments/c-runtime/host/test_runtime.c:526: arena_ring_page_check(page) != 0 -- reserved: nonzero byte at page offset 4095 refused
+vp:7
+vf:8
+assertion failed: x (t.c:1)
+LIBC-HOST checks=1099 failures=0
+HOST-ONLY RESULT FAIL (8 of 1721 checks)
+previous-c exit=1

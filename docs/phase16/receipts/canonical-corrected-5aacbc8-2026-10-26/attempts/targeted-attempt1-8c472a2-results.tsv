@@ -1,0 +1,11 @@
+suite	compiler	exit
+native	gcc	0
+native	clang	0
+c2	gcc	0
+c2	clang	0
+fp	gcc	0
+fp	clang	0
+stdin	gcc	1
+stdin	clang	1
+notification	gcc	0
+notification	clang	0
