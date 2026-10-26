@@ -2,11 +2,49 @@
 
 Date: 2026-10-26 (America/New_York)
 
-Status: **QUALIFICATION CANDIDATE SUBMITTED FOR M/C REVIEW — NOT
-ACCEPTED.** No merge to `main`, release, acceptance declaration, or
-Phase 17 start is authorized by this report.
+Status: **CORRECTED QUALIFICATION CANDIDATE SUBMITTED FOR M/C REVIEW —
+NOT ACCEPTED.** No merge to `main`, release, acceptance declaration,
+or Phase 17 start is authorized by this report.
 
-## 1. Scope and authority
+## 1. Correction closeout and candidate identity
+
+After the earlier `d314d20…` qualification candidate was assembled,
+review found that ADR-0111's “all reserved bytes are zero” rule was
+not enforced completely or consistently by the Rust and C ASTR v2
+validators. The bounded correction below strengthens validation; it
+does not weaken ADR-0111 or change the wire layout.
+
+The current corrected canonical candidate is OS/test source commit
+`5aacbc88c50d4565a7bb9f4075be27e40df27779` on
+`arena/2b4ae1a5-arenaos`. Its receipts are
+`receipts/canonical-corrected-5aacbc8-2026-10-26/`.
+
+Correction chain, committed before final qualification:
+
+1. `8c472a2fe110b6bb3db81145342043de5ee75e03` — production and
+   host-test ASTR v2 reserved-byte enforcement in Rust and C.
+2. `d5874b72f857261fe3c41eb7e7ac7d8af6431463` — harness-only repair
+   to the test-generated legacy ASTR-v1 fixture transform.
+3. `5aacbc88c50d4565a7bb9f4075be27e40df27779` — formatting-only
+   `rustfmt` correction to two assertions in the new Rust tests.
+
+The earlier `d314d20…` receipts under
+`receipts/canonical-2026-10-26/` remain unchanged historical candidate
+evidence. They have not been overwritten or relabelled, and their
+image/stability receipts were not reused for the corrected image.
+
+Corrected final artifacts:
+
+- EFI (11,038,720 bytes):
+  `7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6`
+- ESP (16,777,216 bytes):
+  `04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a`
+- Protected Phase 14 PIE:
+  `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`
+- Protected signed Phase 14 APB1:
+  `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`
+
+## 2. Scope and authority
 
 Phase 16 integrates Arena 2's existing native C runtime into the
 accepted Phase 15 foundation as one canonical runtime and demonstrates
@@ -18,14 +56,11 @@ M accepted ADR-0111 (ASTR v2) and the bounded reconciled ADR-0112
 (native C-runtime architecture) on 2026-10-25 as contracts only. Those
 decisions did not accept this implementation or qualify Phase 16.
 
-The canonical qualification candidate is source commit
-`d314d204aa86ec4018659f3f211cd3a488d30d87` on
-`arena/2b4ae1a5-arenaos`. C's dependency-only commit is
-`02a20fce915bdd0bdbbc24dcdc2fa0b63a1cd7a1`; the earlier development
-evidence through `bffff21f5d4a6235ec764c8596953817e157e196` remains
-separately classified and was not relabelled.
+C's dependency-only commit is
+`02a20fce915bdd0bdbbc24dcdc2fa0b63a1cd7a1`; earlier development
+evidence remains separately classified and was not relabelled.
 
-## 2. What was integrated and changed
+## 3. What was integrated
 
 - Arena 2's runtime was selectively imported from
   `arena/f89ea987-arenaos` at `84392b8…` and kept as the one canonical
@@ -55,10 +90,59 @@ separately classified and was not relabelled.
 - `guest_phase16_canonical.py` runs the unchanged targeted suites
   through canonical `mtest.build` and merges a self-identifying B1,
   source, image, backend, firmware, compiler, and verdict envelope
-  into each summary. `guest_notification.py` adds the missing guest
-  ambiguity proof described below.
+  into each summary. `guest_notification.py` adds the guest ambiguity
+  proof described below.
 
-## 3. B1 resolution and protected Phase 14 identities
+## 4. Reserved-byte correction
+
+ASTR v2 geometry is unchanged: one 4096-byte page; header reserved
+16–63; rings at 64, 1152, and 2240; each ring control reserved 12–63;
+reserved page tail 3328–4095; capacity 1024; version 2.
+
+### Rust
+
+In `userspace/arena-runtime/src/streams.rs`:
+
+- `region_ptr` now requires exactly `STREAM_PAGE_BYTES` (4096) before
+  any caller memory is dereferenced. Sub-page and overlong lengths are
+  refused; this establishes that the supplied range makes the full
+  page readable before the tail is inspected and avoids out-of-range
+  reads.
+- `attach` checks the reserved tail after that exact-length gate and
+  combines it with the existing header/ring reserved checks.
+- `initialize` explicitly zeroes the reserved tail.
+- Three focused tests cover both endpoints of every reserved range, a
+  valid/restored positive control, length boundaries 0/3327/3328/4095,
+  and full-page initializer zeroing from nonzero backing bytes.
+
+### C
+
+In `experiments/c-runtime/src/streams.c` and
+`experiments/c-runtime/include/arena/rt.h`:
+
+- `arena_ring_page_check` checks header reserved bytes, each ring's
+  control bytes 12–63, and tail bytes 3328–4095.
+- Static assertions pin the v2 tail to offset 3328 and the complete
+  layout to one page.
+- The existing bare-pointer API contract is now documented precisely:
+  `page` must name one complete 4096-byte, 4096-aligned readable page
+  (writable for mutating calls). The API takes no length and cannot
+  safely detect a shorter object in C.
+- Host tests probe both endpoints of the header, all three ring
+  controls, and the tail on a complete page, with valid/restored
+  positive controls.
+
+### Sensitivity
+
+The new tests detect the prior omissions:
+
+- Previous C production logic fails exactly 8/1721 host checks, at
+  page offsets 76, 127, 1164, 1215, 2252, 2303, 3328, and 4095.
+- Previous Rust production logic passes the 24 pre-existing tests and
+  fails exactly the three new tests.
+- Corrected code passes Rust 27/27 and C host 1721 checks.
+
+## 5. B1 resolution and protected Phase 14 identities
 
 The official Rust components supplied by C were installed exactly per
 `docs/phase16/dependencies/rust-1.97.0/README.md`:
@@ -72,40 +156,33 @@ The official Rust components supplied by C were installed exactly per
 
 Official archive identities:
 
-- `x86_64-unknown-none` (14,907,620 bytes):
+- `x86_64-unknown-none`:
   `5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a`
-- `x86_64-unknown-uefi` (25,374,412 bytes):
+- `x86_64-unknown-uefi`:
   `2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0`
 
-Protected reproduction initially failed from `/home/user/ArenaOS` and
-through a `/workspace/ArenaOS` symlink. Investigation showed the bytes
-are absolute-build-path sensitive. From a physical bind mount at
-`/workspace/ArenaOS`, both pristine `f103926…` and current `d314d20…`
- reproduced, with unchanged guards and scripts:
+Installed `libcore` identities:
 
-- PIE `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`
-- signed APB1 `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`
+- none:
+  `6b75c5188dca46c917a67ade52dddea81460f96dc4732003cebea2e22a5b1b09`
+- UEFI:
+  `a7de36b0262b7d94cdcf1acb3f78288e7f5a57d546568b3ccaec27cd122c5494`
 
-The failed attempts and successful bind-mount logs are preserved in
-`receipts/canonical-2026-10-26/build/`.
+Protected reproduction is absolute-build-path sensitive. From the
+physical bind mount `/workspace/ArenaOS`, unchanged guards reproduced
+both Phase 14 identities above. No guard or expected hash was changed.
 
-## 4. Canonical evidence summary
+## 6. Corrected canonical evidence
 
-Full index and artifacts: `receipts/canonical-2026-10-26/README.md`.
-
-Final image built from clean `d314d20…` with unchanged
-`tools/build.sh --image`:
-
-- EFI: `850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79`
-- ESP: `65b489016527a49e394ab6e7a57cb592045a3c80b55cceed7610aa448cb519d9`
-- kernel ISA audit: PASS (120,911 instructions)
+Full index:
+`receipts/canonical-corrected-5aacbc8-2026-10-26/README.md`.
 
 Host/static battery (overall exit 0):
 
-- Rust `arena-runtime --lib`: 24/24.
+- Rust `arena-runtime --lib`: 27/27.
 - C runtime GCC/Clang builds and loader/ISA audits: PASS.
 - ABI: 92 constants, no mismatches.
-- C host: LIBC-HOST 1099 checks, 0 failures; HOST-ONLY 1707 PASS.
+- C host: LIBC-HOST 1099 checks, 0 failures; HOST-ONLY 1721 PASS.
 - Judge controls: C2 9/9, FP 12/12, Notification 6/6.
 
 Targeted signed-APB1 guest suites, GCC and Clang (all exact PASS):
@@ -118,69 +195,83 @@ Targeted signed-APB1 guest suites, GCC and Clang (all exact PASS):
 | Live stdin | focused attribution, burst/backpressure, EOF 118/7 bytes, no-grant + ASTR-v1 refusal; exits `[58, 73, 73, 58]` |
 | Notification | production sole candidate exit 75; ambiguous `NONE`, peek `-1005`, blocking `-1012`, exit 76 |
 
-Notification ambiguity method: an audit of windowed/headless/helper
-Desktop launches, APB1 requested capabilities, stream grants, and the
-service manager found no production path that creates two
-role-Other/RW Notification descriptors. The guest negative therefore
-uses the repository's restored-mutation pattern: production boots
-first and passes; a labelled one-count Desktop fixture then adds a
-distinct second descriptor; the probe must refuse selection; source
-and production EFI/ESP/profile restoration is asserted byte-exact.
-This proves the runtime policy in-guest without pretending a
-production launcher emitted the ambiguous record.
+Notification ambiguity method: an audit of production launch paths
+found no way to create two role-Other/RW Notification descriptors.
+The guest negative uses the repository's restored-mutation pattern:
+production boots first and passes; a labelled one-count Desktop
+fixture then adds a distinct second descriptor; the probe must refuse
+selection; source and production EFI/ESP/profile restoration is
+asserted byte-exact. C accepted this evidence form; it is not a claim
+that a production launcher emitted the ambiguous record.
 
-Regressions and final-artifact checks:
+### Attempts and retries
 
-- Official registered runner: **121/121 suites PASS**, clean source at
-  start/end. This includes Phase 13 pressure, all Phase 14 suites,
-  strict Phase 15 inside the registry, and capability-negative suites.
-- Strict Phase 15 checker: PASS on both CPU profiles for the final
-  Phase 16 EFI/ESP and for the preserved accepted Phase 15 package.
-- Stability: **100/100 boots fully green, fail=0**, 914 s, on the exact
-  final EFI/ESP. Receipt: `850cce0d…aa79 100/100`.
-- Genuine canonical screenshots 04–06 are in `screenshots/`, each with
-  a caption identifying its run/source/EFI/ESP and linked serial or
-  stability receipt.
+The correction history includes failed attempts that remain failures:
 
-## 5. Demonstration package and fresh extraction
+- At `8c472a2…`, both live-stdin targeted invocations failed before
+  boot in the generated legacy-v1 fixture. Commit `d5874b7…` fixed
+  only that harness transform.
+- At `d5874b7…`, the complete registered run failed 1/121 after
+  8181 s solely on `cargo fmt --check` for two new Rust assertions.
+  The original full external log was lost in a sandbox reset; only a
+  focused exact reproduction is claimed. Commit `5aacbc8…` is the
+  formatting-only correction.
+- At final source `5aacbc8…`, registered attempt 1 failed 2/121 after
+  6543 s (`test_m84_crash.py`, `test_m9_client_death.py`). Focused
+  reruns passed, but were not substituted for the complete suite.
+- Registered attempt 2 at the same clean source passed all 121 suites
+  in 6574 s. No root cause for attempt 1's two failures is claimed;
+  their non-reproduction in focused and complete reruns is recorded
+  for M/C review.
 
-A demonstration archive was assembled from the final artifacts, the
-canonical receipts, screenshots, firmware identities, a focused
-runnable source subset of commit `d314d20…`, and a package manifest.
-The archive identity and the post-sealing fresh-extraction guest
-verification are recorded as a repository sidecar under
-`receipts/canonical-2026-10-26/fresh-archive/`; the sidecar is kept
-outside the sealed archive so recording its hash does not change the
-artifact being verified.
+Final-artifact checks on the corrected pair:
 
-Fresh-extraction verification extracts the sealed archive into a new
-directory, verifies its internal checksums, confirms the extracted
-EFI/ESP hashes, and boots the extracted pair with the included strict
-Phase 15 checker on both CPU profiles using the pinned backend.
+- Strict Phase 15 checker: PASS on both CPU profiles for the corrected
+  final pair and the preserved accepted Phase 15 package.
+- Stability: **100/100 boots fully green, fail=0**, 942 s, on the
+  exact corrected EFI/ESP. Receipt: `7dcee442…2bfe6 100/100`.
+- Genuine corrected screenshots 07–09 are in `screenshots/`, each with
+  a caption identifying run/source/EFI/ESP and linked receipts.
 
-- Archive: `ArenaOS-Phase16-Demonstration-d314d20.tar.gz`, 4,855,009
+## 7. Demonstration package and fresh extraction
+
+The corrected demonstration archive is
+`artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz`, with its
+external SHA-256 sidecar beside it in `artifacts/`. It contains the
+corrected final artifacts and protected Phase 14 artifacts, firmware,
+corrected receipts, screenshots 07–09, submission/ADR/compat docs, a
+focused tracked-file source subset of tested commit `5aacbc8…`, a
+manifest/checksums, and `verify_package.py`.
+
+The whole-archive SHA-256 and post-sealing fresh-extraction guest
+receipts are recorded outside the sealed archive under
+`receipts/canonical-corrected-5aacbc8-2026-10-26/fresh-archive/`, so
+recording the archive identity cannot change the artifact being
+verified. Fresh verification uses a short extraction prefix, checks
+all internal digests and manifest identities, confirms the ESP's inner
+EFI byte-for-byte, and boots the extracted pair with the included
+strict Phase 15 checker on both CPU profiles using the pinned backend.
+
+- Archive: `ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz`, 5,016,910
   bytes, SHA-256
-  `08786f7900581b08e65acef7466c98d56e05587e6f873c46d2c1ed0cd22225fc`.
-- Attempt 1 failed before any guest boot because the long extraction
-  prefix exceeded QEMU's Unix-socket path limit; the verifier/README
-  were amended to fail closed on that condition, the archive was
-  resealed, and the successful short-prefix attempt is the one hashed
-  above.
-- Successful attempt (sidecar `run.json`): static exit 0 (202 package
-  files); guest exit 0, Phase 15 strict PASS on AVX-capable and
-  `qemu64` profiles; extracted EFI/ESP unchanged afterwards. The
-  sidecar retains both attempts' logs and both successful serials.
+  `106088522042fb501a00554442ae97133127e53a9141d5e95069f112c9a9898b`.
+- Repository download:
+  <https://github.com/zeromike12/ArenaOS/blob/arena/2b4ae1a5-arenaos/docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz>
+- Fresh run: sidecar check exit 0; static exit 0 (225 package files
+  plus `SHA256SUMS`, 100-file source subset, ESP inner EFI exact);
+  guest exit 0 in 15 s with strict Phase 15 PASS on both CPU profiles;
+  extracted EFI/ESP and archive hash unchanged afterwards. Raw logs
+  and serials are in the `fresh-archive/` sidecar.
 
-## 6. Issues disposition
+## 8. Issues disposition
 
 See `ISSUES.md` for the detailed register. Summary:
 
-- I-1 ASTR wrap corruption: **FIXED**, canonical guest verified.
+- I-1 ASTR wrap corruption: **FIXED**, corrected canonical verified.
 - I-2 startup descriptor-count oracle mismatch: **FIXED**.
-- I-3 Notification ambiguity: **FIXED/VERIFIED** in runtime host tests
-  and now in guest for GCC and Clang.
+- I-3 Notification ambiguity: **FIXED/VERIFIED** host + guest.
 - I-4 Clang weak `arena_legacy_write`: **FIXED**.
-- I-5 live stdin: **FIXED**, canonical guest verified.
+- I-5 live stdin: **FIXED**, corrected canonical verified.
 - I-6 process vs worker-thread exit: **VERIFIED-OK** under the
   documented last-thread-exit rule.
 - I-7 graphical surface/compositor identification (B-GFX-1):
@@ -188,6 +279,13 @@ See `ISSUES.md` for the detailed register. Summary:
 - I-8 pre-created console-window wake loss: **FIXED**.
 - I-9 false-positive test judges/input ordering: **FIXED** without
   weakening semantic assertions.
+- I-10 ASTR v2 reserved-byte enforcement gaps: **FIXED**, with
+  negative, boundary, positive-control, sensitivity, host, and guest
+  evidence at `5aacbc8…`.
+- Q-1 registered attempt-1 failures at `5aacbc8…`: **RETAINED / NOT
+  REPRODUCED** in focused reruns or complete attempt 2; no root cause
+  or product fix is claimed because no source changed between those
+  registered attempts.
 
 Known remaining limitations are scope limits, not hidden failures: the
 runtime is a bounded C subset; files/POSIX terminal behavior, floating
@@ -196,7 +294,7 @@ dynamic linking, and graphical service identification remain refused
 or undecided as documented in `docs/compat/C2-LIBC-COVERAGE.md` and
 `ARENA1-HANDOFF.md`.
 
-## 7. Backend and reproducibility limits
+## 9. Backend and reproducibility limits
 
 - Guest evidence used the identified locally modified QEMU 11.1.2 TCG
   backend under isolated glibc 2.40. It is not upstream-QEMU or
@@ -209,19 +307,25 @@ or undecided as documented in `docs/compat/C2-LIBC-COVERAGE.md` and
 - Guest test bundles use the repository RFC 8032 test fixture signing
   path where summaries state it; production key management is outside
   Phase 16.
-- Historical development receipts and screenshots 01–03 remain
-  development evidence. Canonical claims rely only on the 2026-10-26
-  receipt set.
+- Historical development receipts/screenshots and the `d314d20…`
+  canonical-candidate receipts remain separately labelled. Corrected
+  claims rely on the corrected `5aacbc8…` receipt set.
+- Registered attempt 1's two non-reproduced failures are retained as a
+  qualification-history caveat rather than silently discarded.
 
-## 8. Requested M/C review
+## 10. Requested M/C review
 
 Please review for acceptance decisions only; this report makes none:
 
-1. Whether the canonical evidence satisfies Phase 16's bounded exit
-   criteria and ADR-0111/0112 implementation expectations.
-2. Whether the restored-mutation Notification guest negative is the
-   correct evidence form for a state production launchers cannot emit.
-3. Whether the final EFI/ESP and package identities should be accepted
-   as the Phase 16 candidate artifacts.
-4. Whether/when this branch may be merged. Until then: **do not merge,
+1. Whether the reserved-byte correction and sensitivity evidence fully
+   implement ADR-0111 without altering its accepted contract.
+2. Whether the corrected canonical evidence, including the retained
+   failed attempts and complete registered attempt 2, satisfies Phase
+   16's bounded exit criteria.
+3. Whether the restored-mutation Notification guest negative remains
+   the correct evidence form for a state production launchers cannot
+   emit.
+4. Whether the corrected final EFI/ESP and sealed package identities
+   should be accepted as the Phase 16 candidate artifacts.
+5. Whether/when this branch may be merged. Until then: **do not merge,
    do not release, do not start Phase 17.**

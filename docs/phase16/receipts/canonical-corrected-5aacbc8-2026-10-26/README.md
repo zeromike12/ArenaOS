@@ -280,12 +280,22 @@ ESP, backend, and linked receipts.
 
 ## Demonstration archive and fresh extraction
 
-The sealed corrected archive and its external SHA-256 sidecar are
-committed under `../../artifacts/`. Post-sealing verification receipts
-are kept in `fresh-archive/` in this directory, outside the archive,
-so recording the archive hash cannot mutate the artifact being
-verified. See that sidecar and `../../FINAL-REPORT.md` for the exact
-archive identity and fresh-extraction guest result.
+Sealed corrected archive:
+`ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz` (5,016,910 bytes),
+SHA-256
+`106088522042fb501a00554442ae97133127e53a9141d5e95069f112c9a9898b`.
+
+Repository download:
+<https://github.com/zeromike12/ArenaOS/blob/arena/2b4ae1a5-arenaos/docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz>
+
+The exact sealed bytes and external `.sha256` sidecar are committed
+under `../../artifacts/`. Fresh extraction under `/home/user/p16f`
+passed static verification (225 package files plus `SHA256SUMS`) and
+the extracted strict Phase 15 guest checker on both CPU profiles;
+extracted EFI/ESP and the archive hash were unchanged afterwards.
+Post-sealing receipts are kept in `fresh-archive/`, outside the
+archive, so recording the archive hash cannot mutate the artifact
+being verified.
 
 ## Remaining limits
 

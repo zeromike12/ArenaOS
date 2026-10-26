@@ -14,19 +14,37 @@ Use the one Phase 16 runtime at `experiments/c-runtime/` (promotion
 out of `experiments/` remains an M decision). Do not fork a second
 startup, allocator, stream, or thread layer for SDL.
 
-Qualification-candidate source and evidence:
+Corrected qualification-candidate source and evidence:
 
-- Source: `d314d204aa86ec4018659f3f211cd3a488d30d87`
-- Evidence: `docs/phase16/receipts/canonical-2026-10-26/`
-- Final EFI: `850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79`
-- Final ESP: `65b489016527a49e394ab6e7a57cb592045a3c80b55cceed7610aa448cb519d9`
+- Final tested OS/test source:
+  `5aacbc88c50d4565a7bb9f4075be27e40df27779`
+- Evidence:
+  `docs/phase16/receipts/canonical-corrected-5aacbc8-2026-10-26/`
+- Final EFI:
+  `7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6`
+- Final ESP:
+  `04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a`
+- Downloadable sealed demonstration archive on this branch:
+  `docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz`
+  (GitHub:
+  <https://github.com/zeromike12/ArenaOS/blob/arena/2b4ae1a5-arenaos/docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz>);
+  its `.sha256` sidecar is beside it, and post-sealing verification is
+  under the corrected receipts' `fresh-archive/` directory. Archive:
+  5,016,910 bytes, SHA-256
+  `106088522042fb501a00554442ae97133127e53a9141d5e95069f112c9a9898b`;
+  fresh static + extracted strict-guest verification passed.
 
 Canonical guest evidence covers GCC and Clang signed-APB1 execution
 for C1/native, C2 multi-app, baseline x87/SSE2 FP, focused live stdin,
-ASTR v2 (including v1 refusal), and Notification ambiguity refusal.
-The registered historical suite is 121/121 and final-artifact
+ASTR v2 (including v1 and reserved-byte refusal), and Notification
+ambiguity refusal. Complete registered attempt 2 is 121/121, strict
+Phase 15 passes on both CPU profiles, and corrected final-artifact
 stability is 100/100 on the identified locally modified QEMU TCG
-backend.
+backend. The retained qualification history also includes a failed
+registered attempt 1 at the same source (2/121; focused reruns passed;
+no source change before complete attempt 2), so Arena 1 should read
+the attempt receipts rather than treat the final green summary as the
+only run.
 
 ## 2. Runtime facts Arena 1 can rely on
 
@@ -39,7 +57,13 @@ Within the bounded ADR-0112 profile and `docs/compat` coverage:
   measured limits and failure returns; do not raise limits just to get
   a green boot.
 - Standard streams exist only when capability-granted. ASTR is v2
-  only: three 1,024-byte rings, wrapping counters, v1 refused.
+  only: one complete 4096-byte page, three 1,024-byte rings, wrapping
+  counters, v1 refused. Every ADR-0111 reserved byte must be zero:
+  header 16–63, each ring control 12–63, and page tail 3328–4095.
+  Rust requires the exact one-page length before reading the page;
+  the C bare-pointer page APIs require the caller to supply one
+  complete readable/writable-as-required aligned page. Do not pass a
+  sub-page buffer or reuse reserved bytes for private SDL state.
 - Focused live stdin is real keyboard input through the owning
   AppInstance's granted stream, with Ctrl-D EOF. It is a stream, not a
   POSIX tty: no termios, signals, job control, or file-descriptor
@@ -139,8 +163,12 @@ If Phase 17 is authorized after Phase 16 acceptance:
   stdin, or process semantics from `main` return while workers live.
 - Do not claim timer-preemption FP preservation beyond the exact
   Phase 15/Phase 16 receipts.
-- Do not start from the development EFI/ESP or development receipts;
-  use the canonical source/images above if M/C accept them.
+- Do not start from the development EFI/ESP, development receipts, or
+  the superseded `d314d20…` candidate image/receipts; use the corrected
+  canonical source/images above if M/C accept them.
+- Do not reuse a stability or guest receipt across changed EFI/ESP
+  bits. The corrected Phase 16 closeout reran final-artifact
+  qualification because the reserved-byte correction changed the EFI.
 
 Phase 17 remains **proposed only** until M/C accept Phase 16 and give
 separate direction.

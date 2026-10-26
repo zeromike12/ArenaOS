@@ -21,8 +21,11 @@ occupancy/layout refusal, cross-language layout checks, and an explicit
 v1-indexing negative control; the C1 guest app also covers the near-wrap
 path. After B1 was resolved, the canonical GCC/Clang C1, C2, and
 live-stdin guest suites passed at clean `d314d20…`, including explicit
-ASTR-v1 refusal (see `receipts/canonical-2026-10-26/`). The earlier
-fresh development evidence remains separately classified in
+ASTR-v1 refusal (see `receipts/canonical-2026-10-26/`). After the later
+reserved-byte correction (I-10), the same GCC/Clang suites passed again
+at clean `5aacbc8…`; the corrected-candidate receipts are in
+`receipts/canonical-corrected-5aacbc8-2026-10-26/`. The earlier fresh
+development evidence remains separately classified in
 `receipts/dev-guest-2026-10-25-reconstructed/`.
 
 ## I-2 — Startup descriptor-count mismatch (M9) → **FIXED**
@@ -44,7 +47,7 @@ regression tests: `test_m9_seven_descriptor_stream_sync_record_roundtrips`,
 The runtime selects the sole role-Other/RW Notification and refuses zero
 or ambiguous candidates (`arena_startup_pick_notification`,
 `src/startup_query.c`); host tests (`test_notification_selection`) pass in
-the current HOST-ONLY 1707-check suite. The previously missing guest
+the corrected HOST-ONLY 1721-check suite. The previously missing guest
 negative is now implemented in
 `experiments/c-runtime/guest_notification.py` with
 `app/c_notification_app.c`. A launcher audit found no production
@@ -55,8 +58,11 @@ boot PASS (exit 75), then a labelled Desktop fixture adds a distinct
 second role-Other/RW Notification and the probe observes selection
 `NONE`, empty-stdin peek `-1005`, immediate blocking
 `ARENA_E_NO_WAITER=-1012`, and exit 76. GCC and Clang passed
-canonically at `d314d20…`; Desktop source and production EFI/ESP/profile
-restoration is asserted byte-exact (see
+canonically at `d314d20…` and again on the corrected candidate at
+`5aacbc8…`; Desktop source and production EFI/ESP/profile restoration
+is asserted byte-exact (see
+`receipts/canonical-corrected-5aacbc8-2026-10-26/guest/notification/`;
+the historical `d314d20…` receipts remain in
 `receipts/canonical-2026-10-26/guest/notification/`).
 
 ## I-4 — Clang weak undefined `arena_legacy_write` → **FIXED**
@@ -83,8 +89,9 @@ instance, burst/backpressure handling, EOF line/byte counts, no-grant
 refusal, and explicit ASTR-v1 refusal. GCC and Clang first passed with
 exits `[58, 73, 73, 58]` in the 2026-10-25 reconstructed development
 receipts, then passed again canonically at clean `d314d20…` after B1
-was resolved (`receipts/canonical-2026-10-26/guest/stdin/`). This is
-not a general shell or POSIX terminal layer.
+was resolved and at corrected clean `5aacbc8…` after I-10
+(`receipts/canonical-corrected-5aacbc8-2026-10-26/guest/stdin/`). This
+is not a general shell or POSIX terminal layer.
 
 ## I-6 — Process exit vs worker-thread exit → **VERIFIED-OK (with one documented kernel rule)**
 
@@ -136,6 +143,56 @@ stdin. The harness now waits for the non-empty search field to stop
 changing before clicking. Neither change alters a guest assertion or an
 expected exit sequence.
 
+## I-10 — ASTR v2 reserved-byte enforcement gaps → **FIXED (corrected canonical-verified)**
+
+Review of the `d314d20…` candidate found that the implementations did
+not completely enforce ADR-0111's requirement that all reserved bytes
+be zero. Rust validated the typed header/ring reserved fields but did
+not inspect page tail 3328–4095 and accepted some sub-page lengths;
+C validated the header but not each ring's control bytes 12–63 or the
+page tail. ADR-0111 was not weakened and the accepted layout,
+capacity, version, ownership, memory ordering, and capability model
+were preserved.
+
+Corrected chain: `8c472a2…` strengthened production validation and
+host tests; `d5874b7…` repaired only the test-generated legacy-v1
+fixture transform; `5aacbc8…` applied formatting only to the new Rust
+tests. Rust now requires exactly one 4096-byte page before any caller
+memory is read, rejects sub-page/overlong lengths without inspecting
+beyond the supplied range, checks and initializes the reserved tail,
+and retains header/ring checks. C now checks all ring controls and
+the tail under its documented complete-one-page bare-pointer contract.
+
+Regression/sensitivity evidence: Rust and C tests probe both endpoints
+of the header, every ring control, and the tail, with valid/restored
+positive controls. Previous C logic fails exactly the eight newly
+covered ring/tail endpoints; previous Rust logic fails exactly the
+three new tests. Corrected results are Rust 27/27, C host 1721 PASS,
+and all ten targeted GCC/Clang canonical guest invocations PASS at
+clean `5aacbc8…` (see
+`receipts/canonical-corrected-5aacbc8-2026-10-26/sensitivity/`,
+`host/`, and `guest/`).
+
+## Q-1 — Registered attempt-1 failures at corrected source → **RETAINED / NOT REPRODUCED**
+
+This is a qualification-history observation, not a claim of a
+root-caused product defect. Complete registered attempt 1 at clean
+`5aacbc8…` failed 2/121 suites after 6543 s:
+`test_m84_crash.py` (only its final policy/close recovery marker
+conjunction; the preserved recovery serial lacked `packaged READY`
+but showed `pkg: INELIGIBLE` and clean shutdown) and
+`test_m9_client_death.py` (the full-suite log records a fatal-halt
+classification; its original production serial was overwritten by the
+following red-control suite's restored GREEN run). Focused reruns
+passed (M84 276 s; M9 14 s), and a second complete registered run at
+the same unchanged clean source passed all 121 suites in 6574 s.
+
+No source change was made between registered attempts 1 and 2, so no
+product fix or definitive root cause is claimed. The failed attempt is
+retained at
+`receipts/canonical-corrected-5aacbc8-2026-10-26/attempts/registered-attempt1-5aacbc8/`
+for M/C review rather than discarded.
+
 ## Environment blockers
 
 **B2 is resolved** by the exact pinned QEMU under an isolated glibc
@@ -145,7 +202,14 @@ expected exit sequence.
 and whole-archive hash verification. Canonical rebuild/qualification,
 protected-identity reproduction, registered 121/121, strict Phase 15,
 100/100 final-artifact stability, and fresh-archive verification were
-therefore run at `d314d20…` and are indexed in
-`receipts/canonical-2026-10-26/`. Development-image results keep their
-explicit non-qualifying label. Acceptance and merge remain M/C
-decisions, not environment blockers and not consequences of these runs.
+first run at `d314d20…` and are indexed in
+`receipts/canonical-2026-10-26/`. After I-10 changed the image bits,
+the applicable host/static battery, all ten targeted guests, complete
+registered regressions (attempt 2), strict Phase 15, corrected
+100/100 stability, screenshots, and fresh-archive verification were
+rerun at final tested source `5aacbc8…` and are indexed in
+`receipts/canonical-corrected-5aacbc8-2026-10-26/`. The prior image's
+stability receipt was not reused. Development-image results keep
+their explicit non-qualifying label. Acceptance and merge remain M/C
+decisions, not environment blockers and not consequences of these
+runs.
