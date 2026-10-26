@@ -1,7 +1,9 @@
 # Phase 16 corrected demonstration artifact
 
 Classification: **CANONICAL CORRECTED QUALIFICATION CANDIDATE — NOT
-ACCEPTED and not a release.** Phase 16 remains pending M/C acceptance.
+ACCEPTED BY M and not a release.** C recommends acceptance within the
+documented scope; M's final acceptance and merge decision remain
+pending.
 
 ## Download
 

@@ -2,9 +2,17 @@
 
 Date: 2026-10-26 (America/New_York)
 
-Status: **CORRECTED QUALIFICATION CANDIDATE SUBMITTED FOR M/C REVIEW —
-NOT ACCEPTED.** No merge to `main`, release, acceptance declaration,
-or Phase 17 start is authorized by this report.
+Status: **C RECOMMENDS ACCEPTANCE WITHIN THE DOCUMENTED SCOPE;
+PENDING M'S FINAL ACCEPTANCE AND MERGE DECISION — NOT ACCEPTED BY M.**
+No merge to `main`, release, acceptance declaration, or Phase 17 start
+is authorized by this report.
+
+C's independent review covered archive/static verification,
+source-subset comparison, C host tests, judge self-tests, and semantic
+re-evaluation of recorded guest serials. C did **not** independently
+repeat the full registered regression or 100-boot stability runs.
+That recommendation is advisory; M remains the final acceptance and
+merge authority.
 
 ## 1. Correction closeout and candidate identity
 
@@ -220,9 +228,9 @@ The correction history includes failed attempts that remain failures:
   6543 s (`test_m84_crash.py`, `test_m9_client_death.py`). Focused
   reruns passed, but were not substituted for the complete suite.
 - Registered attempt 2 at the same clean source passed all 121 suites
-  in 6574 s. No root cause for attempt 1's two failures is claimed;
-  their non-reproduction in focused and complete reruns is recorded
-  for M/C review.
+  in 6574 s. The causes of attempt 1's two failures remain **unknown**;
+  Q-1 therefore remains open even though the failures were not
+  reproduced in focused reruns or the later complete run.
 
 Final-artifact checks on the corrected pair:
 
@@ -282,10 +290,13 @@ See `ISSUES.md` for the detailed register. Summary:
 - I-10 ASTR v2 reserved-byte enforcement gaps: **FIXED**, with
   negative, boundary, positive-control, sensitivity, host, and guest
   evidence at `5aacbc8…`.
-- Q-1 registered attempt-1 failures at `5aacbc8…`: **RETAINED / NOT
-  REPRODUCED** in focused reruns or complete attempt 2; no root cause
-  or product fix is claimed because no source changed between those
-  registered attempts.
+- Q-1 registered attempt-1 failures at `5aacbc8…`: **OPEN reliability
+  issue**. The two failures were not reproduced in focused reruns or
+  complete attempt 2, but their causes remain unknown and no product
+  fix is claimed because no source changed between those registered
+  attempts. The testing-agent handoff in `ISSUES.md` and
+  `ARENA1-HANDOFF.md` carries the evidence-preservation and recurrence
+  investigation recommendations.
 
 Known remaining limitations are scope limits, not hidden failures: the
 runtime is a bounded C subset; files/POSIX terminal behavior, floating
@@ -310,22 +321,20 @@ or undecided as documented in `docs/compat/C2-LIBC-COVERAGE.md` and
 - Historical development receipts/screenshots and the `d314d20…`
   canonical-candidate receipts remain separately labelled. Corrected
   claims rely on the corrected `5aacbc8…` receipt set.
-- Registered attempt 1's two non-reproduced failures are retained as a
-  qualification-history caveat rather than silently discarded.
+- Registered attempt 1's two non-reproduced failures remain **Q-1, an
+  open reliability issue with unknown causes**, rather than a discarded
+  qualification-history caveat.
 
-## 10. Requested M/C review
+## 10. Remaining M decision
 
-Please review for acceptance decisions only; this report makes none:
+C recommends acceptance within the documented bounded scope. This
+report does not convert that recommendation into M's acceptance. M is
+asked to decide:
 
-1. Whether the reserved-byte correction and sensitivity evidence fully
-   implement ADR-0111 without altering its accepted contract.
-2. Whether the corrected canonical evidence, including the retained
-   failed attempts and complete registered attempt 2, satisfies Phase
-   16's bounded exit criteria.
-3. Whether the restored-mutation Notification guest negative remains
-   the correct evidence form for a state production launchers cannot
-   emit.
-4. Whether the corrected final EFI/ESP and sealed package identities
-   should be accepted as the Phase 16 candidate artifacts.
-5. Whether/when this branch may be merged. Until then: **do not merge,
-   do not release, do not start Phase 17.**
+1. Whether to accept Phase 16 and the corrected final EFI/ESP and
+   sealed package identities as its candidate artifacts.
+2. Whether Q-1 may remain an open post-acceptance reliability issue for
+   the testing-agent handoff, with its failed attempt and evidence
+   limitations preserved.
+3. Whether/when this branch may be merged. Until M decides: **do not
+   merge, do not release, do not start Phase 17.**

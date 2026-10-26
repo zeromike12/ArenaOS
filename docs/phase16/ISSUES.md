@@ -173,11 +173,11 @@ clean `5aacbc8…` (see
 `receipts/canonical-corrected-5aacbc8-2026-10-26/sensitivity/`,
 `host/`, and `guest/`).
 
-## Q-1 — Registered attempt-1 failures at corrected source → **RETAINED / NOT REPRODUCED**
+## Q-1 — Registered attempt-1 failures at corrected source → **OPEN reliability issue**
 
-This is a qualification-history observation, not a claim of a
-root-caused product defect. Complete registered attempt 1 at clean
-`5aacbc8…` failed 2/121 suites after 6543 s:
+Q-1 remains open. It is not closed by later passing reruns, and it is
+not yet a claim of a root-caused product defect. Complete registered
+attempt 1 at clean `5aacbc8…` failed 2/121 suites after 6543 s:
 `test_m84_crash.py` (only its final policy/close recovery marker
 conjunction; the preserved recovery serial lacked `packaged READY`
 but showed `pkg: INELIGIBLE` and clean shutdown) and
@@ -187,11 +187,27 @@ following red-control suite's restored GREEN run). Focused reruns
 passed (M84 276 s; M9 14 s), and a second complete registered run at
 the same unchanged clean source passed all 121 suites in 6574 s.
 
-No source change was made between registered attempts 1 and 2, so no
-product fix or definitive root cause is claimed. The failed attempt is
-retained at
+The causes of both failures remain **unknown**. No source change was
+made between registered attempts 1 and 2, so no product fix is
+claimed and the failures must not be classified as environmental or
+harmless without recurrence evidence. The failed attempt is retained
+at
 `receipts/canonical-corrected-5aacbc8-2026-10-26/attempts/registered-attempt1-5aacbc8/`
 for M/C review rather than discarded.
+
+Testing-agent handoff for Q-1:
+
+- Use unique, immutable output directories for every suite run and
+  complete-suite attempt; never let a later red/green control overwrite
+  an earlier failing run's serial or other raw outputs.
+- Preserve raw serials, exact commands, source/backend/firmware/image
+  identities, per-suite process results, and failed-attempt logs beside
+  every successful rerun.
+- Investigate recurrence and preserve enough repeated-run evidence to
+  distinguish product, harness, timing, and environment causes before
+  classifying either failure as environmental or harmless.
+- Do not weaken the M84 or M9 assertions merely to make Q-1 disappear.
+  This documentation closeout changes no test code.
 
 ## Environment blockers
 
@@ -210,6 +226,6 @@ registered regressions (attempt 2), strict Phase 15, corrected
 rerun at final tested source `5aacbc8…` and are indexed in
 `receipts/canonical-corrected-5aacbc8-2026-10-26/`. The prior image's
 stability receipt was not reused. Development-image results keep
-their explicit non-qualifying label. Acceptance and merge remain M/C
-decisions, not environment blockers and not consequences of these
-runs.
+their explicit non-qualifying label. C recommends acceptance within
+the documented scope; acceptance and merge remain M decisions, not
+environment blockers and not automatic consequences of these runs.

@@ -1,12 +1,17 @@
-# Phase 16 → Arena 1 handoff (proposed Phase 17 only)
+# Phase 16 engineering handoff → Arena 1 and future agents
 
 Date: 2026-10-26
 
-Status: **HANDOFF FOR REVIEW. Phase 17 is not started and no SDL3 work
-is authorized or claimed by this document.**
+Status: **HANDOFF FOR REVIEW.** C recommends Phase 16 acceptance
+within its documented scope, but M's final acceptance and merge
+decision remain pending. Phase 17 is not started, and no SDL3,
+graphics, desktop, or new testing-agent work is authorized or claimed
+by this document.
 
-Arena 1 should treat this as the factual starting point if M/C later
-accept Phase 16 and separately authorize genuine upstream SDL3 work.
+Arena 1 should treat this as the factual starting point if M later
+accepts and merges Phase 16 and separately authorizes genuine upstream
+SDL3 work. The engineering assignments summarized in section 5 are
+confirmed plans only, not instructions to begin them now.
 
 ## 1. Canonical runtime to build on
 
@@ -40,11 +45,12 @@ ASTR v2 (including v1 and reserved-byte refusal), and Notification
 ambiguity refusal. Complete registered attempt 2 is 121/121, strict
 Phase 15 passes on both CPU profiles, and corrected final-artifact
 stability is 100/100 on the identified locally modified QEMU TCG
-backend. The retained qualification history also includes a failed
-registered attempt 1 at the same source (2/121; focused reruns passed;
-no source change before complete attempt 2), so Arena 1 should read
-the attempt receipts rather than treat the final green summary as the
-only run.
+backend. **Q-1 remains an open reliability issue:** registered
+attempt 1 at the same source failed 2/121; focused reruns passed and a
+later complete run passed 121/121, but the causes remain unknown and
+the original failing `m9_client_death` serial was overwritten. Arena 1
+and the testing agent should read the attempt receipts rather than
+treat the final green summary as the only run.
 
 ## 2. Runtime facts Arena 1 can rely on
 
@@ -121,8 +127,9 @@ Phase 16 fixed the old M9 prerequisite mentioned in that handoff
 and Phase 16 now has a two-candidate Notification *guest* negative.
 Those updates do not solve graphical surface/compositor identity.
 
-M/C and Arena 1 need to choose and record the B-GFX-1 direction before
-an SDL video backend can honestly claim graphical guest execution.
+M, with C's advice, and Arena 1 need to choose and record the B-GFX-1
+direction before an SDL video backend can honestly claim graphical
+guest execution.
 
 ## 4. Suggested first Phase 17 gates (for later authorization)
 
@@ -154,7 +161,36 @@ If Phase 17 is authorized after Phase 16 acceptance:
    changed EFI/ESP. Keep new evidence separately labelled by commit
    and image hash.
 
-## 5. Non-goals and warnings
+## 5. Confirmed engineering and testing handoff (plans only)
+
+These assignments are confirmed as the intended post-acceptance
+starting points. They do not start any new work in this closeout:
+
+- **A — canonical C runtime maintenance:** A will maintain the
+  integrated runtime at `experiments/c-runtime/` as the one canonical
+  C runtime. Future C-library additions required by applications
+  should be made there with host and guest evidence, not in an
+  application- or graphics-specific mini-libc.
+- **Graphics/desktop agent — after acceptance and merge only:** future
+  graphics work should start from the accepted, merged Phase 16
+  `mainline`, not from this unmerged branch or the superseded
+  `d314d20…` candidate. It may selectively reuse historical graphics
+  code after auditing that code against the current capability and ABI
+  contracts. It must resolve the B-GFX-1 graphical-service
+  identification decision before resolution-setting or desktop
+  presentation work claims a real graphical launch path.
+- **Testing agent — accepted-baseline profiling and coverage:** the
+  testing agent should begin by profiling the accepted Phase 16
+  baseline and preserving its targeted, registered, strict Phase 15,
+  and stability coverage. Q-1 is part of that handoff as an open
+  reliability issue. Every run and attempt should use unique,
+  immutable output directories and preserve raw serials, exact
+  commands, source/backend/firmware/image identities, and process
+  results. Recurrence should be investigated before either attempt-1
+  failure is called environmental or harmless; assertions must not be
+  weakened merely to obtain a green result.
+
+## 6. Non-goals and warnings
 
 - Do not turn the native C runtime into a Linux/POSIX personality.
 - Do not add syscalls or kernel object types without the required
@@ -165,10 +201,11 @@ If Phase 17 is authorized after Phase 16 acceptance:
   Phase 15/Phase 16 receipts.
 - Do not start from the development EFI/ESP, development receipts, or
   the superseded `d314d20…` candidate image/receipts; use the corrected
-  canonical source/images above if M/C accept them.
+  canonical source/images above only after M accepts them and the
+  branch is merged.
 - Do not reuse a stability or guest receipt across changed EFI/ESP
   bits. The corrected Phase 16 closeout reran final-artifact
   qualification because the reserved-byte correction changed the EFI.
 
-Phase 17 remains **proposed only** until M/C accept Phase 16 and give
-separate direction.
+Phase 17 remains **proposed only** until M accepts and merges Phase 16
+and gives separate direction.
