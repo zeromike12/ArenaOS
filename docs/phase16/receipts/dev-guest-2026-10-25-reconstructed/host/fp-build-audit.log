@@ -1,0 +1,13 @@
+self-test avx.c: {'sse': 0, 'x87': 0, 'avx': 1, 'avx_examples': ['vmulsd %xmm1,%xmm0,%xmm0']}
+self-test int.c: {'sse': 0, 'x87': 0, 'avx': 0, 'avx_examples': []}
+self-test sse.c: {'sse': 1, 'x87': 0, 'avx': 0, 'avx_examples': []}
+FP-IMAGE-CONTROL PASS (7 cases)
+probe_host: probe rc=0 verdict=0 cw=037f sw=2800 tag=e0 rc=0
+probe_host_mutant: probe rc=0 verdict=7 cw=037f sw=2800 tag=e0 rc=1
+FP-AUDIT SELF-TEST PASS
+c-fp-gcc.elf: elf={'sse': 160, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 59, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-gcc.elf
+MUTANT BUILT (isolated negative control): /home/user/ArenaOS/experiments/c-runtime/build/fp-mutant-gcc/c-fp-gcc.elf
+c-fp-clang.elf: elf={'sse': 326, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 50, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-clang.elf
+MUTANT BUILT (isolated negative control): /home/user/ArenaOS/experiments/c-runtime/build/fp-mutant-clang/c-fp-clang.elf

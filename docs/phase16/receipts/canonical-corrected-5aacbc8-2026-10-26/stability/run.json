@@ -1,0 +1,49 @@
+{
+  "attempted_boots": 100,
+  "backend": {
+    "accelerator": "tcg",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "host_glibc_replaced": false,
+    "isolated_glibc_dir": "/home/user/glibc-2.40",
+    "qemu_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_version": "QEMU emulator version 11.1.2",
+    "wrapper": "/home/user/phase16-backend/qemu-patched",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+  },
+  "boot_100_ppm_sha256": "223f56b95d261141385b40d07c5d9d86e70186ce003aed4e59951e066b5d0fe0",
+  "boot_100_serial": "stability-serial-boot-100.log",
+  "boot_100_serial_sha256": "9be174e5840cd8b54aa5c6e1751a6593ad84a41c0f9c62bca92f8f7a793e989b",
+  "boot_1_ppm_sha256": "223f56b95d261141385b40d07c5d9d86e70186ce003aed4e59951e066b5d0fe0",
+  "boot_timeout_seconds": 90,
+  "classification": "CANONICAL - CORRECTED QUALIFICATION CANDIDATE (not acceptance)",
+  "duration_seconds": 942,
+  "efi": {
+    "bytes": 11038720,
+    "sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6"
+  },
+  "esp": {
+    "bytes": 16777216,
+    "sha256": "04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a"
+  },
+  "expected": "stability-expected.txt",
+  "failed_boots": 0,
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS_template": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "log": "stability-100.log",
+  "log_sha256": "da0e2d749294a602c24a535775534b540d96c38e4c5ddf5438a799bd611f0d4d",
+  "pixel_receipt_hashes": "pixel-receipt-hashes.json",
+  "pixel_receipts_present": 100,
+  "receipt": "stability-receipt.txt",
+  "runner": "tools/stability_loop.sh 100",
+  "runner_process_exit": 0,
+  "schema_version": 1,
+  "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+  "successful_boots": 100,
+  "verdict": "PASS"
+}

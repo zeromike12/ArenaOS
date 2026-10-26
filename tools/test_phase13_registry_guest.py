@@ -203,6 +203,31 @@ def right_click(d, x, y):
     d.q.command("input-send-event", events=[{"type": "btn", "data": {"button": "right", "down": False}}])
 
 
+def wait_search_field_settled(d, name, empty_field):
+    """Wait until typed All Applications search keys have been consumed.
+
+    QEMU exposes the keyboard and absolute pointer as separate devices, so a
+    pointer launch can overtake still-queued search keystrokes.  A stream
+    application's newly focused console window would then correctly receive
+    those lagging keys as stdin.  Click only after the non-empty search
+    field has remained unchanged long enough to prove the query drained.
+    """
+    deadline = time.monotonic() + 15
+    previous = None
+    stable_since = None
+    while time.monotonic() < deadline:
+        current = crop(d.shot(name), 190, 154, 420, 22)
+        now = time.monotonic()
+        if current != empty_field and current == previous:
+            if stable_since is not None and now - stable_since >= 1.0:
+                return current
+        else:
+            previous = current
+            stable_since = now if current != empty_field else None
+        time.sleep(0.05)
+    raise AssertionError("All Applications search field did not settle")
+
+
 def checkerboard_pixels(ppm, x, y):
     data = crop(ppm, x, y, 300, 160)
     colors = {data[i:i + 3] for i in range(0, len(data), 3)}
@@ -445,6 +470,11 @@ def interaction(disk):
         )
         assert pixel(searched, 600, 180) == pixel(empty_query, 600, 180), \
             "All Applications search surface disappeared while filtering"
+        wait_search_field_settled(
+            d,
+            "all-apps-search-settled",
+            crop(empty_query, 190, 154, 420, 22),
+        )
         # The filtered catalog has one row; this click is a pointer launch.
         d.click(250, 220)
         try:
@@ -631,10 +661,10 @@ def interaction(disk):
             )
             empty_search_field = crop(opened_search, 190, 154, 420, 22)
             d.q.type_text("phase13", gap_s=0.025)
-            d.shot(
+            wait_search_field_settled(
+                d,
                 f"pressure-installed-search-{launch_index}",
-                lambda p, empty_search_field=empty_search_field:
-                    crop(p, 190, 154, 420, 22) != empty_search_field,
+                empty_search_field,
             )
             d.click(250, 220)
             d.wait(

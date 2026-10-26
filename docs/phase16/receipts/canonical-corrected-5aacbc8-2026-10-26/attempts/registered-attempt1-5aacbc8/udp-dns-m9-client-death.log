@@ -1,0 +1,3 @@
+DNS_FIXTURE_QUERY peer=127.0.0.1:51201 query=29 txid=a7e5 answer=61 wrong_txid=False
+DNS_FIXTURE_QUERY peer=127.0.0.1:33650 query=29 txid=a7e6 answer=61 wrong_txid=False
+DNS_FIXTURE_QUERY peer=127.0.0.1:59343 query=29 txid=7b8e answer=61 wrong_txid=False

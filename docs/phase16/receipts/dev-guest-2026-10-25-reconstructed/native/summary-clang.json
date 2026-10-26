@@ -1,0 +1,235 @@
+{
+  "source_commit": "87987d45c156c5b43b631fd8a6c913bbd84a761a",
+  "worktree_dirty_paths": [
+    " M experiments/c-runtime/app/c_fp_app.c",
+    " M experiments/c-runtime/app/c_native_app.c",
+    " M experiments/c-runtime/app/fp_probe.S",
+    " M experiments/c-runtime/guest_fp.py",
+    " M experiments/c-runtime/guest_phase16_dev.py",
+    " M experiments/c-runtime/host/test_runtime.c",
+    " M experiments/c-runtime/include/arena/abi.h",
+    " M experiments/c-runtime/run.py",
+    " M experiments/c-runtime/src/streams.c",
+    " M tools/test_phase13_registry_guest.py",
+    " M userspace/arena-runtime/src/streams.rs",
+    " M userspace/desktop/src/bin/desktop.rs",
+    " M userspace/desktop/src/package.rs",
+    "?? experiments/c-runtime/app/c_stdin_app.c",
+    "?? experiments/c-runtime/guest_stdin.py",
+    "?? tools/dev-env/build-isolated-glibc.sh"
+  ],
+  "source_sha256": {
+    "guest_native.py": "1d0ba0615aed6c0266214a6f086407d7eb5ef073ae45a89266ffb391b6a31e65",
+    "app/c_native_app.c": "e05a427cca72a2eeef0a5066a3702583cbaeb683f964993151530ece2c1a8d25",
+    "run.py": "f14b14dc986eb773df777de8f1df253e277ffcf1feec5609e7f098d4ea4aef61",
+    "link/arena-user.ld": "6d3d2bbd77941a3a4032416a0921cea5b0f6664aefdddb04e3748b9dea734850"
+  },
+  "identity": {
+    "compiler": "clang",
+    "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+    "elf_sha256": "3b69d2d4fee5e42cb73827d7e7680b3c9bb16f14084172468f5c2d7e2fcb57f3",
+    "elf_size": 70640,
+    "bundle_sha256": "6f941979bc88e7ff69d584600d829d2f6f1cc91d2dfe3b8f135f30e53ea9e1dc",
+    "bundle_size": 71424,
+    "manifest_flags": 28,
+    "signing": "RFC 8032 development fixture (test-only, not a production key)",
+    "loader_audit": {
+      "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+      "entry": "0x200000",
+      "segments": [
+        {
+          "vaddr": "0x200000",
+          "memsz": 52888,
+          "perm": "R-X"
+        },
+        {
+          "vaddr": "0x20d000",
+          "memsz": 44976,
+          "perm": "RW-"
+        }
+      ],
+      "tls": {
+        "vaddr": "0x20d000",
+        "filesz": 4,
+        "memsz": 40,
+        "align": 16
+      },
+      "tls_symbols": {
+        "__arena_tls_align": 16,
+        "__arena_tls_filesz": 4,
+        "__arena_tls_memsz": 40,
+        "__arena_tls_image": 2150400
+      },
+      "loader_failures": [],
+      "disasm": {
+        "instructions": 11928,
+        "simd_or_x87": [],
+        "simd_or_x87_count": 0
+      }
+    },
+    "nostream": {
+      "app_id": "org.arenaos.nostream",
+      "manifest_flags": 20,
+      "bundle_sha256": "fc678f13bc34c69744e41412063c0676098fc581889d41f3372a3e6713ed7ddc",
+      "bundle_size": 71424,
+      "elf_sha256": "3b69d2d4fee5e42cb73827d7e7680b3c9bb16f14084172468f5c2d7e2fcb57f3"
+    }
+  },
+  "runs": 1,
+  "passed": 1,
+  "failed": 0,
+  "evidence_class": "GUEST-DEVELOPMENT",
+  "results": [
+    {
+      "groups_pass": 9,
+      "groups_total": 9,
+      "checks": 98,
+      "final_line": "[c-native] RESULT PASS groups=9/9 checks=98 failed=0",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 1,
+      "compiler": "clang",
+      "boot_rc": 0,
+      "elapsed_s": 11.2,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-clang-run1.log",
+      "driver": {
+        "nostream_installed_entry_sha256": "3b69d2d4fee5e42cb73827d7e7680b3c9bb16f14084172468f5c2d7e2fcb57f3",
+        "native_installed_entry_sha256": "3b69d2d4fee5e42cb73827d7e7680b3c9bb16f14084172468f5c2d7e2fcb57f3",
+        "nostream_driven": true,
+        "driven": true
+      }
+    }
+  ],
+  "phase16_evidence": {
+    "classification": "DEVELOPMENT \u2014 NOT QUALIFICATION EVIDENCE",
+    "qualified": false,
+    "blockers": [
+      "B1: official rust-std components unavailable (docs/phase16/DEPENDENCY-REQUEST.md)"
+    ],
+    "canonical_build": false,
+    "build_script": "tools/build_phase16_dev.sh (committed protected Phase 14 fixture verified, not rebuilt)",
+    "suite": "native",
+    "test_command": "experiments/c-runtime/guest_phase16_dev.py --suite native --esp build/arena-esp.img -- --cc clang --runs 1",
+    "utc": "2026-10-25T19:40:26.647425+00:00",
+    "source_commit": "87987d45c156c5b43b631fd8a6c913bbd84a761a",
+    "dirty_paths": [
+      " M experiments/c-runtime/app/c_fp_app.c",
+      " M experiments/c-runtime/app/c_native_app.c",
+      " M experiments/c-runtime/app/fp_probe.S",
+      " M experiments/c-runtime/guest_fp.py",
+      " M experiments/c-runtime/guest_phase16_dev.py",
+      " M experiments/c-runtime/host/test_runtime.c",
+      " M experiments/c-runtime/include/arena/abi.h",
+      " M experiments/c-runtime/run.py",
+      " M experiments/c-runtime/src/streams.c",
+      " M tools/test_phase13_registry_guest.py",
+      " M userspace/arena-runtime/src/streams.rs",
+      " M userspace/desktop/src/bin/desktop.rs",
+      " M userspace/desktop/src/package.rs",
+      "?? experiments/c-runtime/app/c_stdin_app.c",
+      "?? experiments/c-runtime/guest_stdin.py",
+      "?? tools/dev-env/build-isolated-glibc.sh"
+    ],
+    "images": {
+      "esp": "build/arena-esp.img",
+      "esp_sha256": "0524e6c3fb51b8438a3657b41fd2bd5e2505966b3bfbefcbc03c41e0d4144513",
+      "efi": "build/arena-boot.efi",
+      "efi_sha256": "cd32caf4816247ad99862bd548d0248c5e7d409e8f119ef93fc84d56809219c9",
+      "protected_phase14_fixture_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+    },
+    "emulator": {
+      "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+      "file": "/home/user/phase16-backend/qemu-patched",
+      "sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+      "wrapper_head": [
+        "#!/bin/sh",
+        "exec \"/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2\" \\",
+        "  --library-path \"/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/usr/lib/x86_64-linux-gnu\" \\",
+        "  \"/home/user/phase15-pkg/backend/qemu-system-x86_64-patched\" -accel tcg -L \"/home/user/phase15-pkg/backend/pc-bios\" \"$@\""
+      ],
+      "emulator_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+      "emulator_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+      "version": "QEMU emulator version 11.1.2"
+    },
+    "firmware": {
+      "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+      "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+      "OVMF_VARS_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    },
+    "isolated_runtime": {
+      "note": "Pinned patched QEMU requires GLIBC>=2.38; when a wrapper is used its content (incl. isolated glibc path) is recorded under emulator.wrapper_head. Setup: tools/dev-env/build-isolated-glibc.sh and docs/phase16/BACKEND-RECOVERY.md.",
+      "ARENA_GLIBC_DIR": "/home/user/glibc-2.40",
+      "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+      "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458"
+    },
+    "compilers": {
+      "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+      "zig": "0.17.0",
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+    },
+    "process_exit": 0,
+    "semantic_verdict": {
+      "summary": "/home/user/ArenaOS/experiments/c-runtime/build/guest-native/summary-clang.json",
+      "runs": 1,
+      "passed": 1,
+      "failed": 0,
+      "failures": []
+    },
+    "app_identity": {
+      "compiler": "clang",
+      "elf": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+      "elf_sha256": "3b69d2d4fee5e42cb73827d7e7680b3c9bb16f14084172468f5c2d7e2fcb57f3",
+      "elf_size": 70640,
+      "bundle_sha256": "6f941979bc88e7ff69d584600d829d2f6f1cc91d2dfe3b8f135f30e53ea9e1dc",
+      "bundle_size": 71424,
+      "manifest_flags": 28,
+      "signing": "RFC 8032 development fixture (test-only, not a production key)",
+      "loader_audit": {
+        "path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+        "entry": "0x200000",
+        "segments": [
+          {
+            "vaddr": "0x200000",
+            "memsz": 52888,
+            "perm": "R-X"
+          },
+          {
+            "vaddr": "0x20d000",
+            "memsz": 44976,
+            "perm": "RW-"
+          }
+        ],
+        "tls": {
+          "vaddr": "0x20d000",
+          "filesz": 4,
+          "memsz": 40,
+          "align": 16
+        },
+        "tls_symbols": {
+          "__arena_tls_align": 16,
+          "__arena_tls_filesz": 4,
+          "__arena_tls_memsz": 40,
+          "__arena_tls_image": 2150400
+        },
+        "loader_failures": [],
+        "disasm": {
+          "instructions": 11928,
+          "simd_or_x87": [],
+          "simd_or_x87_count": 0
+        }
+      },
+      "nostream": {
+        "app_id": "org.arenaos.nostream",
+        "manifest_flags": 20,
+        "bundle_sha256": "fc678f13bc34c69744e41412063c0676098fc581889d41f3372a3e6713ed7ddc",
+        "bundle_size": 71424,
+        "elf_sha256": "3b69d2d4fee5e42cb73827d7e7680b3c9bb16f14084172468f5c2d7e2fcb57f3"
+      }
+    }
+  }
+}

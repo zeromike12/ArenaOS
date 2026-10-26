@@ -1,0 +1,82 @@
+SENSITIVITY RUST PREVIOUS VALIDATOR
+final_test_source_commit=5aacbc88c50d4565a7bb9f4075be27e40df27779
+previous_production_base_commit=feaa9b189cb9ed0ac2d078011aa0335385622407
+method=final streams.rs copied into detached previous tree; tail scan, exact-length gate, and initializer tail zeroing reverted only in scratch
+expected=the three new streams tests fail; the 24 pre-existing tests pass
+   Compiling arena-lib v0.1.0 (/home/user/phase16-correction-work/sensitivity/rust-previous/userspace/arena-lib)
+   Compiling arena-startup-abi v0.1.0 (/home/user/phase16-correction-work/sensitivity/rust-previous/userspace/arena-startup-abi)
+   Compiling arena-process v0.1.0 (/home/user/phase16-correction-work/sensitivity/rust-previous/userspace/arena-process)
+   Compiling arena-runtime v0.1.0 (/home/user/phase16-correction-work/sensitivity/rust-previous/userspace/arena-runtime)
+warning: variable does not need to be mutable
+   --> src/streams.rs:755:13
+    |
+755 |         let mut put = |ring: &mut [u8; 768], write: &mut u32, bytes: &[u8]| {
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `arena-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p arena-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.39s
+     Running unittests src/lib.rs (userspace/arena-runtime/target/x86_64-unknown-linux-gnu/debug/deps/arena_runtime-a8ce89a2dec0dd3d)
+
+running 27 tests
+test capabilities::tests::destroyable_attenuation_preserves_only_requested_rights ... ok
+test capabilities::tests::capability_copy_requires_copy_right_and_strictly_attenuates ... ok
+test heap::tests::blocks_align_reuse_and_coalesce_without_touching_neighbor_pages ... ok
+test heap::tests::capacity_refusal_is_mutation_free_and_a_free_large_block_recovers ... ok
+test heap::tests::unsupported_layouts_and_frame_oom_leave_state_unchanged ... ok
+test startup::tests::an_unavailable_listed_slot_description_is_fail_closed ... ok
+test startup::tests::extra_unlisted_capability_refuses_even_when_its_kind_is_unavailable ... ok
+test heap::tests::scalable_heap_commits_lazily_aligns_reuses_and_refuses_oom ... ok
+test startup::tests::full_cap_table_matches_listed_kinds_and_rights_but_ignores_ids ... ok
+test startup::tests::kind_or_rights_mismatch_refuses_before_application_entry ... ok
+test startup::tests::missing_listed_capability_refuses_before_application_entry ... ok
+test startup::tests::rejection_discards_only_a_destroyable_shared_region_slot ... ok
+test streams::tests::attach_checks_layout_and_corrupt_indices_fail_closed ... ok
+test startup::tests::unexpected_startup_slot_zero_and_occupancy_query_errors_refuse ... ok
+test streams::tests::attach_refuses_v1_and_unknown_versions ... ok
+test streams::tests::attach_refuses_nonzero_reserved_bytes_in_header_rings_and_tail ... FAILED
+test streams::tests::attach_requires_the_full_page_before_tail_validation ... FAILED
+test streams::tests::close_produces_eof_after_queued_bytes_and_detects_consumer_death ... ok
+test streams::tests::counter_wraparound_preserves_fifo_order ... ok
+test streams::tests::each_process_local_endpoint_is_unique_while_held ... ok
+test streams::tests::helper_parent_and_child_use_opposite_ring_endpoints ... ok
+test streams::tests::initialize_requires_and_zeroes_the_full_page ... FAILED
+test streams::tests::three_rings_fit_one_page_and_transfer_partial_bytes_under_backpressure ... ok
+test streams::tests::v1_indexing_negative_control ... ok
+test streams::tests::wrap_with_unread_bytes_preserves_content_and_order ... ok
+test threads::tests::stack_layout_leaves_metadata_and_guard_pages_outside_stack ... ok
+test tls::tests::tcb_layout_is_frozen_for_the_arena_fs_base_contract ... ok
+
+failures:
+
+---- streams::tests::attach_refuses_nonzero_reserved_bytes_in_header_rings_and_tail stdout ----
+
+thread 'streams::tests::attach_refuses_nonzero_reserved_bytes_in_header_rings_and_tail' (104239) panicked at src/streams.rs:826:13:
+nonzero reserved byte at page offset 3328 must be refused
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- streams::tests::attach_requires_the_full_page_before_tail_validation stdout ----
+
+thread 'streams::tests::attach_requires_the_full_page_before_tail_validation' (104241) panicked at src/streams.rs:848:13:
+length 3328 must be refused before page validation
+
+---- streams::tests::initialize_requires_and_zeroes_the_full_page stdout ----
+
+thread 'streams::tests::initialize_requires_and_zeroes_the_full_page' (104246) panicked at src/streams.rs:862:9:
+assertion failed: matches!(unsafe
+    { StreamSet::initialize(page.0.as_mut_ptr(), STREAM_PAGE_BYTES - 1) },
+    Err(Error::TooSmall))
+
+
+failures:
+    streams::tests::attach_refuses_nonzero_reserved_bytes_in_header_rings_and_tail
+    streams::tests::attach_requires_the_full_page_before_tail_validation
+    streams::tests::initialize_requires_and_zeroes_the_full_page
+
+test result: FAILED. 24 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+previous-rust exit=101

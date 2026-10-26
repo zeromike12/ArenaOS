@@ -1,0 +1,51 @@
+{
+  "attempt_1": {
+    "duration_seconds": 6543,
+    "failed_suites": [
+      "test_m84_crash.py",
+      "test_m9_client_death.py"
+    ],
+    "full_log": "../attempts/registered-attempt1-5aacbc8/full-suite.log",
+    "full_log_sha256": "0a0b1d680b74ab9fd5aa13650ab9419831c9e75788c7321693cf027a5c301470",
+    "registered_suite_marker": "2 of 121 test suites FAILED",
+    "runner_process_exit": 1,
+    "verdict": "FAIL"
+  },
+  "attempt_2": {
+    "duration_seconds": 6574,
+    "registered_suite_marker": "ALL TESTS PASSED (121 test suites)",
+    "runner_process_exit": 0,
+    "verdict": "PASS"
+  },
+  "backend": {
+    "accelerator": "tcg",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "host_glibc_replaced": false,
+    "isolated_glibc_dir": "/home/user/glibc-2.40",
+    "qemu_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_version": "QEMU emulator version 11.1.2",
+    "wrapper": "/home/user/phase16-backend/qemu-patched",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+  },
+  "classification": "CANONICAL - CORRECTED QUALIFICATION CANDIDATE (not acceptance)",
+  "command": "source canonical environment (recorded in ../environment.json); bash tools/run_tests.sh",
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS_template": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "full_log": "full-suite.log",
+  "full_log_sha256": "60b42be604f146ba7fbadc195a420135d97fd2cb2990e627a0a7758010509164",
+  "registered_suite_marker": "ALL TESTS PASSED (121 test suites)",
+  "runner": "tools/run_tests.sh (default official mode)",
+  "runner_process_exit": 0,
+  "schema_version": 1,
+  "semantic_failures": "none in attempt 2; intentional RED negative controls remained expected and their suites passed",
+  "source_clean_at_start_and_end": true,
+  "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+  "suite_count": 121,
+  "verdict": "PASS (attempt 2; failed attempt 1 retained separately)"
+}

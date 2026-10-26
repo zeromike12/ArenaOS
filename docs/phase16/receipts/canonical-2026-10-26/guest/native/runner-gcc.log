@@ -1,0 +1,21 @@
+PHASE16 CANONICAL RUNNER: suite=native — B1 resolved; not acceptance
+[c1-native] building kernel image + ESP ...
+{
+  "groups_pass": 9,
+  "groups_total": 9,
+  "checks": 98,
+  "final_line": "[c-native] RESULT PASS groups=9/9 checks=98 failed=0",
+  "exit_lines": [
+    58,
+    57
+  ],
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "gcc",
+  "boot_rc": 0,
+  "elapsed_s": 10.8,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-native/serial-c1-native-gcc-run1.log"
+}
+C1.2 guest native app: 1/1 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-native/summary-gcc.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-native/evidence-envelope-native.json

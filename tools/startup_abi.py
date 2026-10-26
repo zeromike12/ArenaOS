@@ -14,7 +14,12 @@ PAGE_BYTES = 4096
 HEADER_BYTES = 128
 ARG_MAX = 32
 ENV_MAX = 32
-CAP_MAX = 4
+# Phase 16 (M9): the oracle tracks the native validators
+# (userspace/arena-platform/src/startup.rs, userspace/arena-startup-abi).
+# It previously pinned the pre-stream/sync contract (4 caps, roles 1..5,
+# kinds 1..13, flags mask 7) and could not encode any record carrying
+# standard streams or a sync domain.
+CAP_MAX = 7
 STRINGS_MAX = 3072
 INSTANCE_SLOTS = 32
 NONE = 0xFFFF
@@ -27,6 +32,27 @@ CAP_SHARED_REGION = 7
 CAP_NOTIFICATION = 3
 CAP_BOOT_IMAGE = 6
 CAP_BADGED_ENDPOINT = 12
+CAP_SYNC_DOMAIN = 16
+ROLE_CURRENT_DIRECTORY = 1
+ROLE_STANDARD_INPUT = 2
+ROLE_STANDARD_OUTPUT = 3
+ROLE_STANDARD_ERROR = 4
+ROLE_OTHER = 5
+ROLE_STREAM_SET = 6
+ROLE_STREAM_WAKE = 7
+ROLE_SYNC_DOMAIN = 8
+FLAG_MULTI_INSTANCE = 1
+FLAG_BACKGROUND = 2
+FLAG_HEADLESS = 4
+FLAG_STANDARD_STREAMS = 8
+FLAG_NATIVE_SYNC = 16
+KNOWN_FLAGS = (
+    FLAG_MULTI_INSTANCE
+    | FLAG_BACKGROUND
+    | FLAG_HEADLESS
+    | FLAG_STANDARD_STREAMS
+    | FLAG_NATIVE_SYNC
+)
 
 # Header offsets; these deliberately match the ADR table, not Rust symbols.
 OFF_TOTAL = 8
@@ -193,7 +219,7 @@ def parse(page: bytes) -> dict[str, object]:
         raise Refusal("bounds")
     if capc > CAP_MAX or strings_len > STRINGS_MAX or instance >= INSTANCE_SLOTS or generation == 0:
         raise Refusal("bounds")
-    if flags & ~7:
+    if flags & ~KNOWN_FLAGS:
         raise Refusal("flags")
     app_id = page[OFF_APP_ID:OFF_APP_ID + 32]
     if not _valid_id(app_id):
@@ -218,23 +244,66 @@ def parse(page: bytes) -> dict[str, object]:
     for i in range(capc):
         at = caps_off + i * 16
         slot, role, kind, rights = struct.unpack_from("<HBBI", page, at)
-        if slot != i + 1 or role not in (1, 2, 3, 4, 5) or not 1 <= kind <= 13:
+        if (
+            slot != i + 1
+            or role not in (1, 2, 3, 4, 5, 6, 7, 8)
+            or not (1 <= kind <= 13 or kind == CAP_SYNC_DOMAIN)
+        ):
             raise Refusal("capability descriptor")
         if not rights or rights & ~RIGHTS_MASK or any(page[at + 8:at + 16]):
             raise Refusal("capability rights/reserved")
-        if role != 5 and role in roles:
+        if role != ROLE_OTHER and role in roles:
             raise Refusal("duplicate capability role")
         roles[role] = i
-        if role == 1 and (kind != CAP_BADGED_ENDPOINT or not rights & RIGHT_WRITE):
+        if role == ROLE_CURRENT_DIRECTORY and (
+            kind != CAP_BADGED_ENDPOINT or not rights & RIGHT_WRITE
+        ):
             raise Refusal("CWD capability")
+        if role == ROLE_STREAM_SET and (
+            kind != CAP_SHARED_REGION or rights != RIGHT_READ | RIGHT_WRITE
+        ):
+            raise Refusal("stream-set capability")
+        if role == ROLE_STREAM_WAKE and (
+            kind != CAP_NOTIFICATION or rights != RIGHT_WRITE
+        ):
+            raise Refusal("stream-wake capability")
+        if role == ROLE_SYNC_DOMAIN and (
+            kind != CAP_SYNC_DOMAIN or rights != RIGHT_READ | RIGHT_WRITE
+        ):
+            raise Refusal("sync-domain capability")
         descriptors.append((slot, role, kind, rights))
 
     refs = tuple(_u16(page, at) for at in (OFF_CWD, OFF_STDIN, OFF_STDOUT, OFF_STDERR))
-    wanted_roles = (1, 2, 3, 4)
-    for ref, role in zip(refs, wanted_roles):
-        expected = roles.get(role, NONE)
-        if ref != expected or (ref != NONE and ref >= capc):
+    if refs[0] != roles.get(ROLE_CURRENT_DIRECTORY, NONE):
+        raise Refusal("role reference")
+    stream_set = roles.get(ROLE_STREAM_SET, NONE)
+    if stream_set != NONE:
+        # Mirrors the native rule: the three standard-stream references all
+        # name the stream set, no per-stream roles may coexist, and the
+        # wake capability must be present.
+        if (
+            refs[1:] != (stream_set,) * 3
+            or any(
+                role in roles
+                for role in (ROLE_STANDARD_INPUT, ROLE_STANDARD_OUTPUT, ROLE_STANDARD_ERROR)
+            )
+            or ROLE_STREAM_WAKE not in roles
+        ):
             raise Refusal("role reference")
+    else:
+        wanted_roles = (ROLE_STANDARD_INPUT, ROLE_STANDARD_OUTPUT, ROLE_STANDARD_ERROR)
+        for ref, role in zip(refs[1:], wanted_roles):
+            if ref != roles.get(role, NONE):
+                raise Refusal("role reference")
+        if ROLE_STREAM_WAKE in roles:
+            raise Refusal("role reference")
+    streams_requested = bool(flags & FLAG_STANDARD_STREAMS)
+    if streams_requested != (stream_set != NONE) or streams_requested != (
+        ROLE_STREAM_WAKE in roles
+    ):
+        raise Refusal("stream flag/role agreement")
+    if bool(flags & FLAG_NATIVE_SYNC) != (ROLE_SYNC_DOMAIN in roles):
+        raise Refusal("sync flag/role agreement")
 
     values = []
     cursor = 0

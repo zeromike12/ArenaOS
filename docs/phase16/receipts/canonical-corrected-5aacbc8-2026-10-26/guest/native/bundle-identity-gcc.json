@@ -1,0 +1,51 @@
+{
+  "compiler": "gcc",
+  "elf": "/workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-native-gcc.elf",
+  "elf_sha256": "e8d763111db70fdc1b0c6fa3d00c0a45fca3a7948c7923419d019fc50db3817d",
+  "elf_size": 58248,
+  "bundle_sha256": "81fff65d82a07abe178c56bc3f29df845ef7fb78dedc28de5ad0544c19ad31ef",
+  "bundle_size": 59032,
+  "manifest_flags": 28,
+  "signing": "RFC 8032 development fixture (test-only, not a production key)",
+  "loader_audit": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-native-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 41508,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20b000",
+        "memsz": 41280,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20b000",
+      "filesz": 4,
+      "memsz": 40,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 40,
+      "__arena_tls_filesz": 4,
+      "__arena_tls_image": 2142208,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 10962,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "nostream": {
+    "app_id": "org.arenaos.nostream",
+    "manifest_flags": 20,
+    "bundle_sha256": "7161e0526b68a2e350b4816c1dc07811c20fc1dd00f41ee15b9c135908885868",
+    "bundle_size": 59032,
+    "elf_sha256": "e8d763111db70fdc1b0c6fa3d00c0a45fca3a7948c7923419d019fc50db3817d"
+  }
+}

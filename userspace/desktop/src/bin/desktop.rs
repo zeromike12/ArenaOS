@@ -251,6 +251,9 @@ struct Session {
     stdin_pending: [u8; STREAM_INPUT_PENDING],
     stdin_head: u8,
     stdin_count: u8,
+    /// Ctrl-D requested stdin EOF: the writer closes once the pending
+    /// queue has drained into the ring (ADR-0104 close semantics).
+    stdin_close_pending: bool,
     process: Option<Handle>,
     handle: u64,
     title: [u8; 32],
@@ -352,6 +355,7 @@ const EMPTY: Session = Session {
     stdin_pending: [0; STREAM_INPUT_PENDING],
     stdin_head: 0,
     stdin_count: 0,
+    stdin_close_pending: false,
     process: None,
     handle: 0,
     title: [0; 32],
@@ -679,6 +683,12 @@ fn publish_rects(src: u64, dst: u64, stride: usize, rects: &[[u16; 4]]) {
 static mut SESSIONS: [Session; LIMIT] = [EMPTY; LIMIT];
 static mut EXTRA_WINDOWS: [ExtraWindow; EXTRA_LIMIT] = [EMPTY_EXTRA; EXTRA_LIMIT];
 const ALL_APPS_CAPACITY: usize = 6 + arena_desktop::package::MAX_CATALOG_APPS;
+/// Manifest default window size per registry slot (Phase 16 console
+/// windows); (0, 0) = none declared.
+static mut INSTALLED_APP_SIZE: [(u16, u16); ALL_APPS_CAPACITY] = [(0, 0); ALL_APPS_CAPACITY];
+/// One-shot console-window request consumed by the next ABI-v2 spawn:
+/// (width, height, title). Set by launch_installed_application only.
+static mut PENDING_CONSOLE: (u16, u16, [u8; 32]) = (0, 0, [0; 32]);
 static mut INSTALLED_APPS: [Option<arena_desktop::package::AppEntry>; ALL_APPS_CAPACITY] =
     [None; ALL_APPS_CAPACITY];
 static mut INSTALLED_ASSOCIATIONS: [[[u8; 32]; 8]; ALL_APPS_CAPACITY] =
@@ -2192,6 +2202,22 @@ fn drain_session_output(index: usize, session: Session) {
             SESSIONS[index].stdin_count = count;
         }
     }
+    if session.stdin_close_pending
+        && unsafe { SESSIONS[index].stdin_count } == 0
+        && let Ok(mut writer) = streams.writer(arena_runtime::streams::Channel::Stdin)
+    {
+        writer.close();
+        unsafe {
+            SESSIONS[index].stdin_close_pending = false;
+            // Bit 4 is stdin-final. Bits 1/2 already mean stdout/stderr
+            // EOF in the output drain above; reusing bit 1 here would let
+            // an app that merely closed stdout (Phase 13 does, before it
+            // reads stdin) silently lose all keyboard input.
+            SESSIONS[index].stream_eof |= 4;
+        }
+        stdin_changed = true;
+        log(b"[desktop] native stream stdin EOF delivered (Ctrl-D)\n");
+    }
     if changed || stdin_changed {
         // Freeing output capacity may unblock the exact AppInstance writer.
         let _ = unsafe { syscall2(SYS_NOTIFY, clock(index), BADGE_STREAM_READY) };
@@ -2204,6 +2230,9 @@ fn queue_stdin_byte(index: usize, byte: u8) {
     };
     if session.stream_va == 0 || session.stream_faulted {
         return;
+    }
+    if session.stdin_close_pending || session.stream_eof & 4 != 0 {
+        return; // stdin EOF requested/delivered: no further stdin bytes
     }
     if session.stdin_count == 0 {
         let streams = match unsafe {
@@ -2949,6 +2978,25 @@ fn launch_installed_application(
         );
         destroy(image.capability);
         return launched;
+    }
+    // Phase 16 console window: a windowed stream application gets its
+    // primary window pre-created at spawn (manifest default size), so it
+    // is focusable and can receive granted-stdin keyboard input without
+    // first speaking the graphics protocol. The app's own Create request
+    // later returns this same window (see the service dispatch).
+    unsafe {
+        PENDING_CONSOLE = (0, 0, [0; 32]);
+        if app_flags & manifest::FLAG_STANDARD_STREAMS != 0
+            && let Some(slot) = (&*(&raw const INSTALLED_APPS))
+                .iter()
+                .position(|e| e.is_some_and(|a| a.application_id == *application_id))
+        {
+            let (w, h) = INSTALLED_APP_SIZE[slot];
+            if w != 0 {
+                let title = INSTALLED_APPS[slot].map_or([0; 32], |a| a.display_name);
+                PENDING_CONSOLE = (w, h, title);
+            }
+        }
     }
     let launched = launch_image_v2_for_app_with_document(
         image.capability,
@@ -3900,6 +3948,40 @@ fn launch_image_v2_for_app_with_document(
         ..EMPTY
     };
     transient_caps();
+    // Phase 16: pre-create the console window for a windowed stream app
+    // (request stashed by launch_installed_application). Failure to
+    // create is non-fatal: the app still runs, it just gets no keyboard
+    // focus until it creates a window itself.
+    let (console_w, console_h, console_title) = unsafe { PENDING_CONSOLE };
+    unsafe { PENDING_CONSOLE = (0, 0, [0; 32]) };
+    if console_w != 0 && sessions[i].stream_va != 0 {
+        let state = unsafe { &mut *(&raw mut WM) };
+        if let Ok(handle) = state.create(id, console_w, console_h) {
+            sessions[i].handle = handle;
+            sessions[i].surface = (console_w, console_h);
+            sessions[i].title = console_title;
+            sessions[i].reveal.retarget(
+                i32::from(console_h),
+                arena_desktop::app_client::now(),
+                if unsafe { PREFS.motion } {
+                    arena_ui::motion::OPEN_US
+                } else {
+                    0
+                },
+                arena_ui::motion::Easing::Smooth,
+            );
+            // Do not spend the one edge-triggered window wake yet: the
+            // app multiplexes its private clock for startup helper/stream
+            // waits and could consume badge 1 before it ever polls its
+            // windows, after which the WOKEN latch would suppress every
+            // later window wake (lost wakeup). The latch is re-armed when
+            // the app adopts this window through its own Create request
+            // (service dispatch). Stdin delivery is unaffected: it is
+            // notified separately with the stream badge.
+            unsafe { WOKEN[i] = true };
+            log(b"[desktop] console window pre-created for stream application\n");
+        }
+    }
     log(b"[desktop] real application spawned; ABI-v2 held Process, unique badge and surface bound\n");
     Ok(())
 }
@@ -4415,6 +4497,7 @@ fn reset_installed_applications() {
     unsafe {
         for index in 0..ALL_APPS_CAPACITY {
             INSTALLED_APPS[index] = None;
+            INSTALLED_APP_SIZE[index] = (0, 0);
             INSTALLED_ASSOCIATIONS[index] = [[0; 32]; 8];
             INSTALLED_ASSOCIATION_COUNTS[index] = 0;
         }
@@ -4483,6 +4566,8 @@ fn refresh_installed_applications() -> Result<(), u64> {
                         };
                     unsafe {
                         INSTALLED_APPS[6 + index] = Some(entry);
+                        INSTALLED_APP_SIZE[6 + index] =
+                            arena_desktop::package::app_default_size(index);
                         INSTALLED_ASSOCIATIONS[6 + index] = associations;
                         INSTALLED_ASSOCIATION_COUNTS[6 + index] = association_count as u8;
                     }
@@ -5825,6 +5910,19 @@ extern "C" fn main() -> ! {
                                 if app_action.is_none()
                                     && pressed
                                     && !modal
+                                    && mods & arena_desktop::model::MOD_CTRL != 0
+                                    && code == u16::from(b'd')
+                                    && let Some(handle) = state.focused()
+                                    && let Some(owner) = stream_owner_for_window(handle)
+                                {
+                                    // Ctrl-D: EOF for the focused app's
+                                    // granted stdin only (Phase 16). The
+                                    // writer closes after queued bytes
+                                    // drain; see drain_session_output.
+                                    unsafe { SESSIONS[owner].stdin_close_pending = true };
+                                } else if app_action.is_none()
+                                    && pressed
+                                    && !modal
                                     && let (Some(handle), Some(byte)) =
                                         (state.focused(), stream_keyboard_byte(code, mods))
                                     && let Some(owner) = stream_owner_for_window(handle)
@@ -6228,6 +6326,19 @@ extern "C" fn main() -> ! {
                         let state = unsafe { &mut *(&raw mut WM) };
                         let s = unsafe { &mut *(&raw mut SESSIONS).cast::<Session>().add(i) };
                         match f {
+                            // A stream application's console window may
+                            // already exist (pre-created at spawn, Phase 16);
+                            // its own Create returns that same window.
+                            Frame::Create { .. } if s.handle != 0 && s.stream_va != 0 => {
+                                // Adopting the pre-created console window:
+                                // re-arm its window wake (suppressed at
+                                // spawn; see launch_image_v2_for_app_with_document). The
+                                // wake pass after this dispatch then
+                                // notifies the app of any queued events.
+                                unsafe { WOKEN[i] = false };
+                                result = s.handle;
+                                status = 0;
+                            }
                             Frame::Create { width, height }
                                 if s.handle == 0
                                     && u64::from(width) * u64::from(height)

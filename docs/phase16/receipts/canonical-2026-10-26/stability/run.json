@@ -1,0 +1,47 @@
+{
+  "attempted_boots": 100,
+  "backend": {
+    "accelerator": "tcg",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "host_glibc_replaced": false,
+    "isolated_glibc_dir": "/home/user/glibc-2.40",
+    "qemu_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_version": "QEMU emulator version 11.1.2",
+    "wrapper": "/home/user/phase16-backend/qemu-patched",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+  },
+  "boot_100_serial": "stability-serial-boot-100.log",
+  "boot_100_serial_sha256": "14c578ffd850d9b03e7bf0d93966a7d78f50dfb8297b817b48dc1633cca09d99",
+  "boot_timeout_seconds": 90,
+  "classification": "CANONICAL - QUALIFICATION CANDIDATE (not acceptance)",
+  "duration_seconds": 914,
+  "efi": {
+    "bytes": 11038720,
+    "sha256": "850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79"
+  },
+  "esp": {
+    "bytes": 16777216,
+    "sha256": "65b489016527a49e394ab6e7a57cb592045a3c80b55cceed7610aa448cb519d9"
+  },
+  "expected": "stability-expected.txt",
+  "failed_boots": 0,
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS_template": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "log": "stability-100.log",
+  "log_sha256": "1580795cc61035fd6daf5757c110174c5732a047cd535e1e438d78b081ad28a6",
+  "pixel_receipt_hashes": "pixel-receipt-hashes.json",
+  "pixel_receipts_present": 100,
+  "receipt": "stability-receipt.txt",
+  "runner": "tools/stability_loop.sh 100",
+  "runner_process_exit": 0,
+  "schema_version": 1,
+  "source_commit": "d314d204aa86ec4018659f3f211cd3a488d30d87",
+  "successful_boots": 100,
+  "verdict": "PASS"
+}

@@ -1,0 +1,239 @@
+{
+  "classification": "CANONICAL - CORRECTED QUALIFICATION CANDIDATE (not acceptance)",
+  "results": [
+    {
+      "compiler": "clang",
+      "console_checks": 88,
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "347b12eb38dbcf5ce044bfd63a0706b16e4f975d8a56f25384d2118f0481e73a",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "c2",
+      "summary": "c2/summary-clang.json"
+    },
+    {
+      "compiler": "gcc",
+      "console_checks": 88,
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "4f0922599eb703923505a792cc54df557b766ae93a6eb813ea79a51b0db9e147",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        58,
+        61,
+        63
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "c2",
+      "summary": "c2/summary-gcc.json"
+    },
+    {
+      "compiler": "clang",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "06db26b69299bcafce99ecfc850d2c812c2cc401a67ed4a70ff89a72c95e5d16",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        71,
+        72
+      ],
+      "fp_results": [
+        [
+          "PASS",
+          66,
+          0,
+          0
+        ],
+        [
+          "FAIL",
+          66,
+          19,
+          0
+        ]
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "fp",
+      "summary": "fp/summary-clang.json"
+    },
+    {
+      "compiler": "gcc",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "2d4949fd1fdf5df828c642d6255cf272ab1326c77ff9d4f4ef757e6538f39493",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        71,
+        72
+      ],
+      "fp_results": [
+        [
+          "PASS",
+          66,
+          0,
+          0
+        ],
+        [
+          "FAIL",
+          66,
+          19,
+          0
+        ]
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "fp",
+      "summary": "fp/summary-gcc.json"
+    },
+    {
+      "checks": 98,
+      "compiler": "clang",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "d4e2cda3073440e613eafd798d536ea5e7643b431be7dd9b500e7009c101341b",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "native",
+      "summary": "native/summary-clang.json"
+    },
+    {
+      "checks": 98,
+      "compiler": "gcc",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "d8bd97501b6123793293363c1e0bf263ae99b898705a2e91db0e2a4f7f4f51fc",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        57
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "native",
+      "summary": "native/summary-gcc.json"
+    },
+    {
+      "compiler": "clang",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "1fb8f510872baaf9b5a42c33f150c9940125930edad7a48197b9b68f16a157e7",
+      "evidence_class": "GUEST-CANONICAL",
+      "modes": [
+        {
+          "exit_lines": [
+            75
+          ],
+          "image_efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+          "mode": "production",
+          "mutant_marker_count": 0
+        },
+        {
+          "exit_lines": [
+            76
+          ],
+          "image_efi_sha256": "cc5ac6729c767e515099dc84920530dc978f46e98551f6297b5daeb21d81aeaf",
+          "mode": "mutant",
+          "mutant_marker_count": 1
+        }
+      ],
+      "passed": 2,
+      "runs": 2,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "notification",
+      "summary": "notification/summary-clang.json"
+    },
+    {
+      "compiler": "gcc",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "2ff0d708ea867c4a7b01a76326d50531a4b45cb8a22d67b4fae41f92d5ab2edd",
+      "evidence_class": "GUEST-CANONICAL",
+      "modes": [
+        {
+          "exit_lines": [
+            75
+          ],
+          "image_efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+          "mode": "production",
+          "mutant_marker_count": 0
+        },
+        {
+          "exit_lines": [
+            76
+          ],
+          "image_efi_sha256": "cc5ac6729c767e515099dc84920530dc978f46e98551f6297b5daeb21d81aeaf",
+          "mode": "mutant",
+          "mutant_marker_count": 1
+        }
+      ],
+      "passed": 2,
+      "runs": 2,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "notification",
+      "summary": "notification/summary-gcc.json"
+    },
+    {
+      "a_eof_bytes": "118",
+      "b_eof_bytes": "7",
+      "compiler": "clang",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "b6578d45be1c76dab467ff2a197b392194954f1eb709d0e885ebb6dc54f3c6f9",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        73,
+        73,
+        58
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "stdin",
+      "summary": "stdin/summary-clang.json"
+    },
+    {
+      "a_eof_bytes": "118",
+      "b_eof_bytes": "7",
+      "compiler": "gcc",
+      "dirty_paths": [],
+      "efi_sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "esp_sha256": "9f1bafb0d974ea9704087493769b18411c82e3e16d83f8dfefe42040b6783009",
+      "evidence_class": "GUEST-CANONICAL",
+      "exit_lines": [
+        58,
+        73,
+        73,
+        58
+      ],
+      "passed": 1,
+      "runs": 1,
+      "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "suite": "stdin",
+      "summary": "stdin/summary-gcc.json"
+    }
+  ]
+}

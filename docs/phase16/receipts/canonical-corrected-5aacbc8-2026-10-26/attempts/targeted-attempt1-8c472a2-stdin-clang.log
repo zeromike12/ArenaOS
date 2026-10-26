@@ -1,0 +1,18 @@
+FOCUSED REPRODUCTION OF TARGETED ATTEMPT 1
+source_commit=8c472a2fe110b6bb3db81145342043de5ee75e03
+command=python3 -u experiments/c-runtime/guest_phase16_canonical.py --suite stdin -- --cc clang
+expected=nonzero before boot: transformed legacy-v1 copy trips the new v2 exact-tail static assert
+PHASE16 CANONICAL RUNNER: suite=stdin — B1 resolved; not acceptance
+/home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/src/streams.c:51:16: error: static assertion failed due to requirement '(64U + 3U * 832U) == 3328U': ASTR v2 reserved tail must start at byte 3328 (ADR-0111)
+   51 | _Static_assert(PAGE_TAIL_OFFSET == 3328u,
+      |                ^~~~~~~~~~~~~~~~~~~~~~~~~
+/home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/src/streams.c:50:26: note: expanded from macro 'PAGE_TAIL_OFFSET'
+   50 | #define PAGE_TAIL_OFFSET (HEADER_BYTES + ARENA_STREAM_CHANNELS * RING_STRIDE)
+      |                          ^
+/home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/src/streams.c:51:33: note: expression evaluates to '2560 == 3328'
+   51 | _Static_assert(PAGE_TAIL_OFFSET == 3328u,
+      |                ~~~~~~~~~~~~~~~~~^~~~~~~~
+1 error generated.
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/evidence-envelope-stdin.json
+command failed (1): /home/user/.local/lib/python3.11/site-packages/ziglang/zig cc -target x86_64-freestanding-none -std=gnu11 -O2 -g0 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-exceptions -fno-omit-frame-pointer -mgeneral-regs-only -msoft-float -mno-sse -mno-sse2 -mno-mmx -mno-80387 -ftls-model=local-exec -fno-strict-aliasing -I /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/include -I /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/include/libc -I /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/src -I /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/third_party/xxhash-0.8.4 -c /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-src/src/streams.c -o /home/user/phase16-correction-work/attempts/tree-8c472a2/experiments/c-runtime/build/guest-stdin/legacy-v1-build/guest-clang/obj/streams.o
+exit=1

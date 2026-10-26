@@ -1,0 +1,126 @@
+{
+  "classification": "CANONICAL \u2014 QUALIFICATION CANDIDATE (not acceptance)",
+  "qualification_candidate": true,
+  "accepted": false,
+  "blockers": [],
+  "b1": {
+    "status": "resolved",
+    "source": "docs/phase16/dependencies/rust-1.97.0/README.md",
+    "components": {
+      "sysroot": "/opt/rust/prefix",
+      "official_archive_sha256": {
+        "rust-std-1.97.0-x86_64-unknown-none.tar.xz": "5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a",
+        "rust-std-1.97.0-x86_64-unknown-uefi.tar.xz": "2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0"
+      },
+      "x86_64-unknown-none": {
+        "libcore": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-none/lib/libcore-05b8190f7da9d31a.rlib",
+        "libcore_sha256": "6b75c5188dca46c917a67ade52dddea81460f96dc4732003cebea2e22a5b1b09"
+      },
+      "x86_64-unknown-uefi": {
+        "libcore": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-uefi/lib/libcore-43f815b849db44c6.rlib",
+        "libcore_sha256": "a7de36b0262b7d94cdcf1acb3f78288e7f5a57d546568b3ccaec27cd122c5494"
+      }
+    },
+    "protected_phase14": {
+      "pie_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+      "pie_expected": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+      "pie_matches": true,
+      "signed_apb1_sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa",
+      "signed_apb1_expected": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa",
+      "signed_apb1_matches": true
+    }
+  },
+  "canonical_build": true,
+  "build_script": "tools/build.sh via each suite's unchanged mtest.build",
+  "suite": "stdin",
+  "test_command": "experiments/c-runtime/guest_phase16_canonical.py --suite stdin -- --cc clang",
+  "utc": "2026-10-26T03:28:27.501058+00:00",
+  "source_commit": "d314d204aa86ec4018659f3f211cd3a488d30d87",
+  "dirty_paths": [],
+  "images": {
+    "esp": "/workspace/ArenaOS/build/arena-esp.img",
+    "esp_sha256": "816512cfc17236d99a82f6d6bdf23021e16b817c3fc753bd9f6f0fae1605ad8e",
+    "efi": "/workspace/ArenaOS/build/arena-boot.efi",
+    "efi_sha256": "850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79",
+    "protected_phase14_fixture_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+    "protected_phase14_signed_apb1_sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+  },
+  "emulator": {
+    "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+    "file": "/home/user/phase16-backend/qemu-patched",
+    "sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+    "wrapper_head": [
+      "#!/bin/sh",
+      "exec \"/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2\" \\",
+      "  --library-path \"/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/usr/lib/x86_64-linux-gnu\" \\",
+      "  \"/home/user/phase15-pkg/backend/qemu-system-x86_64-patched\" -accel tcg -L \"/home/user/phase15-pkg/backend/pc-bios\" \"$@\""
+    ],
+    "emulator_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "emulator_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "version": "QEMU emulator version 11.1.2"
+  },
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "isolated_runtime": {
+    "note": "Pinned patched QEMU requires GLIBC>=2.38; wrapper content is recorded under emulator.wrapper_head. Setup: tools/dev-env/build-isolated-glibc.sh and docs/phase16/BACKEND-RECOVERY.md. Host glibc unchanged.",
+    "ARENA_GLIBC_DIR": "/home/user/glibc-2.40",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458"
+  },
+  "compilers": {
+    "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "zig": "0.17.0",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)"
+  },
+  "dirty_paths_after_run": [],
+  "process_exit": 0,
+  "semantic_verdict": {
+    "summary": "/workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/summary-clang.json",
+    "runs": 1,
+    "passed": 1,
+    "failed": 0,
+    "failures": []
+  },
+  "app_identity": {
+    "compiler": "clang",
+    "apps": {
+      "neg": {
+        "elf": "/workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/c-stdin-neg-clang.elf",
+        "elf_sha256": "0c82a695990397d5c9da742cb8949546cf4b834c9b270eee45a69787f7618743",
+        "bundle_sha256": "f5ad205a4c0df699a2acf7c761906720ed61b3c9aedd58905cca47acc58f3772",
+        "manifest_flags": 0,
+        "wire_layout": "ASTR v2",
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "a": {
+        "elf": "/workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/c-stdin-a-clang.elf",
+        "elf_sha256": "94ef471f97d85c330f6a3390599347c59d1eaecbcd306a70cbffe9750ae36aa0",
+        "bundle_sha256": "e6ba7b40606a54a90697e305066012b10f1fdbe35045b41cf5500a4851cb475f",
+        "manifest_flags": 8,
+        "wire_layout": "ASTR v2",
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "b": {
+        "elf": "/workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/c-stdin-b-clang.elf",
+        "elf_sha256": "b8fa6bf8cfbe104cae4db9b114da13bcd64c1c7aa7e4087d0bb5e6be7b8cb758",
+        "bundle_sha256": "052fa0ad0a4b420ed5106d1a22780bc8ba9f15f783440d804eb7326a27b861ff",
+        "manifest_flags": 8,
+        "wire_layout": "ASTR v2",
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "legacy": {
+        "elf": "/workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/c-stdin-legacy-clang.elf",
+        "elf_sha256": "d1c51c43707ced1cc050155f331f30444e0f9937ffc0efacb2dc7e9e7ed2169a",
+        "bundle_sha256": "f71fee2ed4dd0efcd79ea05674d891054701b01579b3717e3489a8788cdb9506",
+        "manifest_flags": 8,
+        "wire_layout": "ASTR v1 (test-only legacy build)",
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      }
+    }
+  }
+}

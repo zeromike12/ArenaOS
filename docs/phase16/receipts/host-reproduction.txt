@@ -1,0 +1,39 @@
+Phase 16 host reproduction receipt (2026-10-24, this sandbox)
+Base: main f103926d6b28d546fd6a9a32d2bf5f63a16d618b; runtime source 84392b8f (evidence 9c93f8c)
+Toolchain: rustc/cargo 1.97.0, gcc 12.2.0, zig cc (clang 22.1.8, PyPI ziglang==0.17.0), python 3.11
+
+== Pre-edit reproduction (imported tree, unmodified) ==
+run.py abi            -> checked 92 constants, mismatches=[]
+run.py host           -> LIBC-HOST checks=1099 failures=0; HOST-ONLY PASS (1697, defect pinned)
+run.py --cc gcc build -> rc 0; c2-console-gcc.elf  sha256 947a56d16d0bb51130f7e70a682d779225e09c0cdc8dbe7cd22170cd2aa0a6b5 (bit-identical to Arena 2 receipt)
+run.py --cc clang build-> rc 0; c2-console-clang.elf sha256 1e988d28d6dfc4ca2bbbf2b25d5445c1d7ea13e2d4cc5e3214b4325056bf349c (bit-identical)
+libarena_c.a gcc/clang -> bd3b5327ac7110ff... / c583a7761ec289e4... (bit-identical)
+c2_isa_audit.py (8 ELFs) PASS; --self-test PASS; guest_c2.py --self-test 9/9
+nm -u: gcc none; clang "w arena_legacy_write"  (issue I-4 reproduced)
+
+== After Phase 16 fixes I-2 (M9) and I-4 (legacy hook) ==
+tools/test_startup_abi.py        -> 9 tests OK (2 new M9 regressions; 7 pre-existing unchanged)
+run.py host / abi                -> 1099/0, 1697 pinned, 92 constants (unchanged)
+gcc+clang builds                 -> rc 0; nm -u EMPTY for all 8 app ELFs (both compilers)
+ordinary apps: only arena_legacy_write_hook (BSS) remains; crt-probe keeps defined arena_legacy_write (T)
+c2_isa_audit.py                  -> PASS all integer-profile ELFs
+build_fp_app.py (gcc+clang)      -> FP-AUDIT PASS both; gcc sse2=56 x87=11 avx=0
+  c-fp-gcc.elf   sha256 4b586632c074eb2100b4e442771307859c7d339aee0e8a8670ac2aca3ef4500d
+  c-fp-clang.elf sha256 fcfae49304bc526392db043c1a3e003579cbf9d07a9cf74e33ff77ada69d250a
+  negative control: c2_isa_audit.py on c-fp-gcc.elf FAILs (movsd in fp_worker) as designed
+
+== Repo host suites (no guest) ==
+tools: test_startup_abi, test_apb1_format, test_afs2, test_config_record,
+       test_package_record, test_permission_record -> all PASS
+cargo test arena-heap (12) + arena-sync (6) --lib x86_64-unknown-linux-gnu -> ok
+cargo test arena-platform --lib (39, incl. startup validator) -> ok
+
+== Baseline guest smoke (unpatched npm QEMU 11.0.2 — NOT the accepted backend) ==
+Phase 15 strict ESP 631cc645...: m1 8/8 m2 21/21 m3 13/13 m4 9/9; m15 FAIL 5/6
+  (xf_delivery_probe: post-MXCSR 0x1f01, no vector 19 — documented unpatched behavior)
+Phase 14 checkpoint ESP (EFI 418c63ac...): desktop frame presented, shell reached;
+  screenshot ../screenshots/01-baseline-desktop-phase14esp.png sha256 dda4ff509df95feb779f240f92aad4ab65b17de0d52170fe67f68577133b4153
+
+== Not run (blocked, BASELINE.md B1/B2) ==
+tools/build.sh --image (Phase 14 fixture identity), all guest suites on rebuilt kernel,
+strict Phase 15 suite on pinned backend, registered regression (121 at Phase 15), 100/100.

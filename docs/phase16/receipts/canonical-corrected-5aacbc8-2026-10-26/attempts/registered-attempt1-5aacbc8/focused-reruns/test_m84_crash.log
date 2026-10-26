@@ -1,0 +1,54 @@
+[m84-crash] building kernel image + ESP ...
+[m84-crash] baseline: rc=0 7.2s
+[m84-crash] PASS: fresh fixture READY
+[m84-crash] stage-one: rc=0 8.3s
+[m84-crash] PASS: guest committed baseline stage1 + root policy
+[m84-crash] kill-precreate: rc=None 7.6s
+[m84-crash] PASS: precreate: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: precreate: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-empty: rc=None 7.5s
+[m84-crash] PASS: empty: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: empty: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-first-submit: rc=None 7.7s
+[m84-crash] PASS: first-submit: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: first-submit: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-first-reply: rc=None 7.6s
+[m84-crash] PASS: first-reply: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: first-reply: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-second-submit: rc=None 7.7s
+[m84-crash] PASS: second-submit: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: second-submit: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-second-reply: rc=None 8.3s
+[m84-crash] PASS: second-reply: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: second-reply: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-close: rc=None 8.1s
+[m84-crash] PASS: close: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: close: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-rescan: rc=None 8.4s
+[m84-crash] PASS: rescan: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: rescan: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] kill-ack: rc=None 8.1s
+[m84-crash] PASS: ack: observed guest boundary; disk within legal AFS1 prefix, predecessor exact
+[m84-crash] PASS: ack: same-platter reboot accepts only complete newest; partial blocks READY
+[m84-crash] policy-kill-precreate: rc=None 7.2s
+[m84-crash] PASS: policy/precreate: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/precreate: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-empty: rc=None 7.4s
+[m84-crash] PASS: policy/empty: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/empty: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-submit: rc=None 7.2s
+[m84-crash] PASS: policy/submit: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/submit: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-reply: rc=None 7.4s
+[m84-crash] PASS: policy/reply: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/reply: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-close: rc=None 7.7s
+[m84-crash] PASS: policy/close: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/close: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-rescan: rc=None 7.5s
+[m84-crash] PASS: policy/rescan: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/rescan: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] policy-kill-ack: rc=None 7.4s
+[m84-crash] PASS: policy/ack: observed root-signed write boundary; exact AFS1 prefix
+[m84-crash] PASS: policy/ack: same-platter rollback of uncommitted prefix only; no old ALLOW
+[m84-crash] PREFIX CRASH MODEL: PASS; no arbitrary corruption/rollback promise

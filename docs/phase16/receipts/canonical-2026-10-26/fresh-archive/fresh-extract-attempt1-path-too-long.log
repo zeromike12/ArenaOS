@@ -1,0 +1,80 @@
+FRESH_START_UTC=2026-10-26T05:45:24Z
+ARCHIVE=/home/user/phase16-canonical-evidence/ArenaOS-Phase16-Demonstration-d314d20.tar.gz
+d36b8626729b5f3630e57c9c220891351d61838b9ed382278876d2008b3d1447  /home/user/phase16-canonical-evidence/ArenaOS-Phase16-Demonstration-d314d20.tar.gz
+EXTRACTED_TO=/home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20
+205
+850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/artifacts/arena-boot.efi
+65b489016527a49e394ab6e7a57cb592045a3c80b55cceed7610aa448cb519d9  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/artifacts/arena-esp.img
+d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/artifacts/phase14-pie.fixture.elf
+04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/artifacts/phase14-pie.apb1
+PASS SHA256SUMS exists
+PASS MANIFEST.json exists
+PASS package file set matches SHA256SUMS (202 files)
+PASS all SHA-256 digests match
+PASS manifest artifact artifacts/arena-boot.efi identity
+PASS manifest artifact artifacts/arena-esp.img identity
+PASS manifest artifact artifacts/phase14-pie.apb1 identity
+PASS manifest artifact artifacts/phase14-pie.fixture.elf identity
+PASS manifest artifact firmware/OVMF_CODE_4M.fd identity
+PASS manifest artifact firmware/OVMF_VARS_4M.fd identity
+PASS ESP /EFI/BOOT/BOOTX64.EFI is byte-identical to artifacts/arena-boot.efi
+PASS source subset commit matches package manifest
+PACKAGE STATIC VERIFICATION: PASS
+STATIC_EXIT=0
+[phase15-avx] elapsed 0.4s; serial: build/serial-phase15-avx.log
+[phase15-avx] FAIL: QEMU process exited cleanly (rc=1)
+[phase15-avx] FAIL: guest semantic result and harness checks passed (verdict=1)
+[phase15-avx] PASS: no kernel panic or failed in-guest result
+[phase15-avx] FAIL: guest assertion thread_isolation_block_yield_preempt
+[phase15-avx] FAIL: guest assertion process_isolation_slot_reuse
+[phase15-avx] FAIL: guest assertion optional_cpu_feature_reporting
+[phase15-avx] FAIL: guest assertion xf_delivery_probe
+[phase15-avx] FAIL: guest assertion mf_ud_fault_containment
+[phase15-avx] FAIL: MMX coverage honestly skipped on a CPU without MMX
+[phase15-avx] FAIL: all Phase-15 guest cases passed
+[phase15-avx] FAIL: kernel reached declared clean shutdown
+[phase15-avx] FAIL: every reported historical and Phase-15 result passed
+[phase15-avx] FAIL: configured CPUID record is present
+[phase15-avx] FAIL: inherited OSXSAVE state is present
+[phase15-qemu64] elapsed 0.4s; serial: build/serial-phase15-qemu64.log
+[phase15-qemu64] FAIL: QEMU process exited cleanly (rc=1)
+[phase15-qemu64] FAIL: guest semantic result and harness checks passed (verdict=1)
+[phase15-qemu64] PASS: no kernel panic or failed in-guest result
+[phase15-qemu64] FAIL: guest assertion thread_isolation_block_yield_preempt
+[phase15-qemu64] FAIL: guest assertion process_isolation_slot_reuse
+[phase15-qemu64] FAIL: guest assertion optional_cpu_feature_reporting
+[phase15-qemu64] FAIL: guest assertion xf_delivery_probe
+[phase15-qemu64] FAIL: guest assertion mf_ud_fault_containment
+[phase15-qemu64] FAIL: MMX coverage honestly skipped on a CPU without MMX
+[phase15-qemu64] FAIL: all Phase-15 guest cases passed
+[phase15-qemu64] FAIL: kernel reached declared clean shutdown
+[phase15-qemu64] FAIL: every reported historical and Phase-15 result passed
+[phase15-qemu64] FAIL: configured CPUID record is present
+[phase15-qemu64] FAIL: inherited OSXSAVE state is present
+Phase-15 native guest qualification: FAIL (see both CPU-profile receipts)
+PASS SHA256SUMS exists
+PASS MANIFEST.json exists
+PASS package file set matches SHA256SUMS (202 files)
+PASS all SHA-256 digests match
+PASS manifest artifact artifacts/arena-boot.efi identity
+PASS manifest artifact artifacts/arena-esp.img identity
+PASS manifest artifact artifacts/phase14-pie.apb1 identity
+PASS manifest artifact artifacts/phase14-pie.fixture.elf identity
+PASS manifest artifact firmware/OVMF_CODE_4M.fd identity
+PASS manifest artifact firmware/OVMF_VARS_4M.fd identity
+PASS ESP /EFI/BOOT/BOOTX64.EFI is byte-identical to artifacts/arena-boot.efi
+PASS source subset commit matches package manifest
+PACKAGE STATIC VERIFICATION: PASS
+ARENA_QEMU=/home/user/phase16-backend/qemu-patched
+running /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/source/tools/test_m15_guest.py on extracted artifacts (both CPU profiles) ...
+strict checker exit: 1
+PACKAGE GUEST VERIFICATION: FAIL
+GUEST_EXIT=1
+AFTER_GUEST_HASHES
+d36b8626729b5f3630e57c9c220891351d61838b9ed382278876d2008b3d1447  /home/user/phase16-canonical-evidence/ArenaOS-Phase16-Demonstration-d314d20.tar.gz
+850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/artifacts/arena-boot.efi
+65b489016527a49e394ab6e7a57cb592045a3c80b55cceed7610aa448cb519d9  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/artifacts/arena-esp.img
+7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/firmware/OVMF_CODE_4M.fd
+5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e  /home/user/phase16-fresh-extract-20261026/ArenaOS-Phase16-Demonstration-d314d20/firmware/OVMF_VARS_4M.fd
+FRESH_END_UTC=2026-10-26T05:45:26Z
+FRESH_ARCHIVE_OVERALL=FAIL

@@ -1,0 +1,33 @@
+{
+  "backend": {
+    "accelerator": "tcg",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "host_glibc_replaced": false,
+    "isolated_glibc_dir": "/home/user/glibc-2.40",
+    "qemu_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_version": "QEMU emulator version 11.1.2",
+    "wrapper": "/home/user/phase16-backend/qemu-patched",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+  },
+  "classification": "CANONICAL - QUALIFICATION CANDIDATE (not acceptance)",
+  "command": "ARENA_RUST_BIN=/opt/rust/prefix/bin ARENA_QEMU=/home/user/phase16-backend/qemu-patched ARENA_OVMF_CODE=/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd ARENA_OVMF_VARS=/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd ARENA_ZIG=$HOME/.local/lib/python3.11/site-packages/ziglang/zig ARENA_GLIBC_DIR=$HOME/glibc-2.40; source tools/dev-env/env.sh; bash tools/run_tests.sh",
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS_template": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "full_log": "full-suite.log",
+  "full_log_sha256": "3d3c3dd320d0481e48bb4c871c211b4302104a51e5a3a11e2bcd9c0b4ee9fbde",
+  "registered_suite_marker": "ALL TESTS PASSED (121 test suites)",
+  "runner": "tools/run_tests.sh (default official mode)",
+  "runner_process_exit": 0,
+  "schema_version": 1,
+  "semantic_failures": "none; intentional RED negative controls remained expected and their suites passed",
+  "source_clean_at_start_and_end": true,
+  "source_commit": "d314d204aa86ec4018659f3f211cd3a488d30d87",
+  "suite_count": 121,
+  "verdict": "PASS"
+}

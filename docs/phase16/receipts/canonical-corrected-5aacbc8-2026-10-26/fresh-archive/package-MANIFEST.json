@@ -1,0 +1,71 @@
+{
+  "artifacts": {
+    "artifacts/arena-boot.efi": {
+      "bytes": 11038720,
+      "sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6"
+    },
+    "artifacts/arena-esp.img": {
+      "bytes": 16777216,
+      "sha256": "04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a"
+    },
+    "artifacts/phase14-pie.apb1": {
+      "bytes": 24040,
+      "sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+    },
+    "artifacts/phase14-pie.fixture.elf": {
+      "bytes": 23256,
+      "sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+    },
+    "firmware/OVMF_CODE_4M.fd": {
+      "bytes": 3653632,
+      "sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94"
+    },
+    "firmware/OVMF_VARS_4M.fd": {
+      "bytes": 540672,
+      "sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    }
+  },
+  "backend": {
+    "isolated_glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "isolated_glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "label": "locally modified QEMU 11.1.2 TCG under isolated glibc 2.40; emulator not bundled",
+    "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+  },
+  "branch": "arena/2b4ae1a5-arenaos",
+  "classification": "CANONICAL CORRECTED QUALIFICATION CANDIDATE - NOT ACCEPTED; not a release",
+  "correction_chain": [
+    "8c472a2fe110b6bb3db81145342043de5ee75e03",
+    "d5874b72f857261fe3c41eb7e7ac7d8af6431463",
+    "5aacbc88c50d4565a7bb9f4075be27e40df27779"
+  ],
+  "dependency_commit": "02a20fce915bdd0bdbbc24dcdc2fa0b63a1cd7a1",
+  "evidence_summary": {
+    "host": "Rust arena-runtime 27/27; ABI 92 constants, no mismatches; C HOST-ONLY 1721 PASS",
+    "receipts": "evidence/canonical-corrected-5aacbc8-2026-10-26/README.md",
+    "registered": "attempt 2: ALL TESTS PASSED (121 test suites); failed attempt 1 retained under attempts/",
+    "reserved_byte_sensitivity": "previous C fails exactly 8 new checks; previous Rust fails exactly 3 new tests",
+    "stability": "100/100 boots fully green, fail=0, 942s on corrected final EFI/ESP",
+    "strict_phase15": "PASS both CPU profiles on corrected final pair and preserved Phase 15 package",
+    "targeted_guest": "Native/C1, C2, FP, live stdin, Notification exact PASS for GCC and Clang"
+  },
+  "fresh_extraction_sidecar": "repository docs/phase16/receipts/canonical-corrected-5aacbc8-2026-10-26/fresh-archive/ (outside the sealed archive)",
+  "historical_candidate": {
+    "note": "superseded d314d20 receipts and image identities remain in the repository, unchanged; they are not packaged as corrected evidence",
+    "source_commit": "d314d204aa86ec4018659f3f211cd3a488d30d87"
+  },
+  "package": "ArenaOS-Phase16-Demonstration-5aacbc8",
+  "package_docs_note": "Included Phase 16 docs are the corrected pre-sealing texts. The repository copies may add the whole-archive SHA-256 and fresh-extraction result after sealing; the archive hash is intentionally only in the external sidecar.",
+  "schema_version": 1,
+  "screenshots": [
+    "screenshots/07-c-native-desktop-corrected-5aacbc8.png",
+    "screenshots/08-live-stdin-corrected-5aacbc8.png",
+    "screenshots/09-stability-boot-100-corrected-5aacbc8.png"
+  ],
+  "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+  "source_subset": {
+    "file_count": 100,
+    "full_tracked_tree": "not included; use branch at source_commit",
+    "manifest": "source/SOURCE-MANIFEST.json"
+  }
+}

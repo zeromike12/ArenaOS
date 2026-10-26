@@ -1,0 +1,42 @@
+{
+  "archive": "ArenaOS-Phase16-Demonstration-d314d20.tar.gz",
+  "archive_bytes": 4855009,
+  "archive_sha256": "08786f7900581b08e65acef7466c98d56e05587e6f873c46d2c1ed0cd22225fc",
+  "attempt_1": {
+    "artifact_failure": false,
+    "log": "fresh-extract-attempt1-path-too-long.log",
+    "log_sha256": "4490f53e238e9390f1f25d60d8ee49c962cec4ae15a16aed2ae5199fee9a92fe",
+    "reason": "extraction path made QEMU vcon Unix socket path >=108 bytes",
+    "result": "FAIL before guest boot"
+  },
+  "attempt_2": {
+    "cpu_profiles": [
+      "max,+nx,+smep,+smap",
+      "qemu64,+nx,+smep,+smap"
+    ],
+    "guest_checker": "extracted source/tools/test_m15_guest.py",
+    "guest_exit": 0,
+    "log": "fresh-extract.log",
+    "log_sha256": "2c8cb427aa10c801ff3e4ab08625f9cdeb5cadc59dc9fdaf9ba8251b47f3069b",
+    "result": "PASS",
+    "serials": {
+      "avx": "fresh-extracted-avx-serial.log",
+      "avx_sha256": "96700cfe5ce79e766f849f288ad620980198e19f1fe6cae62e02718b4121c26f",
+      "qemu64": "fresh-extracted-qemu64-serial.log",
+      "qemu64_sha256": "f164c853181e76f4d9908bad1e80a2a0b6314a3766c2227fb0e37330998befbe"
+    },
+    "static_exit": 0
+  },
+  "classification": "CANONICAL - QUALIFICATION CANDIDATE (not acceptance)",
+  "extracted_artifacts_after_guest": {
+    "arena-boot.efi": "850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79",
+    "arena-esp.img": "65b489016527a49e394ab6e7a57cb592045a3c80b55cceed7610aa448cb519d9"
+  },
+  "extraction_root": "/home/user/p16f (short prefix; QEMU socket path 91 bytes)",
+  "listing": "package-listing.txt",
+  "listing_sha256": "db3f22cef39246b91c67652cceae05c17e4bdfea8c1a7283ff1b526c0c8a345b",
+  "package_files_excluding_sha256sums": 202,
+  "schema_version": 1,
+  "source_commit": "d314d204aa86ec4018659f3f211cd3a488d30d87",
+  "verdict": "PASS"
+}

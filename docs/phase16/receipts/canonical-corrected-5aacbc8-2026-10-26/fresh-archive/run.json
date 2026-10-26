@@ -1,0 +1,47 @@
+{
+  "archive": "ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz",
+  "archive_bytes": 5016910,
+  "archive_sha256": "106088522042fb501a00554442ae97133127e53a9141d5e95069f112c9a9898b",
+  "archive_sidecar": "docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz.sha256",
+  "archive_sidecar_check_exit": 0,
+  "archive_sidecar_check_log": "archive-sidecar-check.log",
+  "archive_sidecar_check_log_sha256": "6baa17e5932176371c72836e09b20eb5169a90b5f3bac0f047464f7ea4687b30",
+  "classification": "CANONICAL - CORRECTED QUALIFICATION CANDIDATE (not acceptance)",
+  "cpu_profiles": [
+    "max,+nx,+smep,+smap",
+    "qemu64,+nx,+smep,+smap"
+  ],
+  "extracted_artifacts_after_guest": {
+    "arena-boot.efi": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+    "arena-esp.img": "04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a"
+  },
+  "extraction_root": "/home/user/p16f",
+  "guest_checker": "extracted source/tools/test_m15_guest.py via verify_package.py --guest",
+  "guest_duration_seconds": 15,
+  "guest_exit": 0,
+  "listing": "package-listing.txt",
+  "listing_sha256": "887a230439df177360da3570ab8c967698b3dab4d584c6bf391a08e21184dae7",
+  "log": "fresh-extract.log",
+  "log_sha256": "be4442bce4a738d5d0886ef90149f411f8b7a7b806ff198a5a5b86cb625135d8",
+  "package_files_excluding_sha256sums": 225,
+  "package_files_including_sha256sums": 226,
+  "schema_version": 1,
+  "serials": {
+    "avx": "fresh-extracted-avx-serial.log",
+    "avx_sha256": "ba89fe0c6aabaf51907d015dbb941e0a9b5c65d3723e954024529af200a5d91c",
+    "qemu64": "fresh-extracted-qemu64-serial.log",
+    "qemu64_sha256": "fe217b2b419d2b06c88e2246a2c3ce023d150daf4f80c62f0848644e12ae5f3f"
+  },
+  "sidecar_note": "This run record is outside the sealed archive so recording the archive SHA-256 cannot mutate the verified artifact.",
+  "socket_path_bytes": {
+    "qmp-phase15-avx.sock": 87,
+    "qmp-phase15-qemu64.sock": 90,
+    "vcon-phase15-avx.sock": 88,
+    "vcon-phase15-qemu64.sock": 91
+  },
+  "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+  "static_exit": 0,
+  "static_log": "fresh-static.log",
+  "static_log_sha256": "f330cfeb3b7be63075f324f12264fcdf9967e8b122d1a5b8c05e89c26934af51",
+  "verdict": "PASS"
+}

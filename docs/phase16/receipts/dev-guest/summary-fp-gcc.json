@@ -1,0 +1,69 @@
+{
+  "identity": {
+    "compiler": "gcc",
+    "apps": {
+      "fp": {
+        "elf": "/home/user/ArenaOS/experiments/c-runtime/build/fp-gcc/c-fp-gcc.elf",
+        "elf_sha256": "6a280490b5060d063e88cc2d9b695a26323b133d9269dabf9f52e8563da013d0",
+        "bundle_sha256": "8e977ed39a62d9978b2ab6eb0b5105f43a82be68d4c84d64daab3ff5447bdc68",
+        "manifest_flags": 28,
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "fp-nostream": {
+        "elf": "/home/user/ArenaOS/experiments/c-runtime/build/fp-gcc/c-fp-gcc.elf",
+        "elf_sha256": "6a280490b5060d063e88cc2d9b695a26323b133d9269dabf9f52e8563da013d0",
+        "bundle_sha256": "23bcf017e475ff881da2c1812189aa22b6de70108ad5d5cd54be8041fc394ea8",
+        "manifest_flags": 20,
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "fp-mutant": {
+        "elf": "/home/user/ArenaOS/experiments/c-runtime/build/fp-mutant-gcc/c-fp-gcc.elf",
+        "elf_sha256": "69385346631e5d3cf326174a9765ddfedbff197c746ccda8aaa8bc31e46979ec",
+        "bundle_sha256": "cdda7ad5b576998296040eff379ff78e424326ac4d06443789569dfe3512c75d",
+        "manifest_flags": 28,
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      }
+    }
+  },
+  "runs": 1,
+  "passed": 1,
+  "evidence_class": "GUEST",
+  "results": [
+    {
+      "exit_lines": [
+        58,
+        71,
+        72
+      ],
+      "fp_results": [
+        [
+          "PASS",
+          35,
+          0,
+          0
+        ],
+        [
+          "FAIL",
+          35,
+          18,
+          0
+        ]
+      ],
+      "failures": [],
+      "pass": true,
+      "run": 1,
+      "compiler": "gcc",
+      "boot_rc": 0,
+      "elapsed_s": 19.5,
+      "serial_log": "/home/user/ArenaOS/experiments/c-runtime/build/guest-fp/serial-gcc-run1.log",
+      "driver": {
+        "fp-nostream_installed_entry_sha256": "6a280490b5060d063e88cc2d9b695a26323b133d9269dabf9f52e8563da013d0",
+        "fp_installed_entry_sha256": "6a280490b5060d063e88cc2d9b695a26323b133d9269dabf9f52e8563da013d0",
+        "fp-mutant_installed_entry_sha256": "69385346631e5d3cf326174a9765ddfedbff197c746ccda8aaa8bc31e46979ec",
+        "driven-fp-nostream": true,
+        "driven-fp": true,
+        "driven-fp-mutant": true
+      }
+    }
+  ]
+}

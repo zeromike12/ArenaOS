@@ -1,0 +1,37 @@
+PHASE16 DEV RUNNER: suite=fp esp=/home/user/ArenaOS/build/arena-esp.img — NOT QUALIFICATION EVIDENCE
+c-fp-clang.elf: elf={'sse': 326, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 50, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-clang.elf
+Traceback (most recent call last):
+  File "/home/user/ArenaOS/tools/mtest.py", line 512, in feeder
+    proc.stdin.write(payload() if callable(payload) else payload)
+                     ^^^^^^^^^
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_fp.py", line 186, in <lambda>
+    lambda: interaction(disk, bundles, outcome))]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_fp.py", line 126, in interaction
+    d.wait(lambda: d.serial().count(HEADLESS_MARK) == before + 1,
+  File "/home/user/ArenaOS/tools/test_m10_apps.py", line 61, in wait
+    raise AssertionError(description)
+AssertionError: All Applications did not launch fp-nostream
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_phase16_dev.py", line 58, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_phase16_dev.py", line 52, in main
+    return guest_fp.main()
+           ^^^^^^^^^^^^^^^
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_fp.py", line 206, in main
+    results = [one_run(args.cc, bundles, i) for i in range(1, args.runs + 1)]
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_fp.py", line 206, in <listcomp>
+    results = [one_run(args.cc, bundles, i) for i in range(1, args.runs + 1)]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ArenaOS/experiments/c-runtime/guest_fp.py", line 187, in one_run
+    rc, serial, elapsed = mtest.boot(LABEL, esp, feed, disk, pointer=True, timeout_s=1200)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ArenaOS/tools/mtest.py", line 575, in boot
+    raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
+RuntimeError: c-fp: guest workflow assertion failed

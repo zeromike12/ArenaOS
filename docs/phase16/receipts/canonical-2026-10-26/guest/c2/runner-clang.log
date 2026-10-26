@@ -1,0 +1,33 @@
+PHASE16 CANONICAL RUNNER: suite=c2 — B1 resolved; not acceptance
+[c2-runtime] building kernel image + ESP ...
+{
+  "exit_lines": [
+    58,
+    58,
+    61,
+    63
+  ],
+  "console_groups": {
+    "G1 stdio": "PASS",
+    "G2 stdin": "PASS",
+    "G3 allocator": "PASS",
+    "G4 time": "PASS",
+    "G5 threads": "PASS",
+    "G6 threads ext": "PASS",
+    "G7 stdio ext": "PASS",
+    "G8 init": "PASS",
+    "G9 exit": "PASS"
+  },
+  "console_checks": 88,
+  "console_result": "[c2-console] RESULT PASS groups=9/9 checks=88 failed=0",
+  "xxhash_digest_ok": true,
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "clang",
+  "boot_rc": 0,
+  "elapsed_s": 22.0,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-c2/serial-clang-run1.log"
+}
+C2 guest multi-app: 1/1 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-c2/summary-clang.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-c2/evidence-envelope-c2.json

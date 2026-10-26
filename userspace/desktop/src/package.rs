@@ -166,6 +166,26 @@ fn app_metadata_chunk(index: usize, offset: usize, out: &mut [u8; 64]) -> Result
     Ok(())
 }
 
+/// The signed manifest's declared default window size for one catalog
+/// entry, or (0, 0) when it declares none / cannot be read. Descriptive
+/// geometry only: Phase 16 uses it to pre-create the console window of a
+/// windowed stream application; it grants no launch authority (that
+/// still comes from packaged's fresh Image capability at launch). Reads
+/// only the 64-byte manifest chunk at offset 192, which carries
+/// default_width/height at manifest bytes 248..252 (chunk bytes 56..60).
+pub fn app_default_size(index: usize) -> (u16, u16) {
+    let mut chunk = [0u8; 64];
+    if app_metadata_chunk(index, 192, &mut chunk).is_err() {
+        return (0, 0);
+    }
+    let width = u16::from_le_bytes([chunk[56], chunk[57]]);
+    let height = u16::from_le_bytes([chunk[58], chunk[59]]);
+    if !(80..=1024).contains(&width) || !(60..=768).contains(&height) {
+        return (0, 0);
+    }
+    (width, height)
+}
+
 /// Resolve an indexed descriptive catalog entry into canonical metadata.
 pub fn app_manifest(index: usize) -> Result<manifest::Manifest, u64> {
     if index >= app_catalog_count()?.0 {

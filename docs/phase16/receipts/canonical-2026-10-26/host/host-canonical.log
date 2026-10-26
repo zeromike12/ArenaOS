@@ -1,0 +1,432 @@
+SOURCE_COMMIT=d314d204aa86ec4018659f3f211cd3a488d30d87
+rustc 1.97.0 (2d8144b78 2026-07-07)
+binary: rustc
+commit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3
+commit-date: 2026-07-07
+host: x86_64-unknown-linux-gnu
+release: 1.97.0
+LLVM version: 22.1.6
+cargo 1.97.0 (c980f4866 2026-06-30)
+gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+0.17.0
+d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e  userspace/phase14-pie/fixture.elf
+04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa  userspace/phase14-pie/phase14-pie.apb1
+850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79  build/arena-boot.efi
+a65394ae243961f14b45cc7f19f0b29eeccde4f5e4477a326ae25168302ff4c3  build/arena-esp.img
+
+===== cargo test --manifest-path userspace/arena-runtime/Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked =====
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+warning: variable does not need to be mutable
+   --> src/streams.rs:746:13
+    |
+746 |         let mut put = |ring: &mut [u8; 768], write: &mut u32, bytes: &[u8]| {
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `arena-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p arena-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.07s
+     Running unittests src/lib.rs (userspace/arena-runtime/target/x86_64-unknown-linux-gnu/debug/deps/arena_runtime-0aff53556ec12099)
+
+running 24 tests
+test capabilities::tests::destroyable_attenuation_preserves_only_requested_rights ... ok
+test capabilities::tests::capability_copy_requires_copy_right_and_strictly_attenuates ... ok
+test heap::tests::blocks_align_reuse_and_coalesce_without_touching_neighbor_pages ... ok
+test heap::tests::capacity_refusal_is_mutation_free_and_a_free_large_block_recovers ... ok
+test heap::tests::unsupported_layouts_and_frame_oom_leave_state_unchanged ... ok
+test startup::tests::an_unavailable_listed_slot_description_is_fail_closed ... ok
+test heap::tests::scalable_heap_commits_lazily_aligns_reuses_and_refuses_oom ... ok
+test startup::tests::extra_unlisted_capability_refuses_even_when_its_kind_is_unavailable ... ok
+test startup::tests::kind_or_rights_mismatch_refuses_before_application_entry ... ok
+test startup::tests::full_cap_table_matches_listed_kinds_and_rights_but_ignores_ids ... ok
+test startup::tests::rejection_discards_only_a_destroyable_shared_region_slot ... ok
+test startup::tests::missing_listed_capability_refuses_before_application_entry ... ok
+test startup::tests::unexpected_startup_slot_zero_and_occupancy_query_errors_refuse ... ok
+test streams::tests::attach_checks_layout_and_corrupt_indices_fail_closed ... ok
+test streams::tests::attach_refuses_v1_and_unknown_versions ... ok
+test streams::tests::close_produces_eof_after_queued_bytes_and_detects_consumer_death ... ok
+test streams::tests::counter_wraparound_preserves_fifo_order ... ok
+test streams::tests::each_process_local_endpoint_is_unique_while_held ... ok
+test streams::tests::helper_parent_and_child_use_opposite_ring_endpoints ... ok
+test streams::tests::three_rings_fit_one_page_and_transfer_partial_bytes_under_backpressure ... ok
+test streams::tests::v1_indexing_negative_control ... ok
+test streams::tests::wrap_with_unread_bytes_preserves_content_and_order ... ok
+test threads::tests::stack_layout_leaves_metadata_and_guard_pages_outside_stack ... ok
+test tls::tests::tcb_layout_is_frozen_for_the_arena_fs_base_contract ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT[cargo test --manifest-path userspace/arena-runtime/Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked]=0
+
+===== python3 experiments/c-runtime/run.py build --cc gcc =====
+summary: /workspace/ArenaOS/experiments/c-runtime/build/summary.json
+EXIT[python3 experiments/c-runtime/run.py build --cc gcc]=0
+
+===== python3 experiments/c-runtime/run.py audit --cc gcc =====
+{
+  "crt-probe-gcc": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/crt-probe-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 25092,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x207000",
+        "memsz": 24896,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x207000",
+      "filesz": 8,
+      "memsz": 48,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 48,
+      "__arena_tls_filesz": 8,
+      "__arena_tls_image": 2125824,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 6463,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "c-native-gcc": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-native-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 41412,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20b000",
+        "memsz": 41280,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20b000",
+      "filesz": 4,
+      "memsz": 40,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 40,
+      "__arena_tls_filesz": 4,
+      "__arena_tls_image": 2142208,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 10937,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "c2-console-gcc": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 46832,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20c000",
+        "memsz": 16784,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20c000",
+      "filesz": 0,
+      "memsz": 40,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 40,
+      "__arena_tls_filesz": 0,
+      "__arena_tls_image": 2146304,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 12624,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "xxhash-app-gcc": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 52838,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20d000",
+        "memsz": 16712,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20d000",
+      "filesz": 0,
+      "memsz": 24,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_memsz": 24,
+      "__arena_tls_filesz": 0,
+      "__arena_tls_image": 2150400,
+      "__arena_tls_align": 16
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 13082,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  }
+}
+summary: /workspace/ArenaOS/experiments/c-runtime/build/summary.json
+EXIT[python3 experiments/c-runtime/run.py audit --cc gcc]=0
+
+===== python3 experiments/c-runtime/run.py build --cc clang =====
+summary: /workspace/ArenaOS/experiments/c-runtime/build/summary.json
+EXIT[python3 experiments/c-runtime/run.py build --cc clang]=0
+
+===== python3 experiments/c-runtime/run.py audit --cc clang =====
+{
+  "crt-probe-clang": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-clang/crt-probe-clang.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 36568,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x209000",
+        "memsz": 28576,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x209000",
+      "filesz": 8,
+      "memsz": 48,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_align": 16,
+      "__arena_tls_filesz": 8,
+      "__arena_tls_memsz": 48,
+      "__arena_tls_image": 2134016
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 10291,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "c-native-clang": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 52888,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20d000",
+        "memsz": 44976,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20d000",
+      "filesz": 4,
+      "memsz": 40,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_align": 16,
+      "__arena_tls_filesz": 4,
+      "__arena_tls_memsz": 40,
+      "__arena_tls_image": 2150400
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 11928,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "c2-console-clang": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c2-console-clang.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 50752,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x20d000",
+        "memsz": 20456,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x20d000",
+      "filesz": 0,
+      "memsz": 40,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_align": 16,
+      "__arena_tls_filesz": 0,
+      "__arena_tls_memsz": 40,
+      "__arena_tls_image": 2150400
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 14222,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  },
+  "xxhash-app-clang": {
+    "path": "/workspace/ArenaOS/experiments/c-runtime/build/guest-clang/xxhash-app-clang.elf",
+    "entry": "0x200000",
+    "segments": [
+      {
+        "vaddr": "0x200000",
+        "memsz": 69984,
+        "perm": "R-X"
+      },
+      {
+        "vaddr": "0x212000",
+        "memsz": 20384,
+        "perm": "RW-"
+      }
+    ],
+    "tls": {
+      "vaddr": "0x212000",
+      "filesz": 0,
+      "memsz": 24,
+      "align": 16
+    },
+    "tls_symbols": {
+      "__arena_tls_align": 16,
+      "__arena_tls_filesz": 0,
+      "__arena_tls_memsz": 24,
+      "__arena_tls_image": 2170880
+    },
+    "loader_failures": [],
+    "disasm": {
+      "instructions": 17855,
+      "simd_or_x87": [],
+      "simd_or_x87_count": 0
+    }
+  }
+}
+summary: /workspace/ArenaOS/experiments/c-runtime/build/summary.json
+EXIT[python3 experiments/c-runtime/run.py audit --cc clang]=0
+
+===== python3 experiments/c-runtime/run.py abi =====
+abi: checked 92 constants, mismatches=[]
+summary: /workspace/ArenaOS/experiments/c-runtime/build/summary.json
+EXIT[python3 experiments/c-runtime/run.py abi]=0
+
+===== python3 experiments/c-runtime/run.py host =====
+assertion failed: x (t.c:1)
+HOST-ONLY arena C runtime tests (ASan+UBSan, glibc differential)
+  stress: 200000 ops, 50225 allocs ok, 79902 frees, 499 refusals (499 over-ceiling), reuse=98683, committed=2064/4096 pages
+[host] reserve-refusal child: refused cleanly
+vp:7
+vf:8
+LIBC-HOST checks=1099 failures=0
+HOST-ONLY RESULT PASS (1707 checks)
+summary: /workspace/ArenaOS/experiments/c-runtime/build/summary.json
+EXIT[python3 experiments/c-runtime/run.py host]=0
+
+===== python3 experiments/c-runtime/guest_c2.py --self-test =====
+self-test ok   exact view accepted (failures=[])
+self-test ok   reduced G6 count rejected (failures=['group G6 threads ext checks=31, expected 42'])
+self-test ok   reduced total rejected (failures=['RESULT checks=87, expected exactly 88'])
+self-test ok   duplicate PASS line rejected (failures=["group G1 stdio printed 2 times, exactly 1 required (verdicts ['PASS', 'PASS'])"])
+self-test ok   missing group rejected (failures=['missing group G7 stdio ext'])
+self-test ok   FAIL verdict rejected (failures=['group G5 threads FAIL'])
+self-test ok   contradictory PASS/FAIL rejected (failures=["group G3 allocator printed 2 times, exactly 1 required (verdicts ['PASS', 'FAIL'])"])
+self-test ok   unexpected group rejected (failures=['unexpected group line G10 extra'])
+self-test ok   duplicate RESULT rejected (failures=['exact console RESULT PASS line count 2, expected 1'])
+C2 judge self-test: 9/9 controls behave as required
+EXIT[python3 experiments/c-runtime/guest_c2.py --self-test]=0
+
+===== python3 experiments/c-runtime/guest_fp.py --self-test =====
+guest_fp --self-test: PASS (12 judge cases)
+EXIT[python3 experiments/c-runtime/guest_fp.py --self-test]=0
+
+===== python3 experiments/c-runtime/guest_notification.py --self-test =====
+self-test production exact: PASS
+self-test mutant exact: PASS
+self-test mutant marker absent: PASS
+self-test wrong exit: PASS
+self-test first-candidate regression: PASS
+self-test production sees mutant: PASS
+guest_notification judge self-test: 6/6 PASS
+EXIT[python3 experiments/c-runtime/guest_notification.py --self-test]=0
+
+===== python3 experiments/c-runtime/c2_isa_audit.py --self-test =====
+{"negative_control_fails_as_expected": true, "negative_vector_hits": 11358, "x87_control_fails_as_expected": true, "x87_control_hits": 4, "positive_control_passes_as_expected": true, "positive_instructions": 8}
+ISA-AUDIT-SELFTEST PASS
+EXIT[python3 experiments/c-runtime/c2_isa_audit.py --self-test]=0
+
+===== python3 experiments/c-runtime/build_fp_app.py --cc gcc =====
+self-test avx.c: {'sse': 0, 'x87': 0, 'avx': 1, 'avx_examples': ['vmulsd %xmm1,%xmm0,%xmm0']}
+self-test int.c: {'sse': 0, 'x87': 0, 'avx': 0, 'avx_examples': []}
+self-test sse.c: {'sse': 1, 'x87': 0, 'avx': 0, 'avx_examples': []}
+FP-IMAGE-CONTROL PASS (7 cases)
+probe_host: probe rc=0 verdict=0 cw=037f sw=2800 tag=e0 rc=0
+probe_host_mutant: probe rc=0 verdict=7 cw=037f sw=2800 tag=e0 rc=1
+FP-AUDIT SELF-TEST PASS
+c-fp-gcc.elf: elf={'sse': 160, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 59, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-gcc.elf
+MUTANT BUILT (isolated negative control): /workspace/ArenaOS/experiments/c-runtime/build/fp-mutant-gcc/c-fp-gcc.elf
+EXIT[python3 experiments/c-runtime/build_fp_app.py --cc gcc]=0
+
+===== python3 experiments/c-runtime/build_fp_app.py --cc clang =====
+self-test avx.c: {'sse': 0, 'x87': 0, 'avx': 1, 'avx_examples': ['vmulsd %xmm1,%xmm0,%xmm0']}
+self-test int.c: {'sse': 0, 'x87': 0, 'avx': 0, 'avx_examples': []}
+self-test sse.c: {'sse': 1, 'x87': 0, 'avx': 0, 'avx_examples': []}
+FP-IMAGE-CONTROL PASS (7 cases)
+probe_host: probe rc=0 verdict=0 cw=037f sw=2800 tag=e0 rc=0
+probe_host_mutant: probe rc=0 verdict=7 cw=037f sw=2800 tag=e0 rc=1
+FP-AUDIT SELF-TEST PASS
+c-fp-clang.elf: elf={'sse': 326, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 50, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-clang.elf
+MUTANT BUILT (isolated negative control): /workspace/ArenaOS/experiments/c-runtime/build/fp-mutant-clang/c-fp-clang.elf
+EXIT[python3 experiments/c-runtime/build_fp_app.py --cc clang]=0
+HOST_CANONICAL_OVERALL=0

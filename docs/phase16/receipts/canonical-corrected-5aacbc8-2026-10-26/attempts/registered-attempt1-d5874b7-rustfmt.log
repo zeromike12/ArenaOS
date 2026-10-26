@@ -1,0 +1,25 @@
+FOCUSED REPRODUCTION OF REGISTERED ATTEMPT 1 FAILURE
+source_commit=d5874b72f857261fe3c41eb7e7ac7d8af6431463
+command=(cd userspace/arena-runtime && cargo fmt -- --check)
+note=The original full run reached 120/121 suites in 8181 seconds; this is the exact failing command from that suite block.
+Diff in /home/user/phase16-correction-work/attempts/tree-d5874b7/userspace/arena-runtime/src/streams.rs:885:
+             unsafe { StreamSet::initialize(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.unwrap();
+         assert!(page.0[16..64].iter().all(|byte| *byte == 0));
+         for base in [64, 1152, 2240] {
+-            assert!(page.0[base + 12..base + 64]
+-                .iter()
+-                .all(|byte| *byte == 0));
++            assert!(page.0[base + 12..base + 64].iter().all(|byte| *byte == 0));
+         }
+-        assert!(page.0[REGION_BYTES..STREAM_PAGE_BYTES]
+-            .iter()
+-            .all(|byte| *byte == 0));
++        assert!(
++            page.0[REGION_BYTES..STREAM_PAGE_BYTES]
++                .iter()
++                .all(|byte| *byte == 0)
++        );
+         assert!(unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.is_ok());
+     }
+ 
+exit=1

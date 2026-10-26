@@ -1,0 +1,3 @@
+[m10-apps] real six-app desktop, terminal commands, file create, editor exact transactional save/unsaved-close, durable theme/motion, monitor, twelve-session resource accounting and exact cleanup PASS; baseline=(113248, 15, 15, 2, 470, 4, 47) peak=(99768, 27, 27, 26, 11750, 44, 71) transient-broker-caps=72
+[m10-apps] independent fresh boot reads durable preference and changes desktop pixels PASS
+M10 APPS PASS (development ESP)

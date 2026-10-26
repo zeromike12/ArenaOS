@@ -1,0 +1,103 @@
+{
+  "classification": "DEVELOPMENT \u2014 NOT QUALIFICATION EVIDENCE",
+  "qualified": false,
+  "blockers": [
+    "B1: official rust-std components unavailable (docs/phase16/DEPENDENCY-REQUEST.md)"
+  ],
+  "canonical_build": false,
+  "build_script": "tools/build_phase16_dev.sh (committed protected Phase 14 fixture verified, not rebuilt)",
+  "suite": "fp",
+  "test_command": "experiments/c-runtime/guest_phase16_dev.py --suite fp --esp build/arena-esp.img -- --cc clang --runs 1",
+  "utc": "2026-10-25T19:44:46.964022+00:00",
+  "source_commit": "87987d45c156c5b43b631fd8a6c913bbd84a761a",
+  "dirty_paths": [
+    " M experiments/c-runtime/app/c_fp_app.c",
+    " M experiments/c-runtime/app/c_native_app.c",
+    " M experiments/c-runtime/app/fp_probe.S",
+    " M experiments/c-runtime/guest_fp.py",
+    " M experiments/c-runtime/guest_phase16_dev.py",
+    " M experiments/c-runtime/host/test_runtime.c",
+    " M experiments/c-runtime/include/arena/abi.h",
+    " M experiments/c-runtime/run.py",
+    " M experiments/c-runtime/src/streams.c",
+    " M tools/test_phase13_registry_guest.py",
+    " M userspace/arena-runtime/src/streams.rs",
+    " M userspace/desktop/src/bin/desktop.rs",
+    " M userspace/desktop/src/package.rs",
+    "?? experiments/c-runtime/app/c_stdin_app.c",
+    "?? experiments/c-runtime/guest_stdin.py",
+    "?? tools/dev-env/build-isolated-glibc.sh"
+  ],
+  "images": {
+    "esp": "build/arena-esp.img",
+    "esp_sha256": "0524e6c3fb51b8438a3657b41fd2bd5e2505966b3bfbefcbc03c41e0d4144513",
+    "efi": "build/arena-boot.efi",
+    "efi_sha256": "cd32caf4816247ad99862bd548d0248c5e7d409e8f119ef93fc84d56809219c9",
+    "protected_phase14_fixture_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+  },
+  "emulator": {
+    "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+    "file": "/home/user/phase16-backend/qemu-patched",
+    "sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+    "wrapper_head": [
+      "#!/bin/sh",
+      "exec \"/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2\" \\",
+      "  --library-path \"/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/usr/lib/x86_64-linux-gnu\" \\",
+      "  \"/home/user/phase15-pkg/backend/qemu-system-x86_64-patched\" -accel tcg -L \"/home/user/phase15-pkg/backend/pc-bios\" \"$@\""
+    ],
+    "emulator_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "emulator_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "version": "QEMU emulator version 11.1.2"
+  },
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "isolated_runtime": {
+    "note": "Pinned patched QEMU requires GLIBC>=2.38; when a wrapper is used its content (incl. isolated glibc path) is recorded under emulator.wrapper_head. Setup: tools/dev-env/build-isolated-glibc.sh and docs/phase16/BACKEND-RECOVERY.md.",
+    "ARENA_GLIBC_DIR": "/home/user/glibc-2.40",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458"
+  },
+  "compilers": {
+    "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "zig": "0.17.0",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+  },
+  "process_exit": 0,
+  "semantic_verdict": {
+    "summary": "/home/user/ArenaOS/experiments/c-runtime/build/guest-fp/summary-clang.json",
+    "runs": 1,
+    "passed": 1,
+    "failed": 0,
+    "failures": []
+  },
+  "app_identity": {
+    "compiler": "clang",
+    "apps": {
+      "fp": {
+        "elf": "/home/user/ArenaOS/experiments/c-runtime/build/fp-clang/c-fp-clang.elf",
+        "elf_sha256": "fe981f3b7729ad364938dc4b329b71dec8ed47e12a455eae005ba68dd8364401",
+        "bundle_sha256": "e5457022112a66ac4bc7e510dcf59e75f24b7cc5af98f3100b3db8c3a8f90bde",
+        "manifest_flags": 28,
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "fp-nostream": {
+        "elf": "/home/user/ArenaOS/experiments/c-runtime/build/fp-clang/c-fp-clang.elf",
+        "elf_sha256": "fe981f3b7729ad364938dc4b329b71dec8ed47e12a455eae005ba68dd8364401",
+        "bundle_sha256": "0c8547bffe23d15c9f9216a2cbd8e7f65be9d4db9cfd9f0fa473c972cae351bd",
+        "manifest_flags": 20,
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      },
+      "fp-mutant": {
+        "elf": "/home/user/ArenaOS/experiments/c-runtime/build/fp-mutant-clang/c-fp-clang.elf",
+        "elf_sha256": "cb37d7e0b5328a58f6241b9bc380b223a890e842051b12b4abcfee6bb3afd9fa",
+        "bundle_sha256": "a5035bb974d95c630b5fbc4a53a86bc7661ff431cbfde724fb378794b7a811c0",
+        "manifest_flags": 28,
+        "signing": "RFC 8032 development fixture (test-only, not a production key)"
+      }
+    }
+  }
+}

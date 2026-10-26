@@ -1,0 +1,103 @@
+{
+  "backend": {
+    "accelerator": "tcg",
+    "glibc_ld_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "glibc_libc_sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+    "host_glibc_replaced": false,
+    "isolated_glibc_dir": "/home/user/glibc-2.40",
+    "qemu_binary": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_version": "QEMU emulator version 11.1.2",
+    "wrapper": "/home/user/phase16-backend/qemu-patched",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+  },
+  "build_path": "/workspace/ArenaOS (physical bind mount of /home/user/ArenaOS)",
+  "classification": "CANONICAL - CORRECTED QUALIFICATION CANDIDATE (not acceptance)",
+  "compilers": {
+    "clang_path": "zig cc through ARENA_ZIG (recorded in suite envelopes)",
+    "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "zig": "0.17.0"
+  },
+  "correction_chain": [
+    {
+      "commit": "8c472a2fe110b6bb3db81145342043de5ee75e03",
+      "role": "production and host-test ASTR v2 reserved-byte enforcement"
+    },
+    {
+      "commit": "d5874b72f857261fe3c41eb7e7ac7d8af6431463",
+      "role": "harness-only legacy ASTR-v1 fixture transform correction"
+    },
+    {
+      "commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779",
+      "role": "formatting-only Rust test correction; final tested source"
+    }
+  ],
+  "dependency_commit": "02a20fce915bdd0bdbbc24dcdc2fa0b63a1cd7a1",
+  "development_evidence_commit": "bffff21f5d4a6235ec764c8596953817e157e196",
+  "final_artifacts": {
+    "arena-boot.efi": {
+      "bytes": 11038720,
+      "sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6"
+    },
+    "arena-esp.img": {
+      "bytes": 16777216,
+      "sha256": "04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a"
+    },
+    "phase14-pie.apb1": {
+      "bytes": 24040,
+      "sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+    },
+    "phase14-pie.fixture.elf": {
+      "bytes": 23256,
+      "sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+    }
+  },
+  "firmware": {
+    "OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+    "OVMF_CODE_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+    "OVMF_VARS_template": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+    "OVMF_VARS_template_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "historical_candidate": {
+    "receipts": "docs/phase16/receipts/canonical-2026-10-26/",
+    "source_commit": "d314d204aa86ec4018659f3f211cd3a488d30d87",
+    "status": "preserved unchanged; superseded for corrected-candidate review, not relabelled"
+  },
+  "preserved_phase15_package": {
+    "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f"
+  },
+  "rust": {
+    "archive_checksum_file": "docs/phase16/dependencies/rust-1.97.0/SHA256SUMS",
+    "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)",
+    "dependency_instructions": "docs/phase16/dependencies/rust-1.97.0/README.md",
+    "installed_libcore": {
+      "x86_64-unknown-none": {
+        "libcore": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-none/lib/libcore-05b8190f7da9d31a.rlib",
+        "libcore_sha256": "6b75c5188dca46c917a67ade52dddea81460f96dc4732003cebea2e22a5b1b09"
+      },
+      "x86_64-unknown-uefi": {
+        "libcore": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-uefi/lib/libcore-43f815b849db44c6.rlib",
+        "libcore_sha256": "a7de36b0262b7d94cdcf1acb3f78288e7f5a57d546568b3ccaec27cd122c5494"
+      }
+    },
+    "official_component_archives": {
+      "rust-std-1.97.0-x86_64-unknown-none.tar.xz": "5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a",
+      "rust-std-1.97.0-x86_64-unknown-uefi.tar.xz": "2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0"
+    },
+    "parts_checksum_file": "docs/phase16/dependencies/rust-1.97.0/PARTS-SHA256SUMS",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "rustc_verbose": [
+      "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "binary: rustc",
+      "commit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3",
+      "commit-date: 2026-07-07",
+      "host: x86_64-unknown-linux-gnu",
+      "release: 1.97.0",
+      "LLVM version: 22.1.6"
+    ],
+    "sysroot": "/opt/rust/prefix"
+  },
+  "schema_version": 1,
+  "source_commit": "5aacbc88c50d4565a7bb9f4075be27e40df27779"
+}

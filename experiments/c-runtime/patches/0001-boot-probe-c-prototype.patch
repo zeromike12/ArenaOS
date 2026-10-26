@@ -1,0 +1,45 @@
+--- a/kernel/kernel/src/spawn.rs
++++ b/kernel/kernel/src/spawn.rs
+@@ -47,6 +47,14 @@
+ pub const MAX_SPAWN_RECS: usize = 64;
+ /// ADR-0055: 0..26 are boot/embedded IDs, never registry entries.
+ pub const DYNAMIC_FIRST_ID: u32 = crate::image_registry::FIRST;
++// EXPERIMENTAL (C runtime prototype, scratch tree only): a sentinel id that
++// names the freestanding C probe ELF without taking any static (0..=26) or
++// dynamic image slot. Not present in the production tree.
++pub const CPROBE_IMG_ID: u32 = 0xC0DE_0001;
++static CPROBE_ELF: &[u8] = include_bytes!(concat!(
++    env!("CARGO_MANIFEST_DIR"),
++    "/../../experiments/c-runtime/build/crt-probe-embedded.elf"
++));
+ /// Separate from ALL Image IDs, including future dynamic u32 values.
+ pub const MAX_BOOT_IMAGES: u32 = 11;
+ pub fn boot_image_live(index: u32) -> bool {
+@@ -325,12 +333,14 @@
+ }
+ 
+ fn prepare(img_id: u32, boot_index: Option<u32>) -> Result<Prepared, Status> {
+-    let dynamic = boot_index.is_none() && img_id >= DYNAMIC_FIRST_ID;
++    let dynamic = boot_index.is_none() && img_id >= DYNAMIC_FIRST_ID && img_id != CPROBE_IMG_ID;
+     // 1. Resolve full LIVE ID and pin immutable kernel bytes BEFORE
+     // allocating. The guard covers validate/load and every rollback;
+     // revoke/last-ref can retire storage only after this pin drains.
+     let bytes = if let Some(idx) = boot_index {
+         boot_image_bytes(idx).ok_or(STATUS_BAD_ARG)?
++    } else if img_id == CPROBE_IMG_ID {
++        CPROBE_ELF
+     } else if dynamic {
+         crate::image_registry::pin(img_id).ok_or(STATUS_BAD_ARG)?
+     } else {
+--- a/kernel/kernel/src/entry.rs
++++ b/kernel/kernel/src/entry.rs
+@@ -808,6 +808,9 @@
+         filesd_eid,
+         package_root.map(|(eid, _)| eid),
+     );
++    // EXPERIMENTAL (C runtime prototype, scratch tree only): one-shot native C
++    // probe, no capabilities granted. Its serial output is the evidence.
++    let _c_probe_pid = crate::spawn::spawn_init(crate::spawn::CPROBE_IMG_ID, &[], None);
+     let shell_pid = crate::spawn::spawn_init(1, shell_caps, None)
+         .unwrap_or_else(|reason| crate::halt::halt_machine(reason));
+     if let Some(eid) = graphics.as_ref().and_then(|g| g.launch_endpoint) {

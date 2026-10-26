@@ -1,0 +1,211 @@
+# Phase 16 engineering handoff → Arena 1 and future agents
+
+Date: 2026-10-26
+
+Status: **HANDOFF FOR REVIEW.** C recommends Phase 16 acceptance
+within its documented scope, but M's final acceptance and merge
+decision remain pending. Phase 17 is not started, and no SDL3,
+graphics, desktop, or new testing-agent work is authorized or claimed
+by this document.
+
+Arena 1 should treat this as the factual starting point if M later
+accepts and merges Phase 16 and separately authorizes genuine upstream
+SDL3 work. The engineering assignments summarized in section 5 are
+confirmed plans only, not instructions to begin them now.
+
+## 1. Canonical runtime to build on
+
+Use the one Phase 16 runtime at `experiments/c-runtime/` (promotion
+out of `experiments/` remains an M decision). Do not fork a second
+startup, allocator, stream, or thread layer for SDL.
+
+Corrected qualification-candidate source and evidence:
+
+- Final tested OS/test source:
+  `5aacbc88c50d4565a7bb9f4075be27e40df27779`
+- Evidence:
+  `docs/phase16/receipts/canonical-corrected-5aacbc8-2026-10-26/`
+- Final EFI:
+  `7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6`
+- Final ESP:
+  `04ffaf4681e92fe87886bdcff29b175df032ae9d88bd6cae59b34ad070ea674a`
+- Downloadable sealed demonstration archive on this branch:
+  `docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz`
+  (GitHub:
+  <https://github.com/zeromike12/ArenaOS/blob/arena/2b4ae1a5-arenaos/docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz>);
+  its `.sha256` sidecar is beside it, and post-sealing verification is
+  under the corrected receipts' `fresh-archive/` directory. Archive:
+  5,016,910 bytes, SHA-256
+  `106088522042fb501a00554442ae97133127e53a9141d5e95069f112c9a9898b`;
+  fresh static + extracted strict-guest verification passed.
+
+Canonical guest evidence covers GCC and Clang signed-APB1 execution
+for C1/native, C2 multi-app, baseline x87/SSE2 FP, focused live stdin,
+ASTR v2 (including v1 and reserved-byte refusal), and Notification
+ambiguity refusal. Complete registered attempt 2 is 121/121, strict
+Phase 15 passes on both CPU profiles, and corrected final-artifact
+stability is 100/100 on the identified locally modified QEMU TCG
+backend. **Q-1 remains an open reliability issue:** registered
+attempt 1 at the same source failed 2/121; focused reruns passed and a
+later complete run passed 121/121, but the causes remain unknown and
+the original failing `m9_client_death` serial was overwritten. Arena 1
+and the testing agent should read the attempt receipts rather than
+treat the final green summary as the only run.
+
+## 2. Runtime facts Arena 1 can rely on
+
+Within the bounded ADR-0112 profile and `docs/compat` coverage:
+
+- Validated ARST v2 startup reaches C `main` with stack/TLS/argv/env
+  handling supplied by the canonical runtime.
+- The shared allocator is the integration point; SDL must use the
+  runtime allocator rather than a private Arena heap. Respect its
+  measured limits and failure returns; do not raise limits just to get
+  a green boot.
+- Standard streams exist only when capability-granted. ASTR is v2
+  only: one complete 4096-byte page, three 1,024-byte rings, wrapping
+  counters, v1 refused. Every ADR-0111 reserved byte must be zero:
+  header 16–63, each ring control 12–63, and page tail 3328–4095.
+  Rust requires the exact one-page length before reading the page;
+  the C bare-pointer page APIs require the caller to supply one
+  complete readable/writable-as-required aligned page. Do not pass a
+  sub-page buffer or reuse reserved bytes for private SDL state.
+- Focused live stdin is real keyboard input through the owning
+  AppInstance's granted stream, with Ctrl-D EOF. It is a stream, not a
+  POSIX tty: no termios, signals, job control, or file-descriptor
+  process model should be assumed.
+- C11-subset threads are bindings over Arena kernel threads/sync.
+  Process status is the last thread to exit; detached-thread lifetime
+  must be managed explicitly. Thread count is kernel-bounded (four
+  user threads per process in the current profile).
+- Baseline x87/SSE2 ring-3 execution is available under ADR-0113. AVX
+  is not supported; kernel code remains integer-only outside reviewed
+  FP state leaves. Build SDL/runtime objects with the documented
+  baseline profile and audit for AVX.
+- Unsupported features fail closed. In particular, do not assume
+  `fopen`/filesystem authority, floating-point `printf` conversions,
+  wall-clock `time`, timed/recursive mutexes, TSS, dynamic loading,
+  POSIX threads/signals/process APIs, sockets, audio, or GPU APIs.
+
+Consult `docs/compat/C2-LIBC-COVERAGE.md` function-by-function. If SDL
+needs a missing C function, add it to the canonical runtime with host
+and guest tests or record an explicit refusal; do not add an SDL-only
+mini-libc.
+
+## 3. The blocker that must be decided first: B-GFX-1
+
+Graphical service identification remains unresolved. ARST v2 graphical
+descriptors can all carry role Other; kind/rights/counting can say
+that a SharedRegion or BadgedEndpoint exists but cannot unambiguously
+say “this is the surface” vs “this is the compositor.”
+
+Hard rules carried forward:
+
+- Never identify graphical capabilities by slot, descriptor order, or
+  a guessed index.
+- Count by kind/rights only as an existence check.
+- Refuse ambiguity. The Notification policy is the local example:
+  sole candidate only, otherwise `NONE` and an immediate typed error.
+- Do not use a privileged serial/debug path as a substitute for a real
+  graphical launch proof.
+
+Options already compared in `docs/compat/C2.1-B-GFX-1-HANDOFF.md`:
+
+1. **Protocol-level identification over the BadgedEndpoint**
+   (recommended there for review): no ARST change; Desktop answers
+   only when its per-session surface is unambiguous; the app uses only
+   the authority named in the reply. Arena 1/Desktop must define and
+   version the message and its refusal cases.
+2. **Signed-manifest launch layout**: versioned APB1 layout checked by
+   the launcher. Needs packaging authorization and still depends on
+   every launcher performing the check.
+3. **Future ARST extension/service tag**: self-describing but a wire
+   change requiring an ADR and coordinated Rust/Python/C changes.
+
+Phase 16 fixed the old M9 prerequisite mentioned in that handoff
+(`tools/startup_abi.py` now matches the 7-descriptor native contract),
+and Phase 16 now has a two-candidate Notification *guest* negative.
+Those updates do not solve graphical surface/compositor identity.
+
+M, with C's advice, and Arena 1 need to choose and record the B-GFX-1
+direction before an SDL video backend can honestly claim graphical
+guest execution.
+
+## 4. Suggested first Phase 17 gates (for later authorization)
+
+If Phase 17 is authorized after Phase 16 acceptance:
+
+1. **Decision gate:** record the B-GFX-1 choice (ADR if any wire or
+   manifest format changes) and the exact SDL version/source hash.
+   “Unmodified upstream SDL3” needs a precise definition of which
+   upstream files may be configured vs patched.
+2. **Build gate:** compile upstream SDL core against the canonical C
+   runtime with baseline x86-64/SSE2, no AVX, static linking only, and
+   an undefined-symbol report. Every missing symbol is either a
+   canonical-runtime addition with tests or a documented refusal.
+3. **Headless gate:** run a signed APB1 SDL test that initializes only
+   subsystems that truthfully exist, reports version/features over a
+   granted stream, and exits with a checked status. No fake video or
+   audio success.
+4. **Video gate:** after B-GFX-1, map the identified surface, publish
+   damage through the identified compositor path, and verify owned
+   pixels by QMP screendump plus lifecycle/resource teardown receipts.
+5. **Event gate:** route real keyboard/pointer events only to the
+   focused owning instance; prove no delivery to an unfocused second
+   instance, mirroring the Phase 16 live-stdin isolation test.
+6. **Audio gate:** only if an ArenaOS audio service/capability design
+   is separately accepted. Until then SDL audio must report absent,
+   not silently succeed.
+7. **Regression gate:** rerun Phase 16 targeted suites, registered
+   regressions, strict Phase 15, and final-artifact stability on any
+   changed EFI/ESP. Keep new evidence separately labelled by commit
+   and image hash.
+
+## 5. Confirmed engineering and testing handoff (plans only)
+
+These assignments are confirmed as the intended post-acceptance
+starting points. They do not start any new work in this closeout:
+
+- **A — canonical C runtime maintenance:** A will maintain the
+  integrated runtime at `experiments/c-runtime/` as the one canonical
+  C runtime. Future C-library additions required by applications
+  should be made there with host and guest evidence, not in an
+  application- or graphics-specific mini-libc.
+- **Graphics/desktop agent — after acceptance and merge only:** future
+  graphics work should start from the accepted, merged Phase 16
+  `mainline`, not from this unmerged branch or the superseded
+  `d314d20…` candidate. It may selectively reuse historical graphics
+  code after auditing that code against the current capability and ABI
+  contracts. It must resolve the B-GFX-1 graphical-service
+  identification decision before resolution-setting or desktop
+  presentation work claims a real graphical launch path.
+- **Testing agent — accepted-baseline profiling and coverage:** the
+  testing agent should begin by profiling the accepted Phase 16
+  baseline and preserving its targeted, registered, strict Phase 15,
+  and stability coverage. Q-1 is part of that handoff as an open
+  reliability issue. Every run and attempt should use unique,
+  immutable output directories and preserve raw serials, exact
+  commands, source/backend/firmware/image identities, and process
+  results. Recurrence should be investigated before either attempt-1
+  failure is called environmental or harmless; assertions must not be
+  weakened merely to obtain a green result.
+
+## 6. Non-goals and warnings
+
+- Do not turn the native C runtime into a Linux/POSIX personality.
+- Do not add syscalls or kernel object types without the required
+  architecture decision.
+- Do not infer timers from wall clock, files from streams, a tty from
+  stdin, or process semantics from `main` return while workers live.
+- Do not claim timer-preemption FP preservation beyond the exact
+  Phase 15/Phase 16 receipts.
+- Do not start from the development EFI/ESP, development receipts, or
+  the superseded `d314d20…` candidate image/receipts; use the corrected
+  canonical source/images above only after M accepts them and the
+  branch is merged.
+- Do not reuse a stability or guest receipt across changed EFI/ESP
+  bits. The corrected Phase 16 closeout reran final-artifact
+  qualification because the reserved-byte correction changed the EFI.
+
+Phase 17 remains **proposed only** until M accepts and merges Phase 16
+and gives separate direction.
