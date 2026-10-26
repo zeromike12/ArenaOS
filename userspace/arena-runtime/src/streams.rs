@@ -885,13 +885,13 @@ mod tests {
             unsafe { StreamSet::initialize(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.unwrap();
         assert!(page.0[16..64].iter().all(|byte| *byte == 0));
         for base in [64, 1152, 2240] {
-            assert!(page.0[base + 12..base + 64]
-                .iter()
-                .all(|byte| *byte == 0));
+            assert!(page.0[base + 12..base + 64].iter().all(|byte| *byte == 0));
         }
-        assert!(page.0[REGION_BYTES..STREAM_PAGE_BYTES]
-            .iter()
-            .all(|byte| *byte == 0));
+        assert!(
+            page.0[REGION_BYTES..STREAM_PAGE_BYTES]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
         assert!(unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.is_ok());
     }
 
