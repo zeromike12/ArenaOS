@@ -132,8 +132,13 @@ long arena_stream_read(int fd, void *buf, size_t len);
 int arena_stream_close(int fd);
 
 /* Protocol over any ASTR page: the granted mapping, or a private test page.
- * The page must be 4096 bytes and 4096-aligned. channel: 0 stdin, 1 stdout,
- * 2 stderr. */
+ * One-page memory contract: `page` must point to a complete 4096-byte,
+ * 4096-aligned page that remains accessible for the call (readable for
+ * check/read-only queries; readable and writable for init/write/close).
+ * These APIs take no length: arena_ring_page_check reads the whole page,
+ * including reserved bytes 3328..4096. Passing a shorter object or mapping
+ * violates this contract; C cannot bounds-check a bare pointer. channel:
+ * 0 stdin, 1 stdout, 2 stderr. */
 int arena_ring_page_init(void *page);
 int arena_ring_page_check(const void *page);
 long arena_ring_write_some(void *page, unsigned channel, const void *buf, size_t len);

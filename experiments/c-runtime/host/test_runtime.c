@@ -499,6 +499,38 @@ static void test_ring_wrap(void) {
     free(page);
 }
 
+/* ADR-0111 requires every reserved byte to be zero. Probe both endpoints
+ * of the header range (16..64), every ring's control range (12..64 at
+ * page bases 64, 1152, 2240), and the page tail (3328..4096). The C API's
+ * one-page contract is honoured by using a complete 4096-byte allocation. */
+static void test_ring_reserved_bytes(void) {
+    unsigned char *page = aligned_alloc(4096, ARENA_STREAM_PAGE_BYTES);
+    CHECK(page != NULL, "reserved: page allocation");
+    if (page == NULL) {
+        return;
+    }
+    memset(page, 0, ARENA_STREAM_PAGE_BYTES);
+    CHECK(arena_ring_page_init(page) == 0, "reserved: page init");
+    CHECK(arena_ring_page_check(page) == 0, "reserved: valid page accepted");
+
+    static const size_t offsets[] = {
+        16, 63,
+        64 + 12, 64 + 63,
+        1152 + 12, 1152 + 63,
+        2240 + 12, 2240 + 63,
+        3328, 4095,
+    };
+    for (size_t i = 0; i < sizeof offsets / sizeof offsets[0]; i++) {
+        size_t offset = offsets[i];
+        page[offset] = 0xa5u;
+        CHECK(arena_ring_page_check(page) != 0,
+              "reserved: nonzero byte at page offset %zu refused", offset);
+        page[offset] = 0;
+    }
+    CHECK(arena_ring_page_check(page) == 0, "reserved: restored page accepted");
+    free(page);
+}
+
 /* Host-only VM fault injection (vm.c, ARENA_HOSTED). Not guest evidence. */
 void arena_vm_host_fail_reserve_from(int64_t n);
 void arena_vm_host_fail_commit_from(int64_t n);
@@ -709,6 +741,7 @@ int main(int argc, char **argv) {
     test_vm_commit_refusal();
     test_vm_reserve_refusal();
     test_ring_wrap();
+    test_ring_reserved_bytes();
     failures += libc_host_tests();
     checks += libc_host_checks;
     if (failures == 0) {

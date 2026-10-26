@@ -5,8 +5,9 @@
  * Wire format (userspace/arena-runtime/src/streams.rs):
  *   page: 64-byte header {magic "ASTR", version 2, channels 3,
  *         capacity 1024, reserved[48] = 0}, then three 1088-byte rings at
- *         64 + 1088 * channel (3328 of the 4096-byte page).
- *   ring: 64-byte control {write u32 @0, read u32 @4, state u32 @8, pad},
+ *         64 + 1088 * channel. Bytes 3328..4096 are a reserved zero tail.
+ *   ring: 64-byte control {write u32 @0, read u32 @4, state u32 @8,
+ *         reserved[52] @12 = 0},
  *         then 1024 data bytes at ring + 64. state bits: WRITER_CLOSED 1,
  *         READER_CLOSED 2.
  * Channel 0 is stdin (the desktop writes, the app reads), 1 stdout and
@@ -45,9 +46,14 @@
 _Static_assert((ARENA_STREAM_CAPACITY & ARENA_STREAM_MASK) == 0,
                "stream capacity must be a power of two (ADR-0111)");
 #define HEADER_BYTES 64u
+#define HEADER_RESERVED_OFFSET 16u
 #define RING_STRIDE 1088u
-_Static_assert(HEADER_BYTES + 3u * RING_STRIDE <= ARENA_STREAM_PAGE_BYTES,
-               "three ASTR v2 rings must fit in one page");
+#define RING_RESERVED_OFFSET 12u
+#define PAGE_TAIL_OFFSET (HEADER_BYTES + ARENA_STREAM_CHANNELS * RING_STRIDE)
+_Static_assert(PAGE_TAIL_OFFSET == 3328u,
+               "ASTR v2 reserved tail must start at byte 3328 (ADR-0111)");
+_Static_assert(PAGE_TAIL_OFFSET < ARENA_STREAM_PAGE_BYTES,
+               "three ASTR v2 rings and the reserved tail must fit in one page");
 #define CONTROL_BYTES 64u
 #define WRITER_CLOSED 1u
 #define READER_CLOSED 2u
@@ -79,6 +85,13 @@ static uint32_t fetch_or_state(uint8_t *ring, uint32_t bits) {
     return __atomic_fetch_or((uint32_t *)(void *)(ring + 8), bits, __ATOMIC_ACQ_REL);
 }
 
+/*
+ * The C page APIs intentionally have no length parameter: their contract
+ * (arena/rt.h) is that `page` names one complete, 4096-byte, 4096-aligned
+ * ASTR page. This check therefore may read every byte of that page. A
+ * pointer to fewer readable bytes violates the API contract and cannot be
+ * detected safely in C; callers must establish the one-page mapping first.
+ */
 int arena_ring_page_check(const void *page_v) {
     const uint8_t *page = (const uint8_t *)page_v;
     if (page == NULL) {
@@ -92,7 +105,20 @@ int arena_ring_page_check(const void *page_v) {
         load_u32(page + 12, __ATOMIC_RELAXED) != ARENA_STREAM_CAPACITY) {
         return ARENA_E_CORRUPT;
     }
-    for (size_t i = 16; i < HEADER_BYTES; i++) {
+    for (size_t i = HEADER_RESERVED_OFFSET; i < HEADER_BYTES; i++) {
+        if (page[i] != 0) {
+            return ARENA_E_CORRUPT;
+        }
+    }
+    for (unsigned channel = 0; channel < ARENA_STREAM_CHANNELS; channel++) {
+        const uint8_t *ring = ring_at_c(page, channel);
+        for (size_t i = RING_RESERVED_OFFSET; i < CONTROL_BYTES; i++) {
+            if (ring[i] != 0) {
+                return ARENA_E_CORRUPT;
+            }
+        }
+    }
+    for (size_t i = PAGE_TAIL_OFFSET; i < ARENA_STREAM_PAGE_BYTES; i++) {
         if (page[i] != 0) {
             return ARENA_E_CORRUPT;
         }

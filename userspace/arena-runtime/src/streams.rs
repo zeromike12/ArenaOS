@@ -105,15 +105,24 @@ pub struct StreamSet {
 }
 
 impl StreamSet {
-    /// Initialize a newly created, zeroed stream page before publishing it.
+    /// Initialize a newly created stream page before publishing it.
     ///
     /// # Safety
-    /// memory must be page-aligned, writable for bytes bytes, and have no
-    /// other concurrent users.
+    /// `bytes` must be exactly [`STREAM_PAGE_BYTES`], and `memory` must be
+    /// page-aligned, writable for that whole page, and have no other
+    /// concurrent users. The typed region is written with all reserved
+    /// bytes zero and the reserved page tail is explicitly zeroed.
     pub unsafe fn initialize(memory: *mut u8, bytes: usize) -> Result<Self, Error> {
         let region = region_ptr(memory, bytes)?;
         // SAFETY: guaranteed by the exclusive-new-region contract above.
-        unsafe { region.as_ptr().write(Region::new()) };
+        unsafe {
+            region.as_ptr().write(Region::new());
+            ptr::write_bytes(
+                memory.add(REGION_BYTES),
+                0,
+                STREAM_PAGE_BYTES - REGION_BYTES,
+            );
+        }
         Ok(Self {
             region,
             claimed: Cell::new(0),
@@ -124,10 +133,20 @@ impl StreamSet {
     /// Attach to a stream page initialized by its trusted owner.
     ///
     /// # Safety
-    /// memory must map the exact held stream SharedRegion and remain mapped
-    /// until this view and all endpoints are no longer used.
+    /// `bytes` must be exactly [`STREAM_PAGE_BYTES`], and `memory` must map
+    /// that whole readable page in the exact held stream SharedRegion. It
+    /// must remain mapped until this view and all endpoints are no longer
+    /// used. Lengths below one page are rejected before any byte is read, so
+    /// validation never reads beyond the caller-supplied range.
     pub unsafe fn attach(memory: *mut u8, bytes: usize) -> Result<Self, Error> {
         let region = region_ptr(memory, bytes)?;
+        // SAFETY: region_ptr has required the supplied range to be the full
+        // one-page ASTR layout, and the caller promises a readable live
+        // mapping of that page. Read the reserved tail through the raw page
+        // pointer rather than extending the typed Region layout.
+        let page = region.as_ptr().cast::<u8>();
+        let tail_nonzero = (REGION_BYTES..STREAM_PAGE_BYTES)
+            .any(|offset| unsafe { ptr::read_volatile(page.add(offset)) } != 0);
         // SAFETY: the caller promises a readable live mapping.
         let header = unsafe { region.as_ref() };
         if header.magic != MAGIC
@@ -139,6 +158,7 @@ impl StreamSet {
                 .rings
                 .iter()
                 .any(|ring| ring.reserved.iter().any(|byte| *byte != 0))
+            || tail_nonzero
         {
             return Err(Error::BadFormat);
         }
@@ -640,7 +660,12 @@ fn region_ptr(memory: *mut u8, bytes: usize) -> Result<NonNull<Region>, Error> {
     if (memory.as_ptr() as usize) & (align_of::<Region>() - 1) != 0 {
         return Err(Error::BadAddress);
     }
-    if !(REGION_BYTES..=STREAM_PAGE_BYTES).contains(&bytes) {
+    // ASTR v2 is a one-page layout. Require the complete page before any
+    // caller memory is dereferenced: accepting REGION_BYTES..4095 would
+    // leave part or all of the reserved tail outside the supplied range.
+    // Overlong ranges are also refused rather than silently treating a
+    // larger mapping as the one-page SharedRegion contract.
+    if bytes != STREAM_PAGE_BYTES {
         return Err(Error::TooSmall);
     }
     Ok(memory.cast())
@@ -789,6 +814,85 @@ mod tests {
             unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) },
             Err(Error::BadFormat)
         ));
+    }
+
+    #[test]
+    fn attach_refuses_nonzero_reserved_bytes_in_header_rings_and_tail() {
+        let (mut page, _owner) = make_page();
+        // Positive control: an otherwise valid fresh ASTR v2 page attaches.
+        assert!(unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.is_ok());
+
+        // Probe the first and last byte of every ADR-0111 reserved range:
+        // header 16..64; each ring's 12..64 at bases 64, 1152, and 2240;
+        // and the reserved page tail 3328..4096.
+        let reserved_offsets = [
+            16,
+            63,
+            64 + 12,
+            64 + 63,
+            1152 + 12,
+            1152 + 63,
+            2240 + 12,
+            2240 + 63,
+            3328,
+            4095,
+        ];
+        for offset in reserved_offsets {
+            page.0[offset] = 0xa5;
+            assert!(
+                matches!(
+                    unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) },
+                    Err(Error::BadFormat)
+                ),
+                "nonzero reserved byte at page offset {offset} must be refused"
+            );
+            page.0[offset] = 0;
+        }
+
+        // Restoration control: the same page is valid once every probed
+        // reserved byte is zero again.
+        assert!(unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.is_ok());
+    }
+
+    #[test]
+    fn attach_requires_the_full_page_before_tail_validation() {
+        let (mut page, _owner) = make_page();
+        // 3328 is exactly the typed Region size but none of the reserved
+        // tail; 4095 still leaves the final tail byte outside the supplied
+        // range. Both must be rejected by length, without tail inspection.
+        for bytes in [0, REGION_BYTES - 1, REGION_BYTES, STREAM_PAGE_BYTES - 1] {
+            assert!(
+                matches!(
+                    unsafe { StreamSet::attach(page.0.as_mut_ptr(), bytes) },
+                    Err(Error::TooSmall)
+                ),
+                "length {bytes} must be refused before page validation"
+            );
+        }
+        assert!(unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.is_ok());
+    }
+
+    #[test]
+    fn initialize_requires_and_zeroes_the_full_page() {
+        let mut page = Page([0xa5; STREAM_PAGE_BYTES]);
+        assert!(matches!(
+            unsafe { StreamSet::initialize(page.0.as_mut_ptr(), STREAM_PAGE_BYTES - 1) },
+            Err(Error::TooSmall)
+        ));
+        // Even from non-zero backing bytes, initialize must publish zero in
+        // every reserved range, including the untyped 3328..4096 tail.
+        let _owner =
+            unsafe { StreamSet::initialize(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.unwrap();
+        assert!(page.0[16..64].iter().all(|byte| *byte == 0));
+        for base in [64, 1152, 2240] {
+            assert!(page.0[base + 12..base + 64]
+                .iter()
+                .all(|byte| *byte == 0));
+        }
+        assert!(page.0[REGION_BYTES..STREAM_PAGE_BYTES]
+            .iter()
+            .all(|byte| *byte == 0));
+        assert!(unsafe { StreamSet::attach(page.0.as_mut_ptr(), STREAM_PAGE_BYTES) }.is_ok());
     }
 
     #[test]
