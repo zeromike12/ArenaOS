@@ -91,12 +91,18 @@ def build_legacy_v1_elf(cc: str, out: Path) -> Path:
     text = text.replace("head & ARENA_STREAM_MASK", "head % ARENA_STREAM_CAPACITY")
     text = text.replace("tail & ARENA_STREAM_MASK", "tail % ARENA_STREAM_CAPACITY")
     streams.write_text(text)
-    # Drop the v2 power-of-two static assert in the legacy copy only; the
-    # one-page-fit assert remains valid for 768-byte rings.
+    # Drop the v2-only static asserts in the legacy copy only: neither the
+    # power-of-two capacity nor v2's exact 3328-byte reserved-tail offset
+    # applies to the transformed 832-byte-stride v1 geometry. Production
+    # streams.c keeps both asserts unconditional; the one-page-fit assert
+    # below remains valid for the transformed rings.
     text = streams.read_text()
     text = text.replace(
         '_Static_assert((ARENA_STREAM_CAPACITY & ARENA_STREAM_MASK) == 0,\n'
         '               "stream capacity must be a power of two (ADR-0111)");\n', "")
+    text = text.replace(
+        '_Static_assert(PAGE_TAIL_OFFSET == 3328u,\n'
+        '               "ASTR v2 reserved tail must start at byte 3328 (ADR-0111)");\n', "")
     streams.write_text(text)
     legacy_out = out / "legacy-v1-build"
     crun.build_guest(cc, root=root, out_root=legacy_out)
