@@ -1,5 +1,15 @@
 # ArenaOS C compatibility: audit, toolchain, prototype, strategy, roadmap
 
+> **Phase 16 status note (2026-10-26):** this directory retains Arena
+> 2's historical reports. For current status, read
+> `docs/phase16/FINAL-REPORT.md` and
+> `docs/phase16/receipts/canonical-2026-10-26/README.md`. ADR-0111 and
+> bounded ADR-0112 are now Accepted by M as contracts (2026-10-25), B1
+> is resolved, and Phase 16 is a qualification candidate for M/C review
+> (not accepted). Statements below that call those ADRs Proposed or say
+> no production files were modified describe the Arena 2 branch/time of
+> writing.
+
 Branch: `arena/f89ea987-arenaos` (from `arena/phase13-native-app-maturity` @ 74ace4f).
 Status: analysis and experimental prototype. **No production kernel, userspace,
 or tooling file is modified.** The experiment lives in

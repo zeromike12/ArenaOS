@@ -1,0 +1,34 @@
+PHASE16 CANONICAL RUNNER: suite=fp — B1 resolved; not acceptance
+c-fp-clang.elf: elf={'sse': 326, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 50, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-clang.elf
+[c-fp] building kernel image + ESP ...
+{
+  "exit_lines": [
+    58,
+    71,
+    72
+  ],
+  "fp_results": [
+    [
+      "PASS",
+      66,
+      0,
+      0
+    ],
+    [
+      "FAIL",
+      66,
+      19,
+      0
+    ]
+  ],
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "clang",
+  "boot_rc": 0,
+  "elapsed_s": 17.1,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-fp/serial-clang-run1.log"
+}
+FP guest: 1/1 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-fp/summary-clang.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-fp/evidence-envelope-fp.json

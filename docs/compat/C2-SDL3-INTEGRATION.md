@@ -4,13 +4,15 @@ Status: EXPERIMENTAL migration contract. SDL3 is **not** built or tested by C2.
 Nothing here is an SDL3 compatibility claim. Arena 1's branch
 (`arena/13f9221b-arenaos`) was read only and is not modified.
 
-> **Phase 16 update (2026-10-25):** streams are ASTR v2 (1,024-byte
-> rings; v1 pages refused), and live focused stdin has a guest suite at
-> the runtime stream API level. The graphical surface/compositor
-> identification blocker (B-GFX-1) and all unsupported-API refusals in
-> this contract remain unchanged. Current development receipts are in
-> `docs/phase16/receipts/dev-guest-2026-10-25-reconstructed/`; B1 still
-> blocks Phase 16 qualification and no Phase 17 work is started here.
+> **Phase 16 update (2026-10-26):** streams are ASTR v2 (1,024-byte
+> rings; v1 pages refused), live focused stdin and Notification
+> ambiguity refusal have canonical GCC/Clang guest receipts, and B1 is
+> resolved. The graphical surface/compositor identification blocker
+> (B-GFX-1) and all unsupported-API refusals in this contract remain
+> unchanged. Current canonical receipts are in
+> `docs/phase16/receipts/canonical-2026-10-26/`; see also
+> `docs/phase16/ARENA1-HANDOFF.md`. Phase 16 is not accepted by this
+> note and no Phase 17/SDL3 work is started here.
 
 The point of this document: Arena 1's G2 SDL3 path carries its own `_start`, its own
 heap, and its own slot constants. C2 provides one shared runtime that Arena 1 can

@@ -70,6 +70,13 @@ exact binary was strictly better.
 
 ## Status vs B1
 
-Guest *execution* is recovered. Guest *integration* (new C apps in a
-rebuilt kernel) still needs B1: official Rust target components for the
-protected Phase 14 fixture identity. See `RECOVERY-LOG.md`.
+Historical note (2026-10-24): guest *execution* was recovered at that
+point, while rebuilt-kernel guest *integration* still needed B1.
+
+**Superseded 2026-10-26:** B1 is resolved with C's official components
+at `02a20fc…`; this same isolated-glibc/patched-QEMU backend then ran
+the canonical qualification-candidate battery at `d314d20…` (targeted
+C suites, registered 121/121, strict Phase 15, and 100/100 stability).
+See `receipts/canonical-2026-10-26/environment.json` for the exact
+wrapper, QEMU, glibc, and firmware identities. Host glibc remains
+unchanged.

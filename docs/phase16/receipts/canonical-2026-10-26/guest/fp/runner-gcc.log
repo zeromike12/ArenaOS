@@ -1,0 +1,34 @@
+PHASE16 CANONICAL RUNNER: suite=fp — B1 resolved; not acceptance
+c-fp-gcc.elf: elf={'sse': 160, 'x87': 16, 'avx': 0, 'avx_examples': []} app={'sse': 59, 'x87': 11, 'avx': 0, 'avx_examples': []} undefined=[]
+FP-AUDIT PASS c-fp-gcc.elf
+[c-fp] building kernel image + ESP ...
+{
+  "exit_lines": [
+    58,
+    71,
+    72
+  ],
+  "fp_results": [
+    [
+      "PASS",
+      66,
+      0,
+      0
+    ],
+    [
+      "FAIL",
+      66,
+      19,
+      0
+    ]
+  ],
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "gcc",
+  "boot_rc": 0,
+  "elapsed_s": 17.0,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-fp/serial-gcc-run1.log"
+}
+FP guest: 1/1 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-fp/summary-gcc.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-fp/evidence-envelope-fp.json

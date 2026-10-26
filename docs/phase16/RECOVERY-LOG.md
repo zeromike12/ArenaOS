@@ -83,3 +83,22 @@ with `tools/dev-env/bootstrap.sh`, PyPI `ziglang==0.17.0`, and
 `tools/dev-env/build-isolated-glibc.sh`; host and guest evidence was
 regenerated under `receipts/dev-guest-2026-10-25-reconstructed/`.
 B1 is unchanged by this recovery.
+
+## B1 resolution and canonical rerun (2026-10-26)
+
+C supplied the official archives as numbered parts in commit
+`02a20fce915bdd0bdbbc24dcdc2fa0b63a1cd7a1`. Following
+`docs/phase16/dependencies/rust-1.97.0/README.md`, all five parts
+passed `PARTS-SHA256SUMS`; both reconstructed archives passed
+`SHA256SUMS` (`5b6702d1…168a`, `2c48c8b6…1ad0`); and their official
+`install.sh` scripts installed the `x86_64-unknown-none` and
+`x86_64-unknown-uefi` components into private `/opt/rust/prefix`.
+The reconstructed `.tar.xz` duplicates were kept outside the repo.
+
+Protected Phase 14 then reproduced exactly only when the worktree was
+bound at the physical path `/workspace/ArenaOS`; home-path and symlink
+attempts failed and are retained in the canonical receipts. No build
+guard or protected hash was changed. At clean `d314d20…`, canonical
+host/targeted guest suites, registered 121/121, strict Phase 15, and
+100/100 stability passed. The 2026-10-25 receipts remain development
+evidence; canonical evidence is `receipts/canonical-2026-10-26/`.

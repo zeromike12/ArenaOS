@@ -1,0 +1,21 @@
+PHASE16 CANONICAL RUNNER: suite=stdin — B1 resolved; not acceptance
+[c-stdin] building kernel image + ESP ...
+{
+  "exit_lines": [
+    58,
+    73,
+    73,
+    58
+  ],
+  "a_eof_bytes": "118",
+  "b_eof_bytes": "7",
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "clang",
+  "boot_rc": 0,
+  "elapsed_s": 23.2,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/serial-clang-run1.log"
+}
+Live-stdin guest: 1/1 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/summary-clang.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-stdin/evidence-envelope-stdin.json

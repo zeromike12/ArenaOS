@@ -1,0 +1,11 @@
+logical pwd: /workspace/ArenaOS
+physical pwd: /workspace/ArenaOS
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-phase14-pie v0.1.0 (/workspace/ArenaOS/userspace/phase14-pie)
+    Finished `release` profile [optimized] target(s) in 0.94s
+Phase-14 static PIE: 23256 bytes, ELF64 ET_DYN x86-64, SHA-256 d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e
+fixture: userspace/phase14-pie/fixture.elf
+Phase-14 signed APB1: 24040 bytes, SHA-256 04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa

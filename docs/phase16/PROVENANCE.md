@@ -61,12 +61,50 @@ profile.
    `SYS_DEBUG_WRITE` reachability is unchanged (still only via the
    explicit legacy opt-in object).
 3. **FP/SSE2 test application + builder added** (`app/c_fp_app.c`,
-   `build_fp_app.py`): a new guest app exercising x87/SSE2 value
-   preservation across C11-thread yields under the ADR-0113 baseline
-   profile (`-march=x86-64 -msse2 -mno-avx*`). The canonical runtime/app
-   builds keep their integer-only flags and ISA audit unchanged; the FP
-   app is built separately with a *positive* audit (SSE2 expected, AVX
-   refused). Status: build/static evidence only until P16.5 unblocks.
+   `build_fp_app.py`, `guest_fp.py`): a new guest app exercising x87/SSE2
+   value preservation across C11-thread yields and blocking transitions
+   under the ADR-0113 baseline profile (`-march=x86-64 -msse2 -mno-avx*`).
+   The canonical runtime/app builds keep their integer-only flags and ISA
+   audit unchanged; the FP app is built separately with a *positive*
+   audit (SSE2 expected, AVX refused). The tightened app initializes all
+   inline-assembly operands and the judge scopes skip detection to
+   `[c-fp]` lines. Canonical GCC/Clang guest PASS at `d314d20…` (positive
+   `66/0/0`, isolated mutant `66/19/0`).
+4. **ASTR v2 coordinated cutover** (accepted ADR-0111): Rust
+   `userspace/arena-runtime` stream code/tests and C headers/sources
+   (`include/arena/abi.h`, `src/streams.c`, startup validation, host
+   models, and guest app layout constants) moved from three 768-byte
+   v1 rings to version-2, 1,024-byte power-of-two rings with wrapping
+   `u32` occupancy and mask indexing. V1/unknown/wrong-capacity pages
+   are explicitly refused. Host coverage includes unread bytes across
+   the counter wrap and a v1-indexing negative control.
+5. **Focused live stdin** (`app/c_stdin_app.c`, `guest_stdin.py`, plus
+   Desktop routing outside the imported runtime): a pre-created console
+   window routes keyboard bytes only to the focused owning AppInstance
+   and Ctrl-D closes only that instance's stdin writer after queued
+   bytes drain. The suite also proves no-grant refusal, burst/backpressure,
+   two-instance isolation, EOF counts, and ASTR-v1 refusal.
+6. **Self-identifying evidence runners** (`guest_phase16_dev.py`,
+   `guest_phase16_canonical.py`): the development runner records its
+   non-qualifying B1 classification; the canonical runner does not
+   substitute `mtest.build` and records B1/component, source-cleanliness,
+   protected-identity, image, backend, firmware, compiler, app, command,
+   and verdict data in every summary.
+7. **Notification ambiguity guest fixture** (`app/c_notification_app.c`,
+   `guest_notification.py`): new signed streams-only probe and restored
+   Desktop mutation suite. No production runtime selection change was
+   needed; the fixture creates the otherwise unreachable two-candidate
+   record only for the labelled mutant boot and asserts byte-exact
+   source/artifact restoration.
+8. **Integration fixes found during guest regression:** Desktop
+   pre-created windows no longer spend their one window wake before app
+   adoption (I-8), and Phase 13's harness waits for lagging search input
+   to settle before clicking (I-9). These are recorded because they are
+   Phase 16 integration divergences outside the imported C runtime tree.
 
-No other runtime source diverges from `84392b8`. `git diff 84392b8 -- experiments/c-runtime`
-(after fetching that branch) reproduces this log exactly.
+The original statement that items 1–3 were the only divergences was
+true at the P16.2 snapshot and is superseded by items 4–8 above. Use
+`git log f103926..d314d20` and `git diff 84392b8..d314d20 --
+experiments/c-runtime` (after fetching the Arena 2 branch) for the full
+machine-checkable divergence; canonical evidence is indexed in
+`receipts/canonical-2026-10-26/README.md`.

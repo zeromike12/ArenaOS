@@ -1,6 +1,15 @@
 # Phase 16 dependency-transfer request (B1) — for M/C
 
-**One ask:** supply these two unmodified official Rust 1.97.0 distribution
+**Resolved 2026-10-26:** C supplied the numbered parts in commit
+`02a20fce915bdd0bdbbc24dcdc2fa0b63a1cd7a1` under
+`docs/phase16/dependencies/rust-1.97.0/`. All parts matched
+`PARTS-SHA256SUMS`; both reconstructed archives matched `SHA256SUMS`;
+the official `install.sh` scripts installed them into the private
+`/opt/rust/prefix`; the protected Phase 14 PIE/APB1 reproduced and the
+canonical battery ran (see `receipts/canonical-2026-10-26/`). The
+original request below is retained as history.
+
+**One ask (historical):** supply these two unmodified official Rust 1.97.0 distribution
 archives (any channel: attached to the repo as release assets, a branch
 transfer commit of the raw files, or another sandbox-reachable copy with
 identical bytes). Everything else in Phase 16 is unblocked.

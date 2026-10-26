@@ -1238,7 +1238,7 @@ Merged to `main` via PR #4 at `f103926`. Records:
 [QUALIFICATION.md](phase15/QUALIFICATION.md). Arena 1/2 integration was
 explicitly *not* qualified by Phase 15.
 
-## Phase 16 — Native C runtime integration 🔨 (bounded, in progress)
+## Phase 16 — Native C runtime integration 🔨 (bounded; qualification candidate submitted)
 
 Integrate Arena 2's existing C runtime as one canonical runtime on the
 Phase 15 foundation: validated ARST v2 startup → stack/TLS/argv/`main`,
@@ -1246,11 +1246,16 @@ shared allocator over native VM bindings, the documented C library subset,
 capability-backed standard streams, C11-subset threads/synchronization,
 exit-status/cleanup, and baseline x87/SSE2 execution under ADR-0113 —
 demonstrated through the signed APB1 launch path. Explicitly out of scope:
-full POSIX/C11, C++, dynamic linking, audio/GPU, major ports. Proposed
-ADR-0111 (stream ring wrap) and ADR-0112 (C runtime profile) await M/C
-decisions and are not adopted by starting this phase. Plan, baseline,
-provenance, and issue register: [docs/phase16/PLAN.md](phase16/PLAN.md).
-Acceptance remains M's; nothing in this section pre-accepts it.
+full POSIX/C11, C++, dynamic linking, audio/GPU, major ports. M accepted
+ADR-0111 (ASTR v2) and bounded ADR-0112 as contracts only on 2026-10-25.
+At clean candidate source `d314d20…`, canonical C1/C2/FP/live-stdin/
+Notification guest suites pass for GCC and Clang, registered regressions
+pass 121/121, strict Phase 15 passes, and the final EFI/ESP completed
+100/100 stability boots. Records:
+[final report](phase16/FINAL-REPORT.md),
+[canonical receipts](phase16/receipts/canonical-2026-10-26/README.md),
+[Arena 1 handoff](phase16/ARENA1-HANDOFF.md). **Not accepted:** M/C review
+and any merge/release decision remain pending; Phase 17 has not started.
 
 ## Phase 17 — Genuine SDL3 execution ⬜ (proposed)
 

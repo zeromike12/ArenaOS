@@ -6,7 +6,7 @@ named), **PINNED-LIMIT** (defect pinned by test, documented limitation, fix
 needs M/C decision), **VERIFIED-OK**, **OPEN** (needs guest access or a
 decision), **HANDOFF** (Phase 17).
 
-## I-1 — Standard-stream ring counter wrap → **FIXED (development-verified)**
+## I-1 — Standard-stream ring counter wrap → **FIXED (canonical-verified)**
 
 Originally reproduced: both implementations indexed the 768-byte ring
 with `counter % 768` over `u32` counters; because 2³² mod 768 = 256,
@@ -19,8 +19,11 @@ Rust and C host tests for seeded near-wrap transfers with unread bytes,
 empty/full/partial/backpressure/EOF/closed-reader behavior, malformed
 occupancy/layout refusal, cross-language layout checks, and an explicit
 v1-indexing negative control; the C1 guest app also covers the near-wrap
-path. Fresh development evidence (not qualification; B1 remains open)
-is in `receipts/dev-guest-2026-10-25-reconstructed/`.
+path. After B1 was resolved, the canonical GCC/Clang C1, C2, and
+live-stdin guest suites passed at clean `d314d20…`, including explicit
+ASTR-v1 refusal (see `receipts/canonical-2026-10-26/`). The earlier
+fresh development evidence remains separately classified in
+`receipts/dev-guest-2026-10-25-reconstructed/`.
 
 ## I-2 — Startup descriptor-count mismatch (M9) → **FIXED**
 
@@ -36,17 +39,25 @@ regression tests: `test_m9_seven_descriptor_stream_sync_record_roundtrips`,
 `test_m9_over_bound_and_unknown_records_still_refuse` in
 `tools/test_startup_abi.py`.
 
-## I-3 — Notification selection / ambiguous candidates → **VERIFIED-OK (runtime), OPEN (guest ambiguity)**
+## I-3 — Notification selection / ambiguous candidates → **FIXED/VERIFIED (host + guest)**
 
 The runtime selects the sole role-Other/RW Notification and refuses zero
 or ambiguous candidates (`arena_startup_pick_notification`,
 `src/startup_query.c`); host tests (`test_notification_selection`) pass in
-the current reproduced HOST-ONLY 1707-check suite. Imported unchanged.
-Remaining gap is Arena 2's own: no *guest* two-candidate ambiguity run
-exists. A guest negative (two RW notifications → `ARENA_E_NO_WAITER`, no
-misbinding) is still required for qualification; development guest
-execution is unblocked, but producing that launcher record was not part
-of the reconstructed targeted suites run on 2026-10-25.
+the current HOST-ONLY 1707-check suite. The previously missing guest
+negative is now implemented in
+`experiments/c-runtime/guest_notification.py` with
+`app/c_notification_app.c`. A launcher audit found no production
+windowed/headless/helper, APB1-capability, stream-grant, or
+service-manager path that can emit two candidates, so the suite uses
+the repository's restored-mutation pattern: production sole-candidate
+boot PASS (exit 75), then a labelled Desktop fixture adds a distinct
+second role-Other/RW Notification and the probe observes selection
+`NONE`, empty-stdin peek `-1005`, immediate blocking
+`ARENA_E_NO_WAITER=-1012`, and exit 76. GCC and Clang passed
+canonically at `d314d20…`; Desktop source and production EFI/ESP/profile
+restoration is asserted byte-exact (see
+`receipts/canonical-2026-10-26/guest/notification/`).
 
 ## I-4 — Clang weak undefined `arena_legacy_write` → **FIXED**
 
@@ -59,7 +70,7 @@ rebuild; host suite and ABI check re-run green; guest harness's
 legacy-symbol refusal in `guest_c2.py` now trips on nothing. The debug
 syscall remains reachable only through the explicit legacy opt-in.
 
-## I-5 — Live stdin behavior → **FIXED (development-verified)**
+## I-5 — Live stdin behavior → **FIXED (canonical-verified)**
 
 Implemented as a narrow Desktop path over the existing capability-owned
 native streams: a windowed stream app receives a pre-created console
@@ -69,10 +80,11 @@ already-queued bytes drain. `experiments/c-runtime/guest_stdin.py`
 drives real QMP keyboard input to two simultaneously running signed C
 apps and requires exact attribution/order, no delivery to the unfocused
 instance, burst/backpressure handling, EOF line/byte counts, no-grant
-refusal, and explicit ASTR-v1 refusal. GCC and Clang both passed with
+refusal, and explicit ASTR-v1 refusal. GCC and Clang first passed with
 exits `[58, 73, 73, 58]` in the 2026-10-25 reconstructed development
-receipts. This is not a general shell or POSIX terminal layer, and B1
-still prevents calling it qualification evidence.
+receipts, then passed again canonically at clean `d314d20…` after B1
+was resolved (`receipts/canonical-2026-10-26/guest/stdin/`). This is
+not a general shell or POSIX terminal layer.
 
 ## I-6 — Process exit vs worker-thread exit → **VERIFIED-OK (with one documented kernel rule)**
 
@@ -126,12 +138,14 @@ expected exit sequence.
 
 ## Environment blockers
 
-**B2 is resolved** for development execution by the exact pinned QEMU
-under an isolated glibc (`BACKEND-RECOVERY.md`); the host system glibc
-was not replaced. **B1 remains open**: official Rust 1.97.0 target
-components are unavailable here, so canonical rebuild/qualification,
-protected-identity reproduction on a canonical build, the full
-registered regression qualification run, 100/100 final-artifact
-stability, fresh-archive qualification, and any acceptance/merge remain
-blocked. Development-image results must keep their explicit
-non-qualifying label.
+**B2 is resolved** by the exact pinned QEMU under an isolated glibc
+(`BACKEND-RECOVERY.md`); the host system glibc was not replaced.
+**B1 is resolved** by C's official Rust 1.97.0 components at
+`02a20fc…`, installed into the private `/opt/rust/prefix` after part
+and whole-archive hash verification. Canonical rebuild/qualification,
+protected-identity reproduction, registered 121/121, strict Phase 15,
+100/100 final-artifact stability, and fresh-archive verification were
+therefore run at `d314d20…` and are indexed in
+`receipts/canonical-2026-10-26/`. Development-image results keep their
+explicit non-qualifying label. Acceptance and merge remain M/C
+decisions, not environment blockers and not consequences of these runs.

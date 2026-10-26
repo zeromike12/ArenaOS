@@ -1,0 +1,37 @@
+PHASE16 CANONICAL RUNNER: suite=notification — B1 resolved; not acceptance
+[c-notify-production] building kernel image + ESP ...
+{
+  "mode": "production",
+  "exit_lines": [
+    75
+  ],
+  "mutant_marker_count": 0,
+  "failures": [],
+  "pass": true,
+  "run": 1,
+  "compiler": "clang",
+  "boot_rc": 0,
+  "elapsed_s": 8.6,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-notification/serial-c-notify-production-clang-run1.log",
+  "image_esp_sha256": "897c2fb07b816e339e3a3c4c7021aee671fa2f54908ea1524b06bcc9bb9619f0",
+  "image_efi_sha256": "850cce0da36daa5d51452a4c4c4f01ae446b09272de293b3e14ad258f3ccaa79"
+}
+[c-notify-mutant] building kernel image + ESP ...
+{
+  "mode": "mutant",
+  "exit_lines": [
+    76
+  ],
+  "mutant_marker_count": 1,
+  "failures": [],
+  "pass": true,
+  "run": 2,
+  "compiler": "clang",
+  "boot_rc": 0,
+  "elapsed_s": 8.4,
+  "serial_log": "/workspace/ArenaOS/experiments/c-runtime/build/guest-notification/serial-c-notify-mutant-clang-run2.log",
+  "image_esp_sha256": "fa9b77f75ac0fe96e186eaa7469421f131b7a2202c2e8adf9cb5de3a177cf011",
+  "image_efi_sha256": "29cf6f1b2ac8aa9a84e9be8710aaf010aa3af4bf52dccce06ccedf92fff0b1dd"
+}
+Phase 16 notification guest: 2/2 exact PASS (summary: /workspace/ArenaOS/experiments/c-runtime/build/guest-notification/summary-clang.json)
+PHASE16 EVIDENCE ENVELOPE (CANONICAL): /workspace/ArenaOS/experiments/c-runtime/build/guest-notification/evidence-envelope-notification.json

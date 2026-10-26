@@ -20,6 +20,19 @@ untouched). Statements below that call the ADRs merely proposed or both
 blockers unresolved are the original plan text and are superseded by this
 update where they conflict.
 
+**Canonical qualification update (2026-10-26):** C supplied the
+official Rust 1.97.0 components in `02a20fc`; B1 is resolved. At clean
+source `d314d204aa86ec4018659f3f211cd3a488d30d87`, the protected Phase
+14 identities reproduced from a physical `/workspace/ArenaOS` bind
+mount; canonical targeted C1/C2/FP/live-stdin/Notification suites pass
+for GCC and Clang; registered regressions pass 121/121; strict Phase
+15 passes on the final and preserved packages; and the final EFI/ESP
+completed 100/100 stability boots. Receipts are in
+`receipts/canonical-2026-10-26/`; the engineering submission is
+`FINAL-REPORT.md`, with `ARENA1-HANDOFF.md` for the proposed next
+phase. This is a qualification candidate for M/C review only — it is
+not acceptance and does not authorize merging, a release, or Phase 17.
+
 ## 0. Branch note (read first)
 
 The assignment directs work onto `main`. This engineering session is pinned

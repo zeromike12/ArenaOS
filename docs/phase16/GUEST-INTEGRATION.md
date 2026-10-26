@@ -8,6 +8,23 @@
 > (`guest_phase16_dev.py`). All results below must be re-run on an official
 > build before they count as qualification evidence.
 
+## Canonical qualification-candidate runs (2026-10-26)
+
+B1 was resolved by C's official components at `02a20fc…`. The targeted
+suites were rerun from clean source `d314d20…` through
+`guest_phase16_canonical.py`, which does not substitute
+`mtest.build`; each unchanged suite built its image with canonical
+`tools/build.sh`. GCC and Clang all passed: Native/C1 (98 checks), C2
+(88 checks + xxHash), FP (positive `66/0/0`, mutant `66/19/0`), live
+stdin (focused isolation/backpressure/EOF, no-grant and ASTR-v1
+refusals), and Notification production/ambiguity (exits 75/76).
+Registered regressions then passed 121/121, and strict Phase 15 plus
+100/100 stability passed on final EFI `850cce0d…aa79` / ESP
+`65b48901…19d9`. Full self-identifying receipts are in
+`receipts/canonical-2026-10-26/`; this remains a candidate for M/C
+review, not acceptance. The development sections below are historical
+superseded context.
+
 ## Superseding reconstructed runs (2026-10-25)
 
 The 2026-10-24 table below is historical stale-image evidence (including
@@ -58,7 +75,7 @@ mutant (deliberately corrupted probe value) was detected in-guest:
 (Note: app verdict wording is `VERDICT`, not `RESULT`, because `mtest`
 treats any `RESULT FAIL` substring as a fatal milestone marker.)
 
-## Not yet executed / remaining gaps
+## Not yet executed / remaining gaps (2026-10-24 historical; superseded above)
 
 - **Live stdin through a granted stream**: the desktop currently offers no
   input path into a headless stream app's stdin channel; C2 G2 classifies
