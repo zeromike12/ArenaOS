@@ -446,8 +446,8 @@ def _manifest_external_paths(root: Path, entries: list,
             for v in obj:
                 dep_specs(v)
 
-    for rel, _s, _d, _t in entries:
-        if Path(rel).name != "Cargo.toml":
+    for rel, size, _d, _t in entries:
+        if Path(rel).name != "Cargo.toml" or size < 0:
             continue
         manifest = root / rel
         found: list[str] = []
