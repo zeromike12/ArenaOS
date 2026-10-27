@@ -65,6 +65,14 @@ The passing attempt recorded 507 boots and 5,866.0 s of boot time. These
 are host- and cache-state-specific measurements, not a normalized speed
 ratio against Phase 16 or another machine.
 
+Use the short paths as development feedback: `quick` and explained
+`affected` selections in the edit loop, named suites/repeats for
+investigation, and the broad `full` selection at integration or
+PR-readiness gates. The time difference is mostly real guest work, so a
+short pass should be reported as scoped evidence rather than stretched
+into a qualification claim. Formal qualification remains with
+`tools/run_tests.sh` until M/C approve a separate promotion.
+
 ## Accepted Phase 16 baseline (old runner)
 
 From

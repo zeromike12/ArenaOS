@@ -1,13 +1,88 @@
 # Testing infrastructure workstream — final report
 
-Date: 2026-10-26; review-correction addendum 2026-10-27 (sandbox run dates
-recorded as 2026-10-27 UTC in run IDs)
+Date: 2026-10-26; review-correction and closeout addenda 2026-10-27
+(sandbox run dates recorded as 2026-10-27 UTC in run IDs)
 
 Branch: `arena/fd828627-arenaos`
 
-Authority requested: M/C review. This branch is not merged to `main`, does
-not start a new OS phase, and does not replace the accepted qualification
+Status: ready for M's review. C recommends accepting this work as
+**development testing infrastructure**. M's final acceptance and merge
+decision remain pending. This branch is not merged to `main`, does not
+start a new OS phase, and does not replace the accepted qualification
 runner by fiat.
+
+## Closeout — resulting behavior
+
+This candidate adds a documented development testing entry point
+through `tools/arena_test.py`:
+
+- **Fast and focused feedback:** `quick`, conservative `affected`
+  selection, and named `suite` runs provide scoped signals while
+  preserving the exact selection in each run record.
+- **Complete recorded regression:** `full` runs the recorded 138-entry
+  development selection; `qualify` is an implemented, proposed
+  qualification-shaped path, not yet an approved replacement for the
+  authoritative runner.
+- **Evidence that survives retries:** every run, attempt, build, and
+  boot receives unique storage, so a later pass cannot overwrite the
+  serial/output evidence of an earlier failure.
+- **Build reuse only for identified inputs:** effective source, Cargo,
+  toolchain, environment, and external inputs are content-identified;
+  unidentified inputs refuse reuse instead of sharing an uncertain key.
+- **Deadlines that do not depend on output:** attempts use a monotonic
+  process-group deadline and cleanup whether the child is silent,
+  stalls, or writes continuously.
+- **Portable fail-closed verification:** an extracted run must contain
+  the selected attempts and entry-appropriate raw evidence, with
+  hashes and verdicts that agree; fabricated, contradictory,
+  interrupted, or incomplete success claims are rejected.
+
+### Authority boundary
+
+- `quick` and `affected` are development feedback, not milestone
+  qualification.
+- `full` is complete regression coverage for its recorded selection,
+  not every milestone acceptance requirement.
+- `tools/run_tests.sh` **remains authoritative for formal
+  qualification**.
+- `qualify` is implemented but **has not been approved** as its
+  replacement.
+- Parallel execution remains opt-in and **is not approved for
+  qualification evidence**.
+
+### C's independent review
+
+C's closeout review confirmed the following:
+
+- commits after tested source `30fe810` were documentation/evidence
+  only;
+- the sealed archive's external SHA-256 verified;
+- all 6,317 files listed in the archive manifest matched their internal
+  SHA-256 values;
+- all six complete extracted runs verified, including the recorded
+  uninterrupted **138/138** full run;
+- the corrected host infrastructure controls ran successfully in C's
+  review environment.
+
+C did **not** independently repeat the full guest run. C's local
+fake-QEMU control was skipped because that environment lacked OVMF;
+the recorded backend evidence was nevertheless included in the archive
+whose contents C verified. This report therefore does not present C's
+review as an independent rerun of the two-hour guest regression.
+
+Reviewed snapshot links, pinned to documentation/evidence head
+`cb0f59295e672c753a5d82c42ecc9a1bbbda7495`:
+
+- [Reviewed final report](https://github.com/zeromike12/ArenaOS/blob/cb0f59295e672c753a5d82c42ecc9a1bbbda7495/docs/testing/FINAL-REPORT.md)
+- [Sealed evidence archive](https://github.com/zeromike12/ArenaOS/blob/cb0f59295e672c753a5d82c42ecc9a1bbbda7495/docs/testing/evidence/T-correction-2026-10-27/arenaos-testing-correction-evidence-30fe810.tar.gz)
+- [Archive SHA-256 sidecar](https://github.com/zeromike12/ArenaOS/blob/cb0f59295e672c753a5d82c42ecc9a1bbbda7495/docs/testing/evidence/T-correction-2026-10-27/arenaos-testing-correction-evidence-30fe810.tar.gz.sha256)
+- [Fresh-extraction verification log](https://github.com/zeromike12/ArenaOS/blob/cb0f59295e672c753a5d82c42ecc9a1bbbda7495/docs/testing/evidence/T-correction-2026-10-27/EXTRACT-VERIFY.log)
+- [Compact pre-review receipts](https://github.com/zeromike12/ArenaOS/tree/cb0f59295e672c753a5d82c42ecc9a1bbbda7495/docs/testing/receipts/T-2026-10-26)
+
+C recommends acceptance within the development-infrastructure scope
+above. That recommendation does not promote `qualify`, authorize
+parallel qualification, close Q-1 as a whole, or substitute for M's
+final acceptance/merge decision.
 
 ## Correction addendum — current status
 
@@ -51,8 +126,9 @@ The principal improvements are:
    per-boot serial/QEMU evidence, source state, artifact hashes, timing,
    and backend identity.
 2. **Fast development signals exist without weakening full coverage.**
-   `quick` passed in 25.8 s and a docs-only affected run passed in 26.2 s on
-   the constrained 2-CPU sandbox.
+   Corrected `quick` passed in 31.1 s on the constrained 2-CPU sandbox;
+   the earlier pre-review quick/docs-only affected measurements were
+   25.8 s and 26.2 s.
 3. **Repeated identical builds are avoided fail-closed.** The corrected
    schema-2 fingerprint covers effective Cargo/profile/toolchain inputs or
    disables reuse with a recorded blocker. At tested source `30fe810`,
@@ -65,7 +141,8 @@ The principal improvements are:
    fell from 8.47–8.49 s to 1.91–2.01 s with the canonical EFI unchanged.
 5. **Isolated parallelism is implemented and proved at small scale.**
    A warm four-entry set took 20.7 s at `--jobs 2` versus 37.4 s serial.
-   Serial remains the default and qualification posture.
+   Serial remains the default; parallel results are not approved as
+   qualification evidence.
 6. **All current registry entries were exercised successfully in the rebuilt
    environment:** pre-review segmented coverage was 150/150, and the
    corrected runner subsequently completed the 138-entry `full` selection
@@ -90,6 +167,7 @@ The principal improvements are:
 | Q-1 investigation | `docs/testing/Q1-INVESTIGATION.md` |
 | Compact receipts | `docs/testing/receipts/T-2026-10-26/` |
 | Sealed correction evidence | `docs/testing/evidence/T-correction-2026-10-27/` |
+| Contributor closure note | `docs/testing/CLOSURE-NOTE.md` |
 
 ## What changed in product/test code
 
@@ -299,6 +377,19 @@ Not claimed:
 
 - a normalized full-run speedup over Phase 16 attempt 2.
 
+### How future work should use the run scopes
+
+- Use `quick` in the ordinary edit/test loop when a roughly half-minute
+  smoke signal is appropriate.
+- Inspect `affected --explain` before running an affected selection, and
+  use named `suite` runs (with `--repeat` for timing-sensitive failures)
+  to investigate a specific behavior without erasing prior attempts.
+- Reserve the roughly two-hour `full` selection for integration gates,
+  shared-harness changes, PR readiness, and other points where broad
+  recorded regression is worth its guest-boot cost.
+- Continue using `tools/run_tests.sh` for formal qualification until the
+  separate promotion review below has been completed and approved.
+
 The current registered subset's pre-review segmented attempt sum
 (7,121.7 s) is slower than the accepted Phase 16 attempt 2 wall time
 (6,574 s), despite component build savings. The corrected warm-cache
@@ -307,6 +398,37 @@ and host throughput is not normalized (the rebuilt sandbox exposes
 2 CPUs), so neither is a like-for-like Phase 16 speed ratio. The passing
 full remains dominated by 5,866.0 s of recorded guest boot time. See
 `BASELINE.md` for the breakdown and the reasoning.
+
+## Future review required to promote `qualify`
+
+Promoting `tools/arena_test.py qualify` from an implemented proposal to
+the authoritative qualification path would require a separate review and
+explicit M/C approval. At minimum, that review should:
+
+1. define the exact milestone claim and prove selection equivalence with
+   `tools/run_tests.sh` plus every additional required strict,
+   stability, package, backend, and final-artifact gate;
+2. run one uninterrupted, monolithic `qualify` on the exact candidate
+   source and identified backend, from a clean committed tree at the
+   required physical path, serially and without `--force`;
+3. compare old/new runner selections and outcomes sufficiently to show
+   that no registered or external gate is silently omitted, weakened,
+   retried away, or reclassified;
+4. preserve and independently verify the complete run after fresh
+   extraction, including source/backend/artifact identities and cache
+   state;
+5. keep the accepted 100-boot stability methodology intact unless a
+   different methodology is separately justified and approved;
+6. disposition or explicitly waive open reliability items relevant to
+   the candidate, including `m9-client-death` and the separately tracked
+   `m9-resources` transient-count observation;
+7. treat parallel qualification as another separate decision requiring
+   serial-versus-parallel equivalence, host resource limits, and
+   timing-risk review; and
+8. record evidence-retention and failure-handling rules before the new
+   path is used for a formal claim.
+
+None of that promotion work is started or claimed by this closeout.
 
 ## Q-1 disposition
 
@@ -322,7 +444,8 @@ Corrective action: pace pkg recovery boots on
 `packaged READY` **or** the explicit `boot namespace scan refused`
 settlement. Assertions unchanged.
 
-**Request:** close this leg as a harness pacing race.
+**Disposition:** C recommends closing this leg as a resolved harness
+pacing race. M's final issue/acceptance decision remains pending.
 
 ### `m9-client-death`
 
@@ -331,9 +454,35 @@ kernel retirement deadline makes a liveness/timing hypothesis plausible, but
 the exact fatal reason is not preserved. Twenty evidence-preserving repeats
 in the rebuilt environment passed, including under CPU load.
 
-**Request:** keep this leg open under A/C. Do not label it harmless or widen
-the deadline based on rerun passes. The new evidence machinery is the
-tripwire if it recurs.
+**Disposition:** keep this leg open under A/C. Do not label it fixed,
+harmless, or proven environmental, and do not widen the kernel deadline
+based on rerun passes. If it recurs, preserve the complete attempt and
+classify it from the raw serial before retrying. The new evidence
+machinery is the tripwire.
+
+### Separately tracked: `m9-resources`
+
+This is not the original Q-1 `m9-client-death` leg. In corrected full
+attempt 2, `m9-resources` failed because an unsynchronized compositor
+diagnostic reported 17 live processes while the test asserted the
+transient snapshot value 15. The settled shell counts (16→15) and exact
+shared-region/pages/maps retirement accounting held. Ten preserved
+repeats and the following full passed with the assertion unchanged.
+
+The sealed archive above contains the complete failed attempt under:
+
+```text
+runs/full-failed-attempt2-20261027T162612Z-full-30fe810-259917-b23647/attempts/m9-resources/
+```
+
+and the repeats under:
+
+```text
+runs/m9-resources-repeat10-20261027T182829Z-suite-30fe810-434082-eb79ed/
+```
+
+Track it as a separate open reliability observation. The passing
+repeats do not prove it harmless, fixed, or environmental.
 
 ## Known limitations
 
@@ -355,34 +504,32 @@ tripwire if it recurs.
 5. Affected mapping is intentionally conservative and incomplete by design:
    unknown paths select the registered set. It should be refined only with
    evidence that a narrower selection is semantically complete.
-6. The sealed repository archive contains the passing full whole, but the
-   two failed fulls are represented by run-level records plus their
-   failing attempts rather than every passing tree. M/C should decide
-   whether whole superseded failed runs must also be published; the raw
-   directories are retained in the originating workspace.
-7. `m9-resources` failed once because an unsynchronized compositor
-   diagnostic reported 17 live processes rather than the test's exact
-   snapshot 15, even though settled counts and retirement accounting were
-   exact. Ten repeats and the next full passed without changing the
-   assertion. This is a separate intermittent snapshot/scheduling issue
-   for A/C to disposition if it recurs; it is not evidence that
-   `m9-client-death` is fixed or harmless.
+6. The sealed repository archive contains the passing full whole and the
+   complete failing attempts from the two superseded failed fulls. C
+   accepted that representation as sufficient for this review; it does
+   not duplicate every passing attempt tree from the superseded runs.
+7. `m9-resources` remains a separately tracked open observation after
+   its one transient process-count failure. Settled counts and
+   retirement accounting were exact, and ten repeats plus the next full
+   passed without changing the assertion, but that does not prove the
+   observation harmless, fixed, or environmental. It is also not
+   evidence about the cause of `m9-client-death`.
 
 ## Recommended acceptance path
 
-1. Accept the corrected fail-closed evidence model, registry, schema-2
-   cache, output-independent timeout enforcement, quick/affected/suite
-   modes, and the m84 settlement pacing for development use.
-2. Keep `tools/run_tests.sh` authoritative for the next formal qualification
-   unless M/C explicitly bless `arena_test.py qualify` after an uninterrupted
-   comparison run.
-3. Close Q-1's m84 leg; keep the m9 leg open with the evidence requirements
-   in `Q1-INVESTIGATION.md`.
-4. Before parallel qualification is considered, run a complete
-   serial-vs-parallel comparison on a host with documented CPU/memory and
-   investigate any timing-sensitive discrepancy as a potential product or
-   harness issue, not as noise.
-5. Decide whether the sealed-archive representation of superseded failed
-   fulls is sufficient or whole failed-run publication is required, and
-   disposition the separate `m9-resources` transient-count observation.
-   Do not merge this PR as part of Agent T's correction task.
+C recommends acceptance of the corrected fail-closed evidence model,
+registry, schema-2 cache, output-independent timeout enforcement,
+quick/affected/suite/full modes, and m84 settlement pacing as
+**development testing infrastructure**. The remaining decisions for M
+are:
+
+1. final acceptance and whether/when to merge this PR;
+2. closing Q-1's m84 leg, as C recommends, while keeping
+   `m9-client-death` open and separately tracking `m9-resources`;
+3. retaining `tools/run_tests.sh` as the formal-qualification authority
+   unless a future promotion review explicitly approves `qualify`;
+4. keeping parallel execution non-qualification until its own
+   serial-equivalence and resource-policy review is complete.
+
+Marking this PR ready for review does not merge it, accept it, or
+promote any run mode beyond the boundary above.

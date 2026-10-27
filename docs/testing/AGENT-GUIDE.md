@@ -24,6 +24,37 @@ Run from the canonical repository root (`/workspace/ArenaOS` in the sandbox):
 Always report the concrete run ID from `build/test-runs/`, never just
 `latest`.
 
+## Authority boundary
+
+C recommends this infrastructure for **development testing**. That does
+not change formal qualification authority:
+
+- `quick` and `affected` are development feedback, not milestone
+  qualification.
+- `full` is complete regression coverage for its recorded selection,
+  not every milestone acceptance requirement.
+- `tools/run_tests.sh` remains authoritative for formal qualification.
+- `qualify` is implemented but has **not** been approved as a
+  replacement.
+- `--jobs N` with `N > 1` is opt-in development parallelism and is
+  **not approved** for qualification evidence.
+
+Do not soften those distinctions in handoffs, PR text, or release notes.
+
+## Choosing run scope
+
+- During active development, use `quick`, a named `suite`, or an
+  explained `affected` selection; report omitted entries honestly.
+- For shared harness/build/kernel/service changes or integration gates,
+  run the serial `full` selection. On the correction host, corrected
+  `quick` took 31.1 s, while warm-cache `full` took 6,866.0 s including
+  about 5,866 s of guest boots.
+- For intermittent failures, inspect and preserve attempt 1 before
+  adding `--repeat` attempts.
+- For formal qualification, follow `tools/run_tests.sh` and the
+  project's accepted evidence process until a separate promotion
+  review approves the new path.
+
 ## Evidence rules
 
 1. Do not delete or edit a run directory to make it agree with a later run.
@@ -189,10 +220,35 @@ Use these terms exactly:
 - Quick pass: development smoke only.
 - Affected pass: selected development evidence only.
 - Suite pass: focused evidence only.
-- Full pass: complete development set, not automatically a phase
-  qualification.
-- Qualify pass: qualification-shaped evidence only if preconditions were met
-  without `--force` and the applicable project authority accepts the runner.
+- Full pass: complete regression coverage for the recorded selection,
+  not every milestone acceptance requirement and not automatically a
+  phase qualification.
+- Qualify pass: evidence from a proposed qualification-shaped path only
+  if preconditions were met without `--force`; it is not an approved
+  replacement for `tools/run_tests.sh`.
 
 Never describe an omitted suite as passed. The report's omitted count and
 selection reason are part of the result.
+
+## Promotion review for `qualify`
+
+Do not begin promotion work as an incidental side effect of using this
+runner. A future promotion proposal must separately:
+
+1. prove equivalence with `tools/run_tests.sh` and all additional
+   strict/stability/package/backend/final-artifact gates;
+2. complete one uninterrupted serial monolithic `qualify` on the exact
+   candidate source and identified backend, without `--force`;
+3. demonstrate that no gate is omitted, weakened, retried away, or
+   reclassified by the new selection/evidence model;
+4. preserve the run, verify it after fresh extraction, and record cache
+   state and exact source/backend/artifact identities;
+5. retain the accepted 100-boot stability methodology unless separately
+   approved otherwise;
+6. disposition or explicitly waive relevant open reliability items;
+7. keep parallel qualification as a separate approval requiring
+   serial-equivalence and resource-policy evidence; and
+8. obtain explicit M/C approval and define retention/failure rules.
+
+Until then, cite `qualify` results only as qualification-shaped
+development evidence.

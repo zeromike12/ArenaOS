@@ -16,10 +16,13 @@ legs:
 
 | Leg | Classification | Status |
 |---|---|---|
-| `m84-crash` | Preserved serial proves a host harness pacing race | Fixed in test pacing; assertions unchanged |
+| `m84-crash` | Preserved serial proves a host harness pacing race | **C recommends closure as resolved harness pacing; M's final decision pending** |
 | `m9-client-death` | Mechanism plausible but not reproduced; original serial lost | **Remains open for A/C disposition** |
 
-Nothing here declares Q-1 wholly closed. That remains an M/C decision.
+Nothing here declares Q-1 wholly closed. The m84 recommendation does
+not close the separate `m9-client-death` leg, and the later
+`m9-resources` observation documented below is a separate tracked issue
+rather than a third Q-1 conclusion.
 
 Primary Phase 16 evidence:
 
@@ -130,10 +133,13 @@ partial-settlement refusal, and `nth` alternative semantics, and both
 full attempts (including 208.5 s and 289.8 s respectively in the final
 passing full). Assertions and guest deadlines remain unchanged.
 
-### Disposition requested
+### Review disposition
 
-Close the `m84-crash` leg as a harness pacing race, with the settlement gate
-as the corrective action.
+C recommends closing the `m84-crash` leg as a resolved harness pacing
+race, with the settlement gate as the corrective action and the original
+failure/assertions preserved above. M's final closure/acceptance
+decision remains pending; this document does not declare the leg closed
+unilaterally.
 
 Whether packaged-service queries issued before settlement should queue
 instead of using the current service behaviour is a product/API question for
@@ -229,14 +235,56 @@ rerun away:
 Boot JSON also records QEMU exit separately from semantic verdict, so a UEFI
 fatal ResetSystem returning process 0 cannot be misread as success.
 
-### Disposition requested
+### Review disposition
 
-Keep the `m9-client-death` leg open.
+Keep the `m9-client-death` leg **open**.
 
 The evidence supports "not reproduced under the stated bounded conditions,"
 not "harmless," "environmental," or "fixed." Do not widen the kernel's 2
 second deadline blindly. If A/C want a product-side investigation, the next
-preserved failing serial should drive it.
+preserved failing serial should drive it. Preserve that complete attempt
+and classify it using the discriminators above before any retry is allowed
+to become the story.
+
+## Separate tracked issue: `m9-resources` transient process count
+
+This observation arose during the 2026-10-27 correction pass. It is
+**not** part of the original Q-1 pair and must not be used either to
+close Q-1 or to infer the cause of `m9-client-death`.
+
+In full attempt
+`20261027T162612Z-full-30fe810-259917-b23647`, `m9-resources` failed
+its exact assertion on this compositor diagnostic:
+
+```text
+[arena INFO  m9] compositor: live processes 17; ...
+shared 3/96, pages 507/36864, maps 6/160
+```
+
+The test asserted the same line with 15 live processes. The preserved
+serial shows boot processes still spawning/running around that
+unsynchronized snapshot. The later settled measurements were exact:
+shell records/processes went from 16/16 to 15/15 after the original
+child retired, and shared regions/pages/maps and the retirement line
+matched the expected 3/96→2/96, 507→488, and 6/160→4/160 transitions.
+
+The sealed archive linked from `FINAL-REPORT.md` contains:
+
+- the complete failed attempt at
+  `runs/full-failed-attempt2-20261027T162612Z-full-30fe810-259917-b23647/attempts/m9-resources/`;
+- ten passing preserved repeats at
+  `runs/m9-resources-repeat10-20261027T182829Z-suite-30fe810-434082-eb79ed/`,
+  each reporting 15;
+- the next uninterrupted full, where `m9-resources` passed.
+
+No assertion, kernel deadline, or product behavior was changed in
+response. Those passes do **not** establish that the observation is
+harmless, fixed, or proven environmental. Track it separately as open
+reliability evidence. If it recurs, preserve the first attempt and
+compare both the transient diagnostic ordering and settled retirement
+accounting before deciding whether the product leaked resources or the
+test needs a semantically synchronized snapshot—which would require
+its own review rather than quietly broadening the expected value.
 
 ## Structural corrective actions now in place
 
@@ -249,4 +297,7 @@ preserved failing serial should drive it.
 - `verify-run` fails closed if cited evidence is missing or altered.
 - The corrected full and focused evidence are sealed in
   `docs/testing/evidence/T-correction-2026-10-27/` with an external
-  SHA-256 sidecar and fresh-extraction verification log.
+  SHA-256 sidecar and fresh-extraction verification log. C accepted
+  the complete passing full plus complete failing attempts from the
+  superseded runs as sufficient for this review; their passing attempt
+  trees were not duplicated merely for closeout.
