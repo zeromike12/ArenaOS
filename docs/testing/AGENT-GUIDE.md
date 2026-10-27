@@ -81,8 +81,10 @@ and say so in the handoff.
   Rust artifacts embed absolute paths.
 - Workers share `/tmp/arena-test-cache` unless
   `ARENA_TEST_BUILD_CACHE_DIR` is explicitly supplied.
-- Entries whose registry metadata says `serial`, including fragile
-  source-mutation cases, do not enter the pool.
+- Entries whose registry metadata says `serial` do not enter the pool.
+  Source-mutating `worktree` entries may enter only because the mutation is
+  confined to that worker checkout; the runner records status around the
+  attempt and resets the worktree before its next suite.
 - Parallel mode refuses untracked non-ignored files because workers are
   snapshot worktrees.
 - Do not use parallel results as qualification evidence without explicit
@@ -145,7 +147,9 @@ Mutation suites are safety-critical test infrastructure. They must:
 - preserve mutation and restored-build evidence separately;
 - restore byte-exact content even on failure paths;
 - fail if restoration cannot be proven;
-- remain serial unless isolation has been specifically proven.
+- remain serial in a shared checkout; use the isolated worker pool only when
+  the registry marks the entry `worktree` and that isolation has been proven
+  for its fixture/port behaviour.
 
 Do not let the build cache confuse canonical and mutant builds. Their source
 contents differ, therefore their fingerprints must differ; if they do not,

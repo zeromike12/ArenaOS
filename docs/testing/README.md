@@ -185,10 +185,13 @@ Parallel execution is available but is not the default:
 python3 tools/arena_test.py suite smoke-m1 host-heap --jobs 2
 ```
 
-Parallel entries run in isolated Git worktrees and network namespaces.
-Source-mutating and explicitly serial entries remain serial. Use serial
-execution for qualification evidence unless the project has accepted a
-parallel qualification methodology.
+Parallel entries run in isolated Git worktrees and network namespaces. Most
+source-mutating suites may enter that pool because their mutation is confined
+to a worker checkout which is reset after the attempt; the six registry
+entries marked `serial` (the canonical-final/strict/stability/package/backend
+gates) always run after the pool. Use serial execution for qualification
+evidence unless the project has accepted a parallel qualification
+methodology.
 
 ## More detail
 
