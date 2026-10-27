@@ -35,7 +35,35 @@ speedup percentage.
   APB1 `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa`
 
 Each current run records this identity in its own `run.json`; the summary
-receipts are under `receipts/T-2026-10-26/`.
+receipts are under `receipts/T-2026-10-26/`, and the sealed correction
+evidence is under `evidence/T-correction-2026-10-27/`.
+
+## Correction-pass measurements (current cache identity)
+
+C's review invalidated the pre-review fingerprint as a safety claim, so
+its 0.25 s hit mean below is historical only. On corrected source
+`30fe810`, with the same 2-CPU pinned-TCG host:
+
+| Measurement | Result |
+|---|---:|
+| Canonical fingerprint computation | 0.636 s over 1,419 tree files |
+| Direct canonical build, cold | 36.447 s |
+| Direct canonical build, warm | 1.784 s |
+| Representative phase9 isolated-cache miss/store | 20.111 s outer |
+| Representative phase9 hit | 0.982 s outer |
+| Corrected quick | 31.1 s, 10/10 |
+
+Uninterrupted corrected full attempts:
+
+| Attempt | Result | Wall | Build records |
+|---|---|---:|---|
+| `20261027T141830Z-full-ab38d4d-108026-dc6887` | FAIL 137/138, Phase 13 pacing | 6,997.4 s | 48 miss-stored (558.4 s, 11.633 s mean); 118 hits (100.5 s, 0.852 s mean) |
+| `20261027T162612Z-full-30fe810-259917-b23647` | FAIL 137/138, transient M9-resources count | 7,117.0 s | 48 miss-stored (552.0 s, 11.499 s mean); 118 hits (96.7 s, 0.819 s mean) |
+| `20261027T183025Z-full-30fe810-434497-768c5a` | **PASS 138/138** | 6,866.0 s | Warm cache: 166 hits (153.1 s, 0.922 s mean), no misses |
+
+The passing attempt recorded 507 boots and 5,866.0 s of boot time. These
+are host- and cache-state-specific measurements, not a normalized speed
+ratio against Phase 16 or another machine.
 
 ## Accepted Phase 16 baseline (old runner)
 
@@ -69,10 +97,12 @@ file is embedded into the kernel build, so Cargo repeatedly recompiled
 The fix does not bypass the Phase 14 hash guards. A deliberately corrupted
 fixture was restored byte-for-byte by the guarded build path.
 
-### Repeated identical builds dominated build calls
+### Repeated identical builds dominated build calls (pre-review identity)
 
-In the seven batches covering the 138-entry `full` selection, the harness
-recorded 166 `mtest.build()` calls:
+In the seven pre-review batches covering the 138-entry `full` selection,
+the harness recorded 166 `mtest.build()` calls. The counts explain the
+optimization opportunity, but the hit timing is not reused as a safety or
+performance claim for the corrected fingerprint:
 
 | Cache result | Calls | Total build-call time | Mean |
 |---|---:|---:|---:|
@@ -84,9 +114,11 @@ There were 49 distinct fingerprints. Two canonical profiles accounted for
 115 calls. Of the hits, 85 followed the same fingerprint immediately and 33
 followed a fingerprint switch (the historic profile-toggle/relink case).
 
-The cache fingerprint measurement was 0.186 s over 1,411 relevant files in
-the pre-reset sandbox; restored artifacts were hash-verified. A cache hit is
-therefore not "free", but it is about 0.25 s instead of a build traversal.
+The pre-review fingerprint measurement was 0.186 s over 1,411 relevant
+files in the pre-reset sandbox. Schema 2 deliberately spends more (0.636 s
+in the current canonical report) to identify effective configuration and
+toolchain inputs. A corrected hit is therefore not "free": roughly
+0.82–0.92 s in the full attempts instead of an 11.5 s average real build.
 
 ### Guest execution is the main end-to-end cost
 
@@ -112,8 +144,8 @@ few-minute run. The large wins are:
 
 | Command shape | Result | Wall time |
 |---|---|---:|
-| `arena_test.py quick` | 10/10 pass | 25.8 s |
-| Docs-only `arena_test.py affected --base HEAD^` | 10/10 pass | 26.2 s |
+| `arena_test.py quick` | 10/10 pass | 25.8 s pre-review; 31.1 s corrected |
+| Docs-only `arena_test.py affected --base HEAD^` | 10/10 pass | 26.2 s pre-review |
 
 The smoke entry took 20.8 s in the measured quick run; the host entries and
 infra controls together were only a few seconds. Quick remains under a
@@ -194,8 +226,12 @@ The per-entry build/boot/other split is in
 
 - The old 6,574-second registered run and new segmented run cannot be used
   as a normalized before/after wall-clock ratio.
-- Warm-build and build-cache gains are directly measured at the component
-  where they occur.
+- Warm-build and corrected build-cache gains are directly measured at the
+  component where they occur; correctness costs about 0.6–0.9 s per hit
+  on this host and is not hidden.
+- The passing corrected full was warm-cache because the immediately
+  preceding same-source full/focused runs had populated all 49
+  fingerprints. Attempt 2 provides the same-source miss/hit split.
 - The dominant remaining costs are real guest boots, deliberate mutation
   builds, interactive desktop waits, and the AFS2 host model.
 - Quick/affected modes provide the practical developer-time improvement;

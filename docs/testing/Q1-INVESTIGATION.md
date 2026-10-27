@@ -123,6 +123,13 @@ strictly after either `packaged READY` or
 The same suites also passed later inside full-selection batches
 (`m84-crash` 296.3 s in chunk 4 and `m84-stage` 213.4 s in chunk 5).
 
+Correction-pass validation on 2026-10-27 preserved this disposition: the
+infrastructure controls explicitly pass flat-conjunction, nested any-of,
+partial-settlement refusal, and `nth` alternative semantics, and both
+`m84-stage` and `m84-crash` passed in each of the three uninterrupted
+full attempts (including 208.5 s and 289.8 s respectively in the final
+passing full). Assertions and guest deadlines remain unchanged.
+
 ### Disposition requested
 
 Close the `m84-crash` leg as a harness pacing race, with the settlement gate
@@ -200,7 +207,10 @@ few serial lines. The compositor/root order can swap, but neither was absent
 and no `[arena ERROR halt]` appeared.
 
 `m9-client-death` and `m9-client-death-red` also passed in full-selection
-chunk 6.
+chunk 6. They passed again in all three corrected uninterrupted full
+attempts on 2026-10-27. Those are additional passing observations only:
+the original failing serial is still absent, so this leg remains open and
+is not labelled fixed, harmless, or environmental.
 
 ### What evidence would discriminate the hypotheses next time
 
@@ -237,3 +247,6 @@ preserved failing serial should drive it.
   artifact hashes, source status/diff, and backend identity preserved.
 - A passing retry cannot convert a run with a failed attempt to green.
 - `verify-run` fails closed if cited evidence is missing or altered.
+- The corrected full and focused evidence are sealed in
+  `docs/testing/evidence/T-correction-2026-10-27/` with an external
+  SHA-256 sidecar and fresh-extraction verification log.

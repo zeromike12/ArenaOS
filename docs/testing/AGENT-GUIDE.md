@@ -38,6 +38,11 @@ Always report the concrete run ID from `build/test-runs/`, never just
    passing with a caveat.
 6. Do not modify tracked source files while a run is executing. The runner
    compares source status at start/end and will fail the run.
+7. Treat `selection.json` as the run's contract. Do not cite a PASS unless
+   `verify-run` succeeds on that concrete directory after extraction.
+8. Attempt deadlines are monotonic and output-independent. A suite that
+   prints continuously, stalls without a newline, or leaves descendants
+   holding its pipe still times out and is reaped as a process group.
 
 ## Backend rules
 
@@ -57,15 +62,22 @@ Always report the concrete run ID from `build/test-runs/`, never just
 The cache is enabled by the new runner through `ARENA_TEST_BUILD_CACHE=1`.
 Its key is not a Git commit. It covers, among other things:
 
-- contents of build-relevant source files;
-- build profile and build-affecting environment;
-- compiler/toolchain identities;
-- absolute repository path;
-- generated inputs that can change the image.
+- contents of build-relevant source files, following symlink targets;
+- semantic Cargo config from the repo, ancestors and `CARGO_HOME`;
+- effective profile, target, features, flags, linker/wrapper selection and
+  source-declared build-affecting environment (hashed selectively, never a
+  whole-environment dump);
+- compiler, target-library, host-tool and participating Python-module
+  identities;
+- manifests, locks, build scripts, linker scripts and reachable external
+  path inputs;
+- absolute repository path and generated inputs that can change the image.
 
-A cache entry is published only when complete, and restored artifacts are
-hash-verified. A tampered or incomplete entry must be a miss/failure, never a
-best-effort reuse.
+If any supported input cannot be identified conservatively, reuse is
+disabled with explicit blockers and the real build runs. A cache entry is
+published only when complete, and lookup revalidates its enabled identity,
+metadata and artifact hashes. A tampered or incomplete entry must never be
+a best-effort reuse.
 
 Use `--no-build-cache` only for controlled comparisons or cache debugging,
 and say so in the handoff.
@@ -157,8 +169,9 @@ that is an infrastructure failure.
 
 ## Triage order for a failed run
 
-1. Read `run.json`: source commit/dirtiness, environment, selected entries,
-   omitted count, and final verdict.
+1. Read `run.json` and `selection.json`: source commit/dirtiness,
+   environment, selected entries/evidence expectations, omitted count,
+   completion state, and final verdict.
 2. Read the failing attempt's `result.json` and `cmd.json`.
 3. Read `output.log` for the suite's own diagnosis.
 4. Read each `boots/*/boot.json`, then its `serial.log` and

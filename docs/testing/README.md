@@ -126,13 +126,15 @@ Important files include:
 
 ```text
 run.json                         results, timing, source/environment identity
-environment.json                 backend and toolchain identity
+selection.json                   frozen entries and evidence expectations
+evidence-manifest.json           run-level evidence hashes
 source.diff                      uncommitted source state, when present
-source-status.txt                Git status used for the run
+source-status.txt                Git status/diff hashes used for the run
 attempts/<entry>/attempt-001/
   result.json                    attempt verdict and process exit
   output.log                     complete suite output
   cmd.json                       exact command, cwd, timeout, env overrides
+  evidence.json                  attempt-level evidence hashes
   boots/<nnn>-<label>/
     boot.json                    QEMU exit, duration, kill/intent flags, hashes
     serial.log                   raw guest serial output
@@ -151,7 +153,12 @@ Check that a preserved run is internally complete:
 python3 tools/arena_test.py verify-run build/test-runs/<run-id>
 ```
 
-Missing or altered evidence makes verification fail.
+Missing or altered evidence makes verification fail. Verification also
+requires the frozen selection's attempts and verdicts to agree and checks
+the evidence appropriate to each entry kind. It works on an extracted run
+directory: paths are resolved inside that directory, not in the original
+workspace. The sealed correction bundle and fresh-extraction commands are
+in `evidence/T-correction-2026-10-27/`.
 
 ## How to read a result
 
@@ -171,9 +178,12 @@ control behaves as specified and the restored/green path passes.
 ## Build cache and parallel runs
 
 The new runner enables a content-addressed build cache by default. A cached
-EFI/ESP is reused only when source-file contents, build environment,
-toolchain identity, and absolute build path all match, and restored artifacts
-are hash-checked. To compare against the historical behaviour:
+EFI/ESP is reused only when source/symlink contents, semantic Cargo
+configuration, effective profile/target/flag environment, selected
+toolchain/module identities, external path inputs, and absolute build path
+all match; restored artifacts are hash-checked. If an input cannot be
+identified conservatively, reuse is disabled with a printed reason and the
+real build runs. To compare against the historical behaviour:
 
 ```sh
 python3 tools/arena_test.py quick --no-build-cache
@@ -200,3 +210,4 @@ methodology.
 - Q-1 investigation: `Q1-INVESTIGATION.md`
 - Agent-focused rules: `AGENT-GUIDE.md`
 - Workstream outcome and limitations: `FINAL-REPORT.md`
+- Sealed raw correction evidence: `evidence/T-correction-2026-10-27/`

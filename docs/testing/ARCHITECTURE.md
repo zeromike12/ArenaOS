@@ -76,13 +76,15 @@ Each execution creates:
 
 ```text
 build/test-runs/<run-id>/
-  run.json
-  environment.json
+  run.json                    source/environment identity is embedded here
+  selection.json              immutable selected-entry/evidence contract
+  evidence-manifest.json      run-level file hashes (itself excluded)
   source.diff / source-status.txt
   attempts/<entry>/attempt-<nnn>/
     cmd.json
     output.log
     result.json
+    evidence.json             attempt file hashes (itself excluded)
     builds/<nnn>-<label>/build.json + copied logs when available
     boots/<nnn>-<label>/boot.json + serial/QEMU/fixture evidence
     outputs/...
@@ -99,28 +101,77 @@ Important invariants:
 5. Intentional kills/negative controls are metadata, not silently converted
    to ordinary passes.
 6. A run fails if tracked source changes unexpectedly during execution.
-7. `verify-run` checks required metadata and cited output hashes and fails
-   on missing/tampered evidence.
+   `source-status.txt` and the source object bind status/diff SHA-256 and
+   byte counts, so an extracted verifier does not trust prose alone.
+7. `verify-run` checks meaningful source/environment identity, the frozen
+   selected entries and repeat count, every required attempt, terminal
+   verdict agreement, preserved failures, completion state, and cited
+   evidence hashes. It resolves paths inside the supplied run directory,
+   including after extraction elsewhere.
+8. Evidence expectations are entry-specific: host/static entries need
+   command output; ordinary guest entries need build/boot records with
+   raw serial and QEMU stderr; crash fixtures are identified by
+   intentional-kill metadata; backend and extracted-archive witnesses
+   declare their custom raw files. Copy failures mark evidence incomplete
+   and cannot support an evidence-complete PASS.
+9. A feeder/workflow assertion records the boot it was driving, including
+   a distinct workflow verdict/error, before `mtest.boot()` re-raises.
 
 The old shared `build/` outputs are still written for compatibility. They
 are working files, not the durable evidence of record.
 
 ## Build-cache model
 
-The cache key is a fingerprint of effective build inputs, not a commit ID.
-It includes relevant source contents, individual build scripts, build
-environment/profile, toolchain resolution/identity, and absolute repo path.
+The schema-2 cache key is a fingerprint of effective build inputs, not a
+commit ID. It includes:
+
+- relevant repository/vendor tree contents, following symlinks to their
+  target bytes rather than keying only the link name;
+- semantic Cargo configuration from the repository, ancestors, and
+  `CARGO_HOME`, so comments do not churn identity but effective rustflags,
+  target, linker, wrapper, or source-replacement changes do;
+- effective Cargo profile/target/feature/flag environment, selected
+  source-declared compile-time variables, and build-script
+  `rerun-if-env-changed` names (values are represented by hashes; the
+  whole environment and unrelated secrets are not fingerprinted or put in
+  receipts);
+- manifests, lockfiles, linker scripts, build scripts, declared rerun
+  paths, path dependencies/patches/workspace members, and other reachable
+  external file inputs;
+- hashes/identities for the selected Rust compiler and target libraries,
+  Cargo, GCC, Zig, Python executable, and Python modules that actually
+  participate (`pyfatfs`);
+- absolute repo path and graphics/profile inputs.
+
+If configuration is malformed, a custom target/wrapper/linker or external
+input cannot be identified conservatively, or a remote replacement cannot
+be reduced to local bytes, `fingerprint_status()` returns no reusable key
+and records explicit blockers. The real build still runs; it is not
+allowed to publish or consume an uncertain entry.
 
 The absolute path is intentionally part of identity. Rust outputs embed it;
 the Phase 14 PIE guard proved this by rejecting a different-path build with a
 different hash.
 
-Publication is atomic and requires a completion marker. Lookup verifies the
-manifest and artifact hashes. Tampered or incomplete entries are not served.
+Publication is atomic and requires a completion marker. Lookup revalidates
+schema, fingerprint/config agreement, enabled reuse, complete metadata,
+artifact sizes and hashes. Tampered, disabled-identity, missing, or
+incomplete entries are not served.
 
 Mutation suites are safe with respect to canonical reuse because mutated
 source bytes yield different fingerprints. The infra controls test this
 explicitly. `--no-build-cache` returns to historical build behaviour.
+
+## Attempt timeout model
+
+Each suite attempt runs in its own session/process group. The runner
+drains its merged output with a nonblocking selector against one
+`time.monotonic()` deadline, so silence, one partial line, a stall after
+output, and continuous output all share the same expiry rule. At the
+deadline it terminates and then kills/reaps the process group as needed,
+records `timed_out=true`, and preserves output already received. A child
+that would later exit 0, or a descendant holding the output pipe, cannot
+erase or extend the deadline.
 
 ## Readiness model
 
@@ -179,6 +230,10 @@ inheriting an earlier backend identity.
 - Killed boot: never success by itself.
 - Failed attempt followed by passing repeat: run FAIL, both preserved.
 - Missing cited evidence: verification FAIL.
+- Fabricated/contradictory verdicts, missing selected attempts, or an
+  interrupted run claiming success: verification FAIL.
+- Unidentified build configuration: cache reuse disabled with a reason;
+  the real build still runs.
 - Qualification preconditions missing: BLOCKED, exit code 2.
 - Unknown affected mapping: conservative registered fallback.
 
