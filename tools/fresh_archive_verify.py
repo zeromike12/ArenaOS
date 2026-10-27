@@ -88,7 +88,17 @@ def main() -> int:
     record["extraction_root"] = str(extract_root)
     print(f"[fresh-archive] extracting fresh to {extract_root}")
     with tarfile.open(archive) as tf:
-        tf.extractall(extract_root, filter="data")
+        # Python 3.11.2 has no tarfile `filter=`; validate members
+        # ourselves and fail closed on unsafe names or non-regular files.
+        for member in tf.getmembers():
+            name = member.name
+            if name.startswith("/") or ".." in Path(name).parts:
+                print(f"[fresh-archive] FAIL: unsafe archive member: {name!r}")
+                return 1
+            if not (member.isfile() or member.isdir()):
+                print(f"[fresh-archive] FAIL: non-regular member: {name!r}")
+                return 1
+        tf.extractall(extract_root)
     roots = [p for p in extract_root.rglob("verify_package.py")
              if (p.parent / "MANIFEST.json").is_file()]
     if len(roots) != 1:
