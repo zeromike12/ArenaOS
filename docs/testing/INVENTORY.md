@@ -161,4 +161,3 @@ present, are merged from the T workstream receipts on one sandbox
 
 Counts by qualification role: infra=1, package=1, phase16-host=6, phase16-targeted=10, registered=121, stability=1, standalone=6, strict-phase15=4
 Total entries: 150; registered (run_tests.sh-equivalent): 121.
-
