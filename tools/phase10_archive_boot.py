@@ -129,7 +129,8 @@ def boot(qualified: bool = True, extra_markers: tuple = (), label: str = 'PHASE1
             evidence = os.environ.get('ARENA_EXTRACTED_EVIDENCE')
             if evidence:
                 target = Path(evidence).resolve(); target.mkdir(parents=True, exist_ok=True)
-                for p in (serial, image, receipt, tcp_log, dns_log, console_log):
+                for p in (serial, image, receipt, tcp_log, dns_log, console_log,
+                          work / 'qemu.err'):
                     shutil.copyfile(p, target / p.name)
             if (rc != 0 or '[arena ERROR halt]' in text or 'PANIC' in text
                     or 'm7: RESULT PASS (2/2)' not in text

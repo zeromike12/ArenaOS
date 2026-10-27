@@ -66,6 +66,141 @@ MEM_MIB = 512
 # shut down cleanly, yielding QEMU exit 0 with semantic verdict 97.
 LAST_QEMU_EXIT: dict[str, int | None] = {}
 
+# ---- Testing-infrastructure hooks (inert unless the runner opts in) ----
+#
+# ARENA_TEST_ATTEMPT_DIR: when set, every build and every boot copies its
+# raw outputs (serial, QEMU stderr, host-fixture logs, verdicts, artifact
+# hashes) into a fresh per-attempt directory so a later suite or retry can
+# never overwrite an earlier failing run's evidence (the Q-1 hazard where
+# test_m9_client_death_red.py's restored GREEN rerun replaced the original
+# failing serial). The historical build/ outputs are still written exactly
+# as before; suites that read them are unaffected.
+#
+# ARENA_TEST_BUILD_CACHE=1: build() consults the content-addressed cache in
+# tools/build_cache.py and only reuses a build whose input fingerprint
+# matches byte-for-byte. Default off; tools/run_tests.sh never sets it.
+_ATTEMPT_DIR = os.environ.get("ARENA_TEST_ATTEMPT_DIR")
+
+
+def _current_attempt_dir() -> str | None:
+    # Read dynamically: a long-lived harness process may set the
+    # attempt directory after import (the runner always sets it before
+    # spawning a suite, but evidence routing must not depend on that).
+    return os.environ.get("ARENA_TEST_ATTEMPT_DIR") or _ATTEMPT_DIR
+
+
+def _allocate_attempt_dest(kind_dir: str, label: str) -> Path:
+    """Allocate a unique, monotonic evidence directory for this attempt.
+
+    The historical per-label counter labelled every distinct boot ``001-``;
+    worse, a subprocess re-importing mtest could reuse an exact label and
+    lose evidence when the exclusive mkdir failed. Allocate from the
+    directories already present while holding a small file lock, so
+    sequences are monotonic across processes that share an attempt dir.
+    """
+    import fcntl
+
+    parent = Path(_current_attempt_dir()) / kind_dir  # type: ignore[arg-type]
+    parent.mkdir(parents=True, exist_ok=True)
+    with open(parent / ".sequence.lock", "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        seq = 0
+        for child in parent.iterdir():
+            prefix, sep, _rest = child.name.partition("-")
+            if sep and prefix.isdigit():
+                seq = max(seq, int(prefix))
+        while True:
+            seq += 1
+            dest = parent / f"{seq:03d}-{label}"
+            try:
+                dest.mkdir(exist_ok=False)
+                return dest
+            except FileExistsError:
+                continue
+
+
+def _record_evidence_error(kind_dir: str, label: str,
+                           errors: list[str]) -> None:
+    """Leave a sentinel the runner/verifier cannot mistake for success."""
+    try:
+        import json as _json
+
+        dest = _allocate_attempt_dest("evidence-errors", label)
+        (dest / "error.json").write_text(_json.dumps({
+            "kind": kind_dir, "label": label, "errors": errors,
+        }, indent=2, sort_keys=True))
+    except Exception:
+        pass  # the missing required evidence itself is still detectable
+
+
+def _attempt_write(kind_dir: str, label: str, record: dict,
+                   files: dict[str, Path]) -> bool:
+    """Copy raw per-build/per-boot evidence.
+
+    A copy failure never masks the suite's own verdict, but it is no
+    longer a footnote: the record is marked evidence-incomplete and a
+    sentinel is left for the runner, which fails the attempt rather
+    than presenting an evidence-complete pass built on missing files.
+    """
+    if not _current_attempt_dir():
+        return True
+    try:
+        import hashlib
+        import json as _json
+
+        dest = _allocate_attempt_dest(kind_dir, label)
+        copied = {}
+        errors: list[str] = []
+        for name, src in files.items():
+            try:
+                if src is not None and Path(src).is_file():
+                    target = dest / name
+                    shutil.copyfile(src, target)
+                    copied[name] = hashlib.sha256(
+                        target.read_bytes()).hexdigest()
+            except OSError as e:
+                copied[name] = None
+                errors.append(f"{name}: {e}")
+        record = dict(record)
+        record["files"] = copied
+        record["evidence_complete"] = not errors
+        record["evidence_errors"] = errors
+        (dest / ("boot.json" if kind_dir == "boots" else "build.json")
+         ).write_text(_json.dumps(record, indent=2, sort_keys=True))
+        if errors:
+            _record_evidence_error(kind_dir, label, errors)
+        return not errors
+    except Exception as e:  # evidence copy must not mask a suite verdict
+        print(f"[{label}] NOTE: attempt evidence copy failed: {e}")
+        _record_evidence_error(kind_dir, label, [f"{type(e).__name__}: {e}"])
+        return False
+
+
+def _sha256_or_none(p: Path | None) -> str | None:
+    try:
+        import hashlib
+        return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+    except Exception:
+        return None
+
+
+def _markers_satisfied(data: bytes, marker, nth: int) -> bool:
+    """Marker gate: bytes = that marker; tuple = conjunction.
+
+    A tuple *inside* the tuple is an any-of group (at least one member
+    must have appeared ``nth`` times) — for readiness races where either
+    a success or an explicit-refusal line proves the peer settled.
+    Flat tuples keep their historical conjunction meaning exactly.
+    """
+    markers = marker if isinstance(marker, tuple) else (marker,)
+    for m in markers:
+        if isinstance(m, tuple):
+            if not any(data.count(part) >= nth for part in m):
+                return False
+        elif data.count(m) < nth:
+            return False
+    return True
+
 
 def semantic_exit_rc(rc: int | None, serial: str, label: str) -> int | None:
     """QEMU ResetSystem is also used by halt_machine: rc=0 is NOT PASS.
@@ -95,8 +230,54 @@ def build(label: str, desktop: bool = False) -> Path:
     env=os.environ.copy()
     if desktop:env.pop('ARENA_GRAPHICS_FIXTURE',None)
     else:env['ARENA_GRAPHICS_FIXTURE']='phase9'
+    t_build0 = time.monotonic()
+    cache_fp: str | None = None
+    cache_config: dict | None = None
+    cache_module = None
+    cache_status = "disabled"
+    cache_blockers: list[str] = []
+    if env.get("ARENA_TEST_BUILD_CACHE") == "1":
+        try:
+            import build_cache as cache_module  # noqa: F401
+
+            cache_fp, cache_config = cache_module.fingerprint_status(env)
+            if cache_fp is None:
+                cache_blockers = list(
+                    (cache_config or {}).get("reuse", {}).get("blockers") or [])
+                print(f"[{label}] build-cache reuse DISABLED "
+                      f"({'; '.join(cache_blockers) or 'unidentified inputs'}); "
+                      f"running the real build")
+                cache_status = "disabled-identity"
+                cache_module = None
+            entry = cache_module.lookup(cache_fp) if cache_fp else None
+            if cache_fp:
+                cache_status = "miss"
+            if entry is not None and cache_module.restore(entry):
+                dt = time.monotonic() - t_build0
+                print(f"[{label}] build-cache HIT {cache_fp[:16]} "
+                      f"(restored identified EFI/ESP in {dt:.2f}s)")
+                esp = arena_env.REPO_ROOT / "build/arena-esp.img"
+                assert esp.exists(), "build cache did not restore the ESP image"
+                _attempt_write("builds", label, {
+                    "label": label, "desktop": desktop, "cache": "hit",
+                    "fingerprint": cache_fp, "duration_s": round(dt, 3),
+                    "efi_sha256": _sha256_or_none(
+                        arena_env.REPO_ROOT / "build/arena-boot.efi"),
+                    "esp_sha256": _sha256_or_none(esp),
+                }, {})
+                return esp
+            if cache_fp:
+                print(f"[{label}] build-cache MISS {cache_fp[:16]} "
+                      f"(running the real build)")
+        except Exception as e:  # cache must never break a real build
+            print(f"[{label}] NOTE: build cache unavailable ({e}); "
+                  f"running the real build")
+            cache_fp = None
+            cache_module = None
+            if cache_status == "miss":
+                cache_status = "disabled-error"
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["bash", str(arena_env.REPO_ROOT / "tools/build.sh"), "--image"],
             check=True,
             capture_output=True,
@@ -110,6 +291,23 @@ def build(label: str, desktop: bool = False) -> Path:
         raise
     esp = arena_env.REPO_ROOT / "build/arena-esp.img"
     assert esp.exists(), "build.sh did not produce the ESP image"
+    dt = time.monotonic() - t_build0
+    if cache_module is not None and cache_fp is not None:
+        stored = cache_module.store(
+            cache_fp, cache_config or {},
+            (result.stdout or "") + (result.stderr or ""), dt)
+        cache_status = "miss-stored" if stored else "miss-store-skipped"
+        print(f"[{label}] build-cache {'STORED' if stored else 'STORE-SKIPPED'} "
+              f"{cache_fp[:16]}")
+    _attempt_write("builds", label, {
+        "label": label, "desktop": desktop,
+        "cache": cache_status,
+        "cache_blockers": cache_blockers,
+        "fingerprint": cache_fp, "duration_s": round(dt, 3),
+        "efi_sha256": _sha256_or_none(
+            arena_env.REPO_ROOT / "build/arena-boot.efi"),
+        "esp_sha256": _sha256_or_none(esp),
+    }, {})
     return esp
 
 
@@ -149,8 +347,7 @@ def _typist(script: KeyScript, serial_log: Path, sock: Path,
                     data = serial_log.read_bytes()
                 except OSError:
                     data = b""
-                markers = marker if isinstance(marker, tuple) else (marker,)
-                if all(data.count(m) >= nth for m in markers):
+                if _markers_satisfied(data, marker, nth):
                     break
                 time.sleep(0.02)
             if stop.is_set():
@@ -338,8 +535,7 @@ def run_qemu(label: str, esp: Path,
                 # queue the command while the pre-shell config updater
                 # is still draining, splitting its echoed line. A tuple
                 # is a conjunction, not a timed retry or weaker proof.
-                markers = marker if isinstance(marker, tuple) else (marker,)
-                if all(data.count(m) >= nth for m in markers):
+                if _markers_satisfied(data, marker, nth):
                     try:
                         assert proc.stdin is not None
                         proc.stdin.write(payload() if callable(payload) else payload)
@@ -385,6 +581,15 @@ def run_qemu(label: str, esp: Path,
     if verdict == 0 and net and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
         print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")
         verdict = 97
+    _attempt_write("boots", label, {
+        "label": label, "kind": "run_qemu", "qemu_exit": rc,
+        "semantic_verdict": verdict, "duration_s": round(dt, 3),
+        "cpu": cpu, "esp": str(esp), "esp_sha256": _sha256_or_none(esp),
+        "efi_sha256": _sha256_or_none(arena_env.REPO_ROOT / "build/arena-boot.efi"),
+        "intentional_kill": False, "qemu_command": cmd,
+    }, {"serial.log": serial_log, "qemu-stderr.log": err_log,
+        "udp-dns.log": dns_log, "tcp.log": peer_log,
+        "vcon.txt": vcon_capture})
     return verdict, serial, dt
 
 
@@ -504,8 +709,7 @@ def boot(label: str, esp: Path,
                     data = b""
                 while sent < len(feed):
                     m, n, payload = feed[sent]
-                    markers = m if isinstance(m, tuple) else (m,)
-                    if not all(data.count(part) >= n for part in markers):
+                    if not _markers_satisfied(data, m, n):
                         break
                     try:
                         assert proc.stdin is not None
@@ -571,8 +775,6 @@ def boot(label: str, esp: Path,
     peer_thread.join(timeout=2)
     dns_stop.set()
     dns_thread.join(timeout=2)
-    if feeder_errors:
-        raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
     if killed:
         rc = None
     dt = time.monotonic() - t0
@@ -582,6 +784,32 @@ def boot(label: str, esp: Path,
     if verdict == 0 and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
         print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")
         verdict = 97
+    workflow_error = None
+    if feeder_errors:
+        # Preserve the boot that the workflow was driving *before*
+        # propagating its assertion: a raised feeder used to leave the
+        # failing boot with no structured boot record at all.
+        workflow_error = (f"{type(feeder_errors[0]).__name__}: "
+                          f"{feeder_errors[0]}")
+        verdict = 98  # harness workflow verdict, not a QEMU status
+    # An armed `kill` gate is an intentional crash fixture: mark it so
+    # evidence readers can tell a by-design SIGKILL from a lost boot.
+    _attempt_write("boots", label, {
+        "label": label, "kind": "boot", "qemu_exit": rc,
+        "semantic_verdict": verdict, "duration_s": round(dt, 3),
+        "cpu": cpu, "esp": str(esp), "esp_sha256": _sha256_or_none(esp),
+        "efi_sha256": _sha256_or_none(arena_env.REPO_ROOT / "build/arena-boot.efi"),
+        "scratch_disk": str(scratch),
+        "intentional_kill": bool(kill) and killed,
+        "timed_out": killed and not kill,
+        "workflow_error": workflow_error,
+        "qemu_command": cmd,
+    }, {"serial.log": serial_log, "qemu-stderr.log": err_log,
+        "udp-dns.log": dns_log, "tcp.log": bdir / f"tcp-{label}.log",
+        "vcon.txt": bdir / f"vcon-{label}.txt",
+        "timeout.txt": bdir / f"timeout-{label}.txt"})
+    if feeder_errors:
+        raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
     return verdict, serial, dt
 
 

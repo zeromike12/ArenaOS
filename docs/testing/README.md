@@ -1,0 +1,256 @@
+# Running ArenaOS tests
+
+ArenaOS now has one small test entry point:
+
+```sh
+python3 tools/arena_test.py quick
+```
+
+Run commands from the repository root. In the development sandbox, use the
+canonical path `/workspace/ArenaOS`, because some reproducible build identities
+include the absolute build path.
+
+The existing `tools/run_tests.sh` has not been removed or changed. It remains
+the reference runner until the project explicitly accepts the new runner for
+qualification use.
+
+## Authority boundary — read this first
+
+| Command/path | What its result means |
+|---|---|
+| `quick` | Fast development smoke feedback; **not** milestone qualification |
+| `affected` | Development feedback for the recorded affected selection; **not** milestone qualification |
+| `suite` | Focused evidence for named entries; omitted entries did not pass |
+| `full` | Complete regression coverage for its recorded 138-entry selection; **not** every milestone acceptance requirement |
+| `qualify` | An implemented qualification-shaped proposal; **not yet approved** as a replacement |
+| `tools/run_tests.sh` | **Authoritative for formal qualification** |
+| `--jobs N` (`N > 1`) | Opt-in development parallelism; **not approved** for qualification evidence |
+
+Use short paths while developing, named suites to investigate, and the
+broad `full` selection at integration/PR-readiness gates. Do not relabel
+any of those results as formal qualification.
+
+## Choose the right command
+
+### 1. I need a fast smoke signal
+
+```sh
+python3 tools/arena_test.py quick
+```
+
+`quick` runs the fast host checks, one real guest boot, and the
+test-infrastructure controls. It is useful while editing.
+
+A quick pass is **not qualification**. The terminal report and `run.json`
+state the evidence level explicitly.
+
+### 2. I changed some files and want relevant tests
+
+First look at the selection:
+
+```sh
+python3 tools/arena_test.py affected --base main --explain
+```
+
+Then run it:
+
+```sh
+python3 tools/arena_test.py affected --base main
+```
+
+Selection is driven by `tools/test_map.json` and the source paths in
+`tools/test_registry.json`. If the mapper does not understand a changed path,
+it chooses the full registered set rather than guessing narrowly.
+Documentation-only changes explicitly select the quick set.
+
+### 3. I want one named test
+
+List the registry IDs:
+
+```sh
+python3 tools/arena_test.py list
+```
+
+Run one or more:
+
+```sh
+python3 tools/arena_test.py suite m9-client-death
+python3 tools/arena_test.py suite m84-crash m84-stage
+```
+
+To repeat a suite while preserving every attempt:
+
+```sh
+python3 tools/arena_test.py suite m9-client-death --repeat 5
+```
+
+If any repetition fails, the whole run is a failure. A later pass does not
+hide an earlier failure.
+
+### 4. I want the complete development run
+
+```sh
+python3 tools/arena_test.py full
+```
+
+`full` runs the registered set plus entries that previously lived outside the
+old runner: Phase 16 targeted/host suites, the Phase 14 guest checks, and the
+infrastructure controls. Use `list --mode full` to see the exact selection.
+A `full` pass is complete regression evidence for that recorded selection;
+it does not by itself satisfy every milestone acceptance requirement.
+
+### 5. I need the proposed qualification-shaped run
+
+```sh
+python3 tools/arena_test.py qualify
+```
+
+`qualify` adds the qualification-only gates and checks preconditions before
+it starts: clean committed tree, canonical checkout path, and the pinned
+patched-QEMU/isolated-glibc backend. If those conditions are not met, the
+result is `BLOCKED`; it is never relabelled as a pass.
+
+Do not use `--force` for a real qualification claim. It exists only to make
+an explicitly blocked exercise visible in evidence.
+
+This mode is **implemented but not approved** as a replacement for
+`tools/run_tests.sh`. Promoting it would require a separate review that
+proves selection/gate equivalence, performs an uninterrupted serial
+monolithic run on the exact candidate and identified backend, preserves and
+independently verifies the complete extracted evidence, dispositions open
+reliability items, and receives explicit M/C approval. Parallel
+qualification would require its own additional equivalence review. See
+`FINAL-REPORT.md` for the full promotion criteria.
+
+## Sandbox environment
+
+Guest tests need the pinned patched QEMU and firmware identities. Stock QEMU
+is not a substitute: it lacks the genuine vector-19 behaviour required by the
+strict Phase 15 checks.
+
+In this workstream's reconstructed sandbox:
+
+```sh
+cd /workspace/ArenaOS
+source ~/t-env/canonical-env.sh
+python3 tools/arena_test.py env-info
+```
+
+`env-info` prints the CPU count, toolchain, QEMU identity, accelerator,
+firmware paths, and related environment that the runner records. If those
+values are absent or point at a different backend, fix the environment before
+interpreting a guest result.
+
+## Where the evidence is
+
+Every invocation creates a new directory:
+
+```text
+build/test-runs/<run-id>/
+```
+
+Important files include:
+
+```text
+run.json                         results, timing, source/environment identity
+selection.json                   frozen entries and evidence expectations
+evidence-manifest.json           run-level evidence hashes
+source.diff                      uncommitted source state, when present
+source-status.txt                Git status/diff hashes used for the run
+attempts/<entry>/attempt-001/
+  result.json                    attempt verdict and process exit
+  output.log                     complete suite output
+  cmd.json                       exact command, cwd, timeout, env overrides
+  evidence.json                  attempt-level evidence hashes
+  boots/<nnn>-<label>/
+    boot.json                    QEMU exit, duration, kill/intent flags, hashes
+    serial.log                   raw guest serial output
+    qemu-stderr.log              emulator diagnostics
+  builds/<nnn>-<label>/
+    build.json                   build result and artifact identities
+  outputs/                       files produced or changed under build/
+```
+
+The runner also maintains `build/test-runs/latest` as a convenience pointer.
+Do not cite `latest` in a handoff; cite the concrete run ID.
+
+Check that a preserved run is internally complete:
+
+```sh
+python3 tools/arena_test.py verify-run build/test-runs/<run-id>
+```
+
+Missing or altered evidence makes verification fail. Verification also
+requires the frozen selection's attempts and verdicts to agree and checks
+the evidence appropriate to each entry kind. It works on an extracted run
+directory: paths are resolved inside that directory, not in the original
+workspace. The sealed correction bundle and fresh-extraction commands are
+in `evidence/T-correction-2026-10-27/`.
+
+## How to read a result
+
+- `PASS`: every selected entry and every recorded attempt passed, and the
+  source tree did not change unexpectedly during the run.
+- `FAIL`: at least one entry or attempt failed, timed out, lacked required
+  evidence, or the source changed during execution.
+- `BLOCKED`: mandatory preconditions were not met. This is an incomplete
+  evidence state, not a test pass.
+
+QEMU process exit `0` by itself does **not** mean the guest passed. Guest
+suites must see their required semantic markers and must not see fatal guest
+markers. Intentional negative controls are marked as expected failures or
+intentional kills in metadata; their suites pass only when the negative
+control behaves as specified and the restored/green path passes.
+
+## Build cache and parallel runs
+
+The new runner enables a content-addressed build cache by default. A cached
+EFI/ESP is reused only when source/symlink contents, semantic Cargo
+configuration, effective profile/target/flag environment, selected
+toolchain/module identities, external path inputs, and absolute build path
+all match; restored artifacts are hash-checked. If an input cannot be
+identified conservatively, reuse is disabled with a printed reason and the
+real build runs. To compare against the historical behaviour:
+
+```sh
+python3 tools/arena_test.py quick --no-build-cache
+```
+
+Parallel execution is available but is not the default:
+
+```sh
+python3 tools/arena_test.py suite smoke-m1 host-heap --jobs 2
+```
+
+Parallel entries run in isolated Git worktrees and network namespaces. Most
+source-mutating suites may enter that pool because their mutation is confined
+to a worker checkout which is reset after the attempt; the six registry
+entries marked `serial` (the canonical-final/strict/stability/package/backend
+gates) always run after the pool. Parallel execution is a development
+optimization only: it is **not approved for qualification evidence**. Use
+serial development runs for comparable timing-sensitive investigations, and
+use `tools/run_tests.sh` for formal qualification.
+
+## A practical feedback cadence
+
+1. While editing, run `quick` or the specific affected/suite entries.
+2. Before depending on an affected run, inspect it with `--explain`; the
+   saved selection and omitted count are part of the result.
+3. For a timing-sensitive failure, inspect the original attempt first,
+   then use `--repeat` to add attempts—not to replace the failure.
+4. At integration or PR-readiness gates, reserve time for `full` when the
+   change touches shared harness, build, kernel, service, or guest paths.
+   On the correction host it took 6,866 s warm-cache, with about
+   5,866 s in guest boots.
+5. For a formal milestone claim, follow the project's authoritative
+   `tools/run_tests.sh` process until `qualify` is separately promoted.
+
+## More detail
+
+- Test inventory: `INVENTORY.md`
+- Baseline and timing evidence: `BASELINE.md`
+- Q-1 investigation: `Q1-INVESTIGATION.md`
+- Agent-focused rules: `AGENT-GUIDE.md`
+- Workstream outcome and limitations: `FINAL-REPORT.md`
+- Sealed raw correction evidence: `evidence/T-correction-2026-10-27/`
+- Contributor closure note (non-authoritative): `CLOSURE-NOTE.md`

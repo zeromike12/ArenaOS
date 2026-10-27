@@ -29,8 +29,14 @@ def boot(esp,disk,tag,commands,kill=None):
     return rc,s
 
 def recovery(esp,disk,tag):
+    # Pace on packaged-service SETTLEMENT (READY or its fail-closed
+    # refusal), not just the shell prompt: querying before settlement can
+    # return a fail-closed pre-scan answer and shut down before READY is
+    # ever printed — observed in Phase 16 registered attempt 1 (policy/close;
+    # docs/testing/Q1-INVESTIGATION.md). Assertions below are unchanged.
+    settle=(b'arena>',(b'packaged READY',b'boot namespace scan refused'))
     rc,s,secs=mtest.boot(f'{LABEL}-recover-{tag}',esp,
-        [(b'arena>',1,b'pkg query app.test\r'),(b'arena>',2,b'shutdown\r')],disk)
+        [(settle,1,b'pkg query app.test\r'),(b'arena>',2,b'shutdown\r')],disk)
     (arena_env.build_dir()/f'serial-{LABEL}-recover-{tag}.log').write_text(s)
     return rc,s
 

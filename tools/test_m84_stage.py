@@ -296,7 +296,10 @@ def main():
     shutil.copyfile(baseline,corrupt)
     invalid=bytearray(ROOT_FILE); invalid[-1]^=1
     host_seed(corrupt,{STAGE1:bytes(invalid)})
-    rc,s,_=mtest.boot('m84-corrupt-visible',esp,[(b'arena>',1,b'pkg query app.test\r'),
+    # Wait for packaged-service settlement (READY or its refusal) before
+    # querying — same pre-settlement hazard as test_m84_crash.recovery.
+    settle=(b'arena>',(b'packaged READY',b'boot namespace scan refused'))
+    rc,s,_=mtest.boot('m84-corrupt-visible',esp,[(settle,1,b'pkg query app.test\r'),
                                                (b'arena>',2,b'shutdown\r')],corrupt)
     (arena_env.build_dir()/'serial-m84-corrupt-visible.log').write_text(s)
     ok &= check(rc==0 and 'boot namespace scan refused: corrupt/offline, no READY' in s
@@ -334,7 +337,7 @@ def main():
                 and contents(full).get(STAGE1)==b'' and not afs1.audit(full),
                 'allocator-full WRITE leaves visible empty highest stage; DEGRADED never acknowledges')
     if not ok: return 1
-    rc,s,_=mtest.boot('m84-allocator-reboot',esp,[(b'arena>',1,b'pkg query app.test\r'),
+    rc,s,_=mtest.boot('m84-allocator-reboot',esp,[(settle,1,b'pkg query app.test\r'),
                                                 (b'arena>',2,b'shutdown\r')],full)
     (arena_env.build_dir()/'serial-m84-allocator-reboot.log').write_text(s)
     ok &= check(rc==0 and 'packaged READY' not in s and 'boot namespace scan refused' in s

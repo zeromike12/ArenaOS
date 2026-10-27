@@ -26,7 +26,8 @@ def main():
         (stage/'sha256sums.txt').write_text(''.join(
             f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in sorted(stage.iterdir())))
         env=os.environ.copy();env.pop('PYTHONPATH',None)
-        env['ARENA_EXTRACTED_EVIDENCE']=str(BUILD/'phase10-independent-preflight')
+        attempt=os.environ.get('ARENA_TEST_ATTEMPT_DIR')
+        env['ARENA_EXTRACTED_EVIDENCE']=str(Path(attempt)/'extracted') if attempt else str(BUILD/'phase10-independent-preflight')
         runner='import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_path(sys.path[0]+"/phase10_archive_boot.py",run_name="__main__")'
         command=[sys.executable,'-I','-c',runner,str(stage)]
         # A staged unqualified image cannot pass the strict archival gate.

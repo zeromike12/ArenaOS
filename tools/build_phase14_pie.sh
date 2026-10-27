@@ -39,7 +39,18 @@ digest = hashlib.sha256(raw).hexdigest()
 expected = "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
 if digest != expected:
     raise SystemExit(f"error: reproducible PIE fixture hash changed: {digest}")
-open(output, "wb").write(raw)
+# Write-if-changed: fixture.elf is embedded into the kernel via
+# include_bytes!, so unconditionally rewriting identical bytes would
+# poison Cargo's fingerprint and force a full kernel recompile (several
+# seconds) on every build.sh traversal, of which a full test run does
+# over a hundred. The hash guard above is unchanged: bytes that differ
+# from the expected identity still fail here before any write.
+try:
+    existing = open(output, "rb").read()
+except OSError:
+    existing = None
+if existing != raw:
+    open(output, "wb").write(raw)
 print(f"Phase-14 static PIE: {len(raw)} bytes, ELF64 ET_DYN x86-64, SHA-256 {digest}")
 PY
 
