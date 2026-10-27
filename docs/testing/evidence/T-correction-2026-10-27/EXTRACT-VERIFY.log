@@ -1,0 +1,9 @@
+arenaos-testing-correction-evidence-30fe810.tar.gz: OK
+MANIFEST VERIFY PASS: 6317 files under /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810
+run evidence complete: /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810/runs/full-corrected-20261027T183025Z-full-30fe810-434497-768c5a
+run evidence complete: /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810/runs/quick-corrected-20261027T202533Z-quick-30fe810-605011-2eb4dc
+run evidence complete: /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810/runs/archive-preflights-20261027T161852Z-suite-30fe810-259357-b56a3d
+run evidence complete: /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810/runs/phase13-focused-20261027T161936Z-suite-30fe810-259675-adfa05
+run evidence complete: /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810/runs/m9-resources-repeat10-20261027T182829Z-suite-30fe810-434082-eb79ed
+run evidence complete: /home/user/t-env/fresh-extract-check/extracted/arenaos-testing-correction-evidence-30fe810/runs/backend-xm-controls-20261027T141549Z-suite-ab38d4d-107020-614fc6
+FRESH EXTRACT VERIFY PASS
