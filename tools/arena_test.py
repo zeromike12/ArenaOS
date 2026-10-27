@@ -59,7 +59,9 @@ import os
 import platform
 import re
 import secrets
+import selectors
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -322,11 +324,14 @@ def source_identity(run_dir: Path) -> dict:
     untracked = _git("ls-files", "--others", "--exclude-standard").stdout
     (run_dir / "source.diff").write_text(diff)
     (run_dir / "source-status.txt").write_text(status + untracked)
+    status_file = status + untracked
     return {
         "commit": commit,
         "branch": branch,
         "dirty": bool(status.strip()),
         "status_lines": [ln for ln in status.splitlines() if ln],
+        "status_sha256": hashlib.sha256(status_file.encode()).hexdigest(),
+        "status_bytes": len(status_file.encode()),
         "diff_sha256": hashlib.sha256(diff.encode()).hexdigest(),
         "diff_bytes": len(diff.encode()),
         "untracked": [ln for ln in untracked.splitlines() if ln],
@@ -336,8 +341,7 @@ def source_identity(run_dir: Path) -> dict:
 # ------------------------------------------------------------------ selection
 
 
-def select_mode(registry: dict, mode: str) -> list[dict]:
-    ents = registry["entries"]
+def select_mode_entries(ents: list[dict], mode: str) -> list[dict]:
     if mode == "quick":
         return [e for e in ents if e.get("quick")]
     if mode == "full":
@@ -351,6 +355,84 @@ def select_mode(registry: dict, mode: str) -> list[dict]:
                                            "strict-phase15", "stability",
                                            "package")]
     raise ValueError(mode)
+
+
+def select_mode(registry: dict, mode: str) -> list[dict]:
+    return select_mode_entries(registry["entries"], mode)
+
+
+_CUSTOM_GUEST_EVIDENCE = {
+    "backend-xm-controls": [
+        "xm/serial-patched.log", "xm/serial-unpatched.log",
+        "xm/qemu-stderr-patched.log", "xm/qemu-stderr-unpatched.log",
+        "xm/exit-patched.txt", "xm/exit-unpatched.txt", "xm/xm-verify.json",
+    ],
+}
+_PREBUILT_GUEST = {"strict-m15-final", "strict-m15-preserved",
+                   "backend-xm-controls"}
+
+
+def evidence_expectations(entry: dict) -> dict:
+    """Suite-specific evidence contract, frozen into the run snapshot.
+
+    Host/static entries need command output only. Guest entries need
+    preserved boot records (crash-injection boots are identified by the
+    harness's ``intentional_kill`` flag, not treated as surprise
+    failures). The one custom backend gate preserves its own raw #XM
+    serials instead of going through mtest's boot recorder.
+    """
+    kind = str(entry.get("kind", ""))
+    entry_id = str(entry.get("id", ""))
+    guest = kind.startswith("guest")
+    profile = ("guest" if guest else
+               "build" if kind == "build" else
+               "stability" if kind == "stability" else
+               "package" if kind == "package" else "host")
+    return {
+        "profile": profile,
+        "requires_boot": bool(guest and entry_id not in _CUSTOM_GUEST_EVIDENCE),
+        "build_evidence": (
+            "build-record-or-boot-artifact-hashes"
+            if guest and entry_id not in _PREBUILT_GUEST else
+            "command-output" if kind == "build" else "none"),
+        "custom_files": list(_CUSTOM_GUEST_EVIDENCE.get(entry_id, [])),
+    }
+
+
+def _canonical_json(obj) -> bytes:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _selection_snapshot(registry: dict, entries: list[dict], mode: str,
+                        repeat: int, basis: dict,
+                        pathmap: dict | None = None) -> dict:
+    """The immutable selection contract verify-run checks against."""
+    all_entries = json.loads(json.dumps(registry.get("entries", [])))
+    selected_entries = json.loads(json.dumps(entries))
+    selected = [e["id"] for e in selected_entries]
+    snap: dict = {
+        "schema": 1,
+        "mode": mode,
+        "repeat": repeat,
+        "basis": basis,
+        "registry": {
+            "registered_count": registry.get("registered_count"),
+            "entries": all_entries,
+            "digest": hashlib.sha256(
+                _canonical_json(registry)).hexdigest(),
+        },
+        "selected": selected,
+        "selected_entries": selected_entries,
+        "omitted": [e["id"] for e in all_entries if e["id"] not in set(selected)],
+        "evidence": {e["id"]: evidence_expectations(e)
+                     for e in selected_entries},
+    }
+    if pathmap is not None:
+        snap["pathmap"] = json.loads(json.dumps(pathmap))
+        snap["pathmap_digest"] = hashlib.sha256(
+            _canonical_json(pathmap)).hexdigest()
+    snap["digest"] = hashlib.sha256(_canonical_json(snap)).hexdigest()
+    return snap
 
 
 def changed_files(base: str) -> list[str]:
@@ -489,11 +571,110 @@ def _snapshot_copy(base: Path, before: dict, dest: Path) -> list[str]:
     return copied
 
 
+def _evidence_file_records(base: Path, exclude: set[str]) -> list[dict]:
+    records = []
+    for p in sorted(base.rglob("*")):
+        if not p.is_file() or p.name == ".sequence.lock":
+            continue
+        rel = p.relative_to(base).as_posix()
+        if rel in exclude:
+            continue
+        records.append({"path": rel, "size": p.stat().st_size,
+                        "sha256": _sha256_file(p)})
+    return records
+
+
+def _finalize_attempt_evidence(attempt_dir: Path, att: dict,
+                               relpath: str) -> dict:
+    """Seal one attempt: result.json plus a hash manifest of its files."""
+    att["attempt_relpath"] = relpath
+    att["attempt_dir"] = str(attempt_dir)
+    att.pop("evidence_manifest", None)
+    (attempt_dir / "result.json").write_text(json.dumps(att, indent=2))
+    manifest = {
+        "schema": 1,
+        "entry": att.get("entry"),
+        "attempt": relpath,
+        "files": _evidence_file_records(attempt_dir, {"evidence.json"}),
+    }
+    mpath = attempt_dir / "evidence.json"
+    mpath.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    att["evidence_manifest"] = {
+        "path": "evidence.json",
+        "sha256": _sha256_file(mpath),
+        "files": len(manifest["files"]),
+    }
+    return att
+
+
+def _write_run_evidence_manifest(run_dir: Path) -> None:
+    manifest = {
+        "schema": 1,
+        "files": _evidence_file_records(run_dir, {"evidence-manifest.json"}),
+    }
+    (run_dir / "evidence-manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True))
+
+
+def _seal_run(run_dir: Path, run_data: dict) -> bool:
+    """Write the final run.json and its whole-directory hash manifest.
+
+    If sealing fails on a would-be PASS, the verdict is downgraded to
+    FAIL: an unsealable run is not evidence-complete.
+    """
+    (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
+    try:
+        _write_run_evidence_manifest(run_dir)
+        return True
+    except Exception as e:
+        run_data["evidence_error"] = f"{type(e).__name__}: {e}"
+        if run_data.get("verdict") == "PASS":
+            run_data["verdict"] = "FAIL"
+        (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
+        try:
+            _write_run_evidence_manifest(run_dir)
+        except Exception:
+            pass
+        return False
+
+
+def _terminate_process_group(proc: subprocess.Popen, grace_s: float = 2.0
+                             ) -> None:
+    """Terminate and reap a session-leading child and its descendants."""
+    def _signal(sig: int) -> bool:
+        try:
+            os.killpg(proc.pid, sig)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+
+    if proc.poll() is None:
+        _signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=grace_s)
+        except subprocess.TimeoutExpired:
+            _signal(signal.SIGKILL)
+            try:
+                proc.wait(timeout=grace_s)
+            except subprocess.TimeoutExpired:
+                proc.wait()
+    # The leader may be reaped while descendants still hold the group
+    # (and our pipes) open; leave none behind.
+    if _signal(0):
+        _signal(signal.SIGTERM)
+        end = time.monotonic() + 0.5
+        while time.monotonic() < end and _signal(0):
+            time.sleep(0.02)
+        if _signal(0):
+            _signal(signal.SIGKILL)
+
+
 class SuiteResult:
     def __init__(self, entry_id: str):
         self.entry_id = entry_id
         self.verdict = "NOT_RUN"
         self.attempts: list[dict] = []
+        self.not_run_reason: str | None = None
 
 
 def run_attempt(entry: dict, attempt_dir: Path, env: dict, work_root: Path,
@@ -524,6 +705,8 @@ def run_attempt(entry: dict, attempt_dir: Path, env: dict, work_root: Path,
     t0 = time.monotonic()
     timed_out = False
     exit_code: int | None = None
+    output_eof = False
+    descendants_terminated = False
     out_path = attempt_dir / "output.log"
     with open(out_path, "wb") as logf:
         proc = subprocess.Popen(
@@ -531,59 +714,162 @@ def run_attempt(entry: dict, attempt_dir: Path, env: dict, work_root: Path,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=True)
         assert proc.stdout is not None
+        fd = proc.stdout.fileno()
+        os.set_blocking(fd, False)
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ)
         deadline = t0 + timeout_s
-        try:
-            for raw in proc.stdout:
-                logf.write(raw)
-                logf.flush()
-                if echo:
-                    sys.stdout.write(raw.decode(errors="replace"))
-                    sys.stdout.flush()
-                if time.monotonic() > deadline:
-                    timed_out = True
-                    try:
-                        os.killpg(proc.pid, 9)
-                    except ProcessLookupError:
-                        pass
-                    break
-            exit_code = proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+
+        def emit(chunk: bytes) -> None:
+            logf.write(chunk)
+            logf.flush()
+            if echo:
+                sys.stdout.write(chunk.decode(errors="replace"))
+                sys.stdout.flush()
+
+        def read_once() -> None:
+            nonlocal output_eof
             try:
-                os.killpg(proc.pid, 9)
-            except ProcessLookupError:
+                chunk = os.read(fd, 65536)
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError:
+                chunk = b""
+            if chunk:
+                emit(chunk)
+            else:
+                output_eof = True
+                try:
+                    selector.unregister(proc.stdout)
+                except Exception:
+                    pass
+
+        def drain_available(until: float) -> None:
+            while not output_eof and time.monotonic() < until:
+                events = selector.select(
+                    max(0.0, min(0.05, until - time.monotonic())))
+                if not events:
+                    break
+                read_once()
+
+        try:
+            while True:
+                now = time.monotonic()
+                rc = proc.poll()
+                if rc is not None:
+                    exit_code = rc
+                    if not output_eof:
+                        drain_available(now + 0.25)
+                    if not output_eof:
+                        # A descendant still holds the pipe (or is still
+                        # running) after the suite process exited. Do not
+                        # hang on it, and leave nothing behind.
+                        descendants_terminated = True
+                        _terminate_process_group(proc)
+                        drain_available(time.monotonic() + 0.25)
+                    break
+                if now >= deadline:
+                    timed_out = True
+                    _terminate_process_group(proc)
+                    exit_code = proc.returncode
+                    if not output_eof:
+                        drain_available(time.monotonic() + 0.5)
+                    break
+                if output_eof:
+                    try:
+                        exit_code = proc.wait(timeout=deadline - now)
+                    except subprocess.TimeoutExpired:
+                        continue
+                    break
+                events = selector.select(min(0.05, deadline - now))
+                if events:
+                    read_once()
+        finally:
+            selector.close()
+            try:
+                proc.stdout.close()
+            except Exception:
                 pass
-            exit_code = proc.wait()
+    if exit_code is None:
+        exit_code = proc.poll()
     dt = time.monotonic() - t0
     status_after = _git("status", "--porcelain", root=work_root).stdout
-    outputs = _snapshot_copy(work_root, before, attempt_dir / "outputs")
-    boots = []
-    boots_dir = attempt_dir / "boots"
-    if boots_dir.is_dir():
-        for b in sorted(boots_dir.iterdir()):
-            bj = b / "boot.json"
-            if bj.is_file():
-                boots.append(json.loads(bj.read_text()))
-    builds = []
-    builds_dir = attempt_dir / "builds"
-    if builds_dir.is_dir():
-        for b in sorted(builds_dir.iterdir()):
-            bj = b / "build.json"
-            if bj.is_file():
-                builds.append(json.loads(bj.read_text()))
-    verdict = "PASS" if (exit_code == 0 and not timed_out) else "FAIL"
+    evidence_errors: list[str] = []
+    snapshot_error = None
+    try:
+        outputs = _snapshot_copy(work_root, before, attempt_dir / "outputs")
+    except Exception as e:
+        outputs = []
+        snapshot_error = f"{type(e).__name__}: {e}"
+        evidence_errors.append(f"snapshot copy failed: {snapshot_error}")
+
+    def load_records(kind: str, filename: str) -> list[dict]:
+        records: list[dict] = []
+        base = attempt_dir / kind
+        if base.is_dir():
+            for sub in sorted(base.iterdir()):
+                if not sub.is_dir():
+                    continue
+                rec_file = sub / filename
+                if not rec_file.is_file():
+                    evidence_errors.append(
+                        f"{kind}/{sub.name}: missing {filename}")
+                    continue
+                try:
+                    record = json.loads(rec_file.read_text())
+                    if not isinstance(record, dict):
+                        raise ValueError("record is not an object")
+                except Exception as e:
+                    evidence_errors.append(
+                        f"{kind}/{sub.name}: unreadable {filename}: {e}")
+                    continue
+                if record.get("evidence_complete") is False:
+                    evidence_errors.append(
+                        f"{kind}/{sub.name}: harness evidence incomplete: "
+                        f"{record.get('evidence_errors')}")
+                records.append(record)
+        return records
+
+    boots = load_records("boots", "boot.json")
+    builds = load_records("builds", "build.json")
+    errors_dir = attempt_dir / "evidence-errors"
+    if errors_dir.is_dir():
+        for err_file in sorted(errors_dir.glob("*/error.json")):
+            try:
+                rec = json.loads(err_file.read_text())
+                evidence_errors.append(
+                    f"harness evidence error ({rec.get('kind')}/"
+                    f"{rec.get('label')}): {rec.get('errors')}")
+            except Exception as e:
+                evidence_errors.append(
+                    f"unreadable harness evidence error record: {e}")
+    evidence_errors = sorted(set(evidence_errors))
+    verdict = "PASS" if (exit_code == 0 and not timed_out
+                         and not evidence_errors) else "FAIL"
+    try:
+        started = json.loads(
+            (attempt_dir / "cmd.json").read_text())["started_utc"]
+    except Exception:
+        started = _utcnow()
     result = {
         "entry": entry["id"],
         "attempt_dir": str(attempt_dir),
         "exit_code": exit_code,
         "timed_out": timed_out,
+        "timeout_s": timeout_s,
+        "output_eof": output_eof,
+        "descendants_terminated": descendants_terminated,
         "verdict": verdict,
         "duration_s": round(dt, 3),
-        "started_utc": json.loads((attempt_dir / "cmd.json").read_text())["started_utc"],
+        "started_utc": started,
         "finished_utc": _utcnow(),
+        "cmd_sha256": _sha256_file(attempt_dir / "cmd.json"),
         "output_log": "output.log",
         "output_log_sha256": _sha256_file(out_path),
+        "output_log_bytes": out_path.stat().st_size if out_path.exists() else 0,
         "snapshot_outputs": outputs,
+        "snapshot_error": snapshot_error,
+        "evidence_errors": evidence_errors,
         "boots": boots,
         "builds": builds,
         "worktree_status_changed": status_before != status_after,
@@ -634,33 +920,654 @@ def worker_prepare(worker_root: Path, snapshot_commit: str) -> list[str]:
     return ["unshare", "-rmn", str(script)]
 
 
-def verify_run(run_dir: Path) -> list[str]:
-    """Fail-closed completeness check of a finished run directory."""
-    problems: list[str] = []
-    run_json = run_dir / "run.json"
-    if not run_json.is_file():
-        return [f"missing {run_json}"]
+def _is_sha256(value) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _parse_timestamp(value):
+    if not isinstance(value, str) or not value:
+        return None
     try:
-        data = json.loads(run_json.read_text())
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _load_json_object(path: Path, problems: list[str], label: str):
+    try:
+        data = json.loads(path.read_text())
     except Exception as e:
-        return [f"run.json unreadable: {e}"]
-    for field in ("run_id", "mode", "source", "environment", "results",
-                  "verdict"):
+        problems.append(f"{label} unreadable: {e}")
+        return None
+    if not isinstance(data, dict):
+        problems.append(f"{label} is not a JSON object")
+        return None
+    return data
+
+
+def _safe_join(base: Path, rel) -> Path | None:
+    if not isinstance(rel, str) or not rel:
+        return None
+    p = Path(rel)
+    if p.is_absolute() or ".." in p.parts:
+        return None
+    candidate = (base / p).resolve()
+    base_resolved = base.resolve()
+    if candidate != base_resolved and base_resolved not in candidate.parents:
+        return None
+    return base / p
+
+
+def _check_evidence_manifest(base: Path, manifest_rel: str,
+                             problems: list[str], label: str,
+                             expected_sha256: str | None = None):
+    path = base / manifest_rel
+    if not path.is_file():
+        problems.append(f"{label}: missing evidence manifest {manifest_rel}")
+        return None
+    if expected_sha256 is not None and _sha256_file(path) != expected_sha256:
+        problems.append(f"{label}: evidence manifest hash mismatch")
+    manifest = _load_json_object(path, problems, f"{label} evidence manifest")
+    if manifest is None:
+        return None
+    if manifest.get("schema") != 1 or not isinstance(manifest.get("files"), list):
+        problems.append(f"{label}: malformed evidence manifest")
+        return manifest
+    listed = []
+    for rec in manifest["files"]:
+        if not isinstance(rec, dict) or _safe_join(base, rec.get("path")) is None \
+                or not isinstance(rec.get("size"), int) \
+                or not _is_sha256(rec.get("sha256")):
+            problems.append(f"{label}: malformed manifest record {rec!r}")
+            continue
+        listed.append({"path": rec["path"], "size": rec["size"],
+                       "sha256": rec["sha256"]})
+    actual = _evidence_file_records(base, {manifest_rel})
+    if sorted(listed, key=lambda r: r["path"]) != \
+            sorted(actual, key=lambda r: r["path"]):
+        problems.append(f"{label}: evidence files do not match manifest "
+                        "(missing, extra, resized, or altered files)")
+    return manifest
+
+
+def _verify_harness_files(record: dict, record_dir: Path, record_name: str,
+                          label: str, problems: list[str],
+                          required: tuple[str, ...]) -> None:
+    files = record.get("files")
+    if record.get("evidence_complete") is False:
+        problems.append(f"{label}: harness reports incomplete evidence: "
+                        f"{record.get('evidence_errors')}")
+    if not isinstance(files, dict):
+        problems.append(f"{label}: missing files hash record")
+        return
+    for name in required:
+        if not _is_sha256(files.get(name)):
+            problems.append(f"{label}: required evidence {name} missing/unhashed")
+    actual = set()
+    if record_dir.is_dir():
+        for p in record_dir.rglob("*"):
+            if p.is_file() and p.name != ".sequence.lock":
+                actual.add(p.relative_to(record_dir).as_posix())
+    expected_actual = set(files) | {record_name}
+    if actual != expected_actual:
+        problems.append(f"{label}: evidence directory contents do not match "
+                        f"its record (actual {sorted(actual)}, "
+                        f"recorded {sorted(expected_actual)})")
+    for name, digest in files.items():
+        p = _safe_join(record_dir, name)
+        if p is None:
+            problems.append(f"{label}: unsafe evidence path {name!r}")
+        elif digest is None:
+            problems.append(f"{label}: evidence copy failed for {name}")
+        elif not _is_sha256(digest) or not p.is_file() or \
+                _sha256_file(p) != digest:
+            problems.append(f"{label}: evidence {name} missing or altered")
+
+
+def _verify_attempt(run_dir: Path, entry: dict, expectation: dict,
+                    att, index: int) -> list[str]:
+    problems: list[str] = []
+    sid = entry.get("id", "?")
+    label = f"{sid} attempt {index}"
+    if not isinstance(att, dict):
+        return [f"{label}: attempt record is not an object"]
+    expected_rel = f"attempts/{sid}/attempt-{index:03d}"
+    if att.get("attempt_relpath") != expected_rel:
+        problems.append(f"{label}: attempt_relpath "
+                        f"{att.get('attempt_relpath')!r} != {expected_rel!r}")
+    adir = _safe_join(run_dir, expected_rel)
+    if adir is None or not adir.is_dir():
+        problems.append(f"{label}: attempt directory missing inside run: "
+                        f"{expected_rel}")
+        return problems
+    disk_result = _load_json_object(adir / "result.json", problems,
+                                    f"{label} result.json")
+    comparable = {k: v for k, v in att.items() if k != "evidence_manifest"}
+    if disk_result is not None and disk_result != comparable:
+        problems.append(f"{label}: run.json attempt differs from result.json")
+    manifest_meta = att.get("evidence_manifest")
+    manifest = _check_evidence_manifest(
+        adir, "evidence.json", problems, label,
+        manifest_meta.get("sha256") if isinstance(manifest_meta, dict) else None)
+    manifest_paths = set()
+    if manifest and isinstance(manifest.get("files"), list):
+        if manifest.get("entry") != sid or manifest.get("attempt") != expected_rel:
+            problems.append(f"{label}: attempt manifest identity mismatch")
+        manifest_paths = {r.get("path") for r in manifest["files"]
+                          if isinstance(r, dict)}
+        if isinstance(manifest_meta, dict) and \
+                manifest_meta.get("files") != len(manifest["files"]):
+            problems.append(f"{label}: attempt manifest file count mismatch")
+    cmd = _load_json_object(adir / "cmd.json", problems, f"{label} cmd.json")
+    if cmd is not None:
+        if _sha256_file(adir / "cmd.json") != att.get("cmd_sha256"):
+            problems.append(f"{label}: cmd.json hash mismatch")
+        argv = cmd.get("argv")
+        entry_cmd = entry.get("cmd")
+        if not isinstance(argv, list) or not argv or \
+                not all(isinstance(x, str) for x in argv) or \
+                not isinstance(entry_cmd, list) or \
+                argv[-len(entry_cmd):] != entry_cmd:
+            problems.append(f"{label}: cmd.json argv does not end with the "
+                            "snapshot entry command")
+        if cmd.get("entry") != sid or cmd.get("started_utc") != att.get("started_utc"):
+            problems.append(f"{label}: cmd.json identity/start mismatch")
+        if cmd.get("timeout_s") != entry.get("timeout_s") or \
+                att.get("timeout_s") != entry.get("timeout_s"):
+            problems.append(f"{label}: timeout does not match snapshot entry")
+        if not isinstance(cmd.get("cwd"), str) or not cmd.get("cwd"):
+            problems.append(f"{label}: cmd.json cwd missing")
+    out = adir / "output.log"
+    if not out.is_file():
+        problems.append(f"{label}: missing output.log")
+    elif _sha256_file(out) != att.get("output_log_sha256") or \
+            out.stat().st_size != att.get("output_log_bytes"):
+        problems.append(f"{label}: output.log hash/size mismatch")
+    # Terminal-state and verdict consistency. A timeout that later exits
+    # 0, or an evidence-copy failure, can never be recorded as PASS.
+    exit_code = att.get("exit_code")
+    timed_out = att.get("timed_out")
+    evidence_errors = att.get("evidence_errors")
+    if att.get("entry") != sid:
+        problems.append(f"{label}: attempt entry mismatch")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        problems.append(f"{label}: exit_code is not an integer")
+    if not isinstance(timed_out, bool):
+        problems.append(f"{label}: timed_out is not a boolean")
+    if not isinstance(evidence_errors, list):
+        problems.append(f"{label}: evidence_errors missing")
+        evidence_errors = ["<missing>"]
+    if evidence_errors:
+        problems.append(f"{label}: evidence errors recorded: {evidence_errors}")
+    if att.get("snapshot_error"):
+        problems.append(f"{label}: snapshot copy failed")
+    expected_verdict = "PASS" if (
+        exit_code == 0 and timed_out is False and not evidence_errors
+        and not att.get("snapshot_error")) else "FAIL"
+    if att.get("verdict") != expected_verdict:
+        problems.append(f"{label}: verdict {att.get('verdict')!r} contradicts "
+                        f"exit/timeout/evidence state ({expected_verdict})")
+    duration = att.get("duration_s")
+    if not isinstance(duration, (int, float)) or isinstance(duration, bool) \
+            or duration < 0:
+        problems.append(f"{label}: invalid duration")
+    started, finished = _parse_timestamp(att.get("started_utc")), \
+        _parse_timestamp(att.get("finished_utc"))
+    if started is None or finished is None or finished < started:
+        problems.append(f"{label}: invalid attempt timestamps")
+    if timed_out is True and isinstance(duration, (int, float)) and \
+            isinstance(entry.get("timeout_s"), (int, float)) and \
+            duration + 0.001 < entry["timeout_s"]:
+        problems.append(f"{label}: timed out before its deadline duration")
+    outputs = att.get("snapshot_outputs")
+    if not isinstance(outputs, list) or \
+            not all(isinstance(x, str) for x in outputs) or \
+            len(set(outputs)) != len(outputs):
+        problems.append(f"{label}: malformed snapshot_outputs")
+        outputs = []
+    actual_outputs = set()
+    outputs_dir = adir / "outputs"
+    if outputs_dir.is_dir():
+        actual_outputs = {p.relative_to(outputs_dir).as_posix()
+                          for p in outputs_dir.rglob("*") if p.is_file()}
+    if actual_outputs != set(outputs):
+        problems.append(f"{label}: snapshot outputs on disk do not match record")
+    if (adir / "evidence-errors").is_dir() and \
+            any((adir / "evidence-errors").glob("*/error.json")):
+        problems.append(f"{label}: harness evidence-error sentinel present")
+
+    def scan_records(kind: str, filename: str):
+        records, dirs = [], []
+        base = adir / kind
+        if base.is_dir():
+            for sub in sorted(base.iterdir()):
+                if sub.is_dir():
+                    dirs.append(sub)
+                    rec = _load_json_object(sub / filename, problems,
+                                            f"{label} {kind}/{sub.name}")
+                    if rec is not None:
+                        records.append(rec)
+        return records, dirs
+
+    boots, boot_dirs = scan_records("boots", "boot.json")
+    if boots != att.get("boots"):
+        problems.append(f"{label}: boot records differ from preserved boot.json files")
+    for rec, rec_dir in zip(boots, boot_dirs):
+        blabel = f"{label} boot {rec.get('label', rec_dir.name)}"
+        _verify_harness_files(rec, rec_dir, "boot.json", blabel, problems,
+                              ("serial.log", "qemu-stderr.log"))
+        if rec.get("kind") not in ("run_qemu", "boot") or \
+                not isinstance(rec.get("label"), str) or not rec.get("label"):
+            problems.append(f"{blabel}: malformed boot identity")
+        qcmd = rec.get("qemu_command")
+        if not isinstance(qcmd, list) or not qcmd or \
+                not all(isinstance(x, str) for x in qcmd):
+            problems.append(f"{blabel}: missing QEMU command")
+        if not isinstance(rec.get("duration_s"), (int, float)) or \
+                not isinstance(rec.get("cpu"), str) or not rec.get("cpu"):
+            problems.append(f"{blabel}: malformed boot duration/cpu")
+        killed = rec.get("intentional_kill") is True or \
+            rec.get("timed_out") is True
+        if rec.get("qemu_exit") is None and not killed:
+            problems.append(f"{blabel}: QEMU exit is null without an "
+                            "intentional-kill/timeout explanation")
+        if rec.get("semantic_verdict") is None and not killed:
+            problems.append(f"{blabel}: semantic verdict is null without an "
+                            "intentional-kill/timeout explanation")
+        if att.get("verdict") == "PASS" and not (
+                _is_sha256(rec.get("esp_sha256")) and
+                _is_sha256(rec.get("efi_sha256"))):
+            problems.append(f"{blabel}: boot does not identify its ESP/EFI")
+    builds, build_dirs = scan_records("builds", "build.json")
+    if builds != att.get("builds"):
+        problems.append(f"{label}: build records differ from preserved build.json files")
+    for rec, rec_dir in zip(builds, build_dirs):
+        blabel = f"{label} build {rec.get('label', rec_dir.name)}"
+        _verify_harness_files(rec, rec_dir, "build.json", blabel, problems, ())
+        if not isinstance(rec.get("duration_s"), (int, float)) or \
+                not isinstance(rec.get("cache"), str) or not rec.get("cache"):
+            problems.append(f"{blabel}: malformed build record")
+        if att.get("verdict") == "PASS" and not (
+                _is_sha256(rec.get("efi_sha256")) and
+                _is_sha256(rec.get("esp_sha256"))):
+            problems.append(f"{blabel}: build does not identify its EFI/ESP")
+    if att.get("verdict") == "PASS":
+        if expectation.get("requires_boot") and not boots:
+            problems.append(f"{label}: guest entry passed without any "
+                            "preserved boot record")
+        if expectation.get("build_evidence") == \
+                "build-record-or-boot-artifact-hashes" and not builds and \
+                not any(_is_sha256(b.get("esp_sha256")) and
+                        _is_sha256(b.get("efi_sha256")) for b in boots):
+            problems.append(f"{label}: no build record or boot artifact identity")
+        if expectation.get("build_evidence") == "command-output":
+            text = out.read_bytes() if out.is_file() else b""
+            if b"kernel image: build/arena-boot.efi" not in text or \
+                    b"arena-esp.img" not in text:
+                problems.append(f"{label}: build entry output lacks the "
+                                "kernel/ESP build markers")
+        for rel in expectation.get("custom_files") or []:
+            if rel not in manifest_paths:
+                problems.append(f"{label}: missing custom evidence {rel}")
+        if expectation.get("profile") == "stability":
+            text = out.read_bytes() if out.is_file() else b""
+            if b"STABILITY: PASS" not in text or \
+                    "build/stability-receipt.txt" not in outputs:
+                problems.append(f"{label}: stability pass lacks its "
+                                "STABILITY marker/receipt")
+    elif expectation.get("requires_boot") and not boots and not builds \
+            and not outputs:
+        problems.append(f"{label}: guest failure has neither boot, build, "
+                        "nor snapshot evidence")
+    return problems
+
+
+def _verify_run_inner(run_dir: Path) -> list[str]:
+    problems: list[str] = []
+    if not run_dir.is_dir():
+        return [f"run directory missing: {run_dir}"]
+    _check_evidence_manifest(run_dir, "evidence-manifest.json", problems, "run")
+    data = _load_json_object(run_dir / "run.json", problems, "run.json")
+    if data is None:
+        return problems
+    if data.get("schema") != 2:
+        return problems + [f"unsupported run schema {data.get('schema')!r}: "
+                           "only schema-2 sealed runs verify"]
+    for field in ("run_id", "mode", "evidence_level", "source",
+                  "environment", "selected", "omitted", "blocked_reasons",
+                  "selection_snapshot", "options", "started_utc",
+                  "finished_utc", "status", "completion", "counts",
+                  "results", "verdict"):
         if field not in data:
             problems.append(f"run.json missing field: {field}")
-    for sid, res in (data.get("results") or {}).items():
-        if res.get("verdict") in ("PASS", "FAIL") and not res.get("attempts"):
-            problems.append(f"{sid}: verdict without attempts (hidden retry?)")
-        for att in res.get("attempts", []):
-            adir = Path(att.get("attempt_dir", ""))
-            if not adir.is_dir() and not (run_dir / "attempts" / sid).is_dir():
-                problems.append(f"{sid}: attempt dir missing: {adir}")
+    if not isinstance(data.get("run_id"), str) or not data.get("run_id"):
+        problems.append("run_id is empty")
+    mode = data.get("mode")
+    if mode not in ("quick", "affected", "full", "qualify", "suite"):
+        problems.append(f"unknown run mode {mode!r}")
+    # --- selection snapshot: the completeness contract
+    snap_meta = data.get("selection_snapshot")
+    snap = None
+    if not isinstance(snap_meta, dict):
+        problems.append("selection_snapshot metadata missing")
+    else:
+        snap_path = _safe_join(run_dir, snap_meta.get("file"))
+        if snap_path is None or not snap_path.is_file():
+            problems.append("selection snapshot file missing inside run")
+        else:
+            if _sha256_file(snap_path) != snap_meta.get("sha256"):
+                problems.append("selection snapshot hash mismatch")
+            snap = _load_json_object(snap_path, problems, "selection snapshot")
+    selected: list[str] = []
+    selected_entries: dict[str, dict] = {}
+    expectations: dict = {}
+    repeat = None
+    if snap is not None:
+        digest = snap.get("digest")
+        unsigned = {k: v for k, v in snap.items() if k != "digest"}
+        if hashlib.sha256(_canonical_json(unsigned)).hexdigest() != digest \
+                or (isinstance(snap_meta, dict)
+                    and snap_meta.get("digest") != digest):
+            problems.append("selection snapshot digest mismatch")
+        if snap.get("schema") != 1 or snap.get("mode") != mode:
+            problems.append("selection snapshot schema/mode mismatch")
+        registry_snap = snap.get("registry") or {}
+        all_entries = registry_snap.get("entries")
+        if not isinstance(all_entries, list) or not all_entries:
+            problems.append("selection snapshot registry is empty")
+            all_entries = []
+        by_id: dict[str, dict] = {}
+        for e in all_entries:
+            if not isinstance(e, dict) or not isinstance(e.get("id"), str):
+                problems.append("selection snapshot has a malformed entry")
                 continue
-            out = adir / "output.log" if adir.is_dir() else None
-            if out is not None and att.get("output_log_sha256"):
-                if _sha256_file(out) != att["output_log_sha256"]:
-                    problems.append(f"{sid}: output.log hash mismatch")
+            if e["id"] in by_id:
+                problems.append(f"duplicate snapshot entry {e['id']}")
+            by_id[e["id"]] = e
+            for field in ("title", "kind", "qualification", "parallel", "cmd"):
+                if not e.get(field):
+                    problems.append(f"snapshot entry {e['id']} lacks {field}")
+            if not isinstance(e.get("timeout_s"), (int, float)) or \
+                    e.get("timeout_s", 0) <= 0:
+                problems.append(f"snapshot entry {e['id']} has no timeout")
+        registered = sum(1 for e in all_entries
+                         if isinstance(e, dict)
+                         and e.get("qualification") == "registered")
+        if registry_snap.get("registered_count") != registered:
+            problems.append("snapshot registered_count does not match entries")
+        selected = snap.get("selected")
+        if not isinstance(selected, list) or not selected or \
+                len(set(selected)) != len(selected) or \
+                not all(isinstance(x, str) for x in selected):
+            problems.append("snapshot selection is empty, duplicated, or malformed")
+            selected = []
+        unknown = [x for x in selected if x not in by_id]
+        if unknown:
+            problems.append(f"selected entries absent from snapshot registry: {unknown}")
+        if snap.get("selected_entries") != [by_id[x] for x in selected
+                                            if x in by_id]:
+            problems.append("selected_entries do not match snapshot registry")
+        selected_entries = {x: by_id[x] for x in selected if x in by_id}
+        expected_omitted = [e["id"] for e in all_entries
+                            if isinstance(e, dict) and e.get("id") not in set(selected)]
+        if snap.get("omitted") != expected_omitted or \
+                data.get("omitted") != expected_omitted:
+            problems.append("omitted lists do not match snapshot registry/selection")
+        if data.get("selected") != selected:
+            problems.append("run.json selected does not match selection snapshot")
+        expectations = snap.get("evidence") or {}
+        if set(expectations) != set(selected):
+            problems.append("snapshot evidence expectations do not cover selection")
+        for sid, exp in expectations.items():
+            if sid in selected_entries and exp != evidence_expectations(
+                    selected_entries[sid]):
+                problems.append(f"{sid}: evidence expectation was altered")
+        repeat = snap.get("repeat")
+        options = data.get("options") or {}
+        if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat < 1 \
+                or options.get("repeat") != repeat:
+            problems.append("snapshot/options repeat mismatch")
+        basis = snap.get("basis") or {}
+        if mode in ("quick", "full", "qualify"):
+            if basis.get("type") != "mode-rule" or basis.get("mode") != mode:
+                problems.append("mode run lacks a mode-rule selection basis")
+            elif [e["id"] for e in select_mode_entries(all_entries, mode)] != selected:
+                problems.append(f"{mode} selection does not match the mode rule "
+                                "for the snapshot registry")
+        elif mode == "suite":
+            requested = basis.get("requested_ids") or basis.get("entry_ids")
+            if basis.get("type") not in ("explicit-entries", "suite") or \
+                    list(dict.fromkeys(requested or [])) != selected:
+                problems.append("suite selection does not match its requested ids")
+        elif mode == "affected":
+            pathmap = snap.get("pathmap")
+            if basis.get("type") != "affected" or not isinstance(pathmap, dict):
+                problems.append("affected run lacks its pathmap/basis snapshot")
+            else:
+                if snap.get("pathmap_digest") != hashlib.sha256(
+                        _canonical_json(pathmap)).hexdigest():
+                    problems.append("affected pathmap digest mismatch")
+                recomputed, report = select_affected(
+                    {"entries": all_entries}, pathmap,
+                    basis.get("changed_files") or [])
+                if [e["id"] for e in recomputed] != selected:
+                    problems.append("affected selection does not recompute "
+                                    "from snapshot basis")
+                if data.get("selection_report") != report:
+                    problems.append("affected selection_report does not "
+                                    "recompute from snapshot basis")
+    # --- source and environment identity
+    src = data.get("source")
+    if not isinstance(src, dict):
+        problems.append("source identity missing")
+        src = {}
+    if not isinstance(src.get("commit"), str) or \
+            re.fullmatch(r"[0-9a-f]{40}", src.get("commit") or "") is None:
+        problems.append("source commit is not a full commit id")
+    if not isinstance(src.get("branch"), str) or not src.get("branch"):
+        problems.append("source branch missing")
+    if not isinstance(src.get("dirty"), bool) or \
+            not isinstance(src.get("status_lines"), list) or \
+            not isinstance(src.get("untracked"), list):
+        problems.append("source dirty/status identity malformed")
+    for fname, sha_key, size_key in (
+            ("source.diff", "diff_sha256", "diff_bytes"),
+            ("source-status.txt", "status_sha256", "status_bytes")):
+        p = run_dir / fname
+        if not p.is_file():
+            problems.append(f"missing {fname}")
+        elif _sha256_file(p) != src.get(sha_key) or \
+                p.stat().st_size != src.get(size_key):
+            problems.append(f"{fname} does not match source identity")
+    env_info = data.get("environment")
+    if not isinstance(env_info, dict) or not env_info:
+        problems.append("environment identity missing/empty")
+        env_info = {}
+    uname = env_info.get("uname") or {}
+    if not isinstance(uname, dict) or not uname.get("system") or \
+            not uname.get("machine"):
+        problems.append("environment uname incomplete")
+    for field in ("python", "repo_root", "rustc", "cargo", "sysroot"):
+        if not isinstance(env_info.get(field), str) or not env_info.get(field):
+            problems.append(f"environment identity lacks {field}")
+    if not isinstance(env_info.get("canonical_path"), bool) or \
+            not isinstance(env_info.get("cpu_count"), int) or \
+            (env_info.get("cpu_count") or 0) < 1:
+        problems.append("environment host identity malformed")
+    qemu = env_info.get("qemu") or {}
+    if not isinstance(qemu, dict) or not qemu.get("classification"):
+        problems.append("environment emulator identity incomplete")
+    firmware = env_info.get("firmware") or {}
+    if not isinstance(firmware, dict) or not (
+            "error" in firmware or _is_sha256(firmware.get("OVMF_CODE_sha256"))):
+        problems.append("environment firmware identity incomplete")
+    if not isinstance(env_info.get("libcore"), dict):
+        problems.append("environment libcore identity missing")
+    # --- completion state
+    status = data.get("status")
+    verdict = data.get("verdict")
+    if status not in ("COMPLETED", "BLOCKED"):
+        problems.append(f"run is not a finished record (status={status!r}); "
+                        "interrupted/incomplete runs cannot verify")
+    if verdict not in ("PASS", "FAIL", "BLOCKED"):
+        problems.append(f"unknown run verdict {verdict!r}")
+    started, finished = _parse_timestamp(data.get("started_utc")), \
+        _parse_timestamp(data.get("finished_utc"))
+    if started is None or finished is None or finished < started:
+        problems.append("run timestamps missing/invalid")
+    if not isinstance(data.get("duration_s"), (int, float)) or \
+            data.get("duration_s", -1) < 0:
+        problems.append("run duration missing/invalid")
+    blocked = data.get("blocked_reasons")
+    if not isinstance(blocked, list) or \
+            not all(isinstance(x, str) for x in blocked):
+        problems.append("blocked_reasons malformed")
+        blocked = []
+    completion = data.get("completion") or {}
+    if completion.get("expected_attempts_per_entry") != repeat or \
+            completion.get("state") != status:
+        problems.append("completion record does not match status/repeat")
+    not_run = data.get("not_run") or {}
+    if not isinstance(not_run, dict) or \
+            not set(not_run) <= set(selected):
+        problems.append("not_run dispositions malformed or unknown")
+        not_run = {}
+    # --- per-entry results and attempts
+    results = data.get("results")
+    if not isinstance(results, dict):
+        problems.append("results missing")
+        results = {}
+    if set(results) != set(selected):
+        problems.append(f"results entries do not match selection "
+                        f"(missing {sorted(set(selected) - set(results))}, "
+                        f"extra {sorted(set(results) - set(selected))})")
+    counts = {"selected": len(selected), "pass": 0, "fail": 0,
+              "not_run": 0, "attempts": 0}
+    expected_attempt_dirs: set[str] = set()
+    entry_verdicts: dict[str, str] = {}
+    for sid in selected:
+        res = results.get(sid)
+        if not isinstance(res, dict):
+            problems.append(f"{sid}: result missing")
+            continue
+        attempts = res.get("attempts")
+        if not isinstance(attempts, list):
+            problems.append(f"{sid}: attempts missing")
+            attempts = []
+        counts["attempts"] += len(attempts)
+        entry_verdict = res.get("verdict")
+        entry_verdicts[sid] = entry_verdict
+        if entry_verdict == "PASS":
+            counts["pass"] += 1
+        elif entry_verdict == "FAIL":
+            counts["fail"] += 1
+        elif entry_verdict == "NOT_RUN":
+            counts["not_run"] += 1
+        else:
+            problems.append(f"{sid}: unknown entry verdict {entry_verdict!r}")
+        if status == "BLOCKED":
+            if entry_verdict != "NOT_RUN" or attempts or \
+                    not (res.get("not_run_reason") or not_run.get(sid)):
+                problems.append(f"{sid}: blocked run lacks an explicit "
+                                "NOT_RUN disposition")
+            continue
+        if entry_verdict == "NOT_RUN":
+            if attempts or sid not in not_run or not blocked:
+                problems.append(f"{sid}: NOT_RUN without an explicit blocked "
+                                "disposition (incomplete run)")
+            continue
+        if sid in not_run:
+            problems.append(f"{sid}: both executed and marked NOT_RUN")
+        if repeat is not None and len(attempts) != repeat:
+            problems.append(f"{sid}: {len(attempts)} attempts, expected {repeat}")
+        attempt_verdicts = []
+        for idx, att in enumerate(attempts, 1):
+            expected_attempt_dirs.add(f"attempts/{sid}/attempt-{idx:03d}")
+            if isinstance(att, dict):
+                attempt_verdicts.append(att.get("verdict"))
+            if sid in selected_entries:
+                problems.extend(_verify_attempt(
+                    run_dir, selected_entries[sid],
+                    expectations.get(sid) or {}, att, idx))
+        expected_entry = "PASS" if attempt_verdicts and \
+            all(v == "PASS" for v in attempt_verdicts) else "FAIL"
+        if entry_verdict != expected_entry:
+            problems.append(f"{sid}: entry verdict {entry_verdict!r} contradicts "
+                            f"attempts {attempt_verdicts} (failed attempts "
+                            "must stay visible)")
+    actual_attempt_dirs = set()
+    attempts_root = run_dir / "attempts"
+    if attempts_root.is_dir():
+        for sub in attempts_root.glob("*/*"):
+            if sub.is_dir():
+                actual_attempt_dirs.add(sub.relative_to(run_dir).as_posix())
+    if actual_attempt_dirs != expected_attempt_dirs:
+        problems.append("attempt directories do not match recorded attempts "
+                        f"(missing {sorted(expected_attempt_dirs - actual_attempt_dirs)}, "
+                        f"extra {sorted(actual_attempt_dirs - expected_attempt_dirs)})")
+    if data.get("counts") != counts:
+        problems.append(f"run counts {data.get('counts')} != recomputed {counts}")
+    # --- aggregate verdict must be derivable, never merely asserted
+    source_end = data.get("source_status_at_end")
+    if status == "COMPLETED" and not isinstance(source_end, list):
+        problems.append("source_status_at_end missing")
+        source_end = src.get("status_lines")
+    source_changed = source_end != src.get("status_lines")
+    if data.get("source_changed_during_run") not in (None, source_changed):
+        problems.append("source_changed_during_run contradicts status records")
+    if status == "BLOCKED":
+        expected_verdict = "BLOCKED"
+        if not blocked:
+            problems.append("BLOCKED run without blocked reasons")
+    elif any(v == "FAIL" for v in entry_verdicts.values()) or source_changed:
+        expected_verdict = "FAIL"
+    elif blocked or any(v == "NOT_RUN" for v in entry_verdicts.values()):
+        expected_verdict = "BLOCKED"
+    elif entry_verdicts and all(v == "PASS" for v in entry_verdicts.values()):
+        expected_verdict = "PASS"
+    else:
+        expected_verdict = "FAIL"
+        problems.append("run has no complete passing entry set")
+    if verdict != expected_verdict:
+        problems.append(f"aggregate verdict {verdict!r} contradicts entries/"
+                        f"source state (expected {expected_verdict!r})")
+    if verdict == "PASS":
+        guestish = any((expectations.get(sid) or {}).get("profile") in
+                       ("guest", "stability") for sid in selected)
+        if guestish:
+            if not _is_sha256(qemu.get("emulator_sha256")) or \
+                    not qemu.get("version"):
+                problems.append("guest PASS lacks an identified emulator")
+            if not _is_sha256(firmware.get("OVMF_CODE_sha256")) or \
+                    not _is_sha256(firmware.get("OVMF_VARS_template_sha256")):
+                problems.append("guest PASS lacks identified firmware")
+        if mode == "qualify":
+            if not env_info.get("canonical_path"):
+                problems.append("qualify PASS was not at the canonical path")
+            if qemu.get("emulator_sha256") != PINNED_QEMU_SHA256:
+                problems.append("qualify PASS did not use the pinned emulator")
+            if not firmware.get("matches_phase15_package"):
+                problems.append("qualify PASS firmware mismatch")
+            for target, rec in (env_info.get("libcore") or {}).items():
+                if not (rec or {}).get("official"):
+                    problems.append(f"qualify PASS libcore not official: {target}")
     return problems
+
+
+def verify_run(run_dir: Path) -> list[str]:
+    """Fail-closed completeness check of a finished run directory.
+
+    Validates the run against its own persisted selection/registry
+    snapshot, resolving every evidence path *inside* ``run_dir`` so a
+    run extracted anywhere verifies (or fails) on its own contents.
+    An evidence-complete FAIL run verifies as a valid failure record;
+    only a PASS claim requires every entry's evidence to be present
+    and every attempt to have passed.
+    """
+    try:
+        return _verify_run_inner(Path(run_dir))
+    except Exception as e:  # the verifier itself must fail closed
+        return [f"verifier error: {type(e).__name__}: {e}"]
 
 
 # ------------------------------------------------------------------ main run
@@ -687,7 +1594,21 @@ def qualify_preconditions(env: dict, env_info: dict, src: dict) -> list[str]:
     return blocked
 
 
-def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> int:
+def execute(entries: list[dict], mode: str, args, extra_report: dict | None,
+            selection_basis: dict | None = None,
+            pathmap: dict | None = None) -> int:
+    requested_ids = [e["id"] for e in entries]
+    unique_entries: list[dict] = []
+    seen_ids: set[str] = set()
+    for entry in entries:
+        if entry["id"] not in seen_ids:
+            seen_ids.add(entry["id"])
+            unique_entries.append(entry)
+    entries = unique_entries
+    repeat = max(1, getattr(args, "repeat", 1))
+    if selection_basis is None:
+        selection_basis = {"type": "explicit-entries",
+                           "requested_ids": requested_ids}
     env = runner_env()
     if args.no_build_cache:
         env.pop("ARENA_TEST_BUILD_CACHE", None)
@@ -700,24 +1621,51 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
     src = source_identity(run_dir)
     env_info = environment_identity(env)
     blocked_reasons: list[str] = []
+    not_run_reasons: dict[str, str] = {}
     if mode == "qualify":
         blocked_reasons = qualify_preconditions(env, env_info, src)
     if mode == "quick" and env_info["qemu"].get("emulator_sha256") != PINNED_QEMU_SHA256:
         # The smoke boot would fail for a backend reason unrelated to the
-        # code under test (in-guest m15 needs genuine vector 19). Say so
-        # instead of manufacturing either a pass or a misleading fail.
-        before = len(entries)
-        entries = [e for e in entries if e["id"] != "smoke-m1"]
-        if len(entries) != before:
-            blocked_reasons.append(
-                "guest smoke boot NOT RUN: emulator is not the pinned "
-                "patched backend (stock QEMU fails the in-guest m15 "
-                "vector-19 suite by design)")
-    by_id = entries_by_id(load_registry())
-    omitted = [e["id"] for e in load_registry()["entries"]
-               if e["id"] not in {x["id"] for x in entries}]
+        # code under test (in-guest m15 needs genuine vector 19). Keep it
+        # in the selection contract with an explicit NOT_RUN disposition
+        # instead of silently shrinking "quick".
+        if any(e["id"] == "smoke-m1" for e in entries):
+            reason = ("guest smoke boot NOT RUN: emulator is not the pinned "
+                      "patched backend (stock QEMU fails the in-guest m15 "
+                      "vector-19 suite by design)")
+            blocked_reasons.append(reason)
+            not_run_reasons["smoke-m1"] = reason
+    registry = load_registry()
+    snapshot = _selection_snapshot(registry, entries, mode, repeat,
+                                   selection_basis, pathmap)
+    snapshot_path = run_dir / "selection.json"
+    snapshot_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True))
+    omitted = list(snapshot["omitted"])
+    results: dict[str, SuiteResult] = {
+        e["id"]: SuiteResult(e["id"]) for e in entries}
+    for sid, reason in not_run_reasons.items():
+        results[sid].not_run_reason = reason
+
+    def results_json() -> dict:
+        out = {}
+        for k, v in results.items():
+            rec = {"verdict": v.verdict, "attempts": v.attempts}
+            if v.not_run_reason:
+                rec["not_run_reason"] = v.not_run_reason
+            out[k] = rec
+        return out
+
+    def counts_json() -> dict:
+        return {
+            "selected": len(results),
+            "pass": sum(1 for v in results.values() if v.verdict == "PASS"),
+            "fail": sum(1 for v in results.values() if v.verdict == "FAIL"),
+            "not_run": sum(1 for v in results.values() if v.verdict == "NOT_RUN"),
+            "attempts": sum(len(v.attempts) for v in results.values()),
+        }
+
     run_data: dict = {
-        "schema": 1,
+        "schema": 2,
         "run_id": run_id,
         "mode": mode,
         "evidence_level": {
@@ -732,39 +1680,87 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
         "selected": [e["id"] for e in entries],
         "omitted": omitted,
         "blocked_reasons": blocked_reasons,
+        "not_run": dict(not_run_reasons),
+        "selection_snapshot": {
+            "file": "selection.json",
+            "sha256": _sha256_file(snapshot_path),
+            "digest": snapshot["digest"],
+        },
         "selection_report": extra_report,
         "options": {"jobs": args.jobs, "build_cache": not args.no_build_cache,
-                    "repeat": getattr(args, "repeat", 1),
+                    "repeat": repeat,
                     "fail_fast": args.fail_fast},
+        "status": "RUNNING",
+        "completion": {"state": "RUNNING",
+                       "expected_attempts_per_entry": repeat},
+        "counts": counts_json(),
         "started_utc": _utcnow(),
-        "results": {},
+        "finished_utc": None,
+        "duration_s": None,
+        "verdict": "RUNNING",
+        "results": results_json(),
     }
     (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
 
     if mode == "qualify" and blocked_reasons and not args.force:
-        run_data["verdict"] = "BLOCKED"
-        run_data["finished_utc"] = _utcnow()
-        (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
+        reason = ("qualification preconditions blocked execution: "
+                  + "; ".join(blocked_reasons))
+        for res in results.values():
+            res.not_run_reason = reason
+        run_data.update({
+            "status": "BLOCKED",
+            "completion": {"state": "BLOCKED",
+                           "expected_attempts_per_entry": repeat},
+            "counts": counts_json(),
+            "results": results_json(),
+            "not_run": {sid: reason for sid in results},
+            "source_status_at_end": list(src["status_lines"]),
+            "source_changed_during_run": False,
+            "verdict": "BLOCKED",
+            "duration_s": 0.0,
+            "finished_utc": _utcnow(),
+        })
+        _seal_run(run_dir, run_data)
         print(f"RUN {run_id}: BLOCKED")
         for b in blocked_reasons:
             print(f"  BLOCKED: {b}")
         print(f"evidence: {run_dir}")
         return 2
 
-    results: dict[str, SuiteResult] = {e["id"]: SuiteResult(e["id"]) for e in entries}
-    serial_entries = [e for e in entries if e.get("parallel") == "serial"]
-    pool_entries = [e for e in entries if e.get("parallel") != "serial"]
+    execution_entries = [e for e in entries if e["id"] not in not_run_reasons]
+    serial_entries = [e for e in execution_entries if e.get("parallel") == "serial"]
+    pool_entries = [e for e in execution_entries if e.get("parallel") != "serial"]
     jobs = max(1, args.jobs)
     stopped_early = False
+
+    def seal_attempt(att: dict, attempt_dir: Path, i: int) -> dict:
+        relpath = f"attempts/{att['entry']}/attempt-{i:03d}"
+        try:
+            return _finalize_attempt_evidence(attempt_dir, att, relpath)
+        except Exception as e:
+            att = dict(att)
+            att["attempt_relpath"] = relpath
+            att["attempt_dir"] = str(attempt_dir)
+            att["evidence_errors"] = sorted(set(
+                list(att.get("evidence_errors") or [])
+                + [f"attempt evidence sealing failed: {e}"]))
+            att["verdict"] = "FAIL"
+            try:
+                (attempt_dir / "result.json").write_text(
+                    json.dumps(att, indent=2))
+            except Exception:
+                pass
+            return att
 
     def do_entry(entry: dict, work_root: Path, prefix: list[str] | None,
                  echo: bool) -> None:
         res = results[entry["id"]]
-        for i in range(1, max(1, getattr(args, "repeat", 1)) + 1):
+        for i in range(1, repeat + 1):
             attempt_dir = run_dir / "attempts" / entry["id"] / f"attempt-{i:03d}"
             attempt_dir.parent.mkdir(parents=True, exist_ok=True)
             if prefix is None:
                 att = run_attempt(entry, attempt_dir, env, work_root, echo)
+                att = seal_attempt(att, attempt_dir, i)
             else:
                 # Workers write evidence inside their worktree; copy out.
                 w_att = (work_root / "build" / "test-attempts" / run_id
@@ -784,9 +1780,8 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
                 if attempt_dir.exists():
                     shutil.rmtree(attempt_dir)
                 shutil.copytree(w_att, attempt_dir)
-                att["attempt_dir"] = str(attempt_dir)
                 att["worker"] = str(work_root)
-                (attempt_dir / "result.json").write_text(json.dumps(att, indent=2))
+                att = seal_attempt(att, attempt_dir, i)
                 shutil.rmtree(w_att)
                 # A previous suite in this worker may have left the tree
                 # dirty (failed restoration). Reset for the next suite,
@@ -803,9 +1798,8 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
     if jobs == 1:
         for entry in pool_entries + serial_entries:
             do_entry(entry, REPO_ROOT, None, echo=True)
-            run_data["results"] = {
-                k: {"verdict": v.verdict, "attempts": v.attempts}
-                for k, v in results.items()}
+            run_data["results"] = results_json()
+            run_data["counts"] = counts_json()
             (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
             if args.fail_fast and results[entry["id"]].verdict == "FAIL":
                 stopped_early = True
@@ -817,8 +1811,30 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
             print("BLOCKED: --jobs>1 requires no untracked (non-ignored) "
                   "files; workers are git worktrees of a snapshot commit:\n"
                   + untracked)
-            run_data["verdict"] = "BLOCKED"
-            (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
+            reason = ("parallel execution blocked: untracked files prevent "
+                      "an exact worker snapshot")
+            blocked_reasons.append(reason)
+            for res in results.values():
+                res.not_run_reason = res.not_run_reason or reason
+            run_data.update({
+                "status": "BLOCKED",
+                "completion": {"state": "BLOCKED",
+                               "expected_attempts_per_entry": repeat},
+                "counts": counts_json(),
+                "results": results_json(),
+                "not_run": {sid: r.not_run_reason for sid, r in results.items()
+                            if r.not_run_reason},
+                "source_status_at_end": [
+                    ln for ln in _git("status", "--porcelain").stdout.splitlines()
+                    if ln],
+                "source_changed_during_run": False,
+                "verdict": "BLOCKED",
+                "duration_s": round(time.monotonic() - t_all, 1),
+                "finished_utc": _utcnow(),
+            })
+            run_data["source_changed_during_run"] = (
+                run_data["source_status_at_end"] != src["status_lines"])
+            _seal_run(run_dir, run_data)
             return 2
         # Workers must live OUTSIDE the repo tree: inside it, the bind
         # mount makes the inherited cwd path string stop existing, and
@@ -856,27 +1872,40 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
                 do_entry(entry, REPO_ROOT, None, echo=True)
 
     total_dt = time.monotonic() - t_all
-    run_data["results"] = {
-        k: {"verdict": v.verdict, "attempts": v.attempts}
-        for k, v in results.items()}
-    n_pass = sum(1 for v in results.values() if v.verdict == "PASS")
-    n_fail = sum(1 for v in results.values() if v.verdict == "FAIL")
+    run_data["results"] = results_json()
+    run_data["counts"] = counts_json()
+    n_pass = run_data["counts"]["pass"]
+    n_fail = run_data["counts"]["fail"]
     status_end = [ln for ln in _git("status", "--porcelain").stdout.splitlines() if ln]
     source_changed = status_end != src["status_lines"]
     run_data["source_status_at_end"] = status_end
-    if blocked_reasons and n_fail == 0:
+    run_data["source_changed_during_run"] = source_changed
+    incomplete = stopped_early or any(
+        (v.verdict == "NOT_RUN" and not v.not_run_reason)
+        or (v.verdict in ("PASS", "FAIL") and len(v.attempts) != repeat)
+        for v in results.values())
+    if incomplete:
+        final_status = "INCOMPLETE"
+        verdict = "FAIL"
+    elif n_fail or source_changed:
+        final_status = "COMPLETED"
+        verdict = "FAIL"
+    elif blocked_reasons or any(v.verdict == "NOT_RUN" for v in results.values()):
+        final_status = "COMPLETED"
         verdict = "BLOCKED"
-    elif n_fail or stopped_early:
-        verdict = "FAIL"
-    elif source_changed:
-        verdict = "FAIL"
-        run_data["source_changed_during_run"] = True
     else:
+        final_status = "COMPLETED"
         verdict = "PASS"
-    run_data["verdict"] = verdict
-    run_data["duration_s"] = round(total_dt, 1)
-    run_data["finished_utc"] = _utcnow()
-    (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
+    run_data.update({
+        "status": final_status,
+        "completion": {"state": final_status,
+                       "expected_attempts_per_entry": repeat},
+        "verdict": verdict,
+        "duration_s": round(total_dt, 1),
+        "finished_utc": _utcnow(),
+    })
+    if not _seal_run(run_dir, run_data):
+        verdict = run_data["verdict"]
     # Convenience pointer only; run dirs themselves are the evidence.
     latest = REPO_ROOT / "build" / "test-runs" / "latest"
     try:
@@ -994,7 +2023,9 @@ def main(argv: list[str]) -> int:
         return 2
     if args.cmd in ("quick", "full", "qualify"):
         entries = select_mode(registry, args.cmd)
-        return execute(entries, args.cmd, args, None)
+        return execute(entries, args.cmd, args, None,
+                       selection_basis={"type": "mode-rule",
+                                        "mode": args.cmd})
     if args.cmd == "affected":
         pathmap = load_map()
         changed = changed_files(args.base)
@@ -1005,14 +2036,21 @@ def main(argv: list[str]) -> int:
                               "report": report}, indent=2))
             return 0
         args.repeat = 1
-        return execute(entries, "affected", args, report)
+        return execute(entries, "affected", args, report,
+                       selection_basis={"type": "affected",
+                                        "base": args.base,
+                                        "changed_files": changed,
+                                        "report": report},
+                       pathmap=pathmap)
     if args.cmd == "suite":
         by_id = entries_by_id(registry)
         unknown = [i for i in args.ids if i not in by_id]
         if unknown:
             print(f"unknown suite ids: {unknown}", file=sys.stderr)
             return 2
-        return execute([by_id[i] for i in args.ids], "suite", args, None)
+        return execute([by_id[i] for i in args.ids], "suite", args, None,
+                       selection_basis={"type": "explicit-entries",
+                                        "requested_ids": list(args.ids)})
     return 2
 
 
