@@ -483,7 +483,7 @@ def test_accelerator_failure_cannot_pass() -> None:
         return
     with tempfile.TemporaryDirectory() as td:
         fake = Path(td) / "fake-qemu.sh"
-        fake.write_text("#!/bin/sh\necho 'Could not initialize TCG: broken' >&2\nexit 1\n")
+        fake.write_text("#!/bin/sh\necho 'Could not initialize TCG: broken' >&2\nsleep 1\nexit 1\n")
         fake.chmod(0o755)
         esp = Path(td) / "dummy-esp.img"
         esp.write_bytes(b"\0" * 4096)
@@ -500,6 +500,43 @@ def test_accelerator_failure_cannot_pass() -> None:
               "accelerator/process initialization failure cannot pass")
         check(mtest.LAST_QEMU_EXIT.get("infra-fake-qemu") == 1,
               "actual QEMU process exit is preserved separately")
+        # A feeder/workflow assertion must still leave a structured boot
+        # record for the boot it was driving (regression: phase13's
+        # failing boot once had raw snapshots but no boot.json).
+        attempt = Path(td) / "attempt"
+        scratch = Path(td) / "scratch.img"
+        scratch.write_bytes(b"\0" * 4096)
+
+        def boom():
+            raise AssertionError("synthetic workflow failure")
+
+        old_attempt = os.environ.get("ARENA_TEST_ATTEMPT_DIR")
+        os.environ["ARENA_QEMU"] = str(fake)
+        os.environ["ARENA_TEST_ATTEMPT_DIR"] = str(attempt)
+        raised = False
+        try:
+            mtest.boot("infra-feeder-error", esp, [(b"", 1, boom)],
+                       scratch, timeout_s=10)
+        except RuntimeError:
+            raised = True
+        finally:
+            if old is None:
+                os.environ.pop("ARENA_QEMU", None)
+            else:
+                os.environ["ARENA_QEMU"] = old
+            if old_attempt is None:
+                os.environ.pop("ARENA_TEST_ATTEMPT_DIR", None)
+            else:
+                os.environ["ARENA_TEST_ATTEMPT_DIR"] = old_attempt
+        records = list((attempt / "boots").glob("*/boot.json"))
+        check(raised and len(records) == 1,
+              "feeder failure raises only after recording its boot")
+        if records:
+            record = json.loads(records[0].read_text())
+            check(record.get("semantic_verdict") == 98 and
+                  "synthetic workflow failure" in
+                  str(record.get("workflow_error")),
+                  "feeder-error boot record carries the workflow verdict")
 
 
 def test_affected_selection() -> None:

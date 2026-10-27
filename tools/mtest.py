@@ -82,6 +82,13 @@ LAST_QEMU_EXIT: dict[str, int | None] = {}
 _ATTEMPT_DIR = os.environ.get("ARENA_TEST_ATTEMPT_DIR")
 
 
+def _current_attempt_dir() -> str | None:
+    # Read dynamically: a long-lived harness process may set the
+    # attempt directory after import (the runner always sets it before
+    # spawning a suite, but evidence routing must not depend on that).
+    return os.environ.get("ARENA_TEST_ATTEMPT_DIR") or _ATTEMPT_DIR
+
+
 def _allocate_attempt_dest(kind_dir: str, label: str) -> Path:
     """Allocate a unique, monotonic evidence directory for this attempt.
 
@@ -93,7 +100,7 @@ def _allocate_attempt_dest(kind_dir: str, label: str) -> Path:
     """
     import fcntl
 
-    parent = Path(_ATTEMPT_DIR) / kind_dir  # type: ignore[arg-type]
+    parent = Path(_current_attempt_dir()) / kind_dir  # type: ignore[arg-type]
     parent.mkdir(parents=True, exist_ok=True)
     with open(parent / ".sequence.lock", "a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -135,7 +142,7 @@ def _attempt_write(kind_dir: str, label: str, record: dict,
     sentinel is left for the runner, which fails the attempt rather
     than presenting an evidence-complete pass built on missing files.
     """
-    if not _ATTEMPT_DIR:
+    if not _current_attempt_dir():
         return True
     try:
         import hashlib
@@ -768,8 +775,6 @@ def boot(label: str, esp: Path,
     peer_thread.join(timeout=2)
     dns_stop.set()
     dns_thread.join(timeout=2)
-    if feeder_errors:
-        raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
     if killed:
         rc = None
     dt = time.monotonic() - t0
@@ -779,6 +784,14 @@ def boot(label: str, esp: Path,
     if verdict == 0 and "m7: RESULT PASS (2/2)" in serial and dns_log.read_text().count("DNS_FIXTURE_QUERY ") != 3:
         print(f"[{label}] FAIL: controlled host did not receive exactly three DNS queries: {dns_log}")
         verdict = 97
+    workflow_error = None
+    if feeder_errors:
+        # Preserve the boot that the workflow was driving *before*
+        # propagating its assertion: a raised feeder used to leave the
+        # failing boot with no structured boot record at all.
+        workflow_error = (f"{type(feeder_errors[0]).__name__}: "
+                          f"{feeder_errors[0]}")
+        verdict = 98  # harness workflow verdict, not a QEMU status
     # An armed `kill` gate is an intentional crash fixture: mark it so
     # evidence readers can tell a by-design SIGKILL from a lost boot.
     _attempt_write("boots", label, {
@@ -789,11 +802,14 @@ def boot(label: str, esp: Path,
         "scratch_disk": str(scratch),
         "intentional_kill": bool(kill) and killed,
         "timed_out": killed and not kill,
+        "workflow_error": workflow_error,
         "qemu_command": cmd,
     }, {"serial.log": serial_log, "qemu-stderr.log": err_log,
         "udp-dns.log": dns_log, "tcp.log": bdir / f"tcp-{label}.log",
         "vcon.txt": bdir / f"vcon-{label}.txt",
         "timeout.txt": bdir / f"timeout-{label}.txt"})
+    if feeder_errors:
+        raise RuntimeError(f"{label}: guest workflow assertion failed") from feeder_errors[0]
     return verdict, serial, dt
 
 

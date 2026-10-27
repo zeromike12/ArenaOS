@@ -292,6 +292,12 @@ def interaction(disk):
         baseline_rows = COUNTERS.findall(d.serial())
         assert baseline_rows, "native resource baseline is missing"
         baseline = tuple(map(int, baseline_rows[-1]))
+        # The counters line and the detailed receipt are separate serial
+        # writes; Desktop's constructor settles on the former. Wait for
+        # the latter to arrive instead of racing its emission (the
+        # assertion itself is unchanged).
+        d.wait(lambda: DETAILS.findall(d.serial()),
+               "detailed native resource receipt is missing")
         baseline_detail = resource_details(d)[-1]
 
         before_install = d.serial().count("[desktop] APB1 installed; signed version=")

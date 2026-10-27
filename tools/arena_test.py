@@ -367,6 +367,20 @@ _CUSTOM_GUEST_EVIDENCE = {
         "xm/qemu-stderr-patched.log", "xm/qemu-stderr-unpatched.log",
         "xm/exit-patched.txt", "xm/exit-unpatched.txt", "xm/xm-verify.json",
     ],
+    # The archive-preflight entries boot through the standalone
+    # extracted-archive witness, not mtest.boot; that witness copies its
+    # raw serial/QEMU/pixel/network/console evidence into the attempt
+    # directory's extracted/ tree (see ARENA_EXTRACTED_EVIDENCE).
+    "m10-archive-preflight": [
+        "extracted/serial.log", "extracted/qemu.err",
+        "extracted/screen.ppm", "extracted/pixels.txt",
+        "extracted/tcp.log", "extracted/dns.log", "extracted/console.log",
+    ],
+    "m11-archive-preflight": [
+        "extracted/serial.log", "extracted/qemu.err",
+        "extracted/screen.ppm", "extracted/pixels.txt",
+        "extracted/tcp.log", "extracted/dns.log", "extracted/console.log",
+    ],
 }
 _PREBUILT_GUEST = {"strict-m15-final", "strict-m15-preserved",
                    "backend-xm-controls"}
