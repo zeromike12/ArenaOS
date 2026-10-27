@@ -189,7 +189,7 @@ def runner_env(extra: dict | None = None) -> dict:
 
 
 def _qemu_identity(env: dict) -> dict:
-    info: dict = {"areNA_QEMU_env": env.get("ARENA_QEMU")}
+    info: dict = {"ARENA_QEMU_env": env.get("ARENA_QEMU")}
     try:
         import arena_env
 

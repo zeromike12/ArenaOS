@@ -33,7 +33,7 @@ def recovery(esp,disk,tag):
     # refusal), not just the shell prompt: querying before settlement can
     # return a fail-closed pre-scan answer and shut down before READY is
     # ever printed — observed in Phase 16 registered attempt 1 (policy/close;
-    # docs/testing/Q1.md). Assertions below are unchanged.
+    # docs/testing/Q1-INVESTIGATION.md). Assertions below are unchanged.
     settle=(b'arena>',(b'packaged READY',b'boot namespace scan refused'))
     rc,s,secs=mtest.boot(f'{LABEL}-recover-{tag}',esp,
         [(settle,1,b'pkg query app.test\r'),(b'arena>',2,b'shutdown\r')],disk)

@@ -101,6 +101,43 @@ def test_unique_run_dirs() -> None:
             shutil.rmtree(p, ignore_errors=True)
 
 
+def test_attempt_evidence_sequences() -> None:
+    import subprocess
+
+    tools_dir = Path(__file__).resolve().parent
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        attempt = td / "attempt"
+        src = td / "serial.log"
+        src.write_text("guest evidence\n")
+        code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(tools_dir)!r})\n"
+            "import mtest\n"
+            "from pathlib import Path\n"
+            "src = Path(sys.argv[1])\n"
+            "for label in sys.argv[2:]:\n"
+            "    mtest._attempt_write('boots', label, {'label': label}, "
+            "{'serial.log': src})\n"
+        )
+        env = dict(os.environ, ARENA_TEST_ATTEMPT_DIR=str(attempt))
+        for labels in (("first-boot", "second-boot"), ("first-boot", "third-boot")):
+            r = subprocess.run(
+                [sys.executable, "-c", code, str(src), *labels],
+                env=env, capture_output=True, text=True, timeout=60)
+            if r.returncode != 0:
+                check(False, f"evidence sequence subprocess failed: {r.stderr.strip()}")
+                return
+        dirs = sorted(p for p in (attempt / "boots").iterdir() if p.is_dir())
+        prefixes = [p.name.split("-", 1)[0] for p in dirs]
+        labels = sorted(json.loads((p / "boot.json").read_text())["label"]
+                        for p in dirs)
+        check(prefixes == ["001", "002", "003", "004"],
+              "per-boot evidence directories are monotonic across processes")
+        check(labels == ["first-boot", "first-boot", "second-boot", "third-boot"],
+              "re-imported harness processes cannot overwrite boot evidence")
+
+
 def test_semantic_verdicts() -> None:
     import mtest
 
@@ -258,6 +295,7 @@ def test_failed_attempt_stays_visible() -> None:
 def main() -> int:
     test_cache_fingerprint_and_store()
     test_unique_run_dirs()
+    test_attempt_evidence_sequences()
     test_semantic_verdicts()
     test_affected_selection()
     test_failed_attempt_stays_visible()

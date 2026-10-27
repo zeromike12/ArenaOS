@@ -80,8 +80,36 @@ LAST_QEMU_EXIT: dict[str, int | None] = {}
 # tools/build_cache.py and only reuses a build whose input fingerprint
 # matches byte-for-byte. Default off; tools/run_tests.sh never sets it.
 _ATTEMPT_DIR = os.environ.get("ARENA_TEST_ATTEMPT_DIR")
-_boot_seq: dict[str, int] = {}
-_build_seq: dict[str, int] = {}
+
+
+def _allocate_attempt_dest(kind_dir: str, label: str) -> Path:
+    """Allocate a unique, monotonic evidence directory for this attempt.
+
+    The historical per-label counter labelled every distinct boot ``001-``;
+    worse, a subprocess re-importing mtest could reuse an exact label and
+    lose evidence when the exclusive mkdir failed. Allocate from the
+    directories already present while holding a small file lock, so
+    sequences are monotonic across processes that share an attempt dir.
+    """
+    import fcntl
+
+    parent = Path(_ATTEMPT_DIR) / kind_dir  # type: ignore[arg-type]
+    parent.mkdir(parents=True, exist_ok=True)
+    with open(parent / ".sequence.lock", "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        seq = 0
+        for child in parent.iterdir():
+            prefix, sep, _rest = child.name.partition("-")
+            if sep and prefix.isdigit():
+                seq = max(seq, int(prefix))
+        while True:
+            seq += 1
+            dest = parent / f"{seq:03d}-{label}"
+            try:
+                dest.mkdir(exist_ok=False)
+                return dest
+            except FileExistsError:
+                continue
 
 
 def _attempt_write(kind_dir: str, label: str, record: dict,
@@ -93,10 +121,7 @@ def _attempt_write(kind_dir: str, label: str, record: dict,
         import hashlib
         import json as _json
 
-        seq_map = _boot_seq if kind_dir == "boots" else _build_seq
-        seq_map[label] = seq_map.get(label, 0) + 1
-        dest = Path(_ATTEMPT_DIR) / kind_dir / f"{seq_map[label]:03d}-{label}"
-        dest.mkdir(parents=True, exist_ok=False)
+        dest = _allocate_attempt_dest(kind_dir, label)
         copied = {}
         for name, src in files.items():
             try:
