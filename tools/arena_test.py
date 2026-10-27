@@ -505,6 +505,9 @@ def run_attempt(entry: dict, attempt_dir: Path, env: dict, work_root: Path,
     cwd = work_root / entry.get("cwd", ".")
     suite_env = dict(env)
     suite_env["ARENA_TEST_ATTEMPT_DIR"] = str(attempt_dir)
+    if worker_cmd_prefix:
+        suite_env["ARENA_WORKER_CWD"] = str(
+            Path(CANONICAL_PATH) / entry.get("cwd", "."))
     # In a worker namespace the attempt dir must be inside the worktree;
     # the caller passes a worker-local attempt dir and copies it out.
     timeout_s = outer_timeout_s or int(entry.get("timeout_s", 900))
@@ -619,7 +622,10 @@ def worker_prepare(worker_root: Path, snapshot_commit: str) -> list[str]:
         "set -e\n"
         f"mount --bind {worker_root} {CANONICAL_PATH}\n"
         "ip link set lo up\n"
-        f"cd {CANONICAL_PATH}\n"
+        "# cd to the entry cwd under its canonical (post-bind) name so\n"
+        "# getcwd()/realpath spell /workspace/ArenaOS: cargo/rustc embed\n"
+        "# absolute paths, and the Phase 14 PIE hash guard depends on it.\n"
+        "if [ -n \"$ARENA_WORKER_CWD\" ]; then cd \"$ARENA_WORKER_CWD\"; fi\n"
         "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory "
         "GIT_CONFIG_VALUE_0='*'\n"
         "exec \"$@\"\n")
@@ -768,6 +774,11 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
                 # Inside the namespace the worktree is at CANONICAL_PATH.
                 w_env["ARENA_TEST_ATTEMPT_DIR"] = str(
                     Path(CANONICAL_PATH) / w_att.relative_to(work_root))
+                # Share the content-addressed build cache across workers
+                # (each worker's own build/ would start cold). Atomic
+                # publish + hash-verified lookup make this safe.
+                w_env.setdefault("ARENA_TEST_BUILD_CACHE_DIR",
+                                 "/tmp/arena-test-cache")
                 att = run_attempt(entry, w_att, w_env, work_root, echo,
                                   worker_cmd_prefix=prefix)
                 if attempt_dir.exists():
@@ -809,7 +820,12 @@ def execute(entries: list[dict], mode: str, args, extra_report: dict | None) -> 
             run_data["verdict"] = "BLOCKED"
             (run_dir / "run.json").write_text(json.dumps(run_data, indent=2))
             return 2
-        workers_dir = REPO_ROOT / "build" / "test-workers" / run_id
+        # Workers must live OUTSIDE the repo tree: inside it, the bind
+        # mount makes the inherited cwd path string stop existing, and
+        # getcwd() becomes ambiguous (tools reopening cwd by path break).
+        workers_dir = (Path(os.environ.get("ARENA_TEST_WORKERS_DIR",
+                                           "/tmp/arena-test-workers"))
+                       / run_id)
         prefixes: list[tuple[Path, list[str]]] = []
         try:
             for i in range(jobs):
