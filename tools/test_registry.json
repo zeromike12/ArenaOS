@@ -1,0 +1,3623 @@
+{
+ "schema": 1,
+ "generated_by": "tools/gen_test_registry.py",
+ "registered_count": 121,
+ "registered_reference": "tools/run_tests.sh (official mode)",
+ "entries": [
+  {
+   "id": "host-heap",
+   "title": "Host unit tests: arena-heap (cargo test --lib)",
+   "kind": "host-rust",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "arena-heap",
+    "--lib",
+    "--target",
+    "x86_64-unknown-linux-gnu"
+   ],
+   "cwd": "kernel",
+   "sources": [],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [
+    "kernel/libs/heap/**"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-sync",
+   "title": "Host unit tests: arena-sync (cargo test --lib)",
+   "kind": "host-rust",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "arena-sync",
+    "--lib",
+    "--target",
+    "x86_64-unknown-linux-gnu"
+   ],
+   "cwd": "kernel",
+   "sources": [],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [
+    "kernel/libs/sync/**"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-dns-parser",
+   "title": "Host DNS codec tests (netstackd dns.rs)",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "mkdir -p build && rustc --test --edition 2024 userspace/netstackd/src/dns.rs -o build/dns-parser-tests && build/dns-parser-tests"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [
+    "userspace/netstackd/src/dns.rs"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-tcp-parser",
+   "title": "Host TCP wire/timeout policy tests (netstackd tcp.rs)",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "rustc --test --edition 2024 userspace/netstackd/src/tcp.rs -o build/tcp-parser-tests && build/tcp-parser-tests"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [
+    "userspace/netstackd/src/tcp.rs"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-net-api",
+   "title": "Host networking API contract tests (fake transport)",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "rustc --test --edition 2024 tools/net_api_test.rs -o build/net-api-tests && build/net-api-tests"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-arena-lib",
+   "title": "Phase 8.3 userspace client libs: host tests + no_std target build",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "cargo test --manifest-path userspace/arena-lib/Cargo.toml --lib --target x86_64-unknown-linux-gnu && cargo build --manifest-path userspace/arena-lib/Cargo.toml --release --target x86_64-unknown-none"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [
+    "userspace/arena-lib/**"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-servicemgr-manifest",
+   "title": "Service manifest/inventory policy tests + no_std rlib",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "rustc --test --edition 2024 userspace/servicemgr/src/lib.rs -o build/service-manifest-tests && build/service-manifest-tests && rustc --crate-type lib --edition 2024 -D warnings userspace/servicemgr/src/lib.rs -o build/libarena-service-manifest.rlib"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [
+    "userspace/servicemgr/src/lib.rs"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-config-record",
+   "title": "Phase 8.1 config record codec + AFS1 integrity-limit probes",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "rustc --test --edition 2024 -D warnings userspace/config.rs -o build/config-record-tests && build/config-record-tests && rustc --crate-type lib --edition 2024 -D warnings --target x86_64-unknown-none --emit=metadata tools/config_no_std.rs -o build/config-no-std.rmeta && python3 tools/test_config_record.py && python3 tools/probe_config_commit_fallback.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_config_record.py"
+   ],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [
+    "userspace/config.rs",
+    "tools/config_record.py"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-permission-record",
+   "title": "Phase 8.2 immutable permission decision record",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "rustc --test --edition 2024 -D warnings userspace/permission.rs -o build/permission-record-tests && build/permission-record-tests && rustc --crate-type lib --edition 2024 -D warnings --target x86_64-unknown-none --emit=metadata tools/permission_no_std.rs -o build/permission-no-std.rmeta && python3 tools/test_permission_record.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_permission_record.py"
+   ],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [
+    "userspace/permission.rs",
+    "tools/permission_record.py"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-capspace-layout",
+   "title": "Phase 8.2 cap/IPC layout audit (host + bare-metal bounds)",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/probe_capspace_layout.py"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-phase85-records",
+   "title": "Phase 8.5 AINS/AACT records + no_std compile",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 tools/test_phase85_records.py && rustc --crate-type lib --edition 2024 -D warnings --target x86_64-unknown-none --emit=metadata tools/installed_no_std.rs -o build/installed-no-std.rmeta"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase85_records.py"
+   ],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-afs2",
+   "title": "AFS2 host model + Rust engine proofs (crash prefixes, RED)",
+   "kind": "host-python",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 test_afs2.py && python3 test_afs2.py --red && python3 test_afs2_rust.py"
+   ],
+   "cwd": "tools",
+   "sources": [
+    "tools/test_afs2.py",
+    "tools/test_afs2_rust.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [
+    "tools/afs2.py",
+    "userspace/afs2/**"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-watch",
+   "title": "Phase 11 directory-watch host table + RED controls",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "test_watch_red.py"
+   ],
+   "cwd": "tools",
+   "sources": [
+    "tools/test_watch_red.py"
+   ],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-face13",
+   "title": "Phase 11.7 Arena Sans 13 generated-face sync check",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/gen_face13.py",
+    "--check"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-phase12",
+   "title": "Phase 12 APB1/startup-ABI/native-runtime host+target suites",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 tools/test_package_record.py && python3 tools/test_apb1_format.py && python3 tools/test_startup_abi.py && (cd userspace/arena-platform && cargo fmt -- --check && cargo test --manifest-path Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked && cargo clippy --lib --target x86_64-unknown-linux-gnu --locked -- -D warnings && cargo build --manifest-path Cargo.toml --release --target x86_64-unknown-none --locked) && (cd userspace/arena-runtime && cargo fmt -- --check && cargo test --manifest-path Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked && cargo clippy --lib --target x86_64-unknown-linux-gnu --locked -- -D warnings && cargo build --manifest-path Cargo.toml --bin arena-startup-proof --release --locked)"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_package_record.py",
+    "tools/test_apb1_format.py",
+    "tools/test_startup_abi.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1800,
+   "imports": [],
+   "paths": [
+    "userspace/arena-platform/**",
+    "userspace/arena-runtime/**",
+    "tools/apb1_format.py",
+    "tools/package_record.py",
+    "tools/startup_abi.py"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "host-phase13",
+   "title": "Phase 13 Desktop + service-manager host/target suites",
+   "kind": "host-rust",
+   "cmd": [
+    "bash",
+    "-c",
+    "cargo fmt --manifest-path userspace/desktop/Cargo.toml -- --check && cargo test --manifest-path userspace/desktop/Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked && cargo clippy --manifest-path userspace/desktop/Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked -- -D warnings && rustfmt --check --edition 2024 userspace/servicemgr/src/package.rs userspace/servicemgr/src/inventory.rs && cargo test --manifest-path userspace/servicemgr/Cargo.toml --lib --target x86_64-unknown-linux-gnu --locked && cargo check --manifest-path userspace/servicemgr/Cargo.toml --target x86_64-unknown-none --locked"
+   ],
+   "cwd": ".",
+   "sources": [],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1800,
+   "imports": [],
+   "paths": [
+    "userspace/desktop/**",
+    "userspace/servicemgr/**"
+   ],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh host block"
+  },
+  {
+   "id": "phase13-registry-guest",
+   "title": "Real installed APB1 discovery, launch, UI and teardown proof.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_phase13_registry_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase13_registry_guest.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (named Phase 13 guest block)"
+  },
+  {
+   "id": "phase14-pie-guest",
+   "title": "Signed APB1 installation and repeated native PIE launch proof.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_phase14_pie_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase14_pie_guest.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (named Phase 14 loop)"
+  },
+  {
+   "id": "phase14-negative-guest",
+   "title": "Signed APB1 negative launch cases through Desktop and packaged.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_phase14_negative_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase14_negative_guest.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_phase14_pie_guest"
+   ],
+   "paths": [],
+   "negative_controls": "capability/authority negative cases must be refused",
+   "from": "tools/run_tests.sh (named Phase 14 loop)"
+  },
+  {
+   "id": "phase14-no-entropy-guest",
+   "title": "RED mutation proving a signed installed PIE fails closed without seed state.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_phase14_no_entropy_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase14_no_entropy_guest.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_phase14_negative_guest",
+    "test_phase14_pie_guest"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (named Phase 14 loop)"
+  },
+  {
+   "id": "phase14-stale-image-guest",
+   "title": "RED mutation: revoke a verified APB1 Image before Desktop receives it.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_phase14_stale_image_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase14_stale_image_guest.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_phase14_negative_guest",
+    "test_phase14_pie_guest"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (named Phase 14 loop)"
+  },
+  {
+   "id": "smoke-m1",
+   "title": "Milestone-1 guest markers (also the quick-mode smoke boot; replaying every in-guest suite)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m1.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m1.py"
+   ],
+   "qualification": "registered",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-apps",
+   "title": "Real app processes, owned pixels, durable bytes and full-desktop accounting.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_apps.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_apps.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_desktop"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-archive-preflight",
+   "title": "Isolated standalone extraction-tool smoke; deliberately no 100/100 claim.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_archive_preflight.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_archive_preflight.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-boundaries",
+   "title": "Small real desktop oracle for authority, pointer, spawn and exact cleanup.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_boundaries.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_boundaries.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-boundaries-red",
+   "title": "Production boundary mutants; exact restoration and real guest GREEN. Each control builds actual production code. A build error cannot count RED. Guest pixel/nat",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_boundaries_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_boundaries_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_boundaries",
+    "test_m10_client_death",
+    "test_m10_dynamic",
+    "test_m10_files",
+    "test_m12_scale"
+   ],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-client-death",
+   "title": "Fault-injected ordinary client exit: sibling pixels survive, exact cleanup.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_client_death.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_client_death.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_boundaries",
+    "test_m10_desktop"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-clock-sampling",
+   "title": "Native clock controls: early return, one host stall, persistent overshoot. No failed boot is retried or qualified. Each compiled mutation has its own oracle; th",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m10_clock_sampling.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_clock_sampling.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-desktop",
+   "title": "Real tablet + ordinary spawned gallery; semantic pixels, no Sol RGB golden.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_desktop.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_desktop.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-display",
+   "title": "Shipping desktop GOP + real GPU at 800x600/640x480, full six-app pressure.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_display.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_display.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-dynamic",
+   "title": "Actual signed dynamic Image receives owned graphics and is revoked safely.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_dynamic.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_dynamic.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-files",
+   "title": "Files and Editor on AFS2 capabilities (Phase 10 invariants, re-proven). Superseded storage (ADR-0077): the Phase-10 desktop kept user documents as flat AFS1 `us",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_files.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_files.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-handoff",
+   "title": "Real QMP app references; independent-boot gallery raster determinism. PNG encoding uses only the standard library. Full desktop references contain real uptime a",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_handoff.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_handoff.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-keyboard",
+   "title": "Shipping keyboard-only desktop, real F-key launch/focus/close and own input.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_keyboard.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_keyboard.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-multi-red",
+   "title": "Production multi-child quota + cancelled-reply RED, exact restoration GREEN.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m10_multi_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_multi_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-replace",
+   "title": "Real AFS1 named replacement: persistence + crashes, independent disk bytes.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m10_replace.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_replace.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-replace-red",
+   "title": "Production RED: reuse old data sector, crash observes torn old document.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m10_replace_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_replace_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_replace"
+   ],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-select-failure-cleanup",
+   "title": "Bad signed-child receipt still retires the original Process authority. Actual 648-byte signed ELF, 32-object AFS platter and kernel resource counts. Omitting pr",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m10_select_failure_cleanup.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_select_failure_cleanup.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_m85_select",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-service-death",
+   "title": "Actual Phase-10 compositor death while inputd is in CALL, restored GREEN.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m10_service_death.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_service_death.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_boundaries"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m10-ui",
+   "title": "Host presentation/policy gate. Does not claim running apps or QMP input.",
+   "kind": "host-rust",
+   "cmd": [
+    "python3",
+    "tools/test_m10_ui.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m10_ui.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-afs2",
+   "title": "Phase 11.5: AFS2 in the guest (ADR-0076/0077), judged on the host. 1. Migration: an AFS1 volume with user and system files and a blank AFS2 region. filesd forma",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_afs2.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_afs2.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-archive-preflight",
+   "title": "Isolated phase11-complete extraction-tool smoke; deliberately no 100/100 claim. Stages exactly what tools/phase11_checkpoint_bundle.py ships (the 72 MiB disk te",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_archive_preflight.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_archive_preflight.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-desk",
+   "title": "Phase 11.8: the desktop surface shows /Users/user/Desktop as icons. Judged on AFS2 bytes read back on the host: icons appear for objects the terminal created; a",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_desk.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_desk.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-event-red",
+   "title": "Phase 11.0 RED/GREEN controls for kernel event plumbing (ADR-0071/0072). Each control removes ONE production mechanism from real kernel source, builds the real ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m11_event_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_event_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-explorer",
+   "title": "Phase 11.8: the Files explorer on real AFS2 objects, driven by real input. Every operation is judged on the AFS2 bytes the host reads back from the disk, not on",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_explorer.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_explorer.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-files",
+   "title": "Phase 11.6: file capabilities and the trusted chooser, in the real desktop on a real AFS2 volume (ADR-0077), judged on the host. The disk starts as AFS1 with tw",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_files.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_files.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-files-red",
+   "title": "Phase 11.6 RED controls for file capabilities (ADR-0077). Each control removes one production mechanism from filesd and the full guest test (`test_m11_files.py`",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_files_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_files_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m11_files"
+   ],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-repaint-red",
+   "title": "Phase 11.1 RED/GREEN controls for partial repaint and partial publication. Each control removes one production mechanism from the real desktop library source an",
+   "kind": "host-rust",
+   "cmd": [
+    "python3",
+    "tools/test_m11_repaint_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_repaint_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-watch",
+   "title": "Phase 11: directory watches drive Files and the desktop (ADR-0079). Files is snapped to the left half and the Terminal to the right; the Terminal keeps the focu",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_watch.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_watch.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop",
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m11-wm",
+   "title": "Phase 11.3/11.4 guest proof: variable and transient surfaces, window management and richer input on the real desktop (one boot, QMP input). Every claim is a pix",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m11_wm.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m11_wm.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps",
+    "test_m10_desktop"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m12-scale",
+   "title": "Phase-12 guest qualification of the 32-window Desktop envelope. The real Desktop boots with 32 distinct session clocks, starts 32 ordinary ring-3 applications a",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_m12_scale.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m12_scale.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m12-startup",
+   "title": "Phase 12.4/12.5: real ring-3 startup, bounded-heap and refusal proof. The independently linked guest validates ABI v2, allocates through the reusable runtime, f",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m12_startup.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m12_startup.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m15-guest",
+   "title": "Run Phase-15 ring-3 FP/SIMD proofs on baseline and AVX-capable QEMU CPUs. The image must already be built. This runner intentionally does not rebuild the EFI so",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m15_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m15_guest.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m15-osxsave-seed",
+   "title": "Build and boot the diagnostic XCR0=7 entry path on an AVX-capable CPU.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m15_osxsave_seed.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m15_osxsave_seed.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m2",
+   "title": "Milestone 2 automated boot test (docs/TESTING.md, ADR-0005). Pipeline and verdict logic live in tools/mtest.py. M2's contract grows with each roadmap step; the ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m2.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m2.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m3",
+   "title": "Milestone 3 automated boot test (docs/TESTING.md, ADR-0005). Pipeline and verdict logic live in tools/mtest.py. M3's contract grows with each roadmap step; the ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m3.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m3.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m4",
+   "title": "Milestone 4 automated boot test (docs/TESTING.md, ADR-0005). Pipeline and verdict logic live in tools/mtest.py (including the cross-milestone regression guard: ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m4.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m4.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m4-shell",
+   "title": "M4.6 end-to-end: drive the interactive shell session (ADR-0020). The in-guest m4 suite (test_m4.py) proves the console line discipline and validates the shell i",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m4_shell.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m4_shell.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m5",
+   "title": "Milestone 5 automated boot test (docs/TESTING.md, ADR-0005). Pipeline and verdict logic live in tools/mtest.py (including the cross-milestone regression guard: ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m5.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m5.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m5-crash",
+   "title": "M5.4 exit criterion #3: the CRASH-CONSISTENCY GATE \u2014 the harness kills QEMU mid-write, reboots, and verifies recovery WITHOUT an fsck ritual. No repair tool run",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m5_crash.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m5_crash.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m5-persist",
+   "title": "M5.4 exit criterion #2: TWO-BOOT PERSISTENCE \u2014 the same scratch.img, written in boot N, read in boot N+1, with the host parsing the real committed sectors after",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m5_persist.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m5_persist.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m6",
+   "title": "Milestone 6 automated boot test (docs/TESTING.md, ADR-0024). Pipeline and verdict logic live in tools/mtest.py (including the cross-milestone regression guard: ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m6.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m6.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m6-console",
+   "title": "M6.4 live proof: the virtio-console port IS a console (ADR-0027). The m6 suite's `console_service` test proves the DEVICE \u2014 bytes out the transmit queue and bac",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m6_console.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m6_console.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m6-typing",
+   "title": "M6.3 live-typing boot test (docs/TESTING.md, ADR-0026). The m6 suite's `input_service` test proves the DEVICE path: evdev events harvested from a virtqueue by i",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m6_typing.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m6_typing.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m7",
+   "title": "Milestone 7 automated boot test (docs/TESTING.md, ADR-0029). Phase 7 opens with the facility every protocol in it depends on, and with the rule that makes it ne",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m7.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m7.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m7-no-tcp",
+   "title": "Boot a shipping-style image with no TCP host actor (ADR-0035). The test suite must not halt a real user's machine merely because the harness-only host port is a",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m7_no_tcp.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m7_no_tcp.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m81-read",
+   "title": "ADR-0046 incremental READ boundary, NOT the transactional 8.1 gate. Boot a resident ring-3 configd and separate endpoint-only reader on a real AFS1 disk. A seco",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m81_read.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m81_read.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m81-update",
+   "title": "ADR-0046 guest transactional SET under AFS1's ordered-sector crash model. The shell is a TRUSTED raw-FS test-intent writer, never the unprivileged reader or upd",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m81_update.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m81_update.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m81-update-table",
+   "title": "ADR-0046: eight guest commits, ninth refusal, old bytes and resources flat.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m81_update_table.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m81_update_table.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m81_update"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-capspace",
+   "title": "ADR-0048 fixed cap-table foundation plus integrated volatile broker. The broker AND ADR-0053 verify-only package receiver are two real live manager children. Th",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_capspace.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_capspace.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m81_update"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-ipc-caller",
+   "title": "ADR-0050 real IPC dead-caller teardown, reply refusal and queue reuse. Never treat QEMU's ResetSystem return 0 as proof: require semantic markers, exact resourc",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_ipc_caller.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_ipc_caller.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-permission",
+   "title": "Targeted Phase 8.2 mediated integration guest proof (negative gates retained). Uses real virtio-rng, FS disk DMA, ring-3 app/manager/shell. A durable REVOKE mea",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_permission.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_permission.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-policy-crash",
+   "title": "ADR-0048: kill real guest at ALLOW, DENY and REVOKE policy-write boundaries. Audit the COMMITTED platter BEFORE recovery. No false assertion of commit-sector-co",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_policy_crash.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_policy_crash.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1800,
+   "imports": [
+    "test_m82_policy_restart"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-policy-negative",
+   "title": "Phase 8.2: cap-space/token bounds, bogus tokens, absent entropy and file.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_policy_negative.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_policy_negative.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m82_policy_restart"
+   ],
+   "paths": [],
+   "negative_controls": "capability/authority negative cases must be refused",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-policy-refusal",
+   "title": "ADR-0048 real bounded generation, allocator failure and corrupt-namespace gates.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_policy_refusal.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_policy_refusal.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m82_policy_restart"
+   ],
+   "paths": [],
+   "negative_controls": "capability/authority negative cases must be refused",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m82-policy-restart",
+   "title": "ADR-0048 real held-endpoint ALLOW/DENY restart + same-platter rehydration. Read the COMMITTED disk independently, not a broker log. No token bytes are persisted",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m82_policy_restart.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m82_policy_restart.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m83-libraries",
+   "title": "ADR-0052: linked no_std clients in four independent real ring-3 images. fstest and permissiond use the AFS1 client; arptest and the shell use native net. Both c",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m83_libraries.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m83_libraries.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m82_policy_restart"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m83-returned-cap",
+   "title": "ADR-0052: real ring-3 cleanup of an unexpected IPC-landed reply cap. The isolated faultd server answers more than the current capability-space width of linked-l",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m83_returned_cap.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m83_returned_cap.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m84-crash",
+   "title": "ADR-0053 SIGKILL at real fsd CREATE/2xWRITE/CLOSE/verify/ACK boundaries. No anti-rollback claim: AFS1 coherent metadata/atomic 512-B commit and ordered device c",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m84_crash.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m84_crash.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1800,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m84-red-control",
+   "title": "ADR-0053 controlled guest red test: disable ONLY receiver marker gate. Prove the exact focused marker/no-mutation guest test goes RED against a locally built un",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m84_red_control.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m84_red_control.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m84-stage",
+   "title": "ADR-0053 targeted guest staging proof against actual AFS1 + fsd IPC. Only PUBLIC frozen OpenSSL-signed artifacts enter the guest platter; no private seed, host ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m84_stage.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m84_stage.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m84-wrong-root",
+   "title": "ADR-0053 guest negative control: replace the EMBEDDED public test root. An independently OpenSSL-signed test-root package must be refused by a receiver built wi",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m84_wrong_root.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m84_wrong_root.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "capability/authority negative cases must be refused",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-crash",
+   "title": "Guest SIGKILL at real INSTALL and first AACT transaction boundaries. AFS1's documented ordered-commit prefix model only: no arbitrary sector corruption, hostile",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_crash.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_crash.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1800,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-crash-upgrade",
+   "title": "Actual AINS2 and AACT4 same-platter ordered-commit kill/reboot matrix.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_crash_upgrade.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_crash_upgrade.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1800,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-install",
+   "title": "ADR-0054 narrow guest INSTALL + exact repeat: signed APKG, real fsd AINS. Not SELECT, Image registration, activation, runnable ELF or 8.5 qualification. The M5 ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_install.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_install.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-live-cutover",
+   "title": "Real same-boot signed v7/v8 PREPARE; a live old child is stopped before COMMIT.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_live_cutover.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_live_cutover.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-manager-death",
+   "title": "Guest fatal negative: manager exits with LIVE provisional ID before AACT. QEMU rc=0 on UEFI fatal ResetSystem is NOT success. This test only passes when the exa",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_manager_death.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_manager_death.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-manager-death-live",
+   "title": "Fail-stop before IPC/process sweep when manager owns a LIVE signed child.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_manager_death_live.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_manager_death_live.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-manager-destroy",
+   "title": "Controlled test-only route into unchanged production proc::destroy LIVE-ID guard. No public Process cap for the manager is granted to the shell. Only this build",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_manager_destroy.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_manager_destroy.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-maximal",
+   "title": "Guest-real signed maximal historical AFS1 platter and pre-CREATE fourth refusal.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_maximal.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_maximal.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-ref-hook",
+   "title": "Production IPC reply-cap hook omission RED, original exact EFI GREEN. Temporarily removes the actual `image_registry::add_cap` in production `ipc::reply`, provi",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_ref_hook.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_ref_hook.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-resources",
+   "title": "Rerun real live cutover and independently parse guest-observed high-water. The actual Power shell snapshots three kernel counters while the manager holds the un",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_resources.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_resources.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m85_live_cutover"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-select",
+   "title": "Narrow guest PREPARE/ABORT/COMMIT/LAUNCH and signed ELF child fixture. Manager revokes old ID, checks the bounded dynamic-child capacity refusal, reaps the dyna",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_select.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_select.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m85-upgrade",
+   "title": "Two distinct root-test-signed ELF payloads: durable v7\u2192v8 cutover. Both execute in real ring 3 on separate boots; no LIVE overlap or running- child revocation c",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m85_upgrade.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m85_upgrade.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m84_stage",
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-bootstrap",
+   "title": "Phase 8.0: prove manager bootstrap/initial child, not restart. An actual ring-3 process queries its own caps; real boot drivers signal readiness after DRIVER_OK",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_bootstrap.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_bootstrap.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-dependencies",
+   "title": "ADR-0045: actual pre-spawn netd/rngd protocol probes, bounded negatives. Two real IPCs including a 64-byte device entropy DMA finish *before* each production sp",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_dependencies.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_dependencies.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-diagnostic",
+   "title": "ADR-0047: destructive opcodes require service-verified transferred caps.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_diagnostic.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_diagnostic.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-fault",
+   "title": "ADR-0042: genuine production #UD, outstanding IPC failure, bounded recovery. Opt-in privileged serial command only; an ordinary boot stays resident. No claim of",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_fault.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_fault.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-lifecycle",
+   "title": "ADR-0044: real Process-cap lifecycle refusals and positive user-child reap. Cross-check the five cap descriptions printed by ring 3 against independently logged",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_lifecycle.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_lifecycle.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-restart",
+   "title": "ADR-0040: exercise the PRODUCTION manager's one bounded restart. No automatic fault on an ordinary boot. This host actor types the privileged shell command AFTE",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_restart.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_restart.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-stop",
+   "title": "ADR-0043: manager-owned live Process-cap stop of production netstackd. The Power-holding admin issues a private request, NEVER a Process cap. A forged shared wa",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_stop.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_stop.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m8-stress",
+   "title": "ADR-0041: real, opt-in, bounded manager stress on production processes. The first three exits return behind the same endpoint with byte-exact kernel frame/recor",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m8_stress.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m8_stress.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-bar-gate-red",
+   "title": "Guest RED/GREEN for virtio device-info held-MMIO-cap coverage. Omit only the physical *extent* check, retain the exact BAR base and READ right, and demonstrate ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_bar_gate_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_bar_gate_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-client-death",
+   "title": "Actual boot-child sudden exit: copied-region retirement and QMP uncover. The second client gets a real virtio-key 'x' and exits without DESTROY. Its old SharedR",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_client_death.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_client_death.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-client-death-red",
+   "title": "Omit original-client liveness check: real guest RED, restored QMP GREEN. An exited child still has a copied surface cap in the compositor. If the Process-cap li",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_client_death_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_client_death_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-compositor-input",
+   "title": "ADR-0060 live guest: two owned windows, injected virtio key and actual QMP pixels.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_compositor_input.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_compositor_input.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-compositor-model",
+   "title": "Offline host and bare-metal tests for the *non-running* compositor model. No IPC, owned client cap, guest pixels, teardown or injected input proof is claimed by",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_m9_compositor_model.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_compositor_model.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-font-red",
+   "title": "Real guest font RED/GREEN control, not a synthetic PPM mutation. Change one *production* 5x7 glyph row before building the embedded display service, capture QMP",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_font_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_font_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gfxkit",
+   "title": "Host and bare-metal linked-toolkit contract + visual oracle RED/GREEN. This is a static/no_std host gate, not proof that a compositor exists. Real pixels on QEM",
+   "kind": "host-rust",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gfxkit.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gfxkit.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gop-handoff",
+   "title": "Phase-9 GOP pixels and bounded SharedRegion guest smoke proof. The framebuffer screen is captured via QMP *after* userspace displayd has mapped its exclusive Mm",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gop_handoff.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gop_handoff.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gpu2d-red",
+   "title": "Host-only GPU command ACK matcher RED/GREEN; no device claim. Omit a real production response type check, require its exact unit test to reject the mutant, then",
+   "kind": "host-rust",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gpu2d_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gpu2d_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gpu2d-wire",
+   "title": "Offline virtio-gpu 2D codec tests; NO actual device/service proof.",
+   "kind": "host-rust",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gpu2d_wire.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gpu2d_wire.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gpu-compositor-input",
+   "title": "ADR-0060 live guest: virtio-gpu-only owned windows and injected QMP key.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gpu_compositor_input.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gpu_compositor_input.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gpu-fallback-red",
+   "title": "Force rejection of GPU VERSION_1 negotiation; require real GOP QMP fallback. Only the userspace required-features constant is mutated for the negative build. It",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gpu_fallback_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gpu_fallback_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-gpu-pixels",
+   "title": "Real ring-3 virtio-gpu 2D scanout, captured from QEMU's virtual display. QMP pixels, not a serial readiness line or host-generated image, are the oracle. QEMU a",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_gpu_pixels.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_gpu_pixels.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-host-dns-red",
+   "title": "Real guest controlled-peer RED/GREEN: wrong DNS TXID, unchanged EFI.",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_host_dns_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_host_dns_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-resources",
+   "title": "Real guest Phase-9 resource high-water and original-child teardown. The Power-only shell measures live frame/record/process counters before and after the focuse",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_resources.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_resources.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-service-death-red",
+   "title": "ADR-0061 real guest service-death RED / exact-restored QMP pixel GREEN. The test-only mutation makes a receiver-verified QMP key terminate the compositor while ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_service_death_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_service_death_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-shared-info-red",
+   "title": "Guest RED/GREEN for the production SharedRegion INFO READ-cap gate. The mutant omits only one rights check. A real ring-3 WRITE-only copy then improperly reads ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_shared_info_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_shared_info_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-shared-ref-hook",
+   "title": "Deliberate RED/GREEN on the actual SharedRegion cap retirement hook. Omit ONE production cap::install drop credit. The independent capspace, IPC escrow and PTE ",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_shared_ref_hook.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_shared_ref_hook.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "m9-shared-unmap-red",
+   "title": "Guest RED/GREEN for exact own SharedRegion unmap retirement. Omit only the real mapping-pin removal *after* PTE removal; the independent stable-boundary registr",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m9_shared_unmap_red.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m9_shared_unmap_red.py"
+   ],
+   "qualification": "registered",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "intentional RED negative control: deliberately broken production mechanism must fail in-guest (suite PASS means RED was observed and restored GREEN passed)",
+   "from": "tools/run_tests.sh (tools/test_m*.py glob or named)"
+  },
+  {
+   "id": "package-vendor",
+   "title": "Offline synthetic unit tests only; do not assert real candidate archives were obtained.",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_package_vendor.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_package_vendor.py"
+   ],
+   "qualification": "standalone",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "not invoked by tools/run_tests.sh (invoked by other suites or run standalone); registered here so the inventory is complete"
+  },
+  {
+   "id": "phase12-apb1-guest",
+   "title": "Real Phase-12 APB1 Desktop authority handoff and AFS2 install proof.",
+   "kind": "guest-desktop",
+   "cmd": [
+    "python3",
+    "tools/test_phase12_apb1_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase12_apb1_guest.py"
+   ],
+   "qualification": "standalone",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 1200,
+   "imports": [
+    "test_m10_apps"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "not invoked by tools/run_tests.sh (invoked by other suites or run standalone); registered here so the inventory is complete"
+  },
+  {
+   "id": "phase84-zip-unpack",
+   "title": "Isolated fail-closed tests; synthetic archives, no network or real vendor mutation.",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_phase84_zip_unpack.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase84_zip_unpack.py"
+   ],
+   "qualification": "standalone",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "not invoked by tools/run_tests.sh (invoked by other suites or run standalone); registered here so the inventory is complete"
+  },
+  {
+   "id": "phase85-design-capacity",
+   "title": "Host-only Phase 8.5 *capacity design* measurement; no installer/guest execution. Unpacks the actual 8.4 qualified 8 MiB AFS1 template into memory, fills its com",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_phase85_design_capacity.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase85_design_capacity.py"
+   ],
+   "qualification": "standalone",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "not invoked by tools/run_tests.sh (invoked by other suites or run standalone); registered here so the inventory is complete"
+  },
+  {
+   "id": "phase85-elf-fit",
+   "title": "Design-only 8.5 measurement: useful signed APKG v1 ELF fits 4096 bytes. Builds the EXISTING 8.4 kernel only to make production elf.rs's embedded include_bytes a",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_phase85_elf_fit.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase85_elf_fit.py"
+   ],
+   "qualification": "standalone",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [
+    "test_package_record"
+   ],
+   "paths": [],
+   "negative_controls": "",
+   "from": "not invoked by tools/run_tests.sh (invoked by other suites or run standalone); registered here so the inventory is complete"
+  },
+  {
+   "id": "phase85-ref-model",
+   "title": "Phase 8.5 design-only Image ref-conservation model; NOT kernel/guest proof. The transition ledger is deliberately separate from the independent scanner: the sca",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_phase85_ref_model.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_phase85_ref_model.py"
+   ],
+   "qualification": "standalone",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "not invoked by tools/run_tests.sh (invoked by other suites or run standalone); registered here so the inventory is complete"
+  },
+  {
+   "id": "p16-host-c-build-audit-gcc",
+   "title": "C runtime guest-ELF build + loader/ISA audit (GCC)",
+   "kind": "host-c",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 experiments/c-runtime/run.py build --cc gcc && python3 experiments/c-runtime/run.py audit --cc gcc"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/run.py"
+   ],
+   "qualification": "phase16-host",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/src/**",
+    "experiments/c-runtime/include/**",
+    "experiments/c-runtime/app/**",
+    "experiments/c-runtime/host/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical host battery"
+  },
+  {
+   "id": "p16-host-c-build-audit-clang",
+   "title": "C runtime guest-ELF build + loader/ISA audit (Clang via zig cc)",
+   "kind": "host-c",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 experiments/c-runtime/run.py build --cc clang && python3 experiments/c-runtime/run.py audit --cc clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/run.py"
+   ],
+   "qualification": "phase16-host",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/src/**",
+    "experiments/c-runtime/include/**",
+    "experiments/c-runtime/app/**",
+    "experiments/c-runtime/host/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical host battery"
+  },
+  {
+   "id": "p16-host-c-abi",
+   "title": "C/Rust ABI constant cross-check (92 constants)",
+   "kind": "host-c",
+   "cmd": [
+    "python3",
+    "experiments/c-runtime/run.py",
+    "abi"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/run.py"
+   ],
+   "qualification": "phase16-host",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 300,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/src/**",
+    "experiments/c-runtime/include/**",
+    "experiments/c-runtime/app/**",
+    "experiments/c-runtime/host/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical host battery"
+  },
+  {
+   "id": "p16-host-c-host",
+   "title": "C runtime host suite under ASan+UBSan (LIBC-HOST + HOST-ONLY)",
+   "kind": "host-c",
+   "cmd": [
+    "python3",
+    "experiments/c-runtime/run.py",
+    "host"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/run.py"
+   ],
+   "qualification": "phase16-host",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 1200,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/src/**",
+    "experiments/c-runtime/include/**",
+    "experiments/c-runtime/app/**",
+    "experiments/c-runtime/host/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical host battery"
+  },
+  {
+   "id": "p16-host-judge-selftests",
+   "title": "Guest judge negative controls (C2/FP/Notification/ISA-audit self-tests)",
+   "kind": "host-c",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 experiments/c-runtime/guest_c2.py --self-test && python3 experiments/c-runtime/guest_fp.py --self-test && python3 experiments/c-runtime/guest_notification.py --self-test && python3 experiments/c-runtime/c2_isa_audit.py --self-test"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/run.py"
+   ],
+   "qualification": "phase16-host",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 300,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/src/**",
+    "experiments/c-runtime/include/**",
+    "experiments/c-runtime/app/**",
+    "experiments/c-runtime/host/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical host battery"
+  },
+  {
+   "id": "p16-host-fp-builds",
+   "title": "FP guest-app image builds + host mutant control (GCC/Clang)",
+   "kind": "host-c",
+   "cmd": [
+    "bash",
+    "-c",
+    "python3 experiments/c-runtime/build_fp_app.py --cc gcc && python3 experiments/c-runtime/build_fp_app.py --cc clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/run.py"
+   ],
+   "qualification": "phase16-host",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/src/**",
+    "experiments/c-runtime/include/**",
+    "experiments/c-runtime/app/**",
+    "experiments/c-runtime/host/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical host battery"
+  },
+  {
+   "id": "p16-guest-native-gcc",
+   "title": "Phase 16 targeted guest suite 'native' (GCC)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "native",
+    "--",
+    "--cc",
+    "gcc"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_native.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-native-clang",
+   "title": "Phase 16 targeted guest suite 'native' (CLANG)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "native",
+    "--",
+    "--cc",
+    "clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_native.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-c2-gcc",
+   "title": "Phase 16 targeted guest suite 'c2' (GCC)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "c2",
+    "--",
+    "--cc",
+    "gcc"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_c2.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-c2-clang",
+   "title": "Phase 16 targeted guest suite 'c2' (CLANG)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "c2",
+    "--",
+    "--cc",
+    "clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_c2.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-fp-gcc",
+   "title": "Phase 16 targeted guest suite 'fp' (GCC)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "fp",
+    "--",
+    "--cc",
+    "gcc"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_fp.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "in-guest negative cases per suite (see FINAL-REPORT \u00a76)",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-fp-clang",
+   "title": "Phase 16 targeted guest suite 'fp' (CLANG)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "fp",
+    "--",
+    "--cc",
+    "clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_fp.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "in-guest negative cases per suite (see FINAL-REPORT \u00a76)",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-stdin-gcc",
+   "title": "Phase 16 targeted guest suite 'stdin' (GCC)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "stdin",
+    "--",
+    "--cc",
+    "gcc"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_stdin.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "in-guest negative cases per suite (see FINAL-REPORT \u00a76)",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-stdin-clang",
+   "title": "Phase 16 targeted guest suite 'stdin' (CLANG)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "stdin",
+    "--",
+    "--cc",
+    "clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_stdin.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**"
+   ],
+   "negative_controls": "in-guest negative cases per suite (see FINAL-REPORT \u00a76)",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-notification-gcc",
+   "title": "Phase 16 targeted guest suite 'notification' (GCC)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "notification",
+    "--",
+    "--cc",
+    "gcc"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_notification.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**",
+    "userspace/desktop/**"
+   ],
+   "negative_controls": "in-guest negative cases per suite (see FINAL-REPORT \u00a76)",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "p16-guest-notification-clang",
+   "title": "Phase 16 targeted guest suite 'notification' (CLANG)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "-u",
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "--suite",
+    "notification",
+    "--",
+    "--cc",
+    "clang"
+   ],
+   "cwd": ".",
+   "sources": [
+    "experiments/c-runtime/guest_phase16_canonical.py",
+    "experiments/c-runtime/guest_notification.py"
+   ],
+   "qualification": "phase16-targeted",
+   "quick": false,
+   "mutates_source": true,
+   "parallel": "worktree",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "experiments/c-runtime/**",
+    "userspace/desktop/**"
+   ],
+   "negative_controls": "in-guest negative cases per suite (see FINAL-REPORT \u00a76)",
+   "from": "Phase 16 canonical targeted guests"
+  },
+  {
+   "id": "canonical-final-build",
+   "title": "Canonical final build (tools/build.sh --image) producing the exact artifacts the strict/stability gates then consume",
+   "kind": "build",
+   "cmd": [
+    "bash",
+    "tools/build.sh",
+    "--image"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/build.sh"
+   ],
+   "qualification": "strict-phase15",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "serial",
+   "timeout_s": 1800,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "qualification orchestration (existing canonical build)"
+  },
+  {
+   "id": "strict-m15-final",
+   "title": "Strict Phase 15 guest check on the final build/ artifacts, both CPU profiles (genuine vector 19)",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/test_m15_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m15_guest.py"
+   ],
+   "qualification": "strict-phase15",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "serial",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "unpatched-backend discrimination is established separately by the independent XM controls",
+   "from": "Phase 15/16 strict receipts (same unchanged checker)"
+  },
+  {
+   "id": "strict-m15-preserved",
+   "title": "Strict Phase 15 guest check on the preserved accepted Phase 15 package artifacts",
+   "kind": "guest",
+   "cmd": [
+    "bash",
+    "-c",
+    "ARENA_PHASE15_ESP=\"${ARENA_PHASE15_PKG:-$HOME/phase15-pkg}/artifacts/arena-esp.img\" ARENA_PHASE15_EFI=\"${ARENA_PHASE15_PKG:-$HOME/phase15-pkg}/artifacts/arena-boot.efi\" python3 tools/test_m15_guest.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_m15_guest.py"
+   ],
+   "qualification": "strict-phase15",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "serial",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "Phase 15/16 strict receipts (preserved package pair)"
+  },
+  {
+   "id": "stability-100",
+   "title": "Final-artifact stability: 100 independent fresh boots of the exact build/ EFI/ESP, fully green",
+   "kind": "stability",
+   "cmd": [
+    "bash",
+    "tools/stability_loop.sh",
+    "100"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/stability_loop.sh"
+   ],
+   "qualification": "stability",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "serial",
+   "timeout_s": 3700,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "any single non-green boot invalidates the attempt (script semantics unchanged)",
+   "from": "docs/TESTING.md milestone commit gate"
+  },
+  {
+   "id": "fresh-archive-phase16",
+   "title": "Fresh-extraction verification of the sealed Phase 16 demonstration archive (static + guest)",
+   "kind": "package",
+   "cmd": [
+    "python3",
+    "tools/fresh_archive_verify.py",
+    "--archive",
+    "docs/phase16/artifacts/ArenaOS-Phase16-Demonstration-5aacbc8.tar.gz"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/fresh_archive_verify.py"
+   ],
+   "qualification": "package",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "serial",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "",
+   "from": "Phase 16 fresh-archive receipts flow"
+  },
+  {
+   "id": "backend-xm-controls",
+   "title": "Independent #XM backend controls: patched QEMU must PASS, unpatched must expected-FAIL",
+   "kind": "guest",
+   "cmd": [
+    "python3",
+    "tools/backend_controls.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/backend_controls.py"
+   ],
+   "qualification": "strict-phase15",
+   "quick": false,
+   "mutates_source": false,
+   "parallel": "serial",
+   "timeout_s": 600,
+   "imports": [],
+   "paths": [],
+   "negative_controls": "unpatched binary is the intentional negative control",
+   "from": "Phase 15 backend qualification (verify_phase15_xm_controls.py)"
+  },
+  {
+   "id": "infra-selftest",
+   "title": "Testing-infrastructure controls (cache invalidation, evidence collision, fail-closed, semantic verdicts)",
+   "kind": "host-python",
+   "cmd": [
+    "python3",
+    "tools/test_arena_test_infra.py"
+   ],
+   "cwd": ".",
+   "sources": [
+    "tools/test_arena_test_infra.py"
+   ],
+   "qualification": "infra",
+   "quick": true,
+   "mutates_source": false,
+   "parallel": "host",
+   "timeout_s": 900,
+   "imports": [],
+   "paths": [
+    "tools/arena_test.py",
+    "tools/build_cache.py",
+    "tools/mtest.py",
+    "tools/test_registry.json",
+    "tools/test_map.json",
+    "tools/gen_test_registry.py",
+    "tools/backend_controls.py",
+    "tools/fresh_archive_verify.py"
+   ],
+   "negative_controls": "the suite is itself a set of negative controls",
+   "from": "testing workstream"
+  }
+ ]
+}

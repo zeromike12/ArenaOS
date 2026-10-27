@@ -43,5 +43,9 @@ def build() -> bytes:
 
 if __name__ == "__main__":
     blob = build()
-    OUTPUT.write_bytes(blob)
+    # Write-if-changed (see tools/build_phase14_pie.sh): avoid needless
+    # mtime churn on a byte-identical guarded artifact. build() above
+    # still refuses any bytes other than the expected identity.
+    if not OUTPUT.is_file() or OUTPUT.read_bytes() != blob:
+        OUTPUT.write_bytes(blob)
     print(f"Phase-14 signed APB1: {len(blob)} bytes, SHA-256 {hashlib.sha256(blob).hexdigest()}")
