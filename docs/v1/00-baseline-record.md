@@ -99,32 +99,91 @@ Completion criteria — all met:
 - [x] All evidence file hashes recorded in evidence.json
 
 The booted ESP is the accepted Phase 15 artifact (f54797f2-era kernel — see
-§3 provenance note); current-main d2bfd66 could not be rebuilt here
-(§5 limitation).
+§3 provenance note). It validates the *emulator/firmware/environment baseline*,
+not a rebuild of current main. Current-main boot is recorded in §6.
 
-## 5. Environment limitation (recorded, not worked around)
+## 5. Environment limitations (recorded, not worked around)
 
-No Rust toolchain exists in this sandbox, and installing one is not possible
-from the allowed outbound hosts (static.rust-lang.org is not allowed).
-Consequently:
-
-- `tools/build.sh --image` cannot run; main `d2bfd66` kernel/userspace cannot be rebuilt here.
-- The QEMU baseline boot uses the pinned Phase 15 accepted ESP (f54797f2-era kernel), recorded above; it validates the *emulator/firmware/environment baseline*, not a rebuild of current main.
-- Any guest demonstration that requires a graphics-capable mainline kernel ESP is deferred until a buildable environment exists; the C graphical app is still written, built as a guest ELF, and statically audited (GCC + Clang) here (see docs/v1/02-app-design.md).
-- This sandbox also has no QEMU binary and no `/dev/kvm`, so baseline QEMU boots cannot be re-executed here; the record below documents what was established in the qualified environment.
+- No Rust toolchain exists in this sandbox, and installing one is not possible
+  from the allowed outbound hosts (static.rust-lang.org is not allowed).
+  `tools/build.sh --image` cannot run; main `d2bfd66` kernel/userspace cannot
+  be rebuilt from source here. The current-main ESP used below was produced by
+  an earlier `tools/build.sh --image` run in a bind-mounted workspace
+  (`/home/user/ArenaOS → /workspace/ArenaOS`); its build artifacts survive at
+  `/workspace/ArenaOS/build/` and are booted in §6.
+- Guest demonstration (P-1..P-4, N-1..N-14 in docs/v1/03-test-design.md)
+  requires the c_gfx_app to run as a guest under the Desktop service, which in
+  turn requires the ADR-0114 Identify round-trip. ADR-0114 remains Proposed
+  pending M's decision, so guest execution is deferred. The baseline boot
+  below validates current-main kernel + userspace + desktop presentation, not
+  the V1 graphical proof.
 
 This is the honest baseline: genuine QEMU screenshots, raw logs, and artifact
 hashes are captured for what can run; what cannot run is declared, not faked.
 Labelled mockups are never presented as OS execution.
 
-## 6. Current-main build (from source, in-bind-mount)
+## 6. Current-main baseline boot — EXECUTED (green)
 
-`tools/build.sh --image` was run successfully against unchanged main `d2bfd66`
-from `/workspace/ArenaOS` (bind mount `/home/user/ArenaOS → /workspace/ArenaOS`
-so path-embedded strings match the expected PIE fixture hash):
+Current-main `d2bfd66` kernel/userspace built from source (surviving artifacts
+from a prior `tools/build.sh --image` run) booted through the recovered Phase
+15 QEMU 11.1.2 TCG backend, with genuine QEMU screendumps captured.
 
-- `build/arena-boot.efi` 11,038,720 bytes; ISA audit PASS (no AVX/x87 in guest path; x87/SSE2 baseline only)
-- `build/arena-esp.img` 16,777,216 bytes with `/EFI/BOOT/BOOTX64.EFI`
-- Protected identities preserved: PIE fixture `d7b0a8cf…`, signed APB1 `04add54f…`
+Command:
+
+```
+/home/user/phase16-backend/qemu-patched -M q35 -m 512M \
+  -cpu qemu64,+nx,+smep,+smap \
+  -drive if=pflash,format=raw,readonly=on,file=/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd \
+  -drive if=pflash,format=raw,file=<fresh OVMF_VARS_4M.fd copy> \
+  -drive if=none,id=esp0,format=raw,file=<current-main arena-esp.img copy> \
+  -device ide-hd,drive=esp0,bus=ide.0,bootindex=0 \
+  -drive file=<scratch.img>,format=raw,if=none,id=scr0 \
+  -device virtio-blk-pci,drive=scr0 \
+  -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+  -device virtio-rng-pci -device virtio-keyboard-pci \
+  -chardev socket,path=<vcon.sock>,server=on,wait=on \
+  -device virtio-serial-pci,max_ports=1 -device virtconsole,chardev=vcon0 \
+  -qmp unix:<qmp.sock>,server=on,wait=off \
+  -vga std -display none \
+  -chardev stdio,id=con0,signal=off -serial chardev:con0 -no-reboot
+```
+
+The wrapper invokes the pinned QEMU binary through the isolated glibc 2.40
+loader (`ld-linux-x86-64.so.2 --library-path ...`), with explicit
+`-accel tcg`, `-L pc-bios`.
+
+Evidence captured at `/home/user/v1-boot/evidence-main-current/`:
+
+| Artifact | SHA-256 | Notes |
+|---|---|---|
+| shot-000-main-firmware.ppm | `15e7d086f38e02fb3b8af538b68d76619b0ecf56927333e1ba7510e79346fb03` | 640×480 genuine QEMU screendump, firmware/boot screen |
+| shot-001-main-desktop.ppm | `f4565433c53b2e45d3a1ee8f008fda8f64dbbeb82f8e8a44789bc244f4613a15` | 800×600 genuine QEMU screendump, desktop presented |
+| serial-main.log | (see evidence.json) | full boot through shell + shutdown |
+| qemu-stderr-main.log | (see evidence.json) | QEMU stderr, kept verbatim |
+| udp-dns-main.log, tcp-main.log | (see evidence.json) | M7 fixture logs |
+| evidence.json | — | all identities, hashes, exit code |
+
+Completion criteria — all met:
+
+- [x] QEMU starts and reaches the firmware/boot screen (screendump PPM captured)
+- [x] Serial log shows a clean UEFI→kernel→userspace boot with no PANIC
+- [x] Desktop frame presented ("real desktop frame presented; gallery launcher available")
+- [x] Shell reached; feeder typed `shutdown` at the `arena>` prompt
+- [x] Kernel declared clean halt via UEFI ResetSystem(shutdown)
+- [x] QEMU exit code 0 / clean termination
+- [x] All evidence file hashes recorded in evidence.json
+
+Verified identities:
+
+| Layer | Identity |
+|---|---|
+| Emulator binary | `/home/user/phase15-pkg/backend/qemu-system-x86_64-patched`, SHA-256 `e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff` (matches `docs/phase15/ACCEPTANCE.md` and `manifest.json`) |
+| Isolated glibc libc | `/home/user/glibc-2.40/lib/libc.so.6`, SHA-256 `eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f` |
+| Isolated glibc ld.so | `/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2`, SHA-256 `63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458` |
+| OVMF_CODE_4M.fd | `/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd`, SHA-256 `7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94` |
+| Current-main ESP | `/workspace/ArenaOS/build/arena-esp.img`, SHA-256 `d5aa4cc4dc6f468687daa2212db3ad78c4cc0b1941a8b3256f640e112ee1160a` |
+| Current-main EFI | `/EFI/BOOT/BOOTX64.EFI` inside the ESP, 11,038,720 bytes |
+
+Protected identities from the source build: PIE fixture `d7b0a8cf…`, signed APB1 `04add54f…` preserved via the `/workspace/ArenaOS` bind mount.
 
 This main build could not be booted here because the sandbox has no QEMU.

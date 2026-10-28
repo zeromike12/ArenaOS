@@ -3,9 +3,11 @@
 **Status:** implemented source (`experiments/c-runtime/app/c_gfx_app.c`),
 built with GCC and Clang (`run.py build --cc gcc --cc clang`), audited with
 `run.py audit` (zero x87/MMX/SSE/AVX, ET_EXEC, no W+X). Guest execution and
-QMP-injected input are blocked on the QEMU baseline environment (this sandbox
-has no QEMU and no `/dev/kvm` — see docs/v1/00-baseline-record.md §5–6).
-**Milestone:** V1 — Native Graphical Launch Foundation
+QMP-injected input are blocked on the ADR-0114 Identify round-trip (still
+Proposed, not implemented in V1) — the QEMU baseline itself is established
+(current-main boots cleanly through genuine QEMU 11.1.2 TCG, see
+docs/v1/00-baseline-record.md §6). **Milestone:** V1 — Native Graphical
+Launch Foundation
 **Built with:** `experiments/c-runtime/` canonical runtime, GCC and Clang.
 
 ## 1. Contract the app relies on (nothing new)

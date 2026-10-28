@@ -156,9 +156,12 @@ rerun can never overwrite a failing run's raw evidence (Q-1 guard).
 
 ## 5. Execution gate
 
-The full set (P-1..P-4, N-1..N-14) runs after M accepts ADR-0114, the
-Desktop implements Identify, and a bootable graphics-capable mainline ESP
-can be built in an environment that has QEMU. Until then this document is
-the test design; nothing here is claimed as executed evidence. This sandbox
-has no QEMU binary and no `/dev/kvm`, so baseline QEMU boots cannot be
-re-executed here (see docs/v1/00-baseline-record.md §6).
+The QEMU baseline is established: the pinned QEMU 11.1.2 TCG backend
+(SHA `e0ea2b1f…f26ff`) runs through the isolated glibc 2.40 loader, and the
+current-main ESP boots cleanly (qemu_exit=0, desktop presented, clean
+shutdown). Evidence is at `/home/user/v1-boot/evidence-main-current/`.
+
+The full guest set (P-1..P-4, N-1..N-14) runs after M accepts ADR-0114, the
+Desktop implements Identify, and `c_gfx_app` is packaged as a bootable guest
+and launched through the real launcher. Until then this document is the test
+design; nothing here is claimed as executed evidence.
