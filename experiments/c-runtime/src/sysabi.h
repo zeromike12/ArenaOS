@@ -13,6 +13,8 @@
 /* --- syscall numbers (userspace/abi.rs) ----------------------------------- */
 #define ARENA_SYS_DEBUG_WRITE 1u          /* legacy diagnostics; NOT stdio */
 #define ARENA_SYS_THREAD_EXIT 2u
+#define ARENA_SYS_IPC_CALL 7u             /* mirror of userspace/abi.rs SYS_IPC_CALL */
+#define ARENA_SYS_ENDPOINT_BADGE 51u      /* mirror of userspace/abi.rs SYS_ENDPOINT_BADGE */
 #define ARENA_SYS_TRY_WAIT 32u             /* abi.rs SYS_TRY_WAIT */
 #define ARENA_SYS_NOTIFY 10u
 #define ARENA_SYS_WAIT 11u
