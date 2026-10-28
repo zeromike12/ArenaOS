@@ -282,7 +282,7 @@ TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) 
     out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
     for (uint32_t attempt = 0; attempt <= IDENTIFY_BUSY_RETRIES; attempt++) {
         int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, a.endpoint_slot, 0, 0,
-                                    a.surface_slot,
+                                    GFX_CAP_NONE,
                                     (uint64_t)(uintptr_t)out,
                                     (uint64_t)(uintptr_t)frame);
 

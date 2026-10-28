@@ -5705,19 +5705,6 @@ extern "C" fn main() -> ! {
     }
     render(ram as u64, w, h, scanout);
     log(b"[desktop] real desktop frame presented; gallery launcher available\n");
-    // Auto-launch the first installed non-builtin graphical application
-    // (c_gfx_app installed via APB1 into /System/Applications/).
-    if unsafe { INSTALLED_APP_COUNT } > 6 {
-        if let Some(entry) = unsafe { (&*(&raw const INSTALLED_APPS))[6] } {
-            let _ = launch_installed_application(
-                &entry.application_id,
-                entry.flags,
-                CAP_NONE,
-                false,
-            );
-            log(b"[desktop] auto-launched installed graphical application\n");
-        }
-    }
     snapshot(true);
     let mut pending_render = false;
     loop {
@@ -6270,29 +6257,32 @@ extern "C" fn main() -> ! {
         // Identify (ADSK version 2, opcode 13): the client identifies its
         // Desktop session and surface before any graphical request. Only
         // badge-authenticated sessions with a mapped surface may Identify.
+        // The request must carry CAP_NONE; a transferred capability is
+        // refused with safe disposal and no graphical state mutation.
         // The reply carries CAP_NONE (no capability transfer).
+        // session.id is the SharedRegion object ID from SYS_SHARED_CREATE
+        // at session creation — it is the client's surface identity.
         } else if let (Some(index), Ok(_identify_req)) = (
             authenticated_session,
             wire::identify_request_decode(&bytes),
         ) {
             let session = unsafe { SESSIONS[index] };
-            // Only graphical sessions with a mapped surface may Identify.
-            // The surface object ID in the reply is taken from the landed
-            // capability the client transferred, so the client can validate
-            // it against the surface cap it already holds.
-            if session.kind > 6 || session.va == 0 {
+            // Identify must not carry a transferred capability.
+            if landed != CAP_NONE {
+                // Typed refusal: dispose of the unexpected capability,
+                // mutate no graphical state.
+                destroy(landed);
+                landed = CAP_NONE;
+                status = STATUS_BAD_ARG as u64;
+            } else if session.kind > 6 || session.va == 0 {
                 status = STATUS_BAD_ARG as u64;
             } else {
                 let surface_rights = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY;
-                let surface_object_id = describe(landed)
-                    .filter(|d| d[0] == IDENTIFY_SURFACE_KIND as u64)
-                    .map(|d| d[1])
-                    .unwrap_or(session.id);
                 bytes = wire::identify_reply_encode(
                     session.id,
                     IDENTIFY_SURFACE_KIND,
                     surface_rights,
-                    surface_object_id,
+                    session.id,
                 );
                 status = 0;
             }
