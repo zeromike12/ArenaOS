@@ -87,6 +87,8 @@ enum gfx_exit {
     GFX_CREATE_FAILED = 9,
     GFX_DAMAGE_FAILED = 10,
     GFX_POLL_FAILED = 11,
+    GFX_DESTROY_FAILED = 12,
+    GFX_UNMAP_FAILED = 13,
 };
 
 /* Capability kinds/rights as granted by the ADR-0090 desktop profile.
@@ -416,18 +418,44 @@ int main(int argc, char **argv) {
         arena_busy_sleep_us(GFX_FRAME_US);
     }
 
-    /* Teardown: DestroyWindow over the endpoint, unmap, exit cleanly.
-       Cleanup failures are logged but never overwrite the exit code. */
+    /* Teardown: DestroyWindow over the endpoint, then unmap the surface.
+       Policy:
+         - Preserve an existing primary failure (exit_code).
+         - Attempt necessary cleanup regardless.
+         - If the operation was otherwise successful but required cleanup
+           fails, return a distinct failure (GFX_DESTROY_FAILED / GFX_UNMAP_FAILED).
+         - Record cleanup failures even when preserving an earlier primary
+           failure.
+         - Do not report clean teardown merely because process exit may
+           eventually reclaim resources. */
     {
+        int destroy_failed = 0;
+        int unmap_failed = 0;
         uint8_t frame[ADSK_BYTES];
         uint64_t result = 0;
         if (exchange(ADSK_OP_DESTROY_WINDOW, handle, 0, 0, frame, &result) != 0) {
             log_line("[gfx] destroy failed");
+            destroy_failed = 1;
         }
-    }
-    if (a.mapped) {
-        (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
-                             (uint64_t)(uintptr_t)a.framebuffer, 0, 0, 0, 0, 0);
+        if (a.mapped) {
+            int64_t urc = arena_syscall6(ARENA_SYS_SHARED_UNMAP,
+                                         (uint64_t)(uintptr_t)a.framebuffer,
+                                         0, 0, 0, 0, 0);
+            if (urc != 0) {
+                log_line("[gfx] unmap failed");
+                unmap_failed = 1;
+            }
+        }
+
+        if (exit_code == GFX_OK) {
+            if (destroy_failed) {
+                exit_code = GFX_DESTROY_FAILED;
+            } else if (unmap_failed) {
+                exit_code = GFX_UNMAP_FAILED;
+            }
+        }
+        /* exit_code != GFX_OK: primary failure is preserved; cleanup
+           failures above are already logged and not overwritten. */
     }
 
     (void)arena_snprintf(line, sizeof(line),

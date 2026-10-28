@@ -2,12 +2,15 @@
 
 **Status:** implemented source (`experiments/c-runtime/app/c_gfx_app.c`),
 built with GCC and Clang (`run.py build --cc gcc --cc clang`), audited with
-`run.py audit` (zero x87/MMX/SSE/AVX, ET_EXEC, no W+X). Guest execution and
-QMP-injected input are blocked on the ADR-0114 Identify round-trip (still
-Proposed, not implemented in V1) — the QEMU baseline itself is established
-(current-main boots cleanly through genuine QEMU 11.1.2 TCG, see
-docs/v1/00-baseline-record.md §6). **Milestone:** V1 — Native Graphical
-Launch Foundation
+`run.py audit` (zero x87/MMX/SSE/AVX, ET_EXEC, no W+X). The QEMU baseline is
+established (current-main boots cleanly through genuine QEMU 11.1.2 TCG, see
+docs/v1/00-baseline-record.md §6). Guest execution is blocked on the
+ADR-0114 Identify round-trip (still Proposed, not implemented in V1). The
+app's discovery-only path is diagnostic scaffolding: it locates candidates by
+kind+rights over the verified record but does not resolve B-GFX-1, does not
+implement an accepted identification contract, and does not satisfy V1's
+positive acceptance case. **Milestone:** V1 — Native Graphical Launch
+Foundation
 **Built with:** `experiments/c-runtime/` canonical runtime, GCC and Clang.
 
 ## 1. Contract the app relies on (nothing new)
@@ -106,10 +109,22 @@ For `frame` in `0..GFX_FRAMES` (300 frames, ~30 fps via
 
 ## 5. Teardown and exit
 
-`DestroyWindow {handle}` over the endpoint, unmap the surface, then
-`arena_exit(code)`. Cleanup results are logged but never overwrite the exit
-code (the original failure is preserved when cleanup fails). The Desktop's
-Process-cap receipt logs `[desktop] child Process-cap exit status=N`.
+`DestroyWindow {handle}` over the endpoint, then unmap the surface, then
+`arena_exit(code)`. Teardown policy:
+
+- Preserve an existing primary failure (`exit_code`); it is never
+  overwritten by a cleanup failure.
+- Attempt necessary cleanup regardless of the primary failure.
+- If the operation was otherwise successful but required cleanup fails,
+  return a distinct failure: `GFX_DESTROY_FAILED` (12) when
+  `DestroyWindow` refuses, `GFX_UNMAP_FAILED` (13) when `SYS_SHARED_UNMAP`
+  refuses.
+- Record cleanup failures (log lines) even when preserving an earlier
+  primary failure.
+- Do not report clean teardown merely because process exit may eventually
+  reclaim resources: a cleanup failure is a distinct nonzero exit.
+
+The Desktop's Process-cap receipt logs `[desktop] child Process-cap exit status=N`.
 
 ## 6. Negative behaviors exercised by design (tests in docs/v1/03-test-design.md)
 
@@ -120,6 +135,11 @@ Process-cap receipt logs `[desktop] child Process-cap exit status=N`.
 - Map refusal → exit 8.
 - Create refusal → exit 9, no graphical state.
 - Damage refusal → exit 10.
+- Poll refusal → exit 11.
+- `DestroyWindow` refusal on a successful run → exit 12.
+- `SYS_SHARED_UNMAP` refusal on a successful run → exit 13.
+- Primary failure + cleanup failure → primary code preserved, cleanup
+  failure logged.
 - Each failure leaves the process's other granted caps untouched and creates
   no window; a re-launch starts from a clean record.
 

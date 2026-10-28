@@ -1,0 +1,46 @@
+{
+ "source_commit": "d2bfd660040ddface1cd6e791301fb8ea73d181c",
+ "build_dir": "/workspace/ArenaOS/build",
+ "qemu_binary": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+ "qemu_wrapper": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+ "glibc_libc": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+ "glibc_ldso": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+ "ovmf_code": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+ "ovmf_vars_template": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+ "ovmf_vars_boot": "9117cc05296aff1be3f5997158110f871c6d841e25423fe9c4d918c4272fe915",
+ "esp": "d5aa4cc4dc6f468687daa2212db3ad78c4cc0b1941a8b3256f640e112ee1160a",
+ "efi": "d5aa4cc4dc6f468687daa2212db3ad78c4cc0b1941a8b3256f640e112ee1160a",
+ "launcher": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+ "qemu_exit": 0,
+ "esp_sha256": "d5aa4cc4dc6f468687daa2212db3ad78c4cc0b1941a8b3256f640e112ee1160a",
+ "vars_sha256": "9117cc05296aff1be3f5997158110f871c6d841e25423fe9c4d918c4272fe915",
+ "serial_sha256": "a3d9b288c16b4dca4e6f9e4a167e787b4b55fd101288a39c05f7fdff1f052e2e",
+ "qemu_stderr_sha256": "69b055e5634c380f40e7cd60511b1b0363ae950c6c02cf861bf32f5682e5fef3",
+ "dns_log_sha256": "a0fc5068a30840b152219e69e965fc7c65874f2eafca6ec6dbf0f7e8a69802fb",
+ "tcp_log_sha256": "511611c8e6cb584101014d4b5372a698914d69db907b07d9a17e4356b28f09a8",
+ "screenshots": [
+  {
+   "name": "shot-000-main-firmware.ppm",
+   "sha256": "15e7d086f38e02fb3b8af538b68d76619b0ecf56927333e1ba7510e79346fb03",
+   "bytes": 921615,
+   "ppm_dimensions": {
+    "width": 640,
+    "height": 480
+   }
+  },
+  {
+   "name": "shot-001-main-desktop.ppm",
+   "sha256": "f4565433c53b2e45d3a1ee8f008fda8f64dbbeb82f8e8a44789bc244f4613a15",
+   "bytes": 1440015,
+   "ppm_dimensions": {
+    "width": 800,
+    "height": 600
+   }
+  }
+ ],
+ "screenshot_errors": {
+  "path": "/home/user/v1-boot/evidence-main-current/shot-001-main-desktop.ppm"
+ },
+ "serial_tail": "servicemgr: APB1 wrong-kind handoff refused kind=3 rights=5\n\npackaged: installed-app registry offline status=18446744073709551609\n\nservicemgr: APB1 install-only BadgedEndpoint handed to READY packaged in late slot5\n[desktop] AFS2 file service unavailable; file capabilities offline\n[desktop] installed application registry unavailable at boot status=18446744073709551609\n[desktop] real desktop frame presented; gallery launcher available\n[desktop] measured frames/records/processes/regions/pages/maps/caps=113260/15/15/1/469/2/46\n[desktop] native resource detail fields=total-frames/threads/endpoints/notifications/timers/vm-regions/vm-committed-pages/sync-domains/sync-keys/sync-waiters/app-instances/windows/helpers/stream-sets/max-windows-per-instance\n[desktop] native resource detail values=114739/16/12/51/0/0/0/0/0/0/0/0/0/0/0\nshutdown\nshutting down...\n[arena INFO  kernel] shutdown requested by pid 171 through its Power cap \u2014 goodnight\n[arena INFO  halt] halting via UEFI ResetSystem(shutdown)",
+ "qemu_stderr_tail": "qemu-system-x86_64-patched: -chardev socket,id=vcon0,path=/home/user/v1-boot/evidence-main-current/vcon-main.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/home/user/v1-boot/evidence-main-current/vcon-main.sock,server=on\nqemu-system-x86_64-patched: Guest moved used index from 16 to 0\n"
+}

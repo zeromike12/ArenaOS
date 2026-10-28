@@ -1,0 +1,158 @@
+{
+  "package": "v1 current-main baseline evidence",
+  "milestone": "V1 — Native Graphical Launch Foundation",
+  "branch": "arena/f6b7ebc4-arenaos",
+  "source_commit": "d2bfd660040ddface1cd6e791301fb8ea73d181c",
+  "description": "Checksum-verified baseline evidence for the current-main QEMU boot through the recovered Phase 15 TCG backend. This package documents what CAN run (current-main kernel + userspace + desktop presentation through genuine QEMU). It does NOT include V1 graphical guest execution (P-1..P-4, N-1..N-14), which is blocked pending ADR-0114 acceptance and Desktop Identify implementation.",
+  "created": "2026-10-28",
+  "files": {
+    "serial-main.log": {
+      "sha256": "a3d9b288c16b4dca4e6f9e4a167e787b4b55fd101288a39c05f7fdff1f052e2e",
+      "bytes": 104423,
+      "description": "Full UEFI→kernel→userspace serial boot log, including shutdown and UEFI ResetSystem(shutdown) halt"
+    },
+    "qemu-stderr-main.log": {
+      "sha256": "69b055e5634c380f40e7cd60511b1b0363ae950c6c02cf861bf32f5682e5fef3",
+      "bytes": 319,
+      "description": "QEMU stderr, kept verbatim"
+    },
+    "shot-000-main-firmware.ppm": {
+      "sha256": "15e7d086f38e02fb3b8af538b68d76619b0ecf56927333e1ba7510e79346fb03",
+      "bytes": 921615,
+      "ppm_dimensions": {"width": 640, "height": 480},
+      "description": "Genuine QEMU screendump: firmware/boot screen"
+    },
+    "shot-001-main-desktop.ppm": {
+      "sha256": "f4565433c53b2e45d3a1ee8f008fda8f64dbbeb82f8e8a44789bc244f4613a15",
+      "bytes": 1440015,
+      "ppm_dimensions": {"width": 800, "height": 600},
+      "description": "Genuine QEMU screendump: desktop presented"
+    },
+    "BOOTX64.EFI": {
+      "sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "bytes": 11038720,
+      "description": "EFI extracted from the booted ESP (EFI/BOOT/BOOTX64.EFI)"
+    },
+    "evidence.json": {
+      "sha256": "3dd7a6639cbd0933e45f4b12cda749855374e2eb4bb5236f0054bced33a8b2b7",
+      "bytes": 3413,
+      "description": "Original evidence manifest from the boot run"
+    },
+    "tcp-main.log": {
+      "sha256": "511611c8e6cb584101014d4b5372a698914d69db907b07d9a17e4356b28f09a8",
+      "bytes": 54,
+      "description": "M7 fixture TCP log"
+    },
+    "udp-dns-main.log": {
+      "sha256": "a0fc5068a30840b152219e69e965fc7c65874f2eafca6ec6dbf0f7e8a69802fb",
+      "bytes": 255,
+      "description": "M7 fixture UDP-DNS log"
+    },
+    "qemu-patched": {
+      "sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+      "bytes": 304,
+      "description": "QEMU patched wrapper script (shell)"
+    },
+    "qemu-unpatched": {
+      "sha256": "284bdab88795a88be553a7419caafe1524a9a671497f4add58511ae1c74b3f56",
+      "bytes": 306,
+      "description": "QEMU unpatched wrapper script (shell)"
+    }
+  },
+  "identities": {
+    "emulator_binary": {
+      "path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+      "sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+      "description": "QEMU 11.1.2, TCG only (-accel tcg), locally modified (patch SHA c2909ea9…), matches docs/phase15/ACCEPTANCE.md and manifest.json"
+    },
+    "emulator_binary_unpatched": {
+      "path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-unpatched",
+      "sha256": "443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284",
+      "description": "Unpatched QEMU control binary (backend-control expected-fail target)"
+    },
+    "isolated_glibc_libc": {
+      "path": "/home/user/glibc-2.40/lib/libc.so.6",
+      "sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f",
+      "description": "Isolated glibc 2.40 C library, built via tools/dev-env/build-isolated-glibc.sh"
+    },
+    "isolated_glibc_ldso": {
+      "path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+      "sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+      "description": "Isolated glibc 2.40 dynamic loader, used by QEMU wrappers"
+    },
+    "ovmf_code": {
+      "path": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+      "sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "description": "OVMF CODE firmware image (4MB)"
+    },
+    "ovmf_vars_template": {
+      "path": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+      "sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+      "description": "OVMF VARS template (fresh copy per boot)"
+    },
+    "current_main_esp": {
+      "path": "/workspace/ArenaOS/build/arena-esp.img",
+      "sha256": "d5aa4cc4dc6f468687daa2212db3ad78c4cc0b1941a8b3256f640e112ee1160a",
+      "bytes": 16777216,
+      "description": "Current-main d2bfd66 ESP, produced by tools/build.sh --image in a prior bind-mounted workspace run; survives at /workspace/ArenaOS/build/"
+    },
+    "current_main_efi": {
+      "path": "EFI/BOOT/BOOTX64.EFI (inside the ESP)",
+      "sha256": "7dcee4426edc4b2a204592a5680c27c5ee91d51e3231705641df2ca0d7e2bfe6",
+      "bytes": 11038720,
+      "description": "EFI extracted from the booted ESP; also packaged as BOOTX64.EFI in this package"
+    },
+    "qemu_qualification_archive": {
+      "path": "docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz",
+      "sha256": "63b36649…f01f73 (verified at extraction)",
+      "description": "Not duplicated here; referenced by committed identity. Source of the recovered QEMU binaries and firmware."
+    }
+  },
+  "backend_controls": {
+    "patched_exit": 33,
+    "patched_result": "PASS",
+    "unpatched_exit": 35,
+    "unpatched_result": "EXPECTED FAIL",
+    "verifier_exit": 0,
+    "evidence_dir": "/home/user/ArenaOS/build/backend-controls/",
+    "file_hashes": {
+      "exit-patched.txt": "19b8d5c59e421f037fe563007c7254eb8d98bc221b278c3db3e5fdbbfd52e273",
+      "exit-unpatched.txt": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+      "serial-patched.log": "3daa28b1bd86c5e5a8742f6115c36c8c060833e3735080f9167aad6822852211",
+      "serial-unpatched.log": "20217e166a4965dce7bf6bfdd8d13be5fc81766c4e8da052d4e3f0042122845c",
+      "qemu-stderr-patched.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "qemu-stderr-unpatched.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xm-verify.json": "8ea2caa09205ac60141d1c5b28f6d0c761946ab7d14253a3076714200ecc0f58"
+    }
+  },
+  "boot_result": {
+    "qemu_exit": 0,
+    "ok": true,
+    "serial_tail": "shutting down...\n[arena INFO  kernel] shutdown requested by pid 171 through its Power cap \\u2014 goodnight\n[arena INFO  halt] halting via UEFI ResetSystem(shutdown)",
+    "desktop_presented": true,
+    "completion_criteria": [
+      "QEMU starts and reaches the firmware/boot screen (screendump PPM captured)",
+      "Serial log shows a clean UEFI→kernel→userspace boot with no PANIC",
+      "Desktop frame presented (\"real desktop frame presented; gallery launcher available\")",
+      "Shell reached; feeder typed `shutdown` at the `arena>` prompt",
+      "Kernel declared clean halt via UEFI ResetSystem(shutdown)",
+      "QEMU exit code 0 / clean termination",
+      "All evidence file hashes recorded in evidence.json"
+    ]
+  },
+  "build_provenance": {
+    "kernel_elf": "/workspace/ArenaOS/build/arena-boot.efi (11,038,720 bytes)",
+    "esp_image": "/workspace/ArenaOS/build/arena-esp.img (16,777,216 bytes)",
+    "build_method": "tools/build.sh --image in bind-mounted workspace (/home/user/ArenaOS → /workspace/ArenaOS)",
+    "note": "No Rust toolchain on PATH in this sandbox; cargo/rustc exist at /opt/rust/prefix/bin/ but were not needed because surviving build artifacts from a prior run were used. The ESP was NOT rebuilt in this session; it is a surviving artifact.",
+    "protected_identities": {
+      "pie_fixture": "d7b0a8cf…",
+      "signed_apb1": "04add54f…"
+    }
+  },
+  "excluded_from_package": {
+    "arena-esp.img": "16,777,216 bytes; hash d5aa4cc4dc6f468687daa2212db3ad78c4cc0b1941a8b3256f640e112ee1160a; available at /home/user/v1-boot/evidence-main-current/arena-esp.img",
+    "scratch.img": "8,388,608 bytes; available at /home/user/v1-boot/evidence-main-current/scratch.img",
+    "ovmf-vars.img": "540,672 bytes; fresh OVMF vars copy used at boot; hash 9117cc05296aff1be3f5997158110f871c6d841e25423fe9c4d918c4272fe915"
+  }
+}

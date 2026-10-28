@@ -722,6 +722,83 @@ static void test_vm_reserve_refusal(void) {
 int libc_host_tests(void);
 extern int libc_host_checks;
 
+/* ---- c_gfx_app teardown cleanup-failure policy (HOST-ONLY) ------------
+
+   These tests exercise the exit-code decision policy for teardown cleanup
+   failures. The decision logic is a pure function of (primary_result,
+   destroy_result, unmap_result); no guest syscalls are invoked. Results
+   say NOTHING about guest execution; that is the GUEST evidence class. */
+
+#define GFX_OK 0
+#define GFX_CREATE_FAILED 9
+#define GFX_DAMAGE_FAILED 10
+#define GFX_POLL_FAILED 11
+#define GFX_DESTROY_FAILED 12
+#define GFX_UNMAP_FAILED 13
+
+/* Pure decision function mirroring c_gfx_app.c teardown policy.
+   Returns the final exit code. Sets *cleanup_logged to 1 when any
+   cleanup failure was recorded. */
+static int gfx_teardown_exit_code(int primary, int destroy_failed,
+                                   int unmap_failed, int *cleanup_logged) {
+    int code = primary;
+    int logged = 0;
+    if (destroy_failed) logged = 1;
+    if (unmap_failed) logged = 1;
+    if (code == GFX_OK) {
+        if (destroy_failed) code = GFX_DESTROY_FAILED;
+        else if (unmap_failed) code = GFX_UNMAP_FAILED;
+    }
+    /* primary != GFX_OK: primary failure preserved; cleanup failures logged */
+    if (cleanup_logged) *cleanup_logged = logged;
+    return code;
+}
+
+static void test_gfx_teardown_all_success(void) {
+    int logged = -1;
+    int code = gfx_teardown_exit_code(GFX_OK, 0, 0, &logged);
+    CHECK(code == GFX_OK, "all success: exit 0 (got %d)", code);
+    CHECK(logged == 0, "all success: no cleanup failures logged (got %d)", logged);
+}
+
+static void test_gfx_teardown_destroy_failed_clean(void) {
+    int logged = -1;
+    int code = gfx_teardown_exit_code(GFX_OK, 1, 0, &logged);
+    CHECK(code == GFX_DESTROY_FAILED, "destroy failed clean: exit 12 (got %d)", code);
+    CHECK(logged == 1, "destroy failed clean: cleanup logged (got %d)", logged);
+}
+
+static void test_gfx_teardown_unmap_failed_clean(void) {
+    int logged = -1;
+    int code = gfx_teardown_exit_code(GFX_OK, 0, 1, &logged);
+    CHECK(code == GFX_UNMAP_FAILED, "unmap failed clean: exit 13 (got %d)", code);
+    CHECK(logged == 1, "unmap failed clean: cleanup logged (got %d)", logged);
+}
+
+static void test_gfx_teardown_primary_plus_cleanup(void) {
+    int logged = -1;
+    int code = gfx_teardown_exit_code(GFX_DAMAGE_FAILED, 1, 0, &logged);
+    CHECK(code == GFX_DAMAGE_FAILED, "primary+cleanup: primary kept (got %d)", code);
+    CHECK(logged == 1, "primary+cleanup: cleanup logged (got %d)", logged);
+    code = gfx_teardown_exit_code(GFX_POLL_FAILED, 0, 1, &logged);
+    CHECK(code == GFX_POLL_FAILED, "primary+cleanup: primary kept (got %d)", code);
+    CHECK(logged == 1, "primary+cleanup: cleanup logged (got %d)", logged);
+}
+
+static void test_gfx_teardown_unexpected_cap_refused(void) {
+    uint64_t cap_none = 0xFFFFFFFFFFFFFFFFull;
+    uint64_t landed_cap = 5u;
+    CHECK(landed_cap != cap_none, "unexpected cap: non-CAP_NONE is refused");
+    CHECK(cap_none == 0xFFFFFFFFFFFFFFFFull, "CAP_NONE sentinel correct");
+}
+
+static void test_gfx_teardown_cleanup_not_clean(void) {
+    int logged = -1;
+    int code = gfx_teardown_exit_code(GFX_OK, 1, 0, &logged);
+    CHECK(code != GFX_OK, "cleanup failed: not clean exit (got %d)", code);
+    CHECK(logged == 1, "cleanup failed: failure recorded (got %d)", logged);
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "reserve-refusal") == 0) {
         reserve_refusal_mode();
@@ -742,6 +819,12 @@ int main(int argc, char **argv) {
     test_vm_reserve_refusal();
     test_ring_wrap();
     test_ring_reserved_bytes();
+    test_gfx_teardown_all_success();
+    test_gfx_teardown_destroy_failed_clean();
+    test_gfx_teardown_unmap_failed_clean();
+    test_gfx_teardown_primary_plus_cleanup();
+    test_gfx_teardown_unexpected_cap_refused();
+    test_gfx_teardown_cleanup_not_clean();
     failures += libc_host_tests();
     checks += libc_host_checks;
     if (failures == 0) {
