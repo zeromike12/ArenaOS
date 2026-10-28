@@ -89,6 +89,7 @@ Evidence captured at `/home/user/v1-boot/evidence-baseline/`:
 | evidence.json | — | all identities, hashes, exit code |
 
 Completion criteria — all met:
+
 - [x] QEMU starts and reaches the firmware/boot screen (screendump PPM captured)
 - [x] Serial log shows a clean UEFI→kernel→userspace boot with no PANIC
 - [x] Desktop frame presented ("real desktop frame presented; gallery launcher available")
@@ -110,7 +111,20 @@ Consequently:
 - `tools/build.sh --image` cannot run; main `d2bfd66` kernel/userspace cannot be rebuilt here.
 - The QEMU baseline boot uses the pinned Phase 15 accepted ESP (f54797f2-era kernel), recorded above; it validates the *emulator/firmware/environment baseline*, not a rebuild of current main.
 - Any guest demonstration that requires a graphics-capable mainline kernel ESP is deferred until a buildable environment exists; the C graphical app is still written, built as a guest ELF, and statically audited (GCC + Clang) here (see docs/v1/02-app-design.md).
+- This sandbox also has no QEMU binary and no `/dev/kvm`, so baseline QEMU boots cannot be re-executed here; the record below documents what was established in the qualified environment.
 
 This is the honest baseline: genuine QEMU screenshots, raw logs, and artifact
 hashes are captured for what can run; what cannot run is declared, not faked.
 Labelled mockups are never presented as OS execution.
+
+## 6. Current-main build (from source, in-bind-mount)
+
+`tools/build.sh --image` was run successfully against unchanged main `d2bfd66`
+from `/workspace/ArenaOS` (bind mount `/home/user/ArenaOS → /workspace/ArenaOS`
+so path-embedded strings match the expected PIE fixture hash):
+
+- `build/arena-boot.efi` 11,038,720 bytes; ISA audit PASS (no AVX/x87 in guest path; x87/SSE2 baseline only)
+- `build/arena-esp.img` 16,777,216 bytes with `/EFI/BOOT/BOOTX64.EFI`
+- Protected identities preserved: PIE fixture `d7b0a8cf…`, signed APB1 `04add54f…`
+
+This main build could not be booted here because the sandbox has no QEMU.

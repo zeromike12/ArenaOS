@@ -35,8 +35,9 @@ execution.
 
 ### P-1 — Valid launch: render + input + animation + clean exit
 
-1. Launch the app; expect Identify success → Create 640×480 → first frame
-   published (`Damage` FULL).
+1. Launch the app; expect discovery success (exactly one endpoint and one
+   qualifying surface, kind+rights over the verified record) → Create
+   640×480 → first frame published (`Damage` FULL).
 2. `shot(t0)` → PPM matches the deterministic pattern at frame 0 (pixel
    assertion on every sampled pixel of a grid: 16×16 cells over the
    surface).
@@ -118,13 +119,13 @@ the code).
 | N-5 | Endpoint with wrong rights (e.g. WRITE only) | exit 6 |
 | N-6 | Surface with wrong rights (e.g. RO) | exit 6 |
 | N-7 | Surface smaller than 225 pages | exit 7 |
-| N-8 | Identify refused: wrong frame version from Desktop | exit 9, no graphical state |
-| N-9 | Identify refused: malformed reply (bad magic/reserved) | exit 9 |
-| N-10 | Identify refused: badge echo mismatch (spliced reply) | exit 9 |
-| N-11 | Identify refused: generation mismatch (stale surface) | exit 9 |
-| N-12 | Desktop process gone before Identify | STATUS_SERVICE_GONE, exit 9 |
+| N-8 | Identify refused: wrong frame version from Desktop | Identify-phase (ADR-0114 not implemented in V1; N/A until accepted) |
+| N-9 | Identify refused: malformed reply (bad magic/reserved) | Identify-phase (N/A until ADR-0114 accepted) |
+| N-10 | Identify refused: badge echo mismatch (spliced reply) | Identify-phase (N/A until ADR-0114 accepted) |
+| N-11 | Identify refused: generation mismatch (stale surface) | Identify-phase (N/A until ADR-0114 accepted) |
+| N-12 | Desktop process gone before Identify | Identify-phase (N/A until ADR-0114 accepted) |
 | N-13 | App sends malformed message (bad opcode/version) | refused, no service effect (Desktop-side audit) |
-| N-14 | Unsupported protocol version | exit 9, no silent downgrade |
+| N-14 | Unsupported protocol version | Identify-phase: the V1 app speaks only ADSK-v1; version-2 Identify is not sent (N/A until accepted) |
 
 Negative cases use the restored-mutation pattern where the production path
 cannot emit the state (e.g. Desktop-side refusals N-13 are exercised
@@ -157,5 +158,7 @@ rerun can never overwrite a failing run's raw evidence (Q-1 guard).
 
 The full set (P-1..P-4, N-1..N-14) runs after M accepts ADR-0114, the
 Desktop implements Identify, and a bootable graphics-capable mainline ESP
-can be built. Until then this document is the test design; nothing here is
-claimed as executed evidence.
+can be built in an environment that has QEMU. Until then this document is
+the test design; nothing here is claimed as executed evidence. This sandbox
+has no QEMU binary and no `/dev/kvm`, so baseline QEMU boots cannot be
+re-executed here (see docs/v1/00-baseline-record.md §6).

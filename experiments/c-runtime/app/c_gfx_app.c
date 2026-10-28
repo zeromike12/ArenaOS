@@ -1,16 +1,20 @@
 /*
- * c_gfx_app.c — V1 native graphical client scaffolding (ADR-0114).
+ * c_gfx_app.c — V1 native graphical client (discovery-based identification).
  *
  * Integer-only guest application. It locates its Desktop endpoint and its
  * owned surface by kind and rights over the verified ARST v2 record
- * (never by slot), performs the versioned Identify round-trip over the
- * endpoint, renders a deterministic integer pattern into the shared
- * surface, acknowledges injected keyboard/mouse input visibly, animates
- * for a bounded number of frames, then exits cleanly.
+ * (never by slot), maps the shared surface, renders a deterministic
+ * integer pattern into it, acknowledges injected keyboard/mouse input
+ * visibly, animates for a bounded number of frames, then exits cleanly.
  *
- * The Identify round-trip is mandatory: without an implementing Desktop the
- * app fails closed at identification and never guesses which endpoint or
- * surface is its own.
+ * Identification is the V1 contract available today: exactly one
+ * BadgedEndpoint (WRITE|COPY|DESTROY) and exactly one SharedRegion whose
+ * rights include READ|WRITE|COPY in the verified record; uniqueness is
+ * required and ambiguity is refused. The ADR-0114 Identify round-trip
+ * (ADSK version 2, opcode 13) is described in the ADR but is NOT
+ * implemented in V1 while ADR-0114 remains Proposed — the app never sends
+ * it, never queries SYS_ENDPOINT_BADGE (serve-side only), and never
+ * guesses which endpoint or surface is its own.
  *
  * Built with experiments/c-runtime under GCC and Clang
  * (run.py build --cc gcc --cc clang) and audited with run.py audit
@@ -26,29 +30,20 @@
 
    ADSK wire layout (userspace/desktop/src/wire.rs), preserved byte-for-byte
    for ADSK-v1. One 64-byte frame doubles as request and reply buffer:
-   b[0..3] = "ADSK", b[4] = version, b[5] = opcode, b[6..7] reserved,
+   b[0..3] = "ADSK", b[4] = version (1), b[5] = opcode, b[6..7] reserved,
    b[8..15] = handle u64 LE, opcode-specific fields at b[16..63]. */
 
-/* ADSK-v1 opcodes the client emits. */
+/* ADSK-v1 opcodes the client emits. Identify (ADSK v2, opcode 13) is not
+   part of V1 while ADR-0114 remains Proposed. */
 #define ADSK_OP_CREATE 1u
 #define ADSK_OP_DAMAGE 2u
 #define ADSK_OP_POLL 3u
 #define ADSK_OP_DESTROY_WINDOW 11u
 
-/* ADR-0114: Identify runs over ADSK version 2, opcode 13. */
-#define ADSK_VERSION_IDENTIFY 2u
-#define ADSK_OP_IDENTIFY 13u
-#define IDENTIFY_CLIENT_VERSION 1u
-
 #define ADSK_BYTES 64u
 #define ADSK_OFF_VERSION 4u
 #define ADSK_OFF_OPCODE 5u
 #define ADSK_OFF_HANDLE 8u
-#define ADSK_OFF_REPLY_STATUS 6u
-#define ADSK_OFF_REPLY_SERIAL 8u
-#define ADSK_OFF_REPLY_KIND 16u
-#define ADSK_OFF_REPLY_RIGHTS 17u
-#define ADSK_OFF_REPLY_GENERATION 18u
 
 #define ADSK_EVENT_FOCUS 4u
 #define ADSK_EVENT_KEY 1u
@@ -57,18 +52,21 @@
 
 /* ------------------------------------------------------------- surface ---
 
-   V1 surface geometry convention: 640x480 RGB888 = 921,600 bytes =
-   exactly 225 pages, inside the wire's 80x60..1024x768 bounds. Geometry is
-   a documented convention, never an identity mechanism. */
+   V1 surface geometry convention: 640x480 with u32 pixels = 1,228,800
+   bytes = exactly 300 pages, placed at pixel offset 4096 (one page) inside
+   the granted SharedRegion, so the region must provide at least 301 pages.
+   Geometry is a documented convention, never an identity mechanism. */
 
 #define GFX_W 640u
 #define GFX_H 480u
-#define GFX_BPP 3u
-#define GFX_BYTES (GFX_W * GFX_H * GFX_BPP)
-#define GFX_PAGES ((GFX_BYTES + ARENA_PAGE_SIZE - 1u) / ARENA_PAGE_SIZE)
+#define GFX_PIXEL_BYTES (GFX_W * GFX_H * 4u)
+#define GFX_PIXEL_PAGES ((GFX_PIXEL_BYTES + ARENA_PAGE_SIZE - 1u) / ARENA_PAGE_SIZE)
+#define GFX_OFFSET_PAGES 1u              /* PIXEL_OFFSET page */
+#define GFX_TOTAL_PAGES (GFX_OFFSET_PAGES + GFX_PIXEL_PAGES) /* 301 */
+#define PIXEL_OFFSET 4096u
 #define GFX_FRAMES 300u
-#define GFX_FRAME_US 33333u     /* ~30 fps, bounded busy sleep */
-#define GFX_FLASH_FRAMES 30u    /* visible-acknowledgment glow duration */
+#define GFX_FRAME_US 33333u              /* ~30 fps, bounded busy sleep */
+#define GFX_FLASH_FRAMES 30u             /* visible-acknowledgment glow duration */
 
 /* ------------------------------------------------------------------ exit ---
 
@@ -86,8 +84,9 @@ enum gfx_exit {
     GFX_WRONG_RIGHTS = 6,
     GFX_SURFACE_TOO_SMALL = 7,
     GFX_MAP_FAILED = 8,
-    GFX_IDENTIFY_FAILED = 9,
-    GFX_CREATE_FAILED = 10,
+    GFX_CREATE_FAILED = 9,
+    GFX_DAMAGE_FAILED = 10,
+    GFX_POLL_FAILED = 11,
 };
 
 /* Capability kinds/rights as granted by the ADR-0090 desktop profile.
@@ -106,11 +105,12 @@ enum gfx_exit {
 typedef struct {
     uint64_t endpoint_slot;
     uint64_t surface_slot;
-    uint64_t surface_generation;
-    uint64_t own_badge;
+    uint64_t handle;
     uint8_t *framebuffer;
     int mapped;
 } app_t;
+
+static app_t a;
 
 /* ------------------------------------------------------- syscall helpers ---
 
@@ -145,7 +145,9 @@ static int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf) {
             }
         } else if (c->kind == ARENA_CAP_KIND_SHARED_REGION) {
             surf_any++;
-            if (c->rights == GFX_SURFACE_RIGHTS) {
+            /* Rights must include READ|WRITE (and COPY, needed to land the
+               surface cap on calls): not an exact match on other bits. */
+            if ((c->rights & GFX_SURFACE_RIGHTS) == GFX_SURFACE_RIGHTS) {
                 surf_exact++;
                 surf_slot = c->slot;
             }
@@ -164,215 +166,127 @@ static int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf) {
     return (int)GFX_OK;
 }
 
-/* ----------------------------------------------------------- identify ---
+/* ------------------------------------------------------------ exchange ---
 
-   One bounded Identify round-trip over the endpoint (ADSK v2, opcode 13).
-   The reply manufactures no authority: it is accepted only when its named
-   surface matches a capability this process already holds. `s` is the
-   verified startup record; `surface_slot` is the unique exact-rights
-   candidate discovered above with generation `surface_generation`. */
+   One IPC call over the endpoint, landing this session's surface cap so
+   the Desktop can authenticate the call (kind 7, this session's object id,
+   READ|WRITE|COPY). Retries only kernel STATUS_BUSY (a queue refusal that
+   was never accepted); a server status is never retried. An unexpected
+   landed capability is destroyed and the call refused. */
 
-static int identify(const arena_startup_t *s, uint64_t ep,
-                    uint64_t surface_slot, uint64_t surface_generation,
-                    uint64_t own_badge) {
-    uint8_t frame[ADSK_BYTES];
-    uint64_t out[3];
-
-    for (uint32_t attempt = 0; attempt <= IDENTIFY_BUSY_RETRIES; attempt++) {
-        arena_memset(frame, 0, ADSK_BYTES);
-        arena_memcpy(frame, "ADSK", 4);
-        frame[ADSK_OFF_VERSION] = (uint8_t)ADSK_VERSION_IDENTIFY;
-        frame[ADSK_OFF_OPCODE] = (uint8_t)ADSK_OP_IDENTIFY;
-        frame[8] = (uint8_t)(IDENTIFY_CLIENT_VERSION & 0xffu);
-        frame[9] = (uint8_t)((IDENTIFY_CLIENT_VERSION >> 8) & 0xffu);
-
-        out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
-        int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, ep, 0, 0,
-                                    GFX_CAP_NONE,
-                                    (uint64_t)(uintptr_t)out,
-                                    (uint64_t)(uintptr_t)frame);
-
-        if (rc == ARENA_STATUS_BUSY) {
-            if (attempt < IDENTIFY_BUSY_RETRIES) {
-                uint64_t delay = (1000ull << (attempt > 5u ? 5u : attempt));
-                arena_busy_sleep_us(delay);
-                continue;
-            }
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-        if (rc != 0) {
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-        /* A server status was returned: this request was processed. Never
-           retry a server status, and an unexpected returned cap is
-           disposed of as a refusal. */
-        if (out[0] != 0 || out[2] != GFX_CAP_NONE) {
-            if (out[2] != GFX_CAP_NONE) {
-                (void)arena_syscall6(ARENA_SYS_CAP_DESTROY, out[2], 0, 0, 0, 0, 0);
-            }
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-
-        /* Strict reply shape. */
-        if (arena_memcmp(frame, "ADSK", 4) != 0 ||
-            frame[ADSK_OFF_VERSION] != (uint8_t)ADSK_VERSION_IDENTIFY ||
-            frame[ADSK_OFF_OPCODE] != (uint8_t)ADSK_OP_IDENTIFY ||
-            frame[ADSK_OFF_REPLY_STATUS] != 0 || frame[7] != 0) {
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-        for (uint32_t i = 26u; i < ADSK_BYTES; i++) {
-            if (frame[i] != 0) return (int)GFX_IDENTIFY_FAILED;
-        }
-
-        /* Echo check: the reply's session serial must be this endpoint's
-           own kernel-delivered badge (a spliced reply names another
-           session). Bytes 19..25 are the high part of the generation and
-           are excluded from this reserved check above only as generation. */
-        uint64_t serial = 0;
-        uint64_t reply_gen = 0;
-        for (uint32_t i = 0; i < 8u; i++) {
-            serial |= (uint64_t)frame[ADSK_OFF_REPLY_SERIAL + i] << (8 * i);
-            reply_gen |= (uint64_t)frame[ADSK_OFF_REPLY_GENERATION + i] << (8 * i);
-        }
-        if (serial != own_badge) {
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-        if (frame[ADSK_OFF_REPLY_KIND] != (uint8_t)ARENA_CAP_KIND_SHARED_REGION ||
-            frame[ADSK_OFF_REPLY_RIGHTS] != (uint8_t)(GFX_SURFACE_RIGHTS & 0xffu) ||
-            reply_gen != surface_generation) {
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-
-        /* Cross-check: exactly one of this process's held SharedRegions
-           carries kind 7, rights READ|WRITE|COPY, and this generation,
-           and it is the surface we discovered. */
-        unsigned matches = 0;
-        uint64_t match_slot = 0;
-        for (unsigned i = 0; i < s->cap_count; i++) {
-            const arena_cap_desc_t *c = &s->caps[i];
-            if (c->kind != ARENA_CAP_KIND_SHARED_REGION ||
-                c->rights != GFX_SURFACE_RIGHTS) {
-                continue;
-            }
-            uint64_t d[3];
-            if (describe_slot(c->slot, d) != 0 || d[0] != ARENA_CAP_KIND_SHARED_REGION ||
-                d[2] != GFX_SURFACE_RIGHTS) {
-                continue;
-            }
-            if (d[1] == surface_generation) {
-                matches++;
-                match_slot = c->slot;
-            }
-        }
-        if (matches != 1u || match_slot != surface_slot) {
-            return (int)GFX_IDENTIFY_FAILED;
-        }
-
-        return (int)GFX_OK;
-    }
-    return (int)GFX_IDENTIFY_FAILED;
-}
-
-/* ---------------------------------------------------------------- create --- */
-
-static uint64_t create_window(uint64_t ep) {
-    uint8_t frame[ADSK_BYTES];
+static int exchange(uint8_t opcode, uint64_t handle, uint16_t w, uint16_t h,
+                    uint8_t frame[ADSK_BYTES], uint64_t *result_out) {
     uint64_t out[3];
 
     arena_memset(frame, 0, ADSK_BYTES);
     arena_memcpy(frame, "ADSK", 4);
     frame[ADSK_OFF_VERSION] = 1u;           /* ADSK-v1 for window ops */
-    frame[ADSK_OFF_OPCODE] = (uint8_t)ADSK_OP_CREATE;
-    frame[24] = (uint8_t)(GFX_W & 0xffu);
-    frame[25] = (uint8_t)((GFX_W >> 8) & 0xffu);
-    frame[26] = (uint8_t)(GFX_H & 0xffu);
-    frame[27] = (uint8_t)((GFX_H >> 8) & 0xffu);
-
-    out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
-    int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, ep, 0, 0, GFX_CAP_NONE,
-                                (uint64_t)(uintptr_t)out,
-                                (uint64_t)(uintptr_t)frame);
-    (void)rc;
-    return out[1]; /* handle: 0 on refusal */
-}
-
-/* ---------------------------------------------------------------- damage ---
-
-   Publish the whole surface (n == 0 means full damage). */
-
-static int damage(uint64_t ep, uint64_t handle) {
-    uint8_t frame[ADSK_BYTES];
-    uint64_t out[3];
-
-    arena_memset(frame, 0, ADSK_BYTES);
-    arena_memcpy(frame, "ADSK", 4);
-    frame[ADSK_OFF_VERSION] = 1u;
-    frame[ADSK_OFF_OPCODE] = (uint8_t)ADSK_OP_DAMAGE;
-    frame[16] = 0u; /* FULL: whole surface */
+    frame[ADSK_OFF_OPCODE] = opcode;
     for (uint32_t i = 0; i < 8u; i++) {
         frame[ADSK_OFF_HANDLE + i] = (uint8_t)((handle >> (8 * i)) & 0xffu);
     }
+    if (opcode == ADSK_OP_CREATE) {
+        frame[24] = (uint8_t)(w & 0xffu);
+        frame[25] = (uint8_t)((w >> 8) & 0xffu);
+        frame[26] = (uint8_t)(h & 0xffu);
+        frame[27] = (uint8_t)((h >> 8) & 0xffu);
+    } else if (opcode == ADSK_OP_DAMAGE) {
+        frame[16] = 0u;                     /* FULL: whole surface */
+    }
 
     out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
-    int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, ep, 0, 0, GFX_CAP_NONE,
-                                (uint64_t)(uintptr_t)out,
-                                (uint64_t)(uintptr_t)frame);
-    (void)rc;
-    return out[0] == 0 ? 1 : 0;
+    for (uint32_t attempt = 0; attempt <= IDENTIFY_BUSY_RETRIES; attempt++) {
+        int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, a.endpoint_slot, 0, 0,
+                                    a.surface_slot,
+                                    (uint64_t)(uintptr_t)out,
+                                    (uint64_t)(uintptr_t)frame);
+
+        /* An unexpected landed capability is never accepted. */
+        if (out[2] != GFX_CAP_NONE) {
+            (void)arena_syscall6(ARENA_SYS_CAP_DESTROY, out[2], 0, 0, 0, 0, 0);
+            return -1;
+        }
+        if (rc == ARENA_STATUS_BUSY && attempt < IDENTIFY_BUSY_RETRIES) {
+            uint64_t delay = (1000ull << (attempt > 5u ? 5u : attempt));
+            arena_busy_sleep_us(delay);
+            continue;
+        }
+        if (rc != 0 || out[0] != 0) {
+            return -1;
+        }
+        if (result_out != NULL) {
+            *result_out = out[1];
+        }
+        return 0;
+    }
+    return -1;
 }
 
-/* ---------------------------------------------------------------- poll ---
-
-   Wait once for an event on the window; the reply buffer is reused as the
-   request buffer. Returns 1 when an Event frame was decoded, 0 when none,
-   negative on an IPC failure the caller treats as fatal. */
-
-static int poll_event(uint64_t ep, uint64_t handle, uint8_t reply[ADSK_BYTES]) {
-    arena_memset(reply, 0, ADSK_BYTES);
-    arena_memcpy(reply, "ADSK", 4);
-    reply[ADSK_OFF_VERSION] = 1u;
-    reply[ADSK_OFF_OPCODE] = (uint8_t)ADSK_OP_POLL;
-    for (uint32_t i = 0; i < 8u; i++) {
-        reply[ADSK_OFF_HANDLE + i] = (uint8_t)((handle >> (8 * i)) & 0xffu);
+static uint64_t create_window(uint16_t w, uint16_t h) {
+    uint64_t handle = 0;
+    uint8_t frame[ADSK_BYTES];
+    if (exchange(ADSK_OP_CREATE, 0, w, h, frame, &handle) != 0 || handle == 0) {
+        return 0;
     }
+    return handle;
+}
 
-    uint64_t out[3];
-    out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
-    int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, ep, 0, 0, GFX_CAP_NONE,
-                                (uint64_t)(uintptr_t)out,
-                                (uint64_t)(uintptr_t)reply);
-    if (rc != 0 || out[0] != 0) {
+static int damage(uint64_t handle) {
+    uint64_t result = 0;
+    uint8_t frame[ADSK_BYTES];
+    return exchange(ADSK_OP_DAMAGE, handle, 0, 0, frame, &result) == 0;
+}
+
+/* Returns 1 when an event frame was decoded, 0 when none, -1 on failure. */
+
+static int poll_event(uint8_t reply[ADSK_BYTES]) {
+    uint64_t result = 0;
+    if (exchange(ADSK_OP_POLL, a.handle, 0, 0, reply, &result) != 0) {
         return -1;
     }
-    if (arena_memcmp(reply, "ADSK", 4) != 0 || reply[ADSK_OFF_OPCODE] != 5u) {
-        return 0; /* not an event frame: no input this turn */
+    /* The reply buffer holds the server's inline reply. An event frame is
+       ADSK-v1 opcode 5; anything else (including the echoed Poll frame,
+       opcode 3, when nothing is queued) means no event this turn. */
+    if (arena_memcmp(reply, "ADSK", 4) != 0 ||
+        reply[ADSK_OFF_VERSION] != 1u || reply[ADSK_OFF_OPCODE] != 5u) {
+        return 0;
     }
-    return 1;
+    for (uint32_t i = 6u; i < 8u; i++) {
+        if (reply[i] != 0) return 0;
+    }
+    for (uint32_t i = 30u; i < ADSK_BYTES; i++) {
+        if (reply[i] != 0) return 0;
+    }
+    /* Echoed handle must match this window. */
+    uint64_t echo = 0;
+    for (uint32_t i = 0; i < 8u; i++) {
+        echo |= (uint64_t)reply[ADSK_OFF_HANDLE + i] << (8 * i);
+    }
+    if (echo != a.handle) {
+        return 0;
+    }
+    return 1; /* event type at reply[28], detail at reply[29] */
 }
 
 /* ------------------------------------------------------------- render ---- */
 
-static void render_frame(uint8_t *fb, uint32_t frame, int flash) {
+static void render_frame(uint32_t *pixels, uint32_t frame, int flash) {
     for (uint32_t y = 0; y < GFX_H; y++) {
         for (uint32_t x = 0; x < GFX_W; x++) {
             uint32_t cell = ((x >> 4) + (y >> 4) + frame) & 1u;
             uint32_t r = cell ? 60u : 20u;
             uint32_t g = 40u;
             uint32_t b = cell ? 20u : 90u;
+            uint32_t px = (r << 16) | (g << 8) | b; /* 0x00RRGGBB */
             if (flash) {
-                r ^= 0xA0u;
-                g ^= 0xA0u;
-                b ^= 0xA0u;
+                px ^= 0x00A0A0A0u;
             }
-            size_t off = (size_t)((y * GFX_W + x) * GFX_BPP);
-            fb[off] = (uint8_t)b;
-            fb[off + 1] = (uint8_t)g;
-            fb[off + 2] = (uint8_t)r;
+            pixels[y * GFX_W + x] = px;
         }
     }
 }
 
-/* ----------------------------------------------------------- logging -----
+/* --------------------------------------------------------------- logging ---
 
    Best effort over the granted stdout stream when one was granted; silent
    otherwise. No serial/debug fallback ever. */
@@ -390,7 +304,6 @@ static void log_line(const char *msg) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    app_t a;
     arena_memset(&a, 0, sizeof(a));
     (void)arena_stdio_init();
 
@@ -404,16 +317,15 @@ int main(int argc, char **argv) {
     int r = discover(s, &ep, &surf);
     if (r != GFX_OK) {
         static const char *const msgs[] = {
-            "[gfx] discovery ok",   /* 0: unused */
-            "[gfx] no startup record", /* 1: handled above */
-            "[gfx] no endpoint",          /* GFX_NO_ENDPOINT = 2 */
-            "[gfx] ambiguous endpoint",   /* 3 */
-            "[gfx] wrong rights",         /* 4: endpoint any>0, exact==0 */
-            "[gfx] no surface",           /* GFX_NO_SURFACE = 5 */
-            "[gfx] ambiguous surface",    /* 6 */
-            "[gfx] wrong rights",         /* 7: surface any>0, exact==0 */
+            "[gfx] discovery ok",      /* 0: unused */
+            "[gfx] discovery ok",      /* 1: unused */
+            "[gfx] no endpoint",       /* GFX_NO_ENDPOINT = 2 */
+            "[gfx] ambiguous endpoint",/* 3 */
+            "[gfx] no surface",        /* GFX_NO_SURFACE = 4 */
+            "[gfx] ambiguous surface", /* 5 */
+            "[gfx] wrong rights",      /* GFX_WRONG_RIGHTS = 6 */
         };
-        const char *msg = (r >= 2 && r <= 7) ? msgs[r] : "[gfx] discovery failed";
+        const char *msg = (r >= 2 && r <= 6) ? msgs[r] : "[gfx] discovery failed";
         log_line(msg);
         arena_exit((enum gfx_exit)r);
     }
@@ -422,48 +334,31 @@ int main(int argc, char **argv) {
 
     uint64_t desc[3];
     if (describe_slot(surf, desc) != 0 || desc[0] != ARENA_CAP_KIND_SHARED_REGION ||
-        desc[2] != GFX_SURFACE_RIGHTS) {
+        (desc[2] & GFX_SURFACE_RIGHTS) != GFX_SURFACE_RIGHTS) {
         log_line("[gfx] surface describe mismatch");
         arena_exit(GFX_WRONG_RIGHTS);
     }
-    a.surface_generation = desc[1];
 
     int64_t pages = arena_syscall6(ARENA_SYS_SHARED_PAGES, surf, 0, 0, 0, 0, 0);
-    if (pages < 0 || (uint64_t)pages < GFX_PAGES) {
+    if (pages < 0 || (uint64_t)pages < GFX_TOTAL_PAGES) {
         log_line("[gfx] surface too small");
         arena_exit(GFX_SURFACE_TOO_SMALL);
     }
 
-    int64_t va = arena_syscall6(ARENA_SYS_SHARED_MAP, surf, GFX_PAGES, 0, 0, 0, 0);
+    int64_t va = arena_syscall6(ARENA_SYS_SHARED_MAP, surf, 1u, 0, 0, 0, 0);
     if (va <= 0) {
         log_line("[gfx] map failed");
         arena_exit(GFX_MAP_FAILED);
     }
     a.framebuffer = (uint8_t *)(uintptr_t)va;
     a.mapped = 1;
+    uint32_t *pixels = (uint32_t *)(a.framebuffer + PIXEL_OFFSET);
 
-    int64_t badge = arena_syscall6(ARENA_SYS_ENDPOINT_BADGE, ep, ep, 0, 0, 0, 0);
-    if (badge < 0) {
-        log_line("[gfx] badge query failed");
-        if (a.mapped) {
-            (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
-                                 (uint64_t)(uintptr_t)a.framebuffer, 0, 0, 0, 0, 0);
-        }
-        arena_exit(GFX_IDENTIFY_FAILED);
-    }
-    a.own_badge = (uint64_t)badge;
+    /* No SYS_ENDPOINT_BADGE query (serve-side only) and no Identify
+       round-trip while ADR-0114 remains Proposed. The surface above is this
+       session's owned surface by the verified-record discovery contract. */
 
-    if (identify(s, ep, surf, a.surface_generation, a.own_badge) != GFX_OK) {
-        log_line("[gfx] identify failed");
-        if (a.mapped) {
-            (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
-                                 (uint64_t)(uintptr_t)a.framebuffer, 0, 0, 0, 0, 0);
-        }
-        arena_exit(GFX_IDENTIFY_FAILED);
-    }
-    log_line("[gfx] identified endpoint and surface");
-
-    uint64_t handle = create_window(ep);
+    uint64_t handle = create_window(GFX_W, GFX_H);
     if (handle == 0) {
         log_line("[gfx] create failed");
         if (a.mapped) {
@@ -472,39 +367,39 @@ int main(int argc, char **argv) {
         }
         arena_exit(GFX_CREATE_FAILED);
     }
+    a.handle = handle;
+    log_line("[gfx] window created");
 
     uint32_t flash = 0;
     uint64_t events = 0;
     int focused = -1;
     char line[96];
+    int exit_code = GFX_OK;
 
     for (uint32_t f = 0; f < GFX_FRAMES; f++) {
-        render_frame(a.framebuffer, f, flash > 0 ? 1 : 0);
+        render_frame(pixels, f, flash > 0 ? 1 : 0);
         if (flash > 0) flash--;
 
-        if (!damage(ep, handle)) {
+        if (!damage(handle)) {
             log_line("[gfx] damage failed");
-            if (a.mapped) {
-                (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
-                                     (uint64_t)(uintptr_t)a.framebuffer, 0, 0, 0, 0, 0);
-            }
-            arena_exit(GFX_IDENTIFY_FAILED);
+            exit_code = GFX_DAMAGE_FAILED;
+            break;
         }
 
         uint8_t reply[ADSK_BYTES];
-        int pr = poll_event(ep, handle, reply);
+        int pr = poll_event(reply);
         if (pr < 0) {
             log_line("[gfx] poll failed");
-            if (a.mapped) {
-                (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
-                                     (uint64_t)(uintptr_t)a.framebuffer, 0, 0, 0, 0, 0);
-            }
-            arena_exit(GFX_IDENTIFY_FAILED);
+            exit_code = GFX_POLL_FAILED;
+            break;
         }
         if (pr == 1) {
             uint8_t etype = reply[28];
             if (etype == ADSK_EVENT_FOCUS) {
                 focused = reply[29] ? 1 : 0;
+                (void)arena_snprintf(line, sizeof(line),
+                                     "[gfx] focus=%d", focused);
+                log_line(line);
             } else if (etype == ADSK_EVENT_KEY || etype == ADSK_EVENT_POINTER) {
                 events++;
                 flash = GFX_FLASH_FRAMES;
@@ -521,21 +416,14 @@ int main(int argc, char **argv) {
         arena_busy_sleep_us(GFX_FRAME_US);
     }
 
-    /* Teardown: DestroyWindow over the endpoint, unmap, exit cleanly. */
+    /* Teardown: DestroyWindow over the endpoint, unmap, exit cleanly.
+       Cleanup failures are logged but never overwrite the exit code. */
     {
         uint8_t frame[ADSK_BYTES];
-        uint64_t out[3];
-        arena_memset(frame, 0, ADSK_BYTES);
-        arena_memcpy(frame, "ADSK", 4);
-        frame[ADSK_OFF_VERSION] = 1u;
-        frame[ADSK_OFF_OPCODE] = (uint8_t)ADSK_OP_DESTROY_WINDOW;
-        for (uint32_t i = 0; i < 8u; i++) {
-            frame[ADSK_OFF_HANDLE + i] = (uint8_t)((handle >> (8 * i)) & 0xffu);
+        uint64_t result = 0;
+        if (exchange(ADSK_OP_DESTROY_WINDOW, handle, 0, 0, frame, &result) != 0) {
+            log_line("[gfx] destroy failed");
         }
-        out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
-        (void)arena_syscall6(ARENA_SYS_IPC_CALL, a.endpoint_slot, 0, 0,
-                             GFX_CAP_NONE, (uint64_t)(uintptr_t)out,
-                             (uint64_t)(uintptr_t)frame);
     }
     if (a.mapped) {
         (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
@@ -543,9 +431,9 @@ int main(int argc, char **argv) {
     }
 
     (void)arena_snprintf(line, sizeof(line),
-                         "[gfx] exit events=%llu focused=%d",
-                         (unsigned long long)events, focused);
+                         "[gfx] exit events=%llu focused=%d code=%d",
+                         (unsigned long long)events, focused, exit_code);
     log_line(line);
-    arena_exit(GFX_OK);
+    arena_exit(exit_code);
     return 0;
 }

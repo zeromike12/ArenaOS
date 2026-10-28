@@ -1,12 +1,12 @@
 # V1 application design — signed native C graphical client
 
-**Status:** scaffolding source only; the Identify round-trip is mandatory
-but inactive until M accepts ADR-0114 and the Desktop service implements the
-Identify opcode. Until then the app fails closed at identification — it never
-guesses which endpoint or surface is its own.
+**Status:** implemented source (`experiments/c-runtime/app/c_gfx_app.c`),
+built with GCC and Clang (`run.py build --cc gcc --cc clang`), audited with
+`run.py audit` (zero x87/MMX/SSE/AVX, ET_EXEC, no W+X). Guest execution and
+QMP-injected input are blocked on the QEMU baseline environment (this sandbox
+has no QEMU and no `/dev/kvm` — see docs/v1/00-baseline-record.md §5–6).
 **Milestone:** V1 — Native Graphical Launch Foundation
-**Built with:** `experiments/c-runtime/` canonical runtime, GCC and Clang
-(`run.py build --cc gcc --cc clang`), audited with `run.py audit`.
+**Built with:** `experiments/c-runtime/` canonical runtime, GCC and Clang.
 
 ## 1. Contract the app relies on (nothing new)
 
@@ -16,99 +16,98 @@ guesses which endpoint or surface is its own.
   `CAP_KIND_BADGED_ENDPOINT=12`, `CAP_KIND_SHARED_REGION=7`, role OTHER=5,
   RIGHT_READ=1, RIGHT_WRITE=2, RIGHT_COPY=4, RIGHT_DESTROY=8.
 - ADR-0090 grant profile: the trusted launcher gives this session exactly
-  one BadgedEndpoint (WRITE|COPY|DESTROY) and exactly one writable
-  session SharedRegion (READ|WRITE|COPY), both role OTHER.
-- ADR-0114: the app locates them by kind/rights (uniqueness required),
-  then runs a versioned Identify round-trip over the endpoint; the reply
-  manufactures no authority — the app cross-checks the named surface
-  (kind/rights/generation via SYS_CAP_DESCRIBE) against caps it already
-  holds.
+  one BadgedEndpoint (WRITE|COPY|DESTROY) and exactly one writable session
+  SharedRegion (READ|WRITE|COPY), both role OTHER.
+- ADR-0114 (Proposed): the V1 app locates them by kind/rights over the
+  verified record — uniqueness required, ambiguity refused, slots used only as
+  IPC operands, never as identity. The ADR-0114 Identify round-trip
+  (ADSK version 2, opcode 13) is specified in the ADR but NOT implemented in
+  V1 while the ADR remains Proposed: the app never sends opcode 13, never
+  queries `SYS_ENDPOINT_BADGE` (serve-side only), and never guesses which
+  endpoint or surface is its own.
 - ADSK wire (`userspace/desktop/src/wire.rs`): 64-byte frames, magic "ADSK",
   opcodes Create=1, Damage=2, Poll=3, DestroyWindow=11; reply bytes are
-  written back into the same inline buffer.
-- ADR-0114 Identify extension (ADSK version 2, opcode 13), frame layout:
-  request: `b[4]=2, b[5]=13, b[8..10]=client version u16 LE (=1)`, rest zero;
-  reply: `b[4]=2, b[5]=13, b[6]=status, b[8..16]=session serial u64 LE,
-  b[16]=surface kind, b[17]=rights, b[18..26]=surface generation u64 LE`.
-- SYS_CAP_DESCRIBE (29): `[kind, generation/id, rights]` for a held slot.
-- SYS_SHARED_PAGES (52) / SYS_SHARED_MAP (37): size and map a SharedRegion.
-- SYS_IPC_CALL (7): endpoint slot, two descriptor words, transferred cap,
-  3-word out array, inline frame buffer — same shape as
-  `userspace/desktop/src/app_client.rs::exchange`.
+  written back into the same inline buffer. The Desktop authenticates the
+  caller through the endpoint's kernel badge and the landed surface cap
+  (kind 7, this session's object id, READ|WRITE|COPY).
+- SYS_CAP_DESCRIBE (29): `[kind, object_id, rights]` for a held slot — object
+  ids are descriptive, never authority.
+- SYS_SHARED_PAGES (52) / SYS_SHARED_MAP (37, `(slot, writable_flag 0|1)`):
+  size and map a SharedRegion; any writable flag other than 0 or 1 is
+  rejected by the kernel.
+- SYS_IPC_CALL (7): endpoint slot, two descriptor words, transferred cap
+  slot, 3-word out array, inline frame buffer — same shape as
+  `userspace/desktop/src/app_client.rs::exchange`. Blocking, no client-side
+  deadline; only kernel `STATUS_BUSY` retries are bounded.
 - `arena_exit(status)`: ends the process; the Desktop records the exit
-  status through its held Process cap → serial `[desktop] child Process-cap
-  exit status=N`.
+  status through its held Process cap → serial
+  `[desktop] child Process-cap exit status=N`.
 - No syscall additions, no kernel change, no ARST change, no slot-based
-  identification anywhere in the app.
+  identification anywhere in the app, no `SYS_ENDPOINT_BADGE` client call,
+  no capability transfer in V1.
 
 ## 2. Surface geometry (V1 convention)
 
-640×480 RGB888 (921,600 bytes = exactly 225 pages), within the wire's
-80×60..1024×768 bounds. The granted surface region must provide at least
-225 pages (SYS_SHARED_PAGES); all framebuffer writes are bounded to the
+640×480 with **u32 pixels** (0x00RRGGBB) = 1,228,800 bytes = exactly 300
+pages, placed at pixel offset 4096 (one page) inside the granted
+SharedRegion: the region must provide at least 301 pages
+(SYS_SHARED_PAGES ≥ 301). All framebuffer writes are bounded to the
 convention rectangle. Geometry is a documented V1 convention, not an
 identity mechanism: a mismatched region is a launch refusal, never a guess.
 
 ## 3. Startup sequence
 
-1. `s = arena_startup();` → `!s->present` = exit 1.
+1. `s = arena_startup();` → `!s->present` = exit 1 (GFX_NO_STARTUP).
 2. Scan `s->caps[0..cap_count)`:
    - endpoint candidates: kind 12, role 5, rights == WRITE|COPY|DESTROY (14).
-   - surface candidates: kind 7, role 5, rights == READ|WRITE|COPY (7).
+   - surface candidates: kind 7, role 5, rights including READ|WRITE|COPY (7).
    - zero candidates → exit 2 (no endpoint) / 4 (no surface).
    - two or more → exit 3 (ambiguous endpoint) / 5 (ambiguous surface).
-   - rights mismatch → exit 6.
+   - candidates exist but none qualifies → exit 6 (wrong rights).
    Slot numbers are recorded only as IPC operands; never used to identify.
-3. Learn the endpoint's own badge: `SYS_ENDPOINT_BADGE(endpoint_slot,
-   endpoint_slot)` → `own_badge` (used to authenticate the Identify reply's
-   session serial echo).
-4. `SYS_CAP_DESCRIBE(surface_slot)` → require kind 7, rights 7; record
-   `surface_generation`. `SYS_SHARED_PAGES(surface_slot) >= 225` else exit 7.
-5. `SYS_SHARED_MAP(surface_slot, pages_needed)` → framebuffer VA; unmap on
-   any later failure.
-6. **Identify round-trip** (ADSK v2 opcode 13) over the endpoint slot:
-   - encode request, `SYS_IPC_CALL(endpoint, 0, 0, CAP_NONE, out, frame)`;
-   - retry only kernel STATUS_BUSY with the runtime's bounded backoff,
-     then fail; a service status is never retried.
-   - require reply magic/version/opcode, status 0, reserved bytes zero;
-   - echo check: `reply[8..16] == own_badge` else exit 9 (spliced reply);
-   - surface cross-check: among this process's held caps exactly one
-     SharedRegion with kind 7/rights 7 whose `SYS_CAP_DESCRIBE` generation
-     equals `reply[18..26]` else exit 9 (stale/foreign surface).
-   - Any other shape → exit 9 (protocol failure, no graphical state).
-   On every failure the app has created no window and mapped nothing it
-   does not unmap — fail closed, no state change visible to Desktop.
-7. `Create {640, 480}` over the endpoint → window handle in reply word `out[1]`.
-   Create failure → exit 10.
+3. `SYS_CAP_DESCRIBE(surface_slot)` → require kind 7, rights including
+   READ|WRITE|COPY (else exit 6).
+4. `SYS_SHARED_PAGES(surface_slot) >= 301` else exit 7 (surface too small).
+5. `SYS_SHARED_MAP(surface_slot, 1)` → framebuffer VA (writable flag 1; any
+   other value is rejected) else exit 8 (map failed). u32 pixel plane at
+   `framebuffer + 4096`. Unmap on any later failure.
+6. `Create {640, 480}` over the endpoint, landing the surface cap → window
+   handle in reply word `out[1]` (else exit 9, create failed).
+7. Render loop (section 4), then teardown (section 5). Any failure exits with
+   its distinct code; the Desktop's Process-cap receipt logs
+   `[desktop] child Process-cap exit status=N`.
 
 ## 4. Render loop (bounded)
 
-For `frame` in `0..GFX_FRAMES` (300 frames, ~30 fps via `arena_busy_sleep_us`):
+For `frame` in `0..GFX_FRAMES` (300 frames, ~30 fps via
+`arena_busy_sleep_us`):
 
-- Render deterministic integer pattern into the framebuffer:
-  chequerboard of 16×16 cells with colors derived from `(cell_x + cell_y + frame)`
-  using only integer arithmetic (no x87/SSE/AVX anywhere — enforced by the
-  build flags and the static audit).
+- Render a deterministic integer pattern into the u32 pixel plane: a
+  16×16-cell chequerboard with colors derived from
+  `(cell_x + cell_y + frame)` using only integer arithmetic (no x87/SSE/AVX
+  anywhere — enforced by the build flags and the static audit).
 - If an input event was acknowledged this frame, draw a flashing border
-  (inverted cell colors) for `APP_FLASH_FRAMES` frames — visible
+  (inverted cell colors) for `GFX_FLASH_FRAMES` frames — visible
   acknowledgment of real input.
-- `Damage {handle, FULL}` to publish the surface.
+- `Damage {handle, FULL}` to publish the surface (failure → exit 10).
 - `Poll {handle}`; decode any Event frame in the reply buffer:
-  - Focus (type 4, b[29] 0/1) → track focus state (used by the two-instance
-    isolation test: input received only while focused).
-  - Key (type 1) / Pointer (type 2) → `flash = APP_FLASH_FRAMES`,
+  - Focus (type 4, b[29] 0/1) → track focus state.
+  - Key (type 1) / Pointer (type 2) → `flash = GFX_FLASH_FRAMES`,
     `events_received++`, log line via `arena_write(1, ...)` when stdio is
     granted (best-effort; missing stdio never fails the app — no serial
     fallback).
   - Close (type 3) → jump to teardown early.
   - Anything undecodable → continue (a spurious frame never changes state).
+- Event frames are validated (magic, version 1, opcode 5, echoed handle,
+  reserved bytes zero); an unexpected landed capability is destroyed and the
+  call refused.
 
 ## 5. Teardown and exit
 
 `DestroyWindow {handle}` over the endpoint, unmap the surface, then
-`arena_exit(0)`. The Desktop's Process-cap receipt logs
-`[desktop] child Process-cap exit status=0`. Any earlier failure exits with
-its distinct code (1..10) so the serial receipt is unambiguous evidence.
+`arena_exit(code)`. Cleanup results are logged but never overwrite the exit
+code (the original failure is preserved when cleanup fails). The Desktop's
+Process-cap receipt logs `[desktop] child Process-cap exit status=N`.
 
 ## 6. Negative behaviors exercised by design (tests in docs/v1/03-test-design.md)
 
@@ -116,16 +115,18 @@ its distinct code (1..10) so the serial receipt is unambiguous evidence.
 - Duplicate endpoint/surface → exit 3/5 (nothing guessed).
 - Wrong rights on either cap → exit 6.
 - Surface too small for the V1 geometry → exit 7.
-- Identify refused (wrong version, bad magic, nonzero status, reserved
-  bytes, badge echo mismatch, generation mismatch, zero/two matching
-  surfaces) → exit 9, no graphical state.
-- Desktop process gone → `STATUS_SERVICE_GONE` propagates, exit 9.
+- Map refusal → exit 8.
+- Create refusal → exit 9, no graphical state.
+- Damage refusal → exit 10.
 - Each failure leaves the process's other granted caps untouched and creates
   no window; a re-launch starts from a clean record.
 
 ## 7. What is deliberately NOT in this app
 
 - No slot/ordinal-based identification (rejected historical pattern).
+- No `SYS_ENDPOINT_BADGE` client query (serve-side only).
+- No Identify round-trip (ADR-0114 Proposed; not implemented in V1).
+- No capability transfer in V1.
 - No "ask an arbitrary endpoint who it is" — the endpoint called is the one
   the launcher granted; Desktop authenticates the caller via the kernel
   badge.
