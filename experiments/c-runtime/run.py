@@ -423,9 +423,11 @@ def host_tests():
     exe = out / "test_runtime"
     srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "src/streams.c", "src/startup_query.c",
             "src/errno.c", "src/exit.c", "src/libc_string.c", "src/libc_stdlib.c", "src/libc_time.c",
-            "host/host_main.c", "host/test_runtime.c", "host/test_libc.c"]
+            "host/host_main.c", "host/test_runtime.c", "host/test_libc.c",
+            "app/c_gfx_app.c"]
     cmd = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
-           "-DARENA_HOSTED", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+           "-DARENA_HOSTED", "-DARENA_HOSTED_TEST",
+           "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
            "-fno-strict-aliasing",
            "-I", str(EXP / "include"), "-I", str(EXP / "src")]
     run(cmd + [str(EXP / s) for s in srcs] + ["-o", str(exe)])

@@ -53,6 +53,14 @@
 /* Kernel SYS_DEBUG_WRITE per-call cap (syscall.rs WRITE_MAX). */
 #define ARENA_WRITE_MAX 256u
 
+#ifdef ARENA_HOSTED
+/* Host-test seam: arena_syscall6 is provided by the test harness (host_main.c)
+ * and can be programmed with controlled return values. The real inline
+ * syscall stub is used only in guest builds. */
+extern int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
+                              uint64_t a2, uint64_t a3, uint64_t a4,
+                              uint64_t a5);
+#else
 static inline int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
                                      uint64_t a2, uint64_t a3, uint64_t a4,
                                      uint64_t a5) {
@@ -67,6 +75,7 @@ static inline int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
                      : "rcx", "r11", "memory");
     return (int64_t)rax;
 }
+#endif
 
 
 #endif /* ARENA_SYSABI_INTERNAL_H */

@@ -5,9 +5,185 @@ use crate::model::{
 };
 pub const BYTES: usize = 64;
 const MAGIC: &[u8; 4] = b"ADSK";
+/// ADSK wire version 1: the existing graphical client protocol (opcodes
+/// 1..=12). Preserved verbatim.
+pub const ADSK_V1: u8 = 1;
+/// ADSK wire version 2: identification (opcode 13). The Identify round-trip
+/// uses the same 64-byte frame size and canonical reserved-byte rules.
+pub const ADSK_V2: u8 = 2;
+/// Identify opcode (ADSK version 2 only).
+pub const ADSK_OP_IDENTIFY: u8 = 13;
+/// The client protocol version this implementation speaks for Identify.
+pub const CLIENT_PROTOCOL_VERSION: u16 = 1;
+/// Kind value for a SharedRegion surface in Identify replies.
+pub const IDENTIFY_SURFACE_KIND: u8 = 7;
+/// Minimum rights the Identify reply names for the session's surface.
+pub const IDENTIFY_SURFACE_RIGHTS: u64 = crate::abi::RIGHTS_READ | crate::abi::RIGHTS_WRITE;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Invalid,
+}
+
+/// A parsed ADSK version-2 Identify request. All bytes not listed are zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IdentifyRequest {
+    /// Client protocol version (`u16` LE at bytes 8–9).
+    pub client_protocol_version: u16,
+}
+
+/// A parsed ADSK version-2 Identify reply. All bytes not listed are zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IdentifyReply {
+    /// Session serial: descriptive, not authority.
+    pub session_serial: u64,
+    /// Named surface kind (must be 7 = SharedRegion).
+    pub surface_kind: u8,
+    /// Named surface rights bitmask (must include READ|WRITE).
+    pub surface_rights: u64,
+    /// Surface object ID (`u64` LE at bytes 18–25).
+    pub surface_object_id: u64,
+}
+
+/// Validate the reserved-byte and fixed-field rules for an Identify request
+/// frame. Returns `Ok(())` when the frame is well-formed.
+fn identify_request_valid(b: &[u8]) -> bool {
+    b.len() == BYTES
+        && &b[..4] == MAGIC
+        && b[4] == ADSK_V2
+        && b[5] == ADSK_OP_IDENTIFY
+        && b[6] == 0
+        && b[7] == 0
+        && b[10..64].iter().all(|&x| x == 0)
+}
+
+/// Validate the reserved-byte and fixed-field rules for an Identify reply
+/// frame. Returns `Ok(())` when the frame is well-formed.
+fn identify_reply_valid(b: &[u8]) -> bool {
+    b.len() == BYTES
+        && &b[..4] == MAGIC
+        && b[4] == ADSK_V2
+        && b[5] == ADSK_OP_IDENTIFY
+        && b[6] == 0
+        && b[7] == 0
+        && b[26..64].iter().all(|&x| x == 0)
+}
+
+/// Encode an Identify request into a 64-byte frame.
+pub fn identify_request_encode(version: u16) -> [u8; BYTES] {
+    let mut b = [0; BYTES];
+    b[..4].copy_from_slice(MAGIC);
+    b[4] = ADSK_V2;
+    b[5] = ADSK_OP_IDENTIFY;
+    b[8..10].copy_from_slice(&version.to_le_bytes());
+    b
+}
+
+/// Encode an Identify reply into a 64-byte frame.
+pub fn identify_reply_encode(
+    session_serial: u64,
+    surface_kind: u8,
+    surface_rights: u64,
+    surface_object_id: u64,
+) -> [u8; BYTES] {
+    let mut b = [0; BYTES];
+    b[..4].copy_from_slice(MAGIC);
+    b[4] = ADSK_V2;
+    b[5] = ADSK_OP_IDENTIFY;
+    b[8..16].copy_from_slice(&session_serial.to_le_bytes());
+    b[16] = surface_kind;
+    b[17] = surface_rights as u8;
+    b[18..26].copy_from_slice(&surface_object_id.to_le_bytes());
+    b
+}
+
+/// Decode an Identify reply from a 64-byte frame. Validates magic, version,
+/// opcode, and reserved bytes.
+pub fn identify_reply_decode(b: &[u8]) -> Result<IdentifyReply, Error> {
+    if !identify_reply_valid(b) {
+        return Err(Error::Invalid);
+    }
+    Ok(IdentifyReply {
+        session_serial: u64::from_le_bytes(b[8..16].try_into().map_err(|_| Error::Invalid)?),
+        surface_kind: b[16],
+        surface_rights: b[17] as u64,
+        surface_object_id: u64::from_le_bytes(b[18..26].try_into().map_err(|_| Error::Invalid)?),
+    })
+}
+
+/// Decode an Identify request from a 64-byte frame. Validates magic, version,
+/// opcode, and reserved bytes.
+pub fn identify_request_decode(b: &[u8]) -> Result<IdentifyRequest, Error> {
+    if !identify_request_valid(b) {
+        return Err(Error::Invalid);
+    }
+    Ok(IdentifyRequest {
+        client_protocol_version: u16::from_le_bytes(b[8..10].try_into().map_err(|_| Error::Invalid)?),
+    })
+}
+
+#[cfg(test)]
+mod identify_tests {
+    use super::*;
+
+    #[test]
+    fn identify_request_round_trip() {
+        let b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+        assert_eq!(identify_request_decode(&b).unwrap().client_protocol_version, CLIENT_PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn identify_reply_round_trip() {
+        let b = identify_reply_encode(0x1234_5678_9abc_def0, IDENTIFY_SURFACE_KIND, IDENTIFY_SURFACE_RIGHTS, 0x0fed_cba9_8765_4321);
+        let r = identify_reply_decode(&b).unwrap();
+        assert_eq!(r.session_serial, 0x1234_5678_9abc_def0);
+        assert_eq!(r.surface_kind, IDENTIFY_SURFACE_KIND);
+        assert_eq!(r.surface_rights, IDENTIFY_SURFACE_RIGHTS);
+        assert_eq!(r.surface_object_id, 0x0fed_cba9_8765_4321);
+    }
+
+    #[test]
+    fn identify_reserved_bytes_refused() {
+        let mut b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+        for i in [6, 7, 10, 63] {
+            let mut mutant = b;
+            mutant[i] = 1;
+            assert_eq!(identify_request_decode(&mutant), Err(Error::Invalid));
+        }
+        assert_eq!(identify_request_decode(&b[..63]), Err(Error::Invalid));
+    }
+
+    #[test]
+    fn identify_reply_reserved_bytes_refused() {
+        let mut b = identify_reply_encode(1, IDENTIFY_SURFACE_KIND, IDENTIFY_SURFACE_RIGHTS, 2);
+        for i in [6, 7, 26, 63] {
+            let mut mutant = b;
+            mutant[i] = 1;
+            assert_eq!(identify_reply_decode(&mutant), Err(Error::Invalid));
+        }
+        assert_eq!(identify_reply_decode(&b[..63]), Err(Error::Invalid));
+    }
+
+    #[test]
+    fn identify_wrong_magic_refused() {
+        let mut b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+        b[0] = b'X';
+        assert_eq!(identify_request_decode(&b), Err(Error::Invalid));
+    }
+
+    #[test]
+    fn identify_wrong_version_refused() {
+        let mut b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+        b[4] = ADSK_V1;
+        assert_eq!(identify_request_decode(&b), Err(Error::Invalid));
+    }
+
+    #[test]
+    fn identify_wrong_opcode_refused() {
+        let mut b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+        b[5] = 1;
+        assert_eq!(identify_request_decode(&b), Err(Error::Invalid));
+    }
 }
 /// Published regions of one Damage request (Phase 11.1). `n == 0` means
 /// the whole surface — byte-identical to the Phase-10 Damage frame, so

@@ -1,9 +1,107 @@
 /* Host-test glue: the one runtime service the host build must supply. */
 #include <sched.h>
 #include <stddef.h>
+#include <string.h>
 #include <unistd.h>
 
+#include "arena/abi.h"
 #include "arena/rt.h"
+#include "sysabi.h"
+
+/* ---- mocked syscall boundary (ARENA_HOSTED only) ------------------------
+
+   Tests program a sequence of mock entries. Each call to arena_syscall6
+   pops the next entry and:
+
+   * writes out[0..2] to the caller-provided out[] buffer (a4),
+   * copies a reply frame into the caller-provided frame buffer (a5) when
+     the entry carries one,
+   * returns rax as the kernel result.
+
+   When the programmed sequence is exhausted, the default response is used.
+   This drives c_gfx_app.c's production IPC code through controlled
+   kernel/service outcomes without executing real Linux syscalls. */
+
+#define ARENA_HOST_MOCK_MAX 64
+
+typedef struct {
+    int64_t rax;              /* kernel result (0 = OK, negative = status) */
+    uint64_t out0, out1, out2;/* service status word, result, landed cap   */
+    uint8_t frame[64];        /* reply frame copied into the caller's buf  */
+    int have_frame;           /* 1: overwrite the caller's frame buffer  */
+} host_mock_entry_t;
+
+static host_mock_entry_t host_mock_seq[ARENA_HOST_MOCK_MAX];
+static unsigned host_mock_len = 0;
+static unsigned host_mock_idx = 0;
+static host_mock_entry_t host_mock_default = {0, 0, 0, 0, {0}, 0};
+
+void arena_host_mock_push(int64_t rax, uint64_t out0, uint64_t out1,
+                          uint64_t out2) {
+    if (host_mock_len < ARENA_HOST_MOCK_MAX) {
+        host_mock_seq[host_mock_len++] =
+            (host_mock_entry_t){rax, out0, out1, out2, {0}, 0};
+    }
+}
+
+void arena_host_mock_push_frame(int64_t rax, uint64_t out0, uint64_t out1,
+                                uint64_t out2, const uint8_t frame[64]) {
+    if (host_mock_len < ARENA_HOST_MOCK_MAX) {
+        host_mock_entry_t e = {rax, out0, out1, out2, {0}, 1};
+        if (frame) memcpy(e.frame, frame, 64);
+        host_mock_seq[host_mock_len++] = e;
+    }
+}
+
+void arena_host_mock_reset(void) {
+    host_mock_len = 0;
+    host_mock_idx = 0;
+    host_mock_default = (host_mock_entry_t){0, 0, 0, 0, {0}, 0};
+}
+
+void arena_host_mock_default_set(int64_t rax, uint64_t out0, uint64_t out1,
+                                 uint64_t out2) {
+    host_mock_default = (host_mock_entry_t){rax, out0, out1, out2, {0}, 0};
+}
+
+static void host_mock_apply(const host_mock_entry_t *e, uint64_t nr,
+                            uint64_t a1, uint64_t a4, uint64_t a5) {
+    /* IPC_CALL (7):  out[] at a4, frame at a5                    */
+    /* CAP_DESCRIBE (29): out[] at a1                            */
+    if (nr == ARENA_SYS_CAP_DESCRIBE) {
+        uint64_t *out = (uint64_t *)(uintptr_t)a1;
+        if (out) {
+            out[0] = e->out0;
+            out[1] = e->out1;
+            out[2] = e->out2;
+        }
+    } else {
+        uint64_t *out = (uint64_t *)(uintptr_t)a4;
+        uint8_t *frame = (uint8_t *)(uintptr_t)a5;
+        if (out) {
+            out[0] = e->out0;
+            out[1] = e->out1;
+            out[2] = e->out2;
+        }
+        if (e->have_frame && frame) {
+            memcpy(frame, e->frame, 64);
+        }
+    }
+}
+
+int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
+                       uint64_t a2, uint64_t a3, uint64_t a4,
+                       uint64_t a5) {
+    (void)a0; (void)a2; (void)a3;
+    const host_mock_entry_t *e;
+    if (host_mock_idx < host_mock_len) {
+        e = &host_mock_seq[host_mock_idx++];
+    } else {
+        e = &host_mock_default;
+    }
+    host_mock_apply(e, nr, a1, a4, a5);
+    return e->rax;
+}
 
 /* Host test seam for the stdio write path (not part of the runtime API):
  *  - arena_host_write_limit > 0 caps each write to that many bytes (short writes);

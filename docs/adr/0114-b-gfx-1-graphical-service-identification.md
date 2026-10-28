@@ -1,194 +1,146 @@
 # ADR-0114 — Graphical service identification: discovery, then Identify (B-GFX-1)
 
-**Status: Proposed** (decision record; not accepted, not implemented)
-**Date:** 2026-10-28 (corrected after C source review; see the correction log below)
-**Milestone context:** V1 — Native Graphical Launch Foundation. The V1 client
-(`experiments/c-runtime/app/c_gfx_app.c`) implements discovery over the
-verified ARST record; the Identify round-trip is specified below but is **not
-implemented in V1** until M accepts this ADR. The app never sends opcode 13,
-never queries `SYS_ENDPOINT_BADGE` (serve-side only), and never guesses which
-endpoint or surface is its own.
+**Status: Accepted (architecture)** — M approved the architectural direction
+(Discover → Identify → validate already-held surface → proceed).
+**Implementation: pending** — not yet implemented in V1; no merge, no release,
+no V2/V3 or SDL3 integration authorized by this acceptance.
+**Date:** 2026-10-28 (architecture accepted 2026-10-29; implementation
+backlog follows)
+**Milestone context:** V1 — Native Graphical Launch Foundation.
 **Related decisions:** ADR-0074 (badged endpoints), ADR-0083 (native startup ABI v2),
 ADR-0090 (badge-authenticated Desktop sessions), ADR-0111 (ASTR v2), ADR-0112
 (native C runtime profile), C2.1-B-GFX-1-HANDOFF.md.
 
-## 1. Problem
+## 1. Accepted architectural decision
 
-Startup ABI v2 (ARST) grants a graphical application a set of capability
-descriptors in its one-page verified startup record. All graphical descriptors
-carry role **Other (5)**. The record contains, among others, a per-session
-BadgedEndpoint and one session SharedRegion (the client surface), but kind and
-rights alone cannot say *which* BadgedEndpoint is this application's Desktop
-session and *which* SharedRegion is its owned surface: two descriptors of the
-same kind and rights are indistinguishable by contract.
+**Discover → Identify → Validate → Proceed.** The V1 graphical client:
 
-The current code locates them by slot constants
-(`SERVICE_ENDPOINT=1`, `SURFACE=2`, `CLOCK=3` in
-`userspace/desktop/src/app_client.rs`; `V2_ENDPOINT_SLOT=1`/`V2_SURFACE_SLOT=2`
-in `userspace/desktop/src/bin/desktop.rs`). That is exactly what B-GFX-1
-forbids: never identify graphical capabilities by slot, descriptor order, or a
-guessed index.
+1. **Discovers** candidate capabilities by kind + rights over the verified
+   ARST v2 record — never by fixed slot, descriptor order, or guessed index.
+2. **Performs the Identify round-trip** over the discovered BadgedEndpoint
+   (ADSK version 2, opcode 13) before treating the candidate surface as its
+   graphical presentation resource.
+3. **Validates** the Identify reply against a capability it already holds:
+   surface object ID, kind, and required rights must match a `SharedRegion`
+   the client already holds (`SYS_CAP_DESCRIBE`: kind 7, object ID equal to
+   the reply's object ID, rights including `READ|WRITE`).
+4. **Only then** proceeds with the graphical demonstration (Create, Damage,
+   Poll, …).
 
-Kind/rights counting (`arena_startup_count_kind`) remains an existence check
-only; it does not establish purpose.
+Discovery-only identification is **diagnostic scaffolding**. It locates
+candidates but does not resolve B-GFX-1, does not implement an accepted
+identification contract, and does not satisfy V1's positive acceptance case.
+Identify is mandatory before graphical use; it is not optional and not outside
+V1. It remains unimplemented until the Desktop server and V1 client are
+updated under this accepted contract.
 
-## 2. Options considered
+## 2. Approved principles
 
-| # | Option | ABI/wire change | Identifies at launch? | Author | Verdict |
-|---|---|---|---|---|---|
-| 1 | **Discovery by kind and rights over the verified ARST record** (V1 prerequisite) | none | existence + uniqueness only | Arena 1 Desktop + clients | **Required prerequisite** |
-| 2 | Protocol-level identification over the granted BadgedEndpoint (ADSK version 2, opcode `Identify = 13`, versioned) | none (ADSK-v1 preserved; new Identify frame) | after one bounded round trip | Arena 1 Desktop + clients | **Specified here, not implemented in V1** |
-| 3 | Signed-manifest launch layout (APB1 declares expected descriptor layout; launcher checks) | none in ARST; new manifest field | yes, if launcher checks | packaging + launcher | Rejected for V1: positional trust if any launcher skips the check; does not replace option 1 anyway |
-| 4 | Future ARST extension (per-descriptor service tag or new role) | yes (ARST version, ADR, Rust/Python/C coordination) | yes | architecture + all runtimes | Deferred: needs an ADR and tooling coordination; largest change |
+- **Trusted launch profile:** The Desktop itself (per ADR-0090) mints one
+  BadgedEndpoint for this session and grants exactly one writable session
+  SharedRegion. The launcher establishes which endpoint candidate the
+  application may contact: exactly one endpoint candidate with rights
+  `WRITE|COPY|DESTROY` must exist in the verified ARST record. Missing or
+  ambiguous candidates are refused — the client never probes arbitrary
+  endpoints.
+- **Discovery never proves service purpose:** Kind/rights uniqueness over the
+  verified record establishes existence and uniqueness of candidates only.
+  It does not prove that a candidate is the Desktop session for this
+  application, nor does it generalize to arbitrary startup environments.
+- **Identify is mandatory:** The client must not render into or publish the
+  candidate surface until Identify succeeds and the reply validates against a
+  held capability. On Identify failure, the client fails closed; it does not
+  fall back to discovery-only operation.
+- **Desktop authenticates via kernel badge:** The kernel delivers the badge
+  in receive metadata (`SYS_IPC_RECV_BADGED`, word 3). `select_live_badge`
+  matches it to exactly one live session whose process is live; unknown,
+  stale, duplicate, or dead-owner badges fail closed.
+- **Desktop names only that session's surface:** The reply names the session's
+  SharedRegion object ID, kind, and rights.
+- **Client validates against held authority:** The full returned surface
+  object ID, kind, and specified rights are matched against an already-held
+  capability. A numeric object ID is descriptive and does not create
+  authority.
+- **No client hidden-badge query:** The client never calls `SYS_ENDPOINT_BADGE`
+  (serve-side only, ADR-0074 amendment).
+- **No server READ grant, no new syscall, no weakened kernel check.**
+- **No capability transfer for Identify:** `CAP_NONE` on both request and
+  reply; unexpected transferred capabilities are rejected and disposed through
+  the existing safe disposal paths.
+- **ADSK-v1 compatibility:** ADSK-v1 (wire version byte `1`, opcodes 1..=12,
+  64-byte frames) is preserved verbatim. Identification uses ADSK version 2.
 
-Option 1 is the B-GFX-1 near-term requirement: it needs no kernel or ARST
-change, no packaging authorization, and no privilege path. It establishes
-exactly one endpoint candidate and exactly one qualifying surface candidate.
-It is **diagnostic scaffolding**: it locates candidates but does not, by
-itself, resolve B-GFX-1 or satisfy V1's positive acceptance case. Resolution
-requires the Identify exchange in section 4.2.
+## 3. Exact supported launcher profile
 
-Option 2 is the V1 contract mechanism. It is specified below but **not
-implemented** while ADR-0114 remains Proposed. M's decision on the corrected
-contract gates implementation.
+The trusted launcher (Desktop) grants, per session:
 
-## 3. Decision
+| Capability | Kind | Role | Rights | Count |
+|---|---|---|---|---|
+| BadgedEndpoint | 12 | Other (5) | exactly `WRITE|COPY|DESTROY` (14) | exactly 1 |
+| SharedRegion (surface) | 7 | Other (5) | includes `READ|WRITE|COPY` (7) | exactly 1 |
 
-**Identify the Desktop endpoint and the application-owned surface by the
-V1 sequence:**
+Both are role `Other` descriptors in the verified ARST v2 record. The
+runtime locates them by kind and rights — never by slot. The endpoint slot is
+used only as the operand to `SYS_IPC_CALL`, never as its identity.
 
-1. **Discover** candidate capabilities without slot/order guesses (kind + rights
-   over the verified ARST v2 record; uniqueness required; ambiguity refused).
-2. **Perform the approved Identify exchange** over the discovered BadgedEndpoint.
-3. **Validate** the Identify reply against the application's actual held
-   capability authority (surface object ID, kind, rights must match a
-   `SharedRegion` the client already holds).
-4. **Only then** proceed with the graphical demonstration.
+## 4. Identify wire protocol (ADSK version 2, opcode 13)
 
-Identify may remain **unimplemented until M approves the contract**. That does
-not make it optional or outside V1. Discovery-only is diagnostic scaffolding;
-it must not be described as resolving B-GFX-1, implementing an accepted
-identification contract, or satisfying V1's positive acceptance case.
+ADSK-v1 is preserved verbatim. Identification uses **ADSK version 2**,
+same 64-byte frame size, canonical reserved-byte rules.
 
-Authority comes from possession, not from names or numbers: the trusted
-launcher (Desktop itself, per ADR-0090) mints one BadgedEndpoint for this
-session and grants the application exactly one writable session SharedRegion.
-Both are already in the ARST record; the runtime locates them by kind and
-rights over the *verified* record — never by slot.
-
-The cap's slot is used only as the operand to `SYS_IPC_CALL`, never as its
-identity.
-
-## 4. Mechanism
-
-### 4.1 Client-side discovery (V1 prerequisite, implemented)
-
-After `arena_startup_gate` verifies the ARST record and the live cap table,
-the client scans the verified descriptors (descriptor `i` corresponds to child
-slot `i+1` for `i` in `0..cap_count`, but slot numbers play no role in
-identification):
-
-- **Desktop endpoint candidates:** descriptors with kind `BadgedEndpoint (12)`,
-  role `Other (5)` as recorded, rights exactly `WRITE|COPY|DESTROY`.
-- **Surface candidates:** descriptors with kind `SharedRegion (7)`, role
-  `Other`, rights including `READ|WRITE|COPY`.
-
-Refusals (fail closed, before any graphical call):
-
-- zero endpoint candidates → `ERR_NO_ENDPOINT` (the app has no Desktop session).
-- two or more endpoint candidates → `ERR_AMBIGUOUS_ENDPOINT`; nothing is guessed.
-- zero surface candidates → `ERR_NO_SURFACE`.
-- two or more surface candidates → `ERR_AMBIGUOUS_SURFACE`.
-- rights that do not include `READ|WRITE|COPY` → not a surface candidate;
-  if any surface candidate exists but none qualifies → `ERR_WRONG_RIGHTS`.
-
-Exactly one endpoint and exactly one qualifying surface proceed. The client
-then `SYS_SHARED_MAP(surface_slot, 1)` (writable flag 1; any other value is
-rejected by the kernel), checks the page count with `SYS_SHARED_PAGES` (V1
-geometry needs 301 pages: one offset page at 4096 plus 300 u32-pixel pages for
-640×480), and renders u32 pixels at offset 4096. No `SYS_ENDPOINT_BADGE`
-client query is ever made: the badge is the server's business
-(ADR-0074 amendment, Phase 11.5).
-
-### 4.2 Identify round-trip (protocol extension, NOT implemented in V1)
-
-ADSK-v1 (wire version byte `1`, opcodes 1..=12, 64-byte frames,
-`userspace/desktop/src/wire.rs`) is preserved verbatim. Identification uses
-**ADSK version 2**, a new opcode `Identify = 13`, same 64-byte frame size,
-canonical reserved-byte rules.
-
-**Trusted launcher profile:** The launcher (Desktop itself, per ADR-0090)
-mints one BadgedEndpoint for this session and grants the application exactly
-one writable session SharedRegion. The launcher establishes which endpoint
-candidate the application may contact: exactly one endpoint candidate with
-rights `WRITE|COPY|DESTROY` must exist in the verified ARST record. Missing or
-ambiguous candidates are refused — the client never probes arbitrary
-endpoints.
-
-Client request frame (version 2):
+**Client request frame (version 2):**
 
 - `b[0..4]` = `"ADSK"`, `b[4]` = 2, `b[5]` = 13 (Identify)
 - `b[6..8]` = reserved zero
-- `b[8..16]` = client protocol version (`u16` LE at 8..10, rest zero)
-- `b[16..64]` = reserved zero
+- `b[8..10]` = client protocol version (`u16` LE; supported value **1**)
+- `b[10..64]` = reserved zero
 
-Service reply frame (version 2), written back into the same inline buffer:
+**Service reply frame (version 2), written back into the same inline buffer:**
 
 - `b[0..4]` = `"ADSK"`, `b[4]` = 2, `b[5]` = 13
-- `b[6]` = status: `0` = OK; nonzero typed refusal
-- `b[7]` = reserved zero
-- `b[8..16]` = echoed session identity: the endpoint badge's generation-scoped
-  session serial (`u64` LE). This value is descriptive: it names the session
-  the Desktop authenticated. It is **not** a secret the client must compare
-  against, and echoing it is not independent authentication of Desktop.
+- `b[6..8]` = reserved zero
+- `b[8..16]` = echoed session identity: the session's generation-scoped
+  serial (`u64` LE). Descriptive only — not a secret the client must already
+  know, and not independent authentication of Desktop.
 - `b[16]` = named surface kind (must be 7 = SharedRegion)
 - `b[17]` = named surface rights bitmask (must include `READ|WRITE`; COPY is
-  required to land the surface cap but the reply field reports the minimum
-  the session needs)
-- `b[18..26]` = surface object id (`u64` LE): the object ID of the session's
-  SharedRegion. A numeric object ID is descriptive and does not create
-  authority.
+  required to land the surface cap but the reply field reports the session's
+  surface rights)
+- `b[18..26]` = surface object ID (`u64` LE): the object ID of the session's
+  SharedRegion. Descriptive, not authority.
 - `b[26..64]` = reserved zero
 
-**Status policy:** `0` = OK; `STATUS_BAD_ARG` if the request frame is
-malformed (bad magic, bad version, nonzero reserved); `STATUS_SERVICE_GONE`
-if the Desktop process is destroyed while the call is queued or in hand
-(`"unknown"`, not `"did not happen"`); `STATUS_BUSY` only as a kernel queue
-refusal (bounded retries, section 4.3).
+**Status encoding:** Typed service errors are carried in the existing IPC
+reply status word (`SYS_IPC_CALL` out[0]), not in a frame byte. Bytes 6 and 7
+are reserved zero in both request and reply. A successful reply requires both
+kernel success (`SYS_IPC_CALL` returns 0) and service success (out[0] == 0).
+The client decodes the payload only after both succeed.
+
+**Status policy:** `0` = OK; `STATUS_BAD_ARG` for a malformed request frame
+(bad magic, bad version, nonzero reserved, unsupported opcode);
+`STATUS_SERVICE_GONE` if the Desktop process is destroyed while the call is
+queued or in hand ("unknown", not "did not happen"); `STATUS_BUSY` only as a
+kernel queue refusal (bounded retries, section 6).
 
 **Rights policy:** The client matches the full returned surface object ID,
 kind, and specified rights against an already-held capability
-(`SYS_CAP_DESCRIBE`: kind 7, object id equal to `b[18..26]`, rights including
-`READ|WRITE`). Mismatch → typed refusal, no state change. The client does
-not read its hidden badge; the kernel delivers the badge to the server on
-receive metadata (`SYS_IPC_RECV_BADGED`, word 3), and `select_live_badge`
-matches it to exactly one live session (unknown, stale, duplicate, or
-dead-owner badges fail closed).
+(`SYS_CAP_DESCRIBE`: kind 7, object ID equal to `b[18..26]`, rights including
+`READ|WRITE`). Mismatch → typed refusal, no state change.
 
-**Reserved-byte policy:** `b[6..8]`, `b[7]`, and `b[26..64]` must be zero in
-both directions; any nonzero reserved byte makes the frame malformed and the
-call is refused with `STATUS_BAD_ARG`.
+**Reserved-byte policy:** `b[6..8]` and `b[26..64]` must be zero in both
+directions; any nonzero reserved byte makes the frame malformed and the call
+is refused with `STATUS_BAD_ARG`.
 
-**Capability-transfer policy:** No optional capability transfer in V1: the
-reply carries `CAP_NONE`; a landed cap on any path is destroyed per existing
-disposal rules. The client never receives a new cap from Identify; it only
-validates that the Desktop named a surface it already holds.
+**Capability-transfer policy:** `CAP_NONE` on both request and reply. A
+landed capability on any path is destroyed per existing disposal rules. The
+client never receives a new cap from Identify.
 
-Desktop service handling (serve side): the kernel delivers the call with the
-endpoint's badge in receive metadata; `select_live_badge` matches the badge
-to exactly one live session whose process is live and answers only for that
-session. The named surface in the reply is the session's SharedRegion object
-ID.
-
-### 4.3 Failure model
+## 5. Failure model
 
 - `SYS_IPC_CALL` is blocking and has **no client-side deadline**; a client
   distinguishes queue refusal (`STATUS_BUSY`), a normal typed reply, server
   death (`STATUS_SERVICE_GONE`), and a live-but-unresponsive service.
   Bounds come from external supervision, never from a client-side deadline.
-  External supervision (the test harness or launcher watchdog) bounds the
-  total Identify round-trip; it does **not** cancel IPC through an
-  unavailable API — there is no such cancel operation.
 - Only kernel `STATUS_BUSY` retries are bounded (`IPC_BUSY_RETRIES = 512`
   attempts with `1000us << min(attempt, 5)` backoff); a service status is
   never retried — that request was already processed.
@@ -197,52 +149,26 @@ ID.
   handle, reserved bytes); unexpected transferred caps disposed; the original
   failure is preserved when cleanup fails.
 
-## 5. Correction log (2026-10-28, M's correction pass after C source review)
+## 6. Implementation status
 
-1. Restored the agreed V1 contract sequence: Discover → Identify → Validate →
-   Proceed. Identify is specified but unimplemented until M approves; it is
-   not optional and not outside V1.
-2. Discovery-only identification is diagnostic scaffolding: it locates
-   candidates but does not resolve B-GFX-1 or satisfy V1's positive
-   acceptance case. It must not be described as implementing an accepted
-   identification contract.
-3. Audit actual API semantics from source, not syscall numbers:
-   `SYS_SHARED_MAP(slot, writable_flag 0|1)` — passing 225 (a page count) as
-   the writable flag is rejected; `SYS_CAP_DESCRIBE(slot)` returns
-   `[kind, object_id, rights]` (object ids are descriptive, never handles);
-   `SYS_SHARED_INFO(slot)` returns `[object_id, pages]`; `SYS_ENDPOINT_BADGE`
-   is serve-side only (the badge of a landed badged cap, for the endpoint's
-   own server).
-4. Surface geometry: u32 pixels at offset 4096; 301 pages for 640×480;
-   no RGB888 from offset zero.
-5. Removed the `SYS_ENDPOINT_BADGE(ep, ep)` client query; trust via kernel
-   badge + object-ID cross-check on the serve side.
-6. Fail closed: result checks everywhere, no zeroed-output-as-success,
-   validated event frames, disposed unexpected transferred caps, original
-   failure preserved when cleanup fails.
-7. `SYS_IPC_CALL` is not inherently bounded — no client-side deadline;
-   external supervision for bounds.
-8. Wire spec: `CAP_DESCRIBE` returns kind/object_id/rights, not generation;
-   surface-field bounds fixed; no optional cap transfer in V1; rights must
-   include `READ|WRITE|COPY`, not exact; protocol extension preserves ADSK-v1;
-   obsolete "Python startup max 4" removed (Phase 16 fixed it); launcher slot
-   placement is not client identity.
-9. Test design: host controls for syscall failure, malformed replies, wrong
-   identities, unexpected caps, layout bounds, and cleanup failures are
-   runnable; guest cases stay blocked until this ADR is accepted and a
-   bootable graphics-capable mainline ESP can be built in this sandbox.
-10. The Identify round-trip (section 4.2) is specified but not implemented,
-    and ADR-0114 is Proposed, not accepted. The precise decision M is being
-    asked to make: **accept the corrected Identify contract in section 4.2
-    (exact request/reply layout, status policy, rights policy, reserved-byte
-    policy, capability-transfer policy, blocking-call limitation) so that the
-    Desktop server and V1 client can implement opcode 13.** Until M accepts,
-    V1 graphical clients identify by discovery (section 4.1) only.
+| Component | Status |
+|---|---|
+| ADR-0114 architecture | Accepted (M, 2026-10-29) |
+| Desktop Identify handler | Not implemented |
+| Canonical client bindings | Not implemented |
+| c_gfx_app Identify exchange | Not implemented |
+| V1 guest proof | Not executed |
 
-## 6. Known limitation
+This acceptance does **not** implement the contract, qualify V1, or authorize
+a merge or release. Implementation follows under separate review.
 
-The Identify round-trip (section 4.2) is specified but not implemented, and
-ADR-0114 is Proposed, not accepted. No kernel change, no ARST change, no
-server opcode-13 handling exists yet. Until M accepts this ADR, the V1
-graphical client's discovery-only path is diagnostic scaffolding and cannot be
-claimed as resolving B-GFX-1 or satisfying V1 acceptance.
+## 7. Correction log
+
+1. 2026-10-28: M's correction pass after C source review — restored the
+   agreed V1 contract sequence (Discover → Identify → Validate → Proceed);
+   discovery-only is diagnostic scaffolding, not the final contract.
+2. 2026-10-28: Status-encoding clarification — bytes 6 and 7 reserved zero;
+   typed service errors use the existing IPC reply status word, not a frame
+   byte; CAP_NONE on both request and reply; no optional capability transfer.
+3. 2026-10-29: M accepts the architectural direction; ADR-0114 status changes
+   from Proposed to Accepted (architecture). Implementation remains pending.

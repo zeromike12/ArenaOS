@@ -25,6 +25,16 @@
 #include "arena/string.h"
 #include "sysabi.h"
 
+/* In host test builds (ARENA_HOSTED_TEST), TEST_EXPORT is empty so the
+   static functions below can be called directly by test_runtime.c. In
+   guest builds it is plain static, preserving the production contract. */
+
+#ifdef ARENA_HOSTED_TEST
+#define TEST_EXPORT
+#else
+#define TEST_EXPORT static
+#endif
+
 /* ---------------------------------------------------------------- wire ---
 
    ADSK wire layout (userspace/desktop/src/wire.rs), preserved byte-for-byte
@@ -127,14 +137,18 @@ typedef struct {
     int mapped;
 } app_t;
 
+#ifdef ARENA_HOSTED_TEST
+app_t a;
+#else
 static app_t a;
+#endif
 
 /* ------------------------------------------------------- syscall helpers ---
 
    arena_syscall6 passes six arguments; the kernel ignores unused trailing
    registers, so two-argument calls pass zeros for the rest. */
 
-static int describe_slot(uint64_t slot, uint64_t out[3]) {
+TEST_EXPORT int describe_slot(uint64_t slot, uint64_t out[3]) {
     int64_t rc = arena_syscall6(ARENA_SYS_CAP_DESCRIBE, slot,
                                 (uint64_t)(uintptr_t)out, 0, 0, 0, 0);
     return rc < 0 ? -1 : 0;
@@ -145,7 +159,7 @@ static int describe_slot(uint64_t slot, uint64_t out[3]) {
    Locate the Desktop endpoint and the owned surface by kind + rights over
    the verified record. Slots are recorded only as IPC operands. */
 
-static int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf) {
+TEST_EXPORT int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf) {
     uint64_t ep_exact = 0, ep_any = 0, ep_slot = 0;
     uint64_t surf_exact = 0, surf_any = 0, surf_slot = 0;
 
@@ -191,7 +205,7 @@ static int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf) {
    was never accepted); a server status is never retried. An unexpected
    landed capability is destroyed and the call refused. */
 
-static int exchange(uint8_t opcode, uint64_t handle, uint16_t w, uint16_t h,
+TEST_EXPORT int exchange(uint8_t opcode, uint64_t handle, uint16_t w, uint16_t h,
                     uint8_t frame[ADSK_BYTES], uint64_t *result_out) {
     uint64_t out[3];
 
@@ -253,7 +267,7 @@ typedef struct {
     uint64_t surface_object_id;
 } identify_t;
 
-static int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
+TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
     uint64_t out[3];
 
     /* Build the Identify request: ADSK v2, opcode 13, client protocol
@@ -334,7 +348,7 @@ static int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
     return -1;
 }
 
-static uint64_t create_window(uint16_t w, uint16_t h) {
+TEST_EXPORT uint64_t create_window(uint16_t w, uint16_t h) {
     uint64_t handle = 0;
     uint8_t frame[ADSK_BYTES];
     if (exchange(ADSK_OP_CREATE, 0, w, h, frame, &handle) != 0 || handle == 0) {
@@ -343,7 +357,7 @@ static uint64_t create_window(uint16_t w, uint16_t h) {
     return handle;
 }
 
-static int damage(uint64_t handle) {
+TEST_EXPORT int damage(uint64_t handle) {
     uint64_t result = 0;
     uint8_t frame[ADSK_BYTES];
     return exchange(ADSK_OP_DAMAGE, handle, 0, 0, frame, &result) == 0;
@@ -351,7 +365,7 @@ static int damage(uint64_t handle) {
 
 /* Returns 1 when an event frame was decoded, 0 when none, -1 on failure. */
 
-static int poll_event(uint8_t reply[ADSK_BYTES]) {
+TEST_EXPORT int poll_event(uint8_t reply[ADSK_BYTES]) {
     uint64_t result = 0;
     if (exchange(ADSK_OP_POLL, a.handle, 0, 0, reply, &result) != 0) {
         return -1;
@@ -382,7 +396,7 @@ static int poll_event(uint8_t reply[ADSK_BYTES]) {
 
 /* ------------------------------------------------------------- render ---- */
 
-static void render_frame(uint32_t *pixels, uint32_t frame, int flash) {
+TEST_EXPORT void render_frame(uint32_t *pixels, uint32_t frame, int flash) {
     for (uint32_t y = 0; y < GFX_H; y++) {
         for (uint32_t x = 0; x < GFX_W; x++) {
             uint32_t cell = ((x >> 4) + (y >> 4) + frame) & 1u;
@@ -403,7 +417,7 @@ static void render_frame(uint32_t *pixels, uint32_t frame, int flash) {
    Best effort over the granted stdout stream when one was granted; silent
    otherwise. No serial/debug fallback ever. */
 
-static void log_line(const char *msg) {
+TEST_EXPORT void log_line(const char *msg) {
     char buf[96];
     size_t n = arena_strnlen(msg, sizeof(buf) - 1u);
     arena_memcpy(buf, msg, n);
@@ -413,6 +427,7 @@ static void log_line(const char *msg) {
 
 /* ---------------------------------------------------------------- main --- */
 
+#ifndef ARENA_HOSTED_TEST
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -588,3 +603,4 @@ int main(int argc, char **argv) {
     arena_exit(exit_code);
     return 0;
 }
+#endif /* ARENA_HOSTED_TEST */
