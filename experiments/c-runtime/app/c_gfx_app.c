@@ -1,20 +1,19 @@
 /*
- * c_gfx_app.c — V1 native graphical client (discovery-based identification).
+ * c_gfx_app.c — V1 native graphical client (discover → identify → validate → proceed).
  *
  * Integer-only guest application. It locates its Desktop endpoint and its
  * owned surface by kind and rights over the verified ARST v2 record
- * (never by slot), maps the shared surface, renders a deterministic
+ * (never by slot), performs the ADR-0114 Identify round-trip (ADSK version
+ * 2, opcode 13) over the endpoint, validates the reply against the surface
+ * it already holds, maps the shared surface, renders a deterministic
  * integer pattern into it, acknowledges injected keyboard/mouse input
  * visibly, animates for a bounded number of frames, then exits cleanly.
  *
- * Identification is the V1 contract available today: exactly one
- * BadgedEndpoint (WRITE|COPY|DESTROY) and exactly one SharedRegion whose
- * rights include READ|WRITE|COPY in the verified record; uniqueness is
- * required and ambiguity is refused. The ADR-0114 Identify round-trip
- * (ADSK version 2, opcode 13) is described in the ADR but is NOT
- * implemented in V1 while ADR-0114 remains Proposed — the app never sends
- * it, never queries SYS_ENDPOINT_BADGE (serve-side only), and never
- * guesses which endpoint or surface is its own.
+ * Identification is mandatory: the client never renders into or publishes
+ * the candidate surface until Identify succeeds and the reply validates
+ * against a held capability. On Identify failure, the client fails closed
+ * with a distinct exit code — it never falls back to discovery-only
+ * operation.
  *
  * Built with experiments/c-runtime under GCC and Clang
  * (run.py build --cc gcc --cc clang) and audited with run.py audit
@@ -33,8 +32,12 @@
    b[0..3] = "ADSK", b[4] = version (1), b[5] = opcode, b[6..7] reserved,
    b[8..15] = handle u64 LE, opcode-specific fields at b[16..63]. */
 
-/* ADSK-v1 opcodes the client emits. Identify (ADSK v2, opcode 13) is not
-   part of V1 while ADR-0114 remains Proposed. */
+/* ADSK wire versions and opcodes. ADSK-v1 (version byte 1) is preserved
+   verbatim for window operations. ADSK-v2 (version byte 2) is used for
+   Identify (opcode 13) per ADR-0114. */
+#define ADSK_V1 1u
+#define ADSK_V2 2u
+#define ADSK_OP_IDENTIFY 13u
 #define ADSK_OP_CREATE 1u
 #define ADSK_OP_DAMAGE 2u
 #define ADSK_OP_POLL 3u
@@ -44,6 +47,17 @@
 #define ADSK_OFF_VERSION 4u
 #define ADSK_OFF_OPCODE 5u
 #define ADSK_OFF_HANDLE 8u
+
+/* Identify (ADSK v2) frame layout:
+   b[0..3] = "ADSK", b[4] = 2, b[5] = 13, b[6..8] = reserved zero,
+   b[8..10] = client protocol version (u16 LE = 1), b[10..64] = reserved zero.
+   Reply: b[8..16] = session serial (u64 LE), b[16] = surface kind (7),
+   b[17] = surface rights, b[18..26] = surface object ID (u64 LE),
+   b[26..64] = reserved zero. */
+#define IDENTIFY_CLIENT_PROTOCOL_VERSION 1u
+#define IDENTIFY_SURFACE_KIND 7u            /* SharedRegion */
+#define IDENTIFY_SURFACE_RIGHTS (ARENA_RIGHT_READ | ARENA_RIGHT_WRITE) /* reply field */
+#define IDENTIFY_EXIT_FAILED 14u            /* Identify round-trip failed */
 
 #define ADSK_EVENT_FOCUS 4u
 #define ADSK_EVENT_KEY 1u
@@ -89,6 +103,7 @@ enum gfx_exit {
     GFX_POLL_FAILED = 11,
     GFX_DESTROY_FAILED = 12,
     GFX_UNMAP_FAILED = 13,
+    GFX_IDENTIFY_FAILED = 14,
 };
 
 /* Capability kinds/rights as granted by the ADR-0090 desktop profile.
@@ -219,6 +234,101 @@ static int exchange(uint8_t opcode, uint64_t handle, uint16_t w, uint16_t h,
         if (result_out != NULL) {
             *result_out = out[1];
         }
+        return 0;
+    }
+    return -1;
+}
+
+/* ------------------------------------------------------------ identify ---
+
+   Perform the ADR-0114 Identify round-trip (ADSK version 2, opcode 13)
+   over the endpoint. Sends CAP_NONE (no capability transfer). On success,
+   fills `ident` with the Desktop's named surface identity. On any failure
+   (kernel error, service error, malformed reply, wrong kind/rights/object
+   ID mismatch against the held surface) returns -1 and the caller must
+   fail closed — never fall back to discovery-only operation. */
+
+typedef struct {
+    uint64_t session_serial;
+    uint64_t surface_object_id;
+} identify_t;
+
+static int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
+    uint64_t out[3];
+
+    /* Build the Identify request: ADSK v2, opcode 13, client protocol
+       version 1, all other bytes zero. */
+    arena_memset(frame, 0, ADSK_BYTES);
+    arena_memcpy(frame, "ADSK", 4);
+    frame[ADSK_OFF_VERSION] = ADSK_V2;
+    frame[ADSK_OFF_OPCODE] = ADSK_OP_IDENTIFY;
+    frame[8] = (uint8_t)(IDENTIFY_CLIENT_PROTOCOL_VERSION & 0xffu);
+    frame[9] = (uint8_t)((IDENTIFY_CLIENT_PROTOCOL_VERSION >> 8) & 0xffu);
+
+    out[0] = 0; out[1] = 0; out[2] = GFX_CAP_NONE;
+    for (uint32_t attempt = 0; attempt <= IDENTIFY_BUSY_RETRIES; attempt++) {
+        int64_t rc = arena_syscall6(ARENA_SYS_IPC_CALL, a.endpoint_slot, 0, 0,
+                                    a.surface_slot,
+                                    (uint64_t)(uintptr_t)out,
+                                    (uint64_t)(uintptr_t)frame);
+
+        /* An unexpected landed capability is never accepted. */
+        if (out[2] != GFX_CAP_NONE) {
+            (void)arena_syscall6(ARENA_SYS_CAP_DESTROY, out[2], 0, 0, 0, 0, 0);
+            return -1;
+        }
+        /* Kernel result must be success before trusting the payload. */
+        if (rc != 0) {
+            return -1;
+        }
+        /* Service status word out[0] carries the typed service error. */
+        if (out[0] != 0) {
+            return -1;
+        }
+        /* Validate the reply frame: magic, version 2, opcode 13, reserved
+           bytes zero, and echo of our request bytes where applicable. */
+        if (arena_memcmp(frame, "ADSK", 4) != 0 ||
+            frame[ADSK_OFF_VERSION] != ADSK_V2 ||
+            frame[ADSK_OFF_OPCODE] != ADSK_OP_IDENTIFY ||
+            frame[6] != 0 || frame[7] != 0) {
+            return -1;
+        }
+        for (uint32_t i = 26u; i < ADSK_BYTES; i++) {
+            if (frame[i] != 0) return -1;
+        }
+
+        ident->session_serial = 0;
+        for (uint32_t i = 0; i < 8u; i++) {
+            ident->session_serial |=
+                (uint64_t)frame[8 + i] << (8 * i);
+        }
+        ident->surface_object_id = 0;
+        for (uint32_t i = 0; i < 8u; i++) {
+            ident->surface_object_id |=
+                (uint64_t)frame[18 + i] << (8 * i);
+        }
+        uint8_t surface_kind = frame[16];
+        uint8_t surface_rights = frame[17];
+
+        /* The reply must name a SharedRegion with READ|WRITE rights. */
+        if (surface_kind != IDENTIFY_SURFACE_KIND ||
+            (surface_rights & (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE)) !=
+                (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE)) {
+            return -1;
+        }
+
+        /* Validate the named surface against a capability the client
+           already holds: SYS_CAP_DESCRIBE(surface_slot) must return
+           [kind 7, object_id == ident->surface_object_id, rights including
+           READ|WRITE|COPY]. */
+        uint64_t desc[3];
+        if (describe_slot(a.surface_slot, desc) != 0 ||
+            desc[0] != ARENA_CAP_KIND_SHARED_REGION ||
+            desc[1] != ident->surface_object_id ||
+            (desc[2] & GFX_SURFACE_RIGHTS) != GFX_SURFACE_RIGHTS) {
+            return -1;
+        }
+
         return 0;
     }
     return -1;
@@ -356,9 +466,22 @@ int main(int argc, char **argv) {
     a.mapped = 1;
     uint32_t *pixels = (uint32_t *)(a.framebuffer + PIXEL_OFFSET);
 
-    /* No SYS_ENDPOINT_BADGE query (serve-side only) and no Identify
-       round-trip while ADR-0114 remains Proposed. The surface above is this
-       session's owned surface by the verified-record discovery contract. */
+    /* Perform the ADR-0114 Identify round-trip before any graphical
+       request. Identify is mandatory — failure means fail closed, never
+       fall back to discovery-only operation. */
+
+    uint8_t id_frame[ADSK_BYTES];
+    identify_t ident;
+    if (identify_exchange(id_frame, &ident) != 0) {
+        log_line("[gfx] identify failed");
+        if (a.mapped) {
+            (void)arena_syscall6(ARENA_SYS_SHARED_UNMAP,
+                                 (uint64_t)(uintptr_t)a.framebuffer, 0, 0, 0, 0, 0);
+        }
+        arena_exit(GFX_IDENTIFY_FAILED);
+    }
+    (void)ident; /* session_serial and surface_object_id validated against
+                    the held surface inside identify_exchange */
 
     uint64_t handle = create_window(GFX_W, GFX_H);
     if (handle == 0) {
