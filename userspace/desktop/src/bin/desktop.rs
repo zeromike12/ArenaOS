@@ -5705,6 +5705,19 @@ extern "C" fn main() -> ! {
     }
     render(ram as u64, w, h, scanout);
     log(b"[desktop] real desktop frame presented; gallery launcher available\n");
+    // Auto-launch the first installed non-builtin graphical application
+    // (c_gfx_app installed via APB1 into /System/Applications/).
+    if unsafe { INSTALLED_APP_COUNT } > 6 {
+        if let Some(entry) = unsafe { (&*(&raw const INSTALLED_APPS))[6] } {
+            let _ = launch_installed_application(
+                &entry.application_id,
+                entry.flags,
+                CAP_NONE,
+                false,
+            );
+            log(b"[desktop] auto-launched installed graphical application\n");
+        }
+    }
     snapshot(true);
     let mut pending_render = false;
     loop {
@@ -6264,17 +6277,22 @@ extern "C" fn main() -> ! {
         ) {
             let session = unsafe { SESSIONS[index] };
             // Only graphical sessions with a mapped surface may Identify.
-            // session.id is the SharedRegion object ID (set at session
-            // creation from SYS_SHARED_CREATE out[1]).
-            if session.kind > 5 || session.va == 0 {
+            // The surface object ID in the reply is taken from the landed
+            // capability the client transferred, so the client can validate
+            // it against the surface cap it already holds.
+            if session.kind > 6 || session.va == 0 {
                 status = STATUS_BAD_ARG as u64;
             } else {
                 let surface_rights = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY;
+                let surface_object_id = describe(landed)
+                    .filter(|d| d[0] == IDENTIFY_SURFACE_KIND as u64)
+                    .map(|d| d[1])
+                    .unwrap_or(session.id);
                 bytes = wire::identify_reply_encode(
                     session.id,
                     IDENTIFY_SURFACE_KIND,
                     surface_rights,
-                    session.id,
+                    surface_object_id,
                 );
                 status = 0;
             }
