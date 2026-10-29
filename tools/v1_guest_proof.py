@@ -1015,11 +1015,51 @@ def qemu_identity() -> dict:
     return ident
 
 
+def image_freshness() -> dict:
+    """Is the boot image newer than every tracked source file?
+
+    A harness that boots `build/arena-esp.img` without checking when it was
+    built will happily report PASS for code that is no longer in the tree —
+    which is exactly what happened once: `cargo fmt` changed panic-location
+    strings, the EFI digest changed, and an earlier gate still "passed" by
+    booting the previous image. Provenance is not a matter of trust here.
+    """
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+            capture_output=True, text=True, check=True).stdout.split("\0")
+    except Exception:
+        return {"fresh": False, "reason": "git ls-files unavailable"}
+    newest, newest_path = 0.0, ""
+    for rel in tracked:
+        if not rel:
+            continue
+        path = REPO_ROOT / rel
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > newest:
+            newest, newest_path = mtime, rel
+    try:
+        image_mtime = ESP.stat().st_mtime
+    except OSError:
+        return {"fresh": False, "reason": "boot image missing"}
+    return {
+        "fresh": image_mtime >= newest,
+        "image_mtime": image_mtime,
+        "newest_source": newest_path,
+        "newest_source_mtime": newest,
+        "boot_efi_sha256": sha256_file(arena_env.build_dir() / "arena-boot.efi"),
+    }
+
+
 def artifact_identities(apb1: Path) -> dict:
     """Hashes for every artifact the verdict depends on."""
     identity = {"apb1_sha256": sha256_file(apb1),
                 "esp_sha256": sha256_file(ESP),
                 "esp_path": str(ESP)}
+    identity["image"] = image_freshness()
     # EFI extracted from the ESP image (EFI/BOOT/BOOTX64.EFI).
     try:
         import espimg  # noqa: F401  (documented ESP reader, kept for parity)
@@ -1543,6 +1583,17 @@ def compute_overall_verdict(rc: int, checkpoints: dict, install_ack,
             reasons.append("emulator ELF hash does not match the pinned value")
         if not identities.get("qemu_identity_ok", False):
             reasons.append("emulator launch chain identity incomplete")
+        # Booting an image older than the sources means the verdict describes
+        # code that is no longer in the tree.
+        image = identities.get("image") or {}
+        if not image.get("fresh", False):
+            reasons.append(
+                "boot image is older than the newest tracked source file "
+                f"({image.get('newest_source')}); rebuild before running")
+        boot_efi = image.get("boot_efi_sha256")
+        if boot_efi and identities.get("efi_sha256") not in (None, "MISSING") \
+                and boot_efi != identities["efi_sha256"]:
+            reasons.append("EFI on the ESP differs from build/arena-boot.efi")
         compilers = identities.get("compilers", {})
         for name in ("gcc", "clang_via_zig"):
             if "MISSING" in str(compilers.get(name, "MISSING")):
@@ -2052,7 +2103,9 @@ def test_malformed_resource_detail() -> None:
 def test_verdict_logic() -> None:
     good_ids = {k: "x" for k in REQUIRED_IDENTITY_KEYS}
     good_ids.update({"qemu_elf_ok": True, "qemu_identity_ok": True,
-                     "compilers": {"gcc": "gcc 12", "clang_via_zig": "clang 22"}})
+                     "compilers": {"gcc": "gcc 12", "clang_via_zig": "clang 22"},
+                     "efi_sha256": "efi-digest",
+                     "image": {"fresh": True, "boot_efi_sha256": "efi-digest"}})
     all_pass_ck = {n: "PASS" for n in CHECKPOINTS}
     serial = RUN_DIR / "control-serial.log"
     serial.write_text("x")
@@ -2082,6 +2135,22 @@ def test_verdict_logic() -> None:
 
     ok, why = compute_overall_verdict(0, all_pass_ck, None, good_ids, serial, art)
     assert not ok
+
+    # A stale boot image must fail: the verdict would describe code that is
+    # no longer in the tree.
+    ids = dict(good_ids)
+    ids["image"] = {"fresh": False, "newest_source": "userspace/desktop/src/x.rs",
+                    "boot_efi_sha256": "efi-digest"}
+    ok, why = compute_overall_verdict(0, all_pass_ck, {"k": 1}, ids, serial, art)
+    assert not ok and any("older than the newest tracked source" in w
+                          for w in why), why
+
+    # An ESP whose embedded EFI differs from the freshly built one must fail.
+    ids = dict(good_ids)
+    ids["image"] = {"fresh": True, "boot_efi_sha256": "other-digest"}
+    ok, why = compute_overall_verdict(0, all_pass_ck, {"k": 1}, ids, serial, art)
+    assert not ok and any("differs from build/arena-boot.efi" in w
+                          for w in why), why
 
     missing = RUN_DIR / "does-not-exist"
     ok, why = compute_overall_verdict(0, all_pass_ck, {"k": 1}, good_ids, serial,

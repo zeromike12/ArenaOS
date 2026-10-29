@@ -42,6 +42,17 @@ if [[ -d /workspace/ArenaOS && "${V1_ALLOW_UNPINNED_PATH:-0}" != "1" ]]; then
     BUILD_ROOT=/workspace/ArenaOS
 fi
 
+stage "0/6 build the boot image from this tree"
+# The harness refuses to pass on an image older than the newest tracked source
+# file, so the gate builds first and records what it built. `tools/build.sh`
+# is run at the pinned path because the protected PIE guard depends on it.
+( cd "$BUILD_ROOT" && source tools/dev-env/v1-env.sh >/dev/null 2>&1 || true
+  bash tools/build.sh --image ) > "$LOG_DIR/build.log" 2>&1
+bg=$?
+tail -2 "$LOG_DIR/build.log"
+sha256sum "$BUILD_ROOT/build/arena-boot.efi" | tee "$LOG_DIR/boot-efi.sha256"
+check "boot image built from this tree" "$bg"
+
 stage "1/6 environment receipts"
 bash tools/v1_env_evidence.sh "$EVIDENCE/env" > "$LOG_DIR/env.log" 2>&1
 rg=$?
