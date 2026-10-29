@@ -526,6 +526,29 @@ def settle_snapshot(serial, start: int = 0):
     return None, None
 
 
+def wait_settle_snapshot(serial_fn, start: int = 0, timeout: float = 15.0,
+                         interval: float = 0.15):
+    """`settle_snapshot`, but wait for the pair to be readable.
+
+    The Desktop writes the receipt, a field-name line and the detail as three
+    separate serial writes from one `snapshot()` call. A reader that arrives
+    between them sees a receipt with no detail and would have to report "no
+    settled snapshot", which is true of the byte stream it happened to read
+    and false of the machine. Under TCG that window is wide enough to hit --
+    observed on the Clang refusal cell. Waiting does not relax any check: the
+    returned pair must still be adjacent and complete, so a Desktop that
+    never prints one still fails.
+    """
+    deadline = time.time() + timeout
+    while True:
+        detail, receipt = settle_snapshot(serial_fn(), start)
+        if detail is not None and receipt is not None:
+            return detail, receipt
+        if time.time() >= deadline:
+            return None, None
+        time.sleep(interval)
+
+
 def compare_resources(detail, receipt, baseline_detail, baseline_receipt):
     """Compare every enforced resource field against a settled baseline.
 

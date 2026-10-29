@@ -1,5 +1,5 @@
 target: x86_64-unknown-none
 $ rustc --crate-type staticlib --target x86_64-unknown-none
 [rustc exit=0]
--rw-r--r-- 1 user user 943366 Oct 29 23:23 /tmp/tmp.cbBfxue3w1/t-x86_64-unknown-none.a
-bf28a6b3dcad17b055465932465b6f3f16cbeec37b23567c623a103746b10157  /tmp/tmp.cbBfxue3w1/t-x86_64-unknown-none.a
+-rw-r--r-- 1 user user 943366 Oct 29 23:39 /tmp/tmp.WJFbzUJlmd/t-x86_64-unknown-none.a
+bf28a6b3dcad17b055465932465b6f3f16cbeec37b23567c623a103746b10157  /tmp/tmp.WJFbzUJlmd/t-x86_64-unknown-none.a

@@ -82,8 +82,9 @@ def _build_refusal_apb1(out: Path) -> Path:
         raise SystemExit(f"V1_CC must be gcc or clang, not {cc!r}")
     elfs = crun.build_guest(cc)
     # TEMPORARY diagnostic override (removed before the recorded run).
-    elf = Path(os.environ["V1_REFUSAL_ELF"]) if os.environ.get(
-        "V1_REFUSAL_ELF") else elfs["c-gfx-refusals"]
+    # No override: the guest case must run the client the build system just
+    # produced, otherwise a hand-placed ELF could stand in for a real launch.
+    elf = elfs["c-gfx-refusals"]
     audit = crun.audit_elf(elf)
     if audit.get("loader_failures"):
         raise SystemExit(f"refusal client fails the loader audit: {audit}")
@@ -129,7 +130,7 @@ def refusals() -> bytes:
     try:
         d.wait(lambda: "[desktop] real desktop frame presented" in d.serial(),
                "Desktop frame presented")
-        before_detail, before_receipt = proof.settle_snapshot(d.serial())
+        before_detail, before_receipt = proof.wait_settle_snapshot(d.serial)
         record["before"] = {"detail": before_detail, "receipt": before_receipt}
 
         # Install through the guest's protected installer, exactly like the
@@ -183,7 +184,8 @@ def refusals() -> bytes:
         d.wait_serial(r"\[desktop\] application retired", "refusal client exit",
                       30, start=cursor)
         time.sleep(0.6)
-        after_detail, after_receipt = proof.settle_snapshot(d.serial(), cursor)
+        after_detail, after_receipt = proof.wait_settle_snapshot(
+            d.serial, cursor)
         record["after"] = {"detail": after_detail, "receipt": after_receipt}
         drift, warmup = proof.compare_resources(after_detail, after_receipt,
                                                 before_detail, before_receipt)

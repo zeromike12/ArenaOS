@@ -1,4 +1,4 @@
 
 === package ===
-[evidence] packaged 87 files, 3168467 bytes -> /workspace/ArenaOS/docs/v1/evidence/v2-2026-10-29-r2.tar.gz (434245 bytes, sha256 1203d45ea193f4ff54283714d7ae77aec01cf70aab236db579eb58fc997ce80d)
+[evidence] packaged 108 files, 3370777 bytes -> /workspace/ArenaOS/docs/v1/evidence/v2-2026-10-29-r2.tar.gz (460237 bytes, sha256 dd9a56383125b6e1d7bd852ba99202529a69575433530a84c05215a46c433161)
 [gate-stage] package: exit 0 -> build/v1-gate/receipts/package.json

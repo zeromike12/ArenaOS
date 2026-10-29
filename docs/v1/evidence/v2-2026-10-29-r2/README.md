@@ -1,7 +1,7 @@
 # v2-2026-10-29-r2 — V1 qualification evidence
 
-Produced 2026-10-29T23:26:10Z from commit
-`65af1d89a5254cd6a45cb96341966f9265a42742` on branch `arena/af044828-arenaos`
+Produced 2026-10-29T23:42:41Z from commit
+`c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e` on branch `arena/af044828-arenaos`
 (working tree dirty: `True`).
 
 ## What is here
@@ -10,7 +10,7 @@ Produced 2026-10-29T23:26:10Z from commit
 |---|---|---|
 | Serial logs | 31 | The guest's own output under QEMU TCG |
 | Screenshots | 32 | The exact frames each checkpoint assertion was made on (PNG, losslessly re-encoded from the QEMU screendump raster) |
-| Manifests and receipts | 45 | JSON verdicts, identities, build receipts |
+| Manifests and receipts | 48 | JSON verdicts, identities, build receipts |
 
 ## How to check it
 

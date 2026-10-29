@@ -15,6 +15,6 @@
 [v1-cycles] cycle 8: PASS surface=194 exited=0 settled=0/0 visual_gone=True
 [v1-cycles] cycle 9: PASS surface=199 exited=0 settled=0/0 visual_gone=True
 [v1-cycles] cycle 10: PASS surface=204 exited=0 settled=0/0 visual_gone=True
-[v1-cycles] rc=0 dt=23.3s serial -> docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/v1-cycles-serial.log
+[v1-cycles] rc=0 dt=23.2s serial -> docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/v1-cycles-serial.log
 [v1-cycles] 10/10 cycles PASS -> PASS
 [gate-stage] cycles: exit 0 -> build/v1-gate/receipts/cycles.json

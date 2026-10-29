@@ -189,7 +189,7 @@
     },
     "install_receipt": "[desktop] APB1 installed; signed version=7 (no launch authority implied)",
     "screenshot": "shots/cp09-refusal-matrix.png",
-    "screenshot_ppm_sha256": "401e007455eb2110a060a9e6f598b22e4ed0b0388a80cfdbd7905702deb44bd9",
+    "screenshot_ppm_sha256": "13f2b5c3a139af8b24933c5c8845039f7b56351e3b5d7ce49b57882867b53169",
     "missing": [],
     "failed": [],
     "unexpected": [],
@@ -241,26 +241,17 @@
     "exit_status": 0,
     "verdict_ok": true
   },
-  "source_commit": "65af1d89a5254cd6a45cb96341966f9265a42742",
+  "source_commit": "c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e",
   "working_tree_dirty": true,
   "dirty_paths_excluding_evidence": [
-    "M .gitignore",
-    "M docs/v1/V2-STATUS.md",
-    "M experiments/c-runtime/app/c_gfx_app.c",
-    "M experiments/c-runtime/run.py",
-    "M tools/dev-env/recover-rust-and-zig.sh",
     "M tools/v1_cycles.py",
-    "M tools/v1_evidence.py",
-    "M tools/v1_gate.sh",
+    "M tools/v1_gate_aggregate.py",
+    "M tools/v1_gate_stage.py",
     "M tools/v1_guest_proof.py",
-    "?? experiments/c-runtime/app/c_gfx_refusals.c",
-    "?? tools/dev-env/pypi_file.py",
-    "?? tools/v1_gate_aggregate.py",
-    "?? tools/v1_gate_stage.py",
-    "?? tools/v1_refusals.py"
+    "M tools/v1_refusals.py"
   ],
   "guest_compiler_under_test": "clang",
   "apb1_sha256": "b79a7da11bc9eb50fc3841eb5404b51cd4b5a3f07da48c429dbe0adfea002336",
-  "serial_sha256": "1c6e9bc07c3dd2232e6c3e57d19457aab67403c37ba33cbc2c57885aba7fc9c7",
+  "serial_sha256": "c959354387f67b51ce62897725ce18d842b22f3291ebac2e0f5fb4d4e2b52273",
   "rc": 0
 }

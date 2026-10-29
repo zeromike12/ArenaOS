@@ -241,26 +241,17 @@
     "exit_status": 0,
     "verdict_ok": true
   },
-  "source_commit": "65af1d89a5254cd6a45cb96341966f9265a42742",
+  "source_commit": "c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e",
   "working_tree_dirty": true,
   "dirty_paths_excluding_evidence": [
-    "M .gitignore",
-    "M docs/v1/V2-STATUS.md",
-    "M experiments/c-runtime/app/c_gfx_app.c",
-    "M experiments/c-runtime/run.py",
-    "M tools/dev-env/recover-rust-and-zig.sh",
     "M tools/v1_cycles.py",
-    "M tools/v1_evidence.py",
-    "M tools/v1_gate.sh",
+    "M tools/v1_gate_aggregate.py",
+    "M tools/v1_gate_stage.py",
     "M tools/v1_guest_proof.py",
-    "?? experiments/c-runtime/app/c_gfx_refusals.c",
-    "?? tools/dev-env/pypi_file.py",
-    "?? tools/v1_gate_aggregate.py",
-    "?? tools/v1_gate_stage.py",
-    "?? tools/v1_refusals.py"
+    "M tools/v1_refusals.py"
   ],
   "guest_compiler_under_test": "gcc",
   "apb1_sha256": "aab1f0ca5b8e7116d4aa38e8fe38436bb11ef09f75585113ea04e1b1a1f5886d",
-  "serial_sha256": "1bde9a9179631708014a6081fe3d51e26f037c5b0b40a2b7f7511eaab796f1f1",
+  "serial_sha256": "5650d7c113d48971d262a59fc7e8a818137f08794a75fecb5fcd87fff8e0d4db",
   "rc": 0
 }

@@ -104,6 +104,37 @@ def newest_tracked() -> dict:
     return {"path": newest_path, "mtime": newest or None}
 
 
+def code_fingerprint() -> str:
+    """Digest of the tracked code, as it exists on disk right now.
+
+    A commit id is not an identity for this purpose: committing work that was
+    already on disk changes HEAD without changing a single byte of what a
+    stage executed, while editing a tracked file changes the bytes without
+    touching HEAD at all. What the aggregate has to compare is the second
+    thing. Documentation and evidence are excluded for the same reason as in
+    `newest_tracked`: prose cannot change what ran.
+    """
+    tracked = git("ls-files", "-z")
+    if tracked in ("", "unavailable"):
+        return "unavailable"
+    digest = hashlib.sha256()
+    for rel in sorted(x for x in tracked.split("\0") if x):
+        if any(rel.startswith(p) for p in EVIDENCE_PREFIXES):
+            continue
+        if any(rel.startswith(p) for p in DOC_PREFIXES) or \
+                rel.endswith(DOC_SUFFIXES):
+            continue
+        path = REPO_ROOT / rel
+        digest.update(rel.encode())
+        digest.update(b"\0")
+        try:
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
+        except OSError:
+            digest.update(b"absent")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def receipt(stage: str, exit_code: int, notes: list, argv: list,
             started: float, finished: float, qualified: bool = True) -> dict:
     package = REPO_ROOT / "docs/v1/evidence/v2-2026-10-29-r2.tar.gz"
@@ -122,6 +153,8 @@ def receipt(stage: str, exit_code: int, notes: list, argv: list,
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
         "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished)),
         "source_commit": git("rev-parse", "HEAD"),
+        # What the aggregate actually compares: bytes, not bookkeeping.
+        "code_fingerprint": code_fingerprint(),
         "dirty_paths": dirty_paths(),
         "newest_tracked": newest_tracked(),
         "efi_sha256": sha256_file(REPO_ROOT / "build" / "arena-boot.efi"),

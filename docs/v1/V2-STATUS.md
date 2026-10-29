@@ -6,8 +6,8 @@ deliberately conservative: a stage appears as PASS only with the command that
 produced it, the artifact identity it ran against, and the evidence file that
 holds its raw output.
 
-Round 1 (2026-10-29, commit `65af1d8`) and round 2 (this round, same commit,
-uncommitted working tree) are kept separate. Nothing in round 1's evidence
+Round 1 (2026-10-29, commit `65af1d8`) and round 2 (`c4d7cf1` plus this
+round's follow-up changes) are kept separate. Nothing in round 1's evidence
 directory was rewritten.
 
 ---
@@ -18,13 +18,17 @@ directory was rewritten.
 |---|---|
 | Branch | `arena/af044828-arenaos` (session branch; cannot be renamed) |
 | Round-1 checkpoint | `65af1d89a5254cd6a45cb96341966f9265a42742` |
-| Round-2 tree | same commit + uncommitted round-2 changes (see §4) |
+| Round-2 checkpoint | `c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e` |
+| Round-2 tree | that commit + the follow-up changes listed in §4.2 |
 | Merged into `main` | no — merge and release are M's decisions |
 | History rewritten | no — no force-push, no rebase, no `reset` of published commits |
 
-The round-2 working tree is uncommitted by design: it is the review
-candidate. `tools/v1_gate_stage.py` stamps every gate receipt with the commit
-and the dirty paths that ran, so a reader can tell exactly what was executed.
+The gate receipts stamp every stage with the commit, the dirty paths, the
+EFI/ESP digests **and a digest of the tracked code as it existed when the
+stage ran** (`code_fingerprint`). The aggregate compares that digest, not the
+commit id: committing work that was already on disk changes nothing that
+executed, while an uncommitted edit changes everything. Control A and control
+B in `gate/gate-controls.txt` demonstrate both directions.
 
 ---
 
@@ -74,7 +78,19 @@ firmware) rather than from a wrapper hash alone.
 | F5 | The refusal matrix had never executed in the guest | `tools/v1_refusals.py` launches the client through the protected installer and ordinary launch path; 21 cases, no window, no resource drift, exit 0, both compilers | `tools/v1_refusals.py`, `experiments/c-runtime/app/c_gfx_refusals.c` |
 | F6 | **The refusal harness launched the wrong application.** The launcher filters by *substring* and Enter launches the first match, so typing `r` selected **Terminal**; the client never ran and the run looked like a client defect | The selection is proven by the captured frame `cp09-launcher-selection.png`, and the harness now types the unique substring `refusal` before Enter | `tools/v1_refusals.py` |
 | F7 | `.gitignore` line 7 (`*.log`) silently excluded every serial and harness log from round-1's published evidence (0 `.log` files were committed) | Rule removed; evidence logs are committed, PPM working copies are not (they are a fixed header plus the published PNG's raster, and their digests are recorded) | `.gitignore` |
+| F9 | `settle_snapshot()` could be called in the gap between the Desktop's receipt line and its detail line, returning "no settled snapshot" for a machine that had just printed one; the Clang refusal cell failed this way once (23:29Z run) | `wait_settle_snapshot()` waits (bounded, 15 s) for a *complete, adjacent* pair; it relaxes nothing — a Desktop that never prints a pair still fails | `tools/v1_guest_proof.py`, `tools/v1_refusals.py`, `tools/v1_cycles.py` |
+| F10 | The evidence archive was built by adding the whole directory, so it shipped the PPM working copies the manifest deliberately omits; `verify` then reported an unlisted file | The archive is built from the manifest plus `MANIFEST.json`/`README.md` only, so archive contents and manifest are the same set by construction | `tools/v1_evidence.py` |
+| F11 | Gate receipts were tied to the commit id, so a documentation commit invalidated a genuine run and an uncommitted code edit did not; `--mode quick` had no stage list | Receipts carry `code_fingerprint` over tracked non-doc files and the aggregate compares that; `quick` has its own stage list and is labelled partial | `tools/v1_gate_stage.py`, `tools/v1_gate_aggregate.py` |
+| F12 | The refusal harness kept a `V1_REFUSAL_ELF` override that let any ELF stand in for the built client | Removed; the guest case runs the client the build just produced | `tools/v1_refusals.py` |
 | F8 | `tools/v1_gate.sh` claimed to reproduce everything but never ran `tools/run_tests.sh`, and a partial run printed the same PASS as a full one | Stage receipts (`tools/v1_gate_stage.py`) + aggregate (`tools/v1_gate_aggregate.py`): only `--mode full` can print `V1 QUALIFICATION: PASS`; partial and unqualified runs say so and exit non-zero | `tools/v1_gate.sh` |
+
+### 4.2 What changed after the first round-2 commit
+
+`c4d7cf1` published the corrected evidence chain. The follow-up work in this
+tree is: F9 (a real race that made one refusal cell fail), F10 (archive vs
+manifest), F11 (receipt identity, `quick` mode), F12 (the override). Every
+guest stage was re-executed after those edits, and the numbers in §5 are from
+that re-execution, not from `c4d7cf1`'s run.
 
 ### 4.1 Blocker B1 — the canonical EFI build (unchanged, not caused by round 2)
 
@@ -111,29 +127,44 @@ explicitly not qualification artifacts** (§7).
 | Refusal matrix, Clang | same, `V1_CC=clang` | **21/21 cases PASS** | idem |
 | Lifecycle | `V1_EVIDENCE_DIR=…/lifecycle-cycles python3 tools/v1_cycles.py 10` | **10/10 cycles PASS** | idem |
 | Boot stability | `bash tools/stability_loop.sh 100` | **100/100 boots green** (1056 s) | idem |
-| Formal regression | `bash tools/run_tests.sh` | **not completed** — host suites ran with 0 failures for ~18 min, then terminated to free the emulator (log ends `EXIT=143`) | idem |
-| Gate (guest mode) | `V1_GATE_MODE=guest bash tools/v1_gate.sh` | **all 10 stages PASS**; aggregate: `V1 QUALIFICATION: BLOCKED` (dev-path build) | EFI `7134acf1…` |
-| Evidence package | `python3 tools/v1_evidence.py package …` | 108 files, 440 918 B | sha256 `26674d87…f66` |
-| Fresh-extraction verify | `python3 tools/v1_evidence.py verify …` | 108 files, **0 problems** | idem |
+| Formal regression | `bash tools/run_tests.sh` | **22 passed / 99 failed**, single root cause: `tools/build.sh --image` → PIE guard (B1). See §5.1 | idem |
+| Gate (guest mode) | `V1_GATE_MODE=guest bash tools/v1_gate.sh` | **all 10 stages PASS** (2 independent runs); aggregate: `V1 QUALIFICATION: BLOCKED` (dev-path build) | EFI `7134acf1…` |
+| Gate (full mode) | `V1_GATE_MODE=full bash tools/v1_gate.sh` | **not claimable**: the regression stage exits 1 (B1) | — |
+| Gate self-controls | `gate/gate-controls.txt` | stale code → FAIL exit 1; docs-only edit → receipts still accepted | — |
+| Evidence package | `python3 tools/v1_evidence.py package …` | 111 files, 461 677 B | sha256 `07ff4d44…148` |
+| Fresh-extraction verify | `python3 tools/v1_evidence.py verify …` | 111 files, **0 problems** | idem |
 
-### 5.1 Formal regression (incomplete this round)
+### 5.1 Formal regression — executed, 99 suites blocked by B1
 
-`regression/run-tests.log` records the run exactly as it happened: the host
-suites executed in order with no failures, and the run was terminated after
-about eighteen minutes (the log's last line is `EXIT=143`) to release the
-emulator for the guest gate in the same session. It did **not** reach the
-guest suites, so it is not a regression result and nothing is inherited from
-it. Two further facts belong here:
+`regression/run-tests.log` is the complete transcript of one run of
+`bash tools/run_tests.sh` on this candidate. It ran to completion; the result
+is **22 of 121 suites passed, 99 failed**, and every one of the 99 traces to
+a single line: `tools/build.sh --image` exits non-zero at
+`tools/build_phase14_pie.sh`, which refuses because the locally built
+`rust-std` for `x86_64-unknown-none` produces the PIE fixture digest
+`b8636bd4…` instead of the protected `d7b0a8cf…` (blocker B1, §4.1).
 
-* round 1's last complete run was `ALL TESTS PASSED (121 test suites)` at
-  commit `bdf6c66`, recorded in `docs/v1/evidence/v2-2026-10-29/`;
-* thirteen of the 121 sub-suites rebuild the kernel through
-  `tools/build.sh`, so they cannot pass while B1 stands. Their failure is
-  environmental, and the final gate run must name them as such rather than
-  count them as regressions.
+Two of those failures need naming because they look like product failures and
+are not:
 
-The full gate (`V1_GATE_MODE=full`) requires this stage; it is therefore
-**not** claimable until B1 is resolved and the suite completes.
+* `test_m9_font_red.py` prints only a summary line; its two sub-runs
+  (`build/m9-font-red-guest.log`, `build/m9-font-restored-guest.log`) both end
+  in the same `CalledProcessError` from `tools/build.sh --image`;
+* the Phase-13 and Phase-14 guest suites fail in `mtest.build()` before they
+  ever start an emulator.
+
+So the run is **not** a regression signal either way: it never reached the
+product behaviour in those 99 suites. It is reported with its exact numbers
+rather than inherited from round 1, whose `ALL TESTS PASSED (121 test suites)`
+at `bdf6c66` was produced by an environment that still had the official
+`rust-std` components — the component this sandbox cannot fetch (§4.1). **A
+historical pass is not evidence for a changed or differently built artifact**,
+which is the same rule that forbids counting ten cycles as a hundred boots.
+
+Consequence for the gate: `V1_GATE_MODE=full` cannot pass while B1 stands,
+because it requires this stage. The `regression` receipt records `exit 1` and
+the note above; the aggregate reports the full gate as FAIL rather than
+laundering 22 passes into a qualification.
 
 ---
 
@@ -149,8 +180,9 @@ The full gate (`V1_GATE_MODE=full`) requires this stage; it is therefore
 | 4 | Guest refusal matrix, cases 11–17 | **DONE** (HOST-ONLY + GUEST) | `refusals-*/refusals-evidence.json`, 21 cases |
 | 5 | Final-artifact stability (100/100 boots) | **DONE for this artifact**, but the artifact is dev-path (§4.1) | `stability/stability-100.log` |
 | 5b | EFI rebuild reproducibility | **BLOCKED (B1)** | build log: `reproducible PIE fixture hash changed` |
+| 5d | Formal regression (121 suites) | **BLOCKED (B1)**: 22 pass, 99 blocked at the PIE guard | §5.1, `regression/run-tests.log` |
 | 5c | ESP ↔ embedded-EFI identity | **DONE** | `env/`, `evidence.json` `image.boot_efi_sha256` |
-| 6 | Gate command matches the claims | **DONE** | `tools/v1_gate.sh` + receipts + aggregate |
+| 6 | Gate command matches the claims | **DONE** — the gate now *fails* where the claims would be wrong | `tools/v1_gate.sh` + receipts + aggregate + `gate/gate-controls.txt` |
 | 7 | Final review candidate + package | **DONE** (§7) | archive + `.sha256` + fresh-extraction verify |
 
 Artifact identities for this round: EFI
@@ -171,8 +203,9 @@ could be executed has been, and the artifacts are labelled for what they are.
 |---|---|---|
 | `docs/v1/evidence/v2-2026-10-29/` | GUEST + HOST, round 1 | unchanged, do not edit |
 | `docs/v1/evidence/v2-2026-10-29-r2/` | GUEST + HOST, round 2 | this round's runs, receipts, frames, logs |
-| `docs/v1/evidence/v2-2026-10-29-r2.tar.gz` | package | 108 files, 440 918 B, sha256 `26674d877692a4fd66330643cbf2f862381d5d1e5d86a1398b95b9b6e502cf66`; verified from a fresh extraction, 0 problems |
-| `…-r2/gate/receipts/*.json` | receipts | per-stage identity: commit, dirty paths, EFI/ESP digests, newest tracked source, exit code |
+| `docs/v1/evidence/v2-2026-10-29-r2.tar.gz` | package | 111 files, 461 677 B, sha256 `07ff4d442871cd5c70b455b359544eaca754f6ba5a90928497cdd95808e08148`; verified from a fresh extraction, 0 problems |
+| `…-r2/gate/receipts/*.json` | receipts | per-stage identity: commit, dirty paths, `code_fingerprint`, EFI/ESP digests, newest tracked source, exit code |
+| `…-r2/gate/gate-controls.txt` | controls | the gate's own rejection tests (stale code fails; docs-only edit does not) |
 
 Classification of the artifacts used this round:
 
@@ -207,3 +240,20 @@ Classification of the artifacts used this round:
 5. **Launcher semantics**: the app launcher filters by substring and launches
    the first match; harness code must type a unique substring. This bit the
    refusal harness once (F6) and is now proven by a captured frame.
+6. **Formal regression is blocked, not green** (§5.1): 22 of 121 suites ran;
+   99 could not, all at the PIE guard. Nothing in this round may be described
+   as "all 121 suites pass".
+7. **ESP bytes are not stable across rebuilds**: the FAT timestamps change
+   with wall-clock time, so `build/arena-esp.img` hashes differently on each
+   `tools/espimg.py` run while the embedded `BOOTX64.EFI` stays byte-identical
+   to the EFI it was built from. Each stage receipt records the ESP it
+   actually used; the ESP digest is therefore provenance, never an identity
+   check, and a reader comparing an old digest with a newer file is seeing
+   this effect rather than a changed artifact.
+8. **Self-reference in the package receipts**: `gate/receipts/package.json`
+   and `verify.json` were recorded by the packaging run, so the copy inside
+   the archive names the digest of the archive produced just before the final
+   repackaging. The authoritative pairing is the `.sha256` file beside the
+   archive plus the fresh-extraction verify in §5.
+
+

@@ -1,0 +1,32 @@
+{
+  "stage": "stability",
+  "exit": 0,
+  "qualified": true,
+  "notes": [
+    "REUSED EXECUTION: tools/stability_loop.sh 100 completed 2026-10-29 (100/100 boots fully green, 1056 s, fail=0) against build/arena-boot.efi 7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5, which is unchanged on disk; the loop's only inputs are that EFI, tools/stability_loop.sh and tools/espimg.py, none of which changed since (git log: last change bfa4e85). Raw log docs/v1/evidence/v2-2026-10-29-r2/stability/stability-100.log"
+  ],
+  "argv": [],
+  "started_epoch": 1793317343.2050014,
+  "finished_epoch": 1793317343.2050018,
+  "started_utc": "2026-10-29T23:42:23Z",
+  "finished_utc": "2026-10-29T23:42:23Z",
+  "source_commit": "c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e",
+  "code_fingerprint": "dd9a65d3fbc2ed12bf6dc1b33f75fb7697f394ea24a30702e64b6621b694c40a",
+  "dirty_paths": [
+    "ocs/v1/evidence/v2-2026-10-29-r2.tar.gz",
+    "tools/v1_cycles.py",
+    "tools/v1_gate_aggregate.py",
+    "tools/v1_gate_stage.py",
+    "tools/v1_guest_proof.py",
+    "tools/v1_refusals.py"
+  ],
+  "newest_tracked": {
+    "path": "tools/v1_gate_aggregate.py",
+    "mtime": 1793317163.8315961
+  },
+  "efi_sha256": "7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5",
+  "esp_sha256": "d28aca63aa4829fc1ca505b73a27015559c77bcf2db2c3447875da55459397ae",
+  "evidence_package_sha256": "dd9a56383125b6e1d7bd852ba99202529a69575433530a84c05215a46c433161",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

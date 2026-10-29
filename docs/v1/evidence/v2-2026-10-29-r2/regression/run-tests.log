@@ -1,23 +1,22 @@
-QUALIFICATION SOURCE COMMIT: 65af1d89a5254cd6a45cb96341966f9265a42742
+QUALIFICATION SOURCE COMMIT: c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e
 QUALIFICATION SOURCE CLEAN: no (development run)
 ======================================================================
 == host-side unit tests (arena-heap: cargo test --lib)
 ======================================================================
-   Compiling arena-heap v0.1.0 (/workspace/ArenaOS/kernel/libs/heap)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.73s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
      Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_heap-9c860bc7eac3920c)
 
 running 12 tests
-test tests::core_guards_off ... ok
 test tests::alignment_requests ... ok
-test tests::core_guards_on ... ok
+test tests::core_guards_off ... ok
 test tests::double_free_rejected ... ok
+test tests::core_guards_on ... ok
 test tests::foreign_and_interior_pointers_rejected ... ok
 test tests::growth_and_exhaustion ... ok
 test tests::red_zones_catch_overflow_and_underflow ... ok
 test tests::many_small_then_coalesce ... ok
-test tests::release_chunks_resets_and_regrows ... ok
 test tests::release_chunks_refuses_nonempty_heap - should panic ... ok
+test tests::release_chunks_resets_and_regrows ... ok
 test tests::zero_size_and_oversize_rejected ... ok
 test tests::stress_lcg_alloc_free_with_reference_model ... ok
 
@@ -26,8 +25,7 @@ test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ======================================================================
 == host-side unit tests (arena-sync: cargo test --lib)
 ======================================================================
-   Compiling arena-sync v0.1.0 (/workspace/ArenaOS/kernel/libs/sync)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.47s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
      Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_sync-b414257b95d72f0d)
 
 running 6 tests
@@ -38,7 +36,7 @@ test tests::recursive_acquire_panics_in_debug_builds - should panic ... ok
 test tests::try_lock_is_none_while_held_and_some_after_drop ... ok
 test tests::mutual_exclusion_under_four_parallel_threads ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
 == host-side DNS parser tests
 
@@ -69,8 +67,7 @@ test address_wire_layout_dns_and_local_validation ... ok
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 == host and no_std target Phase 8.3 userspace client libraries
-   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
      Running unittests src/lib.rs (userspace/arena-lib/target/x86_64-unknown-linux-gnu/debug/deps/arena_lib-625db13177203621)
 
 running 2 tests
@@ -79,20 +76,19 @@ test fs::tests::exact_wire_and_no_hidden_retry ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
-    Finished `release` profile [optimized] target(s) in 0.17s
+    Finished `release` profile [optimized] target(s) in 0.00s
 == host-side service manifest and inventory policy tests
 
 running 15 tests
-test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
 test inventory::tests::missing_or_unsupported_authority_fails_closed ... ok
+test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
 test inventory::tests::reads_live_cap_metadata_not_manifest_words ... ok
 test inventory::tests::observed_authority_goes_directly_to_policy_without_manifest_minting ... ok
 test manifest::tests::attenuated_grants_and_actual_source_slots ... ok
 test manifest::tests::dependencies_must_be_present_ready_and_acyclic ... ok
-test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
 test manifest::tests::rights_may_never_be_broadened_or_quietly_clamped ... ok
 test manifest::tests::topological_order_and_duplicate_policy ... ok
+test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
 test readiness::tests::coalesced_apb1_wake_is_preserved_but_cannot_complete_readiness ... ok
 test readiness::tests::late_coalesced_ready_is_still_too_late ... ok
 test readiness::tests::requires_both_independent_driver_signals ... ok
@@ -145,4 +141,2650 @@ Phase 8.5 AINS/AACT accepted wire: 6 independent SHA-256 vectors, 4-generation a
 [afs2] 1040 randomized operations remounted/audited/matched {'write': 206, 'bad': 100, 'create': 83, 'rename': 217, 'truncate': 105, 'unlink': 110, 'mkdir': 106, 'rmdir': 113}
 [afs2] crash prefixes exact old-or-new: {'mkdir': 6, 'create': 6, 'write': 9, 'replace': 4, 'truncate': 7, 'rename': 6, 'move': 8, 'move-dir': 8, 'unlink': 6, 'rmdir': 6}
 [afs2] no-space after 81 blocks, refusals byte-identical; capacity {'blocks': 16384, 'free': 11830, 'objects': 10004, 'max_objects': 15779, 'seq': 10068}; fail-closed PASS
-EXIT=143
+[afs2-red] in-place-metadata: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] early-free: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] missing-parent-update: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] half-published-rename: RED PASS (afs2.FsError: CORRUPT)
+[afs2-red] 4 RED controls; byte-exact restore; GREEN
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.36s
+[afs2-rust] format cross-check both directions PASS (303 namespace lines)
+[afs2-rust-red] in-place-metadata: crash_prefixes_are_exactly_old_or_new FAILED -> RED PASS
+[afs2-rust-red] early-free: crash_prefixes_are_exactly_old_or_new FAILED -> RED PASS
+[afs2-rust-red] missing-parent-update: random_operations_match_a_model_and_survive_remount FAILED -> RED PASS
+[afs2-rust-red] commit-not-last: crash_prefixes_are_exactly_old_or_new FAILED -> RED PASS
+[afs2-rust-red] reformat-damaged: format_prefixes_are_never_committed_or_mountable FAILED -> RED PASS
+[afs2-rust] 5 RED controls (in-place-metadata, early-free, missing-parent-update, commit-not-last, reformat-damaged); byte-exact restore; GREEN
+== Phase 11 directory watches: host table and RED controls
+[watch-red] stale-generation: a_reused_directory_index_never_signals_the_old_watcher FAILED -> RED PASS
+[watch-red] rename-parent: a_rename_changes_both_parents FAILED -> RED PASS
+[watch-red] directory watch table GREEN; stale-generation and rename-parent RED; source restored byte-exact PASS
+== Phase 11.7: Arena Sans 13 art and generated face in sync
+[face13] userspace/gfxkit/src/face13.rs matches tools/face13.txt
+== Phase 12 APB1, startup ABI and native runtime host/target suites
+test_boundaries (__main__.TestRecord.test_boundaries) ... ok
+test_bounded_mutation_fuzz (__main__.TestRecord.test_bounded_mutation_fuzz) ... ok
+test_independent_wire_construction (__main__.TestRecord.test_independent_wire_construction) ... ok
+test_negative_package (__main__.TestRecord.test_negative_package) ... ok
+test_policy_chain_exhaustion (__main__.TestRecord.test_policy_chain_exhaustion) ... ok
+test_rfc_vector2_and_signed_domains (__main__.TestRecord.test_rfc_vector2_and_signed_domains) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 4.858s
+
+OK
+test_bounded_random_mutations_never_upgrade_to_valid_signed_bundle (__main__.TestApb1Reference.test_bounded_random_mutations_never_upgrade_to_valid_signed_bundle) ... ok
+test_checked_in_fixtures_are_reproducible_and_independent_signature_valid (__main__.TestApb1Reference.test_checked_in_fixtures_are_reproducible_and_independent_signature_valid) ... ok
+test_large_bundle_fixture_exercises_a_nontrivial_payload (__main__.TestApb1Reference.test_large_bundle_fixture_exercises_a_nontrivial_payload) ... ok
+test_phase13_stream_and_sync_manifest_hints_are_known_but_unknown_bits_refuse (__main__.TestApb1Reference.test_phase13_stream_and_sync_manifest_hints_are_known_but_unknown_bits_refuse) ... ok
+test_signature_payload_manifest_and_exact_length_mutations_refuse (__main__.TestApb1Reference.test_signature_payload_manifest_and_exact_length_mutations_refuse) ... ok
+test_signed_hostile_metadata_controls_refuse (__main__.TestApb1Reference.test_signed_hostile_metadata_controls_refuse) ... ok
+test_valid_multifile_bundle_exactly_accounts_for_payload (__main__.TestApb1Reference.test_valid_multifile_bundle_exactly_accounts_for_payload) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.171s
+
+OK
+test_32_instance_slots_match_lifecycle_and_manager_without_aliasing (__main__.TestStartupAbi.test_32_instance_slots_match_lifecycle_and_manager_without_aliasing) ... ok
+test_cap_inventory_syscall_number_and_slot_bound_are_mirrored (__main__.TestStartupAbi.test_cap_inventory_syscall_number_and_slot_bound_are_mirrored) ... ok
+test_capability_role_identity_and_bound_mutations_refuse (__main__.TestStartupAbi.test_capability_role_identity_and_bound_mutations_refuse) ... ok
+test_independent_guest_vector_and_live_capability_red_control (__main__.TestStartupAbi.test_independent_guest_vector_and_live_capability_red_control) ... ok
+test_m9_over_bound_and_unknown_records_still_refuse (__main__.TestStartupAbi.test_m9_over_bound_and_unknown_records_still_refuse) ... ok
+test_m9_seven_descriptor_stream_sync_record_roundtrips (__main__.TestStartupAbi.test_m9_seven_descriptor_stream_sync_record_roundtrips) ... ok
+test_mutated_offsets_padding_and_tail_refuse (__main__.TestStartupAbi.test_mutated_offsets_padding_and_tail_refuse) ... ok
+test_rust_golden_vector_is_canonical_and_roundtrips_independently (__main__.TestStartupAbi.test_rust_golden_vector_is_canonical_and_roundtrips_independently) ... ok
+test_slot_zero_transport_requires_exact_read_only_one_page (__main__.TestStartupAbi.test_slot_zero_transport_requires_exact_read_only_one_page) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.003s
+
+OK
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling generic-array v0.14.7
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling semver v1.0.28
+   Compiling rustc_version v0.4.1
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling syn v2.0.119
+   Compiling curve25519-dalek v4.1.3
+   Compiling cpufeatures v0.2.17
+   Compiling cfg-if v1.0.5
+   Compiling subtle v2.6.1
+   Compiling signature v2.2.0
+   Compiling ed25519 v2.2.3
+   Compiling sha2 v0.10.9
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling ed25519-dalek v2.2.0
+   Compiling arena-phase84-crypto-audit v0.1.0 (/workspace/ArenaOS/audit/phase84-crypto)
+   Compiling arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.98s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_platform_core-67cc63cc6bef4bbe)
+
+running 39 tests
+test bundle::tests::exact_envelope_rejects_trailing_or_truncated_payload ... ok
+test bundle::tests::large_payload_is_hashed_in_fixed_four_kibibyte_reads ... ok
+test bundle::tests::receiver_rejects_wrong_key_signature_and_tampered_payload ... ok
+test bundle::tests::signed_multi_file_bundle_verifies_and_exposes_only_descriptive_records ... ok
+test helpers::tests::rejects_unknown_flags_noncanonical_paths_and_duplicates ... ok
+test helpers::tests::resolves_only_a_canonical_signed_descriptor ... ok
+test helpers::tests::stream_helpers_require_both_private_wait_and_owner_wake_grants ... ok
+test install::tests::a_source_swap_never_activates_unverified_destination_bytes ... ok
+test bundle::tests::valid_signatures_do_not_excuse_noncanonical_or_unsafe_metadata ... ok
+test install::tests::corrupted_installed_payload_is_not_a_registry_candidate ... ok
+test install::tests::duplicate_version_refusal_does_not_write_or_change_the_afs2_image ... ok
+test install::tests::policy_install_streams_source_from_the_same_afs2_volume ... ok
+test install::tests::policy_preflight_binds_the_exact_bundle_before_mutation ... ok
+test install::tests::protected_candidate_lookup_reverifies_tree_and_resolves_exact_entry ... ok
+test install::tests::receiver_authorization_mismatch_refuses_before_afs2_mutation ... ok
+test install::tests::receiver_authorized_install_binds_the_same_volume_source_and_readback ... ok
+test install::tests::receiver_policy_denial_precedes_all_afs2_mutation ... ok
+test install::tests::registry_rebuild_is_manifest_derived_and_rejects_extra_tree_entries ... ok
+test install::tests::reserved_record_path_refuses_before_afs2_mutation ... ok
+test install::tests::staged_multifile_install_readback_and_atomic_activation ... ok
+test install::tests::volume_source_must_be_a_file_and_refusal_is_mutation_free ... ok
+test install::tests::wrong_signer_is_refused_before_afs2_mutation ... ok
+test lifecycle::tests::app_ids_do_not_authorize_instance_and_stale_generation_never_aliases ... ok
+test lifecycle::tests::exact_process_group_binding_multiwindow_owner_and_stale_window_refusal ... ok
+test lifecycle::tests::instance_retirement_waits_for_exact_process_and_window_cleanup ... ok
+test lifecycle::tests::integrated_target_models_thirty_two_apps_windows_and_a_headless_helper ... ok
+test lifecycle::tests::thirty_two_windows_and_thirty_two_instances_refuse_without_mutation ... ok
+test manifest::tests::bundle_paths_reject_traversal_aliases_and_platform_separators ... ok
+test manifest::tests::canonical_manifest_roundtrips_without_assigning_authority ... ok
+test manifest::tests::native_sync_opt_in_is_descriptive_and_grants_no_capability ... ok
+test manifest::tests::reserved_noncanonical_identity_associations_and_dimensions_refuse ... ok
+test manifest::tests::standard_stream_opt_in_is_descriptive_and_grants_no_capability ... ok
+test policy::tests::root_key_is_test_policy_only_and_namespace_is_checked ... ok
+test policy::tests::subordinate_authority_minimum_and_revocation_are_exact ... ok
+test registry::tests::app_names_and_ids_are_catalog_hints_not_launch_authority ... ok
+test registry::tests::association_resolution_does_not_offer_document_authority ... ok
+test registry::tests::capacity_duplicate_and_uninstall_cleanup_are_explicit ... ok
+test install::tests::every_afs2_write_prefix_is_old_or_a_complete_reverifiable_install ... ok
+test registry::tests::catalog_capacity_refusal_is_mutation_free ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.98s
+
+    Checking typenum v1.20.1
+    Checking cpufeatures v0.2.17
+    Checking cfg-if v1.0.5
+    Checking signature v2.2.0
+    Checking subtle v2.6.1
+    Checking ed25519 v2.2.3
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+    Checking generic-array v0.14.7
+    Checking crypto-common v0.1.7
+    Checking block-buffer v0.10.4
+    Checking digest v0.10.7
+    Checking sha2 v0.10.9
+    Checking curve25519-dalek v4.1.3
+    Checking ed25519-dalek v2.2.0
+    Checking arena-phase84-crypto-audit v0.1.0 (/workspace/ArenaOS/audit/phase84-crypto)
+    Checking arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.97s
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling generic-array v0.14.7
+   Compiling semver v1.0.28
+   Compiling rustc_version v0.4.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling cpufeatures v0.2.17
+   Compiling cfg-if v1.0.5
+   Compiling signature v2.2.0
+   Compiling subtle v2.6.1
+   Compiling ed25519 v2.2.3
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling ed25519-dalek v2.2.0
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-phase84-crypto-audit v0.1.0 (/workspace/ArenaOS/audit/phase84-crypto)
+   Compiling arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+    Finished `release` profile [optimized] target(s) in 2.69s
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+warning: variable does not need to be mutable
+   --> src/streams.rs:771:13
+    |
+771 |         let mut put = |ring: &mut [u8; 768], write: &mut u32, bytes: &[u8]| {
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `arena-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p arena-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.95s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_runtime-0aff53556ec12099)
+
+running 27 tests
+test capabilities::tests::destroyable_attenuation_preserves_only_requested_rights ... ok
+test capabilities::tests::capability_copy_requires_copy_right_and_strictly_attenuates ... ok
+test heap::tests::blocks_align_reuse_and_coalesce_without_touching_neighbor_pages ... ok
+test heap::tests::capacity_refusal_is_mutation_free_and_a_free_large_block_recovers ... ok
+test heap::tests::unsupported_layouts_and_frame_oom_leave_state_unchanged ... ok
+test heap::tests::scalable_heap_commits_lazily_aligns_reuses_and_refuses_oom ... ok
+test startup::tests::an_unavailable_listed_slot_description_is_fail_closed ... ok
+test startup::tests::extra_unlisted_capability_refuses_even_when_its_kind_is_unavailable ... ok
+test startup::tests::full_cap_table_matches_listed_kinds_and_rights_but_ignores_ids ... ok
+test startup::tests::kind_or_rights_mismatch_refuses_before_application_entry ... ok
+test startup::tests::rejection_discards_only_a_destroyable_shared_region_slot ... ok
+test startup::tests::missing_listed_capability_refuses_before_application_entry ... ok
+test startup::tests::unexpected_startup_slot_zero_and_occupancy_query_errors_refuse ... ok
+test streams::tests::attach_checks_layout_and_corrupt_indices_fail_closed ... ok
+test streams::tests::attach_refuses_v1_and_unknown_versions ... ok
+test streams::tests::attach_requires_the_full_page_before_tail_validation ... ok
+test streams::tests::attach_refuses_nonzero_reserved_bytes_in_header_rings_and_tail ... ok
+test streams::tests::close_produces_eof_after_queued_bytes_and_detects_consumer_death ... ok
+test streams::tests::counter_wraparound_preserves_fifo_order ... ok
+test streams::tests::each_process_local_endpoint_is_unique_while_held ... ok
+test streams::tests::helper_parent_and_child_use_opposite_ring_endpoints ... ok
+test streams::tests::initialize_requires_and_zeroes_the_full_page ... ok
+test streams::tests::three_rings_fit_one_page_and_transfer_partial_bytes_under_backpressure ... ok
+test streams::tests::v1_indexing_negative_control ... ok
+test streams::tests::wrap_with_unread_bytes_preserves_content_and_order ... ok
+test threads::tests::stack_layout_leaves_metadata_and_guard_pages_outside_stack ... ok
+test tls::tests::tcb_layout_is_frozen_for_the_arena_fs_base_contract ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+    Checking arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+    Finished `release` profile [optimized] target(s) in 0.04s
+== Phase 13 Desktop and service-manager host/target suites
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+warning: variable does not need to be mutable
+   --> src/wire.rs:157:13
+    |
+157 |         let mut b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+    |             ----^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/wire.rs:168:13
+    |
+168 |         let mut b = identify_reply_encode(1, IDENTIFY_SURFACE_KIND, IDENTIFY_SURFACE_RIGHTS, 2);
+    |             ----^
+    |             |
+    |             help: remove this `mut`
+
+warning: `arena-desktop` (lib test) generated 2 warnings (run `cargo fix --lib -p arena-desktop --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.01s
+     Running unittests src/lib.rs (userspace/desktop/target/x86_64-unknown-linux-gnu/debug/deps/arena_desktop-3b46cfabf4b1da48)
+
+running 96 tests
+test apps::explorer::tests::history_back_forward_up_and_open_by_type ... ok
+test apps::explorer::tests::copy_cut_paste_and_drag_moves ... ok
+test apps::explorer::tests::listing_sorts_folders_first_and_hides_dotfiles ... ok
+test apps::explorer::tests::new_folder_rename_and_refusals ... ok
+test apps::explorer::tests::trash_restore_and_empty ... ok
+test apps::explorer::tests::type_ahead_change_detection_and_paths ... ok
+test apps::explorer_ctl::tests::fingerprint_tracks_visible_state_only ... ok
+test apps::explorer_ctl::tests::double_click_opens_folder_and_text_and_refuses_binary ... ok
+test apps::explorer_ctl::tests::keyboard_rename_clipboard_menu_and_sheet ... ok
+test apps::explorer_ctl::tests::guest_sequence_on_the_default_window ... ok
+test apps::explorer_view::tests::geometry_hits_every_part ... ok
+test apps::explorer_view::tests::sizes_times_and_columns ... ok
+test apps::explorer_ctl::tests::shift_ctrl_band_and_drag_into_folder_and_trash ... ok
+test apps::layout::tests::controls_keep_tested_interaction_points ... ok
+test apps::layout::tests::default_size_is_the_phase10_geometry ... ok
+test apps::model::tests::editor_full_refuses_without_cursor_or_data_mutation ... ok
+test apps::layout::tests::every_size_lays_out_inside_the_surface ... ok
+test apps::model::tests::editor_insert_delete_navigation_and_atomic_load_refusal ... ok
+test apps::model::tests::terminal_line_edit_and_bounded_scrollback ... ok
+test apps::scene::tests::changed_box_is_exactly_the_changed_pixels ... ok
+test apps::scene::tests::dirty_runs_merge_and_stay_bounded ... ok
+test apps::scene::tests::editor_caret_motion_repaints_old_and_new_rows_only ... ok
+test apps::scene::tests::editor_partial_repaint_equals_full_redraw ... ok
+test apps::scene::tests::terminal_partial_repaint_equals_full_redraw ... ok
+test apps::scene::tests::terminal_typing_repaints_only_the_input_line ... ok
+test apps::view::tests::editor_probe_regions_change_only_for_their_events ... ok
+test apps::view::tests::terminal_header_keeps_cascade_probe_strip_plain ... ok
+test associations::tests::canonical_defaults_round_trip_and_corruption_refuses ... ok
+test associations::tests::malformed_preference_fields_are_rejected ... ok
+test associations::tests::replacing_and_pruning_preserve_sorted_canonical_state ... ok
+test compose::tests::a_presented_publication_is_not_damaged_again ... ok
+test apps::scene::tests::partial_repaint_equals_full_redraw_at_every_size ... ok
+test compose::tests::additional_surface_publication_and_partial_damage_are_composed ... ok
+test compose::tests::damage_list_merges_and_bounds ... ok
+test compose::tests::pointer_motion_damages_only_two_small_rects ... ok
+test desk::tests::a_press_after_a_menu_click_is_a_press ... ok
+test desk::tests::bundle_open_requests_trusted_install_without_content_authority ... ok
+test desk::tests::damage_covers_changed_cells_ghosts_and_menu ... ok
+test desk::tests::desktop_open_with_emits_only_the_selected_document_path ... ok
+test desk::tests::open_drop_into_folder_menu_and_trash ... ok
+test desk::tests::positions_parse_and_persist_and_survive_reload ... ok
+test favorites::tests::built_in_defaults_round_trip_and_user_toggle_is_persistent ... ok
+test favorites::tests::capacity_invalid_ids_duplicates_and_corruption_are_bounded ... ok
+test favorites::tests::stale_ids_are_pruned_without_reordering_survivors ... ok
+test files::tests::components_and_split_are_lexical ... ok
+test filesd_wire::tests::apb1_key_and_digest_share_exactly_one_raw_64_byte_record ... ok
+test input_wire::tests::canonical_control_keys_pointer_and_reserved_fields ... ok
+test model::tests::alt_tab_switcher_cycles_most_recent_first_commits_on_alt_release_and_cancels ... ok
+test model::tests::body_button_release_is_captured_and_retirement_discards_capture ... ok
+test model::tests::capacity_stale_cleanup_and_routed_queue ... ok
+test model::tests::desktop_keyboard_launch_cycle_close_preserves_ordinary_key_focus ... ok
+test model::tests::dock_half_open_bounds_and_screen_edges ... ok
+test model::tests::drag_to_edges_snaps_and_keyboard_places_restores_and_minimizes ... ok
+test model::tests::exhausted_generations_refuse_before_publication ... ok
+test model::tests::focus_change_move_and_retire_dismiss_menus_but_dialogs_are_modal_and_persist ... ok
+test model::tests::frame_edges_resize_with_minimum_work_area_and_bar_clamps ... ok
+test model::tests::hit_focus_drag_release_and_close_exact_content ... ok
+test model::tests::key_repeat_chords_and_host_autorepeat_do_not_stack ... ok
+test model::tests::one_owner_has_multiple_independently_stateful_windows ... ok
+test model::tests::resize_is_opt_in_bounded_and_configure_is_coalesced ... ok
+test model::tests::secondary_press_activates_and_reaches_the_window_without_drag_or_capture ... ok
+test model::tests::small_window_title_and_close_remain_above_dock ... ok
+test model::tests::thirty_two_windows_fit_on_screen_and_the_thirty_third_is_refused ... ok
+test model::tests::title_buttons_minimize_and_maximize_only_where_supported ... ok
+test model::tests::title_drag_has_a_threshold_and_double_click_maximizes_and_restores ... ok
+test model::tests::tooltips_take_no_input_and_any_press_dismisses_without_consuming ... ok
+test model::tests::transient_surfaces_are_owned_focused_stale_safe_and_menu_dismissal_consumes ... ok
+test model::tests::transient_surfaces_stay_on_screen ... ok
+test model::tests::wheel_goes_to_the_window_under_the_pointer ... ok
+test package::manifest::tests::bundle_paths_reject_traversal_aliases_and_platform_separators ... ok
+test package::manifest::tests::canonical_manifest_roundtrips_without_assigning_authority ... ok
+test package::manifest::tests::native_sync_opt_in_is_descriptive_and_grants_no_capability ... ok
+test package::manifest::tests::reserved_noncanonical_identity_associations_and_dimensions_refuse ... ok
+test package::manifest::tests::standard_stream_opt_in_is_descriptive_and_grants_no_capability ... ok
+test perf::tests::long_lines_are_emitted_in_prefixed_pieces ... ok
+test perf::tests::stat_and_line_format ... ok
+test preferences::tests::canonical_durable_choices ... ok
+test scope::tests::explicit_resource_namespace_cannot_write_trust_records ... ok
+test scope::tests::graphics_never_amplifies_and_cross_function_scope_refuses ... ok
+test scope::tests::launch_targets_are_explicit_and_bounded ... ok
+test service_wire::tests::canonical_metadata_and_operations_do_not_accept_reserved_or_names_as_authority ... ok
+test service_wire::tests::titles_with_spaces_and_folders_cross_launch_and_started ... ok
+test session_auth::tests::duplicate_badges_are_ambiguous_even_if_only_one_owner_is_live ... ok
+test session_auth::tests::only_the_unique_live_badge_owner_is_selected ... ok
+test session_auth::tests::zero_unknown_and_dead_badges_never_select_a_session ... ok
+test wire::identify_tests::identify_reply_reserved_bytes_refused ... ok
+test wire::identify_tests::identify_reply_round_trip ... ok
+test wire::identify_tests::identify_request_round_trip ... ok
+test wire::identify_tests::identify_reserved_bytes_refused ... ok
+test wire::identify_tests::identify_wrong_magic_refused ... ok
+test wire::identify_tests::identify_wrong_opcode_refused ... ok
+test wire::identify_tests::identify_wrong_version_refused ... ok
+test wire::tests::damage_rectangles_are_bounded_and_canonical ... ok
+test wire::tests::strict_canonical_frames_and_reserved_refusal ... ok
+test wire::tests::surface_and_transient_bounds_refuse ... ok
+test compose::tests::damage_composition_matches_full_redraw ... ok
+
+test result: ok. 96 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.68s
+
+    Checking arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Checking arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+    Checking arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+    Checking arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+    Checking arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Checking arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.83s
+   Compiling arena-servicemgr v0.1.0 (/workspace/ArenaOS/userspace/servicemgr)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.43s
+     Running unittests src/lib.rs (userspace/servicemgr/target/x86_64-unknown-linux-gnu/debug/deps/arena_servicemgr-371452a59df3117e)
+
+running 15 tests
+test inventory::tests::missing_or_unsupported_authority_fails_closed ... ok
+test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
+test inventory::tests::observed_authority_goes_directly_to_policy_without_manifest_minting ... ok
+test inventory::tests::reads_live_cap_metadata_not_manifest_words ... ok
+test manifest::tests::attenuated_grants_and_actual_source_slots ... ok
+test manifest::tests::dependencies_must_be_present_ready_and_acyclic ... ok
+test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
+test manifest::tests::rights_may_never_be_broadened_or_quietly_clamped ... ok
+test manifest::tests::topological_order_and_duplicate_policy ... ok
+test readiness::tests::coalesced_apb1_wake_is_preserved_but_cannot_complete_readiness ... ok
+test readiness::tests::late_coalesced_ready_is_still_too_late ... ok
+test readiness::tests::requires_both_independent_driver_signals ... ok
+test readiness::tests::timeout_unknown_badge_and_invalid_masks_fail_closed ... ok
+test restart::tests::exact_child_and_bounded_restart_budget ... ok
+test restart::tests::invalid_policy_and_premature_ready_refused ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-servicemgr v0.1.0 (/workspace/ArenaOS/userspace/servicemgr)
+warning: constant `SECTOR_BYTES` is never used
+  --> src/../../permission.rs:11:11
+   |
+11 | pub const SECTOR_BYTES: usize = 512;
+   |           ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PAYLOAD_MAX` is never used
+  --> src/../../permission.rs:12:11
+   |
+12 | pub const PAYLOAD_MAX: usize = 32;
+   |           ^^^^^^^^^^^
+
+warning: constant `MAX_GENERATIONS` is never used
+  --> src/../../permission.rs:13:11
+   |
+13 | pub const MAX_GENERATIONS: u8 = 8;
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `MAGIC` is never used
+  --> src/../../permission.rs:14:7
+   |
+14 | const MAGIC: &[u8; 8] = b"ARPRM8V1";
+   |       ^^^^^
+
+warning: constant `PREFIX` is never used
+  --> src/../../permission.rs:15:7
+   |
+15 | const PREFIX: &[u8; 6] = b"perm8-";
+   |       ^^^^^^
+
+warning: constant `CHECKSUM_OFF` is never used
+  --> src/../../permission.rs:16:7
+   |
+16 | const CHECKSUM_OFF: usize = 504;
+   |       ^^^^^^^^^^^^
+
+warning: constant `FNV_BASIS` is never used
+  --> src/../../permission.rs:17:7
+   |
+17 | const FNV_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+   |       ^^^^^^^^^
+
+warning: constant `FNV_PRIME` is never used
+  --> src/../../permission.rs:18:7
+   |
+18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+   |       ^^^^^^^^^
+
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `encode_request` is never used
+  --> src/../../permission.rs:49:8
+   |
+49 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: struct `Record` is never constructed
+  --> src/../../permission.rs:63:12
+   |
+63 | pub struct Record {
+   |            ^^^^^^
+
+warning: methods `sequence` and `bytes` are never used
+  --> src/../../permission.rs:70:12
+   |
+69 | impl Record {
+   | ----------- methods in this implementation
+70 |     pub fn sequence(&self) -> u8 {
+   |            ^^^^^^^^
+...
+74 |     pub fn bytes(&self) -> &[u8] {
+   |            ^^^^^
+
+warning: function `name` is never used
+  --> src/../../permission.rs:79:8
+   |
+79 | pub fn name(seq: u8) -> Result<[u8; 8], Error> {
+   |        ^^^^
+
+warning: function `hash` is never used
+  --> src/../../permission.rs:86:4
+   |
+86 | fn hash(data: &[u8]) -> u64 {
+   |    ^^^^
+
+warning: function `valid_decision` is never used
+  --> src/../../permission.rs:94:8
+   |
+94 | pub fn valid_decision(bytes: &[u8]) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decision` is never used
+  --> src/../../permission.rs:97:8
+   |
+97 | pub fn decision(allow: bool) -> [u8; 4] {
+   |        ^^^^^^^^
+
+warning: function `encode` is never used
+   --> src/../../permission.rs:103:8
+    |
+103 | pub fn encode(seq: u8, payload: &[u8], out: &mut [u8; SECTOR_BYTES]) -> Result<(), Error> {
+    |        ^^^^^^
+
+warning: function `decode` is never used
+   --> src/../../permission.rs:121:8
+    |
+121 | pub fn decode(seq: u8, raw: &[u8; SECTOR_BYTES]) -> Result<Record, Error> {
+    |        ^^^^^^
+
+warning: struct `Scan` is never constructed
+   --> src/../../permission.rs:154:12
+    |
+154 | pub struct Scan {
+    |            ^^^^
+
+warning: struct `Recovery` is never constructed
+   --> src/../../permission.rs:163:12
+    |
+163 | pub struct Recovery {
+    |            ^^^^^^^^
+
+warning: method `next` is never used
+   --> src/../../permission.rs:171:12
+    |
+168 | impl Recovery {
+    | ------------- method in this implementation
+...
+171 |     pub fn next(&self) -> Option<u8> {
+    |            ^^^^
+
+warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never used
+   --> src/../../permission.rs:180:18
+    |
+179 | impl Scan {
+    | --------- associated items in this implementation
+180 |     pub const fn new() -> Self {
+    |                  ^^^
+...
+190 |     fn corrupt(&mut self) -> Result<bool, Error> {
+    |        ^^^^^^^
+...
+199 |     pub fn ingest(
+    |            ^^^^^^
+...
+238 |     pub fn finish(self) -> Result<Recovery, Error> {
+    |            ^^^^^^
+
+warning: `arena-servicemgr` (bin "arena-servicemgr") generated 22 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.44s
+== Phase 13 real installed-application pressure guest
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+   Compiling arena-phase13-installed-app v0.1.0 (/workspace/ArenaOS/userspace/phase13-app)
+    Finished `release` profile [optimized] target(s) in 4.50s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+   Compiling arena-phase13-headless v0.1.0 (/workspace/ArenaOS/userspace/phase13-headless)
+    Finished `release` profile [optimized] target(s) in 4.28s
+    Finished `release` profile [optimized] target(s) in 0.01s
+[phase13-registry] build failed; diagnostics: /workspace/ArenaOS/build/phase13-registry-build.log
+[phase13-registry] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase13_registry_guest.py", line 941, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_phase13_registry_guest.py", line 858, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! Phase 13 installed-application guest FAILED
+======================================================================
+== running test_phase14_pie_guest.py
+======================================================================
+[phase14-pie] build failed; diagnostics: /workspace/ArenaOS/build/phase14-pie-build.log
+[phase14-pie] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase14_pie_guest.py", line 219, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_phase14_pie_guest.py", line 177, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_phase14_pie_guest.py FAILED
+======================================================================
+== running test_phase14_negative_guest.py
+======================================================================
+[phase14-pie-negative] build failed; diagnostics: /workspace/ArenaOS/build/phase14-pie-negative-build.log
+[phase14-pie-negative] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase14_negative_guest.py", line 345, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_phase14_negative_guest.py", line 283, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_phase14_negative_guest.py FAILED
+======================================================================
+== running test_phase14_no_entropy_guest.py
+======================================================================
+[phase14-no-entropy-production-baseline] build failed; diagnostics: /workspace/ArenaOS/build/phase14-no-entropy-production-baseline-build.log
+[phase14-no-entropy-production-baseline] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase14_no_entropy_guest.py", line 127, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_phase14_no_entropy_guest.py", line 50, in main
+    production_esp = build(LABEL + "-production-baseline")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/test_phase14_no_entropy_guest.py", line 41, in build
+    return mtest.build(label, desktop=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_phase14_no_entropy_guest.py FAILED
+======================================================================
+== running test_phase14_stale_image_guest.py
+======================================================================
+[phase14-stale-image-production-baseline] build failed; diagnostics: /workspace/ArenaOS/build/phase14-stale-image-production-baseline-build.log
+[phase14-stale-image-production-baseline] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase14_stale_image_guest.py", line 142, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_phase14_stale_image_guest.py", line 58, in main
+    production_esp = mtest.build(LABEL + "-production-baseline", desktop=True)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_phase14_stale_image_guest.py FAILED
+======================================================================
+== running test_m1.py
+======================================================================
+[test-m1] build failed; diagnostics: /workspace/ArenaOS/build/test-m1-build.log
+[test-m1] building kernel image + ESP ...
+[test-m1] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m1.py FAILED
+======================================================================
+== running test_m10_apps.py
+======================================================================
+[m10-apps] build failed; diagnostics: /workspace/ArenaOS/build/m10-apps-build.log
+[m10-apps] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_apps.py", line 263, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_apps.py", line 210, in main
+    if esp is None:esp=mtest.build('m10-apps',desktop=True)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_apps.py FAILED
+======================================================================
+== running test_m10_archive_preflight.py
+======================================================================
+[m10-archive-preflight] build failed; diagnostics: /workspace/ArenaOS/build/m10-archive-preflight-build.log
+[m10-archive-preflight] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_archive_preflight.py", line 42, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_archive_preflight.py", line 17, in main
+    esp=mtest.build('m10-archive-preflight',desktop=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_archive_preflight.py FAILED
+======================================================================
+== running test_m10_boundaries.py
+======================================================================
+[m10-boundaries] build failed; diagnostics: /workspace/ArenaOS/build/m10-boundaries-build.log
+[m10-boundaries] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_boundaries.py", line 48, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_boundaries.py", line 44, in main
+    if esp is None:esp=mtest.build(LABEL,desktop=True)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_boundaries.py FAILED
+======================================================================
+== running test_m10_boundaries_red.py
+======================================================================
+[m10-boundaries-red-base] build failed; diagnostics: /workspace/ArenaOS/build/m10-boundaries-red-base-build.log
+[m10-boundaries-red-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_boundaries_red.py", line 143, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_boundaries_red.py", line 97, in main
+    esp=mtest.build('m10-boundaries-red-base',desktop=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_boundaries_red.py FAILED
+======================================================================
+== running test_m10_client_death.py
+======================================================================
+[m10-client-death-base] build failed; diagnostics: /workspace/ArenaOS/build/m10-client-death-base-build.log
+[m10-client-death-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_client_death.py", line 61, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_client_death.py", line 44, in main
+    esp=mtest.build(LABEL+'-base',desktop=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_client_death.py FAILED
+======================================================================
+== running test_m10_clock_sampling.py
+======================================================================
+[m10-clock-base] build failed; diagnostics: /workspace/ArenaOS/build/m10-clock-base-build.log
+[m10-clock-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_clock_sampling.py", line 64, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_clock_sampling.py", line 33, in main
+    esp=mtest.build('m10-clock-base')
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_clock_sampling.py FAILED
+======================================================================
+== running test_m10_desktop.py
+======================================================================
+[m10-desktop] build failed; diagnostics: /workspace/ArenaOS/build/m10-desktop-build.log
+[m10-desktop] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_desktop.py", line 68, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_desktop.py", line 62, in main
+    esp=mtest.build(LABEL,desktop=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_desktop.py FAILED
+======================================================================
+== running test_m10_display.py
+======================================================================
+[m10-display] build failed; diagnostics: /workspace/ArenaOS/build/m10-display-build.log
+[m10-display] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_display.py", line 82, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_display.py", line 75, in main
+    if esp is None:esp=mtest.build('m10-display',desktop=True)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_display.py FAILED
+======================================================================
+== running test_m10_dynamic.py
+======================================================================
+   Compiling arena-phase10-graphical-probe v0.1.0 (/workspace/ArenaOS/tools/phase10-graphical-probe)
+    Finished `release` profile [optimized] target(s) in 0.15s
+production elf::validate: PASS; payload=1496 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=1281 memsz=1281 RX; W+X/entry/truncation refused
+[m10-dynamic] build failed; diagnostics: /workspace/ArenaOS/build/m10-dynamic-build.log
+[m10-dynamic] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_dynamic.py", line 209, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_dynamic.py", line 25, in main
+    if esp is None:esp=mtest.build(LABEL,desktop=True)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_dynamic.py FAILED
+======================================================================
+== running test_m10_files.py
+======================================================================
+[m10-files] build failed; diagnostics: /workspace/ArenaOS/build/m10-files-build.log
+[m10-files] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_files.py", line 187, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m10_files.py", line 163, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_files.py FAILED
+======================================================================
+== running test_m10_handoff.py
+======================================================================
+[m10-handoff] build failed; diagnostics: /workspace/ArenaOS/build/m10-handoff-build.log
+[m10-handoff] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_handoff.py", line 114, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_handoff.py", line 38, in main
+    if esp is None:esp=mtest.build('m10-handoff',desktop=True)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_handoff.py FAILED
+======================================================================
+== running test_m10_keyboard.py
+======================================================================
+[m10-keyboard] build failed; diagnostics: /workspace/ArenaOS/build/m10-keyboard-build.log
+[m10-keyboard] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_keyboard.py", line 35, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_keyboard.py", line 30, in main
+    esp=mtest.build(LABEL,desktop=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_keyboard.py FAILED
+======================================================================
+== running test_m10_multi_red.py
+======================================================================
+[m10-multi-red-base] build failed; diagnostics: /workspace/ArenaOS/build/m10-multi-red-base-build.log
+[m10-multi-red-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_multi_red.py", line 61, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_multi_red.py", line 25, in main
+    esp=mtest.build('m10-multi-red-base');efi=BUILD/'arena-boot.efi';artifacts={p:p.read_bytes() for p in (esp,efi)}
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_multi_red.py FAILED
+======================================================================
+== running test_m10_replace.py
+======================================================================
+[m10-replace] build failed; diagnostics: /workspace/ArenaOS/build/m10-replace-build.log
+[m10-replace] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_replace.py", line 62, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_replace.py", line 24, in main
+    if esp is None:esp=mtest.build('m10-replace')
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_replace.py FAILED
+======================================================================
+== running test_m10_replace_red.py
+======================================================================
+[m10-put-red-baseline] build failed; diagnostics: /workspace/ArenaOS/build/m10-put-red-baseline-build.log
+[m10-put-red-baseline] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_replace_red.py", line 41, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_replace_red.py", line 14, in main
+    esp=mtest.build('m10-put-red-baseline');artifacts={p:p.read_bytes() for p in (efi,esp)};digest=hashlib.sha256(artifacts[efi]).hexdigest()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_replace_red.py FAILED
+======================================================================
+== running test_m10_select_failure_cleanup.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 66, in <module>
+    main(existing_userspace=bool(sys.argv[1:]))
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 35, in main
+    run('bash','tools/build.sh','--image',env=env)
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 24, in run
+    return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('bash', 'tools/build.sh', '--image')' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_select_failure_cleanup.py", line 76, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_select_failure_cleanup.py", line 48, in main
+    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py')],cwd=ROOT,check=True)
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', '/workspace/ArenaOS/tools/test_phase85_elf_fit.py']' returned non-zero exit status 1.
+!! test_m10_select_failure_cleanup.py FAILED
+======================================================================
+== running test_m10_service_death.py
+======================================================================
+[m10-service-death-base] build failed; diagnostics: /workspace/ArenaOS/build/m10-service-death-base-build.log
+[m10-service-death-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m10_service_death.py", line 47, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m10_service_death.py", line 21, in main
+    esp=mtest.build(LABEL+'-base',desktop=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m10_service_death.py FAILED
+======================================================================
+== running test_m10_ui.py
+======================================================================
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.79s
+     Running unittests src/lib.rs (userspace/ui/target/x86_64-unknown-linux-gnu/debug/deps/arena_ui-70a8cb02f9525191)
+
+running 11 tests
+test motion::tests::monotone_extreme_geometry_and_clock_end ... ok
+test motion::tests::endpoints_retarget_and_disabled_animation ... ok
+test widgets::tests::breadcrumb_collapses_and_hits ... ok
+test theme::tests::legible_roles_in_both_palettes ... ok
+test widgets::tests::grid_columns_cells_and_hits ... ok
+test widgets::tests::input_edits_with_selection_and_bounds ... ok
+test widgets::tests::scroll_clamps_reveals_and_maps_the_thumb ... ok
+test widgets::tests::selection_click_shift_ctrl_and_steps ... ok
+test widgets::tests::splitter_and_focus_order ... ok
+test widgets::tests::text_in_ellipsizes_inside_its_width ... ok
+test widgets::tests::list_is_virtualized_hit_tested_and_revealing ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Checking arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+    Finished `release` profile [optimized] target(s) in 0.68s
+warning: variable does not need to be mutable
+   --> src/wire.rs:157:13
+    |
+157 |         let mut b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
+    |             ----^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/wire.rs:168:13
+    |
+168 |         let mut b = identify_reply_encode(1, IDENTIFY_SURFACE_KIND, IDENTIFY_SURFACE_RIGHTS, 2);
+    |             ----^
+    |             |
+    |             help: remove this `mut`
+
+warning: `arena-desktop` (lib test) generated 2 warnings (run `cargo fix --lib -p arena-desktop --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running unittests src/lib.rs (userspace/desktop/target/x86_64-unknown-linux-gnu/debug/deps/arena_desktop-3b46cfabf4b1da48)
+
+running 96 tests
+test apps::explorer::tests::history_back_forward_up_and_open_by_type ... ok
+test apps::explorer::tests::copy_cut_paste_and_drag_moves ... ok
+test apps::explorer::tests::listing_sorts_folders_first_and_hides_dotfiles ... ok
+test apps::explorer::tests::new_folder_rename_and_refusals ... ok
+test apps::explorer::tests::trash_restore_and_empty ... ok
+test apps::explorer::tests::type_ahead_change_detection_and_paths ... ok
+test apps::explorer_ctl::tests::double_click_opens_folder_and_text_and_refuses_binary ... ok
+test apps::explorer_ctl::tests::fingerprint_tracks_visible_state_only ... ok
+test apps::explorer_ctl::tests::keyboard_rename_clipboard_menu_and_sheet ... ok
+test apps::explorer_ctl::tests::guest_sequence_on_the_default_window ... ok
+test apps::explorer_view::tests::geometry_hits_every_part ... ok
+test apps::explorer_view::tests::sizes_times_and_columns ... ok
+test apps::explorer_ctl::tests::shift_ctrl_band_and_drag_into_folder_and_trash ... ok
+test apps::layout::tests::controls_keep_tested_interaction_points ... ok
+test apps::layout::tests::default_size_is_the_phase10_geometry ... ok
+test apps::model::tests::editor_full_refuses_without_cursor_or_data_mutation ... ok
+test apps::layout::tests::every_size_lays_out_inside_the_surface ... ok
+test apps::model::tests::editor_insert_delete_navigation_and_atomic_load_refusal ... ok
+test apps::model::tests::terminal_line_edit_and_bounded_scrollback ... ok
+test apps::scene::tests::changed_box_is_exactly_the_changed_pixels ... ok
+test apps::scene::tests::dirty_runs_merge_and_stay_bounded ... ok
+test apps::scene::tests::editor_caret_motion_repaints_old_and_new_rows_only ... ok
+test apps::scene::tests::editor_partial_repaint_equals_full_redraw ... ok
+test apps::scene::tests::terminal_partial_repaint_equals_full_redraw ... ok
+test apps::scene::tests::terminal_typing_repaints_only_the_input_line ... ok
+test apps::view::tests::editor_probe_regions_change_only_for_their_events ... ok
+test apps::view::tests::terminal_header_keeps_cascade_probe_strip_plain ... ok
+test associations::tests::canonical_defaults_round_trip_and_corruption_refuses ... ok
+test associations::tests::malformed_preference_fields_are_rejected ... ok
+test associations::tests::replacing_and_pruning_preserve_sorted_canonical_state ... ok
+test compose::tests::a_presented_publication_is_not_damaged_again ... ok
+test apps::scene::tests::partial_repaint_equals_full_redraw_at_every_size ... ok
+test compose::tests::additional_surface_publication_and_partial_damage_are_composed ... ok
+test compose::tests::damage_list_merges_and_bounds ... ok
+test compose::tests::pointer_motion_damages_only_two_small_rects ... ok
+test desk::tests::a_press_after_a_menu_click_is_a_press ... ok
+test desk::tests::bundle_open_requests_trusted_install_without_content_authority ... ok
+test desk::tests::damage_covers_changed_cells_ghosts_and_menu ... ok
+test desk::tests::desktop_open_with_emits_only_the_selected_document_path ... ok
+test desk::tests::open_drop_into_folder_menu_and_trash ... ok
+test desk::tests::positions_parse_and_persist_and_survive_reload ... ok
+test favorites::tests::built_in_defaults_round_trip_and_user_toggle_is_persistent ... ok
+test favorites::tests::capacity_invalid_ids_duplicates_and_corruption_are_bounded ... ok
+test favorites::tests::stale_ids_are_pruned_without_reordering_survivors ... ok
+test files::tests::components_and_split_are_lexical ... ok
+test filesd_wire::tests::apb1_key_and_digest_share_exactly_one_raw_64_byte_record ... ok
+test input_wire::tests::canonical_control_keys_pointer_and_reserved_fields ... ok
+test model::tests::alt_tab_switcher_cycles_most_recent_first_commits_on_alt_release_and_cancels ... ok
+test model::tests::body_button_release_is_captured_and_retirement_discards_capture ... ok
+test model::tests::capacity_stale_cleanup_and_routed_queue ... ok
+test model::tests::desktop_keyboard_launch_cycle_close_preserves_ordinary_key_focus ... ok
+test model::tests::dock_half_open_bounds_and_screen_edges ... ok
+test model::tests::drag_to_edges_snaps_and_keyboard_places_restores_and_minimizes ... ok
+test model::tests::exhausted_generations_refuse_before_publication ... ok
+test model::tests::focus_change_move_and_retire_dismiss_menus_but_dialogs_are_modal_and_persist ... ok
+test model::tests::frame_edges_resize_with_minimum_work_area_and_bar_clamps ... ok
+test model::tests::hit_focus_drag_release_and_close_exact_content ... ok
+test model::tests::key_repeat_chords_and_host_autorepeat_do_not_stack ... ok
+test model::tests::one_owner_has_multiple_independently_stateful_windows ... ok
+test model::tests::resize_is_opt_in_bounded_and_configure_is_coalesced ... ok
+test model::tests::secondary_press_activates_and_reaches_the_window_without_drag_or_capture ... ok
+test model::tests::small_window_title_and_close_remain_above_dock ... ok
+test model::tests::thirty_two_windows_fit_on_screen_and_the_thirty_third_is_refused ... ok
+test model::tests::title_buttons_minimize_and_maximize_only_where_supported ... ok
+test model::tests::title_drag_has_a_threshold_and_double_click_maximizes_and_restores ... ok
+test model::tests::tooltips_take_no_input_and_any_press_dismisses_without_consuming ... ok
+test model::tests::transient_surfaces_are_owned_focused_stale_safe_and_menu_dismissal_consumes ... ok
+test model::tests::transient_surfaces_stay_on_screen ... ok
+test model::tests::wheel_goes_to_the_window_under_the_pointer ... ok
+test package::manifest::tests::bundle_paths_reject_traversal_aliases_and_platform_separators ... ok
+test package::manifest::tests::canonical_manifest_roundtrips_without_assigning_authority ... ok
+test package::manifest::tests::native_sync_opt_in_is_descriptive_and_grants_no_capability ... ok
+test package::manifest::tests::reserved_noncanonical_identity_associations_and_dimensions_refuse ... ok
+test package::manifest::tests::standard_stream_opt_in_is_descriptive_and_grants_no_capability ... ok
+test perf::tests::long_lines_are_emitted_in_prefixed_pieces ... ok
+test perf::tests::stat_and_line_format ... ok
+test preferences::tests::canonical_durable_choices ... ok
+test scope::tests::explicit_resource_namespace_cannot_write_trust_records ... ok
+test scope::tests::graphics_never_amplifies_and_cross_function_scope_refuses ... ok
+test scope::tests::launch_targets_are_explicit_and_bounded ... ok
+test service_wire::tests::canonical_metadata_and_operations_do_not_accept_reserved_or_names_as_authority ... ok
+test service_wire::tests::titles_with_spaces_and_folders_cross_launch_and_started ... ok
+test session_auth::tests::duplicate_badges_are_ambiguous_even_if_only_one_owner_is_live ... ok
+test session_auth::tests::only_the_unique_live_badge_owner_is_selected ... ok
+test session_auth::tests::zero_unknown_and_dead_badges_never_select_a_session ... ok
+test wire::identify_tests::identify_reply_reserved_bytes_refused ... ok
+test wire::identify_tests::identify_reply_round_trip ... ok
+test wire::identify_tests::identify_request_round_trip ... ok
+test wire::identify_tests::identify_reserved_bytes_refused ... ok
+test wire::identify_tests::identify_wrong_magic_refused ... ok
+test wire::identify_tests::identify_wrong_opcode_refused ... ok
+test wire::identify_tests::identify_wrong_version_refused ... ok
+test wire::tests::damage_rectangles_are_bounded_and_canonical ... ok
+test wire::tests::strict_canonical_frames_and_reserved_refusal ... ok
+test wire::tests::surface_and_transient_bounds_refuse ... ok
+test compose::tests::damage_composition_matches_full_redraw ... ok
+
+test result: ok. 96 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.72s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+   Compiling arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `release` profile [optimized] target(s) in 3.97s
+    Checking arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Checking arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Checking arena-startup-abi v0.1.0 (/workspace/ArenaOS/userspace/arena-startup-abi)
+    Checking arena-process v0.1.0 (/workspace/ArenaOS/userspace/arena-process)
+    Checking arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Checking arena-runtime v0.1.0 (/workspace/ArenaOS/userspace/arena-runtime)
+    Checking arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+    Checking arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `release` profile [optimized] target(s) in 2.23s
+
+running 3 tests
+test tests::coherent_batch_buttons_and_exact_edges ... ok
+test tests::unknown_events_and_button_repeat_never_fabricate_motion ... ok
+test tests::wheel_notches_are_reported_once_per_batch_with_sign ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test tests::empty_geometry_and_reserved_sectors ... ok
+test tests::fragmented_complete_reservation_and_mutation_free_refusal ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test tests::editor_insert_delete_navigation_and_atomic_load_refusal ... ok
+test tests::editor_full_refuses_without_cursor_or_data_mutation ... ok
+test tests::terminal_line_edit_and_bounded_scrollback ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+host fixture phase10-host-gallery-light.ppm sha256=b59941e293ba5dd6fee2def92186286e52abb768acc57ad68e850f31ecadd476
+host fixture phase10-host-gallery-dark.ppm sha256=b3be3fd578cdf8f000c8fa53db07bc2490dfa05dab22b0429f618689dbc9eafc
+[m10-ui] host components/motion/window-policy, no_std binaries/static checks and deterministic palette-independent raster checks PASS; guest proof is separate
+======================================================================
+== running test_m11_afs2.py
+======================================================================
+[m11-afs2] build failed; diagnostics: /workspace/ArenaOS/build/m11-afs2-build.log
+[m11-afs2] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_afs2.py", line 239, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m11_afs2.py", line 124, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_afs2.py FAILED
+======================================================================
+== running test_m11_archive_preflight.py
+======================================================================
+[m11-archive-preflight] build failed; diagnostics: /workspace/ArenaOS/build/m11-archive-preflight-build.log
+[m11-archive-preflight] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_archive_preflight.py", line 67, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_archive_preflight.py", line 27, in main
+    esp = mtest.build('m11-archive-preflight', desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_archive_preflight.py FAILED
+======================================================================
+== running test_m11_desk.py
+======================================================================
+[m11-desk] build failed; diagnostics: /workspace/ArenaOS/build/m11-desk-build.log
+[m11-desk] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_desk.py", line 194, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_desk.py", line 173, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_desk.py FAILED
+======================================================================
+== running test_m11_event_red.py
+======================================================================
+[m11-red-base] build failed; diagnostics: /workspace/ArenaOS/build/m11-red-base-build.log
+[m11-red-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_event_red.py", line 120, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_event_red.py", line 84, in main
+    esp = mtest.build('m11-red-base')
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_event_red.py FAILED
+======================================================================
+== running test_m11_explorer.py
+======================================================================
+[m11-explorer] build failed; diagnostics: /workspace/ArenaOS/build/m11-explorer-build.log
+[m11-explorer] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_explorer.py", line 255, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_explorer.py", line 232, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_explorer.py FAILED
+======================================================================
+== running test_m11_files.py
+======================================================================
+   Compiling arena-phase11-files-probe v0.1.0 (/workspace/ArenaOS/tools/phase11-files-probe)
+    Finished `release` profile [optimized] target(s) in 0.16s
+[m11-files] build failed; diagnostics: /workspace/ArenaOS/build/m11-files-build.log
+[m11-files] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_files.py", line 294, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m11_files.py", line 137, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_files.py FAILED
+======================================================================
+== running test_m11_files_red.py
+======================================================================
+[m11-files-red-base] build failed; diagnostics: /workspace/ArenaOS/build/m11-files-red-base-build.log
+[m11-files-red-base] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_files_red.py", line 64, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_files_red.py", line 34, in main
+    esp = mtest.build('m11-files-red-base', desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_files_red.py FAILED
+======================================================================
+== running test_m11_repaint_red.py
+======================================================================
+[m11-repaint-red] old-caret: editor_partial_repaint_equals_full_redraw FAILED → RED PASS
+[m11-repaint-red] exposed-rows: terminal_partial_repaint_equals_full_redraw FAILED → RED PASS
+[m11-repaint-red] client-merge: dirty_runs_merge_and_stay_bounded FAILED → RED PASS
+[m11-repaint-red] region-merge: damage_composition_matches_full_redraw FAILED → RED PASS
+[m11-repaint-red] region-offset: damage_composition_matches_full_redraw FAILED → RED PASS
+[m11-repaint-red] 5 RED controls (old-caret, exposed-rows, client-merge, region-merge, region-offset); byte-exact restore; library suite GREEN
+======================================================================
+== running test_m11_watch.py
+======================================================================
+[m11-watch] build failed; diagnostics: /workspace/ArenaOS/build/m11-watch-build.log
+[m11-watch] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_watch.py", line 171, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_watch.py", line 155, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_watch.py FAILED
+======================================================================
+== running test_m11_wm.py
+======================================================================
+[m11-wm] build failed; diagnostics: /workspace/ArenaOS/build/m11-wm-build.log
+[m11-wm] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m11_wm.py", line 228, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m11_wm.py", line 220, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m11_wm.py FAILED
+======================================================================
+== running test_m12_scale.py
+======================================================================
+[m12-scale] build failed; diagnostics: /workspace/ArenaOS/build/m12-scale-build.log
+[m12-scale] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m12_scale.py", line 363, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m12_scale.py", line 315, in main
+    esp = mtest.build(LABEL, desktop=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m12_scale.py FAILED
+======================================================================
+== running test_m12_startup.py
+======================================================================
+[test-m12] build failed; diagnostics: /workspace/ArenaOS/build/test-m12-build.log
+[test-m12] building kernel image + ESP ...
+[test-m12] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m12_startup.py FAILED
+======================================================================
+== running test_m15_guest.py
+======================================================================
+error: no OVMF/EDK2 vars flash found (set ARENA_OVMF_VARS)
+!! test_m15_guest.py FAILED
+======================================================================
+== running test_m15_osxsave_seed.py
+======================================================================
+build failed; see build/phase15-osxsave-seed-build.log
+[phase15-osxsave-seed] building controlled diagnostic image
+!! test_m15_osxsave_seed.py FAILED
+======================================================================
+== running test_m2.py
+======================================================================
+[test-m2] build failed; diagnostics: /workspace/ArenaOS/build/test-m2-build.log
+[test-m2] building kernel image + ESP ...
+[test-m2] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m2.py FAILED
+======================================================================
+== running test_m3.py
+======================================================================
+[test-m3] build failed; diagnostics: /workspace/ArenaOS/build/test-m3-build.log
+[test-m3] building kernel image + ESP ...
+[test-m3] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m3.py FAILED
+======================================================================
+== running test_m4.py
+======================================================================
+[test-m4] build failed; diagnostics: /workspace/ArenaOS/build/test-m4-build.log
+[test-m4] building kernel image + ESP ...
+[test-m4] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m4.py FAILED
+======================================================================
+== running test_m4_shell.py
+======================================================================
+[test-m4-shell] build failed; diagnostics: /workspace/ArenaOS/build/test-m4-shell-build.log
+[test-m4-shell] building kernel image + ESP ...
+[test-m4-shell] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m4_shell.py FAILED
+======================================================================
+== running test_m5.py
+======================================================================
+[test-m5] build failed; diagnostics: /workspace/ArenaOS/build/test-m5-build.log
+[test-m5] building kernel image + ESP ...
+[test-m5] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m5.py FAILED
+======================================================================
+== running test_m5_crash.py
+======================================================================
+[test-m5-crash] build failed; diagnostics: /workspace/ArenaOS/build/test-m5-crash-build.log
+[test-m5-crash] building kernel image + ESP ...
+[test-m5-crash] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m5_crash.py FAILED
+======================================================================
+== running test_m5_persist.py
+======================================================================
+[test-m5-persist] build failed; diagnostics: /workspace/ArenaOS/build/test-m5-persist-build.log
+[test-m5-persist] building kernel image + ESP ...
+[test-m5-persist] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m5_persist.py FAILED
+======================================================================
+== running test_m6.py
+======================================================================
+[test-m6] build failed; diagnostics: /workspace/ArenaOS/build/test-m6-build.log
+[test-m6] building kernel image + ESP ...
+[test-m6] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+[test-m6] ==============================================
+[test-m6] MILESTONE 6.1+6.2+6.3+6.4: FAIL (link + entropy + input + console proofs, honest SKIPs with no fixtures)
+!! test_m6.py FAILED
+======================================================================
+== running test_m6_console.py
+======================================================================
+[test-m6-console] build failed; diagnostics: /workspace/ArenaOS/build/test-m6-console-build.log
+[test-m6-console] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m6_console.py", line 145, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m6_console.py", line 73, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m6_console.py FAILED
+======================================================================
+== running test_m6_typing.py
+======================================================================
+[test-m6-typing] build failed; diagnostics: /workspace/ArenaOS/build/test-m6-typing-build.log
+[test-m6-typing] building kernel image + ESP ...
+[test-m6-typing] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.01s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m6_typing.py FAILED
+======================================================================
+== running test_m7.py
+======================================================================
+[test-m7] build failed; diagnostics: /workspace/ArenaOS/build/test-m7-build.log
+[test-m7] building kernel image + ESP ...
+[test-m7] FAIL: kernel build failed:
+== building userspace payload (userspace/payload, x86_64-unknown-none) ==
+payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
+== building native static PIE fixture (userspace/phase14-pie) ==
+
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+
+!! test_m7.py FAILED
+======================================================================
+== running test_m7_no_tcp.py
+======================================================================
+[tcp-no-peer] build failed; diagnostics: /workspace/ArenaOS/build/tcp-no-peer-build.log
+[tcp-no-peer] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m7_no_tcp.py", line 27, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m7_no_tcp.py", line 16, in main
+    esp = mtest.build(label)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m7_no_tcp.py FAILED
+======================================================================
+== running test_m81_read.py
+======================================================================
+[m81-read] build failed; diagnostics: /workspace/ArenaOS/build/m81-read-build.log
+[m81-read] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m81_read.py", line 140, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m81_read.py", line 29, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m81_read.py FAILED
+======================================================================
+== running test_m81_update.py
+======================================================================
+[m81-update] build failed; diagnostics: /workspace/ArenaOS/build/m81-update-build.log
+[m81-update] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m81_update.py", line 215, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m81_update.py", line 73, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m81_update.py FAILED
+======================================================================
+== running test_m81_update_table.py
+======================================================================
+[m81-table] build failed; diagnostics: /workspace/ArenaOS/build/m81-table-build.log
+[m81-table] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m81_update_table.py", line 75, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m81_update_table.py", line 15, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m81_update_table.py FAILED
+======================================================================
+== running test_m82_capspace.py
+======================================================================
+[m82-capspace] build failed; diagnostics: /workspace/ArenaOS/build/m82-capspace-build.log
+[m82-capspace] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_capspace.py", line 51, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_capspace.py", line 18, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_capspace.py FAILED
+======================================================================
+== running test_m82_ipc_caller.py
+======================================================================
+[m82-ipc-caller] build failed; diagnostics: /workspace/ArenaOS/build/m82-ipc-caller-build.log
+[m82-ipc-caller] GUEST FAILURE despite QEMU rc=0: fatal [arena ERROR halt]
+[m82-ipc-caller] GUEST FAILURE despite QEMU rc=0: missing m4: RESULT PASS (9/9)
+[m82-ipc-caller] PASS: harness refuses QEMU rc=0 kernel halt or missing semantic PASS
+[m82-ipc-caller] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_ipc_caller.py", line 86, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_ipc_caller.py", line 49, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_ipc_caller.py FAILED
+======================================================================
+== running test_m82_permission.py
+======================================================================
+[m82-permission-integration] build failed; diagnostics: /workspace/ArenaOS/build/m82-permission-integration-build.log
+[m82-permission-integration] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_permission.py", line 88, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_permission.py", line 20, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_permission.py FAILED
+======================================================================
+== running test_m82_policy_crash.py
+======================================================================
+[m82-policy-crash] build failed; diagnostics: /workspace/ArenaOS/build/m82-policy-crash-build.log
+[m82-policy-crash] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_policy_crash.py", line 100, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_policy_crash.py", line 87, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_policy_crash.py FAILED
+======================================================================
+== running test_m82_policy_negative.py
+======================================================================
+[m82-policy-negative] build failed; diagnostics: /workspace/ArenaOS/build/m82-policy-negative-build.log
+[m82-policy-negative] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_policy_negative.py", line 108, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_policy_negative.py", line 17, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_policy_negative.py FAILED
+======================================================================
+== running test_m82_policy_refusal.py
+======================================================================
+[m82-policy-refusal] build failed; diagnostics: /workspace/ArenaOS/build/m82-policy-refusal-build.log
+[m82-policy-refusal] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_policy_refusal.py", line 117, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_policy_refusal.py", line 28, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_policy_refusal.py FAILED
+======================================================================
+== running test_m82_policy_restart.py
+======================================================================
+[m82-policy-restart] build failed; diagnostics: /workspace/ArenaOS/build/m82-policy-restart-build.log
+[m82-policy-restart] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m82_policy_restart.py", line 118, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m82_policy_restart.py", line 42, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m82_policy_restart.py FAILED
+======================================================================
+== running test_m83_libraries.py
+======================================================================
+[m83-libraries] build failed; diagnostics: /workspace/ArenaOS/build/m83-libraries-build.log
+[m83-libraries] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m83_libraries.py", line 64, in <module>
+    if __name__ == '__main__': sys.exit(main())
+                                        ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m83_libraries.py", line 23, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m83_libraries.py FAILED
+======================================================================
+== running test_m83_returned_cap.py
+======================================================================
+[m83-returned-cap] build failed; diagnostics: /workspace/ArenaOS/build/m83-returned-cap-build.log
+[m83-returned-cap] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m83_returned_cap.py", line 40, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m83_returned_cap.py", line 23, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m83_returned_cap.py FAILED
+======================================================================
+== running test_m84_crash.py
+======================================================================
+[m84-crash] build failed; diagnostics: /workspace/ArenaOS/build/m84-crash-build.log
+[m84-crash] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m84_crash.py", line 145, in <module>
+    if __name__=='__main__':sys.exit(main())
+                                     ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m84_crash.py", line 44, in main
+    esp=mtest.build(LABEL)
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m84_crash.py FAILED
+======================================================================
+== running test_m84_red_control.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m84_red_control.py", line 80, in <module>
+    if __name__=='__main__':sys.exit(main())
+                                     ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m84_red_control.py", line 37, in main
+    build()
+  File "/workspace/ArenaOS/tools/test_m84_red_control.py", line 27, in build
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m84_red_control.py FAILED
+======================================================================
+== running test_m84_stage.py
+======================================================================
+[m84-stage] build failed; diagnostics: /workspace/ArenaOS/build/m84-stage-build.log
+[m84-stage] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m84_stage.py", line 349, in <module>
+    if __name__ == '__main__':sys.exit(main())
+                                       ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m84_stage.py", line 108, in main
+    esp = mtest.build('m84-stage')
+          ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m84_stage.py FAILED
+======================================================================
+== running test_m84_wrong_root.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m84_wrong_root.py", line 74, in <module>
+    if __name__=='__main__':sys.exit(main())
+                                     ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m84_wrong_root.py", line 36, in main
+    build()
+  File "/workspace/ArenaOS/tools/test_m84_wrong_root.py", line 25, in build
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m84_wrong_root.py FAILED
+======================================================================
+== running test_m85_crash.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 66, in <module>
+    main(existing_userspace=bool(sys.argv[1:]))
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 35, in main
+    run('bash','tools/build.sh','--image',env=env)
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 24, in run
+    return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('bash', 'tools/build.sh', '--image')' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_crash.py", line 100, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_crash.py", line 31, in main
+    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py')],check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', '/workspace/ArenaOS/tools/test_phase85_elf_fit.py']' returned non-zero exit status 1.
+!! test_m85_crash.py FAILED
+======================================================================
+== running test_m85_crash_upgrade.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 66, in <module>
+    main(existing_userspace=bool(sys.argv[1:]))
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 35, in main
+    run('bash','tools/build.sh','--image',env=env)
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 24, in run
+    return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('bash', 'tools/build.sh', '--image')' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_crash_upgrade.py", line 83, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_crash_upgrade.py", line 24, in main
+    subprocess.run(['python3',str(ROOT/'tools/test_phase85_elf_fit.py')],check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['python3', '/workspace/ArenaOS/tools/test_phase85_elf_fit.py']' returned non-zero exit status 1.
+!! test_m85_crash_upgrade.py FAILED
+======================================================================
+== running test_m85_install.py
+======================================================================
+[m85-install] build failed; diagnostics: /workspace/ArenaOS/build/m85-install-build.log
+[m85-install] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_install.py", line 77, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_install.py", line 31, in main
+    esp=mtest.build(LABEL)
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_install.py FAILED
+======================================================================
+== running test_m85_live_cutover.py
+======================================================================
+   Compiling arena-phase85-elf-probe-hold v0.1.0 (/workspace/ArenaOS/tools/phase85-elf-probe-hold)
+    Finished `release` profile [optimized] target(s) in 0.15s
+   Compiling arena-phase85-elf-probe-v2 v0.1.0 (/workspace/ArenaOS/tools/phase85-elf-probe-v2)
+    Finished `release` profile [optimized] target(s) in 0.14s
+production elf::validate: PASS; payload=1608 bytes <=4096, entry=0x400080, PT_LOAD offset=0 filesz=1328 memsz=1328 RX; W+X/entry/truncation refused
+production elf::validate: PASS; payload=656 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=445 memsz=445 RX; W+X/entry/truncation refused
+[m85-live-cutover] build failed; diagnostics: /workspace/ArenaOS/build/m85-live-cutover-build.log
+[m85-live-cutover] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_live_cutover.py", line 85, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_live_cutover.py", line 40, in main
+    esp=mtest.build(LABEL); disk=arena_env.make_scratch_disk()
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_live_cutover.py FAILED
+======================================================================
+== running test_m85_manager_death.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 66, in <module>
+    main(existing_userspace=bool(sys.argv[1:]))
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 35, in main
+    run('bash','tools/build.sh','--image',env=env)
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 24, in run
+    return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('bash', 'tools/build.sh', '--image')' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_manager_death.py", line 54, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_manager_death.py", line 26, in main
+    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py')],check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', '/workspace/ArenaOS/tools/test_phase85_elf_fit.py']' returned non-zero exit status 1.
+!! test_m85_manager_death.py FAILED
+======================================================================
+== running test_m85_manager_death_live.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+[m85-manager-death-live] build failed; diagnostics: /workspace/ArenaOS/build/m85-manager-death-live-build.log
+[m85-manager-death-live] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_manager_death_live.py", line 51, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_manager_death_live.py", line 28, in main
+    esp=mtest.build(LABEL);disk=arena_env.make_scratch_disk()
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_manager_death_live.py FAILED
+======================================================================
+== running test_m85_manager_destroy.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_manager_destroy.py", line 77, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_manager_destroy.py", line 41, in main
+    build('original');artifacts={p:p.read_bytes() for p in (EFI,ESP)}
+    ^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_manager_destroy.py", line 37, in build
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,stdout=f,stderr=subprocess.STDOUT)
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_manager_destroy.py FAILED
+======================================================================
+== running test_m85_maximal.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.00s
+[m85-maximal] build failed; diagnostics: /workspace/ArenaOS/build/m85-maximal-build.log
+[m85-maximal] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_maximal.py", line 73, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_maximal.py", line 37, in main
+    esp=mtest.build(LABEL);disk=arena_env.make_scratch_disk()
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_maximal.py FAILED
+======================================================================
+== running test_m85_ref_hook.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+error: reproducible PIE fixture hash changed: b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_ref_hook.py", line 74, in <module>
+    if __name__=='__main__':sys.exit(main())
+                                     ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_ref_hook.py", line 40, in main
+    subprocess.run(['bash','tools/build.sh','--image'],cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_ref_hook.py FAILED
+======================================================================
+== running test_m85_resources.py
+======================================================================
+    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
+production elf::validate: PASS; payload=1608 bytes <=4096, entry=0x400080, PT_LOAD offset=0 filesz=1328 memsz=1328 RX; W+X/entry/truncation refused
+production elf::validate: PASS; payload=656 bytes <=4096, entry=0x400078, PT_LOAD offset=0 filesz=445 memsz=445 RX; W+X/entry/truncation refused
+[m85-live-cutover] build failed; diagnostics: /workspace/ArenaOS/build/m85-live-cutover-build.log
+[m85-live-cutover] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_resources.py", line 33, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_resources.py", line 14, in main
+    live.main()
+  File "/workspace/ArenaOS/tools/test_m85_live_cutover.py", line 40, in main
+    esp=mtest.build(LABEL); disk=arena_env.make_scratch_disk()
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m85_resources.py FAILED
+======================================================================
+== running test_m85_select.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 66, in <module>
+    main(existing_userspace=bool(sys.argv[1:]))
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 35, in main
+    run('bash','tools/build.sh','--image',env=env)
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 24, in run
+    return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('bash', 'tools/build.sh', '--image')' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_select.py", line 88, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_select.py", line 29, in main
+    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py'),
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', '/workspace/ArenaOS/tools/test_phase85_elf_fit.py']' returned non-zero exit status 1.
+!! test_m85_select.py FAILED
+======================================================================
+== running test_m85_upgrade.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 66, in <module>
+    main(existing_userspace=bool(sys.argv[1:]))
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 35, in main
+    run('bash','tools/build.sh','--image',env=env)
+  File "/workspace/ArenaOS/tools/test_phase85_elf_fit.py", line 24, in run
+    return subprocess.run(cmd,check=True,cwd=kwargs.get('cwd',ROOT),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('bash', 'tools/build.sh', '--image')' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m85_upgrade.py", line 98, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m85_upgrade.py", line 38, in main
+    subprocess.run([sys.executable,str(ROOT/'tools/test_phase85_elf_fit.py')],check=True,
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', '/workspace/ArenaOS/tools/test_phase85_elf_fit.py']' returned non-zero exit status 1.
+!! test_m85_upgrade.py FAILED
+======================================================================
+== running test_m8_bootstrap.py
+======================================================================
+[m8-bootstrap] build failed; diagnostics: /workspace/ArenaOS/build/m8-bootstrap-build.log
+[m8-bootstrap] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_bootstrap.py", line 87, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_bootstrap.py", line 43, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_bootstrap.py FAILED
+======================================================================
+== running test_m8_dependencies.py
+======================================================================
+[m8-dependencies] build failed; diagnostics: /workspace/ArenaOS/build/m8-dependencies-build.log
+[m8-dependencies] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_dependencies.py", line 105, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_dependencies.py", line 35, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_dependencies.py FAILED
+======================================================================
+== running test_m8_diagnostic.py
+======================================================================
+[m8-diagnostic] build failed; diagnostics: /workspace/ArenaOS/build/m8-diagnostic-build.log
+[m8-diagnostic] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_diagnostic.py", line 71, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_diagnostic.py", line 19, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_diagnostic.py FAILED
+======================================================================
+== running test_m8_fault.py
+======================================================================
+[m8-fault] build failed; diagnostics: /workspace/ArenaOS/build/m8-fault-build.log
+[m8-fault] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_fault.py", line 80, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_fault.py", line 26, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_fault.py FAILED
+======================================================================
+== running test_m8_lifecycle.py
+======================================================================
+[m8-lifecycle] build failed; diagnostics: /workspace/ArenaOS/build/m8-lifecycle-build.log
+[m8-lifecycle] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_lifecycle.py", line 103, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_lifecycle.py", line 32, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_lifecycle.py FAILED
+======================================================================
+== running test_m8_restart.py
+======================================================================
+[m8-restart] build failed; diagnostics: /workspace/ArenaOS/build/m8-restart-build.log
+[m8-restart] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_restart.py", line 71, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_restart.py", line 27, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_restart.py FAILED
+======================================================================
+== running test_m8_stop.py
+======================================================================
+[m8-stop] build failed; diagnostics: /workspace/ArenaOS/build/m8-stop-build.log
+[m8-stop] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_stop.py", line 90, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_stop.py", line 27, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_stop.py FAILED
+======================================================================
+== running test_m8_stress.py
+======================================================================
+[m8-stress] build failed; diagnostics: /workspace/ArenaOS/build/m8-stress-build.log
+[m8-stress] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m8_stress.py", line 77, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m8_stress.py", line 28, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m8_stress.py FAILED
+======================================================================
+== running test_m9_bar_gate_red.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_bar_gate_red.py", line 75, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_bar_gate_red.py", line 35, in main
+    build(bdir / 'm9-bar-gate-original-build.log')
+  File "/workspace/ArenaOS/tools/test_m9_bar_gate_red.py", line 27, in build
+    subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_bar_gate_red.py FAILED
+======================================================================
+== running test_m9_client_death.py
+======================================================================
+[m9-client-death] build failed; diagnostics: /workspace/ArenaOS/build/m9-client-death-build.log
+[m9-client-death] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_client_death.py", line 73, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m9_client_death.py", line 45, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_client_death.py FAILED
+======================================================================
+== running test_m9_client_death_red.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_client_death_red.py", line 121, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_client_death_red.py", line 81, in main
+    build(bdir / f'{LABEL}-original-build.log')
+  File "/workspace/ArenaOS/tools/test_m9_client_death_red.py", line 29, in build
+    subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_client_death_red.py FAILED
+======================================================================
+== running test_m9_compositor_input.py
+======================================================================
+[m9-compositor-input] build failed; diagnostics: /workspace/ArenaOS/build/m9-compositor-input-build.log
+[m9-compositor-input] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_compositor_input.py", line 53, in <module>
+    if __name__=='__main__': main()
+                             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_compositor_input.py", line 33, in main
+    esp=mtest.build(LABEL)
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_compositor_input.py FAILED
+======================================================================
+== running test_m9_compositor_model.py
+======================================================================
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.66s
+     Running unittests src/lib.rs (userspace/compositord/target/x86_64-unknown-linux-gnu/debug/deps/arena_compositor_model-68419ed4b92b2955)
+
+running 13 tests
+test render::tests::overlapping_surfaces_use_z_and_preserve_base ... ok
+test render::tests::negative_clip_and_offscreen_leave_uncovered_base ... ok
+test render::tests::preflight_does_not_publish_partial_frame ... ok
+test tests::authority_preflight_and_capacity_never_mutate_on_refusal ... ok
+test tests::exhausted_monotonic_ids_refuse_without_mutation ... ok
+test tests::focus_input_ring_overflow_and_verified_death ... ok
+test tests::real_overlap_z_order_clipping_and_stale_reuse ... ok
+test wire::tests::exact_reserved_bytes_and_geometry_not_cap_authority ... ok
+test wire::tests::exact_versioned_golden_bytes_and_roundtrips ... ok
+test wire::tests::hostile_inline_frame_fuzz_never_reads_short_buffers ... ok
+test wire::tests::malformed_opcode_reserved_and_bearerless_handle_refuse ... ok
+test wire::tests::present_rects_roundtrip_and_refusals ... ok
+test tests::repeated_owner_retirement_clears_all_state_before_reuse ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Checking arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.41s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+    Finished `release` profile [optimized] target(s) in 0.41s
+[m9-compositor-model] 13/13 host state/churn and typed-wire/fuzz tests, fmt/clippy, bare-metal no_std build PASS; no running service or input proof
+======================================================================
+== running test_m9_font_red.py
+======================================================================
+[m9-font] real QMP missing-glyph RED: FAIL; restored exact source/EFI real QMP GREEN: FAIL
+!! test_m9_font_red.py FAILED
+======================================================================
+== running test_m9_gfxkit.py
+======================================================================
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running unittests src/lib.rs (userspace/gfxkit/target/x86_64-unknown-linux-gnu/debug/deps/arena_gfxkit-6f5c92ca532a86fd)
+
+running 7 tests
+test tests::checked_geometry_and_disjoint_padding ... ok
+test tests::blend_mask_and_bits_are_exact_and_bounded ... ok
+test tests::clip_restricts_every_operation_exactly ... ok
+test tests::clipped_opaque_blit_and_refusals ... ok
+test tests::origin_translates_every_operation_exactly ... ok
+test tests::owned_font_and_bounded_rejection ... ok
+test tests::face13_is_complete_measured_and_clipped ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+    Finished `release` profile [optimized] target(s) in 0.22s
+[m9-gfxkit] 3/3 host contracts, bare-metal no_std build, pixel oracle GREEN and deliberate one-channel RED PASS
+======================================================================
+== running test_m9_gop_handoff.py
+======================================================================
+[m9-gop-handoff] build failed; diagnostics: /workspace/ArenaOS/build/m9-gop-handoff-build.log
+[m9-gop-handoff] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_gop_handoff.py", line 77, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_gop_handoff.py", line 29, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_gop_handoff.py FAILED
+======================================================================
+== running test_m9_gpu2d_red.py
+======================================================================
+[m9-gpu2d-ack] production ACK matcher RED host control: PASS; exact source/no_std codec GREEN: PASS; no GPU guest claim
+======================================================================
+== running test_m9_gpu2d_wire.py
+======================================================================
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (userspace/gpu2d/target/x86_64-unknown-linux-gnu/debug/deps/arena_gpu2d_wire-c2c0402d3971ea49)
+
+running 8 tests
+test device::tests::wrong_type_split_layout_and_offset_overflow_refuse ... ok
+test device::tests::exact_modern_gpu_record_and_window_offsets ... ok
+test queue::tests::invalid_offer_notify_offsets_and_used_entry_fail_closed ... ok
+test queue::tests::mock_mmio_ring_setup_and_one_strict_completion ... ok
+test tests::command_layouts_are_exact_and_refuse_before_touching_output ... ok
+test tests::display_response_only_one_checked_mode ... ok
+test tests::hostile_geometry_and_stale_response_lengths_refuse ... ok
+test tests::short_hostile_response_fuzz_never_reads_past_used_length ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+    Finished `release` profile [optimized] target(s) in 0.04s
+[m9-gpu2d-wire] 8/8 strict wire/refusal/fuzz, device-info and mock polling-queue tests, fmt/clippy, bare-metal no_std build PASS; device transport/guest pixels pending
+======================================================================
+== running test_m9_gpu_compositor_input.py
+======================================================================
+[m9-gpu-compositor-input] build failed; diagnostics: /workspace/ArenaOS/build/m9-gpu-compositor-input-build.log
+[m9-gpu-compositor-input] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_gpu_compositor_input.py", line 55, in <module>
+    if __name__=='__main__': main()
+                             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_gpu_compositor_input.py", line 33, in main
+    esp=mtest.build(LABEL)
+        ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_gpu_compositor_input.py FAILED
+======================================================================
+== running test_m9_gpu_fallback_red.py
+======================================================================
+[m9-gpu-fallback-reject] build failed; diagnostics: /workspace/ArenaOS/build/m9-gpu-fallback-reject-build.log
+[m9-gpu-fallback-reject] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_gpu_fallback_red.py", line 70, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m9_gpu_fallback_red.py", line 49, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_gpu_fallback_red.py FAILED
+======================================================================
+== running test_m9_gpu_pixels.py
+======================================================================
+[m9-gpu-pixels] build failed; diagnostics: /workspace/ArenaOS/build/m9-gpu-pixels-build.log
+[m9-gpu-pixels] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_gpu_pixels.py", line 68, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m9_gpu_pixels.py", line 29, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_gpu_pixels.py FAILED
+======================================================================
+== running test_m9_host_dns_red.py
+======================================================================
+[m9-dns-peer-red] build failed; diagnostics: /workspace/ArenaOS/build/m9-dns-peer-red-build.log
+[m9-dns-peer-red] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_host_dns_red.py", line 33, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_host_dns_red.py", line 13, in main
+    esp = mtest.build('m9-dns-peer-red')
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_host_dns_red.py FAILED
+======================================================================
+== running test_m9_resources.py
+======================================================================
+[m9-resources] build failed; diagnostics: /workspace/ArenaOS/build/m9-resources-build.log
+[m9-resources] building kernel image + ESP ...
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_resources.py", line 60, in <module>
+    main()
+  File "/workspace/ArenaOS/tools/test_m9_resources.py", line 31, in main
+    esp = mtest.build(LABEL)
+          ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ArenaOS/tools/mtest.py", line 280, in build
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/workspace/ArenaOS/tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_resources.py FAILED
+======================================================================
+== running test_m9_service_death_red.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_service_death_red.py", line 83, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_service_death_red.py", line 37, in main
+    build(bdir / 'm9-service-death-original-build.log')
+  File "/workspace/ArenaOS/tools/test_m9_service_death_red.py", line 29, in build
+    subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_service_death_red.py FAILED
+======================================================================
+== running test_m9_shared_info_red.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_shared_info_red.py", line 79, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_shared_info_red.py", line 41, in main
+    build(bdir / 'm9-info-original-build.log')
+  File "/workspace/ArenaOS/tools/test_m9_shared_info_red.py", line 33, in build
+    subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_shared_info_red.py FAILED
+======================================================================
+== running test_m9_shared_ref_hook.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_shared_ref_hook.py", line 74, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_shared_ref_hook.py", line 33, in main
+    build(bdir / 'm9-shared-red-control-original-build.log')
+  File "/workspace/ArenaOS/tools/test_m9_shared_ref_hook.py", line 25, in build
+    subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_shared_ref_hook.py FAILED
+======================================================================
+== running test_m9_shared_unmap_red.py
+======================================================================
+Traceback (most recent call last):
+  File "/workspace/ArenaOS/tools/test_m9_shared_unmap_red.py", line 68, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/ArenaOS/tools/test_m9_shared_unmap_red.py", line 33, in main
+    build(bdir / 'm9-unmap-original-build.log')
+  File "/workspace/ArenaOS/tools/test_m9_shared_unmap_red.py", line 25, in build
+    subprocess.run(['bash', 'tools/build.sh', '--image'], cwd=ROOT,env=arena_env.rust_env() | {'ARENA_GRAPHICS_FIXTURE':'phase9'},
+  File "/usr/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', 'tools/build.sh', '--image']' returned non-zero exit status 1.
+!! test_m9_shared_unmap_red.py FAILED
+======================================================================
+QUALIFICATION SOURCE END: c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e
+99 of 121 test suites FAILED
+EXIT=1

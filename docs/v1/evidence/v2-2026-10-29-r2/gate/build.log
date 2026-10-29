@@ -10,7 +10,7 @@ The protected Phase 14 fixture below is verified, not rebuilt (B1).
 ========================================================================
 Phase 14 fixture (committed, verified not rebuilt): d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e
 == building userspace payload (userspace/payload, x86_64-unknown-none) ==
-    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
 payload image: userspace/payload/target/x86_64-unknown-none/release/arena-payload (9552 bytes)
 == building Phase-15 native FP/SIMD fixture (userspace/phase15-fpu) ==
     Finished `release` profile [optimized] target(s) in 0.00s
@@ -212,11 +212,11 @@ rngd image: userspace/rngd/target/x86_64-unknown-none/release/rngtest (16008 byt
 inputd image: userspace/inputd/target/x86_64-unknown-none/release/arena-inputd (33912 bytes)
 inputd image: userspace/inputd/target/x86_64-unknown-none/release/inputtest (16032 bytes)
 == building userspace consoled (userspace/consoled, x86_64-unknown-none) ==
-    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
 consoled image: userspace/consoled/target/x86_64-unknown-none/release/arena-consoled (24784 bytes)
 consoled image: userspace/consoled/target/x86_64-unknown-none/release/contest (15760 bytes)
 == building userspace faultd (userspace/faultd, x86_64-unknown-none) ==
-    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
 faultd image: userspace/faultd/target/x86_64-unknown-none/release/arena-faultd (15456 bytes)
 faultd image: userspace/faultd/target/x86_64-unknown-none/release/faulttest (15776 bytes)
 == building userspace timertest (userspace/timertest, x86_64-unknown-none) ==
@@ -444,21 +444,34 @@ warning: constant `FNV_PRIME` is never used
 18 | const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
    |       ^^^^^^^^^
 
-warning: variant `Corrupt` is never constructed
-  --> src/../../permission.rs:25:5
+warning: enum `Error` is never used
+  --> src/../../permission.rs:23:10
    |
 23 | pub enum Error {
-   |          ----- variant in this enum
-24 |     InvalidInput,
-25 |     Corrupt,
-   |     ^^^^^^^
+   |          ^^^^^
+
+warning: struct `AppRequest` is never constructed
+  --> src/../../permission.rs:34:12
    |
-   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+34 | pub struct AppRequest {
+   |            ^^^^^^^^^^
+
+warning: constant `ARENA_READ` is never used
+  --> src/../../permission.rs:40:11
+   |
+40 | pub const ARENA_READ: AppRequest = AppRequest {
+   |           ^^^^^^^^^^
 
 warning: function `encode_request` is never used
   --> src/../../permission.rs:49:8
    |
 49 | pub fn encode_request(req: AppRequest) -> Result<[u8; REQUEST_BYTES], Error> {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `decode_request` is never used
+  --> src/../../permission.rs:55:8
+   |
+55 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
    |        ^^^^^^^^^^^^^^
 
 warning: struct `Record` is never constructed
@@ -552,23 +565,23 @@ warning: associated items `new`, `corrupt`, `ingest`, and `finish` are never use
 238 |     pub fn finish(self) -> Result<Recovery, Error> {
     |            ^^^^^^
 
+warning: `arena-permissiond` (bin "permapp") generated 25 warnings
+warning: variant `Corrupt` is never constructed
+  --> src/../../permission.rs:25:5
+   |
+23 | pub enum Error {
+   |          ----- variant in this enum
+24 |     InvalidInput,
+25 |     Corrupt,
+   |     ^^^^^^^
+   |
+   = note: `Error` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
 warning: constant `REQUEST_BYTES` is never used
   --> src/../../permission.rs:32:11
    |
 32 | pub const REQUEST_BYTES: usize = 8;
    |           ^^^^^^^^^^^^^
-
-warning: struct `AppRequest` is never constructed
-  --> src/../../permission.rs:34:12
-   |
-34 | pub struct AppRequest {
-   |            ^^^^^^^^^^
-
-warning: constant `ARENA_READ` is never used
-  --> src/../../permission.rs:40:11
-   |
-40 | pub const ARENA_READ: AppRequest = AppRequest {
-   |           ^^^^^^^^^^
 
 warning: constant `READ_REQUEST` is never used
   --> src/../../permission.rs:48:11
@@ -576,45 +589,51 @@ warning: constant `READ_REQUEST` is never used
 48 | pub const READ_REQUEST: [u8; REQUEST_BYTES] = [1, 1, 1, 1, 1, 0, 0, 0];
    |           ^^^^^^^^^^^^
 
-warning: function `decode_request` is never used
-  --> src/../../permission.rs:55:8
-   |
-55 | pub fn decode_request(raw: &[u8]) -> Result<AppRequest, Error> {
-   |        ^^^^^^^^^^^^^^
-
-warning: `arena-permissiond` (bin "arena-permissiond") generated 27 warnings
-warning: enum `Error` is never used
-  --> src/../../permission.rs:23:10
-   |
-23 | pub enum Error {
-   |          ^^^^^
-
-warning: `arena-permissiond` (bin "permapp") generated 25 warnings (24 duplicates)
+warning: `arena-permissiond` (bin "arena-permissiond") generated 27 warnings (24 duplicates)
     Finished `release` profile [optimized] target(s) in 0.01s
 permission image: userspace/permissiond/target/x86_64-unknown-none/release/arena-permissiond (24912 bytes)
 permission image: userspace/permissiond/target/x86_64-unknown-none/release/permapp (15176 bytes)
 == building ADR-0053 verify-only package receiver (offline pinned sources) ==
-    Finished `release` profile [optimized] target(s) in 0.01s
+   Compiling arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+   Compiling arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+   Compiling arena-packaged v0.1.0 (/workspace/ArenaOS/userspace/packaged)
+    Finished `release` profile [optimized] target(s) in 2.07s
 package image: userspace/packaged/target/x86_64-unknown-none/release/arena-packaged (138464 bytes)
 == building userspace depcheck (userspace/depcheck, x86_64-unknown-none) ==
-    Finished `release` profile [optimized] target(s) in 0.00s
+    Finished `release` profile [optimized] target(s) in 0.01s
 depcheck image: userspace/depcheck/target/x86_64-unknown-none/release/arena-depcheck (13744 bytes)
 == building Phase-9 userspace display service (GOP fallback) ==
-    Finished `release` profile [optimized] target(s) in 0.00s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-gpu2d-wire v0.1.0 (/workspace/ArenaOS/userspace/gpu2d)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-displayd v0.1.0 (/workspace/ArenaOS/userspace/displayd)
+    Finished `release` profile [optimized] target(s) in 0.72s
 display image: userspace/displayd/target/x86_64-unknown-none/release/arena-displayd (35640 bytes)
 shared probe image: userspace/displayd/target/x86_64-unknown-none/release/sharedprobe (15744 bytes)
 display protocol probe image: userspace/displayd/target/x86_64-unknown-none/release/displayprobe (15168 bytes)
 == building Phase-9 compositor and two independent windows ==
-    Finished `release` profile [optimized] target(s) in 0.00s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-phase9-prototypes v0.1.0 (/workspace/ArenaOS/phase9-work)
+    Finished `release` profile [optimized] target(s) in 0.58s
 graphics image: arena-compositord (3172144 bytes)
 graphics image: arena-window-a (20440 bytes)
 graphics image: arena-window-b (20440 bytes)
 == building ArenaOS native startup/runtime proof image ==
     Finished `release` profile [optimized] target(s) in 0.01s
 startup proof image: userspace/arena-runtime/target/x86_64-unknown-none/release/arena-startup-proof (34152 bytes)
-    Finished `release` profile [optimized] target(s) in 0.01s
-    Finished `release` profile [optimized] target(s) in 0.01s
-    Finished `release` profile [optimized] target(s) in 0.01s
+   Compiling arena-gfxkit v0.1.0 (/workspace/ArenaOS/userspace/gfxkit)
+   Compiling arena-compositor-model v0.1.0 (/workspace/ArenaOS/userspace/compositord)
+   Compiling arena-ui v0.1.0 (/workspace/ArenaOS/userspace/ui)
+   Compiling arena-desktop v0.1.0 (/workspace/ArenaOS/userspace/desktop)
+    Finished `release` profile [optimized] target(s) in 6.24s
+   Compiling arena-afs2 v0.1.0 (/workspace/ArenaOS/userspace/afs2)
+   Compiling arena-platform-core v0.1.0 (/workspace/ArenaOS/userspace/arena-platform)
+   Compiling arena-filesd v0.1.0 (/workspace/ArenaOS/userspace/filesd)
+    Finished `release` profile [optimized] target(s) in 2.29s
+   Compiling arena-kernel v0.1.0 (/workspace/ArenaOS/kernel/kernel)
+   Compiling arena-boot v0.1.0 (/workspace/ArenaOS/kernel/boot)
+    Finished `release` profile [optimized] target(s) in 6.67s
 kernel image: build/arena-boot.efi (11038720 bytes)
 kernel ISA audit negative controls: PASS
 kernel ISA audit: PASS; 120503 real instructions checked across 1 fully decoded executable sections, six trusted leaf profiles matched, ordinary x87/MMX/SSE/AVX rejected

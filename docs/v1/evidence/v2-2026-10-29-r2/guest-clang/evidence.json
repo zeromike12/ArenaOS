@@ -44,7 +44,7 @@
       "name": "two concurrent instances: focus/input isolation, both directions",
       "result": "PASS",
       "evidence_ref": "shots/cp06a-focused.png, shots/cp06b-focused.png",
-      "detail": "A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=d054b6792575; B(169) key: ack {'before': 2, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=89b52f506126"
+      "detail": "A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=fd03822b5d4d; B(169) key: ack {'before': 2, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=a5e7d97eab22"
     },
     {
       "case": 7,
@@ -58,7 +58,7 @@
       "name": "final V1 demonstration",
       "result": "PASS",
       "evidence_ref": "shots/cp08-final-demonstration.png",
-      "detail": "final instance surface=174 placed (70, 60, 640, 480) bound=174 key ack 0->3 + visible flash, frame 1043a6182762"
+      "detail": "final instance surface=174 placed (70, 60, 640, 48) bound=174 key ack 1->3 + visible flash, frame fd69e1cfcafa"
     }
   ],
   "install_ack": {
@@ -114,25 +114,25 @@
       "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
     },
     "shots/cp06a-two-instances.png": {
-      "tested_ppm_sha256": "e8711c72fcb1f48781c4bb64649adb79da1f27244fd823f1467ae7abc25335d2",
-      "published_png_sha256": "ec09f22129d304cc95eba95700736ea751bed8491293fc791967928ac03f69e8",
-      "raster_sha256": "d49dc60465cacb039d3a83b0a34a35477e7fa47d99bb0f249b8ffa6dad5fc01e",
+      "tested_ppm_sha256": "eda280d7d955d52cd0207bc78fdda6995b21b70fba89a6090b7dd51b96b556b5",
+      "published_png_sha256": "2e613a97cd0828b83549f34cbccf4d0175ba93cb45dd28acdf5fa56a57542565",
+      "raster_sha256": "970df6d3912137a8ac90af0b68f804fcf6492cc1bd3faa7d6a2ca93e4a3e5a55",
       "width": 800,
       "height": 600,
       "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
     },
     "shots/cp06a-focused.png": {
-      "tested_ppm_sha256": "afa1d6c04af19c62fa157cb5ea5284203e3d6a01dee08993025ecce9a834b928",
-      "published_png_sha256": "02d94b1efc5ea0d58792d3671e860d3831656c7deec58987f0de9fac87dc4ed6",
-      "raster_sha256": "d054b6792575e74b5c8fd6e1b75b6c3a3e522ac3ec1947a6a53dbc19c0cb3c52",
+      "tested_ppm_sha256": "cb0d8a0e8441ba8c1efde1468686fb7ec309177d0d5386faf44d6d885cc4e97d",
+      "published_png_sha256": "d84b15658e552ffaa402fc3160c99c24f44ef6249dd7513a93ba60d891257882",
+      "raster_sha256": "fd03822b5d4d9f3ba406b0ea187e83e418d4518f85249121caa04a7be485a52a",
       "width": 800,
       "height": 600,
       "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
     },
     "shots/cp06b-focused.png": {
-      "tested_ppm_sha256": "c8f8b7fef678af13daf777f4f07019fbe1bb0479746bbae866e672d3794a347f",
-      "published_png_sha256": "370d7d7a717f92a753768ab55309cfb13b2536cdde76ae0e1a426980c14afd0e",
-      "raster_sha256": "89b52f5061260a042faae602b05ab05fa4748ec2d3b93cc87090c5f24c35466d",
+      "tested_ppm_sha256": "812a662a94ea3d0d76b3d3cd3d5fabc8e53490c13912ea40b5a0ee0ae4d5eefa",
+      "published_png_sha256": "f73a1370f089fcef570a3513dea84ad06478ebea8379332cedce847ce5517fb8",
+      "raster_sha256": "a5e7d97eab22326ce56125621a36ac641b4429bdc2eb31acd22fecfa7a53b068",
       "width": 800,
       "height": 600,
       "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
@@ -146,32 +146,23 @@
       "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
     },
     "shots/cp08-final-demonstration.png": {
-      "tested_ppm_sha256": "45bb77668363e50c2c7475663adce0a887c299234a10718aa75cfac496e13051",
-      "published_png_sha256": "8bd088d79318008f6a015e94016c4ea2d1fb230e957574d264016c548c95dd8d",
-      "raster_sha256": "1043a6182762a95f52c0c4691e181fbfd3957401555b95b1bf9946b42a89e89a",
+      "tested_ppm_sha256": "65c0aca8d24194ff1f6a1d0ba8d19b8a2de43e560cc627545712580965d25759",
+      "published_png_sha256": "87083fb5f1c06a2a7bba356fde8e0aede4bb845918fa98d28dc64994ea54407e",
+      "raster_sha256": "fd69e1cfcafaac16dff1803b1ffbd1b5d940e97b84f375886c7b3ec84b68af7e",
       "width": 800,
       "height": 600,
       "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
     }
   },
   "identities": {
-    "source_commit": "65af1d89a5254cd6a45cb96341966f9265a42742",
+    "source_commit": "c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e",
     "working_tree_dirty": true,
     "dirty_paths_excluding_evidence": [
-      "M .gitignore",
-      "M docs/v1/V2-STATUS.md",
-      "M experiments/c-runtime/app/c_gfx_app.c",
-      "M experiments/c-runtime/run.py",
-      "M tools/dev-env/recover-rust-and-zig.sh",
       "M tools/v1_cycles.py",
-      "M tools/v1_evidence.py",
-      "M tools/v1_gate.sh",
+      "M tools/v1_gate_aggregate.py",
+      "M tools/v1_gate_stage.py",
       "M tools/v1_guest_proof.py",
-      "?? experiments/c-runtime/app/c_gfx_refusals.c",
-      "?? tools/dev-env/pypi_file.py",
-      "?? tools/v1_gate_aggregate.py",
-      "?? tools/v1_gate_stage.py",
-      "?? tools/v1_refusals.py"
+      "M tools/v1_refusals.py"
     ],
     "qemu_wrapper_path": "/home/user/phase16-backend/qemu-patched",
     "qemu_wrapper_sha256": "2b03f6bc6dc50e5c2f98d7c2c30bb7c319667ed7010b16f1ec0d24fa967ee270",
@@ -312,15 +303,15 @@
     },
     "guest_compiler_under_test": "clang",
     "guest_elf_sha256": "003c381b0f107d8dbe68c6affaa56ca6a1d238145364f8b2dc2c699196c7e502",
-    "serial_sha256": "664e81265a108ff927b92374d7f3295261c41a9220b00714aac907da0b816628",
+    "serial_sha256": "4b7fa0c7b049fe81355ad3fd3b8bb8f325a0ef800a3301039fe580b741b69b65",
     "apb1_sha256": "1db228addca3c7b98f3b3886617dffb0087cf627d7ce65c4fc1900f019870361",
-    "esp_sha256": "96c3616bc4cf03f46b7e4446b2dab1c14d0b1fe1363b51f63969c4869785f423",
+    "esp_sha256": "d28aca63aa4829fc1ca505b73a27015559c77bcf2db2c3447875da55459397ae",
     "esp_path": "/workspace/ArenaOS/build/arena-esp.img",
     "image": {
       "fresh": true,
-      "image_mtime": 1793316206.6667614,
-      "newest_source": "tools/v1_evidence.py",
-      "newest_source_mtime": 1793316203.3387446,
+      "image_mtime": 1793317186.6477113,
+      "newest_source": "tools/v1_gate_aggregate.py",
+      "newest_source_mtime": 1793317163.8315961,
       "boot_efi_sha256": "7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5"
     },
     "efi_sha256": "7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5",
@@ -330,7 +321,7 @@
     "rc": 0,
     "run_dir": "docs/v1/evidence/v2-2026-10-29-r2/guest-clang",
     "serial": "docs/v1/evidence/v2-2026-10-29-r2/guest-clang/v1-guest-serial.log",
-    "serial_sha256": "664e81265a108ff927b92374d7f3295261c41a9220b00714aac907da0b816628"
+    "serial_sha256": "4b7fa0c7b049fe81355ad3fd3b8bb8f325a0ef800a3301039fe580b741b69b65"
   },
   "verdict": {
     "pass": true,

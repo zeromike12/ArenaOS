@@ -29,9 +29,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RECEIPTS = Path("build/v1-gate/receipts")
 
-# `guest` is the review-candidate gate: every V1-specific execution.
-# `full` adds the two project-wide gates (121-suite regression, boot loop).
+# `quick` exists so `v1_gate.sh`'s development mode has an aggregate too;
+# it can only ever report a partial result. `guest` is the review-candidate
+# gate: every V1-specific execution. `full` adds the two project-wide gates
+# (121-suite regression, boot loop).
 STAGES = {
+    "quick": ["build", "env", "controls"],
     "guest": [
         "build", "env", "controls", "guest-gcc", "guest-clang",
         "refusals-gcc", "refusals-clang", "cycles", "package", "verify",
@@ -98,6 +101,7 @@ def main(argv: list) -> int:
 
     required = STAGES[mode]
     current_commit = _git("rev-parse", "HEAD")
+    current_code = code_fingerprint()
     current_efi = sha256_file(REPO_ROOT / "build" / "arena-boot.efi")
     problems, rows, unqualified = [], [], []
 
@@ -109,10 +113,16 @@ def main(argv: list) -> int:
             continue
         if receipt.get("exit") != 0:
             problems.append(f"{stage}: stage failed (exit {receipt.get('exit')})")
-        if receipt.get("source_commit") != current_commit:
+        # Commit id alone would be the wrong test in both directions: a
+        # documentation commit moves HEAD without changing a byte that ran,
+        # and an uncommitted edit changes the bytes with HEAD fixed. Compare
+        # the digest of the tracked code instead, and keep the commit in the
+        # message as provenance.
+        if receipt.get("code_fingerprint") != current_code:
             problems.append(
-                f"{stage}: ran at {receipt.get('source_commit', '?')[:12]}, "
-                f"candidate is {current_commit[:12]}")
+                f"{stage}: ran against code {str(receipt.get('code_fingerprint'))[:12]}"
+                f" (commit {str(receipt.get('source_commit'))[:12]}), candidate is"
+                f" {current_code[:12]} (commit {current_commit[:12]})")
         if receipt.get("efi_sha256") != current_efi:
             problems.append(
                 f"{stage}: tested EFI {str(receipt.get('efi_sha256'))[:12]}, "
@@ -148,6 +158,9 @@ def main(argv: list) -> int:
         for stage, notes in unqualified:
             print(f"  - {stage}: {'; '.join(notes) if notes else 'unqualified'}")
         print("  See docs/v1/V2-STATUS.md §4 (blocker B1).")
+        if mode != "full":
+            print(f"  This {mode}-mode run was also partial; not run: "
+                  + ", ".join(s for s in STAGES["full"] if s not in required))
         return 3
 
     if mode == "full":
@@ -160,6 +173,28 @@ def main(argv: list) -> int:
     print("  Not run (required for qualification): "
           + ", ".join(f"{s} ({STAGE_PURPOSE[s]})" for s in missing_all))
     return 0
+
+
+def code_fingerprint() -> str:
+    """Same rule the stage writer used; see tools/v1_gate_stage.py."""
+    import hashlib
+    tracked = _git("ls-files", "-z")
+    if tracked in ("", "unavailable"):
+        return "unavailable"
+    digest = hashlib.sha256()
+    for rel in sorted(x for x in tracked.split("\0") if x):
+        if rel.startswith("docs/v1/evidence/"):
+            continue
+        if rel.startswith("docs/") or rel.endswith(".md"):
+            continue
+        digest.update(rel.encode())
+        digest.update(b"\0")
+        try:
+            digest.update(hashlib.sha256((REPO_ROOT / rel).read_bytes()).digest())
+        except OSError:
+            digest.update(b"absent")
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _git(*args: str) -> str:

@@ -62,7 +62,7 @@ def cycles(n: int) -> bytes:
         # production snapshot; evaluate_cleanup compares both halves, so the
         # baseline must carry both (a bare detail leaves every receipt field
         # unreadable and would have failed every cycle).
-        base_detail, base_receipt = proof.settle_snapshot(d.serial())
+        base_detail, base_receipt = proof.wait_settle_snapshot(d.serial)
         baseline = ({"detail": base_detail, "receipt": base_receipt}
                     if base_detail and base_receipt else None)
         if baseline is None:

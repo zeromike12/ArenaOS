@@ -33,11 +33,11 @@ m1:test:idt_installed: PASS
 m1:test:memory_map: PASS
 [arena INFO  m1] wide_math: (0xdeadbeefcafebabe * 0x123456789abcdef1) / 7 = 0x2431b22219849681cde9fbfc6c0f01f
 m1:test:wide_math: PASS
-[arena INFO  m1] timer_irq: absorbed 2 hardware IRQ(s) through our IDT (EOI cycle verified, spin=61536)
+[arena INFO  m1] timer_irq: absorbed 2 hardware IRQ(s) through our IDT (EOI cycle verified, spin=70483)
 m1:test:timer_irq_absorbed: PASS
 m1: RESULT PASS (8/8)
-[arena INFO  timekeeping] tsc calibration round 1/3: window1 119345 counts/210038266 tsc = 2099911000 Hz, window2 119359/210083876 = 2100120638 Hz (99 ppm apart)
-[arena INFO  timekeeping] tsc_hz=2100015819 (2100 MHz); PIT ch0 ticking at 100 Hz (mode 3, vector 32 via IOAPIC/LAPIC)
+[arena INFO  timekeeping] tsc calibration round 1/3: window1 119373 counts/210098892 tsc = 2100024428 Hz, window2 119378/210118676 = 2100134212 Hz (52 ppm apart)
+[arena INFO  timekeeping] tsc_hz=2100079320 (2100 MHz); PIT ch0 ticking at 100 Hz (mode 3, vector 32 via IOAPIC/LAPIC)
 [arena INFO  boot] frames: managing 114274 frames (446 MiB free)
 [arena INFO  paging] address space live: cr3=0x100000 identity+direct-map(offset 0xffffffff80000000), image window [0x1c46b000,0x1cf4a000) 5 sections, skipped_high_regions=1
 [arena INFO  heap] kernel heap ready: guards=on chunk=64KiB frame-backed (arena-heap core, host-tested)
@@ -48,16 +48,16 @@ m2:test:tss_installed: PASS
 m2:test:exc_de_recovered: PASS
 [arena INFO  m2] exc_pf: observed vector=0xe error_code=0x2 cr2=0x600000000000; resumed after faulting write
 m2:test:exc_pf_recovered: PASS
-[arena INFO  m2] pit_oneshot: status=0xb2 (OUT=true) after 10081us (spin=20552)
+[arena INFO  m2] pit_oneshot: status=0xb2 (OUT=true) after 10091us (spin=20637)
 m2:test:pit_oneshot: PASS
-[arena INFO  m2] tsc_frequency: window 1/3 re-measured 2099899820 Hz (2099 MHz) vs boot 2100 MHz over 119342 PIT counts — 55 ppm apart
+[arena INFO  m2] tsc_frequency: window 1/3 re-measured 2099965868 Hz (2099 MHz) vs boot 2100 MHz over 119347 PIT counts — 54 ppm apart
 m2:test:tsc_frequency: PASS
-[arena INFO  m2] clock_monotonic: waited 2054us for 2000us request; cross-check best window pit=2007us clock=2004us skew=3us
+[arena INFO  m2] clock_monotonic: waited 2057us for 2000us request; cross-check best window pit=2008us clock=2005us skew=3us
 m2:test:clock_monotonic: PASS
-[arena INFO  m2] tick_rate: 10 ticks in 98223us (avg 9822us, expected ~10000us at 100 Hz)
+[arena INFO  m2] tick_rate: 10 ticks in 97362us (avg 9736us, expected ~10000us at 100 Hz)
 m2:test:tick_rate: PASS
 [arena INFO  m2] frame_allocator: managing 114274 frames (446 MiB) from 11 conventional regions; 18 frames owned by boot infrastructure (page tables)
-[arena INFO  m2] frame_allocator: stress 200x64 OK; benchmark 2048 alloc+free in 567us (~276 ns/op)
+[arena INFO  m2] frame_allocator: stress 200x64 OK; benchmark 2048 alloc+free in 432us (~210 ns/op)
 m2:test:frame_allocator: PASS
 [arena INFO  m2] vm_address_space: cr3=0x100000 (ours 0x100000)
 [arena INFO  m2] vm_address_space: alias round-trip OK; higher-half call at 0xffffffff9c4701c0 returned 0x2464a0ffee005a5a
@@ -73,7 +73,7 @@ m2:test:heap_basics: PASS
 [arena ERROR heap] free rejected: NotFromHeap ptr=0x1cefb930
 [arena INFO  m2] heap_guards: DoubleFree/RedZoneBack/NotFromHeap rejected; heap usable after each
 m2:test:heap_guards: PASS
-[arena INFO  m2] heap_stress: 1920 alloc/free ops in 772us (~402 ns/op), chunks=1, reserved=64KiB, this-test allocs=961
+[arena INFO  m2] heap_stress: 1920 alloc/free ops in 784us (~408 ns/op), chunks=1, reserved=64KiB, this-test allocs=961
 m2:test:heap_stress: PASS
 [arena INFO  m2] crit_section: 2 ticks delivered, 0 crossed a 25ms section entered with IF=1, resumed, RFLAGS exact
 m2:test:crit_section: PASS
@@ -95,10 +95,10 @@ m2:test:ebs_exited: PASS
 [arena INFO  boot] entering kernel proper: trampoline=0xffffffff9c482b20 kmain=0xffffffff9c4859b0 boot-info=0xffffffff9cf1b528 kernel_cr3=0x112000
 [arena INFO  cpu] feature discovery after FP setup: vendor=AuthenticAMD family=15 model=107 stepping=1 physaddr=40bit fpu=true mmx=true fxsr=true sse=true sse2=true sse3=true ssse3=false sse4.1=false sse4.2=false sse4a=false xsave=false avx=false osxsave=false nx=true longmode=true smep=true smap=true; firmware OSXSAVE was false
 [arena INFO  fpu] FXSAVE64 initialized eagerly: CR0=0x80010033 CR4=0x668 MXCSR=0x1f80 mask=0xffff XCR0=None OSXSAVE=off AVX-state=unsupported
-[arena INFO  kernel] arena kernel proper entered: boot-info v1 map_key=0x93d regions=122 conventional=447MiB tsc=2100015819Hz tick=100Hz
+[arena INFO  kernel] arena kernel proper entered: boot-info v1 map_key=0x93d regions=122 conventional=447MiB tsc=2100079320Hz tick=100Hz
 [arena INFO  kernel] handover: boot m1 8/8, m2 pre-entry 17/17; post-EBS reconcile leaked 0 frame(s); 1 heap chunk(s) recycled
 [arena INFO  entropy] ADR-0110 ChaCha20 block known-answer check passed; placement entropy remains unavailable until production rngd seeds it
-[arena INFO  kernel] timer chain reclaimed: pit 100 Hz (ch0 11139 -> 6285 over 2ms); ioapic pin 2 rte 0x10000/0x0 -> 0x20; hpet gen_conf 0x0 -> 0x0; lapic svr=0x10f
+[arena INFO  kernel] timer chain reclaimed: pit 100 Hz (ch0 11017 -> 6161 over 2ms); ioapic pin 2 rte 0x10000/0x0 -> 0x20; hpet gen_conf 0x0 -> 0x0; lapic svr=0x10f
 [arena INFO  kernel] console input armed: com1 rx -> ioapic pin 4 -> vector 33 (rte 0x21), line discipline live
 [arena INFO  kernel] kernel_entry: rip=0xffffffff9c48652e rsp=0xffffffff9fb61880 cr3=0x112000 (dual was 0x100000) cr0=0x80010033 efer=0xd00
 m2:test:kernel_entry: PASS
@@ -206,7 +206,7 @@ m3:test:thread_callee_saved: PASS
 m3:test:thread_stack_isolation: PASS
 [arena INFO  m3] thread_churn_accounting: 127 threads created/run/reaped; free frames 114217 -> 114217 (exact); heap reserved unchanged at 64 KiB; table-full refusal at MAX_THREADS=64
 m3:test:thread_churn_accounting: PASS
-[arena INFO  m3] preempt_rotation: 12 timer rotations, exact order 0->1->2->3 cycle; progress without a single yield call: 165418 / 160973 / 157016 loop iterations
+[arena INFO  m3] preempt_rotation: 12 timer rotations, exact order 0->1->2->3 cycle; progress without a single yield call: 156173 / 183047 / 161499 loop iterations
 m3:test:preempt_rotation: PASS
 [arena INFO  m3] preempt_coexist: 2 threads finished 3x(15ms wait + yield) under 10ms quanta; 14 timer rotations interleaved with cooperative yields
 m3:test:preempt_coexist: PASS
@@ -290,7 +290,7 @@ m15:test:thread_isolation_block_yield_preempt: PASS
 [arena INFO  sched] thread_main(proc): id=157 entry=ffffffff9c47b0f0 arg=0 cr3=144000
 [arena INFO  sched] spawn(proc): id=158 slot=1 entry=ffffffff9c47b0f0 cr3=139000
 [arena INFO  sched] thread_main(proc): id=158 entry=ffffffff9c47b0f0 arg=0 cr3=139000
-[arena INFO  m15] process isolation: distinct CR3 roots retained independent FP state (23 timer switches); fresh process entered cleanly in recycled slot 1 (20 switches), teardown exact
+[arena INFO  m15] process isolation: distinct CR3 roots retained independent FP state (20 timer switches); fresh process entered cleanly in recycled slot 1 (20 switches), teardown exact
 m15:test:process_isolation_slot_reuse: PASS
 [arena INFO  m15] optional CPUID feature reporting matches guest bits: MMX=true SSE3=true SSSE3=false SSE4.1=false SSE4.2=false SSE4a=false XSAVE=false AVX=false OSXSAVE=false
 m15:test:optional_cpu_feature_reporting: PASS
@@ -311,7 +311,7 @@ m15:test:xf_delivery_probe: PASS
 [arena user fault] pid=98 vector=0x10 (#MF x87 FPU Error) rip=0x3004df cr2=0x0
 [arena INFO  sched] thread_main(proc): id=163 entry=ffffffff9c47b0f0 arg=0 cr3=139000
 [arena INFO  sched] thread_main(proc): id=164 entry=ffffffff9c47b0f0 arg=0 cr3=145000
-[arena INFO  m15] contained CPL3 vector 0x10: fault status 0x110; sibling and separate process survived (20 timer switches)
+[arena INFO  m15] contained CPL3 vector 0x10: fault status 0x110; sibling and separate process survived (24 timer switches)
 [arena INFO  sched] spawn(proc): id=165 slot=1 entry=ffffffff9c47b0f0 cr3=139000
 [arena INFO  sched] spawn(proc): id=166 slot=2 entry=ffffffff9c47b0f0 cr3=139000
 [arena INFO  sched] spawn(proc): id=167 slot=3 entry=ffffffff9c47b0f0 cr3=145000
@@ -339,7 +339,7 @@ m5:test:untyped_alloc: PASS
 [arena INFO  sched] spawn(proc): id=171 slot=1 entry=ffffffff9c4ce970 cr3=139000
 [arena INFO  sched] thread_main(proc): id=171 entry=ffffffff9c4ce970 arg=0 cr3=139000
 [arena INFO  syscall] map_memory: pid 105 window va=0x40000000 pages=1 writable=false mmio=true
-[arena INFO  m5] mmio_user: ring 3 read the HPET main counter through a kernel-minted Mmio cap — 0x3b999d → 0x3be799 strictly increasing across a bounded delay (kernel observed 0x1f12 → 0x3a1349), read-only window, cap survived the mapping, teardown freed exactly the RAM (device page skipped) — frames 114214
+[arena INFO  m5] mmio_user: ring 3 read the HPET main counter through a kernel-minted Mmio cap — 0x3cc3d0 → 0x3d4101 strictly increasing across a bounded delay (kernel observed 0x1ab7 → 0x3b0623), read-only window, cap survived the mapping, teardown freed exactly the RAM (device page skipped) — frames 114214
 m5:test:mmio_user: PASS
 [arena INFO  relay] vector 48 → notification 0 badge 0x51ab (owner pid 0)
 [arena WARN  relay] spurious delivery on unregistered vector 49
@@ -479,7 +479,7 @@ rngtest: entropy-service client starting (two draws, variance-checked)
 [arena INFO  syscall] map_memory: pid 114 window va=0x40200000 pages=1 writable=true mmio=false
 rngd: GET 4096 bytes buf 0x0000000000184000 → device wrote 4096 (completion #1)
 rngd: GET 4096 bytes buf 0x0000000000187000 → device wrote 4096 (completion #2)
-rngtest: draw A ca41112c… vs draw B a47ef15b… — both varied, and different
+rngtest: draw A dfabe88f… vs draw B 07e9b1a8… — both varied, and different
 rngdtest: missing diagnostic authority refused by service
 rngd: shutdown requested after 2 interrupt-delivered completion(s) — replying and exiting
 rngtest: PASS — two device-filled draws, both varied, mutually different, 2 interrupt-served completions
@@ -585,7 +585,7 @@ m6: RESULT SKIP (5/6 passed, 1 skipped — nothing to prove them against; see th
 [arena INFO  m7] timer_facility: timertest pid 125 (notification 0) — measuring real deadlines against the monotonic clock
 [arena INFO  sched] thread_main(proc): id=192 entry=ffffffff9c4800a0 arg=0 cr3=139000
 timertest: measuring the timer facility against the monotonic clock
-timertest: PASS — 50000us timer delivered after 53678us (never early, 3678us of lag against a 10000us tick)
+timertest: PASS — 50000us timer delivered after 53131us (never early, 3131us of lag against a 10000us tick)
 timertest: PASS — a cancelled timer stayed silent, and a second cancel was refused
 timertest: PASS — two timers on one notification both delivered
 timertest: PASS — a stale id was refused and the live timer it aliased (30064771072) still fired
@@ -680,8 +680,8 @@ netstackd: resolved 10.0.2.3 → 52:55:0a:00:02:03 on attempt 2 (cached for 30s)
 arptest: PASS — 10.0.2.3 resolved to 52:55:0a:00:02:03 through a driver that was RESTARTED under the stack
 netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
 netd: SEND 242 bytes buf 0x00000000001dd000 → completion #4
-netstackd: echo reply from 10.0.2.2 seq 1 in 1068us — identifier, sequence and all 200 payload bytes matched across the chunked receive
-arptest: PASS — ICMP echo to 10.0.2.2 answered in 1068us (measured on the monotonic clock, identifier and sequence matched)
+netstackd: echo reply from 10.0.2.2 seq 1 in 1015us — identifier, sequence and all 200 payload bytes matched across the chunked receive
+arptest: PASS — ICMP echo to 10.0.2.2 answered in 1015us (measured on the monotonic clock, identifier and sequence matched)
 netd: SEND 42 bytes buf 0x00000000001dd000 → completion #5
 netd: SEND 42 bytes buf 0x00000000001dd000 → completion #6
 netd: SEND 42 bytes buf 0x00000000001dd000 → completion #7
@@ -700,7 +700,7 @@ arptest: PASS — closing and rebinding rotated the bearer; the old handle staye
 rngd: GET 8 bytes buf 0x00000000001dd000 → device wrote 8 (completion #3)
 netstackd: port 5355 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
 netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
-netd: SEND 71 bytes buf 0x00000000001dd000 → completion #10
+netd: SEND 71 bytes buf 0x00000000001dd000 → completion #11
 arptest: PASS — native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer
 netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
 rngd: GET 2 bytes buf 0x00000000001dd000 → device wrote 2 (completion #4)
@@ -711,7 +711,7 @@ rngd: GET 16 bytes buf 0x00000000001dd000 → device wrote 16 (completion #5)
 netd: SEND 58 bytes buf 0x00000000001dd000 → completion #15
 netd: SEND 54 bytes buf 0x00000000001dd000 → completion #16
 arptest: PASS — TCP active OPEN returned a bearer; POLL completed the real three-way handshake
-netd: SEND 63 bytes buf 0x00000000001dd000 → completion #18
+netd: SEND 63 bytes buf 0x00000000001dd000 → completion #20
 netd: SEND 54 bytes buf 0x00000000001dd000 → completion #21
 arptest: PASS — TCP read 200 position-dependent bytes from the host in IPC chunks without loss or reordering
 netd: SEND 54 bytes buf 0x00000000001dd000 → completion #23
@@ -727,7 +727,7 @@ arptest: done — the stack put 8 request(s) on the wire and served 6 from cache
 [arena INFO  proc] destroy pid 127: released 1 owned IRQ relay vector(s)
 [arena INFO  proc] destroy pid 130: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
 [arena INFO  proc] destroy pid 130: released 2 owned IRQ relay vector(s)
-[arena INFO  m7] arp_service: arptest drove netstackd (pid 128) over netd (pid 126) through the whole Phase-7-so-far story — ARP resolved on the wire (15 transmit and 9 receive interrupt delivery/deliveries), a cached lookup that touched no wire, a silent address reported UNREACHABLE, the driver KILLED and re-established with, and an ICMP echo answered over IPv4 with both checksums verified and the demultiplexer sorting each frame to its protocol; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames 114214)
+[arena INFO  m7] arp_service: arptest drove netstackd (pid 128) over netd (pid 126) through the whole Phase-7-so-far story — ARP resolved on the wire (15 transmit and 8 receive interrupt delivery/deliveries), a cached lookup that touched no wire, a silent address reported UNREACHABLE, the driver KILLED and re-established with, and an ICMP echo answered over IPv4 with both checksums verified and the demultiplexer sorting each frame to its protocol; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames 114214)
 m7:test:arp_service: PASS
 m7: RESULT PASS (2/2)
 [arena INFO  m11] bound_signal: queued CALL raised badge 0x40 on notification 0; request served exactly
@@ -939,8 +939,6 @@ configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
-storaged: READ  sector 0 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
-rngd: submitted a device-filled 256-bit seed to the kernel CSPRNG
 configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
@@ -955,18 +953,20 @@ configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
 configd: SET refused without receiving-service authority
 configread: SET absent/wrong-kind refused x20 by receiver
+storaged: READ  sector 0 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
+rngd: submitted a device-filled 256-bit seed to the kernel CSPRNG
 storaged: READ  sector 1 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
 [arena INFO  sched] spawn(proc): id=262 slot=10 entry=ffffffff9c4800a0 cr3=2aa000
 [arena INFO  m8] manager-owned dependency probe pid 159: netd/W rngd/W private-notification/W audited, no privileged extras
-storaged: READ  sector 2 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
 [arena INFO  sched] thread_main(proc): id=262 entry=ffffffff9c4800a0 arg=9 cr3=2aa000
-storaged: READ  sector 21 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
-storaged: READ  sector 22 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
 depcheck: production driver poison opcodes refused without marker
+storaged: READ  sector 2 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
+storaged: READ  sector 21 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
 depcheck: netd MAC answered
 [arena INFO  syscall] map_memory: pid 159 window va=0x40000000 pages=1 writable=true mmio=false
-rngd: GET 64 bytes buf 0x00000000002ca000 → device wrote 64 (completion #2)
+storaged: READ  sector 22 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
 storaged: READ  sector 23 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #6, used idx 6)
+rngd: GET 64 bytes buf 0x00000000002ca000 → device wrote 64 (completion #2)
 depcheck: rngd device completed 64 varied bytes
 storaged: READ  sector 24 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #7, used idx 7)
 servicemgr: active netd MAC and rngd entropy probes passed; worker reaped
@@ -979,11 +979,14 @@ netstackd: starting — ArenaOS network stack service (M7.1, ADR-0030)
 storaged: READ  sector 26 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #9, used idx 9)
 storaged: READ  sector 27 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #10, used idx 10)
 rngd: GET 64 bytes buf 0x00000000002d1000 → device wrote 64 (completion #3)
-storaged: READ  sector 28 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
 netstackd: drew 8 unguessable UDP handles from rngd — possession of one IS the authority to use its port
 netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted
 netstackd: UDP checksum self-test PASSED 4/4 — outgoing nonzero and valid, incoming valid/nonzero accepted, corruption counted, IPv4 zero-checksum accepted
 netstackd: ready — ARP over IPv4 for 52:54:00:12:34:56, cache 8 entries, TTL 30s; netd stays L2
+storaged: READ  sector 28 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
+servicemgr: production netstackd READY pid 160
+[arena INFO  sched] spawn(proc): id=264 slot=11 entry=ffffffff9c4800a0 cr3=2d4000
+[arena INFO  sched] spawn(proc): id=265 slot=12 entry=ffffffff9c4800a0 cr3=2f6000
 storaged: READ  sector 1 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #12, used idx 12)
 fsd: reclaimed 8 superseded metadata sector(s) from commit seq 2
 fsd: mounted AFS1 — commit seq 3, objtab@21, bitmap@25, 16384 sectors, 16363 free, 1 file(s)
@@ -991,35 +994,32 @@ configd: READ UNSET
 configread: READ UNSET
 configd: READ UNSET
 configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)
-servicemgr: production netstackd READY pid 160
-[arena INFO  sched] spawn(proc): id=264 slot=9 entry=ffffffff9c4800a0 cr3=263000
-[arena INFO  sched] spawn(proc): id=265 slot=11 entry=ffffffff9c4800a0 cr3=2ec000
-[arena INFO  kernel] configread: boot-root reader reaped; no update authority delegated
-[arena INFO  sched] spawn(proc): id=266 slot=12 entry=ffffffff9c4800a0 cr3=25c000
-[arena INFO  sched] thread_main(proc): id=264 entry=ffffffff9c4800a0 arg=10 cr3=263000
+[arena INFO  sched] thread_main(proc): id=264 entry=ffffffff9c4800a0 arg=10 cr3=2d4000
 permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty
 [arena INFO  syscall] map_memory: pid 161 window va=0x40000000 pages=1 writable=true mmio=false
-[arena INFO  sched] thread_main(proc): id=265 entry=ffffffff9c4800a0 arg=11 cr3=2ec000
+[arena INFO  sched] thread_main(proc): id=265 entry=ffffffff9c4800a0 arg=11 cr3=2f6000
+[arena INFO  kernel] configread: boot-root reader reaped; no update authority delegated
+[arena INFO  sched] spawn(proc): id=266 slot=9 entry=ffffffff9c4800a0 cr3=25c000
 [arena INFO  sched] thread_main(proc): id=266 entry=ffffffff9c4800a0 arg=8 cr3=25c000
 permissiond: validated durable policy generation 0 DENY
 servicemgr: permission PING result + exit before deadline; worker reaped
 servicemgr: permissiond READY (validated durable decision; bearer table fresh)
-[arena INFO  sched] spawn(proc): id=267 slot=11 entry=ffffffff9c4800a0 cr3=2ec000
+[arena INFO  sched] spawn(proc): id=267 slot=12 entry=ffffffff9c4800a0 cr3=2f6000
 servicemgr: permission app SPAWNED (not grant/approval)
-[arena INFO  sched] spawn(proc): id=268 slot=13 entry=ffffffff9c4800a0 cr3=327000
-[arena INFO  sched] spawn(proc): id=269 slot=14 entry=ffffffff9c4800a0 cr3=37c000
-[arena INFO  sched] thread_main(proc): id=267 entry=ffffffff9c4800a0 arg=11 cr3=2ec000
+[arena INFO  sched] spawn(proc): id=268 slot=13 entry=ffffffff9c4800a0 cr3=32e000
+[arena INFO  sched] spawn(proc): id=269 slot=14 entry=ffffffff9c4800a0 cr3=383000
+[arena INFO  sched] thread_main(proc): id=267 entry=ffffffff9c4800a0 arg=11 cr3=2f6000
 permapp: REQUEST arena.txt READ (not authority)
 permapp: audited ONLY mediator WRITE|COPY, 127 other cap slots empty
 permapp: endpoint-only ALLOW/DENY/REVOKE refused by receiver
 permapp: malformed version/duplicate/rights/op refused by receiver x4
 permapp: ACQUIRE denied (no approval)
-[arena INFO  sched] thread_main(proc): id=268 entry=ffffffff9c4800a0 arg=12 cr3=327000
+[arena INFO  sched] thread_main(proc): id=268 entry=ffffffff9c4800a0 arg=12 cr3=32e000
 [arena INFO  syscall] map_memory: pid 165 window va=0x40000000 pages=1 writable=true mmio=false
 packaged: observed initial cap occupancy 6
 
 packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified
-[arena INFO  sched] thread_main(proc): id=269 entry=ffffffff9c4800a0 arg=13 cr3=37c000
+[arena INFO  sched] thread_main(proc): id=269 entry=ffffffff9c4800a0 arg=13 cr3=383000
 configup: SKIP (no trusted test intent; no SET)
 servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)
 servicemgr: observed cap occupancy packaged-ready=26
@@ -1030,7 +1030,7 @@ servicemgr: reserved APB1 slot127 descriptor=0 kind=0 rights=0
 
 servicemgr: permission app reaped through held Process cap
 [arena INFO  kernel] configup: boot-root updater reaped; marker never delegated to shell
-[arena INFO  sched] spawn(proc): id=270 slot=11 entry=ffffffff9c4800a0 cr3=25c000
+[arena INFO  sched] spawn(proc): id=270 slot=9 entry=ffffffff9c4800a0 cr3=25c000
 [arena INFO  kernel] filesd spawned: pid 167 (caps: 0=Endpoint0/W 1=Endpoint10/R 2=Rtc/R 3=Endpoint1/W) — AFS2 file service
 [arena INFO  sched] spawn(proc): id=271 slot=12 entry=ffffffff9c4800a0 cr3=3f7000
 [arena INFO  kernel] displayd spawned: pid 168; GOP=false virtio-gpu=true; sole framebuffer/BAR holder
@@ -1050,17 +1050,7 @@ storaged: BLKR4K sector 147448 buf 0x000000000041b000 → status 0, device wrote
 storaged: BLKR4K sector 16384 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #14, used idx 14)
 storaged: BLKR4K sector 16392 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #15, used idx 15)
 storaged: BLKR4K sector 16384 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #16, used idx 16)
-storaged: BLKR4K sector 16392 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #17, used idx 17)
-storaged: BLKR4K sector 16400 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #18, used idx 18)
-storaged: BLKR4K sector 16648 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #19, used idx 19)
-storaged: BLKR4K sector 16632 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #20, used idx 20)
-storaged: BLKR4K sector 16616 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #21, used idx 21)
-storaged: BLKR4K sector 16528 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #22, used idx 22)
-storaged: BLKR4K sector 16520 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #23, used idx 23)
-storaged: BLKR4K sector 16888 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #24, used idx 24)
-storaged: BLKR4K sector 16880 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #25, used idx 25)
 [displayprobe] ring3 MODE/cap-refusal/PRESENT 80x drain PASS
-storaged: BLKR4K sector 16568 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #26, used idx 26)
 [arena INFO  m9] displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS
 [arena INFO  sched] spawn(proc): id=273 slot=14 entry=ffffffff9c4800a0 cr3=423000
 [arena INFO  m10] desktop broker spawned with explicit delegated grants; application Process/region ownership remains userspace
@@ -1073,6 +1063,9 @@ storaged: BLKR4K sector 16568 buf 0x000000000041b000 → status 0, device wrote 
 [arena INFO  m8] manager-owned netstackd pid 160: five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded
 [arena INFO  m8] lifecycle read-only foreign Process reference installed pid 160 slot 14
 [arena INFO  sched] thread_main(proc): id=273 entry=ffffffff9c4800a0 arg=13 cr3=423000
+[desktop] session reservation shared/snapshot pages=471/469
+[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); private notification factory slot44; synchronization domain factory slot45; scratch slots125/126 free
+[arena INFO  syscall] map_memory: pid 170 window va=0x40200000 pages=1 writable=true mmio=false
 [arena INFO  sched] thread_main(proc): id=274 entry=ffffffff9c4800a0 arg=14 cr3=6a0000
 ArenaOS shell v0.10 (M4.6 + M5.3/5.4 + M6.5, ADR-0020/0023/0028) — serial, keyboard, or console port.
 arena> servicemgr: observed cap occupancy apb1-authority-held=26
@@ -1085,15 +1078,22 @@ packaged: observed cap high-water 7
 
 servicemgr: APB1 wrong-kind handoff refused kind=3 rights=5
 
+storaged: BLKR4K sector 16392 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #17, used idx 17)
+storaged: BLKR4K sector 16400 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #18, used idx 18)
+storaged: BLKR4K sector 16648 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #19, used idx 19)
+storaged: BLKR4K sector 16632 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #20, used idx 20)
+storaged: BLKR4K sector 16616 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #21, used idx 21)
+storaged: BLKR4K sector 16528 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #22, used idx 22)
+storaged: BLKR4K sector 16520 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #23, used idx 23)
+storaged: BLKR4K sector 16888 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #24, used idx 24)
+storaged: BLKR4K sector 16880 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #25, used idx 25)
+storaged: BLKR4K sector 16568 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #26, used idx 26)
 storaged: BLKR4K sector 16560 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #27, used idx 27)
 filesd: protected APB1 roots ready; abandoned staging entries removed=0
 filesd: AFS2 mounted seq 33, 16345/16384 blocks free, 14 objects; wall clock from RTC
 packaged: protected installed-app registry ready entries=0
 
 servicemgr: APB1 install-only BadgedEndpoint handed to READY packaged in late slot5
-[desktop] session reservation shared/snapshot pages=471/469
-[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); private notification factory slot44; synchronization domain factory slot45; scratch slots125/126 free
-[arena INFO  syscall] map_memory: pid 170 window va=0x40200000 pages=1 writable=true mmio=false
 [desktop] AFS2 file service online; /Users/user granted per session
 storaged: BLKR4K sector 16928 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #28, used idx 28)
 storaged: BLKR4K sector 16920 buf 0x000000000041b000 → status 0, device wrote 4097 bytes (completion #29, used idx 29)
