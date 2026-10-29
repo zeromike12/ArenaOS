@@ -1,0 +1,156 @@
+{
+  "label": "v1-guest-proof",
+  "milestone": "V1 \u2014 Native Graphical Launch Foundation",
+  "branch": "arena/f6b7ebc4-arenaos",
+  "source_commit": "2881fd619e7bc315746c860e2ac5cff6d339f513",
+  "working_tree_dirty": true,
+  "run_dir": "/tmp/v1-guest-proof-3192-_xrf3h18",
+  "qemu_binary": "/home/user/phase16-backend/qemu-patched",
+  "qemu_binary_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+  "apb1": "/tmp/v1-guest-proof-3192-_xrf3h18/c-gfx-app.apb1",
+  "apb1_sha256": "8b3e365e870e30324aa2752cf629e15c8524a15da22e69e3c1e773f7bb5d1916",
+  "install_ack": {
+    "serial_line": "[desktop] APB1 installed; signed version=42 (no launch authority implied)",
+    "apb1_sha256": "8b3e365e870e30324aa2752cf629e15c8524a15da22e69e3c1e773f7bb5d1916",
+    "kind": "installation_acknowledgment",
+    "note": "serial acknowledgment from guest protected installer; not a cryptographic receipt unless signature verified"
+  },
+  "serial_sha256": "6aa53d3d8327d161bf0e055549ee39b53f9aa2f4cf4f6f6221183d5bcb444543",
+  "serial_path": "/tmp/v1-guest-proof-3192-_xrf3h18/v1-guest-serial.log",
+  "checkpoints": [
+    {
+      "case": 1,
+      "name": "launch-ready Desktop",
+      "result": "PASS",
+      "evidence_ref": "shots/cp01-launch-ready-desktop.ppm (1440000 bytes)",
+      "detail": ""
+    },
+    {
+      "case": 2,
+      "name": "first native C window",
+      "result": "PASS",
+      "evidence_ref": "shots/cp02-first-native-c-window.ppm",
+      "detail": "1 connected checker component(s), checker pattern present"
+    },
+    {
+      "case": 3,
+      "name": "keyboard response",
+      "result": "PASS",
+      "evidence_ref": "shots/cp03-keyboard-response.ppm",
+      "detail": "fresh flash after keyboard input"
+    },
+    {
+      "case": 4,
+      "name": "mouse response",
+      "result": "PASS",
+      "evidence_ref": "shots/cp04-mouse-response.ppm",
+      "detail": "fresh flash after pointer input"
+    },
+    {
+      "case": 5,
+      "name": "two concurrent instances: focus/input isolation",
+      "result": "PASS",
+      "evidence_ref": "shots/cp05-focus-isolation.ppm",
+      "detail": "dir1(A focus@x=86): PASS, dir2(B focus@x=719): PASS"
+    },
+    {
+      "case": 6,
+      "name": "window removal with resource accounting",
+      "result": "PASS",
+      "evidence_ref": "shots/cp06-desktop-restored.ppm",
+      "detail": "2 window(s) retired, Desktop restored, resources settled=True, visual rects=0"
+    },
+    {
+      "case": 7,
+      "name": "final V1 demonstration",
+      "result": "PASS",
+      "evidence_ref": "shots/cp07-final-v1-demonstration.ppm",
+      "detail": "final V1 demonstration"
+    }
+  ],
+  "screenshots": [
+    {
+      "name": "cp01-launch-ready-desktop.ppm",
+      "bytes": 1440015,
+      "sha256": "54c2cf017a98d6ed74baefdc8a84d267d6f641b30fb65fb0232a58237a6fa677",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp02-first-native-c-window.ppm",
+      "bytes": 1440015,
+      "sha256": "e5232796fa4a6a6bf844e254facde11118b966886c9ec9e919997e4cac46ad72",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp03-keyboard-response.ppm",
+      "bytes": 1440015,
+      "sha256": "913a81c9d7f9988642394e543f677a2884f4f2e0799f39cce4e2ef58a0b85833",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp04-mouse-response.ppm",
+      "bytes": 1440015,
+      "sha256": "e55372d6731310afde89e0e014ff76b3143d17b862cadce14e4171c3da0b51b4",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp05-focus-isolation.ppm",
+      "bytes": 1440015,
+      "sha256": "2290b69b91a32f8f0d442716f197e1f2d5b2aa74ccde439f4c8a5d6213b6d450",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp05a-two-concurrent-instances.ppm",
+      "bytes": 1440015,
+      "sha256": "cba5d4f74f325c5ff3ad9e93eeb8baf8cfafe8bb88d45414676402362ba9e4f2",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp06-desktop-restored.ppm",
+      "bytes": 1440015,
+      "sha256": "da6fac0e98afb312cbd27a5f28e82b3a082c67025ed0a98c6407f75463948b8c",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    },
+    {
+      "name": "cp07-final-v1-demonstration.ppm",
+      "bytes": 1440015,
+      "sha256": "62feeb61a65641a4380a538738e8b3c7329d3baf5b25791d9ca3e9cded275c58",
+      "dimensions": {
+        "width": 800,
+        "height": 600
+      }
+    }
+  ],
+  "all_pass": true,
+  "qemu_rc": 0,
+  "identities": {
+    "source_commit": "2881fd619e7bc315746c860e2ac5cff6d339f513",
+    "working_tree_dirty": true,
+    "qemu_binary": "/home/user/phase16-backend/qemu-patched",
+    "qemu_binary_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+    "apb1_sha256": "8b3e365e870e30324aa2752cf629e15c8524a15da22e69e3c1e773f7bb5d1916",
+    "esp_sha256": "ddc1191b281d52ac00e42ad9f6b3dfeaead275e5fec7ccbbf7f40681bbc3d8d6",
+    "serial_sha256": "6aa53d3d8327d161bf0e055549ee39b53f9aa2f4cf4f6f6221183d5bcb444543"
+  }
+}
