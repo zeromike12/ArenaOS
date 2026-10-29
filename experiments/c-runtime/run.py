@@ -40,6 +40,7 @@ RUNTIME_SRC = ["src/crt0.c", "src/rt.c", "src/alloc.c", "src/string.c", "src/std
                "src/libc_time.c", "src/libc_threads.c", "src/profile.c", "src/libc_names.c"]
 GUEST_APPS = {"crt-probe": ["app/crt_probe.c"], "c-native": ["app/c_native_app.c"],
               "c2-console": ["app/c2_console_app.c"],
+              "c-gfx-app": ["app/c_gfx_app.c"],
               "xxhash-app": ["app/xxhash_app.c", "third_party/xxhash-0.8.4/xxhash.c"]}
 
 ZIG = os.environ.get("ARENA_ZIG", "/opt/zig-clang/pkg/ziglang/zig")
@@ -422,9 +423,11 @@ def host_tests():
     exe = out / "test_runtime"
     srcs = ["src/alloc.c", "src/string.c", "src/stdio.c", "src/vm.c", "src/streams.c", "src/startup_query.c",
             "src/errno.c", "src/exit.c", "src/libc_string.c", "src/libc_stdlib.c", "src/libc_time.c",
-            "host/host_main.c", "host/test_runtime.c", "host/test_libc.c"]
+            "host/host_main.c", "host/test_runtime.c", "host/test_libc.c",
+            "app/c_gfx_app.c"]
     cmd = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
-           "-DARENA_HOSTED", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+           "-DARENA_HOSTED", "-DARENA_HOSTED_TEST",
+           "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
            "-fno-strict-aliasing",
            "-I", str(EXP / "include"), "-I", str(EXP / "src")]
     run(cmd + [str(EXP / s) for s in srcs] + ["-o", str(exe)])

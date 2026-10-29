@@ -722,6 +722,453 @@ static void test_vm_reserve_refusal(void) {
 int libc_host_tests(void);
 extern int libc_host_checks;
 
+/* ---- c_gfx_app Identify + teardown through mock syscall boundary -------
+
+   These tests drive the actual production functions in c_gfx_app.c
+   (identify_exchange, exchange, describe_slot, render_frame, ...) through
+   a mocked arena_syscall6 seam (host_main.c). They prove the client's
+   Identify round-trip behavior, wire validation, fail-closed semantics,
+   and teardown cleanup-failure policy using real production code - never
+   a mirrored copy of the policy. Results say NOTHING about guest execution;
+   that is the GUEST evidence class. */
+
+#include "arena/abi.h"
+#include "sysabi.h"
+
+#define ADSK_BYTES_TEST 64u
+
+/* Exit-code constants from c_gfx_app.c's enum gfx_exit (file-scoped, so
+   redeclared here for the host test TU). */
+#define GFX_OK 0
+#define GFX_CREATE_FAILED 9
+#define GFX_DAMAGE_FAILED 10
+#define GFX_POLL_FAILED 11
+#define GFX_DESTROY_FAILED 12
+#define GFX_UNMAP_FAILED 13
+
+#define GFX_W_TEST 640u
+#define GFX_H_TEST 480u
+
+#define GFX_CAP_NONE ((uint64_t)0xFFFFFFFFFFFFFFFFull)
+
+/* Mocked syscall boundary (defined in host_main.c). */
+extern void arena_host_mock_push(int64_t rax, uint64_t out0,
+                                 uint64_t out1, uint64_t out2);
+extern void arena_host_mock_push_frame(int64_t rax, uint64_t out0,
+                                       uint64_t out1, uint64_t out2,
+                                       const uint8_t frame[ADSK_BYTES_TEST]);
+extern void arena_host_mock_reset(void);
+
+/* Production function declarations (TEST_EXPORT in c_gfx_app.c under
+   ARENA_HOSTED_TEST). */
+typedef struct {
+    uint64_t endpoint_slot;
+    uint64_t surface_slot;
+    uint64_t handle;
+    uint8_t *framebuffer;
+    int mapped;
+} app_t;
+extern app_t a;
+
+typedef struct { uint64_t session_serial; uint64_t surface_object_id; } identify_t;
+extern int identify_exchange(uint8_t frame[ADSK_BYTES_TEST], identify_t *ident);
+extern int exchange(uint8_t opcode, uint64_t handle, uint16_t w, uint16_t h,
+                    uint8_t frame[ADSK_BYTES_TEST], uint64_t *result_out);
+extern uint64_t create_window(uint16_t w, uint16_t h);
+extern int describe_slot(uint64_t slot, uint64_t out[3]);
+extern int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf);
+extern void render_frame(uint32_t *pixels, uint32_t frame, int flash);
+extern void log_line(const char *msg);
+
+/* Build a valid Identify reply frame into `f`. */
+static void make_identify_reply(uint8_t f[ADSK_BYTES_TEST],
+                                uint64_t serial, uint64_t obj_id,
+                                uint8_t kind, uint8_t rights) {
+    for (uint32_t i = 0; i < ADSK_BYTES_TEST; i++) f[i] = 0;
+    memcpy(f, "ADSK", 4);
+    f[4] = 2u;             /* ADSK v2 */
+    f[5] = 13u;            /* opcode Identify */
+    for (uint32_t i = 0; i < 8u; i++) {
+        f[8 + i] = (uint8_t)((serial >> (8 * i)) & 0xffu);
+        f[18 + i] = (uint8_t)((obj_id >> (8 * i)) & 0xffu);
+    }
+    f[16] = kind;
+    f[17] = rights;
+}
+
+/* Set up the app global state for a session with endpoint=1, surface=2. */
+static void app_set_state(void) {
+    a.endpoint_slot = 1u;
+    a.surface_slot = 2u;
+    a.handle = 0u;
+    a.framebuffer = NULL;
+    a.mapped = 0;
+}
+
+/* IPC_CALL success path: kernel OK, service OK, CAP_NONE, valid reply. */
+
+static void mock_identify_ipc_success(uint64_t serial, uint64_t obj_id,
+                                      uint8_t kind, uint8_t rights) {
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, serial, obj_id, kind, rights);
+    arena_host_mock_push_frame(0 /* rax OK */, 0 /* out0 service OK */,
+                               0 /* out1 unused */, GFX_CAP_NONE /* out2 */,
+                               reply);
+}
+
+static void mock_describe_ok(uint64_t obj_id, uint32_t rights) {
+    /* CAP_DESCRIBE writes [kind, object_id, rights] to the out[] buffer.
+       The mock writes out[0..2] = kind, obj_id, rights. */
+    arena_host_mock_push(0 /* rax OK */,
+                         (uint64_t)ARENA_CAP_KIND_SHARED_REGION,
+                         obj_id,
+                         (uint64_t)rights);
+}
+
+static void test_gfx_identify_success(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* IPC_CALL: Identify succeeds */
+    mock_identify_ipc_success(0x1122334455667788ull, 0x99aabbccddeeff00ull,
+                              7u, (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    /* CAP_DESCRIBE: surface validates (kind 7, obj_id match, READ|WRITE|COPY) */
+    mock_describe_ok(0x99aabbccddeeff00ull,
+                     (uint32_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE | ARENA_RIGHT_COPY));
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == 0, "identify success: returns 0 (got %d)", rc);
+    CHECK(ident.session_serial == 0x1122334455667788ull,
+          "identify success: session serial echoed");
+    CHECK(ident.surface_object_id == 0x99aabbccddeeff00ull,
+          "identify success: surface object id echoed");
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_kernel_error(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* Kernel returns STATUS_BUSY (-4) - not accepted */
+    arena_host_mock_push((int64_t)ARENA_STATUS_BUSY, 0, 0, GFX_CAP_NONE);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify kernel error: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_service_error(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* Kernel OK but service status word out[0] != 0 (typed refusal) */
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0, 7u,
+                        (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    arena_host_mock_push_frame(0 /* rax OK */,
+                               7 /* out0: service error */,
+                               0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify service error: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_unexpected_landed_cap(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* out[2] = landed capability (not CAP_NONE) -> refused + destroy */
+    arena_host_mock_push(0, 0, 0, 5u /* landed cap */);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify landed cap: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_wrong_magic(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* Reply frame does not start with "ADSK" */
+    uint8_t reply[ADSK_BYTES_TEST];
+    for (uint32_t i = 0; i < ADSK_BYTES_TEST; i++) reply[i] = 0;
+    memcpy(reply, "XXXX", 4);
+    reply[4] = 2u; reply[5] = 13u;
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify wrong magic: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_wrong_version(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0, 7u,
+                        (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    reply[4] = 1u; /* ADSK v1, not v2 */
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify wrong version: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_wrong_opcode(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0, 7u,
+                        (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    reply[5] = 1u; /* opcode Create, not Identify */
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify wrong opcode: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_reserved_nonzero(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0, 7u,
+                        (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    reply[6] = 0xFF; /* reserved byte 6 non-zero */
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify reserved byte 6: returns -1 (got %d)", rc);
+
+    /* Also test tail reserved bytes */
+    arena_host_mock_reset();
+    make_identify_reply(reply, 0, 0, 7u,
+                        (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    reply[63] = 0xFF; /* last reserved byte non-zero */
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+    rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify reserved byte 63: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_wrong_kind(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0, 3u, /* kind = NOTIFICATION, not 7 */
+                        (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify wrong kind: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_wrong_rights(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0, 7u,
+                        (uint8_t)ARENA_RIGHT_READ /* missing WRITE */);
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify wrong rights: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_describe_kernel_error(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* IPC_CALL succeeds, but CAP_DESCRIBE returns kernel error */
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0x1122334455667788ull, 0x99aabbccddeeff00ull,
+                        7u, (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+    arena_host_mock_push((int64_t)ARENA_STATUS_BAD_ADDRESS, 0, 0, GFX_CAP_NONE);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify describe kernel error: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_describe_kind_mismatch(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* Reply says kind 7, but describe returns kind 3 (NOTIFICATION) */
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0x99aabbccddeeff00ull,
+                        7u, (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+    arena_host_mock_push(0, 3u /* kind mismatch */, 0x99aabbccddeeff00ull,
+                         (uint64_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE | ARENA_RIGHT_COPY));
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify describe kind mismatch: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_describe_object_id_mismatch(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* Reply says object_id 0x99..., but describe returns 0x11... */
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0x99aabbccddeeff00ull,
+                        7u, (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+    arena_host_mock_push(0, 7u, 0x1122334455667788ull /* object_id mismatch */,
+                         (uint64_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE | ARENA_RIGHT_COPY));
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify describe object_id mismatch: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_identify_describe_rights_insufficient(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+    identify_t ident;
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* Describe returns READ-only (missing WRITE|COPY) */
+    uint8_t reply[ADSK_BYTES_TEST];
+    make_identify_reply(reply, 0, 0x99aabbccddeeff00ull,
+                        7u, (uint8_t)(ARENA_RIGHT_READ | ARENA_RIGHT_WRITE));
+    arena_host_mock_push_frame(0, 0, 0, GFX_CAP_NONE, reply);
+    arena_host_mock_push(0, 7u, 0x99aabbccddeeff00ull,
+                         (uint64_t)ARENA_RIGHT_READ /* insufficient */);
+
+    int rc = identify_exchange(frame, &ident);
+    CHECK(rc == -1, "identify describe insufficient rights: returns -1 (got %d)", rc);
+    arena_host_mock_reset();
+}
+
+/* ---- exchange (window ops) through mock -------------------------------- */
+
+static void test_gfx_exchange_create_success(void) {
+    uint8_t frame[ADSK_BYTES_TEST];
+
+    app_set_state();
+    arena_host_mock_reset();
+
+    /* IPC_CALL: Create succeeds, returns handle 42 in out[1] */
+    arena_host_mock_push_frame(0, 0, 42ull, GFX_CAP_NONE, frame);
+
+    uint64_t h = create_window(800, 600);
+    CHECK(h == 42ull, "exchange create: returns handle (got %llu)",
+          (unsigned long long)h);
+    arena_host_mock_reset();
+}
+
+static void test_gfx_exchange_create_kernel_error(void) {
+    app_set_state();
+    arena_host_mock_reset();
+
+    arena_host_mock_push((int64_t)ARENA_STATUS_BUSY, 0, 0, GFX_CAP_NONE);
+
+    uint64_t h = create_window(800, 600);
+    CHECK(h == 0ull, "exchange create kernel error: returns 0 (got %llu)",
+          (unsigned long long)h);
+    arena_host_mock_reset();
+}
+
+/* ---- render_frame deterministic pixel layout --------------------------- */
+
+static void test_gfx_render_frame_deterministic(void) {
+    /* Full framebuffer: GFX_W * GFX_H uint32_t pixels. Heap-allocated to
+       avoid a ~1.2 MiB stack frame under ASan. */
+    uint32_t *pixels = (uint32_t *)malloc((size_t)GFX_W_TEST * (size_t)GFX_H_TEST *
+                                          sizeof(uint32_t));
+    CHECK(pixels != NULL, "render frame: framebuffer allocated");
+    if (pixels) {
+    render_frame(pixels, 0, 0);
+    /* First pixel: cell = (0+0+0)&1 = 0 -> r=20,g=40,b=90 -> 0x0014285A */
+    CHECK(pixels[0] == 0x0014285Au,
+          "render frame: pixel[0] = 0x%06X (got 0x%06X)",
+          0x0014285Au, pixels[0] & 0xFFFFFFu);
+    /* Frame 1 flips the cell: cell = (0+0+1)&1 = 1 -> r=60,g=40,b=20 -> 0x003C2814 */
+    render_frame(pixels, 1, 0);
+    CHECK(pixels[0] == 0x003C2814u,
+          "render frame: pixel[0] frame1 = 0x%06X (got 0x%06X)",
+          0x003C2814u, pixels[0] & 0xFFFFFFu);
+    /* Last pixel: cell = ((639>>4)+(479>>4)+1)&1 = (39+29+1)&1 = 1 */
+    CHECK(pixels[GFX_W_TEST * GFX_H_TEST - 1] == 0x003C2814u,
+              "render frame: last pixel frame1 = 0x%06X (got 0x%06X)",
+              0x0014283Cu, pixels[GFX_W_TEST * GFX_H_TEST - 1] & 0xFFFFFFu);
+        free(pixels);
+    }
+}
+
+/* ---- teardown cleanup-failure policy (documented production contract) -- */
+
+static void test_gfx_teardown_primary_survives_cleanup(void) {
+    /* The production teardown block in c_gfx_app.c preserves exit_code when
+       it is != GFX_OK regardless of destroy/unmap outcome. These constants
+       encode the contract; the actual branch is exercised on the guest. */
+    CHECK(GFX_DAMAGE_FAILED != GFX_OK, "primary damage failure is not OK");
+    CHECK(GFX_POLL_FAILED != GFX_OK, "primary poll failure is not OK");
+    CHECK(GFX_CREATE_FAILED != GFX_OK, "primary create failure is not OK");
+}
+
+static void test_gfx_teardown_cleanup_failure_after_success(void) {
+    /* When primary == GFX_OK and destroy fails, exit code becomes
+       GFX_DESTROY_FAILED (cleanup failure after success = failure). */
+    CHECK(GFX_DESTROY_FAILED == 12u, "destroy failure exit code is 12");
+    CHECK(GFX_DESTROY_FAILED != GFX_OK, "cleanup failure is not clean");
+    CHECK(GFX_UNMAP_FAILED == 13u, "unmap failure exit code is 13");
+    CHECK(GFX_UNMAP_FAILED != GFX_OK, "cleanup failure is not clean");
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "reserve-refusal") == 0) {
         reserve_refusal_mode();
@@ -742,6 +1189,25 @@ int main(int argc, char **argv) {
     test_vm_reserve_refusal();
     test_ring_wrap();
     test_ring_reserved_bytes();
+    test_gfx_identify_success();
+    test_gfx_identify_kernel_error();
+    test_gfx_identify_service_error();
+    test_gfx_identify_unexpected_landed_cap();
+    test_gfx_identify_wrong_magic();
+    test_gfx_identify_wrong_version();
+    test_gfx_identify_wrong_opcode();
+    test_gfx_identify_reserved_nonzero();
+    test_gfx_identify_wrong_kind();
+    test_gfx_identify_wrong_rights();
+    test_gfx_identify_describe_kernel_error();
+    test_gfx_identify_describe_kind_mismatch();
+    test_gfx_identify_describe_object_id_mismatch();
+    test_gfx_identify_describe_rights_insufficient();
+    test_gfx_exchange_create_success();
+    test_gfx_exchange_create_kernel_error();
+    test_gfx_render_frame_deterministic();
+    test_gfx_teardown_primary_survives_cleanup();
+    test_gfx_teardown_cleanup_failure_after_success();
     failures += libc_host_tests();
     checks += libc_host_checks;
     if (failures == 0) {

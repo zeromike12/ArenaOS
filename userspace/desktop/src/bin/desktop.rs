@@ -10,7 +10,7 @@ use arena_desktop::{
 use arena_desktop::{
     input_wire,
     model::{Action, State},
-    wire::Frame,
+    wire::{self, Frame, IDENTIFY_SURFACE_KIND},
 };
 use arena_gfxkit::Canvas;
 use arena_process::{
@@ -6253,6 +6253,38 @@ extern "C" fn main() -> ! {
                 }
             } else {
                 status = STATUS_BAD_ARG as u64;
+            }
+        // Identify (ADSK version 2, opcode 13): the client identifies its
+        // Desktop session and surface before any graphical request. Only
+        // badge-authenticated sessions with a mapped surface may Identify.
+        // The request must carry CAP_NONE; a transferred capability is
+        // refused with safe disposal and no graphical state mutation.
+        // The reply carries CAP_NONE (no capability transfer).
+        // session.id is the SharedRegion object ID from SYS_SHARED_CREATE
+        // at session creation — it is the client's surface identity.
+        } else if let (Some(index), Ok(_identify_req)) = (
+            authenticated_session,
+            wire::identify_request_decode(&bytes),
+        ) {
+            let session = unsafe { SESSIONS[index] };
+            // Identify must not carry a transferred capability.
+            if landed != CAP_NONE {
+                // Typed refusal: dispose of the unexpected capability,
+                // mutate no graphical state.
+                destroy(landed);
+                landed = CAP_NONE;
+                status = STATUS_BAD_ARG as u64;
+            } else if session.kind > 6 || session.va == 0 {
+                status = STATUS_BAD_ARG as u64;
+            } else {
+                let surface_rights = RIGHTS_READ | RIGHTS_WRITE | RIGHTS_COPY;
+                bytes = wire::identify_reply_encode(
+                    session.id,
+                    IDENTIFY_SURFACE_KIND,
+                    surface_rights,
+                    session.id,
+                );
+                status = 0;
             }
         } else if let Some([7, id, rights]) = description {
             if let Some(i) = unsafe { &*(&raw const SESSIONS) }

@@ -13,6 +13,8 @@
 /* --- syscall numbers (userspace/abi.rs) ----------------------------------- */
 #define ARENA_SYS_DEBUG_WRITE 1u          /* legacy diagnostics; NOT stdio */
 #define ARENA_SYS_THREAD_EXIT 2u
+#define ARENA_SYS_IPC_CALL 7u             /* mirror of userspace/abi.rs SYS_IPC_CALL */
+#define ARENA_SYS_ENDPOINT_BADGE 51u      /* mirror of userspace/abi.rs SYS_ENDPOINT_BADGE */
 #define ARENA_SYS_TRY_WAIT 32u             /* abi.rs SYS_TRY_WAIT */
 #define ARENA_SYS_NOTIFY 10u
 #define ARENA_SYS_WAIT 11u
@@ -51,6 +53,14 @@
 /* Kernel SYS_DEBUG_WRITE per-call cap (syscall.rs WRITE_MAX). */
 #define ARENA_WRITE_MAX 256u
 
+#ifdef ARENA_HOSTED
+/* Host-test seam: arena_syscall6 is provided by the test harness (host_main.c)
+ * and can be programmed with controlled return values. The real inline
+ * syscall stub is used only in guest builds. */
+extern int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
+                              uint64_t a2, uint64_t a3, uint64_t a4,
+                              uint64_t a5);
+#else
 static inline int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
                                      uint64_t a2, uint64_t a3, uint64_t a4,
                                      uint64_t a5) {
@@ -65,6 +75,7 @@ static inline int64_t arena_syscall6(uint64_t nr, uint64_t a0, uint64_t a1,
                      : "rcx", "r11", "memory");
     return (int64_t)rax;
 }
+#endif
 
 
 #endif /* ARENA_SYSABI_INTERNAL_H */

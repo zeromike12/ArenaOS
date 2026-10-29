@@ -1,0 +1,6 @@
+{
+  "serial_line": "[desktop] APB1 installed; signed version=42 (no launch authority implied)",
+  "apb1_sha256": "8b3e365e870e30324aa2752cf629e15c8524a15da22e69e3c1e773f7bb5d1916",
+  "kind": "installation_acknowledgment",
+  "note": "serial acknowledgment from guest protected installer; not a cryptographic receipt unless signature verified"
+}
