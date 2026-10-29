@@ -70,7 +70,7 @@
     "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
   },
   "identities": {
-    "source_commit": "f0efaf790b5c6fae7188937e8258af11ee0d64ed",
+    "source_commit": "a6a04cd816ca78e7c20f3918ac19bcd7d1b8c9e7",
     "working_tree_dirty": true,
     "qemu_wrapper_path": "/home/user/phase16-backend/qemu-patched",
     "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
@@ -227,18 +227,18 @@
     },
     "guest_compiler_under_test": "gcc",
     "guest_elf_sha256": "07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f",
-    "serial_sha256": "8c67b9895b753c70efebbbb3576949ddbfb3c116db9d8c7cd7c6166522879356",
+    "serial_sha256": "dbbd2a3738cf294c21f79a835abb02be9672851af4e8cefcddceff8a0fb04c7c",
     "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
-    "esp_sha256": "0efce7f9d515606d95655ba24296081c6e953deac5f11e6c5c2ab88988231052",
+    "esp_sha256": "d7f7cf923c4ca896a185beae88a52d2eeeab025632c9e6a0df61538802308cb6",
     "esp_path": "/home/user/ArenaOS/build/arena-esp.img",
     "efi_sha256": "6951abba4917d9994d9c5dc837770d1d8e4de1836d77b82c0fd9340656d2df91",
     "efi_size": 11039232
   },
   "run": {
     "rc": 0,
-    "run_dir": "/tmp/v1-guest-proof-3482-0jbjibph",
-    "serial": "/tmp/v1-guest-proof-3482-0jbjibph/v1-guest-serial.log",
-    "serial_sha256": "8c67b9895b753c70efebbbb3576949ddbfb3c116db9d8c7cd7c6166522879356"
+    "run_dir": "docs/v1/evidence/v2-2026-10-29/guest-gcc",
+    "serial": "docs/v1/evidence/v2-2026-10-29/guest-gcc/v1-guest-serial.log",
+    "serial_sha256": "dbbd2a3738cf294c21f79a835abb02be9672851af4e8cefcddceff8a0fb04c7c"
   },
   "verdict": {
     "pass": true,

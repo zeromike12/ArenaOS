@@ -162,6 +162,17 @@ def package(root: Path) -> int:
     if converted:
         print(f"[evidence] converted {converted} PPM screendumps to PNG")
     files = collect(root)
+    # A single multi-megabyte blob in an evidence directory is almost always
+    # scratch state (a formatted disk image, a copied boot image), and it
+    # bloats the published package without giving a reader anything to check
+    # that a recorded SHA-256 does not already give. Refuse rather than
+    # quietly publish it.
+    oversized = [rel for rel, meta in files.items() if meta["size"] > 32 * 1024 * 1024]
+    if oversized:
+        print("[evidence] refusing oversized artifacts (scratch, not evidence):")
+        for rel in oversized:
+            print(f"  {rel}: {files[rel]['size']} bytes")
+        return 1
     manifest = {
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_commit": _git("rev-parse", "HEAD"),

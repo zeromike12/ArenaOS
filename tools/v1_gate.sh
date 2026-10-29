@@ -68,6 +68,11 @@ if [[ "${SKIP_GUEST:-0}" != "1" ]]; then
         # at it from an empty serial log.
         cp -f build/qemu-stderr-v1-guest-proof.log "$EVIDENCE/guest-$cc/qemu-stderr.log" 2>/dev/null || true
         cp -f "$LOG_DIR/proof-$cc.log" "$EVIDENCE/guest-$cc/harness-console.log"
+        # Scratch state, not evidence: the formatted scratch disk and the copy
+        # of the boot image are inputs to the run. Their identities are in
+        # evidence.json, so keeping the bytes would bloat the package without
+        # adding anything a reader can check.
+        rm -f "$EVIDENCE/guest-$cc/arena-disk.img" "$EVIDENCE/guest-$cc/BOOTX64.EFI"
         check "guest proof ($cc)" "$pg"
     done
 
@@ -79,6 +84,7 @@ if [[ "${SKIP_GUEST:-0}" != "1" ]]; then
     grep -E "cycles PASS" "$LOG_DIR/cycles.log" | tail -1
     cp -f build/qemu-stderr-v1-cycles.log "$EVIDENCE/lifecycle-cycles/qemu-stderr.log" 2>/dev/null || true
     cp -f "$LOG_DIR/cycles.log" "$EVIDENCE/lifecycle-cycles/harness-console.log"
+    rm -f "$EVIDENCE/lifecycle-cycles"/arena-disk*.img "$EVIDENCE/lifecycle-cycles/BOOTX64.EFI"
     check "ten launch/close cycles" "$yg"
 else
     echo "SKIP: guest proof and cycles (SKIP_GUEST=1)"

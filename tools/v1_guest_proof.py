@@ -877,13 +877,36 @@ def _source_commit() -> str | None:
         return None
 
 
-def _working_tree_dirty() -> bool:
+# Paths that the run itself writes. They are excluded from the "source tree
+# dirty" question, because a run that publishes its own evidence must not be
+# able to make its provenance unverifiable by doing so.
+EVIDENCE_PREFIXES = ("docs/v1/evidence/",)
+
+
+def _source_dirty_paths() -> list:
+    """Working-tree changes that are NOT this run's own evidence output."""
     try:
         out = subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--porcelain"],
                              capture_output=True, text=True, check=True).stdout
-        return bool(out.strip())
     except Exception:
-        return True
+        return ["<git status unavailable>"]
+    paths = []
+    for line in out.splitlines():
+        path = line[3:].strip()
+        if any(path.startswith(p) or f" {p}" in path for p in EVIDENCE_PREFIXES):
+            continue
+        paths.append(line.strip())
+    return paths
+
+
+def _working_tree_dirty() -> bool:
+    """True when the SOURCE tree (not merely the evidence output) is dirty.
+
+    The evidence actually produced records the full dirty-path list, so a
+    reviewer can see exactly what differed from the named commit instead of
+    trusting a boolean.
+    """
+    return bool(_source_dirty_paths())
 
 
 def _compiler_identity(cmd: list[str]) -> str:
@@ -1688,6 +1711,7 @@ def main() -> int:
     identities = {
         "source_commit": _source_commit(),
         "working_tree_dirty": _working_tree_dirty(),
+        "dirty_paths_excluding_evidence": _source_dirty_paths(),
         "qemu_wrapper_path": qemu_id["wrapper_path"],
         "qemu_wrapper_sha256": qemu_id["wrapper_sha256"],
         "qemu_elf_path": qemu_id["elf_path"],
