@@ -129,34 +129,55 @@ native guest application and both pass the ISA audit
 
 ## 4. Verified completed work
 
+Every row below is a run that happened, with the artifact it produced.
+
 | Item | Result | Evidence |
 |---|---|---|
-| QEMU package integrity, extraction, pinned ELF | PASS | `evidence/v2-2026-10-29/env/qemu-package*.txt`, `qemu-identities.txt` |
-| Emulator runs under the isolated loader, TCG only | PASS | `env/qemu-version.txt`, `env/qemu-accel-help.txt` |
-| Backend controls (patched/unpatched) | PASS 16/16 vs FAIL | `env/backend-controls/xm-verify.json` |
-| Rust 1.97.0 + official `none`/`uefi` targets | PASS | `env/rust-cargo-version.txt`, `env/rust-target-compile-*.txt` |
+| QEMU package integrity, extraction, pinned ELF | PASS `e0ea2b1f…f26ff` | `env/qemu-package*.txt`, `env/qemu-identities.txt` |
+| Emulator under the isolated loader, TCG only | PASS, 11.1.2, `-accel tcg` | `env/qemu-version.txt`, `env/qemu-accel-help.txt` |
+| Backend controls patched / unpatched | PASS 16/16 vs FAIL | `env/backend-controls/xm-verify.json` |
+| Rust 1.97.0 + official `none`/`uefi` targets | PASS (compiled) | `env/rust-cargo-version.txt`, `env/rust-target-compile-*.txt` |
 | GCC and Clang guest toolchains + ISA audit | PASS | `env/compilers/` |
-| Protected guards unchanged (PIE `d7b0a8cf…`, APB1 `04add54f…`) | PASS | `env/guards/` |
-| Guest proof, GCC cell (8 checkpoints) | PASS | `evidence/v2-2026-10-29/guest-gcc/evidence.json` |
-| Guest proof, Clang cell (8 checkpoints) | PASS | `evidence/v2-2026-10-29/guest-clang/evidence.json` |
-| Ten launch/close cycles | 10/10 PASS | `evidence/v2-2026-10-29/lifecycle-cycles/cycles-evidence.json` |
-| Harness focused controls | 19/19 PASS | `build/v1-gate/controls.log` |
+| Protected guards unchanged (PIE `d7b0a8cf…`, APB1) | PASS | `env/guards/` |
+| Guest proof, GCC cell — 8 checkpoints | **PASS** | `guest-gcc/evidence.json` |
+| Guest proof, Clang cell — 8 checkpoints | **PASS** | `guest-clang/evidence.json` |
+| Ten launch/close cycles | **10/10 PASS** | `lifecycle-cycles/cycles-evidence.json` |
+| Harness focused controls | **19/19 PASS** | gate log stage 2 |
+| Repository regression suite | **ALL TESTS PASSED (121 suites)** | `regressions/run-tests.log` |
+
+Run provenance for the published package:
+
+| Fact | Value |
+|---|---|
+| Gate source commit | `3d340622` (`working_tree_dirty: false`, no other changed paths) |
+| Boot image the guest ran | `arena-boot.efi` `bcd86866dbe7…` — identical on the ESP and in `build/`, image newer than every tracked source file |
+| GCC client ELF / APB1 | `07f9fbc5d7dc…` / `073f08f79f3b…` |
+| Clang client ELF / APB1 | `30cab76f2c94…` / `c0da952974c6…` |
+| Archive | `v2-2026-10-29.tar.gz` `ba83c3bab766…6fc`, 97 files, verified from a fresh extraction and from a fresh `git clone` |
 
 Guest-proven facts from the serial evidence (GCC cell; the Clang cell repeats
-them with a different client binary):
+them with a differently-built client):
 
-- `[gfx] identify ok surface=159` → `[desktop] ordinary window placed
-  handle=1 surface=159 x=70 y=60 w=640 h=480` → rendered frame.
-- `[gfx] event type=1 events=3 surface=159` (keyboard) and
-  `[gfx] event type=2 events=4 surface=159` (pointer), each with a visible
-  flash in that instance's own rectangle.
-- Two concurrent instances (159, 164) with focus acknowledgments in both
-  directions and no cross-instance acknowledgment.
-- `[desktop] application retired: kind=6 surface=159 …` and
-  `[desktop] child Process-cap exit surface=159 status=0`, followed by a
-  fresh resource detail line returning to the idle baseline.
+- `[gfx] identify ok surface=159 → [desktop] ordinary window placed handle=1
+  surface=159 x=70 y=60 w=640 h=480` → rendered frame.
+- `[gfx] event type=1 events=3 surface=159` (keyboard) and `[gfx] event type=2
+  events=4 surface=159` (pointer), each with the flash visible inside that
+  instance's own rectangle.
+- Two concurrent instances (159, 164): focus acknowledged in both directions,
+  per-instance key acks `9→10` and `4→5`, zero cross-instance acks.
+- `[desktop] application retired: kind=6 surface=159 …` and `[desktop] child
+  Process-cap exit surface=159 status=0`, then a fresh resource-detail line
+  back to `app-instances=0 windows=0`.
+- Cycles: surfaces 159, 164, 169 … 204 — a new object each time, each retired
+  with status 0 and settlement to the pre-cycle baseline.
 
----
+### 4.1 A defect this section caught in passing
+
+The first gate reported PASS while its evidence recorded an EFI digest that no
+longer matched a rebuild at the same commit: the harness had booted an image
+built before a formatting-only change. Evidence now records the boot image's
+age against the newest tracked source file and the EFI digest from both the
+ESP and `build/`, and the verdict fails when they disagree — see §5.
 
 ## 5. Known defects and their status
 
@@ -168,6 +189,9 @@ them with a different client binary):
 | 4 | Settlement accepted historical snapshots / incomplete accounting | **Closed** — `evaluate_cleanup` uses only lines after the close cursor, requires the *latest* detail line to match the pre-launch baseline, and rejects spurious retirements |
 | 5 | Negative controls tested a copied policy or an empty slice | **Closed** — 19 controls drive the real evaluation functions; each fails for one specific reason |
 | 6 | Missing provenance did not block PASS | **Closed** — a single `compute_overall_verdict` requires every checkpoint PASS, the serial log, the harness transcript, and every identity (commit, compilers, ELF, APB1, ESP, EFI, emulator ELF, loader, firmware) |
+
+| 7 | The harness could boot a stale image and still PASS | **Closed** — verdict fails when the boot image is older than the newest tracked source file, or when the EFI embedded in the ESP differs from `build/arena-boot.efi` |
+| 8 | Evidence could be copied into the package by hand after the fact | **Closed** — `V1_EVIDENCE_DIR` makes the run write where the verdict says the artifacts are; packaging refuses a single artifact over 32 MB so scratch state cannot masquerade as evidence |
 
 Two production-side gaps were found while proving the above and were fixed
 through the production path, not the harness:
@@ -192,14 +216,14 @@ bytes without executing.
 
 | # | Case | Verdict | Class | Evidence |
 |---|---|---|---|---|
-| 1 | Launch-ready Desktop | PASS | GUEST | `guest-gcc/shots/cp01-launch-ready-desktop.ppm`, serial `real desktop frame presented` |
+| 1 | Launch-ready Desktop | PASS | GUEST | `guest-gcc/shots/cp01-launch-ready-desktop.png`, serial `real desktop frame presented` |
 | 2 | Protected-installer APB1 receipt | PASS | GUEST | `guest-gcc/install-ack.json` (signed version 42) |
-| 3 | Discover → Identify → Validate → native window | PASS | GUEST | `guest-gcc/evidence.json` cp3, `shots/cp03-first-native-c-window.ppm` |
-| 4 | Keyboard acknowledgment (type + instance) | PASS | GUEST | cp4, `shots/cp04-keyboard-response.ppm` |
-| 5 | Mouse acknowledgment (type + instance) | PASS | GUEST | cp5, `shots/cp05-mouse-response.ppm` |
-| 6 | Two-instance focus/input isolation, both directions | PASS | GUEST | cp6, `shots/cp06-focus-isolation.ppm` |
-| 7 | Retirements, exits, settlement vs baseline, visual removal | PASS | GUEST | cp7, `shots/cp07-desktop-restored.ppm` |
-| 8 | Final demonstration | PASS | GUEST | cp8, `shots/cp08-final-demonstration.ppm` |
+| 3 | Discover → Identify → Validate → native window | PASS | GUEST | `guest-gcc/evidence.json` cp3, `shots/cp03-first-native-c-window.png` |
+| 4 | Keyboard acknowledgment (type + instance) | PASS | GUEST | cp4, `shots/cp04-keyboard-response.png` |
+| 5 | Mouse acknowledgment (type + instance) | PASS | GUEST | cp5, `shots/cp05-mouse-response.png` |
+| 6 | Two-instance focus/input isolation, both directions | PASS | GUEST | cp6, `shots/cp06-focus-isolation.png` |
+| 7 | Retirements, exits, settlement vs baseline, visual removal | PASS | GUEST | cp7, `shots/cp07-desktop-restored.png` |
+| 8 | Final demonstration | PASS | GUEST | cp8, `shots/cp08-final-demonstration.png` |
 | 9 | GCC guest coverage | PASS | GUEST | `guest-gcc/` |
 | 10 | Clang guest coverage | PASS | GUEST | `guest-clang/` |
 | 11 | Descriptor-reordering independence | PASS | HOST-ONLY | `test_gfx_discover_permutation_independence` (reversed, rotated, relocated slots) |
@@ -211,15 +235,42 @@ bytes without executing.
 | 17 | Surface-layout boundaries | PASS | HOST-ONLY | `test_gfx_surface_layout_boundary` (page 4096, offset 4096, 640×480×4, 300 pixel pages, 301 minimum, 32-bit, no padding) |
 | 18 | Repeated launch/close (≥10 cycles) | PASS | GUEST | `lifecycle-cycles/cycles-evidence.json` — 10/10, surfaces 159…204 |
 | 19 | Bounded lifecycle and resource settlement | PASS | GUEST | per-cycle fresh detail line back to `app-instances=0 windows=0`; `[gfx] exit events=… focused=… code=0` |
-| 20 | Authoritative regressions | see §6.1 | GUEST+HOST | `tools/run_tests.sh` |
-| 21 | Final-artifact stability gates | see §6.2 | STATIC | `env/guards/`, `tools/v1_gate.sh` |
+| 20 | Authoritative regressions | **PASS** (121 suites) | GUEST+HOST | `regressions/run-tests.log` |
+| 21 | Final-artifact stability gates | **PASS** | STATIC | §6.2; `env/guards/`, gate stage 0 and stage 6 |
 
 ### 6.1 Authoritative regressions
 
-`bash tools/run_tests.sh` runs the repository's full regression suite. The
-result for this checkpoint is recorded verbatim in §6.1.1 with the source
-SHA it ran against; the suite itself refuses to report PASS if the working
-tree changes while it runs.
+`bash tools/run_tests.sh` at source commit `bdf6c66` with a clean tree:
+
+```
+QUALIFICATION SOURCE COMMIT: bdf6c66971574f63687f23bbd69f08415d5c37f4
+QUALIFICATION SOURCE CLEAN: yes
+...
+QUALIFICATION SOURCE END: bdf6c66971574f63687f23bbd69f08415d5c37f4
+ALL TESTS PASSED (121 test suites)
+```
+
+The transcript is committed unmodified as `regressions/run-tests.log`. The
+runner re-checks at the end that HEAD and the working-tree status are what
+they were at the start, so a PASS cannot hide a source change made mid-run.
+Negative controls inside the suite are expected to print `FAILED -> RED PASS`;
+those are fixtures proving that the production oracles can fail.
+
+### 6.2 Final-artifact stability
+
+- Phase-14 static-PIE digest `d7b0a8cf…`: unchanged, and still fails closed at
+  any other build path (`env/guards/`).
+- APB1 protected digest: unchanged.
+- Kernel ISA audit: PASS (120,911 instructions, six trusted leaf profiles).
+- `arena-boot.efi` is byte-identical across consecutive builds of the same
+  tree (`bcd86866…`), and the gate builds before it boots.
+- **The ESP image is not byte-stable, by construction:** `pyfatfs` writes FAT
+  directory timestamps, so `arena-esp.img` differs between builds even when
+  its contents do not. The evidence therefore pins the *EFI extracted from the
+  ESP* and compares it to `build/arena-boot.efi`, rather than pretending the
+  FAT image is reproducible.
+- The evidence archive is re-verified from a fresh extraction outside the
+  workspace (`97 files, problems: 0`), and separately from a fresh `git clone`.
 
 ### 6.2 Final-artifact stability
 
@@ -241,7 +292,12 @@ tree changes while it runs.
 | `docs/v1/evidence/v2-2026-10-29/guest-gcc/` | GUEST | serial log, harness transcript, `evidence.json`, install ack, 8 screenshots, QEMU stderr |
 | `docs/v1/evidence/v2-2026-10-29/guest-clang/` | GUEST | the same, with the Clang-built client |
 | `docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/` | GUEST | 10-cycle verdict, serial log, per-cycle screenshots |
-| `docs/v1/evidence/v2-2026-10-29.tar.gz` + `.sha256` | — | the durable package (manifest + archive) |
+| `docs/v1/evidence/v2-2026-10-29/regressions/` | GUEST+HOST | `run_tests.sh` transcript, unmodified, with the runner's own commit assertions |
+| `docs/v1/evidence/v2-2026-10-29.tar.gz` + `.tar.gz.sha256` | — | the durable package (manifest, README, archive) |
+
+Screenshots are stored as PNG. QEMU writes PPM; packaging converts them
+losslessly (no resize, no recolour) and says so in the package README, because
+1.44 MB per frame is not worth keeping in a repository.
 
 **Historical evidence, preserved and not counted.** `evidence/v1-guest-proof/runs/v1-proof-pass-2881fd6/`
 is kept untouched. It is missing its serial log and QEMU stderr, so its PASS
@@ -249,10 +305,16 @@ cannot be re-verified and it is **not** used for any verdict here
 (`docs/v1/REVIEW_CORRECTION_2881fd6.md`). The run in §4 is a new, clearly
 labelled run of the corrected harness; it does not replace the old one.
 
+**Provenance note.** `evidence.json` in each cell records the commit the run
+executed against (`3d340622`) and `working_tree_dirty: false` with an empty
+list of other changed paths. The evidence files themselves were committed
+afterwards (`82ef9a3`). Nothing in the evidence was written by hand, and
+`V1_EVIDENCE_DIR` means the harness wrote them where they now sit.
+
 **Reproduce:**
 
 ```sh
-bash tools/v1_gate.sh          # env receipts → controls → GCC → Clang → cycles → package+verify
+bash tools/v1_gate.sh          # build → env receipts → controls → GCC → Clang → cycles → package+verify
 python3 tools/v1_evidence.py verify docs/v1/evidence/v2-2026-10-29.tar.gz
 ```
 
@@ -260,10 +322,12 @@ python3 tools/v1_evidence.py verify docs/v1/evidence/v2-2026-10-29.tar.gz
 
 ## 8. Known limitations (stated, not hidden)
 
-1. Cases 11–17 are HOST-ONLY. They exercise the production client and the
-   production Desktop wire code through a mocked syscall boundary; they do not
-   prove guest execution of those refusals. A guest-level negative client for
-   each refusal is still outstanding work.
+1. Cases 11–17 are HOST-ONLY. They drive the production `discover()`,
+   `identify_exchange()` and the production Desktop wire codecs against
+   synthetic records and a mocked syscall boundary. They prove the *decisions*
+   are right and that the code is reachable, but they do not prove guest
+   execution of each refusal: a guest-side negative client per refusal is
+   still outstanding work. No verdict above claims otherwise.
 2. The unresponsive-service case is not exercised inside the guest: sync IPC
    has no client deadline by design, and the documented supervision path is
    external. No test claims to prove a guest-side timeout.
