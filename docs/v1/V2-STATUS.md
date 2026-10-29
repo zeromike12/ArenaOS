@@ -32,21 +32,26 @@ B in `gate/gate-controls.txt` demonstrate both directions.
 
 ---
 
-## 2. Round-2 summarised in one paragraph
+## 2. Round 2 in one paragraph
 
-Round 2 corrected four defects in the V1 evidence chain and extended the
-matrix: (a) an input checkpoint can no longer pass on an acknowledgment
-without a captured frame showing the response, and vice versa; (b) every
-checkpoint now publishes the exact frame its assertion was made on, as a
-lossless PNG whose raster digest is recorded, and packaging refuses a run
-that is missing one; (c) cleanup compares 21 resource fields from one
-production snapshot pair, with a single documented, bounded, one-directional
-frame warm-up allowance; (d) the guest refusal matrix (21 cases) now runs in
-the guest, through the production launch path, instead of only on the host.
-The gate was reconciled with the claims it makes. The canonical EFI build
-remains blocked by an environment limitation that predates this round (§4 B1)
-and the artifacts used here are therefore explicitly **not** qualification
-artifacts.
+Round 2 corrected the defects M raised and extended the matrix: (a) an input
+checkpoint can no longer pass on an acknowledgment without a captured frame
+showing the response, or on a frame without a fresh ack; (b) every checkpoint
+publishes the exact frame its assertion was made on, as a lossless PNG whose
+raster digest is recorded, and packaging refuses a run that is missing one or
+whose archive does not match its manifest; (c) cleanup compares 21 resource
+fields from one production snapshot pair, with a single documented, bounded,
+one-directional frame warm-up allowance, and controls prove a thread,
+capability or frame leak fails the verdict; (d) the guest refusal matrix (21
+cases) runs in the guest through the production launch path for both
+compilers; (e) the gate was reconciled with the claims it makes, by receipts
+that identify the code by content and an aggregate that will not print a
+qualification for a partial or unqualified run. Two things are **not** done
+and are not dressed up as done: the canonical EFI build is blocked by an
+environment limitation that predates this round (§4.1 B1), and the formal
+121-suite regression is 22/121 with the other 99 stopped at that same guard
+(§5.1). The artifacts used here are explicitly **not** qualification
+artifacts, and V1 acceptance remains M's decision.
 
 ---
 
