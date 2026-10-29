@@ -70,11 +70,9 @@
     "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
   },
   "identities": {
-    "source_commit": "bdf6c66971574f63687f23bbd69f08415d5c37f4",
-    "working_tree_dirty": true,
-    "dirty_paths_excluding_evidence": [
-      "M tools/v1_evidence.py"
-    ],
+    "source_commit": "3d34062296cc5e35b86416a8eab70ebaa15560b8",
+    "working_tree_dirty": false,
+    "dirty_paths_excluding_evidence": [],
     "qemu_wrapper_path": "/home/user/phase16-backend/qemu-patched",
     "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
     "qemu_elf_path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
@@ -230,13 +228,13 @@
     },
     "guest_compiler_under_test": "gcc",
     "guest_elf_sha256": "07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f",
-    "serial_sha256": "1ad93c125ab47358af5de0e84b2382f74e15c7385c5ea6feec5761effa6498de",
+    "serial_sha256": "96b37dfc46d05cb630dc612d81caa66d3b9975edc630b758813be2ba14f16dc9",
     "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
-    "esp_sha256": "b1d6f213dfb186d31f079682d29999e0a8a1eaed37fc8ba414c7551d7518f789",
+    "esp_sha256": "40bc0694c849c2ed296f2ea51d7e9a8b9cd8f837e8c0ec92b5dc705cfd9696ff",
     "esp_path": "/home/user/ArenaOS/build/arena-esp.img",
     "image": {
       "fresh": true,
-      "image_mtime": 1793309765.0361574,
+      "image_mtime": 1793309888.833394,
       "newest_source": "tools/v1_evidence.py",
       "newest_source_mtime": 1793309754.5720527,
       "boot_efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83"
@@ -248,7 +246,7 @@
     "rc": 0,
     "run_dir": "docs/v1/evidence/v2-2026-10-29/guest-gcc",
     "serial": "docs/v1/evidence/v2-2026-10-29/guest-gcc/v1-guest-serial.log",
-    "serial_sha256": "1ad93c125ab47358af5de0e84b2382f74e15c7385c5ea6feec5761effa6498de"
+    "serial_sha256": "96b37dfc46d05cb630dc612d81caa66d3b9975edc630b758813be2ba14f16dc9"
   },
   "verdict": {
     "pass": true,
