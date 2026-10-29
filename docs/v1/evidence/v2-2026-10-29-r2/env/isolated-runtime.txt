@@ -1,0 +1,32 @@
+prefix: /home/user/glibc-2.40
+eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f  /home/user/glibc-2.40/lib/libc.so.6
+63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458  /home/user/glibc-2.40/lib/ld-linux-x86-64.so.2
+--- wrappers ---
+2b03f6bc6dc50e5c2f98d7c2c30bb7c319667ed7010b16f1ec0d24fa967ee270  /home/user/phase16-backend/qemu-patched
+6c6749b22d153a7eb3b586b5865cf03a718eb8ee4bb9b1a4e9e7120c7198e5cf  /home/user/phase16-backend/qemu-unpatched
+--- /home/user/phase16-backend/qemu-patched ---
+#!/bin/bash
+# Pinned Phase-15 patched QEMU 11.1.2 (TCG), launched through the private
+# glibc 2.40 loader because the host glibc (2.36) predates the binary's
+# GLIBC_2.38 requirement. The emulator ELF, loader and runtime libraries are
+# named with absolute literals so tools/v1_guest_proof.py can hash every link
+# of the launch chain separately from this wrapper. -accel tcg is added by
+# the harness (arena_env.qemu_cmd), never assumed here.
+HOST_LEAF="/home/user/glibc-2.40/hostleaf"
+exec "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2" \
+    --library-path "/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/home/user/glibc-2.40/hostleaf" \
+    "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched" \
+    -L "/home/user/phase15-pkg/backend/pc-bios" "$@"
+--- /home/user/phase16-backend/qemu-unpatched ---
+#!/bin/bash
+# Pinned Phase-15 patched QEMU 11.1.2 (TCG), launched through the private
+# glibc 2.40 loader because the host glibc (2.36) predates the binary's
+# GLIBC_2.38 requirement. The emulator ELF, loader and runtime libraries are
+# named with absolute literals so tools/v1_guest_proof.py can hash every link
+# of the launch chain separately from this wrapper. -accel tcg is added by
+# the harness (arena_env.qemu_cmd), never assumed here.
+HOST_LEAF="/home/user/glibc-2.40/hostleaf"
+exec "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2" \
+    --library-path "/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/home/user/glibc-2.40/hostleaf" \
+    "/home/user/phase15-pkg/backend/qemu-system-x86_64-unpatched" \
+    -L "/home/user/phase15-pkg/backend/pc-bios" "$@"

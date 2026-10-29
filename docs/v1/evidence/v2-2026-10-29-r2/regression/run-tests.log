@@ -1,0 +1,148 @@
+QUALIFICATION SOURCE COMMIT: 65af1d89a5254cd6a45cb96341966f9265a42742
+QUALIFICATION SOURCE CLEAN: no (development run)
+======================================================================
+== host-side unit tests (arena-heap: cargo test --lib)
+======================================================================
+   Compiling arena-heap v0.1.0 (/workspace/ArenaOS/kernel/libs/heap)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.73s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_heap-9c860bc7eac3920c)
+
+running 12 tests
+test tests::core_guards_off ... ok
+test tests::alignment_requests ... ok
+test tests::core_guards_on ... ok
+test tests::double_free_rejected ... ok
+test tests::foreign_and_interior_pointers_rejected ... ok
+test tests::growth_and_exhaustion ... ok
+test tests::red_zones_catch_overflow_and_underflow ... ok
+test tests::many_small_then_coalesce ... ok
+test tests::release_chunks_resets_and_regrows ... ok
+test tests::release_chunks_refuses_nonempty_heap - should panic ... ok
+test tests::zero_size_and_oversize_rejected ... ok
+test tests::stress_lcg_alloc_free_with_reference_model ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+======================================================================
+== host-side unit tests (arena-sync: cargo test --lib)
+======================================================================
+   Compiling arena-sync v0.1.0 (/workspace/ArenaOS/kernel/libs/sync)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.47s
+     Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/debug/deps/arena_sync-b414257b95d72f0d)
+
+running 6 tests
+test tests::lock_guard_gives_exclusive_value_access ... ok
+test tests::owner_token_tracks_acquirer_across_threads ... ok
+test tests::protects_handoff_of_non_sync_data ... ok
+test tests::recursive_acquire_panics_in_debug_builds - should panic ... ok
+test tests::try_lock_is_none_while_held_and_some_after_drop ... ok
+test tests::mutual_exclusion_under_four_parallel_threads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+== host-side DNS parser tests
+
+running 2 tests
+test tests::compressed_answer_and_negative_space ... ok
+test tests::bounded_names ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side TCP wire/timeout policy tests
+
+running 3 tests
+test tests::syn_options_and_header_bounds ... ok
+test tests::no_early_or_unbounded_retransmission ... ok
+test tests::valid_odd_payload_and_corruption ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side networking API contract tests
+
+running 5 tests
+test ipc::tests::status_transport_and_capability_are_distinct ... ok
+test malformed_replies_are_not_silently_truncated ... ok
+test tcp_async_bearer_state_and_revocation ... ok
+test udp_chunk_offsets_sender_identity_and_bearer_lifecycle ... ok
+test address_wire_layout_dns_and_local_validation ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host and no_std target Phase 8.3 userspace client libraries
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+     Running unittests src/lib.rs (userspace/arena-lib/target/x86_64-unknown-linux-gnu/debug/deps/arena_lib-625db13177203621)
+
+running 2 tests
+test ipc::tests::status_transport_and_capability_are_distinct ... ok
+test fs::tests::exact_wire_and_no_hidden_retry ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling arena-lib v0.1.0 (/workspace/ArenaOS/userspace/arena-lib)
+    Finished `release` profile [optimized] target(s) in 0.17s
+== host-side service manifest and inventory policy tests
+
+running 15 tests
+test inventory::tests::child_pid_is_not_authority_but_a_live_process_cap_is ... ok
+test inventory::tests::missing_or_unsupported_authority_fails_closed ... ok
+test inventory::tests::reads_live_cap_metadata_not_manifest_words ... ok
+test inventory::tests::observed_authority_goes_directly_to_policy_without_manifest_minting ... ok
+test manifest::tests::attenuated_grants_and_actual_source_slots ... ok
+test manifest::tests::dependencies_must_be_present_ready_and_acyclic ... ok
+test manifest::tests::missing_or_false_authority_never_gets_a_plan ... ok
+test manifest::tests::rights_may_never_be_broadened_or_quietly_clamped ... ok
+test manifest::tests::topological_order_and_duplicate_policy ... ok
+test readiness::tests::coalesced_apb1_wake_is_preserved_but_cannot_complete_readiness ... ok
+test readiness::tests::late_coalesced_ready_is_still_too_late ... ok
+test readiness::tests::requires_both_independent_driver_signals ... ok
+test readiness::tests::timeout_unknown_badge_and_invalid_masks_fail_closed ... ok
+test restart::tests::exact_child_and_bounded_restart_budget ... ok
+test restart::tests::invalid_policy_and_premature_ready_refused ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== host-side Phase 8.1 config record and AFS1 integrity-limit probes
+
+running 4 tests
+test tests::malformed_namespace_and_read_failures ... ok
+test tests::pending_contiguous_and_exhausted ... ok
+test tests::python_reference_vectors_and_roundtrip ... ok
+test tests::visible_corruption_never_falls_back_to_old ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.003s
+
+OK
+ADR-0046 probe PASS: corrupted newer AFS1 commit silently selects older valid metadata
+A config service given only fsd's namespace cannot distinguish this from no newer commit.
+== host-side Phase 8.2 immutable permission decision record
+
+running 3 tests
+test tests::fixed_scope_and_no_authority_in_record ... ok
+test tests::request_is_bounded_and_cannot_encode_authority_or_approval ... ok
+test tests::poisoned_scan_never_falls_back_to_allow ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+POLICY RECORD: PASS (independent vectors, malformed decisions/names, full scan, eight-generation bound)
+== host and no_std target cap/IPC layout audit
+CapObj=16 Cap=24
+16: CapSpace=400 Process=1744 Option<Process>=1744 32-table=55808
+18: CapSpace=456 Process=1800 Option<Process>=1800 32-table=57600
+32: CapSpace=800 Process=2144 Option<Process>=2144 32-table=68608
+64: CapSpace=1600 Process=2944 Option<Process>=2944 32-table=94208
+128: CapSpace=3200 Process=4544 Option<Process>=4544 32-table=145408
+x86_64-unknown-none target cap layout: CapSpace<128>=3200 B, Option<Process<128>>=4544 B with 80 process-owned mapping bounds, 64-process table=290816 B (ADR-0088/0095) PASS
+x86_64-unknown-none IPC: CallSlot=240 Endpoint<32>=7728 Notif=32; 16 endpoints=123648 B, 64 notifications=2048 B (ADR-0089) PASS
+Phase-12 fixed notification table: 64 objects (32 client clocks plus system budget) PASS
+== host-independent Phase 8.5 AINS/AACT records and no_std compile
+Phase 8.5 AINS/AACT accepted wire: 6 independent SHA-256 vectors, 4-generation admission, prefix/corruption/chain/encode refusal PASS (host codec only; no AFS1 CREATE or guest proof)
+== AFS2 host model and Rust engine (crash prefixes, cross-check, RED)
+[afs2] 1040 randomized operations remounted/audited/matched {'write': 206, 'bad': 100, 'create': 83, 'rename': 217, 'truncate': 105, 'unlink': 110, 'mkdir': 106, 'rmdir': 113}
+[afs2] crash prefixes exact old-or-new: {'mkdir': 6, 'create': 6, 'write': 9, 'replace': 4, 'truncate': 7, 'rename': 6, 'move': 8, 'move-dir': 8, 'unlink': 6, 'rmdir': 6}
+[afs2] no-space after 81 blocks, refusals byte-identical; capacity {'blocks': 16384, 'free': 11830, 'objects': 10004, 'max_objects': 15779, 'seq': 10068}; fail-closed PASS
+EXIT=143

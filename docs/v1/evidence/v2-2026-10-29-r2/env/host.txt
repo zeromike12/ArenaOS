@@ -1,0 +1,24 @@
+date_utc: 2026-10-29T23:23:26Z
+host: Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux
+nproc: 2
+mem_total_kb: 4034452
+glibc: ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
+gcc: gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+repo_head: 65af1d89a5254cd6a45cb96341966f9265a42742
+repo_branch: arena/af044828-arenaos
+repo_dirty:
+   M .gitignore
+   M docs/v1/V2-STATUS.md
+   M experiments/c-runtime/app/c_gfx_app.c
+   M experiments/c-runtime/run.py
+   M tools/dev-env/recover-rust-and-zig.sh
+   M tools/v1_cycles.py
+   M tools/v1_evidence.py
+   M tools/v1_gate.sh
+   M tools/v1_guest_proof.py
+  ?? docs/v1/evidence/v2-2026-10-29-r2/
+  ?? experiments/c-runtime/app/c_gfx_refusals.c
+  ?? tools/dev-env/pypi_file.py
+  ?? tools/v1_gate_aggregate.py
+  ?? tools/v1_gate_stage.py
+  ?? tools/v1_refusals.py

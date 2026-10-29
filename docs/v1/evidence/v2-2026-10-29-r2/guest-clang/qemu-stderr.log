@@ -1,0 +1,2 @@
+qemu-system-x86_64-patched: -chardev socket,id=vcon0,path=/workspace/ArenaOS/build/vcon-v1-guest-proof.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/workspace/ArenaOS/build/vcon-v1-guest-proof.sock,server=on
+qemu-system-x86_64-patched: Guest moved used index from 17 to 0

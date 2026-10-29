@@ -1,0 +1,20 @@
+
+=== cycles ===
+[v1-cycles] run directory: docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles
+[v1-guest-proof] built APB1 docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/c-gfx-app.apb1 (40472 bytes, sha256 073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3) with gcc from ELF /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-app-gcc.elf (sha256 07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f, simd/x87=0)
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (40472 bytes)
+[v1-cycles] baseline app-instances=0 windows=0 free-frames=112785
+[v1-cycles] APB1 installed by the guest protected installer
+[v1-cycles] cycle 1: PASS surface=159 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 2: PASS surface=164 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 3: PASS surface=169 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 4: PASS surface=174 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 5: PASS surface=179 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 6: PASS surface=184 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 7: PASS surface=189 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 8: PASS surface=194 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 9: PASS surface=199 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] cycle 10: PASS surface=204 exited=0 settled=0/0 visual_gone=True
+[v1-cycles] rc=0 dt=23.3s serial -> docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/v1-cycles-serial.log
+[v1-cycles] 10/10 cycles PASS -> PASS
+[gate-stage] cycles: exit 0 -> build/v1-gate/receipts/cycles.json

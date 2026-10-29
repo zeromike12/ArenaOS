@@ -20,6 +20,8 @@
 # private prefixes. Idempotent: each stage skips when already satisfied.
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 RUST_VER="1.97.0"
 ZIG_VER="0.17.0"
 RUST_PREFIX="/opt/rust/prefix"
@@ -90,17 +92,24 @@ fi
 log "rust toolchain ready"
 
 # ----------------------------------------------------------------- zig ------
-ZIG_BIN="$ZIG_ROOT/pkg/ziglang/zig"
+# The wheel extracts `ziglang/` directly under the root (no `pkg/` level).
+ZIG_BIN="$ZIG_ROOT/ziglang/zig"
 have_zig() { [[ -x "$ZIG_BIN" ]] && "$ZIG_BIN" version 2>/dev/null | grep -q "^${ZIG_VER}$"; }
 if have_zig; then
     log "zig $ZIG_VER present at $ZIG_ROOT"
 else
     log "downloading ziglang==$ZIG_VER from PyPI"
     WHL_DIR="$(mktemp -d)"
-    pip3 download --no-deps -q -d "$WHL_DIR" --only-binary=:all: \
-        --platform manylinux1_x86_64 "ziglang==$ZIG_VER" \
-        || pip3 download --no-deps -q -d "$WHL_DIR" "ziglang==$ZIG_VER"
-    WHL="$(ls "$WHL_DIR"/ziglang-*.whl | head -1)"
+    # PyPI's simple index does not offer ziglang 0.17.0 to this platform
+    # through `pip download --platform` (and the plain fallback resolves only
+    # a 0.0.0 placeholder), so the release file is fetched from the project's
+    # own file list, selected by the pinned digest. A substituted wheel is
+    # refused by the checksum before anything is extracted.
+    ZIG_SHA256="97079827064a7492cce5541ceb438ae8003ce1e54e399676da2d62fb7a5dc08b"
+    ZIG_URL="$(python3 "$REPO_ROOT/tools/dev-env/pypi_file.py" ziglang "$ZIG_VER" "$ZIG_SHA256")"
+    curl -sSL --fail -o "$WHL_DIR/ziglang.whl" "$ZIG_URL"
+    echo "$ZIG_SHA256  $WHL_DIR/ziglang.whl" | sha256sum -c - >/dev/null
+    WHL="$WHL_DIR/ziglang.whl"
     $SUDO mkdir -p "$ZIG_ROOT"
     $SUDO chown -R "$(id -u):$(id -g)" "$ZIG_ROOT"
     python3 -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \

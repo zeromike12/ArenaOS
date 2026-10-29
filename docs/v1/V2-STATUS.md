@@ -1,12 +1,14 @@
 # V2 — V1 qualification status (durable)
 
-**Owner:** V2 (replacement engineer). **Lead:** M. **Reviewer:** C.
-**Last updated:** 2026-10-29.
+This file is the standing record of what this session did, what it proved and
+what it did **not** prove. It is written to be read by M and by C, and it is
+deliberately conservative: a stage appears as PASS only with the command that
+produced it, the artifact identity it ran against, and the evidence file that
+holds its raw output.
 
-This document is the single reconstruction point for V1 qualification. It is
-written so that a reader with only this repository — no conversation history —
-can rebuild the environment, re-run every gate, and decide for themselves
-whether the evidence supports the verdict.
+Round 1 (2026-10-29, commit `65af1d8`) and round 2 (this round, same commit,
+uncommitted working tree) are kept separate. Nothing in round 1's evidence
+directory was rewritten.
 
 ---
 
@@ -14,326 +16,194 @@ whether the evidence supports the verdict.
 
 | Item | Value |
 |---|---|
-| Handoff checkpoint | `bfa4e85564a8e7840b862c7fdc89794190a34158` (verified with `git cat-file -t`) |
-| Working branch | `arena/af044828-arenaos` |
-| Requested branch | `arena/v2-v1-qualification` — **not used**, see below |
-| `main` at handoff | `d2bfd660040ddface1cd6e791301fb8ea73d181c`; checkpoint is 1 ahead / 0 behind |
+| Branch | `arena/af044828-arenaos` (session branch; cannot be renamed) |
+| Round-1 checkpoint | `65af1d89a5254cd6a45cb96341966f9265a42742` |
+| Round-2 tree | same commit + uncommitted round-2 changes (see §4) |
+| Merged into `main` | no — merge and release are M's decisions |
+| History rewritten | no — no force-push, no rebase, no `reset` of published commits |
 
-**Branch deviation.** The handoff asked for a fresh working branch. This
-session is bound to `arena/af044828-arenaos`: the platform tracks the session
-by that branch and forbids creating, switching to, or pushing any other. All
-work is committed there, branched from the handoff checkpoint. Nothing is
-force-pushed, nothing is merged into `main`, and no historical evidence was
-rewritten.
-
-**Build-path requirement (protected guard, unchanged).** The Phase-14 static
-PIE guard pins `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`.
-The fixture embeds its own absolute source path, so the digest reproduces
-only when the tree is built at the physical path `/workspace/ArenaOS`.
-Building at `/home/user/ArenaOS` yields
-`a65f3a1e9bc29158b509e5c267cbbacf53ae6ba0a39b2b5972f1cad56e086c05` and the
-guard fails closed. Recovery is a bind mount:
-
-```sh
-sudo mkdir -p /workspace/ArenaOS
-sudo mount --bind /home/user/ArenaOS /workspace/ArenaOS
-cd /workspace/ArenaOS && source tools/dev-env/env.sh && bash tools/build.sh --image
-```
-
-No build guard, expected digest or protected hash was modified.
+The round-2 working tree is uncommitted by design: it is the review
+candidate. `tools/v1_gate_stage.py` stamps every gate receipt with the commit
+and the dirty paths that ran, so a reader can tell exactly what was executed.
 
 ---
 
-## 2. Accepted contract (unchanged by this work)
+## 2. Round-2 summarised in one paragraph
 
-ADR-0114 is **accepted**: Discover → Identify → validate the already-held
-surface → proceed. Boundaries preserved in this work:
-
-- Discovery only through the verified ARST v2 startup record, by kind and
-  rights; never by slot index or descriptor order.
-- Exactly one conforming endpoint and one conforming surface, else refuse
-  (codes 2/3/4/5/6). The trusted Desktop launcher profile is the only writer.
-- ADSK v2 Identify, opcode 13, fixed 64-byte frames, bytes 6–7 reserved zero.
-- Service status travels in the existing IPC reply status word, separate from
-  the kernel syscall result.
-- `CAP_NONE` on both the Identify request and its reply; the Desktop
-  authenticates the caller from the kernel-delivered badge and names that
-  session's surface.
-- The client validates the full object ID, kind and required rights against
-  the authority it actually holds (`describe`), and refuses a foreign or
-  stale object.
-- ADSK-v1 compatibility, the 32-bit surface layout, the 4096-byte pixel
-  offset and the real bounds are all unchanged.
-- Primary failures are preserved and cleanup failures recorded; a required
-  cleanup failure after an otherwise successful operation still fails.
-- Sync IPC has no client deadline by design; unresponsive-service behaviour is
-  covered by documented external supervision, not by inventing a timeout.
-
-Nothing in this work changed the contract, the wire format, the syscall
-surface or any permission.
+Round 2 corrected four defects in the V1 evidence chain and extended the
+matrix: (a) an input checkpoint can no longer pass on an acknowledgment
+without a captured frame showing the response, and vice versa; (b) every
+checkpoint now publishes the exact frame its assertion was made on, as a
+lossless PNG whose raster digest is recorded, and packaging refuses a run
+that is missing one; (c) cleanup compares 21 resource fields from one
+production snapshot pair, with a single documented, bounded, one-directional
+frame warm-up allowance; (d) the guest refusal matrix (21 cases) now runs in
+the guest, through the production launch path, instead of only on the host.
+The gate was reconciled with the claims it makes. The canonical EFI build
+remains blocked by an environment limitation that predates this round (§4 B1)
+and the artifacts used here are therefore explicitly **not** qualification
+artifacts.
 
 ---
 
-## 3. Environment recovery
+## 3. Environment (verified this round)
 
-Host: Debian 12, glibc 2.36, no KVM (TCG is the required accelerator).
-
-### 3.1 Tracked QEMU package
-
-```sh
-sha256sum /home/user/phase15-pkg/backend/qemu-system-x86_64-patched
-# e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff
-sha256sum /home/user/phase15-pkg/backend/qemu-system-x86_64-unpatched
-# 443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284
-```
-
-Packaged tarball `63b36649…f73` (95,562,916 B) matches its sidecar. The
-patched ELF is what every qualification boot uses; the unpatched ELF is kept
-only as a negative control (`tools/backend_controls.py`).
-
-### 3.2 Isolated runtime (host glibc 2.36 < required 2.38)
-
-`tools/dev-env/build-isolated-glibc.sh` builds glibc 2.40 into
-`/home/user/glibc-2.40` and wraps the emulator with the matching loader.
-Observed identities:
-
-| Object | SHA-256 |
-|---|---|
-| `libc.so.6` | `eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f` |
-| `ld-linux-x86-64.so.2` | `63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458` |
-| `qemu-patched` wrapper | `92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1` |
-
-`$ARENA_QEMU --version` → QEMU emulator version 11.1.2; `-accel help` lists
-exactly `tcg`. Backend controls: patched **PASS 16/16** (exit 33), unpatched
-**FAIL** (exit 35) — the negative control behaves as designed.
-
-### 3.3 Rust 1.97.0 and the official bare-metal targets
-
-Installed into a private prefix (`/opt/rust/prefix`) from the official
-component tarballs, then both targets were *compiled against*, not merely
-listed:
-
-- `rustc 1.97.0 (2d8144b78 2026-07-07)`, `cargo 1.97.0 (c980f4866 2026-06-30)`
-- `x86_64-unknown-none` → `rustc --crate-type staticlib` exit 0, 10.5 MB archive
-- `x86_64-unknown-uefi` → compile exit 0
-  (`env/rust-target-compile-*.txt`)
-
-### 3.4 GCC and the supported Clang route
-
-`gcc (Debian 12.2.0-14+deb12u1) 12.2.0`;
-`clang version 22.1.8` via Zig 0.17.0 (`/opt/zig-clang`). Both build the
-native guest application and both pass the ISA audit
-(`run.py build --cc gcc --cc clang`, `run.py audit`: 10 ELFs clean).
-
----
-
-## 4. Verified completed work
-
-Every row below is a run that happened, with the artifact it produced.
-
-| Item | Result | Evidence |
+| Component | Identity | Evidence |
 |---|---|---|
-| QEMU package integrity, extraction, pinned ELF | PASS `e0ea2b1f…f26ff` | `env/qemu-package*.txt`, `env/qemu-identities.txt` |
-| Emulator under the isolated loader, TCG only | PASS, 11.1.2, `-accel tcg` | `env/qemu-version.txt`, `env/qemu-accel-help.txt` |
-| Backend controls patched / unpatched | PASS 16/16 vs FAIL | `env/backend-controls/xm-verify.json` |
-| Rust 1.97.0 + official `none`/`uefi` targets | PASS (compiled) | `env/rust-cargo-version.txt`, `env/rust-target-compile-*.txt` |
-| GCC and Clang guest toolchains + ISA audit | PASS | `env/compilers/` |
-| Protected guards unchanged (PIE `d7b0a8cf…`, APB1) | PASS | `env/guards/` |
-| Guest proof, GCC cell — 8 checkpoints | **PASS** | `guest-gcc/evidence.json` |
-| Guest proof, Clang cell — 8 checkpoints | **PASS** | `guest-clang/evidence.json` |
-| Ten launch/close cycles | **10/10 PASS** | `lifecycle-cycles/cycles-evidence.json` |
-| Harness focused controls | **19/19 PASS** | gate log stage 2 |
-| Repository regression suite | **ALL TESTS PASSED (121 suites)** | `regressions/run-tests.log` |
+| QEMU (patched, TCG) | `e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff` | `env/qemu-identities.txt` |
+| Loader | private glibc 2.40 `ld-linux-x86-64.so.2`, `63704534fba7799d…` | `env/isolated-runtime.txt` |
+| Firmware | code `7e34e3b8…`, vars `5d2ac383…` | `env/qemu-identities.txt` |
+| GCC | 12.2.0 | `env/compilers/tool-identities.txt` |
+| Clang route | Zig 0.17.0 `zig cc -target x86_64-freestanding-none` | idem |
+| Rust | 1.97.0 (`2d8144b78`), LLVM 22.1.6 | `env/rust-cargo-version.txt` |
 
-Run provenance for the published package:
+The emulator is only ever started with explicit `-accel tcg`; the identity is
+resolved per link of the chain (wrapper, ELF, loader, runtime libraries,
+firmware) rather than from a wrapper hash alone.
 
-| Fact | Value |
-|---|---|
-| Gate source commit | `3d340622` (`working_tree_dirty: false`, no other changed paths) |
-| Boot image the guest ran | `arena-boot.efi` `bcd86866dbe7…` — identical on the ESP and in `build/`, image newer than every tracked source file |
-| GCC client ELF / APB1 | `07f9fbc5d7dc…` / `073f08f79f3b…` |
-| Clang client ELF / APB1 | `30cab76f2c94…` / `c0da952974c6…` |
-| Archive | `v2-2026-10-29.tar.gz` `ba83c3bab766…6fc`, 97 files, verified from a fresh extraction and from a fresh `git clone` |
+---
 
-Guest-proven facts from the serial evidence (GCC cell; the Clang cell repeats
-them with a differently-built client):
+## 4. Findings and corrections (round 2)
 
-- `[gfx] identify ok surface=159 → [desktop] ordinary window placed handle=1
-  surface=159 x=70 y=60 w=640 h=480` → rendered frame.
-- `[gfx] event type=1 events=3 surface=159` (keyboard) and `[gfx] event type=2
-  events=4 surface=159` (pointer), each with the flash visible inside that
-  instance's own rectangle.
-- Two concurrent instances (159, 164): focus acknowledged in both directions,
-  per-instance key acks `9→10` and `4→5`, zero cross-instance acks.
-- `[desktop] application retired: kind=6 surface=159 …` and `[desktop] child
-  Process-cap exit surface=159 status=0`, then a fresh resource-detail line
-  back to `app-instances=0 windows=0`.
-- Cycles: surfaces 159, 164, 169 … 204 — a new object each time, each retired
-  with status 0 and settlement to the pre-cycle baseline.
+| # | Finding | Correction | Where |
+|---|---|---|---|
+| F1 | The keyboard/mouse checkpoints accepted `ack["ok"]` alone: an acknowledgment proved delivery, never that anything was drawn | `evaluate_input_proof()` requires a fresh, correctly-scoped ack **and** a captured frame with the instance's flash inside its own rectangle, **and** a flash-free pre-frame; used by checkpoints 4, 5, 6 and 8 | `tools/v1_guest_proof.py` |
+| F2 | `__ack-probe__` was overwritten by every input, so no single published file could represent several checkpoints | `save_frame()` publishes a per-checkpoint PNG plus the tested PPM; `REQUIRED_FRAMES` names them; the verdict fails when one is absent | idem |
+| F3 | Evidence references pointed at `.ppm` files that were never published, and packaging checksummed whatever happened to exist | PNG writer in-tree (no new dependency), `frames` recorded with tested-PPM, published-PNG and raster digests; `tools/v1_evidence.py package` re-decodes every required PNG and compares it with the recorded raster | `tools/v1_guest_proof.py`, `tools/v1_evidence.py` |
+| F4 | Cleanup compared only app instances and windows | 14 detail + 7 receipt fields compared from one adjacent production snapshot pair; controls prove a thread, capability or frame leak fails, and that a missing/stale receipt cannot read as settled | `tools/v1_guest_proof.py` |
+| F5 | The refusal matrix had never executed in the guest | `tools/v1_refusals.py` launches the client through the protected installer and ordinary launch path; 21 cases, no window, no resource drift, exit 0, both compilers | `tools/v1_refusals.py`, `experiments/c-runtime/app/c_gfx_refusals.c` |
+| F6 | **The refusal harness launched the wrong application.** The launcher filters by *substring* and Enter launches the first match, so typing `r` selected **Terminal**; the client never ran and the run looked like a client defect | The selection is proven by the captured frame `cp09-launcher-selection.png`, and the harness now types the unique substring `refusal` before Enter | `tools/v1_refusals.py` |
+| F7 | `.gitignore` line 7 (`*.log`) silently excluded every serial and harness log from round-1's published evidence (0 `.log` files were committed) | Rule removed; evidence logs are committed, PPM working copies are not (they are a fixed header plus the published PNG's raster, and their digests are recorded) | `.gitignore` |
+| F8 | `tools/v1_gate.sh` claimed to reproduce everything but never ran `tools/run_tests.sh`, and a partial run printed the same PASS as a full one | Stage receipts (`tools/v1_gate_stage.py`) + aggregate (`tools/v1_gate_aggregate.py`): only `--mode full` can print `V1 QUALIFICATION: PASS`; partial and unqualified runs say so and exit non-zero | `tools/v1_gate.sh` |
 
-### 4.1 A defect this section caught in passing
+### 4.1 Blocker B1 — the canonical EFI build (unchanged, not caused by round 2)
 
-The first gate reported PASS while its evidence recorded an EFI digest that no
-longer matched a rebuild at the same commit: the harness had booted an image
-built before a formatting-only change. Evidence now records the boot image's
-age against the newest tracked source file and the EFI digest from both the
-ESP and `build/`, and the verdict fails when they disagree — see §5.
+`tools/build_phase14_pie.sh` recomputes the protected Phase-14 PIE fixture and
+refuses when the digest is not
+`d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`. That
+reproduction requires the **official** `rust-std` target components for
+`x86_64-unknown-none` and `x86_64-unknown-uefi`
+(`5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a`,
+`2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0`). The
+sandbox may only reach github.com, codeload/api.github.com,
+registry.npmjs.org and pypi.org; `static.rust-lang.org` is refused at TLS
+level. Rebuilding the sysroot from source produces a different crate
+disambiguator (`Csi1tY5tVYnWh_` vs the official `CsieveXhe8AWz_`) and hence a
+different fixture — investigated again this round (flag variants, `-C
+panic`/opt-level/debug-assertions, `cargo -Z build-std`) without success; the
+disambiguator is driven by bootstrap-grade crate metadata, not by codegen
+flags.
 
-## 5. Known defects and their status
+The documented development substitute `tools/build_phase16_dev.sh` verifies
+the committed fixture instead of rebuilding it. **Artifacts it produces are
+explicitly not qualification artifacts** (§7).
 
-| # | Defect found in review | Status |
-|---|---|---|
-| 1 | Telemetry merged globally; event type and instance discarded | **Closed** — `parse_gfx_events` keeps type + surface; `evaluate_event_ack` requires the named instance, the named type and a counter advance for *that* instance |
-| 2 | `baseline is None or …` let a visible flash pass without an ack | **Closed** — missing telemetry fails; a flash alone never satisfies a checkpoint |
-| 3 | Screen geometry used as instance identity | **Closed** — geometry comes from the Desktop's placement receipt and is still confirmed by an acknowledgment from that instance |
-| 4 | Settlement accepted historical snapshots / incomplete accounting | **Closed** — `evaluate_cleanup` uses only lines after the close cursor, requires the *latest* detail line to match the pre-launch baseline, and rejects spurious retirements |
-| 5 | Negative controls tested a copied policy or an empty slice | **Closed** — 19 controls drive the real evaluation functions; each fails for one specific reason |
-| 6 | Missing provenance did not block PASS | **Closed** — a single `compute_overall_verdict` requires every checkpoint PASS, the serial log, the harness transcript, and every identity (commit, compilers, ELF, APB1, ESP, EFI, emulator ELF, loader, firmware) |
+---
 
-| 7 | The harness could boot a stale image and still PASS | **Closed** — verdict fails when the boot image is older than the newest tracked source file, or when the EFI embedded in the ESP differs from `build/arena-boot.efi` |
-| 8 | Evidence could be copied into the package by hand after the fact | **Closed** — `V1_EVIDENCE_DIR` makes the run write where the verdict says the artifacts are; packaging refuses a single artifact over 32 MB so scratch state cannot masquerade as evidence |
+## 5. What round 2 executed (raw results)
 
-Two production-side gaps were found while proving the above and were fixed
-through the production path, not the harness:
+| Stage | Command | Result | Artifact |
+|---|---|---|---|
+| Focused controls | `python3 tools/v1_guest_proof.py --controls` | **35/35 PASS** | — |
+| Guest proof, GCC | `V1_EVIDENCE_DIR=…/guest-gcc python3 tools/v1_guest_proof.py` | **8/8 checkpoints PASS** | EFI `7134acf1…` |
+| Guest proof, Clang | same, `V1_CC=clang` | **8/8 checkpoints PASS** | idem |
+| Refusal matrix, GCC | `V1_EVIDENCE_DIR=…/refusals-gcc python3 tools/v1_refusals.py` | **21/21 cases PASS** | idem |
+| Refusal matrix, Clang | same, `V1_CC=clang` | **21/21 cases PASS** | idem |
+| Lifecycle | `V1_EVIDENCE_DIR=…/lifecycle-cycles python3 tools/v1_cycles.py 10` | **10/10 cycles PASS** | idem |
+| Boot stability | `bash tools/stability_loop.sh 100` | **100/100 boots green** (1056 s) | idem |
+| Formal regression | `bash tools/run_tests.sh` | **not completed** — host suites ran with 0 failures for ~18 min, then terminated to free the emulator (log ends `EXIT=143`) | idem |
+| Gate (guest mode) | `V1_GATE_MODE=guest bash tools/v1_gate.sh` | **all 10 stages PASS**; aggregate: `V1 QUALIFICATION: BLOCKED` (dev-path build) | EFI `7134acf1…` |
+| Evidence package | `python3 tools/v1_evidence.py package …` | 108 files, 440 918 B | sha256 `26674d87…f66` |
+| Fresh-extraction verify | `python3 tools/v1_evidence.py verify …` | 108 files, **0 problems** | idem |
 
-- The Desktop logged a placement line on only one of its two `Create` paths.
-  The second instance *adopts* a pre-created console window, so the receipt
-  was missing exactly where it was needed. `log_placement()` is now called on
-  both paths (`userspace/desktop/src/bin/desktop.rs`).
-- The native client animated for 300 frames (~10 s), which is shorter than an
-  interactive qualification pass (focus, keyboard, pointer, close). It now
-  runs 1200 frames (~40 s) — still strictly bounded, so the lifecycle is
-  finite and the teardown receipts remain the proof of a clean exit.
+### 5.1 Formal regression (incomplete this round)
+
+`regression/run-tests.log` records the run exactly as it happened: the host
+suites executed in order with no failures, and the run was terminated after
+about eighteen minutes (the log's last line is `EXIT=143`) to release the
+emulator for the guest gate in the same session. It did **not** reach the
+guest suites, so it is not a regression result and nothing is inherited from
+it. Two further facts belong here:
+
+* round 1's last complete run was `ALL TESTS PASSED (121 test suites)` at
+  commit `bdf6c66`, recorded in `docs/v1/evidence/v2-2026-10-29/`;
+* thirteen of the 121 sub-suites rebuild the kernel through
+  `tools/build.sh`, so they cannot pass while B1 stands. Their failure is
+  environmental, and the final gate run must name them as such rather than
+  count them as regressions.
+
+The full gate (`V1_GATE_MODE=full`) requires this stage; it is therefore
+**not** claimable until B1 is resolved and the suite completes.
 
 ---
 
 ## 6. Qualification matrix
 
-Legend: **GUEST** = executed inside ArenaOS under QEMU TCG (serial, screenshots
-and Desktop receipts are the guest's own output); **HOST-ONLY** = exercised
-through a mocked syscall boundary on the host; **STATIC** = computed from
-bytes without executing.
+"Required" is the contract; "state" is what exists today.
 
-| # | Case | Verdict | Class | Evidence |
-|---|---|---|---|---|
-| 1 | Launch-ready Desktop | PASS | GUEST | `guest-gcc/shots/cp01-launch-ready-desktop.png`, serial `real desktop frame presented` |
-| 2 | Protected-installer APB1 receipt | PASS | GUEST | `guest-gcc/install-ack.json` (signed version 42) |
-| 3 | Discover → Identify → Validate → native window | PASS | GUEST | `guest-gcc/evidence.json` cp3, `shots/cp03-first-native-c-window.png` |
-| 4 | Keyboard acknowledgment (type + instance) | PASS | GUEST | cp4, `shots/cp04-keyboard-response.png` |
-| 5 | Mouse acknowledgment (type + instance) | PASS | GUEST | cp5, `shots/cp05-mouse-response.png` |
-| 6 | Two-instance focus/input isolation, both directions | PASS | GUEST | cp6, `shots/cp06-focus-isolation.png` |
-| 7 | Retirements, exits, settlement vs baseline, visual removal | PASS | GUEST | cp7, `shots/cp07-desktop-restored.png` |
-| 8 | Final demonstration | PASS | GUEST | cp8, `shots/cp08-final-demonstration.png` |
-| 9 | GCC guest coverage | PASS | GUEST | `guest-gcc/` |
-| 10 | Clang guest coverage | PASS | GUEST | `guest-clang/` |
-| 11 | Descriptor-reordering independence | PASS | HOST-ONLY | `test_gfx_discover_permutation_independence` (reversed, rotated, relocated slots) |
-| 12 | Missing/ambiguous capability refusal | PASS | HOST-ONLY | `test_gfx_discover_refusals` (codes 2/3/4/5/6) |
-| 13 | Malformed frame / unsupported version refusal | PASS | HOST-ONLY | `test_gfx_identify_{wrong_magic,wrong_version,wrong_opcode,reserved_nonzero,wrong_kind,wrong_rights}`; desktop `wire::identify_tests` |
-| 14 | Wrong-rights refusal | PASS | HOST-ONLY | `test_gfx_discover_refusals`, `test_gfx_identify_wrong_rights`, `test_gfx_identify_describe_rights_insufficient` |
-| 15 | Stale/foreign identity refusal | PASS | HOST-ONLY | `test_gfx_identify_describe_{object_id_mismatch,kind_mismatch}`, `test_gfx_identify_service_error` |
-| 16 | Unexpected capability transfer refused + disposed | PASS | HOST-ONLY | `test_gfx_identify_unexpected_landed_cap` |
-| 17 | Surface-layout boundaries | PASS | HOST-ONLY | `test_gfx_surface_layout_boundary` (page 4096, offset 4096, 640×480×4, 300 pixel pages, 301 minimum, 32-bit, no padding) |
-| 18 | Repeated launch/close (≥10 cycles) | PASS | GUEST | `lifecycle-cycles/cycles-evidence.json` — 10/10, surfaces 159…204 |
-| 19 | Bounded lifecycle and resource settlement | PASS | GUEST | per-cycle fresh detail line back to `app-instances=0 windows=0`; `[gfx] exit events=… focused=… code=0` |
-| 20 | Authoritative regressions | **PASS** (121 suites) | GUEST+HOST | `regressions/run-tests.log` |
-| 21 | Final-artifact stability gates | **PASS** | STATIC | §6.2; `env/guards/`, gate stage 0 and stage 6 |
+| # | Requirement | State | Evidence |
+|---|---|---|---|
+| 1 | Ack **and** visible response, produced by production logic | **DONE** | `guest-*/evidence.json` (`input_proof` per checkpoint), 8 controls |
+| 2 | Actual successful checkpoint frames published | **DONE** | `guest-*/shots/cp0*.png`, `frames` digests, packaging validation |
+| 3 | Cleanup compares all enforceable resources | **DONE** | `lifecycle-cycles/cycles-evidence.json`, 5 cleanup controls |
+| 4 | Guest refusal matrix, cases 11–17 | **DONE** (HOST-ONLY + GUEST) | `refusals-*/refusals-evidence.json`, 21 cases |
+| 5 | Final-artifact stability (100/100 boots) | **DONE for this artifact**, but the artifact is dev-path (§4.1) | `stability/stability-100.log` |
+| 5b | EFI rebuild reproducibility | **BLOCKED (B1)** | build log: `reproducible PIE fixture hash changed` |
+| 5c | ESP ↔ embedded-EFI identity | **DONE** | `env/`, `evidence.json` `image.boot_efi_sha256` |
+| 6 | Gate command matches the claims | **DONE** | `tools/v1_gate.sh` + receipts + aggregate |
+| 7 | Final review candidate + package | **DONE** (§7) | archive + `.sha256` + fresh-extraction verify |
 
-### 6.1 Authoritative regressions
+Artifact identities for this round: EFI
+`7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5`, ESP
+`d74b9773b300ada1341a81c34551df90a7389caa2b3f4ef10f7de8f282329d30`; GCC
+client ELF `07f9fbc5d7dc…`, APB1 `073f08f79f3b…`; Clang client APB1
+`c0da952974c6…`; refusal APB1 `841d086b3b52…` (gcc).
 
-`bash tools/run_tests.sh` at source commit `bdf6c66` with a clean tree:
-
-```
-QUALIFICATION SOURCE COMMIT: bdf6c66971574f63687f23bbd69f08415d5c37f4
-QUALIFICATION SOURCE CLEAN: yes
-...
-QUALIFICATION SOURCE END: bdf6c66971574f63687f23bbd69f08415d5c37f4
-ALL TESTS PASSED (121 test suites)
-```
-
-The transcript is committed unmodified as `regressions/run-tests.log`. The
-runner re-checks at the end that HEAD and the working-tree status are what
-they were at the start, so a PASS cannot hide a source change made mid-run.
-Negative controls inside the suite are expected to print `FAILED -> RED PASS`;
-those are fixtures proving that the production oracles can fail.
-
-### 6.2 Final-artifact stability
-
-- Phase-14 static-PIE digest `d7b0a8cf…`: unchanged, and still fails closed at
-  any other build path (`env/guards/`).
-- APB1 protected digest: unchanged.
-- Kernel ISA audit: PASS (120,911 instructions, six trusted leaf profiles).
-- `arena-boot.efi` is byte-identical across consecutive builds of the same
-  tree (`bcd86866…`), and the gate builds before it boots.
-- **The ESP image is not byte-stable, by construction:** `pyfatfs` writes FAT
-  directory timestamps, so `arena-esp.img` differs between builds even when
-  its contents do not. The evidence therefore pins the *EFI extracted from the
-  ESP* and compares it to `build/arena-boot.efi`, rather than pretending the
-  FAT image is reproducible.
-- The evidence archive is re-verified from a fresh extraction outside the
-  workspace (`97 files, problems: 0`), and separately from a fresh `git clone`.
-
-### 6.2 Final-artifact stability
-
-- Phase-14 static-PIE digest: `d7b0a8cf…` (guard unchanged, reproduces only at
-  the pinned path).
-- APB1 protected digest: unchanged.
-- Kernel ISA audit: PASS (120,911 instructions, six trusted leaf profiles).
-- The evidence archive is re-verified from a fresh extraction outside the
-  workspace by `tools/v1_evidence.py verify`, which re-computes every digest
-  and rejects unlisted files.
+**Qualification status: NOT COMPLETE.** The V1 matrix is not fully green
+because requirement 5b cannot be executed in this sandbox. Everything that
+could be executed has been, and the artifacts are labelled for what they are.
 
 ---
 
-## 7. Evidence classification and locations
+## 7. Evidence package and classification
 
 | Path | Class | Contents |
 |---|---|---|
-| `docs/v1/evidence/v2-2026-10-29/env/` | GUEST + STATIC | emulator/loader/firmware identities, TCG proof, backend controls, Rust/GCC/Clang receipts, guard digests |
-| `docs/v1/evidence/v2-2026-10-29/guest-gcc/` | GUEST | serial log, harness transcript, `evidence.json`, install ack, 8 screenshots, QEMU stderr |
-| `docs/v1/evidence/v2-2026-10-29/guest-clang/` | GUEST | the same, with the Clang-built client |
-| `docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/` | GUEST | 10-cycle verdict, serial log, per-cycle screenshots |
-| `docs/v1/evidence/v2-2026-10-29/regressions/` | GUEST+HOST | `run_tests.sh` transcript, unmodified, with the runner's own commit assertions |
-| `docs/v1/evidence/v2-2026-10-29.tar.gz` + `.tar.gz.sha256` | — | the durable package (manifest, README, archive) |
+| `docs/v1/evidence/v2-2026-10-29/` | GUEST + HOST, round 1 | unchanged, do not edit |
+| `docs/v1/evidence/v2-2026-10-29-r2/` | GUEST + HOST, round 2 | this round's runs, receipts, frames, logs |
+| `docs/v1/evidence/v2-2026-10-29-r2.tar.gz` | package | 108 files, 440 918 B, sha256 `26674d877692a4fd66330643cbf2f862381d5d1e5d86a1398b95b9b6e502cf66`; verified from a fresh extraction, 0 problems |
+| `…-r2/gate/receipts/*.json` | receipts | per-stage identity: commit, dirty paths, EFI/ESP digests, newest tracked source, exit code |
 
-Screenshots are stored as PNG. QEMU writes PPM; packaging converts them
-losslessly (no resize, no recolour) and says so in the package README, because
-1.44 MB per frame is not worth keeping in a repository.
+Classification of the artifacts used this round:
 
-**Historical evidence, preserved and not counted.** `evidence/v1-guest-proof/runs/v1-proof-pass-2881fd6/`
-is kept untouched. It is missing its serial log and QEMU stderr, so its PASS
-cannot be re-verified and it is **not** used for any verdict here
-(`docs/v1/REVIEW_CORRECTION_2881fd6.md`). The run in §4 is a new, clearly
-labelled run of the corrected harness; it does not replace the old one.
-
-**Provenance note.** `evidence.json` in each cell records the commit the run
-executed against (`3d340622`) and `working_tree_dirty: false` with an empty
-list of other changed paths. The evidence files themselves were committed
-afterwards (`82ef9a3`). Nothing in the evidence was written by hand, and
-`V1_EVIDENCE_DIR` means the harness wrote them where they now sit.
-
-**Reproduce:**
-
-```sh
-bash tools/v1_gate.sh          # build → env receipts → controls → GCC → Clang → cycles → package+verify
-python3 tools/v1_evidence.py verify docs/v1/evidence/v2-2026-10-29.tar.gz
-```
+- `DEV-PATH` — built by `tools/build_phase16_dev.sh`: the protected Phase-14
+  fixture was **verified, not rebuilt**; the bare-metal sysroot came from
+  `tools/build-sysroot.sh`. EFI `7134acf1…`, ESP `d74b9773…`. These are the
+  only artifacts available while B1 stands, and they are **not** qualification
+  artifacts, not release candidates and not Phase 14/15 identity
+  reproductions.
+- `HOST-ONLY` — host-side suites (C runtime, AFS2, packaging); they prove
+  logic, not guest behaviour.
+- `GUEST` — executed inside ArenaOS under the pinned QEMU with explicit TCG.
 
 ---
 
 ## 8. Known limitations (stated, not hidden)
 
-1. Cases 11–17 are HOST-ONLY. They drive the production `discover()`,
-   `identify_exchange()` and the production Desktop wire codecs against
-   synthetic records and a mocked syscall boundary. They prove the *decisions*
-   are right and that the code is reachable, but they do not prove guest
-   execution of each refusal: a guest-side negative client per refusal is
-   still outstanding work. No verdict above claims otherwise.
-2. The unresponsive-service case is not exercised inside the guest: sync IPC
-   has no client deadline by design, and the documented supervision path is
-   external. No test claims to prove a guest-side timeout.
-3. The emulator runs under QEMU TCG, so frame timing is not representative of
-   hardware; the proof is about correctness of delivery and attribution, not
-   performance.
-4. The bind mount at `/workspace/ArenaOS` is required for the protected PIE
-   digest. On a machine where that path cannot be created, the build guard
-   fails closed — by design, and this document does not work around it.
+1. **B1**: the canonical `tools/build.sh --image` cannot complete; the EFI/ESP
+   used here are dev-path builds. The decision needed is one of: allowlist
+   `static.rust-lang.org`, supply the two component archives (digests above),
+   or accept a dev-path artifact as the candidate with the caveat recorded.
+2. **Strict Phase-15 gate**: `PHASE15_STRICT_GATE=1` pins the historical
+   EFI/ESP identities, so a rebuilt candidate can never pass strict mode
+   without editing those pins. Round 2 did not edit them.
+3. **Round-1 artifacts are gone**: the previous sandbox's `build/` directory
+   is not preserved, so the round-1 EFI (`bcd86866…`) cannot be re-verified;
+   only its recorded identity in the round-1 evidence remains.
+4. **Runtime heap warm-up**: `free-frames` may settle up to 32 frames below
+   the baseline (measured: 5 after the first lifecycle, 3 more with two
+   concurrent instances). The allowance is one-directional, bounded, recorded
+   per run, and every other field must be exactly equal.
+5. **Launcher semantics**: the app launcher filters by substring and launches
+   the first match; harness code must type a unique substring. This bit the
+   refusal harness once (F6) and is now proven by a captured frame.

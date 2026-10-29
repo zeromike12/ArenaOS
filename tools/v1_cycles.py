@@ -58,13 +58,21 @@ def cycles(n: int) -> bytes:
     try:
         d.wait(lambda: "[desktop] real desktop frame presented" in d.serial(),
                "Desktop frame presented")
-        baseline = proof.last_detail(d.serial())
+        # settle_snapshot returns the adjacent receipt+detail pair from one
+        # production snapshot; evaluate_cleanup compares both halves, so the
+        # baseline must carry both (a bare detail leaves every receipt field
+        # unreadable and would have failed every cycle).
+        base_detail, base_receipt = proof.settle_snapshot(d.serial())
+        baseline = ({"detail": base_detail, "receipt": base_receipt}
+                    if base_detail and base_receipt else None)
         if baseline is None:
             records.append({"cycle": 0, "result": "FAIL",
                             "detail": "no idle resource baseline"})
             return b"shutdown\r"
-        print(f"[v1-cycles] baseline app-instances={baseline['app-instances']} "
-              f"windows={baseline['windows']}", flush=True)
+        print(f"[v1-cycles] baseline app-instances="
+              f"{baseline['detail']['app-instances']} "
+              f"windows={baseline['detail']['windows']} "
+              f"free-frames={baseline['receipt']['free-frames']}", flush=True)
 
         # Install the bundle through the guest's protected installer first:
         # the catalog only lists installed applications.
@@ -174,6 +182,10 @@ def cycles(n: int) -> bytes:
                 "retired": cleanup["per_instance"].get(str(surface), {}),
                 "settlement": cleanup["settlement"],
                 "matches_baseline": cleanup["settlement_matches_baseline"],
+                # The documented one-directional free-frame warm-up, recorded
+                # per cycle rather than absorbed silently into "settled".
+                "frame_warmup": cleanup.get("frame_warmup", {}),
+                "resource_drift": cleanup.get("resource_drift", {}),
             }
             entry["visual_gone"] = gone
             entry["result"] = "PASS" if (cleanup["ok"] and gone) else "FAIL"

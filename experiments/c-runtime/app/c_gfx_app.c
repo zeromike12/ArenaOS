@@ -29,10 +29,12 @@
    static functions below can be called directly by test_runtime.c. In
    guest builds it is plain static, preserving the production contract. */
 
+#ifndef TEST_EXPORT
 #ifdef ARENA_HOSTED_TEST
 #define TEST_EXPORT
 #else
 #define TEST_EXPORT static
+#endif
 #endif
 
 /* ---------------------------------------------------------------- wire ---
@@ -274,6 +276,29 @@ typedef struct {
     uint64_t surface_object_id;
 } identify_t;
 
+/* Validate a named identity against the authority this client already
+   holds: SYS_CAP_DESCRIBE(surface_slot) must return [kind 7, an object ID
+   equal to the one Identify named, and rights including READ|WRITE|COPY].
+   The client never trusts a name it cannot match to a capability it holds;
+   a foreign, stale or over-privileged identity is refused here. */
+
+TEST_EXPORT int identify_validate_surface(const identify_t *ident) {
+    uint64_t desc[3];
+    if (describe_slot(a.surface_slot, desc) != 0) {
+        return -1;
+    }
+    if (desc[0] != ARENA_CAP_KIND_SHARED_REGION) {
+        return -1;
+    }
+    if (desc[1] != ident->surface_object_id) {
+        return -1;
+    }
+    if ((desc[2] & GFX_SURFACE_RIGHTS) != GFX_SURFACE_RIGHTS) {
+        return -1;
+    }
+    return 0;
+}
+
 TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
     uint64_t out[3];
 
@@ -338,18 +363,9 @@ TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) 
             return -1;
         }
 
-        /* Validate the named surface against a capability the client
-           already holds: SYS_CAP_DESCRIBE(surface_slot) must return
-           [kind 7, object_id == ident->surface_object_id, rights including
-           READ|WRITE|COPY]. */
-        uint64_t desc[3];
-        if (describe_slot(a.surface_slot, desc) != 0 ||
-            desc[0] != ARENA_CAP_KIND_SHARED_REGION ||
-            desc[1] != ident->surface_object_id ||
-            (desc[2] & GFX_SURFACE_RIGHTS) != GFX_SURFACE_RIGHTS) {
+        if (identify_validate_surface(ident) != 0) {
             return -1;
         }
-
         return 0;
     }
     return -1;
@@ -439,7 +455,7 @@ TEST_EXPORT void log_line(const char *msg) {
 
 /* ---------------------------------------------------------------- main --- */
 
-#ifndef ARENA_HOSTED_TEST
+#if !defined(ARENA_HOSTED_TEST) && !defined(GFX_NO_MAIN)
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;

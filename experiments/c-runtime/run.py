@@ -41,6 +41,7 @@ RUNTIME_SRC = ["src/crt0.c", "src/rt.c", "src/alloc.c", "src/string.c", "src/std
 GUEST_APPS = {"crt-probe": ["app/crt_probe.c"], "c-native": ["app/c_native_app.c"],
               "c2-console": ["app/c2_console_app.c"],
               "c-gfx-app": ["app/c_gfx_app.c"],
+              "c-gfx-refusals": ["app/c_gfx_refusals.c"],
               "xxhash-app": ["app/xxhash_app.c", "third_party/xxhash-0.8.4/xxhash.c"]}
 
 ZIG = os.environ.get("ARENA_ZIG", "/opt/zig-clang/pkg/ziglang/zig")

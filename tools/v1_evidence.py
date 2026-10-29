@@ -48,31 +48,123 @@ def _git(*args: str) -> str:
         return "unavailable"
 
 
-def convert_ppm_to_png(root: Path) -> int:
-    """Losslessly convert the emulator's PPM screendumps to PNG.
+# Independent restatement of the checkpoint images a guest run must publish.
+#
+# It is deliberately duplicated here instead of imported from the harness: a
+# producer that silently stops publishing a checkpoint must not be able to
+# relax the packaging rule that notices. The names cover the four input
+# checkpoints (keyboard, mouse, per-instance isolation focus) and the final
+# demonstration, which is exactly what M's round-2 requirement #2 asks for.
+REQUIRED_GUEST_FRAMES = (
+    "shots/cp01-launch-ready-desktop.png",
+    "shots/cp03-first-native-c-window.png",
+    "shots/cp04-keyboard-response.png",
+    "shots/cp05-mouse-response.png",
+    "shots/cp06a-two-instances.png",
+    "shots/cp06a-focused.png",
+    "shots/cp06b-focused.png",
+    "shots/cp07-desktop-restored.png",
+    "shots/cp08-final-demonstration.png",
+)
 
-    QEMU's `screendump` writes PPM; 1.44 MB per 800x600 frame makes a
-    ten-cycle run needlessly bulky in a repository. The conversion is
-    lossless (ImageMagick, no resize, no colour change) and is declared in
-    the package README, so a reader always knows the frames were converted
-    after capture rather than re-rendered.
+
+def png_raster(data: bytes) -> tuple:
+    """Decode a PNG written by the harness (8-bit RGB, filter 0) to pixels.
+
+    Implemented here rather than shared with the producer so packaging checks
+    the bytes that are actually published.
     """
-    tool = shutil.which("convert")
-    if tool is None:
-        return 0
-    converted = 0
-    for ppm in sorted(root.rglob("*.ppm")):
-        png = ppm.with_suffix(".png")
-        done = subprocess.run([tool, str(ppm), str(png)],
-                              capture_output=True, text=True, check=False)
-        if done.returncode == 0 and png.is_file() and png.stat().st_size > 0:
-            ppm.unlink()
-            converted += 1
-    return converted
+    import struct
+    import zlib
+
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("not a PNG")
+    pos, width, height, depth, colour, idat = 8, None, None, None, None, b""
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos:pos + 4])
+        tag = data[pos + 4:pos + 8]
+        payload = data[pos + 8:pos + 8 + length]
+        (crc,) = struct.unpack(">I", data[pos + 8 + length:pos + 12 + length])
+        if zlib.crc32(tag + payload) & 0xFFFFFFFF != crc:
+            raise ValueError(f"PNG chunk {tag!r} CRC mismatch")
+        if tag == b"IHDR":
+            width, height, depth, colour = struct.unpack(">IIBB", payload[:10])
+        elif tag == b"IDAT":
+            idat += payload
+        pos += 12 + length
+    if depth != 8 or colour != 2:
+        raise ValueError("unexpected PNG depth/colour type")
+    raw = zlib.decompress(idat)
+    stride = width * 3
+    out = bytearray()
+    for y in range(height):
+        i = y * (stride + 1)
+        if raw[i] != 0:
+            raise ValueError(f"unexpected PNG filter {raw[i]} on row {y}")
+        out += raw[i + 1:i + 1 + stride]
+    return width, height, bytes(out)
 
 
-def collect(root: Path) -> dict:
+def check_frames(root: Path) -> list:
+    """Require every checkpoint image, and that it still shows its frame.
+
+    A run that records a verdict but publishes no image for a checkpoint has
+    not shown the frame the assertion was made on. Each published PNG must
+    decode back to the raster digest the harness recorded at capture time, so
+    a re-encoded, resized or substituted image is caught here rather than
+    merely checksummed.
+    """
+    problems = []
+    for evidence_path in sorted(root.rglob("evidence.json")):
+        run_dir = evidence_path.parent
+        rel_dir = str(run_dir.relative_to(root)) or "."
+        try:
+            payload = json.loads(evidence_path.read_text())
+        except (OSError, ValueError) as exc:
+            problems.append(f"{rel_dir}: evidence.json unreadable: {exc}")
+            continue
+        frames = payload.get("frames")
+        if not isinstance(frames, dict) or not frames:
+            problems.append(f"{rel_dir}: evidence.json records no checkpoint "
+                            "frames")
+            continue
+        required = payload.get("required_frames") or list(REQUIRED_GUEST_FRAMES)
+        missing = [n for n in REQUIRED_GUEST_FRAMES if n not in frames]
+        if missing:
+            problems.append(f"{rel_dir}: evidence.json omits checkpoint "
+                            f"frames: {', '.join(missing)}")
+        for name in required:
+            entry = frames.get(name)
+            if entry is None:
+                problems.append(f"{rel_dir}: no digest entry for {name}")
+                continue
+            path = run_dir / name
+            if not path.is_file() or path.stat().st_size == 0:
+                problems.append(f"{rel_dir}: required checkpoint image "
+                                f"{name} is missing or empty")
+                continue
+            data = path.read_bytes()
+            if sha256_bytes(data) != entry.get("published_png_sha256"):
+                problems.append(f"{rel_dir}: {name} does not match its "
+                                "recorded published digest")
+                continue
+            try:
+                w, h, raster = png_raster(data)
+            except (ValueError, OSError) as exc:
+                problems.append(f"{rel_dir}: {name} cannot be decoded: {exc}")
+                continue
+            if sha256_bytes(raster) != entry.get("raster_sha256"):
+                problems.append(f"{rel_dir}: {name} decodes to a different "
+                                "raster than the tested frame")
+            if (w, h) != (entry.get("width"), entry.get("height")):
+                problems.append(f"{rel_dir}: {name} is {w}x{h}, recorded "
+                                f"{entry.get('width')}x{entry.get('height')}")
+    return problems
+
+
+def collect(root: Path) -> tuple:
     files = {}
+    excluded = 0
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
@@ -80,8 +172,15 @@ def collect(root: Path) -> dict:
         if rel in ("MANIFEST.json", "README.md"):
             continue  # generated below, and named in their own manifest
         data = path.read_bytes()
+        if rel.endswith(".ppm"):
+            # A PPM screendump is a fixed 15-byte header followed by exactly
+            # the raster of the published PNG, so it adds no evidence a reader
+            # cannot already rebuild from the PNG plus the recorded digests --
+            # it only makes the archive several megabytes larger per frame.
+            excluded += 1
+            continue
         files[rel] = {"sha256": sha256_bytes(data), "size": len(data)}
-    return files
+    return files, excluded
 
 
 VERIFY_SNIPPET = """import hashlib, json, pathlib
@@ -108,6 +207,7 @@ def readme(root: Path, manifest: dict) -> str:
     serials = [f for f in files if f.endswith(".log")]
     shots = [f for f in files if f.endswith((".ppm", ".png"))]
     snippet = VERIFY_SNIPPET % {"root": root.name}
+    excluded = manifest.get("excluded_from_package", {}).get("count", 0)
     return f"""# {root.name} — V1 qualification evidence
 
 Produced {manifest["created_utc"]} from commit
@@ -119,7 +219,7 @@ Produced {manifest["created_utc"]} from commit
 | Kind | Count | Notes |
 |---|---|---|
 | Serial logs | {len(serials)} | The guest's own output under QEMU TCG |
-| Screenshots | {len(shots)} | Frames captured through the emulator console (PPM as written by QEMU, converted losslessly to PNG) |
+| Screenshots | {len(shots)} | The exact frames each checkpoint assertion was made on (PNG, losslessly re-encoded from the QEMU screendump raster) |
 | Manifests and receipts | {len(files) - len(serials) - len(shots)} | JSON verdicts, identities, build receipts |
 
 ## How to check it
@@ -135,6 +235,15 @@ cd {root.name} && python3 - <<'PY'
 
 `tools/v1_evidence.py verify <archive>` performs exactly this check, plus a
 scan for files that exist in the archive but not in the manifest.
+
+`package` refuses to run unless every guest run in this directory publishes
+all nine checkpoint images, each PNG still decoding to the raster digest the
+harness recorded when that checkpoint passed.
+
+PPM working copies are not shipped ({excluded} of them): a PPM is a fixed
+header plus the identical raster, so it is reproducible from the published
+PNG, and each tested PPM's own SHA-256 is recorded in its run's
+`evidence.json`.
 
 ## How the verdicts were produced
 
@@ -158,10 +267,14 @@ def package(root: Path) -> int:
     if not root.is_dir():
         print(f"[evidence] {root} is not a directory", file=sys.stderr)
         return 2
-    converted = convert_ppm_to_png(root)
-    if converted:
-        print(f"[evidence] converted {converted} PPM screendumps to PNG")
-    files = collect(root)
+    frame_problems = check_frames(root)
+    if frame_problems:
+        print("[evidence] refusing to package: checkpoint frames do not match "
+              "their recorded identity")
+        for problem in frame_problems:
+            print(f"[evidence] PROBLEM: {problem}")
+        return 1
+    files, excluded_ppm = collect(root)
     # A single multi-megabyte blob in an evidence directory is almost always
     # scratch state (a formatted disk image, a copied boot image), and it
     # bloats the published package without giving a reader anything to check
@@ -179,13 +292,33 @@ def package(root: Path) -> int:
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "working_tree_dirty": bool(_git("status", "--porcelain")),
         "files": files,
+        "excluded_from_package": {
+            "count": excluded_ppm,
+            "pattern": "*.ppm",
+            "reason": "PPM screendumps are a fixed header plus the exact "
+                      "raster of the published PNG; their SHA-256 is "
+                      "recorded in each run's evidence.json",
+        },
+        "checkpoint_frames": {
+            "required": list(REQUIRED_GUEST_FRAMES),
+            "checked": "each published PNG re-decoded and compared with the "
+                       "raster digest the harness recorded when the checkpoint "
+                       "assertion passed",
+            "runs": sum(1 for _ in root.rglob("evidence.json")),
+        },
         "total_bytes": sum(f["size"] for f in files.values()),
     }
     (root / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (root / "README.md").write_text(readme(root, manifest))
     archive = root.with_suffix(".tar.gz")
+    # Archive exactly what the manifest lists (plus the manifest and README).
+    # Adding the directory wholesale would ship the PPM working copies, which
+    # `collect` deliberately leaves out -- and an unlisted file in the archive
+    # is precisely what `verify` exists to reject.
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(root, arcname=root.name)
+        tar.add(root, arcname=root.name, recursive=False)
+        for rel in sorted(files) + ["MANIFEST.json", "README.md"]:
+            tar.add(root / rel, arcname=f"{root.name}/{rel}", recursive=False)
     print(f"[evidence] packaged {len(files)} files, "
           f"{manifest['total_bytes']} bytes -> {archive} "
           f"({archive.stat().st_size} bytes, sha256 {sha256_file(archive)})")

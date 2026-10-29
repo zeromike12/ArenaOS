@@ -1,0 +1,28 @@
+
+=== guest-clang ===
+[v1-guest-proof] built APB1 docs/v1/evidence/v2-2026-10-29-r2/guest-clang/c-gfx-app.apb1 (53144 bytes, sha256 1db228addca3c7b98f3b3886617dffb0087cf627d7ce65c4fc1900f019870361) with clang from ELF /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c-gfx-app-clang.elf (sha256 003c381b0f107d8dbe68c6affaa56ca6a1d238145364f8b2dc2c699196c7e502, simd/x87=0)
+[v1-guest-proof] run directory: docs/v1/evidence/v2-2026-10-29-r2/guest-clang
+[v1-guest-proof] source commit: 65af1d89a5254cd6a45cb96341966f9265a42742
+[v1-guest-proof] working tree dirty: True
+[v1-guest-proof] AFS2 formatted by filesd (boot 1, 8.0s)
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (53144 bytes)
+[v1-guest-proof] checkpoint 1 PASS: launch-ready Desktop desktop frame presented; app-instances=0 windows=0
+[v1-guest-proof] checkpoint 2 PASS: APB1 install receipt (protected installer) protected installer installed signed version=42
+[v1-guest-proof] primed instance 159 at (70, 60, 640, 480); frame warm-up 5 of at most 32; settled receipt 112780/15/15/3/472/5/47
+[v1-guest-proof] checkpoint 3 PASS: first native C window (Identify -> create -> render) Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance
+[v1-guest-proof] checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) KEY ack surface=164 counter 1->3 + flash in the window, frame 81d5851a1530
+[v1-guest-proof] checkpoint 5 PASS: mouse response (instance-specific acknowledgment) POINTER ack surface=164 counter 3->4 + flash in the window, frame 02f96ff494ab
+[v1-guest-proof] checkpoint 6 PASS: two concurrent instances: focus/input isolation, both directions A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=d054b6792575; B(169) key: ack {'before': 2, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=89b52f506126
+[v1-guest-proof] checkpoint 7 PASS: window removal: retirements, exits, settlement, visual removal retired=['164', '169'] exits={'164': 0, '169': 0} all 21 resource fields settled to baseline visual_rects=0
+[v1-guest-proof] checkpoint 8 PASS: final V1 demonstration final instance surface=174 placed (70, 60, 640, 480) bound=174 key ack 0->3 + visible flash, frame 1043a6182762
+[v1-guest-proof] rc=0 dt=19.4s serial -> docs/v1/evidence/v2-2026-10-29-r2/guest-clang/v1-guest-serial.log
+  checkpoint 1 PASS: launch-ready Desktop (shots/cp01-launch-ready-desktop.png)
+  checkpoint 2 PASS: APB1 install receipt (protected installer) (install-ack.json)
+  checkpoint 3 PASS: first native C window (Identify -> create -> render) (shots/cp03-first-native-c-window.png)
+  checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) (shots/cp04-keyboard-response.png)
+  checkpoint 5 PASS: mouse response (instance-specific acknowledgment) (shots/cp05-mouse-response.png)
+  checkpoint 6 PASS: two concurrent instances: focus/input isolation, both directions (shots/cp06a-focused.png, shots/cp06b-focused.png)
+  checkpoint 7 PASS: window removal: retirements, exits, settlement, visual removal (shots/cp07-desktop-restored.png)
+  checkpoint 8 PASS: final V1 demonstration (shots/cp08-final-demonstration.png)
+[v1-guest-proof] V1 GUEST PROOF PASS
+[gate-stage] guest-clang: exit 0 -> build/v1-gate/receipts/guest-clang.json

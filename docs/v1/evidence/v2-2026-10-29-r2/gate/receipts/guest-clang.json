@@ -1,0 +1,43 @@
+{
+  "stage": "guest-clang",
+  "exit": 0,
+  "qualified": true,
+  "notes": [],
+  "argv": [
+    "env",
+    "V1_EVIDENCE_DIR=docs/v1/evidence/v2-2026-10-29-r2/guest-clang",
+    "V1_CC=clang",
+    "python3",
+    "tools/v1_guest_proof.py"
+  ],
+  "started_epoch": 1793316270.5435998,
+  "finished_epoch": 1793316299.4926817,
+  "started_utc": "2026-10-29T23:24:30Z",
+  "finished_utc": "2026-10-29T23:24:59Z",
+  "source_commit": "65af1d89a5254cd6a45cb96341966f9265a42742",
+  "dirty_paths": [
+    "gitignore",
+    "docs/v1/V2-STATUS.md",
+    "experiments/c-runtime/app/c_gfx_app.c",
+    "experiments/c-runtime/run.py",
+    "tools/dev-env/recover-rust-and-zig.sh",
+    "tools/v1_cycles.py",
+    "tools/v1_evidence.py",
+    "tools/v1_gate.sh",
+    "tools/v1_guest_proof.py",
+    "experiments/c-runtime/app/c_gfx_refusals.c",
+    "tools/dev-env/pypi_file.py",
+    "tools/v1_gate_aggregate.py",
+    "tools/v1_gate_stage.py",
+    "tools/v1_refusals.py"
+  ],
+  "newest_tracked": {
+    "path": "tools/v1_evidence.py",
+    "mtime": 1793316203.3387446
+  },
+  "efi_sha256": "7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5",
+  "esp_sha256": "96c3616bc4cf03f46b7e4446b2dab1c14d0b1fe1363b51f63969c4869785f423",
+  "evidence_package_sha256": "MISSING",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

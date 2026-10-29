@@ -1,121 +1,152 @@
 #!/usr/bin/env bash
-# One command for the V1 qualification gate.
+# One command for the V1 gate, with an honest answer about what it proved.
 #
-#   bash tools/v1_gate.sh            # full gate (guest runs, ~10 minutes)
-#   SKIP_GUEST=1 bash tools/v1_gate.sh   # receipts + harness controls only
+#   bash tools/v1_gate.sh                      # guest gate (V1-specific stages)
+#   V1_GATE_MODE=full bash tools/v1_gate.sh    # + 121-suite regression and
+#                                              #   runtime boot-stability loop
+#   V1_GATE_MODE=quick bash tools/v1_gate.sh   # environment + controls only
 #
-# Stages, in dependency order:
-#   1. environment receipts  (emulator/loader/toolchains/guards/backend controls)
-#   2. harness controls      (verdict logic, no QEMU)
-#   3. guest proof, GCC cell (8 checkpoints, instance-attributed evidence)
-#   4. guest proof, Clang cell
-#   5. lifecycle cycles      (10 launch/close cycles with settlement)
-#   6. evidence package      (manifest + archive, then verify from a fresh
-#                             extraction outside this workspace)
+# Every stage writes a receipt (tools/v1_gate_stage.py) stamped with the
+# commit, the dirty paths, the EFI/ESP digests and the newest tracked source
+# file. `tools/v1_gate_aggregate.py` then decides the result, and it will not
+# let a partial run or a stale receipt read as a qualification:
 #
-# Every stage is a real execution. Nothing here re-uses an earlier verdict:
-# a missing receipt, a missing serial log or a missing identity fails the gate.
+#   * guest mode (default) covers build, environment receipts, focused
+#     controls, both compiler cells of the guest proof, both refusal-matrix
+#     cells, ten lifecycle cycles, and the evidence package plus a
+#     fresh-extraction verify. That is the review-candidate gate.
+#   * full mode adds `tools/run_tests.sh` (the project's 121-suite formal
+#     regression, which is the reason the earlier "reproduces everything"
+#     claim was wrong) and `tools/stability_loop.sh N` (the boot-stability
+#     gate). Only this mode can print `V1 QUALIFICATION: PASS`.
+#   * quick mode is a development convenience and says so.
+#
+# Reusing an earlier stage is allowed only through `--record` with the same
+# identities: code and artifacts unchanged, receipt newer than the newest
+# tracked source. Nothing is re-run merely to refresh a timestamp.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-EVIDENCE="docs/v1/evidence/v2-2026-10-29"
+MODE="${V1_GATE_MODE:-guest}"
+EVIDENCE="${V1_GATE_EVIDENCE:-docs/v1/evidence/v2-2026-10-29-r2}"
 LOG_DIR="${V1_GATE_LOGS:-build/v1-gate}"
-mkdir -p "$LOG_DIR"
+RECEIPTS="${V1_GATE_RECEIPTS:-$LOG_DIR/receipts}"
+STABILITY_BOOTS="${V1_STABILITY_BOOTS:-100}"
+mkdir -p "$LOG_DIR" "$RECEIPTS"
 
-fail=0
-stage() { printf '\n=== %s ===\n' "$*"; }
-check() { # $1 = label, $2 = exit code
-    if [[ "$2" -eq 0 ]]; then
-        echo "GATE PASS: $1"
-    else
-        echo "GATE FAIL: $1 (exit $2)"
-        fail=$((fail+1))
-    fi
+stage_run() { # $1 = stage name; remaining = command
+    local name="$1"; shift
+    printf '\n=== %s ===\n' "$name"
+    python3 tools/v1_gate_stage.py run --stage "$name" --receipts "$RECEIPTS" -- "$@"
 }
 
-# The build path the Phase-14 PIE guard pins. Building elsewhere fails closed,
-# so the qualification runs from the bound path when it exists.
+# The Phase-14 PIE guard pins the build path. Build where it is bound.
 BUILD_ROOT="$REPO_ROOT"
 if [[ -d /workspace/ArenaOS && "${V1_ALLOW_UNPINNED_PATH:-0}" != "1" ]]; then
     BUILD_ROOT=/workspace/ArenaOS
 fi
 
-stage "0/6 build the boot image from this tree"
-# The harness refuses to pass on an image older than the newest tracked source
-# file, so the gate builds first and records what it built. `tools/build.sh`
-# is run at the pinned path because the protected PIE guard depends on it.
-( cd "$BUILD_ROOT" && source tools/dev-env/v1-env.sh >/dev/null 2>&1 || true
+echo "gate mode: $MODE    evidence: $EVIDENCE    receipts: $RECEIPTS"
+
+# The canonical build is the qualification build. It refuses (correctly)
+# when the protected Phase-14 PIE fixture does not reproduce, which in this
+# sandbox is caused by blocker B1: the official rust-std target components
+# cannot be fetched. Substituting tools/build_phase16_dev.sh keeps the guest
+# work executable, and the receipt is marked unqualified so no gate summary
+# can present the result as a qualification.
+( cd "$BUILD_ROOT" && source tools/dev-env/v1-env.sh >/dev/null 2>&1 || true; \
   bash tools/build.sh --image ) > "$LOG_DIR/build.log" 2>&1
-bg=$?
+build_rc=$?
+if [[ $build_rc -eq 0 ]]; then
+    python3 tools/v1_gate_stage.py record --stage build --receipts "$RECEIPTS" \
+        --exit 0 --note "canonical build (tools/build.sh --image)" \
+        --note "efi $(sha256sum build/arena-boot.efi | cut -d' ' -f1)" > /dev/null
+else
+    echo "canonical build refused (exit $build_rc):"
+    grep -E "reproducible PIE fixture hash changed|error:" "$LOG_DIR/build.log" | tail -2
+    echo "falling back to the documented dev build (B1); receipt is unqualified"
+    ( cd "$BUILD_ROOT" && bash tools/build_phase16_dev.sh \
+        && python3 tools/espimg.py build/arena-boot.efi build/arena-esp.img ) \
+        >> "$LOG_DIR/build.log" 2>&1
+    dev_rc=$?
+    python3 tools/v1_gate_stage.py record --stage build --receipts "$RECEIPTS" \
+        --exit "$dev_rc" --unqualified \
+        --note "dev-path build (tools/build_phase16_dev.sh): canonical PIE guard blocked by blocker B1 (official rust-std target components unavailable offline)" \
+        --note "committed Phase-14 fixture verified, not rebuilt" \
+        --note "efi $(sha256sum build/arena-boot.efi | cut -d' ' -f1)" > /dev/null
+fi
 tail -2 "$LOG_DIR/build.log"
 sha256sum "$BUILD_ROOT/build/arena-boot.efi" | tee "$LOG_DIR/boot-efi.sha256"
-check "boot image built from this tree" "$bg"
 
-stage "1/6 environment receipts"
-bash tools/v1_env_evidence.sh "$EVIDENCE/env" > "$LOG_DIR/env.log" 2>&1
-rg=$?
+stage_run env bash tools/v1_env_evidence.sh "$EVIDENCE/env" \
+    > "$LOG_DIR/env.log" 2>&1
 tail -1 "$LOG_DIR/env.log"
-check "environment receipts ($EVIDENCE/env)" "$rg"
 
-stage "2/6 harness controls"
-python3 tools/v1_guest_proof.py --controls > "$LOG_DIR/controls.log" 2>&1
-cg=$?
+stage_run controls python3 tools/v1_guest_proof.py --controls \
+    > "$LOG_DIR/controls.log" 2>&1
 tail -1 "$LOG_DIR/controls.log"
-check "harness focused controls" "$cg"
 
-if [[ "${SKIP_GUEST:-0}" != "1" ]]; then
+if [[ "$MODE" == "quick" ]]; then
+    echo
+    echo "quick mode: guest stages skipped by request"
+else
     source tools/dev-env/v1-env.sh >/dev/null 2>&1 || true
+
     for cc in gcc clang; do
-        stage "3-4/6 guest proof ($cc)"
         rm -rf "$EVIDENCE/guest-$cc"
-        V1_EVIDENCE_DIR="$EVIDENCE/guest-$cc" V1_CC="$cc" \
-            python3 tools/v1_guest_proof.py > "$LOG_DIR/proof-$cc.log" 2>&1
-        pg=$?
-        grep -E "V1 GUEST PROOF (PASS|FAIL)|failed because" "$LOG_DIR/proof-$cc.log" | tail -2
-        # The emulator's own stderr and the console transcript travel with the
-        # evidence: a reader must be able to see a startup failure, not guess
-        # at it from an empty serial log.
-        cp -f build/qemu-stderr-v1-guest-proof.log "$EVIDENCE/guest-$cc/qemu-stderr.log" 2>/dev/null || true
+        stage_run "guest-$cc" env "V1_EVIDENCE_DIR=$EVIDENCE/guest-$cc" \
+            V1_CC="$cc" python3 tools/v1_guest_proof.py \
+            > "$LOG_DIR/proof-$cc.log" 2>&1
+        grep -E "V1 GUEST PROOF (PASS|FAIL)|failed because" "$LOG_DIR/proof-$cc.log" \
+            | tail -2
+        cp -f build/qemu-stderr-v1-guest-proof.log \
+            "$EVIDENCE/guest-$cc/qemu-stderr.log" 2>/dev/null || true
         cp -f "$LOG_DIR/proof-$cc.log" "$EVIDENCE/guest-$cc/harness-console.log"
-        # Scratch state, not evidence: the formatted scratch disk and the copy
-        # of the boot image are inputs to the run. Their identities are in
-        # evidence.json, so keeping the bytes would bloat the package without
-        # adding anything a reader can check.
-        rm -f "$EVIDENCE/guest-$cc/arena-disk.img" "$EVIDENCE/guest-$cc/BOOTX64.EFI"
-        check "guest proof ($cc)" "$pg"
+
+        rm -rf "$EVIDENCE/refusals-$cc"
+        stage_run "refusals-$cc" env "V1_EVIDENCE_DIR=$EVIDENCE/refusals-$cc" \
+            V1_CC="$cc" python3 tools/v1_refusals.py \
+            > "$LOG_DIR/refusals-$cc.log" 2>&1
+        grep -E "cases=.*(PASS|FAIL)" "$LOG_DIR/refusals-$cc.log" | tail -1
+        cp -f "$LOG_DIR/refusals-$cc.log" "$EVIDENCE/refusals-$cc/harness-console.log"
+
+        # Scratch inputs, not evidence: their digests are in evidence.json.
+        rm -f "$EVIDENCE/guest-$cc"/arena-disk.img "$EVIDENCE/guest-$cc/BOOTX64.EFI"
+        rm -f "$EVIDENCE/refusals-$cc"/arena-disk.img "$EVIDENCE/refusals-$cc/BOOTX64.EFI"
     done
 
-    stage "5/6 lifecycle cycles"
     rm -rf "$EVIDENCE/lifecycle-cycles"
-    V1_EVIDENCE_DIR="$EVIDENCE/lifecycle-cycles" V1_CYCLES=10 \
-        python3 tools/v1_cycles.py > "$LOG_DIR/cycles.log" 2>&1
-    yg=$?
+    stage_run cycles env "V1_EVIDENCE_DIR=$EVIDENCE/lifecycle-cycles" \
+        V1_CYCLES=10 python3 tools/v1_cycles.py > "$LOG_DIR/cycles.log" 2>&1
     grep -E "cycles PASS" "$LOG_DIR/cycles.log" | tail -1
-    cp -f build/qemu-stderr-v1-cycles.log "$EVIDENCE/lifecycle-cycles/qemu-stderr.log" 2>/dev/null || true
+    cp -f build/qemu-stderr-v1-cycles.log \
+        "$EVIDENCE/lifecycle-cycles/qemu-stderr.log" 2>/dev/null || true
     cp -f "$LOG_DIR/cycles.log" "$EVIDENCE/lifecycle-cycles/harness-console.log"
-    rm -f "$EVIDENCE/lifecycle-cycles"/arena-disk*.img "$EVIDENCE/lifecycle-cycles/BOOTX64.EFI"
-    check "ten launch/close cycles" "$yg"
-else
-    echo "SKIP: guest proof and cycles (SKIP_GUEST=1)"
+    rm -f "$EVIDENCE/lifecycle-cycles"/arena-disk*.img \
+          "$EVIDENCE/lifecycle-cycles/BOOTX64.EFI"
+
+    if [[ "$MODE" == "full" ]]; then
+        stage_run regression bash tools/run_tests.sh > "$LOG_DIR/regression.log" 2>&1
+        grep -E "ALL TESTS PASSED|test suites FAILED" "$LOG_DIR/regression.log" | tail -1
+        stage_run stability bash tools/stability_loop.sh "$STABILITY_BOOTS" \
+            > "$LOG_DIR/stability.log" 2>&1
+        tail -2 "$LOG_DIR/stability.log"
+    fi
 fi
 
-stage "6/6 evidence package + fresh-extraction verify"
-python3 tools/v1_evidence.py package "$EVIDENCE" > "$LOG_DIR/package.log" 2>&1
-pg=$?
+stage_run package python3 tools/v1_evidence.py package "$EVIDENCE" \
+    > "$LOG_DIR/package.log" 2>&1
 tail -1 "$LOG_DIR/package.log"
-check "evidence package" "$pg"
-# Verification happens in a temporary directory that is NOT this workspace.
-python3 tools/v1_evidence.py verify "$EVIDENCE.tar.gz" > "$LOG_DIR/verify.log" 2>&1
-vg=$?
+stage_run verify python3 tools/v1_evidence.py verify "$EVIDENCE.tar.gz" \
+    > "$LOG_DIR/verify.log" 2>&1
 tail -2 "$LOG_DIR/verify.log"
-check "evidence verifies from a fresh extraction" "$vg"
 
 printf '\n=== gate summary ===\n'
-if [[ "$fail" -eq 0 ]]; then
-    echo "V1 GATE: PASS (logs in $LOG_DIR)"
-    exit 0
+python3 tools/v1_gate_aggregate.py --mode "$MODE" --receipts "$RECEIPTS"
+result=$?
+if [[ $result -ne 0 ]]; then
+    echo "logs in $LOG_DIR; receipts in $RECEIPTS"
 fi
-echo "V1 GATE: FAIL ($fail stage(s); logs in $LOG_DIR)"
-exit 1
+exit $result
