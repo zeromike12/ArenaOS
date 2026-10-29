@@ -1,16 +1,16 @@
 # v2-2026-10-29 — V1 qualification evidence
 
-Produced 2026-10-29T19:21:09Z from commit
-`119cfdc8cca8a647416b40f619dad084fb1bde70` on branch `arena/af044828-arenaos`
+Produced 2026-10-29T21:38:00Z from commit
+`bdf6c66971574f63687f23bbd69f08415d5c37f4` on branch `arena/af044828-arenaos`
 (working tree dirty: `True`).
 
 ## What is here
 
 | Kind | Count | Notes |
 |---|---|---|
-| Serial logs | 15 | The guest's own output under QEMU TCG |
+| Serial logs | 16 | The guest's own output under QEMU TCG |
 | Screenshots | 50 | Frames captured through the emulator console (PPM as written by QEMU, converted losslessly to PNG) |
-| Manifests and receipts | 30 | JSON verdicts, identities, build receipts |
+| Manifests and receipts | 31 | JSON verdicts, identities, build receipts |
 
 ## How to check it
 

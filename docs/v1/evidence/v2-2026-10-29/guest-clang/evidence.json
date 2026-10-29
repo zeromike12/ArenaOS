@@ -70,9 +70,11 @@
     "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
   },
   "identities": {
-    "source_commit": "119cfdc8cca8a647416b40f619dad084fb1bde70",
-    "working_tree_dirty": false,
-    "dirty_paths_excluding_evidence": [],
+    "source_commit": "bdf6c66971574f63687f23bbd69f08415d5c37f4",
+    "working_tree_dirty": true,
+    "dirty_paths_excluding_evidence": [
+      "M tools/v1_evidence.py"
+    ],
     "qemu_wrapper_path": "/home/user/phase16-backend/qemu-patched",
     "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
     "qemu_elf_path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
@@ -228,15 +230,15 @@
     },
     "guest_compiler_under_test": "clang",
     "guest_elf_sha256": "30cab76f2c94f0a3b6fd81296937c380514e91de4b8a714a981ecf2ebe8fb664",
-    "serial_sha256": "6349e986668b34276d9ed571d54afae371575e7062bb54939c9ab13313cb2a3e",
+    "serial_sha256": "1b955177ab6f260505ecc426ae9135d1f7a669c70c9ccbfb4d731540a842112b",
     "apb1_sha256": "c0da952974c626515f756cc0316c2983bb6207b7b5178d073963e0ad9c355c7c",
-    "esp_sha256": "20441b0405bc483f51cce419ae1c0a7b4cfc74a08221bbe1883fbd23fed28cda",
+    "esp_sha256": "b1d6f213dfb186d31f079682d29999e0a8a1eaed37fc8ba414c7551d7518f789",
     "esp_path": "/home/user/ArenaOS/build/arena-esp.img",
     "image": {
       "fresh": true,
-      "image_mtime": 1793301553.5781076,
-      "newest_source": "tools/v1_guest_proof.py",
-      "newest_source_mtime": 1793301425.9288323,
+      "image_mtime": 1793309765.0361574,
+      "newest_source": "tools/v1_evidence.py",
+      "newest_source_mtime": 1793309754.5720527,
       "boot_efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83"
     },
     "efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83",
@@ -246,7 +248,7 @@
     "rc": 0,
     "run_dir": "docs/v1/evidence/v2-2026-10-29/guest-clang",
     "serial": "docs/v1/evidence/v2-2026-10-29/guest-clang/v1-guest-serial.log",
-    "serial_sha256": "6349e986668b34276d9ed571d54afae371575e7062bb54939c9ab13313cb2a3e"
+    "serial_sha256": "1b955177ab6f260505ecc426ae9135d1f7a669c70c9ccbfb4d731540a842112b"
   },
   "verdict": {
     "pass": true,

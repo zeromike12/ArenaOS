@@ -189,8 +189,8 @@ def package(root: Path) -> int:
     print(f"[evidence] packaged {len(files)} files, "
           f"{manifest['total_bytes']} bytes -> {archive} "
           f"({archive.stat().st_size} bytes, sha256 {sha256_file(archive)})")
-    (archive.with_suffix(".tar.gz.sha256")).write_text(
-        f"{sha256_file(archive)}  {archive.name}\n")
+    sidecar = archive.parent / (archive.name + ".sha256")
+    sidecar.write_text(f"{sha256_file(archive)}  {archive.name}\n")
     return 0
 
 
