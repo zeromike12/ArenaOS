@@ -145,6 +145,12 @@ RE_CHILD_EXIT = re.compile(r"\[desktop\] child Process-cap exit surface=(\d+) st
 RE_RESOURCE_DETAIL = re.compile(r"\[desktop\] native resource detail values=([\d/]+)")
 RE_INSTALL_ACK = re.compile(r"\[desktop\] APB1 installed; signed version=(\d+)")
 RE_DESKTOP_READY = re.compile(r"\[desktop\] real desktop frame presented")
+# Authoritative placement: which screen rectangle the Desktop gave an
+# instance's window. The title bar occupies its top TITLE_H rows, so this is
+# also how the harness finds that exact window's own close button.
+RE_PLACED = re.compile(
+    r"\[desktop\] ordinary window placed handle=(\d+) surface=(\d+) "
+    r"x=(\d+) y=(\d+) w=(\d+) h=(\d+)")
 
 # Field indices inside a resource-detail receipt (see desktop.rs
 # log_resource_detail; the field order is published on the preceding line).
@@ -217,6 +223,18 @@ def parse_gfx_focus(serial_or_lines) -> list[dict]:
     return out
 
 
+def current_focus(serial_or_lines):
+    """Surface the guest last acknowledged gaining focus, or None.
+
+    A focus change is delivered to both sessions (gain and loss), so only
+    `focus=1` acknowledgments describe who currently holds focus. Clicking a
+    window that already has focus produces no new event, which is why the
+    current state must be tracked rather than re-derived from the last click.
+    """
+    gains = [f for f in parse_gfx_focus(serial_or_lines) if f["focused"] == 1]
+    return gains[-1]["surface"] if gains else None
+
+
 def parse_gfx_identities(serial_or_lines) -> list[dict]:
     out = []
     for index, ln in enumerate(_lines(serial_or_lines)):
@@ -259,6 +277,27 @@ def parse_child_exits(serial_or_lines) -> list[dict]:
             out.append({"line": index, "surface": int(m.group(1)),
                         "status": int(m.group(2))})
     return out
+
+
+def parse_placements(serial_or_lines) -> list[dict]:
+    """Every `[desktop] ordinary window placed ...` receipt."""
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_PLACED.search(ln)
+        if m:
+            out.append({
+                "line": index,
+                "handle": int(m.group(1)),
+                "surface": int(m.group(2)),
+                "rect": (int(m.group(3)), int(m.group(4)),
+                         int(m.group(5)), int(m.group(6))),
+            })
+    return out
+
+
+def placement_for(serial_or_lines, surface: int):
+    hits = [p for p in parse_placements(serial_or_lines) if p["surface"] == surface]
+    return hits[-1] if hits else None
 
 
 def serial_cursor(serial_or_lines) -> int:
@@ -436,7 +475,48 @@ def ppm(path: Path, expect_w: int = SCREEN_W, expect_h: int = SCREEN_H) -> bytes
     return payload
 
 
+try:  # pragma: no cover - exercised implicitly by every run
+    import numpy as _np
+except Exception:  # pragma: no cover
+    _np = None
+
+
+def _np_image(data: bytes, width: int, height: int):
+    return _np.frombuffer(data, dtype=_np.uint8).reshape(height, width, 3)
+
+
+def _np_color_match(img, color, tol: int = COLOR_TOL):
+    return _np.all(_np.abs(img.astype(_np.int16) - _np.int16(color)) <= tol,
+                   axis=2)
+
+
+def _np_app_mask(data: bytes, width: int, height: int):
+    img = _np_image(data, width, height)
+    mask = _np.zeros((height, width), dtype=bool)
+    for color in APP_COLORS:
+        mask |= _np_color_match(img, color)
+    return mask
+
+
+def _np_flash_mask(data: bytes, width: int, height: int):
+    img = _np_image(data, width, height)
+    mask = _np.zeros((height, width), dtype=bool)
+    for color in FLASH_COLORS:
+        mask |= _np_color_match(img, color)
+    return mask
+
+
 def app_mask(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list:
+    """Pixel coordinates matching app checker colors (tight tolerance).
+
+    Vectorised when numpy is present; the pure-Python path is kept so the
+    harness runs (slower) on a bare interpreter. Both paths apply the same
+    tolerance and colour set.
+    """
+    if _np is not None:
+        mask = _np_app_mask(data, width, height)
+        ys, xs = _np.nonzero(mask)
+        return list(zip(xs.tolist(), ys.tolist()))
     hits = []
     for y in range(height):
         base = (y * width) * 3
@@ -450,9 +530,16 @@ def app_mask(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list
 def has_app_color(data: bytes, rect, width: int = SCREEN_W,
                   height: int = SCREEN_H) -> bool:
     x, y, w, h = rect
-    for row in range(y, min(y + h, height)):
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(x + w, width), min(y + h, height)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    if _np is not None:
+        img = _np_image(data, width, height)[y0:y1, x0:x1]
+        return bool(any(_np_color_match(img, c).any() for c in APP_COLORS))
+    for row in range(y0, y1):
         base = (row * width) * 3
-        for col in range(x, min(x + w, width)):
+        for col in range(x0, x1):
             i = base + col * 3
             if any(color_close(data[i:i + 3], c) for c in APP_COLORS):
                 return True
@@ -460,40 +547,79 @@ def has_app_color(data: bytes, rect, width: int = SCREEN_W,
 
 
 def window_rects(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list:
-    """2D connected components of app-colored pixels (8-connectivity).
+    """Axis-aligned connected components of app-colored pixels.
 
-    Components are NOT instances: overlapping windows merge. Callers must
-    bind a component to an instance only through an acknowledgment.
+    Components are NOT instances: overlapping windows merge into one
+    component, so a caller must bind a component to an instance through an
+    acknowledgment, never through geometry alone.
+
+    Implementation: row runs merged by overlapping x-extent (union-find).
+    This is exact for the rectangular windows this client paints and is
+    O(rows x runs) instead of a per-pixel flood fill.
     """
-    hits = set(app_mask(data, width, height))
-    if not hits:
-        return []
-    visited = set()
+    if _np is not None:
+        mask = _np_app_mask(data, width, height)
+        runs_by_row = []
+        for y in range(height):
+            row = mask[y]
+            if not row.any():
+                continue
+            idx = _np.flatnonzero(row)
+            splits = _np.flatnonzero(_np.diff(idx) > 1)
+            start = 0
+            for stop in list(splits) + [len(idx) - 1]:
+                runs_by_row.append((y, int(idx[start]), int(idx[stop])))
+                start = stop + 1
+    else:
+        hits = app_mask(data, width, height)
+        rows = {}
+        for x, y in hits:
+            rows.setdefault(y, []).append(x)
+        runs_by_row = []
+        for y, xs in rows.items():
+            xs.sort()
+            start = prev = xs[0]
+            for x in xs[1:]:
+                if x == prev + 1:
+                    prev = x
+                    continue
+                runs_by_row.append((y, start, prev))
+                start = prev = x
+            runs_by_row.append((y, start, prev))
+
+    parent = list(range(len(runs_by_row)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    last_row = {}
+    for i, (y, x0, x1) in enumerate(runs_by_row):
+        for j in last_row.get(y - 1, []):
+            _y, a0, a1 = runs_by_row[j]
+            # 8-connectivity: runs on adjacent rows touch if their x extents
+            # overlap or are within one pixel.
+            if not (x1 + 1 < a0 or a1 + 1 < x0):
+                union(i, j)
+        last_row.setdefault(y, []).append(i)
+
+    groups = {}
+    for i, (y, x0, x1) in enumerate(runs_by_row):
+        groups.setdefault(find(i), []).append((y, x0, x1))
+
     rects = []
-    for start in hits:
-        if start in visited:
-            continue
-        stack = [start]
-        visited.add(start)
-        minx = maxx = start[0]
-        miny = maxy = start[1]
-        while stack:
-            cx, cy = stack.pop()
-            if cx < minx:
-                minx = cx
-            if cx > maxx:
-                maxx = cx
-            if cy < miny:
-                miny = cy
-            if cy > maxy:
-                maxy = cy
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    nx, ny = cx + dx, cy + dy
-                    if (0 <= nx < width and 0 <= ny < height
-                            and (nx, ny) in hits and (nx, ny) not in visited):
-                        visited.add((nx, ny))
-                        stack.append((nx, ny))
+    for runs in groups.values():
+        minx = min(r[1] for r in runs)
+        maxx = max(r[2] for r in runs)
+        miny = min(r[0] for r in runs)
+        maxy = max(r[0] for r in runs)
         if (maxx - minx + 1) * (maxy - miny + 1) >= 200:
             rects.append((minx, miny, maxx - minx + 1, maxy - miny + 1))
     rects.sort(key=lambda r: (r[1], r[0]))
@@ -516,9 +642,16 @@ def pixel_flash(data: bytes, x: int, y: int, width: int = SCREEN_W,
 def has_flash_color(data: bytes, rect, width: int = SCREEN_W,
                     height: int = SCREEN_H) -> bool:
     x, y, w, h = rect
-    for row in range(y, min(y + h, height)):
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(x + w, width), min(y + h, height)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    if _np is not None:
+        img = _np_image(data, width, height)[y0:y1, x0:x1]
+        return bool(any(_np_color_match(img, c).any() for c in FLASH_COLORS))
+    for row in range(y0, y1):
         base = (row * width) * 3
-        for col in range(x, min(x + w, width)):
+        for col in range(x0, x1):
             i = base + col * 3
             if any(color_close(data[i:i + 3], c) for c in FLASH_COLORS):
                 return True
@@ -707,8 +840,16 @@ def record(n: int, verdict: str, ref: str = "", text: str = "") -> None:
     results[n] = verdict
     refs[n] = ref
     detail[n] = text
-    print(f"[v1-guest-proof] checkpoint {n} {verdict}: {CHECKPOINTS[n]} {text}",
-          flush=True)
+    line = f"[v1-guest-proof] checkpoint {n} {verdict}: {CHECKPOINTS[n]} {text}"
+    print(line, flush=True)
+    # The harness transcript is itself a required evidence artifact. It is
+    # appended as the run proceeds (and created before any checkpoint) so the
+    # verdict can require it to exist without the check being self-defeating.
+    try:
+        with open(HARNESS_LOG, "a") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
 
 
 def skip_remaining(from_n: int, reason: str) -> None:
@@ -798,6 +939,15 @@ def qemu_identity() -> dict:
         elf = next((Path(p) for p in cmd
                     if Path(p).exists() and Path(p).is_file()
                     and Path(p).name.startswith("qemu-system")), None)
+    if elf is None and contents:
+        # The launch prefix is a wrapper script (isolated-glibc recovery):
+        # the emulator ELF it execs is named inside it. Resolve that path so
+        # the ELF identity is recorded separately from the wrapper hash.
+        for candidate in re.findall(r'"(/[^"]*qemu-system[^"]*)"', contents):
+            cp = Path(candidate)
+            if cp.exists() and cp.is_file():
+                elf = cp
+                break
     if elf is not None:
         ident["elf_path"] = str(elf)
         ident["elf_sha256"] = sha256_file(elf)
@@ -856,18 +1006,30 @@ def artifact_identities(apb1: Path) -> dict:
 
 
 def extract_esp_file(esp: Path, path: str, out: Path) -> bool:
-    """Extract a file from the FAT ESP using the repo's pyfatfs tooling."""
+    """Extract a file from the FAT ESP.
+
+    Uses the same pyfatfs reader call the repository's other checkpoints use
+    (`getbytes`); `PyFatFS.open()` trips over short-name decoding in this
+    pyfatfs build, so it is not used here.
+    """
     try:
         from pyfatfs.PyFatFS import PyFatFS
     except Exception:
         return False
-    try:
-        with PyFatFS(str(esp)) as fs:
-            with fs.open(path) as src:
-                out.write_bytes(src.read())
-        return True
-    except Exception:
-        return False
+    for read_only in (True, False):
+        try:
+            fs = PyFatFS(str(esp), read_only=read_only)
+            try:
+                out.write_bytes(fs.getbytes(path))
+            finally:
+                try:
+                    fs.close()
+                except Exception:
+                    pass
+            return True
+        except Exception:
+            continue
+    return False
 
 
 # ============================================================================
@@ -886,8 +1048,17 @@ def probe_instance_at(d: V1Desktop, point: tuple, timeout_s: float = 3.0):
     end = time.monotonic() + timeout_s
     while time.monotonic() < end:
         acks = [f for f in parse_gfx_focus(d.serial()) if f["line"] >= cursor]
+        # A focus change is delivered to BOTH sessions: the one gaining focus
+        # acknowledges focus=1 and the one losing it acknowledges focus=0.
+        # Only the gain identifies which instance owns this point.
+        gained = [f for f in acks if f["focused"] == 1]
+        if len({f["surface"] for f in gained}) > 1:
+            return None, gained[-1]  # ambiguous: refuse rather than guess
+        if gained:
+            return gained[-1]["surface"], gained[-1]
         if acks:
-            return acks[-1]["surface"], acks[-1]
+            # A focus loss with no gain in the same window is not a binding.
+            return None, acks[-1]
         time.sleep(0.05)
     return None, None
 
@@ -984,9 +1155,20 @@ def proof() -> bytes:
         identity = parse_gfx_identities(d.serial())[-1]["surface"]
         created = d.wait_serial(r"\[gfx\] window created handle=\d+ surface=%d" % identity,
                                 "client window creation", 30, start=launch)
-        d.wait(lambda: re.search(RE_WINDOW_COUNT, d.serial()) is not None,
-               "desktop window registration", 30)
-        time.sleep(0.6)
+
+        def desktop_registered() -> bool:
+            """The Desktop's own snapshot must show the instance and window.
+
+            The Desktop logs a "registered ordinary window count" line only on
+            one of its two Create paths, so registration is proven from the
+            resource detail it publishes on every state change instead.
+            """
+            detail_now = last_detail(d.serial())
+            return bool(detail_now and detail_now["app-instances"] >= 1
+                        and detail_now["windows"] >= 1)
+
+        d.wait(desktop_registered, "desktop-side instance/window registration", 30)
+        time.sleep(0.2)
         img3 = d.shot("cp03-first-native-c-window")
         rects = window_rects(img3)
         if not created or not rects:
@@ -994,9 +1176,11 @@ def proof() -> bytes:
                    f"Identify={identity} created={created} visual_rects={len(rects)}")
             skip_remaining(4, "blocked by checkpoint 3 failure")
             return b"shutdown\r"
-        rect1 = rects[0]
+        placed1 = placement_for(d.serial(), identity)
+        rect1 = placed1["rect"] if placed1 else rects[0]
         # Bind the rectangle to the instance by acknowledgment, not geometry.
-        bound, _focus = probe_instance_at(d, rect_center(rect1))
+        bound, _focus = probe_instance_at(
+            d, (rect1[0] + 60, rect1[1] + TITLE_H + 60))
         if bound != identity:
             record(3, "FAIL", "shots/cp03-first-native-c-window.ppm",
                    f"geometry/identity binding failed: Identify named {identity}, "
@@ -1078,88 +1262,144 @@ def proof() -> bytes:
             skip_remaining(7, "blocked by checkpoint 6 failure")
             return b"shutdown\r"
         identity_a, identity_b = recent[0], recent[1]
-        time.sleep(0.5)
+
+        # Authoritative geometry: the Desktop's own placement receipt for each
+        # instance. No pixel guessing and no component counting.
+        d.wait(lambda: placement_for(d.serial(), identity_a) is not None
+               and placement_for(d.serial(), identity_b) is not None,
+               "placement receipts for both instances", 30)
+        place_a = placement_for(d.serial(), identity_a)
+        place_b = placement_for(d.serial(), identity_b)
+        rect_a = place_a["rect"]
+        rect_b = place_b["rect"]
+        time.sleep(0.3)
         img6a = d.shot("cp06a-two-instances")
-        rects = window_rects(img6a)
-        if len(rects) < 2:
+        visual_a = has_app_color(img6a, (rect_a[0], rect_a[1] + TITLE_H,
+                                         rect_a[2], rect_a[3] - TITLE_H))
+        visual_b = has_app_color(img6a, (rect_b[0], rect_b[1] + TITLE_H,
+                                         rect_b[2], rect_b[3] - TITLE_H))
+        if not (visual_a and visual_b):
             record(6, "FAIL", "shots/cp06a-two-instances.ppm",
-                   f"expected 2 visible windows, found {len(rects)}")
+                   f"both instances must be rendered: A={visual_a} B={visual_b} "
+                   f"(rects {rect_a} {rect_b})")
             skip_remaining(7, "blocked by checkpoint 6 failure")
             return b"shutdown\r"
 
-        # Bind each visible rectangle to an instance by acknowledgment. The
-        # two probes must name DIFFERENT instances; otherwise the harness
-        # refuses rather than guessing which window is which.
-        probe_a = (rects[0][0] + 40, rects[0][1] + 60)
-        probe_b = (rects[-1][0] + rects[-1][2] - 40, rects[-1][1] + 60)
-        inst_a, _ = probe_instance_at(d, probe_a)
-        inst_b, _ = probe_instance_at(d, probe_b)
-        if inst_a is None or inst_b is None or inst_a == inst_b:
+        # Cascaded windows overlap, and the Desktop raises a window when it
+        # is clicked. A point that is inside a window's rectangle can
+        # therefore still be covered by the other instance. The harness probes
+        # the strips each window keeps exposed (the later window's right and
+        # bottom edges, the earlier window's top-left) and accepts a binding
+        # only when the guest acknowledges focus for the expected instance.
+        def candidates(rect, upper: bool):
+            x, y, w, h = rect
+            content_top = y + TITLE_H
+            if upper:
+                return [
+                    (x + w - 8, y + h - 8),             # right/bottom strip
+                    (x + w - 8, content_top + h // 2),  # right edge
+                    (x + w // 2, y + h - 8),            # bottom edge
+                    (x + 8, content_top + 8),           # top-left content
+                ]
+            return [
+                (x + 8, content_top + 8),               # top-left strip
+                (x + 8, content_top + h // 2),          # left edge
+                (x + w // 2, content_top + 8),          # top content
+                (x + w - 8, y + h - 8),                 # bottom-right
+            ]
+
+        def bind(rect, expected, upper, label):
+            tried = []
+            for point in candidates(rect, upper):
+                inst, _ = probe_instance_at(d, point)
+                tried.append((point, inst))
+                if inst == expected:
+                    return True, inst, point, tried
+            return False, tried[-1][1] if tried else None, None, tried
+
+        # The later instance is the upper window in the cascade.
+        ok_bind_b, inst_seen_b, point_b, tried_b = bind(
+            rect_b, identity_b, True, "B")
+        ok_bind_a, inst_seen_a, point_a, tried_a = bind(
+            rect_a, identity_a, False, "A")
+        if not (ok_bind_a and ok_bind_b and inst_seen_a != inst_seen_b):
             record(6, "FAIL", "shots/cp06a-two-instances.ppm",
-                   f"could not bind two distinct instances by acknowledgment "
-                   f"(probe_a->{inst_a}, probe_b->{inst_b})")
+                   f"could not bind both instances by acknowledgment: "
+                   f"A(expected {identity_a})->{inst_seen_a} {tried_a}, "
+                   f"B(expected {identity_b})->{inst_seen_b} {tried_b}; "
+                   f"placements A={rect_a} B={rect_b}")
             skip_remaining(7, "blocked by checkpoint 6 failure")
             return b"shutdown\r"
-        rect_a = rects[0]
-        rect_b = rects[-1]
 
-        def direction(focus_point, rect_self, rect_other, self_id, other_id,
-                      key_char):
-            inst, _ = probe_instance_at(d, focus_point)
-            if inst != self_id:
-                return {"ok": False, "error": f"focus ack was {inst}, "
-                                              f"expected {self_id}"}
-            if not await_no_flash(d, rect_self):
+        def direction(point, focus_rect, self_id, other_id, key_char, label):
+            # Click the point: it raises/focuses the window under it. Whether
+            # that emits a focus event depends on the previous focus, so the
+            # acknowledged focus STATE is checked, not a fresh event.
+            d.click(*point)
+            end = time.monotonic() + 3.0
+            focus = current_focus(d.serial())
+            while time.monotonic() < end and focus != self_id:
+                time.sleep(0.05)
+                focus = current_focus(d.serial())
+            if focus != self_id:
+                return {"ok": False,
+                        "error": f"acknowledged focus is {focus}, "
+                                 f"expected {self_id}"}
+            if not await_no_flash(d, focus_rect):
                 return {"ok": False, "error": "pre-input flash did not settle"}
             evaluation, frame, _c = do_input_and_ack(
-                d, self_id, EVENT_KEY, rect_self,
+                d, self_id, EVENT_KEY, focus_rect,
                 lambda: d.type_text(key_char), others=[other_id])
             if frame is None:
-                frame = d.shot("__isolate-probe__")
-            clean_other = not has_flash_color(frame, rect_other)
-            ok = evaluation["ok"] and clean_other
+                frame = d.shot(f"__isolate-{label}-probe__")
             return {
-                "ok": ok,
-                "ack": {
-                    "counter_before": evaluation["counter_before"],
-                    "counter_after": evaluation["counter_after"],
-                    "cross_acks": evaluation["cross_acks"],
-                },
-                "other_quiet": clean_other,
+                "ok": evaluation["ok"],
+                "ack": {"before": evaluation["counter_before"],
+                        "after": evaluation["counter_after"],
+                        "cross_acks": evaluation["cross_acks"],
+                        "fresh_acks": evaluation["fresh_acks"]},
+                "error": "" if evaluation["ok"] else
+                         f"no fresh KEY ack for {self_id} "
+                         f"(cross={evaluation['cross_acks']})",
             }
 
-        dir1 = direction(probe_a, rect_a, rect_b, inst_a, inst_b, "a")
-        dir2 = direction(probe_b, rect_b, rect_a, inst_b, inst_a, "b")
+        # Isolation is decided by acknowledgment attribution: the focused
+        # instance must produce a NEW KEY acknowledgment and the other
+        # instance must produce none. Pixels corroborate the focused
+        # instance's own response; they are not used to decide isolation,
+        # because raising a window can cover the other window's probe point.
+        dir1 = direction(point_a, rect_a, identity_a, identity_b, "a", "dir1")
+        d.shot("cp06b-dir1-focused-a")
+        dir2 = direction(point_b, rect_b, identity_b, identity_a, "b", "dir2")
         img6 = d.shot("cp06-focus-isolation")
         ok6 = dir1["ok"] and dir2["ok"]
         record(6, "PASS" if ok6 else "FAIL", "shots/cp06-focus-isolation.ppm",
-               f"dir1 {inst_a}->{inst_a}: {dir1}; dir2 {inst_b}->{inst_b}: {dir2}"
-               if ok6 else
-               f"isolation failed: dir1={dir1}, dir2={dir2}")
-        live_instances = [inst_a, inst_b]
+               f"A({identity_a}) key: ack {dir1['ack']}; "
+               f"B({identity_b}) key: ack {dir2['ack']}"
+               if ok6 else f"isolation failed: dir1={dir1}, dir2={dir2}")
+        live_instances = [(identity_a, rect_a), (identity_b, rect_b)]
 
         # ---------------- Checkpoint 7: removal + settlement --------------
         cursor = d.cursor()
         closed = []
         close_detail = []
-        for inst, rect in ((inst_a, rect_a), (inst_b, rect_b)):
+        for inst, rect in live_instances:
             cx = rect[0] + rect[2] - CLOSE_W // 2
             cy = rect[1] + TITLE_H // 2
             d.click(cx, cy)
             closed.append(inst)
-            # Visual removal of this window (allow time for the close animation).
-            end = time.monotonic() + 4.0
+            end = time.monotonic() + 6.0
+            gone = False
             while time.monotonic() < end:
-                if not has_app_color(d.shot("__close-probe__"), rect):
+                if not has_app_color(d.shot("__close-probe__"),
+                                     (rect[0], rect[1] + TITLE_H,
+                                      rect[2], rect[3] - TITLE_H)):
+                    gone = True
                     break
                 time.sleep(0.1)
-            close_detail.append({
-                "instance": inst,
-                "rect": rect,
-                "visually_gone": not has_app_color(d.shot("__close-probe__"), rect),
-            })
-        # Wait for fresh settlement receipts.
-        end = time.monotonic() + 20.0
+            close_detail.append({"instance": inst, "rect": rect,
+                                 "visually_gone": gone})
+        end = time.monotonic() + 25.0
         cleanup = evaluate_cleanup(d.serial(), cursor, closed, baseline)
         while time.monotonic() < end and not cleanup["ok"]:
             time.sleep(0.25)
@@ -1173,7 +1413,7 @@ def proof() -> bytes:
         record(7, "PASS" if ok7 else "FAIL", "shots/cp07-desktop-restored.ppm",
                f"retired={sorted(cleanup['per_instance'])} exits="
                f"{ {k: v['exit_status'] for k, v in cleanup['per_instance'].items()} } "
-               f"settlement={cleanup['settlement']['app-instances'] if cleanup['settlement'] else None}/"
+               f"settled={cleanup['settlement']['app-instances'] if cleanup['settlement'] else None}/"
                f"{cleanup['settlement']['windows'] if cleanup['settlement'] else None} "
                f"baseline={baseline['app-instances']}/{baseline['windows']} "
                f"visual_rects={len(rects7)}"
@@ -1369,6 +1609,12 @@ def _build_apb1(apb1_out: Path) -> Path:
 
 
 def main() -> int:
+    # Start the harness transcript before anything else: it is a required
+    # evidence artifact and must exist even if the run fails early.
+    HARNESS_LOG.write_text(
+        f"run_dir={RUN_DIR}\nsource_commit={_source_commit()}\n"
+        f"working_tree_dirty={_working_tree_dirty()}\n"
+        f"guest_compiler={os.environ.get('V1_CC', 'gcc')}\n")
     disk = RUN_DIR / "arena-disk.img"
     import afs1
     tmp8 = RUN_DIR / "arena-disk-8m.img"
@@ -1445,8 +1691,10 @@ def main() -> int:
     }
     identities.update(artifact_identities(APB1))
 
+    # evidence.json is written FROM this verdict, so it cannot be a
+    # precondition of it; its own write is verified immediately afterwards and
+    # a failure there forces FAIL (see below).
     artifacts = {
-        "evidence.json": EVIDENCE,
         "serial": SERIAL_OUT,
         "harness": HARNESS_LOG,
     }
@@ -1458,6 +1706,9 @@ def main() -> int:
         print(f"[v1-guest-proof] ERROR: evidence write failed: {exc}", flush=True)
         all_pass = False
         reasons.append(f"evidence write failed: {exc}")
+    if not EVIDENCE.exists():
+        all_pass = False
+        reasons.append("evidence.json was not written")
 
     for n in sorted(CHECKPOINTS):
         print(f"  checkpoint {n} {results[n]}: {CHECKPOINTS[n]} ({refs[n]})",

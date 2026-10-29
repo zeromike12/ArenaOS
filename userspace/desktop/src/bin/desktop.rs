@@ -871,6 +871,34 @@ fn observe_resource_detail() -> ResourceDetail {
         max_windows_per_instance,
     ]
 }
+/// Authoritative placement receipt for one ordinary window: which screen
+/// rectangle the window manager gave it. The title bar occupies the top
+/// `arena_ui::metrics::TITLE_HEIGHT` rows of this rect (see
+/// `model::title_button`), so a reader can locate that exact window's own
+/// close button instead of guessing from pixels. Descriptive telemetry only:
+/// it reveals geometry the user can already see and grants no authority.
+fn log_placement(handle: u64, surface: u64) {
+    let placed = unsafe { &*(&raw const WM) }
+        .windows()
+        .find(|w| w.handle == handle)
+        .map(|w| (w.x, w.y, w.width, w.height));
+    let Some((x, y, width, height)) = placed else {
+        return;
+    };
+    log(b"[desktop] ordinary window placed handle=");
+    log_number(handle);
+    log(b" surface=");
+    log_number(surface);
+    log(b" x=");
+    log_number(x as u64);
+    log(b" y=");
+    log_number(y as u64);
+    log(b" w=");
+    log_number(u64::from(width));
+    log(b" h=");
+    log_number(u64::from(height));
+    log(b"\n");
+}
 fn log_resource_receipt(prefix: &[u8], receipt: ResourceReceipt) {
     let mut line = perf::Line::new();
     line.push(prefix);
@@ -6387,6 +6415,7 @@ extern "C" fn main() -> ! {
                                 unsafe { WOKEN[i] = false };
                                 result = s.handle;
                                 status = 0;
+                                log_placement(s.handle, id);
                             }
                             Frame::Create { width, height }
                                 if s.handle == 0
@@ -6396,6 +6425,7 @@ extern "C" fn main() -> ! {
                                 if let Ok(handle) = state.create(id, width, height) {
                                     s.handle = handle;
                                     s.surface = (width, height);
+                                    log_placement(s.handle, id);
                                     s.reveal.retarget(
                                         i32::from(height),
                                         arena_desktop::app_client::now(),

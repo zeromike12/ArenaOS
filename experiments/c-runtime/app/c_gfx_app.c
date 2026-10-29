@@ -88,7 +88,14 @@
 #define GFX_OFFSET_PAGES 1u              /* PIXEL_OFFSET page */
 #define GFX_TOTAL_PAGES (GFX_OFFSET_PAGES + GFX_PIXEL_PAGES) /* 301 */
 #define PIXEL_OFFSET 4096u
-#define GFX_FRAMES 300u
+/* Bounded animation lifetime. 300 frames (~10 s at 30 fps) is shorter than
+   the time a person — or a qualification harness driving real input through
+   the compositor — needs to focus the window, inject a key, inject a
+   pointer event and close it, and it made interactive proofs race the
+   client's own exit. 1200 frames (~40 s) keeps the lifetime strictly
+   bounded and the clean-shutdown path unchanged while giving interaction
+   room. The bound is a presentation choice, not an authority change. */
+#define GFX_FRAMES 1200u
 #define GFX_FRAME_US 33333u              /* ~30 fps, bounded busy sleep */
 #define GFX_FLASH_FRAMES 30u             /* visible-acknowledgment glow duration */
 
