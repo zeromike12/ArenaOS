@@ -70,9 +70,11 @@
     "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
   },
   "identities": {
-    "source_commit": "9cec18123f803802450fd985f25a926de7aa8cde",
-    "working_tree_dirty": false,
-    "dirty_paths_excluding_evidence": [],
+    "source_commit": "35897eaca7a7438172a6aa47580fbedb803e2eb9",
+    "working_tree_dirty": true,
+    "dirty_paths_excluding_evidence": [
+      "M tools/v1_guest_proof.py"
+    ],
     "qemu_wrapper_path": "/home/user/phase16-backend/qemu-patched",
     "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
     "qemu_elf_path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
@@ -228,18 +230,25 @@
     },
     "guest_compiler_under_test": "gcc",
     "guest_elf_sha256": "07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f",
-    "serial_sha256": "1485023de070d970d10b2ed9eae2dc3b598bd97ab0cf459a5ec2278c7b88dc2f",
+    "serial_sha256": "0faa194fcd87f8c3d3dc41112dd428941023fb02d0bf032646e8c11c7ed1db14",
     "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
-    "esp_sha256": "d7f7cf923c4ca896a185beae88a52d2eeeab025632c9e6a0df61538802308cb6",
+    "esp_sha256": "700b8b9f90f154685736ed28eea28a6646ca6e192577cbe3e152b7a6cc0f27d5",
     "esp_path": "/home/user/ArenaOS/build/arena-esp.img",
-    "efi_sha256": "6951abba4917d9994d9c5dc837770d1d8e4de1836d77b82c0fd9340656d2df91",
+    "image": {
+      "fresh": true,
+      "image_mtime": 1793301427.9848528,
+      "newest_source": "tools/v1_guest_proof.py",
+      "newest_source_mtime": 1793301425.9288323,
+      "boot_efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83"
+    },
+    "efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83",
     "efi_size": 11039232
   },
   "run": {
     "rc": 0,
     "run_dir": "docs/v1/evidence/v2-2026-10-29/guest-gcc",
     "serial": "docs/v1/evidence/v2-2026-10-29/guest-gcc/v1-guest-serial.log",
-    "serial_sha256": "1485023de070d970d10b2ed9eae2dc3b598bd97ab0cf459a5ec2278c7b88dc2f"
+    "serial_sha256": "0faa194fcd87f8c3d3dc41112dd428941023fb02d0bf032646e8c11c7ed1db14"
   },
   "verdict": {
     "pass": true,

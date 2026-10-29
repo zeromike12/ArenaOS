@@ -1034,6 +1034,10 @@ def image_freshness() -> dict:
     for rel in tracked:
         if not rel:
             continue
+        # The run writes its own evidence; a file it just created must not
+        # make the image it is booting look stale.
+        if any(rel.startswith(prefix) for prefix in EVIDENCE_PREFIXES):
+            continue
         path = REPO_ROOT / rel
         try:
             mtime = path.stat().st_mtime

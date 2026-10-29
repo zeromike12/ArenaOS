@@ -1,10 +1,70 @@
-date_utc: 2026-10-29T19:08:59Z
+date_utc: 2026-10-29T19:17:08Z
 host: Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux
 nproc: 2
 mem_total_kb: 4034452
 glibc: ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
 gcc: gcc (Debian 12.2.0-14+deb12u1) 12.2.0
-repo_head: 9cec18123f803802450fd985f25a926de7aa8cde
+repo_head: 35897eaca7a7438172a6aa47580fbedb803e2eb9
 repo_branch: arena/af044828-arenaos
 repo_dirty:
+   M docs/v1/evidence/v2-2026-10-29.tar.gz
+   M docs/v1/evidence/v2-2026-10-29.tar.tar.gz.sha256
+   M docs/v1/evidence/v2-2026-10-29/MANIFEST.json
+   M docs/v1/evidence/v2-2026-10-29/README.md
    M docs/v1/evidence/v2-2026-10-29/env/host.txt
+   M docs/v1/evidence/v2-2026-10-29/env/rust-target-compile-x86_64-unknown-none.txt
+   M docs/v1/evidence/v2-2026-10-29/env/rust-target-compile-x86_64-unknown-uefi.txt
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/evidence.json
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/__ack-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/__close-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/__cp8-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/__settle-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/cp01-launch-ready-desktop.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/cp03-first-native-c-window.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/cp06-focus-isolation.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/cp06a-two-instances.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/cp06b-dir1-focused-a.png
+   M docs/v1/evidence/v2-2026-10-29/guest-clang/shots/cp07-desktop-restored.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/evidence.json
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/__ack-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/__close-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/__cp8-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/__settle-probe__.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/cp01-launch-ready-desktop.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/cp03-first-native-c-window.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/cp06-focus-isolation.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/cp06a-two-instances.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/cp06b-dir1-focused-a.png
+   M docs/v1/evidence/v2-2026-10-29/guest-gcc/shots/cp07-desktop-restored.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/cycles-evidence.json
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle01-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle01-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle01-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle02-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle02-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle02-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle03-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle03-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle03-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle04-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle04-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle04-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle05-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle05-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle05-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle06-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle06-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle06-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle07-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle07-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle07-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle08-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle08-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle08-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle09-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle09-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle09-window.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle10-closed.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle10-settled.png
+   M docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/shots/cycle10-window.png
+   M tools/v1_guest_proof.py
