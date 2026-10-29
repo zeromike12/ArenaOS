@@ -1,0 +1,248 @@
+{
+  "label": "v1-guest-proof",
+  "harness": "tools/v1_guest_proof.py",
+  "milestone": "V1 \u2014 Native Graphical Launch Foundation",
+  "branch": "arena/af044828-arenaos",
+  "checkpoints": [
+    {
+      "case": 1,
+      "name": "launch-ready Desktop",
+      "result": "PASS",
+      "evidence_ref": "shots/cp01-launch-ready-desktop.ppm",
+      "detail": "desktop frame presented; idle baseline app-instances=0 windows=0"
+    },
+    {
+      "case": 2,
+      "name": "APB1 install receipt (protected installer)",
+      "result": "PASS",
+      "evidence_ref": "install-ack.json",
+      "detail": "protected installer installed signed version=42"
+    },
+    {
+      "case": 3,
+      "name": "first native C window (Identify -> create -> render)",
+      "result": "PASS",
+      "evidence_ref": "shots/cp03-first-native-c-window.ppm",
+      "detail": "Identify surface=159 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance"
+    },
+    {
+      "case": 4,
+      "name": "keyboard response (instance-specific acknowledgment)",
+      "result": "PASS",
+      "evidence_ref": "shots/cp04-keyboard-response.ppm",
+      "detail": "KEY ack surface=159 counter 2->3 + visible flash"
+    },
+    {
+      "case": 5,
+      "name": "mouse response (instance-specific acknowledgment)",
+      "result": "PASS",
+      "evidence_ref": "shots/cp05-mouse-response.ppm",
+      "detail": "POINTER ack surface=159 counter 3->4 + visible flash"
+    },
+    {
+      "case": 6,
+      "name": "two concurrent instances: focus/input isolation, both directions",
+      "result": "PASS",
+      "evidence_ref": "shots/cp06-focus-isolation.ppm",
+      "detail": "A(159) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1}; B(164) key: ack {'before': 4, 'after': 5, 'cross_acks': [], 'fresh_acks': 1}"
+    },
+    {
+      "case": 7,
+      "name": "window removal: retirements, exits, settlement, visual removal",
+      "result": "PASS",
+      "evidence_ref": "shots/cp07-desktop-restored.ppm",
+      "detail": "retired=['159', '164'] exits={'159': 0, '164': 0} settled=0/0 baseline=0/0 visual_rects=0"
+    },
+    {
+      "case": 8,
+      "name": "final V1 demonstration",
+      "result": "PASS",
+      "evidence_ref": "shots/cp08-final-demonstration.ppm",
+      "detail": "final instance surface=169 bound=169 ack=True"
+    }
+  ],
+  "install_ack": {
+    "serial_line": "[desktop] APB1 installed; signed version=42 (no launch authority implied)",
+    "receipt_count_before": 0,
+    "version": 42,
+    "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+    "kind": "installation_receipt",
+    "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
+  },
+  "identities": {
+    "source_commit": "f0efaf790b5c6fae7188937e8258af11ee0d64ed",
+    "working_tree_dirty": true,
+    "qemu_wrapper_path": "/home/user/phase16-backend/qemu-patched",
+    "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+    "qemu_elf_path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_elf_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_elf_ok": true,
+    "qemu_loader_path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+    "qemu_loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "qemu_runtime_libs": [
+      {
+        "path": "/home/user/glibc-2.40/lib/Mcrt1.o",
+        "sha256": "b138ca9618aa7ac126f744f03e57016562aa3d10901f112ad761daccea573170"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/Scrt1.o",
+        "sha256": "2f626fbdec77cc9faa3efc1d2f9787aacd06dc105bd9619e65ed3bb1b9c43e66"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/crt1.o",
+        "sha256": "780904d2afb202c6033a9ddb8f4eaab6a6e50f6ad2edecf093a39ca31ada14ed"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/crti.o",
+        "sha256": "db53e211bacee8953f9dab8ef15ea838c947f78e574778cc2d485a8cde66986f"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/crtn.o",
+        "sha256": "d0214060b5b56f557aab8dc8fcf0b5c8363ce8ef18e3b3824d405e494c912885"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/gcrt1.o",
+        "sha256": "e893e5738290bcaba8f3565fb24a9372d1233f5b546f51134b7bcec4cd53245d"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/grcrt1.o",
+        "sha256": "65172dd8568f7dc94d3948d454d89c03f73c205d976e7553c79625218ec2ee6d"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+        "sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libBrokenLocale.a",
+        "sha256": "04186bde5039dc94914360cdf819653b0a3f3d9f320862040967f17cef42073e"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libBrokenLocale.so",
+        "sha256": "3e7763a31f93302ec6d473e5b6bb3c1acd2872b618e5d49b030ec7e51a69bb6c"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libBrokenLocale.so.1",
+        "sha256": "3e7763a31f93302ec6d473e5b6bb3c1acd2872b618e5d49b030ec7e51a69bb6c"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libanl.a",
+        "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libanl.so",
+        "sha256": "0b0be0b68d96bdbb65f35193dd0d87e9f6adabf1489175921f9049059199ee7b"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libanl.so.1",
+        "sha256": "0b0be0b68d96bdbb65f35193dd0d87e9f6adabf1489175921f9049059199ee7b"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc.a",
+        "sha256": "969e39b950eaa8fc171fa512789f48eda1367045765f898d35331562bf96279e"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc.so",
+        "sha256": "9f45f8608c42a520da8452e6d5af85967acdabcc615c7cb0fbf065f5e2478eb7"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc.so.6",
+        "sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc_malloc_debug.so",
+        "sha256": "710b9cf60a079f941e0bb0a55e6716f71351f79dfa223fefa984eccb225338f7"
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libglib-2.0.so.0",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d"
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libglib-2.0.so.0.8400.4",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d"
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libpixman-1.so.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd"
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libpixman-1.so.0.44.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd"
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libslirp.so.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3"
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libslirp.so.0.4.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/Mcrt1.o",
+        "sha256": "b55462ba78eba536e137cbb960489601b13b470940659e436f8dc1ca21e2a8a5"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/Scrt1.o",
+        "sha256": "476c1939cbc572be9ca35ac2592e24a57c636003dd6c2d2ed4138cecde2a2ff9"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/crt1.o",
+        "sha256": "4b46dce59ad3ab304d3f98fd370048b20c1569d6d0a9176623a6bbb0dc6d3513"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/crti.o",
+        "sha256": "78acef26a7007f5320c98633376f2903e33895e694fbc2b91d189b38addbca8a"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/crtn.o",
+        "sha256": "121f2a5f12b13471dd8c7dabe3ff334df08540c270564d1a2b3c47ecbd8d3101"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/gcrt1.o",
+        "sha256": "757914a2b17bdb29fbc2879d86c2568d59c411cafbf668b76881f79069d8ddb3"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/grcrt1.o",
+        "sha256": "3a4a4a65ac4268041b7c3528bfe969cc40404e7c1ee9b6259fc402c99b05ced2"
+      },
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "sha256": "02bcda52c1a5dfc236f94d9e5255b4a0e26347d8a372a5223b650e31f291ce3c"
+      }
+    ],
+    "qemu_firmware": {
+      "code_path": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+      "code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "vars_path": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+      "vars_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    },
+    "qemu_launch_cmd": [
+      "/home/user/phase16-backend/qemu-patched"
+    ],
+    "qemu_identity_ok": true,
+    "compilers": {
+      "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+      "clang_via_zig": "clang version 22.1.8",
+      "zig": "0.17.0",
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+    },
+    "guest_compiler_under_test": "gcc",
+    "guest_elf_sha256": "07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f",
+    "serial_sha256": "8c67b9895b753c70efebbbb3576949ddbfb3c116db9d8c7cd7c6166522879356",
+    "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+    "esp_sha256": "0efce7f9d515606d95655ba24296081c6e953deac5f11e6c5c2ab88988231052",
+    "esp_path": "/home/user/ArenaOS/build/arena-esp.img",
+    "efi_sha256": "6951abba4917d9994d9c5dc837770d1d8e4de1836d77b82c0fd9340656d2df91",
+    "efi_size": 11039232
+  },
+  "run": {
+    "rc": 0,
+    "run_dir": "/tmp/v1-guest-proof-3482-0jbjibph",
+    "serial": "/tmp/v1-guest-proof-3482-0jbjibph/v1-guest-serial.log",
+    "serial_sha256": "8c67b9895b753c70efebbbb3576949ddbfb3c116db9d8c7cd7c6166522879356"
+  },
+  "verdict": {
+    "pass": true,
+    "failed_because": []
+  },
+  "classification": "qualification candidate run \u2014 evidence class GUEST (executed in ArenaOS under QEMU TCG) with HOST provenance"
+}

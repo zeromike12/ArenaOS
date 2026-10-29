@@ -6307,10 +6307,9 @@ extern "C" fn main() -> ! {
         // The reply carries CAP_NONE (no capability transfer).
         // session.id is the SharedRegion object ID from SYS_SHARED_CREATE
         // at session creation — it is the client's surface identity.
-        } else if let (Some(index), Ok(_identify_req)) = (
-            authenticated_session,
-            wire::identify_request_decode(&bytes),
-        ) {
+        } else if let (Some(index), Ok(_identify_req)) =
+            (authenticated_session, wire::identify_request_decode(&bytes))
+        {
             let session = unsafe { SESSIONS[index] };
             // Identify must not carry a transferred capability.
             if landed != CAP_NONE {

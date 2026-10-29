@@ -1176,8 +1176,22 @@ def proof() -> bytes:
                    f"Identify={identity} created={created} visual_rects={len(rects)}")
             skip_remaining(4, "blocked by checkpoint 3 failure")
             return b"shutdown\r"
-        placed1 = placement_for(d.serial(), identity)
-        rect1 = placed1["rect"] if placed1 else rects[0]
+        # Geometry comes from the Desktop's placement receipt for THIS
+        # instance. Falling back to a pixel bounding box would reintroduce
+        # geometry-as-identity: the box is the page area, not the window
+        # rectangle the window manager chose.
+        placed1 = None
+        end = time.monotonic() + 10.0
+        while time.monotonic() < end and placed1 is None:
+            placed1 = placement_for(d.serial(), identity)
+            if placed1 is None:
+                time.sleep(0.1)
+        if placed1 is None:
+            record(3, "FAIL", "shots/cp03-first-native-c-window.ppm",
+                   f"no placement receipt for surface={identity}")
+            skip_remaining(4, "blocked by checkpoint 3 failure")
+            return b"shutdown\r"
+        rect1 = placed1["rect"]
         # Bind the rectangle to the instance by acknowledgment, not geometry.
         bound, _focus = probe_instance_at(
             d, (rect1[0] + 60, rect1[1] + TITLE_H + 60))

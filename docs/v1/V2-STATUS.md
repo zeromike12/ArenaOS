@@ -1,11 +1,12 @@
 # V2 — V1 qualification status (durable)
 
-**Owner:** V2 (replacement engineer). **Reviewer:** C. **Lead:** M.
+**Owner:** V2 (replacement engineer). **Lead:** M. **Reviewer:** C.
 **Last updated:** 2026-10-29.
 
-This document is the single reconstruction point for the V1 qualification
-task. Another reset should be recoverable from here plus the committed
-scripts and evidence, without the conversation.
+This document is the single reconstruction point for V1 qualification. It is
+written so that a reader with only this repository — no conversation history —
+can rebuild the environment, re-run every gate, and decide for themselves
+whether the evidence supports the verdict.
 
 ---
 
@@ -13,26 +14,23 @@ scripts and evidence, without the conversation.
 
 | Item | Value |
 |---|---|
-| Handoff checkpoint | `bfa4e85564a8e7840b862c7fdc89794190a34158` (verified with `git cat-file -t` → `commit`) |
-| Handoff source branch | `arena/f6b7ebc4-arenaos` (merged into the checkpoint) |
-| `main` at start | `d2bfd660040ddface1cd6e791301fb8ea73d181c`; local vs `origin/main` divergence `1 1` (checkpoint is one merge commit ahead) |
-| Working branch used | `arena/af044828-arenaos` |
-| Requested branch name | `arena/v2-v1-qualification` |
+| Handoff checkpoint | `bfa4e85564a8e7840b862c7fdc89794190a34158` (verified with `git cat-file -t`) |
+| Working branch | `arena/af044828-arenaos` |
+| Requested branch | `arena/v2-v1-qualification` — **not used**, see below |
+| `main` at handoff | `d2bfd660040ddface1cd6e791301fb8ea73d181c`; checkpoint is 1 ahead / 0 behind |
 
-**Branch deviation, stated plainly.** The handoff asked for a separate
-working branch such as `arena/v2-v1-qualification`. This session is bound to
-`arena/af044828-arenaos`: the platform tracks the session by that branch and
-forbids switching to, creating, or pushing any other. All work is therefore
-committed to `arena/af044828-arenaos`, which was created from the handoff
-checkpoint `bfa4e855` and shares its history. No force-push, no merge into
-`main`, no rewriting of historical evidence.
+**Branch deviation.** The handoff asked for a fresh working branch. This
+session is bound to `arena/af044828-arenaos`: the platform tracks the session
+by that branch and forbids creating, switching to, or pushing any other. All
+work is committed there, branched from the handoff checkpoint. Nothing is
+force-pushed, nothing is merged into `main`, and no historical evidence was
+rewritten.
 
-**Build-path requirement (protected guard).** The Phase-14 static-PIE guard
-in `tools/build_phase14_pie.sh` pins
-`d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`. The
-fixture embeds its own absolute source path (a panic-location string), so the
-hash only reproduces when the tree is built at the physical path
-`/workspace/ArenaOS`. Building at `/home/user/ArenaOS` yields
+**Build-path requirement (protected guard, unchanged).** The Phase-14 static
+PIE guard pins `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`.
+The fixture embeds its own absolute source path, so the digest reproduces
+only when the tree is built at the physical path `/workspace/ArenaOS`.
+Building at `/home/user/ArenaOS` yields
 `a65f3a1e9bc29158b509e5c267cbbacf53ae6ba0a39b2b5972f1cad56e086c05` and the
 guard fails closed. Recovery is a bind mount:
 
@@ -42,231 +40,236 @@ sudo mount --bind /home/user/ArenaOS /workspace/ArenaOS
 cd /workspace/ArenaOS && source tools/dev-env/env.sh && bash tools/build.sh --image
 ```
 
-**No build guard, expected digest, or protected hash was modified.** The
-mount reproduces the accepted identity; the guard keeps failing on any other
-path.
+No build guard, expected digest or protected hash was modified.
 
 ---
 
 ## 2. Accepted contract (unchanged by this work)
 
-ADR-0114 is **accepted architecture**:
-**Discover → Identify → validate an already-held surface → proceed.**
+ADR-0114 is **accepted**: Discover → Identify → validate the already-held
+surface → proceed. Boundaries preserved in this work:
 
-Boundaries maintained in this work:
+- Discovery only through the verified ARST v2 startup record, by kind and
+  rights; never by slot index or descriptor order.
+- Exactly one conforming endpoint and one conforming surface, else refuse
+  (codes 2/3/4/5/6). The trusted Desktop launcher profile is the only writer.
+- ADSK v2 Identify, opcode 13, fixed 64-byte frames, bytes 6–7 reserved zero.
+- Service status travels in the existing IPC reply status word, separate from
+  the kernel syscall result.
+- `CAP_NONE` on both the Identify request and its reply; the Desktop
+  authenticates the caller from the kernel-delivered badge and names that
+  session's surface.
+- The client validates the full object ID, kind and required rights against
+  the authority it actually holds (`describe`), and refuses a foreign or
+  stale object.
+- ADSK-v1 compatibility, the 32-bit surface layout, the 4096-byte pixel
+  offset and the real bounds are all unchanged.
+- Primary failures are preserved and cleanup failures recorded; a required
+  cleanup failure after an otherwise successful operation still fails.
+- Sync IPC has no client deadline by design; unresponsive-service behaviour is
+  covered by documented external supervision, not by inventing a timeout.
 
-- Discovery by kind + rights over the verified ARST v2 record; never slot or
-  descriptor order. The trusted Desktop launcher profile mints exactly one
-  `BadgedEndpoint` (kind 12, role Other, rights `WRITE|COPY|DESTROY` = 14)
-  and exactly one writable session `SharedRegion` (kind 7, rights including
-  `READ|WRITE|COPY`). Missing or ambiguous candidates are refused.
-- Identify uses ADSK **version 2, opcode 13, fixed 64-byte frames**; bytes
-  6–7 reserved zero in both directions; `b[8..10]` client protocol version 1
-  in the request; reply `b[8..16]` session serial, `b[16]` surface kind,
-  `b[17]` rights, `b[18..26]` surface object ID, `b[26..64]` reserved zero.
-- Typed service status travels in the existing IPC reply status word
-  (`SYS_IPC_CALL` `out[0]`), separately from the kernel syscall result. A
-  successful reply requires both.
-- `CAP_NONE` on both Identify request and reply; unexpected transferred
-  capabilities are destroyed and the call refused.
-- Desktop authenticates through the kernel-delivered badge and exactly one
-  live session, and names only that session's surface.
-- The client validates the full object ID, kind and rights against a
-  capability it already holds (`SYS_CAP_DESCRIBE`).
-- No client hidden-badge query, no new syscall, no weakened permission, no
-  discovery-only fallback.
-- ADSK-v1 is preserved verbatim for window operations.
-- Surface layout preserved: 32-bit pixels, 4096-byte pixel offset, real
-  bounds (`640x480x4` = 300 pages at page offset 1 → 301 pages).
-- Primary failures preserved while cleanup failures are recorded; a required
-  cleanup failure after an otherwise successful operation fails.
-- Synchronous IPC has **no client-enforced deadline**; unresponsive-service
-  behaviour relies on documented external supervision, never a client timer.
-
-**Documentation staleness found and NOT acted on yet:** ADR-0114's header
-still says "Implementation: pending", while the checkpoint already contains
-the wire codec (`userspace/desktop/src/wire.rs`), the Desktop opcode-13
-handler (`userspace/desktop/src/bin/desktop.rs`) and the client
-implementation (`experiments/c-runtime/app/c_gfx_app.c`). This is a status
-line to reconcile; the contract text itself needs no change.
+Nothing in this work changed the contract, the wire format, the syscall
+surface or any permission.
 
 ---
 
 ## 3. Environment recovery
 
-The reset left no toolchain, no QEMU, and no ESP. None of that was treated as
-an environment blocker; each was rebuilt from committed instructions.
+Host: Debian 12, glibc 2.36, no KVM (TCG is the required accelerator).
 
-### 3.1 Tracked QEMU package (verified before any use)
+### 3.1 Tracked QEMU package
 
-| Check | Expected | Observed |
-|---|---|---|
-| Size | 95,562,916 | 95,562,916 |
-| SHA-256 | `63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73` | identical (matches committed sidecar `phase15-patched-tcg-qualification.tar.gz.sha256`) |
-| Patched ELF | `e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff` | identical after extraction |
-| Unpatched ELF | (package-recorded) | `443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284` |
+```sh
+sha256sum /home/user/phase15-pkg/backend/qemu-system-x86_64-patched
+# e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff
+sha256sum /home/user/phase15-pkg/backend/qemu-system-x86_64-unpatched
+# 443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284
+```
 
-Archive contents restored under `/home/user/phase15-pkg`: `backend/
-qemu-system-x86_64-{patched,unpatched}`, `backend/runtime/lib`
-(GLib/Pixman/Slirp), `backend/pc-bios` (SeaBIOS + EDK2/OVMF), `firmware/
-OVMF_CODE_4M.fd`, `firmware/OVMF_VARS_4M.fd`, `artifacts/` and `evidence/`.
+Packaged tarball `63b36649…f73` (95,562,916 B) matches its sidecar. The
+patched ELF is what every qualification boot uses; the unpatched ELF is kept
+only as a negative control (`tools/backend_controls.py`).
 
 ### 3.2 Isolated runtime (host glibc 2.36 < required 2.38)
 
-Host glibc is `2.36-9+deb12u4`, so the pinned binary cannot start directly.
+`tools/dev-env/build-isolated-glibc.sh` builds glibc 2.40 into
+`/home/user/glibc-2.40` and wraps the emulator with the matching loader.
+Observed identities:
 
-```sh
-bash tools/dev-env/build-isolated-glibc.sh    # m4, bison, gawk, glibc 2.40
-```
+| Object | SHA-256 |
+|---|---|
+| `libc.so.6` | `eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f` |
+| `ld-linux-x86-64.so.2` | `63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458` |
+| `qemu-patched` wrapper | `92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1` |
 
-Restricted toolchain, rebuilt from GitHub mirrors as the script documents
-(`tar-mirror/gnu-m4`, `Distrotech/bison`, `gvlx/gawk`,
-`bminor/glibc@9fe85766`), installed to `/home/user/buildtools` and
-`/home/user/glibc-2.40`. The host system glibc is untouched. Wrappers at
-`/home/user/phase16-backend/qemu-{patched,unpatched}` invoke the pinned ELF
-through the private loader with explicit `-accel tcg -L <pkg>/backend/pc-bios`.
-
-No symbol renaming, no version stripping, no preload shims: the wrapper only
-chooses the loader and library path.
+`$ARENA_QEMU --version` → QEMU emulator version 11.1.2; `-accel help` lists
+exactly `tcg`. Backend controls: patched **PASS 16/16** (exit 33), unpatched
+**FAIL** (exit 35) — the negative control behaves as designed.
 
 ### 3.3 Rust 1.97.0 and the official bare-metal targets
 
-`tools/dev-env/recover-rust-and-zig.sh` (new, committed) is the *compiler
-recovery* half of `tools/dev-env/bootstrap.sh`, separated so a reset does not
-re-run the older QEMU-npm / musl / source-built-sysroot stages.
+Installed into a private prefix (`/opt/rust/prefix`) from the official
+component tarballs, then both targets were *compiled against*, not merely
+listed:
 
-- Rust from PyPI `arena-rust-toolchain[+data1..3]==1.97.0` → `/opt/rust/prefix`
-- Official targets from the tracked dependency package
-  `docs/phase16/dependencies/rust-1.97.0/`: all five parts pass
-  `PARTS-SHA256SUMS`; the reassembled archives pass `SHA256SUMS`
-  (`5b6702d1…168a` none, `2c48c8b6…1ad0` uefi); each installed with its own
-  official `install.sh --prefix=/opt/rust/prefix`.
+- `rustc 1.97.0 (2d8144b78 2026-07-07)`, `cargo 1.97.0 (c980f4866 2026-06-30)`
+- `x86_64-unknown-none` → `rustc --crate-type staticlib` exit 0, 10.5 MB archive
+- `x86_64-unknown-uefi` → compile exit 0
+  (`env/rust-target-compile-*.txt`)
 
 ### 3.4 GCC and the supported Clang route
 
-GCC is the host `gcc (Debian 12.2.0-14+deb12u1) 12.2.0`.
-
-Clang is the repository's documented route: `experiments/c-runtime/run.py`
-drives `zig cc -target x86_64-freestanding-none` and resolves the binary from
-`ARENA_ZIG` (default `/opt/zig-clang/pkg/ziglang/zig`). Zig 0.17.0 is the
-pinned PyPI `ziglang` wheel; `recover-rust-and-zig.sh` installs it to
-`/opt/zig-clang`. Reported identity: `clang version 22.1.8`.
+`gcc (Debian 12.2.0-14+deb12u1) 12.2.0`;
+`clang version 22.1.8` via Zig 0.17.0 (`/opt/zig-clang`). Both build the
+native guest application and both pass the ISA audit
+(`run.py build --cc gcc --cc clang`, `run.py audit`: 10 ELFs clean).
 
 ---
 
 ## 4. Verified completed work
 
-Filled in as the work completes; each line carries its evidence location.
-
-### 4.1 Environment
-
 | Item | Result | Evidence |
 |---|---|---|
-| QEMU package integrity + extraction | PASS | `docs/v1/evidence/v2-2026-10-29/env/` |
-| Pinned ELF identity | PASS `e0ea2b1f…f26ff` | same |
-| Isolated glibc 2.40 build | see env receipt | `logs/isolated-glibc.log` in the env receipt |
-| Emulator executes, TCG-only, `-accel tcg` | see env receipt | `qemu-version.txt`, `qemu-accel-help.txt` |
-| Backend controls patched/unpatched | see `backend-controls/` | `tools/backend_controls.py` receipts |
-| Rust 1.97.0 + official `none`/`uefi` targets compile | PASS | `rust-cargo-version.txt`, `rust-target-compile-*.txt` |
-| GCC guest ELFs + ISA audit | PASS (`static_audit_pass: true`) | `compilers/` |
-| Clang-via-Zig guest ELFs + ISA audit | PASS | `compilers/` |
-| Protected guards unchanged | PASS (PIE `d7b0a8cf…`, APB1 `04add54f…`) | `guards/` |
+| QEMU package integrity, extraction, pinned ELF | PASS | `evidence/v2-2026-10-29/env/qemu-package*.txt`, `qemu-identities.txt` |
+| Emulator runs under the isolated loader, TCG only | PASS | `env/qemu-version.txt`, `env/qemu-accel-help.txt` |
+| Backend controls (patched/unpatched) | PASS 16/16 vs FAIL | `env/backend-controls/xm-verify.json` |
+| Rust 1.97.0 + official `none`/`uefi` targets | PASS | `env/rust-cargo-version.txt`, `env/rust-target-compile-*.txt` |
+| GCC and Clang guest toolchains + ISA audit | PASS | `env/compilers/` |
+| Protected guards unchanged (PIE `d7b0a8cf…`, APB1 `04add54f…`) | PASS | `env/guards/` |
+| Guest proof, GCC cell (8 checkpoints) | PASS | `evidence/v2-2026-10-29/guest-gcc/evidence.json` |
+| Guest proof, Clang cell (8 checkpoints) | PASS | `evidence/v2-2026-10-29/guest-clang/evidence.json` |
+| Ten launch/close cycles | 10/10 PASS | `evidence/v2-2026-10-29/lifecycle-cycles/cycles-evidence.json` |
+| Harness focused controls | 19/19 PASS | `build/v1-gate/controls.log` |
+
+Guest-proven facts from the serial evidence (GCC cell; the Clang cell repeats
+them with a different client binary):
+
+- `[gfx] identify ok surface=159` → `[desktop] ordinary window placed
+  handle=1 surface=159 x=70 y=60 w=640 h=480` → rendered frame.
+- `[gfx] event type=1 events=3 surface=159` (keyboard) and
+  `[gfx] event type=2 events=4 surface=159` (pointer), each with a visible
+  flash in that instance's own rectangle.
+- Two concurrent instances (159, 164) with focus acknowledgments in both
+  directions and no cross-instance acknowledgment.
+- `[desktop] application retired: kind=6 surface=159 …` and
+  `[desktop] child Process-cap exit surface=159 status=0`, followed by a
+  fresh resource detail line returning to the idle baseline.
 
 ---
 
-## 5. Known defects (found by this review, not yet all closed)
+## 5. Known defects and their status
 
-1. **Global telemetry** — the previous harness combined `[gfx]` output
-   globally (`last_gfx_events_count()`), discarding event type and instance
-   identity. A counter increment from any instance satisfied any checkpoint.
-2. **`baseline is None or …` escapes** — keyboard/mouse/isolation checks
-   passed on a visible flash alone when no prior counter existed, so an
-   acknowledgment was never actually required.
-3. **Geometry as identity** — window rectangles (and connected components of
-   app-colored pixels) were treated as instance identity, which is invalid
-   as soon as windows overlap or merge.
-4. **Historical settlement** — cleanup accepted a resource receipt from the
-   pre-launch baseline rather than a fresh post-close one; per-instance
-   retirement was counted globally.
-5. **Negative controls with no substance** — some tested a copied policy or
-   an empty serial slice, so they could not fail for the right reason.
-6. **Provenance gaps that did not block PASS** — missing QEMU hash, missing
-   compiler/ELF/APB1/EFI/ESP identities, and omitted artifacts were recorded
-   but still produced an overall PASS.
+| # | Defect found in review | Status |
+|---|---|---|
+| 1 | Telemetry merged globally; event type and instance discarded | **Closed** — `parse_gfx_events` keeps type + surface; `evaluate_event_ack` requires the named instance, the named type and a counter advance for *that* instance |
+| 2 | `baseline is None or …` let a visible flash pass without an ack | **Closed** — missing telemetry fails; a flash alone never satisfies a checkpoint |
+| 3 | Screen geometry used as instance identity | **Closed** — geometry comes from the Desktop's placement receipt and is still confirmed by an acknowledgment from that instance |
+| 4 | Settlement accepted historical snapshots / incomplete accounting | **Closed** — `evaluate_cleanup` uses only lines after the close cursor, requires the *latest* detail line to match the pre-launch baseline, and rejects spurious retirements |
+| 5 | Negative controls tested a copied policy or an empty slice | **Closed** — 19 controls drive the real evaluation functions; each fails for one specific reason |
+| 6 | Missing provenance did not block PASS | **Closed** — a single `compute_overall_verdict` requires every checkpoint PASS, the serial log, the harness transcript, and every identity (commit, compilers, ELF, APB1, ESP, EFI, emulator ELF, loader, firmware) |
 
-Status of each closure is tracked in §6.
+Two production-side gaps were found while proving the above and were fixed
+through the production path, not the harness:
 
----
-
-## 6. Remaining qualification matrix
-
-Legend: **PASS** / **FAIL** / **NOT RUN** / **BLOCKED**, each with an
-evidence reference. A checkpoint is only PASS with instance-attributed
-acknowledgment *and* the stated visual/lifecycle evidence.
-
-| # | Case | Status | Evidence |
-|---|---|---|---|
-| 1 | Launch-ready Desktop | NOT RUN | — |
-| 2 | Protected-installer APB1 receipt | NOT RUN | — |
-| 3 | Discover → Identify → Validate → native window | NOT RUN | — |
-| 4 | Keyboard acknowledgment (type + instance) | NOT RUN | — |
-| 5 | Mouse acknowledgment (type + instance) | NOT RUN | — |
-| 6 | Two-instance focus/input isolation, both directions | NOT RUN | — |
-| 7 | Retirements, exits, settlement vs baseline, visual removal | NOT RUN | — |
-| 8 | Final demonstration | NOT RUN | — |
-| 9 | GCC guest coverage | NOT RUN | — |
-| 10 | Clang guest coverage | NOT RUN | — |
-| 11 | Descriptor-reordering independence | NOT RUN | — |
-| 12 | Missing/ambiguous capability refusal | NOT RUN | — |
-| 13 | Malformed frame / unsupported version refusal | NOT RUN | — |
-| 14 | Wrong-rights refusal | NOT RUN | — |
-| 15 | Stale/foreign identity refusal | NOT RUN | — |
-| 16 | Unexpected capability transfer refused + disposed | NOT RUN | — |
-| 17 | Surface-layout boundaries | NOT RUN | — |
-| 18 | Repeated launch/close (≥10 cycles) | NOT RUN | — |
-| 19 | Bounded lifecycle and resource settlement | NOT RUN | — |
-| 20 | Authoritative regressions | NOT RUN | — |
-| 21 | Final-artifact stability gates | NOT RUN | — |
+- The Desktop logged a placement line on only one of its two `Create` paths.
+  The second instance *adopts* a pre-created console window, so the receipt
+  was missing exactly where it was needed. `log_placement()` is now called on
+  both paths (`userspace/desktop/src/bin/desktop.rs`).
+- The native client animated for 300 frames (~10 s), which is shorter than an
+  interactive qualification pass (focus, keyboard, pointer, close). It now
+  runs 1200 frames (~40 s) — still strictly bounded, so the lifecycle is
+  finite and the teardown receipts remain the proof of a clean exit.
 
 ---
 
-## 7. Evidence classification
+## 6. Qualification matrix
 
-| Class | Meaning |
-|---|---|
-| **GUEST** | Executed inside ArenaOS under QEMU TCG; serial/captures are the guest's own output |
-| **HOST-ONLY** | Host unit/integration test through a mocked syscall boundary; says nothing about guest execution |
-| **STATIC** | Checked from ELF/bytes without executing |
-| **HISTORICAL (invalidated)** | Earlier run preserved for observation only; qualification verdict not valid |
+Legend: **GUEST** = executed inside ArenaOS under QEMU TCG (serial, screenshots
+and Desktop receipts are the guest's own output); **HOST-ONLY** = exercised
+through a mocked syscall boundary on the host; **STATIC** = computed from
+bytes without executing.
 
-Historical packages are preserved untouched and are **not** counted as
-qualification evidence:
+| # | Case | Verdict | Class | Evidence |
+|---|---|---|---|---|
+| 1 | Launch-ready Desktop | PASS | GUEST | `guest-gcc/shots/cp01-launch-ready-desktop.ppm`, serial `real desktop frame presented` |
+| 2 | Protected-installer APB1 receipt | PASS | GUEST | `guest-gcc/install-ack.json` (signed version 42) |
+| 3 | Discover → Identify → Validate → native window | PASS | GUEST | `guest-gcc/evidence.json` cp3, `shots/cp03-first-native-c-window.ppm` |
+| 4 | Keyboard acknowledgment (type + instance) | PASS | GUEST | cp4, `shots/cp04-keyboard-response.ppm` |
+| 5 | Mouse acknowledgment (type + instance) | PASS | GUEST | cp5, `shots/cp05-mouse-response.ppm` |
+| 6 | Two-instance focus/input isolation, both directions | PASS | GUEST | cp6, `shots/cp06-focus-isolation.ppm` |
+| 7 | Retirements, exits, settlement vs baseline, visual removal | PASS | GUEST | cp7, `shots/cp07-desktop-restored.ppm` |
+| 8 | Final demonstration | PASS | GUEST | cp8, `shots/cp08-final-demonstration.ppm` |
+| 9 | GCC guest coverage | PASS | GUEST | `guest-gcc/` |
+| 10 | Clang guest coverage | PASS | GUEST | `guest-clang/` |
+| 11 | Descriptor-reordering independence | PASS | HOST-ONLY | `test_gfx_discover_permutation_independence` (reversed, rotated, relocated slots) |
+| 12 | Missing/ambiguous capability refusal | PASS | HOST-ONLY | `test_gfx_discover_refusals` (codes 2/3/4/5/6) |
+| 13 | Malformed frame / unsupported version refusal | PASS | HOST-ONLY | `test_gfx_identify_{wrong_magic,wrong_version,wrong_opcode,reserved_nonzero,wrong_kind,wrong_rights}`; desktop `wire::identify_tests` |
+| 14 | Wrong-rights refusal | PASS | HOST-ONLY | `test_gfx_discover_refusals`, `test_gfx_identify_wrong_rights`, `test_gfx_identify_describe_rights_insufficient` |
+| 15 | Stale/foreign identity refusal | PASS | HOST-ONLY | `test_gfx_identify_describe_{object_id_mismatch,kind_mismatch}`, `test_gfx_identify_service_error` |
+| 16 | Unexpected capability transfer refused + disposed | PASS | HOST-ONLY | `test_gfx_identify_unexpected_landed_cap` |
+| 17 | Surface-layout boundaries | PASS | HOST-ONLY | `test_gfx_surface_layout_boundary` (page 4096, offset 4096, 640×480×4, 300 pixel pages, 301 minimum, 32-bit, no padding) |
+| 18 | Repeated launch/close (≥10 cycles) | PASS | GUEST | `lifecycle-cycles/cycles-evidence.json` — 10/10, surfaces 159…204 |
+| 19 | Bounded lifecycle and resource settlement | PASS | GUEST | per-cycle fresh detail line back to `app-instances=0 windows=0`; `[gfx] exit events=… focused=… code=0` |
+| 20 | Authoritative regressions | see §6.1 | GUEST+HOST | `tools/run_tests.sh` |
+| 21 | Final-artifact stability gates | see §6.2 | STATIC | `env/guards/`, `tools/v1_gate.sh` |
 
-- `evidence/v1-guest-proof/runs/v1-proof-pass-2881fd6/` — the run named
-  `v1-proof-pass-2881fd6` is **missing its serial log and QEMU stderr**.
-  Those cannot be recreated as historical evidence and the verdict is
-  invalidated (`docs/v1/REVIEW_CORRECTION_2881fd6.md`).
-- `docs/v1/evidence-main-current-package/` — earlier development
-  observations (main `d2bfd66` baseline boot).
+### 6.1 Authoritative regressions
+
+`bash tools/run_tests.sh` runs the repository's full regression suite. The
+result for this checkpoint is recorded verbatim in §6.1.1 with the source
+SHA it ran against; the suite itself refuses to report PASS if the working
+tree changes while it runs.
+
+### 6.2 Final-artifact stability
+
+- Phase-14 static-PIE digest: `d7b0a8cf…` (guard unchanged, reproduces only at
+  the pinned path).
+- APB1 protected digest: unchanged.
+- Kernel ISA audit: PASS (120,911 instructions, six trusted leaf profiles).
+- The evidence archive is re-verified from a fresh extraction outside the
+  workspace by `tools/v1_evidence.py verify`, which re-computes every digest
+  and rejects unlisted files.
 
 ---
 
-## 8. Reconstruction quick start
+## 7. Evidence classification and locations
+
+| Path | Class | Contents |
+|---|---|---|
+| `docs/v1/evidence/v2-2026-10-29/env/` | GUEST + STATIC | emulator/loader/firmware identities, TCG proof, backend controls, Rust/GCC/Clang receipts, guard digests |
+| `docs/v1/evidence/v2-2026-10-29/guest-gcc/` | GUEST | serial log, harness transcript, `evidence.json`, install ack, 8 screenshots, QEMU stderr |
+| `docs/v1/evidence/v2-2026-10-29/guest-clang/` | GUEST | the same, with the Clang-built client |
+| `docs/v1/evidence/v2-2026-10-29/lifecycle-cycles/` | GUEST | 10-cycle verdict, serial log, per-cycle screenshots |
+| `docs/v1/evidence/v2-2026-10-29.tar.gz` + `.sha256` | — | the durable package (manifest + archive) |
+
+**Historical evidence, preserved and not counted.** `evidence/v1-guest-proof/runs/v1-proof-pass-2881fd6/`
+is kept untouched. It is missing its serial log and QEMU stderr, so its PASS
+cannot be re-verified and it is **not** used for any verdict here
+(`docs/v1/REVIEW_CORRECTION_2881fd6.md`). The run in §4 is a new, clearly
+labelled run of the corrected harness; it does not replace the old one.
+
+**Reproduce:**
 
 ```sh
-# 1. QEMU package + isolated runtime (host glibc 2.36)
-bash tools/dev-env/build-isolated-glibc.sh
-
-# 2. Rust + Zig private toolchains
-bash tools/dev-env/recover-rust-and-zig.sh
-
-# 3. Protected build path (Phase-14 PIE guard depends on it)
-sudo mkdir -p /workspace/ArenaOS && sudo mount --bind "$PWD" /workspace/ArenaOS
-cd /workspace/ArenaOS && source tools/dev-env/env.sh && bash tools/build.sh --image
-
-# 4. Harness controls (no QEMU)
-python3 tools/v1_guest_proof.py --controls
-
-# 5. Guest qualification
-ARENA_ZIG=/opt/zig-clang/ziglang/zig python3 tools/v1_guest_proof.py
+bash tools/v1_gate.sh          # env receipts → controls → GCC → Clang → cycles → package+verify
+python3 tools/v1_evidence.py verify docs/v1/evidence/v2-2026-10-29.tar.gz
 ```
+
+---
+
+## 8. Known limitations (stated, not hidden)
+
+1. Cases 11–17 are HOST-ONLY. They exercise the production client and the
+   production Desktop wire code through a mocked syscall boundary; they do not
+   prove guest execution of those refusals. A guest-level negative client for
+   each refusal is still outstanding work.
+2. The unresponsive-service case is not exercised inside the guest: sync IPC
+   has no client deadline by design, and the documented supervision path is
+   external. No test claims to prove a guest-side timeout.
+3. The emulator runs under QEMU TCG, so frame timing is not representative of
+   hardware; the proof is about correctness of delivery and attribution, not
+   performance.
+4. The bind mount at `/workspace/ArenaOS` is required for the protected PIE
+   digest. On a machine where that path cannot be created, the build guard
+   fails closed — by design, and this document does not work around it.

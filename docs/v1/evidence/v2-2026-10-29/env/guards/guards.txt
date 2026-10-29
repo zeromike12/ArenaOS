@@ -1,0 +1,16 @@
+--- Phase-14 PIE guard (unmodified source excerpt) ---
+if e_type != 3 or machine != 62:
+    raise SystemExit("error: fixture is not linker-produced x86-64 ET_DYN")
+digest = hashlib.sha256(raw).hexdigest()
+expected = "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e"
+if digest != expected:
+    raise SystemExit(f"error: reproducible PIE fixture hash changed: {digest}")
+# Write-if-changed: fixture.elf is embedded into the kernel via
+--- Phase-14 signed APB1 guard (unmodified source excerpt) ---
+OUTPUT = ROOT / "userspace/phase14-pie/phase14-pie.apb1"
+APP_ID = b"org.arenaos.phase14pie"
+EXPECTED_SHA256 = "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+
+
+--- guards are byte-identical to the checkpoint ---
+(empty diff above == unmodified)

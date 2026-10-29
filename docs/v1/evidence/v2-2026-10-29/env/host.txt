@@ -1,0 +1,12 @@
+date_utc: 2026-10-29T18:56:19Z
+host: Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux
+nproc: 2
+mem_total_kb: 4034452
+glibc: ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
+gcc: gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+repo_head: f0efaf790b5c6fae7188937e8258af11ee0d64ed
+repo_branch: arena/af044828-arenaos
+repo_dirty:
+   M tools/v1_cycles.py
+  ?? docs/v1/evidence/
+  ?? tools/v1_evidence.py
