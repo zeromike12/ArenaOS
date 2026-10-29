@@ -20,6 +20,7 @@ receipts and hashes are the ones the verdict was computed from.
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -47,6 +48,29 @@ def _git(*args: str) -> str:
         return "unavailable"
 
 
+def convert_ppm_to_png(root: Path) -> int:
+    """Losslessly convert the emulator's PPM screendumps to PNG.
+
+    QEMU's `screendump` writes PPM; 1.44 MB per 800x600 frame makes a
+    ten-cycle run needlessly bulky in a repository. The conversion is
+    lossless (ImageMagick, no resize, no colour change) and is declared in
+    the package README, so a reader always knows the frames were converted
+    after capture rather than re-rendered.
+    """
+    tool = shutil.which("convert")
+    if tool is None:
+        return 0
+    converted = 0
+    for ppm in sorted(root.rglob("*.ppm")):
+        png = ppm.with_suffix(".png")
+        done = subprocess.run([tool, str(ppm), str(png)],
+                              capture_output=True, text=True, check=False)
+        if done.returncode == 0 and png.is_file() and png.stat().st_size > 0:
+            ppm.unlink()
+            converted += 1
+    return converted
+
+
 def collect(root: Path) -> dict:
     files = {}
     for path in sorted(root.rglob("*")):
@@ -60,10 +84,30 @@ def collect(root: Path) -> dict:
     return files
 
 
+VERIFY_SNIPPET = """import hashlib, json, pathlib
+root = pathlib.Path("%(root)s")
+m = json.loads((root / "MANIFEST.json").read_text())
+bad = []
+for rel, want in m["files"].items():
+    p = root / rel
+    if not p.is_file():
+        bad.append((rel, "missing"))
+        continue
+    got = hashlib.sha256(p.read_bytes()).hexdigest()
+    if got != want["sha256"] or p.stat().st_size != want["size"]:
+        bad.append((rel, got + " != " + want["sha256"]))
+print("files:", len(m["files"]), "mismatches:", len(bad))
+for b in bad:
+    print(" ", b)
+raise SystemExit(1 if bad else 0)
+"""
+
+
 def readme(root: Path, manifest: dict) -> str:
     files = manifest["files"]
     serials = [f for f in files if f.endswith(".log")]
-    shots = [f for f in files if f.endswith(".ppm")]
+    shots = [f for f in files if f.endswith((".ppm", ".png"))]
+    snippet = VERIFY_SNIPPET % {"root": root.name}
     return f"""# {root.name} — V1 qualification evidence
 
 Produced {manifest["created_utc"]} from commit
@@ -75,8 +119,8 @@ Produced {manifest["created_utc"]} from commit
 | Kind | Count | Notes |
 |---|---|---|
 | Serial logs | {len(serials)} | The guest's own output under QEMU TCG |
-| Screenshots | {len(shots)} | PPM frames captured through the emulator console |
-| Manifests/receipts | {len(files) - len(serials) - len(shots)} | JSON verdicts, identities, build receipts |
+| Screenshots | {len(shots)} | Frames captured through the emulator console (PPM as written by QEMU, converted losslessly to PNG) |
+| Manifests and receipts | {len(files) - len(serials) - len(shots)} | JSON verdicts, identities, build receipts |
 
 ## How to check it
 
@@ -85,23 +129,8 @@ directory (nothing is compared against the original workspace):
 
 ```sh
 tar xzf {root.name}.tar.gz
-python3 - <<'PY'
-import hashlib, json, pathlib
-root = pathlib.Path("{root.name}")
-m = json.loads((root / "MANIFEST.json").read_text())
-bad = []
-for rel, want in m["files"].items():
-    p = root / rel
-    if not p.is_file():
-        bad.append((rel, "missing")); continue
-    got = hashlib.sha256(p.read_bytes()).hexdigest()
-    if got != want["sha256"] or p.stat().st_size != want["size"]:
-        bad.append((rel, f"sha256 {got} != {want['sha256']}"))
-print("files:", len(m["files"]), "mismatches:", len(bad))
-for b in bad:
-    print(" ", b)
-raise SystemExit(1 if bad else 0)
-PY
+cd {root.name} && python3 - <<'PY'
+{snippet}PY
 ```
 
 `tools/v1_evidence.py verify <archive>` performs exactly this check, plus a
@@ -120,8 +149,7 @@ scan for files that exist in the archive but not in the manifest.
   acceleration, toolchain versions, protected guards).
 
 A missing serial log, a missing harness transcript, an absent identity or a
-missing required artifact makes the run FAIL — see
-`docs/v1/V2-STATUS.md` §6.
+missing required artifact makes the run FAIL — see `docs/v1/V2-STATUS.md` §6.
 """
 
 
@@ -130,6 +158,9 @@ def package(root: Path) -> int:
     if not root.is_dir():
         print(f"[evidence] {root} is not a directory", file=sys.stderr)
         return 2
+    converted = convert_ppm_to_png(root)
+    if converted:
+        print(f"[evidence] converted {converted} PPM screendumps to PNG")
     files = collect(root)
     manifest = {
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -159,7 +190,18 @@ def verify(archive: Path) -> int:
         return 2
     with tempfile.TemporaryDirectory(prefix="v1-evidence-verify-") as tmp:
         with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(tmp, filter="data")
+            # Reject absolute paths and ".." traversal before extracting;
+            # `filter="data"` is not available on every Python version the
+            # project supports, so the check is explicit.
+            for member in tar.getmembers():
+                name = member.name
+                if name.startswith("/") or ".." in Path(name).parts:
+                    print(f"[evidence] refusing unsafe member: {name}")
+                    return 1
+            try:
+                tar.extractall(tmp, filter="data")
+            except TypeError:
+                tar.extractall(tmp)
         roots = [p for p in Path(tmp).iterdir() if p.is_dir()]
         if len(roots) != 1:
             print(f"[evidence] expected one root directory, found {len(roots)}")

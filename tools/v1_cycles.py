@@ -275,6 +275,8 @@ def tempfile_dirname() -> str:
     application to launch. Every invocation therefore gets its own directory
     and therefore its own formatted disk.
     """
+    if os.environ.get("V1_EVIDENCE_DIR"):
+        return os.environ["V1_EVIDENCE_DIR"]
     stamp = os.environ.get("V1_RUN_STAMP") or time.strftime("%Y%m%dT%H%M%S")
     return str(Path(mtest.arena_env.build_dir()) / f"v1-cycles-run-{stamp}")
 

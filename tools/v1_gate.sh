@@ -58,16 +58,27 @@ if [[ "${SKIP_GUEST:-0}" != "1" ]]; then
     source tools/dev-env/v1-env.sh >/dev/null 2>&1 || true
     for cc in gcc clang; do
         stage "3-4/6 guest proof ($cc)"
-        V1_CC="$cc" python3 tools/v1_guest_proof.py > "$LOG_DIR/proof-$cc.log" 2>&1
+        rm -rf "$EVIDENCE/guest-$cc"
+        V1_EVIDENCE_DIR="$EVIDENCE/guest-$cc" V1_CC="$cc" \
+            python3 tools/v1_guest_proof.py > "$LOG_DIR/proof-$cc.log" 2>&1
         pg=$?
         grep -E "V1 GUEST PROOF (PASS|FAIL)|failed because" "$LOG_DIR/proof-$cc.log" | tail -2
+        # The emulator's own stderr and the console transcript travel with the
+        # evidence: a reader must be able to see a startup failure, not guess
+        # at it from an empty serial log.
+        cp -f build/qemu-stderr-v1-guest-proof.log "$EVIDENCE/guest-$cc/qemu-stderr.log" 2>/dev/null || true
+        cp -f "$LOG_DIR/proof-$cc.log" "$EVIDENCE/guest-$cc/harness-console.log"
         check "guest proof ($cc)" "$pg"
     done
 
     stage "5/6 lifecycle cycles"
-    V1_CYCLES=10 python3 tools/v1_cycles.py > "$LOG_DIR/cycles.log" 2>&1
+    rm -rf "$EVIDENCE/lifecycle-cycles"
+    V1_EVIDENCE_DIR="$EVIDENCE/lifecycle-cycles" V1_CYCLES=10 \
+        python3 tools/v1_cycles.py > "$LOG_DIR/cycles.log" 2>&1
     yg=$?
     grep -E "cycles PASS" "$LOG_DIR/cycles.log" | tail -1
+    cp -f build/qemu-stderr-v1-cycles.log "$EVIDENCE/lifecycle-cycles/qemu-stderr.log" 2>/dev/null || true
+    cp -f "$LOG_DIR/cycles.log" "$EVIDENCE/lifecycle-cycles/harness-console.log"
     check "ten launch/close cycles" "$yg"
 else
     echo "SKIP: guest proof and cycles (SKIP_GUEST=1)"

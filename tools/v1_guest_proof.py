@@ -67,8 +67,14 @@ import afs2  # noqa: E402
 
 LABEL = "v1-guest-proof"
 
+# Evidence goes to a per-invocation temporary directory by default. Setting
+# V1_EVIDENCE_DIR points the run at a durable package directory instead, so a
+# published run's artifacts are written where the verdict says they are —
+# not copied there afterwards by hand, which is how a stale file becomes
+# indistinguishable from a fresh one.
 RUN_DIR = Path(
-    tempfile.mkdtemp(prefix=f"v1-guest-proof-{int(time.monotonic())}-")
+    os.environ.get("V1_EVIDENCE_DIR")
+    or tempfile.mkdtemp(prefix=f"v1-guest-proof-{int(time.monotonic())}-")
 )
 SHOTS = RUN_DIR / "shots"
 SHOTS.mkdir(parents=True, exist_ok=True)
