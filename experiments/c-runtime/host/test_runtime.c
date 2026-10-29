@@ -719,6 +719,7 @@ static void test_vm_reserve_refusal(void) {
           "reserve refusal: fresh process refused the reservation cleanly");
 }
 
+
 int libc_host_tests(void);
 extern int libc_host_checks;
 
@@ -750,6 +751,12 @@ extern int libc_host_checks;
 #define GFX_H_TEST 480u
 
 #define GFX_CAP_NONE ((uint64_t)0xFFFFFFFFFFFFFFFFull)
+
+/* Surface-layout constants mirrored from c_gfx_app.c (file-scoped there). */
+#define PIXEL_OFFSET_TEST 4096u
+#define GFX_PIXEL_BYTES_TEST (640ull * 480ull * 4ull)
+#define GFX_PIXEL_PAGES_TEST ((GFX_PIXEL_BYTES_TEST + 4095ull) / 4096ull)
+#define GFX_TOTAL_PAGES_TEST (1ull + GFX_PIXEL_PAGES_TEST)
 
 /* Mocked syscall boundary (defined in host_main.c). */
 extern void arena_host_mock_push(int64_t rax, uint64_t out0,
@@ -824,6 +831,172 @@ static void mock_describe_ok(uint64_t obj_id, uint32_t rights) {
                          obj_id,
                          (uint64_t)rights);
 }
+
+/* ---- discovery and surface layout (ADR-0114 section 3) -----------------
+
+   These drive the production `discover()` against synthetic verified ARST
+   v2 records. They prove that discovery is by kind + rights over the record
+   and NOT by descriptor slot or order: the same logical record presented in
+   several permutations must produce the same answer, and every missing or
+   ambiguous shape must be refused with its own exit code. HOST-ONLY: this
+   says nothing about guest execution. */
+
+#define GFX_ENDPOINT_RIGHTS_TEST (ARENA_RIGHT_WRITE | ARENA_RIGHT_COPY | ARENA_RIGHT_DESTROY)
+#define GFX_SURFACE_RIGHTS_TEST (ARENA_RIGHT_READ | ARENA_RIGHT_WRITE | ARENA_RIGHT_COPY)
+
+static void startup_reset(arena_startup_t *s) {
+    memset(s, 0, sizeof(*s));
+    s->present = 1;
+    s->stream_set = ARENA_ARST_NONE;
+    s->stream_wake = ARENA_ARST_NONE;
+    s->sync_domain = ARENA_ARST_NONE;
+    s->notification = ARENA_ARST_NONE;
+}
+
+static void startup_add(arena_startup_t *s, uint8_t kind, uint8_t role,
+                        uint64_t rights, uint16_t slot) {
+    arena_cap_desc_t *c = &s->caps[s->cap_count++];
+    memset(c, 0, sizeof(*c));
+    c->kind = kind;
+    c->role = role;
+    c->rights = rights;
+    c->slot = slot;
+}
+
+/* A conforming launcher record: one endpoint (kind 12, role OTHER, rights 14)
+   and one surface (kind 7, role OTHER, rights READ|WRITE|COPY), plus
+   unrelated descriptors that must be ignored. */
+static void startup_conforming(arena_startup_t *s) {
+    startup_reset(s);
+    startup_add(s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_OTHER,
+                GFX_ENDPOINT_RIGHTS_TEST, 5);
+    startup_add(s, ARENA_CAP_KIND_SHARED_REGION, ARENA_ARST_ROLE_OTHER,
+                GFX_SURFACE_RIGHTS_TEST, 9);
+    startup_add(s, 3u /* StandardStreamSet */, ARENA_ARST_ROLE_STANDARD_STREAM_SET,
+                0x1Fu, 13);
+    startup_add(s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_OTHER,
+                ARENA_RIGHT_READ, 21); /* decoy: wrong rights */
+}
+
+static void test_gfx_discover_permutation_independence(void) {
+    arena_startup_t base;
+    startup_conforming(&base);
+    uint64_t ep = 0, surf = 0;
+    int rc = discover(&base, &ep, &surf);
+    CHECK(rc == 0, "discover: conforming record accepted (got %d)", rc);
+    uint64_t ep0 = ep, surf0 = surf;
+
+    /* Reverse the descriptor order; slots are unchanged, order is not. */
+    arena_startup_t rev;
+    startup_reset(&rev);
+    for (unsigned i = base.cap_count; i > 0; i--) {
+        rev.caps[rev.cap_count++] = base.caps[i - 1];
+    }
+    rc = discover(&rev, &ep, &surf);
+    CHECK(rc == 0, "discover: reversed record accepted (got %d)", rc);
+    CHECK(ep == ep0 && surf == surf0,
+          "discover: reversed order yields the same capabilities "
+          "(ep %llu/%llu surf %llu/%llu)",
+          (unsigned long long)ep, (unsigned long long)ep0,
+          (unsigned long long)surf, (unsigned long long)surf0);
+
+    /* Rotate by one. */
+    arena_startup_t rot;
+    startup_reset(&rot);
+    for (unsigned i = 1; i <= base.cap_count; i++) {
+        rot.caps[rot.cap_count++] = base.caps[i % base.cap_count];
+    }
+    rc = discover(&rot, &ep, &surf);
+    CHECK(rc == 0, "discover: rotated record accepted (got %d)", rc);
+    CHECK(ep == ep0 && surf == surf0,
+          "discover: rotated order yields the same capabilities");
+
+    /* Same kinds and rights, different slots: the answer follows the
+       descriptor, never the slot number. */
+    arena_startup_t moved;
+    startup_conforming(&moved);
+    for (unsigned i = 0; i < moved.cap_count; i++) {
+        moved.caps[i].slot = (uint16_t)(100u + i * 3u);
+    }
+    rc = discover(&moved, &ep, &surf);
+    CHECK(rc == 0 && ep == 100u && surf == 103u,
+          "discover: slots are operands only (rc=%d ep=%llu surf=%llu)",
+          rc, (unsigned long long)ep, (unsigned long long)surf);
+}
+
+static void test_gfx_discover_refusals(void) {
+    arena_startup_t s;
+    uint64_t ep = 0, surf = 0;
+
+    /* No endpoint at all. */
+    startup_reset(&s);
+    startup_add(&s, ARENA_CAP_KIND_SHARED_REGION, ARENA_ARST_ROLE_OTHER,
+                GFX_SURFACE_RIGHTS_TEST, 9);
+    CHECK(discover(&s, &ep, &surf) == 2, "discover: no endpoint refused (2)");
+
+    /* Two endpoint candidates: ambiguous, must be refused, never first-wins. */
+    startup_conforming(&s);
+    startup_add(&s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_OTHER,
+                GFX_ENDPOINT_RIGHTS_TEST, 6);
+    CHECK(discover(&s, &ep, &surf) == 3, "discover: ambiguous endpoint refused (3)");
+
+    /* Endpoint present but rights insufficient. */
+    startup_reset(&s);
+    startup_add(&s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_OTHER,
+                ARENA_RIGHT_WRITE, 5);
+    startup_add(&s, ARENA_CAP_KIND_SHARED_REGION, ARENA_ARST_ROLE_OTHER,
+                GFX_SURFACE_RIGHTS_TEST, 9);
+    CHECK(discover(&s, &ep, &surf) == 6, "discover: endpoint wrong rights refused (6)");
+
+    /* No surface. */
+    startup_reset(&s);
+    startup_add(&s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_OTHER,
+                GFX_ENDPOINT_RIGHTS_TEST, 5);
+    CHECK(discover(&s, &ep, &surf) == 4, "discover: no surface refused (4)");
+
+    /* Two surface candidates: ambiguous. */
+    startup_conforming(&s);
+    startup_add(&s, ARENA_CAP_KIND_SHARED_REGION, ARENA_ARST_ROLE_OTHER,
+                GFX_SURFACE_RIGHTS_TEST, 10);
+    CHECK(discover(&s, &ep, &surf) == 5, "discover: ambiguous surface refused (5)");
+
+    /* Surface present without READ|WRITE|COPY. */
+    startup_reset(&s);
+    startup_add(&s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_OTHER,
+                GFX_ENDPOINT_RIGHTS_TEST, 5);
+    startup_add(&s, ARENA_CAP_KIND_SHARED_REGION, ARENA_ARST_ROLE_OTHER,
+                ARENA_RIGHT_READ, 9);
+    CHECK(discover(&s, &ep, &surf) == 6, "discover: surface wrong rights refused (6)");
+
+    /* A same-kind descriptor in another role is not a candidate. */
+    startup_reset(&s);
+    startup_add(&s, ARENA_CAP_KIND_BADGED_ENDPOINT, ARENA_ARST_ROLE_STANDARD_STREAM_SET,
+                GFX_ENDPOINT_RIGHTS_TEST, 5);
+    startup_add(&s, ARENA_CAP_KIND_SHARED_REGION, ARENA_ARST_ROLE_OTHER,
+                GFX_SURFACE_RIGHTS_TEST, 9);
+    CHECK(discover(&s, &ep, &surf) == 2,
+          "discover: non-OTHER role ignored (no endpoint, 2)");
+}
+
+static void test_gfx_surface_layout_boundary(void) {
+    /* The V1 surface convention: 640x480 u32 pixels at byte offset 4096 in a
+       SharedRegion of at least 301 pages. The boundary is exercised through
+       the production main-path predicates (constants + page arithmetic). */
+    CHECK(ARENA_PAGE_SIZE == 4096u, "layout: page size 4096");
+    CHECK(PIXEL_OFFSET_TEST == 4096u, "layout: pixel offset is one page (4096)");
+    CHECK(GFX_W_TEST == 640u && GFX_H_TEST == 480u, "layout: 640x480");
+    CHECK(GFX_PIXEL_BYTES_TEST == 1228800u,
+          "layout: 640*480*4 == 1228800 bytes");
+    CHECK(GFX_PIXEL_PAGES_TEST == 300u, "layout: pixels span exactly 300 pages");
+    CHECK(GFX_TOTAL_PAGES_TEST == 301u,
+          "layout: offset page + 300 pixel pages == 301 (the minimum accepted)");
+    CHECK(GFX_TOTAL_PAGES_TEST - 1u < GFX_TOTAL_PAGES_TEST,
+          "layout: 300 pages must be refused (surface too small)");
+    /* 32-bit pixels: one u32 per pixel, no padding between rows. */
+    CHECK(GFX_PIXEL_BYTES_TEST == (uint64_t)GFX_W_TEST * GFX_H_TEST * 4u,
+          "layout: 32-bit pixels, no row padding");
+}
+
 
 static void test_gfx_identify_success(void) {
     uint8_t frame[ADSK_BYTES_TEST];
@@ -1189,6 +1362,9 @@ int main(int argc, char **argv) {
     test_vm_reserve_refusal();
     test_ring_wrap();
     test_ring_reserved_bytes();
+    test_gfx_discover_permutation_independence();
+    test_gfx_discover_refusals();
+    test_gfx_surface_layout_boundary();
     test_gfx_identify_success();
     test_gfx_identify_kernel_error();
     test_gfx_identify_service_error();

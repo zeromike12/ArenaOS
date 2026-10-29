@@ -418,7 +418,12 @@ TEST_EXPORT void render_frame(uint32_t *pixels, uint32_t frame, int flash) {
    otherwise. No serial/debug fallback ever. */
 
 TEST_EXPORT void log_line(const char *msg) {
-    char buf[96];
+    /* 128 bytes: every acknowledgment line below carries the instance's
+       validated surface object ID (up to 20 decimal digits) alongside the
+       event type, counter, focus bit and exit code, and must never be
+       truncated. Truncation would silently drop the instance identity the
+       qualification harness depends on. */
+    char buf[128];
     size_t n = arena_strnlen(msg, sizeof(buf) - 1u);
     arena_memcpy(buf, msg, n);
     buf[n] = '\n';
@@ -487,6 +492,7 @@ int main(int argc, char **argv) {
 
     uint8_t id_frame[ADSK_BYTES];
     identify_t ident;
+    char line[128];
     if (identify_exchange(id_frame, &ident) != 0) {
         log_line("[gfx] identify failed");
         if (a.mapped) {
@@ -495,8 +501,23 @@ int main(int argc, char **argv) {
         }
         arena_exit(GFX_IDENTIFY_FAILED);
     }
-    (void)ident; /* session_serial and surface_object_id validated against
-                    the held surface inside identify_exchange */
+
+    /* Instance identity for every acknowledgment below.
+
+       `surface_object_id` is the value the Desktop named in the Identify
+       reply and that this client then validated against the SharedRegion
+       capability it already held (kind 7, equal object ID, READ|WRITE|COPY).
+       It is therefore a per-session identity the guest can honestly report,
+       not a hunch about which window is which: two concurrent instances
+       have distinct surface object IDs. Emitting it makes every event
+       acknowledgment attributable to one specific instance instead of
+       relying on log ordering. It is descriptive telemetry the guest
+       chooses to publish; it grants nothing. */
+    uint64_t instance = ident.surface_object_id;
+    (void)arena_snprintf(line, sizeof(line),
+                         "[gfx] identify ok surface=%llu",
+                         (unsigned long long)instance);
+    log_line(line);
 
     uint64_t handle = create_window(GFX_W, GFX_H);
     if (handle == 0) {
@@ -508,12 +529,15 @@ int main(int argc, char **argv) {
         arena_exit(GFX_CREATE_FAILED);
     }
     a.handle = handle;
-    log_line("[gfx] window created");
+    (void)arena_snprintf(line, sizeof(line),
+                         "[gfx] window created handle=%llu surface=%llu",
+                         (unsigned long long)handle,
+                         (unsigned long long)instance);
+    log_line(line);
 
     uint32_t flash = 0;
     uint64_t events = 0;
     int focused = -1;
-    char line[96];
     int exit_code = GFX_OK;
 
     for (uint32_t f = 0; f < GFX_FRAMES; f++) {
@@ -538,15 +562,21 @@ int main(int argc, char **argv) {
             if (etype == ADSK_EVENT_FOCUS) {
                 focused = reply[29] ? 1 : 0;
                 (void)arena_snprintf(line, sizeof(line),
-                                     "[gfx] focus=%d", focused);
+                                     "[gfx] focus=%d surface=%llu",
+                                     focused,
+                                     (unsigned long long)instance);
                 log_line(line);
             } else if (etype == ADSK_EVENT_KEY || etype == ADSK_EVENT_POINTER) {
                 events++;
                 flash = GFX_FLASH_FRAMES;
+                /* Event-specific acknowledgment: event TYPE and the
+                   instance's validated surface identity travel together
+                   with the per-instance counter. */
                 (void)arena_snprintf(line, sizeof(line),
-                                     "[gfx] event type=%u events=%llu",
+                                     "[gfx] event type=%u events=%llu surface=%llu",
                                      (unsigned)etype,
-                                     (unsigned long long)events);
+                                     (unsigned long long)events,
+                                     (unsigned long long)instance);
                 log_line(line);
             } else if (etype == ADSK_EVENT_CLOSE) {
                 break;
@@ -597,8 +627,9 @@ int main(int argc, char **argv) {
     }
 
     (void)arena_snprintf(line, sizeof(line),
-                         "[gfx] exit events=%llu focused=%d code=%d",
-                         (unsigned long long)events, focused, exit_code);
+                         "[gfx] exit events=%llu focused=%d code=%d surface=%llu",
+                         (unsigned long long)events, focused, exit_code,
+                         (unsigned long long)instance);
     log_line(line);
     arena_exit(exit_code);
     return 0;

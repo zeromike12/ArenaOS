@@ -4360,8 +4360,16 @@ fn retire(index: usize, _force: bool) {
         APP_GROUPS[index] = None;
         WOKEN[index] = false;
     }
+    // Instance-specific retirement receipt: `kind` plus the session's
+    // SharedRegion object ID. That object ID is the same value the session's
+    // Identify reply names (ADSK v2 opcode 13, session.id), so a retirement
+    // is attributable to exactly one graphical instance instead of to
+    // whichever window happened to disappear from the screen. Descriptive
+    // telemetry only; it grants no authority.
     log(b"[desktop] application retired: kind=");
     log_number(s.kind as u64);
+    log(b" surface=");
+    log_number(s.id);
     log(b" Process consumed; mapping and region released\n");
 }
 fn sweep() -> bool {
@@ -4371,7 +4379,16 @@ fn sweep() -> bool {
         if s.id != 0 && !child_live(i, s.process.unwrap_or_else(|| die(83))) {
             if !s.ending {
                 let status = child_exit_status(i, s.process.unwrap_or_else(|| die(83)));
+                // Existing line kept byte-identical: several authoritative
+                // suites parse it with an anchored ^...$ regex.
                 log(b"[desktop] child Process-cap exit status=");
+                log_number(status);
+                log(b"\n");
+                // Additive instance-attributed exit receipt (same facts,
+                // named session). Nothing anchors on this line yet.
+                log(b"[desktop] child Process-cap exit surface=");
+                log_number(s.id);
+                log(b" status=");
                 log_number(status);
                 log(b"\n");
             }

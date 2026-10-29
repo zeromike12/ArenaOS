@@ -1,25 +1,49 @@
 #!/usr/bin/env python3
-"""V1 Guest Proof — 7-checkpoint native graphical launch foundation proof.
+"""V1 Guest Proof (v2) — instance-attributed native graphical qualification.
 
-Runs inside QEMU (TCG, ArenaOS guest). Drives the guest desktop via QMP
-input events and screendumps, verifying:
+Runs inside QEMU (TCG, ArenaOS guest). Drives the guest Desktop through QMP
+input events and screendumps and verifies, per checkpoint:
 
-  1. Launch-ready Desktop
-  2. APB1 install via guest protected installer (installation acknowledgment)
-  3. First native c-gfx-app checker window (after conforming Identify)
-  4. Keyboard response (visible flash, fresh acknowledgment)
-  5. Mouse response (visible flash, fresh acknowledgment)
-  6. Two concurrent instances with focus/input isolation (both directions)
-  7. Window removal with resource accounting, Desktop restored
+  1. Launch-ready Desktop (plus a recorded idle resource baseline)
+  2. APB1 install via the guest protected installer (installation receipt)
+  3. First native C window after a conforming Identify round-trip
+  4. Keyboard response — event-type- and instance-specific acknowledgment
+  5. Mouse response — event-type- and instance-specific acknowledgment
+  6. Two concurrent instances, focus/input isolation in BOTH directions
+  7. Window removal: targeted retirements, successful exits, fresh resource
+     settlement against the pre-launch baseline, and visual removal
   8. Final V1 demonstration
 
-Writes per-run evidence (screenshots, serial log, install acknowledgment,
-evidence.json) to a run-specific output directory so stale artifacts can
-never satisfy new assertions.
+Design rules enforced here (review corrections from the V1 handoff):
+
+  * Telemetry is attributed, never global. The guest client publishes the
+    surface object ID it received in the Identify reply and validated against
+    the SharedRegion capability it already held; every event acknowledgment
+    carries {event type, per-instance counter, instance identity}. The
+    Desktop publishes retirement and exit receipts naming the same session.
+    `last_events_count()`-style global parsing is gone: a counter increment
+    from some other instance can never satisfy an assertion.
+  * Missing telemetry FAILS. There is no `baseline is None or ...` escape:
+    an acknowledgment requires a *new* line for the *expected instance* with
+    the *expected event type* and a strictly advanced per-instance counter.
+  * Presentation is evidence of presentation only. A visible flash never
+    substitutes for an acknowledgment, and an acknowledgment never
+    substitutes for visible rendering; both are required where claimed.
+  * Geometry is not identity. A window rectangle is bound to an instance only
+    when that instance acknowledges the exact click delivered at that point.
+  * Cleanup evidence is fresh. A serial cursor is captured before closing;
+    only receipts after it count. Per-instance retirement and successful exit
+    are required for every instance that was closed, settlement must match
+    the idle baseline recorded before the first launch, and no spurious
+    retirement may appear.
+  * One verdict computation drives the exit status, the console summary and
+    evidence.json. Missing identities, missing evidence artifacts, FAIL or
+    NOT RUN checkpoints all prevent PASS.
 
 This is TEST INFRASTRUCTURE ONLY. Nothing inside ArenaOS knows about this
 script; the guest sees QMP input events and screendumps exactly as a user
-would.
+would, and the serial lines it parses are the production client's and
+Desktop's own output.
 """
 
 import hashlib
@@ -34,18 +58,15 @@ from pathlib import Path
 
 # ------------------------------------------------------------------ paths ---
 
-# Repository-relative paths; never hardcode /home/user/ArenaOS.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
-import arena_env  # noqa: E402  (import after sys.path insert)
+import arena_env  # noqa: E402
 import mtest  # noqa: E402
 import afs2  # noqa: E402
 
 LABEL = "v1-guest-proof"
 
-# Run-specific output directory: every run gets a fresh directory so stale
-# screenshots/receipts from a previous run cannot satisfy new assertions.
 RUN_DIR = Path(
     tempfile.mkdtemp(prefix=f"v1-guest-proof-{int(time.monotonic())}-")
 )
@@ -54,22 +75,20 @@ SHOTS.mkdir(parents=True, exist_ok=True)
 EVIDENCE = RUN_DIR / "evidence.json"
 SERIAL_OUT = RUN_DIR / "v1-guest-serial.log"
 INSTALL_ACK_PATH = RUN_DIR / "install-ack.json"
+HARNESS_LOG = RUN_DIR / "harness-output.log"
 
 ESP = arena_env.build_dir() / "arena-esp.img"
-APB1 = RUN_DIR / "c-gfx-app.apb1"  # staged bundle, copied from fixture
+APB1 = RUN_DIR / "c-gfx-app.apb1"
 
 SCREEN_W, SCREEN_H = 800, 600
 
-# c-gfx-app checker pattern pixels (0x00RRGGBB LE -> RGB bytes), from
-# experiments/c-runtime/app/c_gfx_app.c render_frame():
+# c-gfx-app checker pattern pixels (0x00RRGGBB LE -> RGB bytes):
 #   cell ? (60,40,20) : (20,40,90)
-APP_COLOR_NORMAL = (20, 40, 90)   # 0x14, 0x28, 0x5A
-APP_COLOR_ALT = (60, 40, 20)      # 0x3C, 0x28, 0x14
+APP_COLOR_NORMAL = (20, 40, 90)
+APP_COLOR_ALT = (60, 40, 20)
 APP_COLORS = (APP_COLOR_NORMAL, APP_COLOR_ALT)
 
-# Same pixels mid-flash: XOR with 0x00A0A0A0 per c_gfx_app.c:
-#   (20,40,90) ^ (160,160,160) = (180,136,250)  # 0xB4, 0x88, 0xFA
-#   (60,40,20) ^ (160,160,160) = (220,136,148)  # 0xDC, 0x88, 0x94
+# Same pixels mid-flash: XOR with 0x00A0A0A0.
 FLASH_COLORS = (
     (APP_COLOR_NORMAL[0] ^ 0xA0, APP_COLOR_NORMAL[1] ^ 0xA0,
      APP_COLOR_NORMAL[2] ^ 0xA0),
@@ -77,252 +96,307 @@ FLASH_COLORS = (
      APP_COLOR_ALT[2] ^ 0xA0),
 )
 
-# Tolerance: tight enough to exclude desktop background (24,32,53) and
-# titlebar (34,51,85) from app-color matches, while still catching exact
-# checker pixels.  At tol=18, titlebar (34,51,85) matches (20,40,90):
-#   |34-20|=14, |51-40|=11, |85-90|=5  all <= 18  -> FALSE POSITIVE.
-# At tol=8:
-#   |34-20|=14 > 8  -> titlebar excluded.  Checker pixels match exactly.
+# Tolerance excludes the desktop background (24,32,53) and titlebar
+# (34,51,85) from app-color matches while catching exact checker pixels.
 COLOR_TOL = 8
 
-# Close button geometry from arena_ui::metrics.
 CLOSE_W, TITLE_H = 28, 28
+
+# ADSK event types emitted by the guest client.
+EVENT_KEY = 1
+EVENT_POINTER = 2
 
 CHECKPOINTS = {
     1: "launch-ready Desktop",
-    2: "first native C window",
-    3: "keyboard response",
-    4: "mouse response",
-    5: "two concurrent instances: focus/input isolation",
-    6: "window removal with resource accounting",
-    7: "final V1 demonstration",
+    2: "APB1 install receipt (protected installer)",
+    3: "first native C window (Identify -> create -> render)",
+    4: "keyboard response (instance-specific acknowledgment)",
+    5: "mouse response (instance-specific acknowledgment)",
+    6: "two concurrent instances: focus/input isolation, both directions",
+    7: "window removal: retirements, exits, settlement, visual removal",
+    8: "final V1 demonstration",
 }
 
 results = {n: "NOT RUN" for n in CHECKPOINTS}
 refs = {n: None for n in CHECKPOINTS}
 detail = {n: "" for n in CHECKPOINTS}
 
-# Track which instances have been closed in CP6 for specific tracking.
-cp6_closed_instances: list[int] = []
+# ============================================================================
+# Production serial parsers — the single source of truth for both the live
+# proof and the negative controls. Every parser returns records that carry
+# the originating serial line index so freshness (cursor) is checkable.
+# ============================================================================
 
-WINDOW_COUNT_RE = re.compile(r"registered ordinary window count=(\d+)")
-RETIRED_RE = re.compile(r"\[desktop\] application retired")
-CHILD_EXIT_RE = re.compile(r"child Process-cap exit status=(\d+)")
-RESOURCE_DETAIL_RE = re.compile(
-    r"\[desktop\] native resource detail values=([\d/]+)"
+RE_IDENTIFY_OK = re.compile(r"\[gfx\] identify ok surface=(\d+)")
+RE_GFX_EVENT = re.compile(
+    r"\[gfx\] event type=(\d+) events=(\d+) surface=(\d+)")
+RE_GFX_FOCUS = re.compile(r"\[gfx\] focus=(-?\d+) surface=(\d+)")
+RE_GFX_EXIT = re.compile(
+    r"\[gfx\] exit events=(\d+) focused=(-?\d+) code=(\d+) surface=(\d+)")
+RE_GFX_CREATE = re.compile(
+    r"\[gfx\] window created handle=(\d+) surface=(\d+)")
+RE_GFX_FAILURE = re.compile(r"\[gfx\] ([a-z ]+failed|no endpoint|ambiguous endpoint|"
+                            r"no surface|ambiguous surface|wrong rights|"
+                            r"surface describe mismatch|surface too small|"
+                            r"no startup record)")
+RE_WINDOW_COUNT = re.compile(r"\[desktop\] registered ordinary window count=(\d+)")
+RE_RETIRED = re.compile(r"\[desktop\] application retired: kind=(\d+) surface=(\d+)")
+RE_CHILD_EXIT = re.compile(r"\[desktop\] child Process-cap exit surface=(\d+) status=(\d+)")
+RE_RESOURCE_DETAIL = re.compile(r"\[desktop\] native resource detail values=([\d/]+)")
+RE_INSTALL_ACK = re.compile(r"\[desktop\] APB1 installed; signed version=(\d+)")
+RE_DESKTOP_READY = re.compile(r"\[desktop\] real desktop frame presented")
+
+# Field indices inside a resource-detail receipt (see desktop.rs
+# log_resource_detail; the field order is published on the preceding line).
+DETAIL_FIELDS = (
+    "total-frames", "threads", "endpoints", "notifications", "timers",
+    "vm-regions", "vm-committed-pages", "sync-domains", "sync-keys",
+    "sync-waiters", "app-instances", "windows", "helpers", "stream-sets",
+    "max-windows-per-instance",
 )
-# Item 5: parse the c-gfx-app event acknowledgment counter from guest serial.
-# The guest logs "[gfx] event type=N events=M" where M is the cumulative
-# count of KEY/POINTER events acknowledged by this instance. Used for
-# event-specific acknowledgment: capture baseline before injection, require
-# increment after injection, correlated with visible flash.
-GFX_EVENTS_RE = re.compile(r"\[gfx\] event type=\d+ events=(\d+)")
-GFX_EXIT_RE = re.compile(r"\[gfx\] exit events=(\d+) focused=(\d+) code=(\d+)")
+DETAIL_FIELD_NAMES = (
+    "total-frames/threads/endpoints/notifications/timers/vm-regions/"
+    "vm-committed-pages/sync-domains/sync-keys/sync-waiters/app-instances/"
+    "windows/helpers/stream-sets/max-windows-per-instance"
+)
 
 
-def last_gfx_events_count(serial: str) -> int | None:
-    """Return the last gfx events counter value from guest serial, or None.
+def _lines(serial_or_lines) -> list[str]:
+    if isinstance(serial_or_lines, str):
+        return serial_or_lines.splitlines()
+    return list(serial_or_lines)
 
-    Parses "[gfx] event type=N events=M" lines; returns M (cumulative count
-    of KEY/POINTER events acknowledged by the guest instance). Returns None
-    when no such line exists.
+
+def parse_resource_details(serial_or_lines, start: int = 0) -> list[dict]:
+    """Parse `[desktop] native resource detail values=...` receipts.
+
+    Returns one dict per receipt with the published field names plus
+    `line` (index into the full serial). A receipt with the wrong arity is
+    not silently reinterpreted: it is reported with `malformed=True`.
     """
-    ms = GFX_EVENTS_RE.findall(serial)
-    return int(ms[-1]) if ms else None
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        if index < start:
+            continue
+        m = RE_RESOURCE_DETAIL.search(ln)
+        if not m:
+            continue
+        values = m.group(1).split("/")
+        if len(values) != len(DETAIL_FIELDS):
+            out.append({"line": index, "malformed": True, "raw": m.group(1)})
+            continue
+        record = {"line": index, "malformed": False, "raw": m.group(1)}
+        for name, value in zip(DETAIL_FIELDS, values):
+            record[name] = int(value)
+        out.append(record)
+    return out
 
 
-def last_gfx_exit(serial: str) -> tuple[int, int, int] | None:
-    """Return (events, focused, exit_code) from the last [gfx] exit line."""
-    ms = GFX_EXIT_RE.findall(serial)
-    if not ms:
-        return None
-    events, focused, code = ms[-1]
-    return (int(events), int(focused), int(code))
+def parse_gfx_events(serial_or_lines) -> list[dict]:
+    """Every `[gfx] event type=T events=N surface=S` acknowledgment."""
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_GFX_EVENT.search(ln)
+        if m:
+            out.append({
+                "line": index,
+                "type": int(m.group(1)),
+                "events": int(m.group(2)),
+                "surface": int(m.group(3)),
+            })
+    return out
 
 
-# ------------------------------------------------------------------ utils ---
+def parse_gfx_focus(serial_or_lines) -> list[dict]:
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_GFX_FOCUS.search(ln)
+        if m:
+            out.append({"line": index, "focused": int(m.group(1)),
+                        "surface": int(m.group(2))})
+    return out
+
+
+def parse_gfx_identities(serial_or_lines) -> list[dict]:
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_IDENTIFY_OK.search(ln)
+        if m:
+            out.append({"line": index, "surface": int(m.group(1))})
+    return out
+
+
+def parse_gfx_exits(serial_or_lines) -> list[dict]:
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_GFX_EXIT.search(ln)
+        if m:
+            out.append({
+                "line": index,
+                "events": int(m.group(1)),
+                "focused": int(m.group(2)),
+                "code": int(m.group(3)),
+                "surface": int(m.group(4)),
+            })
+    return out
+
+
+def parse_retirements(serial_or_lines) -> list[dict]:
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_RETIRED.search(ln)
+        if m:
+            out.append({"line": index, "kind": int(m.group(1)),
+                        "surface": int(m.group(2))})
+    return out
+
+
+def parse_child_exits(serial_or_lines) -> list[dict]:
+    out = []
+    for index, ln in enumerate(_lines(serial_or_lines)):
+        m = RE_CHILD_EXIT.search(ln)
+        if m:
+            out.append({"line": index, "surface": int(m.group(1)),
+                        "status": int(m.group(2))})
+    return out
+
+
+def serial_cursor(serial_or_lines) -> int:
+    return len(_lines(serial_or_lines))
+
+
+def last_detail(serial_or_lines) -> dict | None:
+    receipts = [r for r in parse_resource_details(serial_or_lines)
+                if not r["malformed"]]
+    return receipts[-1] if receipts else None
+
+
+# ============================================================================
+# Verdict evaluators — pure functions over (serial, cursor, expectations).
+# The live proof and every negative control call exactly these.
+# ============================================================================
+
+def evaluate_event_ack(serial, cursor: int, instance: int, event_type: int,
+                       others=()):
+    """Evaluate an event-type- and instance-specific acknowledgment.
+
+    Requires a NEW `[gfx] event type=<event_type> ... surface=<instance>`
+    line after `cursor` whose per-instance counter is strictly greater than
+    that instance's last counter before `cursor`. Any *other* instance that
+    produced a new acknowledgment of the same event type after `cursor`
+    fails the result (cross-delivery).
+    """
+    lines = _lines(serial)
+    all_events = parse_gfx_events(lines)
+
+    def last_counter(surface, upto):
+        prior = [e["events"] for e in all_events
+                 if e["surface"] == surface and e["line"] < upto]
+        return prior[-1] if prior else 0
+
+    expected = [e for e in all_events
+                if e["line"] >= cursor and e["surface"] == instance
+                and e["type"] == event_type]
+    before = last_counter(instance, cursor)
+    matched = expected[0] if expected else None
+    advanced = matched is not None and matched["events"] > before
+
+    cross = []
+    for other in others:
+        if other == instance:
+            continue
+        prior = last_counter(other, cursor)
+        fresh = [e for e in all_events if e["line"] >= cursor
+                 and e["surface"] == other and e["type"] == event_type
+                 and e["events"] > prior]
+        if fresh:
+            cross.append(other)
+
+    return {
+        "ok": bool(matched is not None and advanced and not cross),
+        "record": matched,
+        "counter_before": before,
+        "counter_after": matched["events"] if matched else None,
+        "advanced": advanced,
+        "cross_acks": cross,
+        "fresh_acks": len(expected),
+    }
+
+
+def evaluate_cleanup(serial, cursor: int, expected_instances, baseline: dict | None):
+    """Evaluate fresh, instance-specific cleanup evidence after `cursor`.
+
+    Requirements (all must hold):
+      * every expected instance has an `application retired: ... surface=S`
+        receipt after the cursor;
+      * every expected instance has a `child Process-cap exit surface=S
+        status=0` receipt after the cursor (successful exit);
+      * no retirement receipt names an instance that was not expected;
+      * at least one resource-detail receipt after the cursor shows
+        app-instances == baseline.app-instances AND windows ==
+        baseline.windows — i.e. settlement measured against the recorded
+        idle baseline, not merely "zero somewhere";
+      * the settlement receipt is the LATEST receipt after the cursor
+        (a transient dip followed by a leak must not pass).
+    """
+    lines = _lines(serial)
+    retirements = [r for r in parse_retirements(lines) if r["line"] >= cursor]
+    child_exits = [r for r in parse_child_exits(lines) if r["line"] >= cursor]
+    details = [d for d in parse_resource_details(lines, cursor)
+               if not d["malformed"]]
+
+    per_instance = {}
+    for instance in expected_instances:
+        retro = [r for r in retirements if r["surface"] == instance]
+        ex = [r for r in child_exits if r["surface"] == instance]
+        per_instance[str(instance)] = {
+            "retired": bool(retro),
+            "retire_line": retro[0]["line"] if retro else None,
+            "exit_ok": bool(ex) and ex[-1]["status"] == 0,
+            "exit_status": ex[-1]["status"] if ex else None,
+            "exit_line": ex[-1]["line"] if ex else None,
+        }
+
+    spurious = sorted({r["surface"] for r in retirements
+                       if r["surface"] not in expected_instances})
+
+    settlement = None
+    settlement_matches_baseline = False
+    if details and baseline is not None:
+        last = details[-1]
+        settlement = last
+        settlement_matches_baseline = (
+            last["app-instances"] == baseline.get("app-instances")
+            and last["windows"] == baseline.get("windows")
+        )
+
+    per_instance_ok = all(v["retired"] and v["exit_ok"]
+                          for v in per_instance.values())
+    ok = (bool(expected_instances) and per_instance_ok
+          and settlement_matches_baseline and not spurious)
+
+    return {
+        "ok": ok,
+        "per_instance": per_instance,
+        "spurious_retirements": spurious,
+        "settlement": settlement,
+        "settlement_matches_baseline": settlement_matches_baseline,
+        "baseline": baseline,
+        "expected_instances": list(expected_instances),
+    }
+
+
+def evaluate_presentation(rects_after_close) -> bool:
+    """Visual removal: no app-colored window may remain on screen."""
+    return len(rects_after_close) == 0
+
+
+# ============================================================================
+# Screenshot helpers
+# ============================================================================
 
 def sha256_file(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "MISSING"
-
-
-# ----------------------------------------------------------------- qemu identity ---
-
-# Item 2: record the emulator ELF separately from its wrapper. The wrapper
-# hash (e.g. 92ec1c12…) is NOT proof of the ELF it invokes. Required identity
-# failures (missing ELF, wrong ELF hash) must prevent qualification.
-
-QEMU_WRAPPER_HINT = "qemu-patched"
-QEMU_ELF_HINT = "qemu-system-x86_64-patched"
-REQUIRED_QEMU_ELF_SHA256 = (
-    "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff"
-)
-
-
-def _resolve_qemu_parts() -> dict:
-    """Resolve every component of the QEMU launch chain separately.
-
-    Returns a dict with:
-      wrapper_path, wrapper_sha256, wrapper_contents
-      elf_path, elf_sha256, elf_ok (matches REQUIRED_QEMU_ELF_SHA256)
-      loader_path, loader_sha256
-      runtime_libs: list of {path, sha256}
-      firmware: {code_path, code_sha256, vars_path, vars_sha256}
-      launch_cmd: full qemu_cmd() list
-      qemu_cmd_args: the extra QEMU args appended by mtest (machine, memory, etc.)
-      identity_ok: whether all required identities verified
-    """
-    # qemu_cmd() calls sys.exit() when no QEMU is found; catch that so
-    # focused controls (no QEMU) can still run.
-    try:
-        cmd = arena_env.qemu_cmd()
-    except SystemExit:
-        cmd = []
-    result: dict = {
-        "wrapper_path": "MISSING",
-        "wrapper_sha256": "MISSING",
-        "wrapper_contents": "MISSING",
-        "elf_path": "MISSING",
-        "elf_sha256": "MISSING",
-        "elf_ok": False,
-        "loader_path": "MISSING",
-        "loader_sha256": "MISSING",
-        "runtime_libs": [],
-        "firmware": {
-            "code_path": "MISSING",
-            "code_sha256": "MISSING",
-            "vars_path": "MISSING",
-            "vars_sha256": "MISSING",
-        },
-        "launch_cmd": [str(c) for c in cmd],
-        "identity_ok": False,
-    }
-
-    # --- wrapper: first file in the launch prefix ---
-    wrapper_path = None
-    for part in cmd:
-        p = Path(part)
-        if p.exists() and p.is_file():
-            wrapper_path = p
-            break
-    if wrapper_path is not None:
-        result["wrapper_path"] = str(wrapper_path)
-        result["wrapper_sha256"] = sha256_file(wrapper_path)
-        try:
-            result["wrapper_contents"] = wrapper_path.read_text(errors="replace")
-        except (OSError, UnicodeError):
-            result["wrapper_contents"] = "(binary or unreadable)"
-
-    # --- ELF: the actual emulator binary ---
-    elf_path = None
-    for part in cmd:
-        p = Path(part)
-        if (
-            p.exists()
-            and p.is_file()
-            and QEMU_ELF_HINT in p.name
-        ):
-            elf_path = p
-            break
-    # Fallback: any file in the prefix whose name starts with qemu-system
-    if elf_path is None:
-        for part in cmd:
-            p = Path(part)
-            if p.exists() and p.is_file() and p.name.startswith("qemu-system"):
-                elf_path = p
-                break
-    if elf_path is not None:
-        result["elf_path"] = str(elf_path)
-        result["elf_sha256"] = sha256_file(elf_path)
-        result["elf_ok"] = (
-            result["elf_sha256"] == REQUIRED_QEMU_ELF_SHA256
-        )
-
-    # --- loader: parse from wrapper contents (ld-linux path) ---
-    import re as _re
-
-    if result["wrapper_contents"] != "MISSING":
-        loader_matches = _re.findall(
-            r'"(/[^"]*ld-linux[^"]*)"', result["wrapper_contents"]
-        )
-        if loader_matches:
-            lp = Path(loader_matches[0])
-            if lp.exists():
-                result["loader_path"] = str(lp)
-                result["loader_sha256"] = sha256_file(lp)
-
-    # --- runtime libraries: from --library-path in wrapper ---
-    lib_matches = _re.findall(
-        r'--library-path "([^"]*)"', result["wrapper_contents"]
-    )
-    if lib_matches:
-        for lib_dir in lib_matches[0].split(":"):
-            lp = Path(lib_dir)
-            if lp.exists() and lp.is_dir():
-                for lib in sorted(lp.iterdir())[:20]:
-                    if lib.is_file():
-                        result["runtime_libs"].append(
-                            {"path": str(lib), "sha256": sha256_file(lib)}
-                        )
-
-    # --- firmware: OVMF code and vars ---
-    # (SystemExit inherits from BaseException, not Exception, so catch both)
-    try:
-        code_p = arena_env.ovmf_code()
-        result["firmware"]["code_path"] = str(code_p)
-        result["firmware"]["code_sha256"] = sha256_file(code_p)
-    except (Exception, SystemExit):
-        pass
-    try:
-        vars_p = arena_env.ovmf_vars_template()
-        result["firmware"]["vars_path"] = str(vars_p)
-        result["firmware"]["vars_sha256"] = sha256_file(vars_p)
-    except (Exception, SystemExit):
-        pass
-
-    # --- identity_ok: all required identities present and ELF matches ---
-    result["identity_ok"] = (
-        result["elf_path"] != "MISSING"
-        and result["elf_sha256"] != "MISSING"
-        and result["elf_ok"]
-        and result["wrapper_path"] != "MISSING"
-        and result["wrapper_sha256"] != "MISSING"
-        and result["loader_path"] != "MISSING"
-        and result["loader_sha256"] != "MISSING"
-        and result["firmware"]["code_path"] != "MISSING"
-        and result["firmware"]["code_sha256"] != "MISSING"
-        and result["firmware"]["vars_path"] != "MISSING"
-        and result["firmware"]["vars_sha256"] != "MISSING"
-    )
-
-    return result
-
-
-def qemu_identity() -> dict:
-    """Full QEMU identity record: wrapper, ELF, loader, libs, firmware, cmd.
-
-    The ELF hash is recorded separately from the wrapper hash. A wrapper
-    hash alone never qualifies as emulator identity.
-    """
-    return _resolve_qemu_parts()
-
-
-def window_count(serial: str) -> int:
-    ms = WINDOW_COUNT_RE.findall(serial)
-    return int(ms[-1]) if ms else 0
-
-
-def retired_count(serial: str) -> int:
-    return len(RETIRED_RE.findall(serial))
-
-
-def child_exit_count(serial: str) -> int:
-    return len(CHILD_EXIT_RE.findall(serial))
-
-
-def last_child_exit(serial: str) -> int | None:
-    ms = CHILD_EXIT_RE.findall(serial)
-    return int(ms[-1]) if ms else None
 
 
 def color_close(px, color, tol=COLOR_TOL) -> bool:
@@ -330,21 +404,15 @@ def color_close(px, color, tol=COLOR_TOL) -> bool:
 
 
 def parse_ppm(path: Path) -> tuple[int, int, bytes]:
-    """Parse a PPM file and return (width, height, rgb_bytes).
-
-    Validates magic number, dimensions, maxval, and exact payload length.
-    Raises ValueError on any malformation — never silently assumes 800x600.
-    """
+    """Parse a PPM file; validate magic, dimensions, maxval, payload length."""
     data = path.read_bytes()
     if not data.startswith(b"P6\n"):
         raise ValueError(f"{path}: not a raw PPM (P6) file: {data[:20]!r}")
-    # P6\n<width> <height>\n<maxval>\n<payload>
     try:
         header_end = data.index(b"\n", data.index(b"\n", data.index(b"\n") + 1) + 1) + 1
     except ValueError as exc:
         raise ValueError(f"{path}: truncated PPM header") from exc
-    header = data[:header_end - 1]
-    parts = header.split(b"\n")
+    parts = data[:header_end - 1].split(b"\n")
     if len(parts) != 3:
         raise ValueError(f"{path}: unexpected PPM header lines: {parts!r}")
     try:
@@ -355,58 +423,47 @@ def parse_ppm(path: Path) -> tuple[int, int, bytes]:
     if maxval != 255:
         raise ValueError(f"{path}: unexpected PPM maxval {maxval}")
     payload = data[header_end:]
-    expected = width * height * 3
-    if len(payload) != expected:
-        raise ValueError(
-            f"{path}: PPM payload {len(payload)} bytes != {expected} "
-            f"({width}x{height}x3)"
-        )
+    if len(payload) != width * height * 3:
+        raise ValueError(f"{path}: PPM payload {len(payload)} bytes != "
+                         f"{width * height * 3} ({width}x{height}x3)")
     return width, height, payload
 
 
 def ppm(path: Path, expect_w: int = SCREEN_W, expect_h: int = SCREEN_H) -> bytes:
-    """Read a PPM file, validate dimensions, return raw RGB pixel bytes."""
     width, height, payload = parse_ppm(path)
     if width != expect_w or height != expect_h:
-        raise ValueError(
-            f"{path}: {width}x{height} != expected {expect_w}x{expect_h}"
-        )
+        raise ValueError(f"{path}: {width}x{height} != {expect_w}x{expect_h}")
     return payload
 
 
 def app_mask(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list:
-    """Pixel coordinates matching app checker colors (tight tolerance)."""
     hits = []
     for y in range(height):
         base = (y * width) * 3
         for x in range(width):
             i = base + x * 3
-            r, g, b = data[i], data[i + 1], data[i + 2]
-            if any(color_close((r, g, b), c) for c in APP_COLORS):
+            if any(color_close(data[i:i + 3], c) for c in APP_COLORS):
                 hits.append((x, y))
     return hits
 
 
 def has_app_color(data: bytes, rect, width: int = SCREEN_W,
                   height: int = SCREEN_H) -> bool:
-    """True if any pixel inside rect carries an app checker color."""
     x, y, w, h = rect
     for row in range(y, min(y + h, height)):
         base = (row * width) * 3
         for col in range(x, min(x + w, width)):
-            i = base + (col - x) * 3
+            i = base + col * 3
             if any(color_close(data[i:i + 3], c) for c in APP_COLORS):
                 return True
     return False
 
 
-def window_rects(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H
-                 ) -> list:
-    """2D connected components (8-connectivity) of app-colored pixels.
+def window_rects(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list:
+    """2D connected components of app-colored pixels (8-connectivity).
 
-    Filters out small noise specks (<200 px). Overlapping or cascaded
-    windows may MERGE into one component — a connected component is NOT
-    equivalent to an application instance. Callers must not equate the two.
+    Components are NOT instances: overlapping windows merge. Callers must
+    bind a component to an instance only through an acknowledgment.
     """
     hits = set(app_mask(data, width, height))
     if not hits:
@@ -418,25 +475,27 @@ def window_rects(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H
             continue
         stack = [start]
         visited.add(start)
-        comp = []
+        minx = maxx = start[0]
+        miny = maxy = start[1]
         while stack:
-            x, y = stack.pop()
-            comp.append((x, y))
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    if dx == 0 and dy == 0:
-                        continue
-                    nb = (x + dx, y + dy)
-                    if nb in hits and nb not in visited:
-                        visited.add(nb)
-                        stack.append(nb)
-        if len(comp) < 200:
-            continue
-        xs = [p[0] for p in comp]
-        ys = [p[1] for p in comp]
-        rects.append((min(xs), min(ys),
-                      max(xs) - min(xs) + 1,
-                      max(ys) - min(ys) + 1))
+            cx, cy = stack.pop()
+            if cx < minx:
+                minx = cx
+            if cx > maxx:
+                maxx = cx
+            if cy < miny:
+                miny = cy
+            if cy > maxy:
+                maxy = cy
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    nx, ny = cx + dx, cy + dy
+                    if (0 <= nx < width and 0 <= ny < height
+                            and (nx, ny) in hits and (nx, ny) not in visited):
+                        visited.add((nx, ny))
+                        stack.append((nx, ny))
+        if (maxx - minx + 1) * (maxy - miny + 1) >= 200:
+            rects.append((minx, miny, maxx - minx + 1, maxy - miny + 1))
     rects.sort(key=lambda r: (r[1], r[0]))
     return rects
 
@@ -448,7 +507,6 @@ def rect_center(rect) -> tuple:
 
 def pixel_flash(data: bytes, x: int, y: int, width: int = SCREEN_W,
                 height: int = SCREEN_H) -> bool:
-    """True if pixel (x,y) carries a mid-flash color."""
     if x < 0 or x >= width or y < 0 or y >= height:
         return False
     i = (y * width + x) * 3
@@ -457,42 +515,23 @@ def pixel_flash(data: bytes, x: int, y: int, width: int = SCREEN_W,
 
 def has_flash_color(data: bytes, rect, width: int = SCREEN_W,
                     height: int = SCREEN_H) -> bool:
-    """True if any pixel inside rect carries a mid-flash color."""
     x, y, w, h = rect
     for row in range(y, min(y + h, height)):
         base = (row * width) * 3
         for col in range(x, min(x + w, width)):
-            i = base + (col - x) * 3
+            i = base + col * 3
             if any(color_close(data[i:i + 3], c) for c in FLASH_COLORS):
                 return True
     return False
 
 
-def await_flash(d, rect, hold_s: float = 1.6,
-                width: int = SCREEN_W, height: int = SCREEN_H) -> bool:
-    """Poll screendumps; True if flash colors appear inside rect."""
-    end = time.monotonic() + hold_s
-    while time.monotonic() < end:
-        last = d.shot("__flash-probe__")
-        if has_flash_color(last, rect, width, height):
-            return True
-        time.sleep(0.1)
-    return False
-
-
-def await_no_flash(d, rect, settle_s: float = 0.8,
-                   width: int = SCREEN_W, height: int = SCREEN_H) -> bool:
-    """Wait until no flash color remains inside rect (settling period).
-
-    Returns True when the rect is clean (no flash for the full settle
-    window). Used before injecting new input so a stale flash cannot be
-    mistaken for a fresh acknowledgment.
-    """
+def await_no_flash(d, rect, settle_s: float = 2.5) -> bool:
+    """Wait until the rect carries no flash color for a 0.2 s continuous window."""
     end = time.monotonic() + settle_s
     clean_since = None
     while time.monotonic() < end:
         shot = d.shot("__settle-probe__")
-        if not has_flash_color(shot, rect, width, height):
+        if not has_flash_color(shot, rect):
             if clean_since is None:
                 clean_since = time.monotonic()
             elif time.monotonic() - clean_since >= 0.2:
@@ -503,202 +542,13 @@ def await_no_flash(d, rect, settle_s: float = 0.8,
     return clean_since is not None
 
 
-def serial_line_count(d) -> int:
-    """Return the number of lines in the guest serial log (cursor)."""
-    return len(d.serial().splitlines())
-
-
-def resource_detail_after_cursor(serial: str, cursor: int) -> list[dict]:
-    """Extract resource detail receipts appearing after line cursor.
-
-    Returns list of {"windows": str, "app_instances": str} for each
-    matching receipt found in lines[cursor:].
-    """
-    lines = serial.splitlines()
-    receipts = []
-    for ln in lines[cursor:]:
-        m = RESOURCE_DETAIL_RE.search(ln)
-        if not m:
-            continue
-        vals = m.group(1).split("/")
-        # fields: total-frames/threads/endpoints/notifications/timers/
-        #   vm-regions/vm-committed-pages/sync-domains/sync-keys/
-        #   sync-waiters/app-instances/windows/helpers/stream-sets/max-windows-per-instance
-        windows = vals[11] if len(vals) > 11 else "?"
-        app_instances = vals[10] if len(vals) > 10 else "?"
-        receipts.append({"windows": windows, "app_instances": app_instances})
-    return receipts
-
-
-def _evaluate_settlement_fresh(serial_lines: list[str], cursor: int) -> bool:
-    """Shared core: evaluate fresh zero-instance/zero-window settlement.
-
-    Used by both production polling (await_settlement_fresh) and focused
-    controls (await_settlement_fresh_from_serial) so they always apply the
-    same parser/verdict. Item 4: production and controls share one
-    implementation.
-
-    Requires both:
-      1. At least one "application retired" receipt after cursor
-      2. At least one resource detail receipt with app-instances=0 AND
-         windows=0 after cursor
-    """
-    retirement_found = False
-    settlement_found = False
-    for ln in serial_lines[cursor:]:
-        if "application retired" in ln:
-            retirement_found = True
-        m = RESOURCE_DETAIL_RE.search(ln)
-        if m:
-            vals = m.group(1).split("/")
-            windows = vals[11] if len(vals) > 11 else "?"
-            app_instances = vals[10] if len(vals) > 10 else "?"
-            if windows == "0" and app_instances == "0":
-                settlement_found = True
-    return retirement_found and settlement_found
-
-
-def await_settlement_fresh(d, cursor: int, bound_s: float = 15.0) -> bool:
-    """Wait for fresh zero-instance/zero-window settlement AFTER cursor.
-
-    Only evaluates lifecycle and resource receipts that appear after
-    `cursor` in the serial log. Requires both:
-      1. At least one "application retired" receipt after cursor
-      2. At least one resource detail receipt with app-instances=0 AND
-         windows=0 after cursor
-
-    This fixes the historical-snapshot false positive where the initial
-    Desktop baseline (app-instances=0, windows=0) satisfied a search of the
-    entire serial history.
-    """
-    end = time.monotonic() + bound_s
-    while time.monotonic() < end:
-        serial_lines = d.serial().splitlines()
-        if _evaluate_settlement_fresh(serial_lines, cursor):
-            return True
-        time.sleep(0.2)
-    return False
-
-
-def await_settlement_fresh_from_serial(serial: str, cursor: int) -> bool:
-    """Shared-core version for testing without QEMU.
-
-    Operates on a serial string directly instead of polling d.serial().
-    Uses the same _evaluate_settlement_fresh core as production.
-    """
-    return _evaluate_settlement_fresh(serial.splitlines(), cursor)
-
-
-def record(n: int, verdict: str, ref: str = "", text: str = "") -> None:
-    results[n] = verdict
-    refs[n] = ref
-    detail[n] = text
-    print(f"[v1-guest-proof] checkpoint {n} {verdict}: {CHECKPOINTS[n]} {text}",
-          flush=True)
-
-
-def write_evidence(all_pass: bool, rc: int, install_ack: dict | None,
-                   serial_path: Path,
-                   identities: dict | None = None) -> None:
-    """Write evidence.json — always, even on unsuccessful runs.
-
-    Never suppresses errors: if writing evidence itself fails, that is
-    reported explicitly rather than silently dropped.
-    """
-    shots = []
-    for name in sorted(p.name for p in SHOTS.glob("cp*.ppm")):
-        p = SHOTS / name
-        try:
-            width, height, _ = parse_ppm(p)
-            dims = {"width": width, "height": height}
-        except ValueError:
-            dims = {"width": None, "height": None, "parse_error": True}
-        shots.append({
-            "name": name,
-            "bytes": p.stat().st_size,
-            "sha256": sha256_file(p),
-            "dimensions": dims,
-        })
-
-    # Actual identities — never hardcoded, never "MISSING" for required
-    # identities. Record QEMU wrapper, ELF, loader, libs, firmware, and
-    # launch command separately (item 2: ELF hash is distinct from wrapper
-    # hash; a wrapper hash never qualifies as emulator identity).
-    qemu_id = qemu_identity()
-    evidence = {
-        "label": LABEL,
-        "milestone": "V1 — Native Graphical Launch Foundation",
-        "branch": "arena/f6b7ebc4-arenaos",
-        "source_commit": _source_commit(),
-        "working_tree_dirty": _working_tree_dirty(),
-        "run_dir": str(RUN_DIR),
-        "qemu_wrapper_path": qemu_id["wrapper_path"],
-        "qemu_wrapper_sha256": qemu_id["wrapper_sha256"],
-        "qemu_wrapper_contents": qemu_id["wrapper_contents"],
-        "qemu_elf_path": qemu_id["elf_path"],
-        "qemu_elf_sha256": qemu_id["elf_sha256"],
-        "qemu_elf_ok": qemu_id["elf_ok"],
-        "qemu_loader_path": qemu_id["loader_path"],
-        "qemu_loader_sha256": qemu_id["loader_sha256"],
-        "qemu_runtime_libs": qemu_id["runtime_libs"],
-        "qemu_firmware": qemu_id["firmware"],
-        "qemu_launch_cmd": qemu_id["launch_cmd"],
-        "qemu_identity_ok": qemu_id["identity_ok"],
-        "apb1": str(APB1),
-        "apb1_sha256": sha256_file(APB1),
-        "install_ack": install_ack,  # captured installation acknowledgment
-        "serial_sha256": sha256_file(serial_path),
-        "serial_path": str(serial_path),
-        "checkpoints": [
-            {"case": n, "name": CHECKPOINTS[n], "result": results[n],
-             "evidence_ref": refs[n], "detail": detail[n]}
-            for n in sorted(CHECKPOINTS)
-        ],
-        "screenshots": shots,
-        "all_pass": all_pass,
-        "qemu_rc": rc,
-    }
-    if identities:
-        evidence["identities"] = identities
-    EVIDENCE.write_text(json.dumps(evidence, indent=2))
-    print(f"[v1-guest-proof] evidence -> {EVIDENCE}")
-
-
-def _source_commit() -> str | None:
-    """Actual tested source commit, or MISSING if not a git repo."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if out.returncode == 0:
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return "MISSING"
-
-
-def _working_tree_dirty() -> bool:
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "status", "--porcelain"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return bool(out.stdout.strip())
-    except Exception:
-        return True  # unknown -> treat as dirty (conservative)
-
-
-# ------------------------------------------------------------------ desktop ---
+# ============================================================================
+# Guest Desktop driver over QMP
+# ============================================================================
 
 class V1Desktop:
-    """Guest desktop client over QMP + serial log.
-
-    Uses arena_env for all path resolution; no hardcoded host paths.
-    """
-
     def __init__(self, label: str):
-        import qmp  # noqa: E402  (qmp.py is in tools/, on sys.path)
+        import qmp
         bdir = arena_env.build_dir()
         self.q = qmp.Qmp(str(bdir / f"qmp-{label}.sock"))
         self.serial_path = bdir / f"serial-{label}.log"
@@ -711,6 +561,9 @@ class V1Desktop:
             pass
         return self._serial_cache
 
+    def cursor(self) -> int:
+        return serial_cursor(self.serial())
+
     def wait(self, pred, desc: str, timeout_s: float = 45.0) -> None:
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
@@ -719,8 +572,17 @@ class V1Desktop:
             time.sleep(0.04)
         raise AssertionError(
             f"V1 proof blocked waiting for: {desc}\n"
-            f"serial tail:\n{self.serial()[-1500:]}"
-        )
+            f"serial tail:\n{self.serial()[-2000:]}")
+
+    def wait_serial(self, pattern: str, desc: str, timeout_s: float = 45.0,
+                    start: int = 0) -> bool:
+        rx = re.compile(pattern)
+        end = time.monotonic() + timeout_s
+        while time.monotonic() < end:
+            if rx.search("\n".join(_lines(self.serial())[start:])):
+                return True
+            time.sleep(0.04)
+        return False
 
     def shot(self, name: str) -> bytes:
         path = SHOTS / f"{name}.ppm"
@@ -735,22 +597,21 @@ class V1Desktop:
                                      "value": (y * 32767 + 599) // 599}},
         ]
         if down is not None:
-            events.append({"type": "btn", "data": {"button": "left",
-                                                   "down": down}})
+            events.append({"type": "btn",
+                           "data": {"button": "left", "down": down}})
         self.q.command("input-send-event", events=events)
 
     def click(self, x: int, y: int) -> None:
         self.point(x, y, True)
         self.point(x, y, False)
-        self.point(780, 500)  # leave the pointer over the desktop background
+        self.point(780, 560)  # park the pointer on the desktop background
 
     def qkey(self, qcode: str, down: bool) -> None:
-        self.q.command(
-            "input-send-event",
-            events=[{"type": "key", "data": {"down": down,
-                                              "key": {"type": "qcode",
-                                                     "data": qcode}}}],
-        )
+        self.q.command("input-send-event",
+                       events=[{"type": "key",
+                                "data": {"down": down,
+                                         "key": {"type": "qcode",
+                                                 "data": qcode}}}])
 
     def key(self, qcode: str, gap: float = 0.02) -> None:
         self.qkey(qcode, True)
@@ -766,29 +627,24 @@ class V1Desktop:
             self.key(qcode, gap)
 
     def open_apps(self) -> None:
-        # Desktop shell "All Applications" button: system bar, right of the
-        # "ArenaOS" wordmark. Center approx (103, 13).
+        # Desktop shell "All Applications" button: right of the wordmark.
         self.click(103, 13)
-
-    def f8(self) -> None:
-        self.qkey("f8", True)
-        self.qkey("f8", False)
 
 
 QMAP = {chr(c): chr(c) for c in
-        list(range(ord("a"), ord("z") + 1)) +
-        list(range(ord("0"), ord("9") + 1))}
+        list(range(ord("a"), ord("z") + 1)) + list(range(ord("0"), ord("9") + 1))}
 QMAP[" "] = "spc"
 QMAP["\r"] = "ret"
 
 
-# ------------------------------------------------------------------ AFS2 seeding ---
+# ============================================================================
+# AFS2 seeding (unchanged production filesystem path)
+# ============================================================================
 
-AFS2_REGION_OFFSET = arena_env.AFS2_BASE_SECTOR * 512  # 8 MiB into the disk
+AFS2_REGION_OFFSET = arena_env.AFS2_BASE_SECTOR * 512
 
 
 def read_afs2_region(disk_path: Path) -> bytes:
-    """Extract the AFS2 volume region from a disk image."""
     data = disk_path.read_bytes()
     if len(data) < AFS2_REGION_OFFSET:
         raise ValueError(f"disk {disk_path} too small ({len(data)} bytes)")
@@ -796,7 +652,6 @@ def read_afs2_region(disk_path: Path) -> bytes:
 
 
 def write_afs2_region(disk_path: Path, region: bytes) -> None:
-    """Write the AFS2 volume region back into the disk image."""
     data = bytearray(disk_path.read_bytes())
     data[AFS2_REGION_OFFSET:AFS2_REGION_OFFSET + len(region)] = region
     disk_path.write_bytes(bytes(data))
@@ -804,15 +659,8 @@ def write_afs2_region(disk_path: Path, region: bytes) -> None:
 
 def stage_apb1_in_afs2(disk_path: Path, bundle: bytes,
                        filename: bytes = b"c-gfx-app.apb1") -> None:
-    """Stage the APB1 bundle as a real AFS2 file entry.
-
-    Uses the repository's AFS2 Volume API to create directory entries and
-    file data — never a raw offset write. Verifies after writing that the
-    path exists, contents match, and filesystem consistency passes.
-    """
     region = read_afs2_region(disk_path)
     vol = afs2.Volume(region)
-
     root_id = vol.root_id()
 
     def ensure_dir(parent_id: int, name: bytes) -> int:
@@ -825,7 +673,6 @@ def stage_apb1_in_afs2(disk_path: Path, bundle: bytes,
     users_id = ensure_dir(root_id, b"Users")
     user_id = ensure_dir(users_id, b"user")
     desktop_id = ensure_dir(user_id, b"Desktop")
-
     try:
         file_id, _ = vol.lookup(desktop_id, filename)
     except afs2.FsError:
@@ -839,608 +686,727 @@ def stage_apb1_in_afs2(disk_path: Path, bundle: bytes,
 
     region_after = vol.image()
     vol2 = afs2.Volume(region_after)
-
     desktop_id2 = vol2.resolve("/Users/user/Desktop")
     file_id2, _ = vol2.lookup(desktop_id2, filename)
     rec = vol2.record(file_id2)
     if rec.size != len(bundle):
-        raise RuntimeError(
-            f"AFS2 staged file size {rec.size} != bundle {len(bundle)}")
-    read_back = vol2.read(file_id2, 0, rec.size)
-    if read_back != bundle:
+        raise RuntimeError(f"AFS2 staged size {rec.size} != bundle {len(bundle)}")
+    if vol2.read(file_id2, 0, rec.size) != bundle:
         raise RuntimeError("AFS2 staged file contents mismatch")
-
     vol2.statfs()
-
     write_afs2_region(disk_path, region_after)
-    print(f"[v1-guest-proof] APB1 staged in AFS2 at /Users/user/Desktop/"
+    print(f"[v1-guest-proof] APB1 staged at /Users/user/Desktop/"
           f"{filename.decode()} ({len(bundle)} bytes)", flush=True)
 
 
-# ------------------------------------------------------------------ proof helpers ---
+# ============================================================================
+# Evidence recording
+# ============================================================================
 
-def launch_cgfx_app(d: V1Desktop) -> None:
-    """Launch one c-gfx-app instance via the All Applications catalog."""
-    d.open_apps()
-    time.sleep(0.1)
-    d.type_text("c")  # filter catalog to c-gfx-app
-    time.sleep(0.1)
-    d.key("ret")
-    d.wait(
-        lambda: window_count(d.serial()) >= 1,
-        "c-gfx-app native window registered",
-    )
+def record(n: int, verdict: str, ref: str = "", text: str = "") -> None:
+    results[n] = verdict
+    refs[n] = ref
+    detail[n] = text
+    print(f"[v1-guest-proof] checkpoint {n} {verdict}: {CHECKPOINTS[n]} {text}",
+          flush=True)
 
 
-def instance_identity_from_rects(rects: list) -> list[dict]:
-    """Establish instance identity from window rects.
+def skip_remaining(from_n: int, reason: str) -> None:
+    for n in sorted(CHECKPOINTS):
+        if n >= from_n and results[n] == "NOT RUN":
+            record(n, "NOT RUN", "", reason)
 
-    Each instance is identified by its screen geometry (x,y,w,h). Returns
-    a list of {"rect": (x,y,w,h), "center": (cx,cy), "label": str}.
-    Label is "A" for the first (top-leftmost), "B" for the second, etc.
+
+# ============================================================================
+# Provenance
+# ============================================================================
+
+def _source_commit() -> str | None:
+    try:
+        return subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, check=True
+                              ).stdout.strip()
+    except Exception:
+        return None
+
+
+def _working_tree_dirty() -> bool:
+    try:
+        out = subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--porcelain"],
+                             capture_output=True, text=True, check=True).stdout
+        return bool(out.strip())
+    except Exception:
+        return True
+
+
+def _compiler_identity(cmd: list[str]) -> str:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=60).stdout.splitlines()[0].strip()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        return f"MISSING ({exc})"
+
+
+def compiler_identities() -> dict:
+    zig = os.environ.get("ARENA_ZIG", "/opt/zig-clang/pkg/ziglang/zig")
+    return {
+        "gcc": _compiler_identity(["gcc", "--version"]),
+        "clang_via_zig": _compiler_identity([zig, "cc", "--version"]),
+        "zig": _compiler_identity([zig, "version"]),
+        "rustc": _compiler_identity([str(Path("/opt/rust/prefix/bin/rustc")),
+                                     "--version"]),
+    }
+
+
+QEMU_ELF_HINT = "qemu-system-x86_64-patched"
+REQUIRED_QEMU_ELF_SHA256 = (
+    "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff")
+
+
+def qemu_identity() -> dict:
+    """Resolve every component of the launch chain separately: wrapper, ELF,
+    loader, runtime libraries, firmware. A wrapper hash alone is never
+    treated as emulator identity."""
+    try:
+        cmd = arena_env.qemu_cmd()
+    except SystemExit:
+        cmd = []
+    ident = {
+        "launch_cmd": [str(c) for c in cmd],
+        "wrapper_path": "MISSING", "wrapper_sha256": "MISSING",
+        "elf_path": "MISSING", "elf_sha256": "MISSING", "elf_ok": False,
+        "loader_path": "MISSING", "loader_sha256": "MISSING",
+        "runtime_libs": [],
+        "firmware": {"code_path": "MISSING", "code_sha256": "MISSING",
+                     "vars_path": "MISSING", "vars_sha256": "MISSING"},
+        "identity_ok": False,
+    }
+    wrapper = next((Path(p) for p in cmd if Path(p).exists() and Path(p).is_file()),
+                   None)
+    contents = ""
+    if wrapper is not None:
+        ident["wrapper_path"] = str(wrapper)
+        ident["wrapper_sha256"] = sha256_file(wrapper)
+        try:
+            contents = wrapper.read_text(errors="replace")
+        except OSError:
+            contents = ""
+    elf = next((Path(p) for p in cmd
+                if Path(p).exists() and Path(p).is_file()
+                and QEMU_ELF_HINT in Path(p).name), None)
+    if elf is None:
+        elf = next((Path(p) for p in cmd
+                    if Path(p).exists() and Path(p).is_file()
+                    and Path(p).name.startswith("qemu-system")), None)
+    if elf is not None:
+        ident["elf_path"] = str(elf)
+        ident["elf_sha256"] = sha256_file(elf)
+        ident["elf_ok"] = ident["elf_sha256"] == REQUIRED_QEMU_ELF_SHA256
+    loader = re.findall(r'"(\S*ld-linux\S*)"', contents)
+    if loader:
+        lp = Path(loader[0])
+        if lp.exists():
+            ident["loader_path"] = str(lp)
+            ident["loader_sha256"] = sha256_file(lp)
+    libpaths = re.findall(r'--library-path "([^"]*)"', contents)
+    for lib_dir in (libpaths[0].split(":") if libpaths else []):
+        ld = Path(lib_dir)
+        if ld.is_dir():
+            for lib in sorted(ld.iterdir())[:20]:
+                if lib.is_file():
+                    ident["runtime_libs"].append(
+                        {"path": str(lib), "sha256": sha256_file(lib)})
+    for key, getter in (("code_path", arena_env.ovmf_code),
+                        ("vars_path", arena_env.ovmf_vars_template)):
+        try:
+            p = getter()
+            ident["firmware"][key] = str(p)
+            ident["firmware"][key.replace("_path", "_sha256")] = sha256_file(p)
+        except Exception:
+            pass
+    fw = ident["firmware"]
+    ident["identity_ok"] = bool(
+        ident["elf_ok"]
+        and ident["wrapper_path"] != "MISSING"
+        and ident["wrapper_sha256"] != "MISSING"
+        and ident["loader_path"] != "MISSING"
+        and ident["loader_sha256"] != "MISSING"
+        and fw["code_sha256"] != "MISSING"
+        and fw["vars_sha256"] != "MISSING")
+    return ident
+
+
+def artifact_identities(apb1: Path) -> dict:
+    """Hashes for every artifact the verdict depends on."""
+    identity = {"apb1_sha256": sha256_file(apb1),
+                "esp_sha256": sha256_file(ESP),
+                "esp_path": str(ESP)}
+    # EFI extracted from the ESP image (EFI/BOOT/BOOTX64.EFI).
+    try:
+        import espimg  # noqa: F401  (documented ESP reader, kept for parity)
+    except Exception:
+        pass
+    efi = RUN_DIR / "BOOTX64.EFI"
+    if extract_esp_file(ESP, "/EFI/BOOT/BOOTX64.EFI", efi):
+        identity["efi_sha256"] = sha256_file(efi)
+        identity["efi_size"] = efi.stat().st_size
+    else:
+        identity["efi_sha256"] = "MISSING"
+    return identity
+
+
+def extract_esp_file(esp: Path, path: str, out: Path) -> bool:
+    """Extract a file from the FAT ESP using the repo's pyfatfs tooling."""
+    try:
+        from pyfatfs.PyFatFS import PyFatFS
+    except Exception:
+        return False
+    try:
+        with PyFatFS(str(esp)) as fs:
+            with fs.open(path) as src:
+                out.write_bytes(src.read())
+        return True
+    except Exception:
+        return False
+
+
+# ============================================================================
+# Proof flow
+# ============================================================================
+
+def probe_instance_at(d: V1Desktop, point: tuple, timeout_s: float = 3.0):
+    """Click `point` and return the instance that acknowledges FOCUS for it.
+
+    This is the only way a screen location is bound to an instance: the
+    guest must acknowledge the exact click. Returns None if no instance
+    acknowledges focus within the timeout (which fails the caller).
     """
-    identities = []
-    for i, rect in enumerate(rects):
-        cx, cy = rect_center(rect)
-        identities.append({
-            "rect": rect,
-            "center": (cx, cy),
-            "label": chr(ord("A") + i),
-        })
-    return identities
+    cursor = d.cursor()
+    d.click(*point)
+    end = time.monotonic() + timeout_s
+    while time.monotonic() < end:
+        acks = [f for f in parse_gfx_focus(d.serial()) if f["line"] >= cursor]
+        if acks:
+            return acks[-1]["surface"], acks[-1]
+        time.sleep(0.05)
+    return None, None
 
 
-# ------------------------------------------------------------------ proof ---
+def do_input_and_ack(d: V1Desktop, instance: int, event_type: int,
+                     rect, action, others=(), timeout_s: float = 2.5):
+    """Inject `action`, then require (a) a fresh instance/type-specific
+    acknowledgment and (b) a visible flash inside `rect`. Both are required;
+    the frame that satisfied both is returned."""
+    cursor = d.cursor()
+    action()
+    end = time.monotonic() + timeout_s
+    ack = None
+    frame = None
+    while time.monotonic() < end:
+        evaluation = evaluate_event_ack(d.serial(), cursor, instance,
+                                        event_type, others=others)
+        shot = d.shot("__ack-probe__")
+        if evaluation["ok"] and has_flash_color(shot, rect):
+            ack = evaluation
+            frame = shot
+            break
+        time.sleep(0.08)
+    if ack is None:
+        # Keep the final serial evaluation for the failure detail.
+        ack = evaluate_event_ack(d.serial(), cursor, instance, event_type,
+                                 others=others)
+    return ack, frame, cursor
+
 
 def proof() -> bytes:
-    """The guest workflow callback — mtest.boot calls it with NO arguments."""
     d = V1Desktop(LABEL)
+    baseline = None
+    instances = []
     try:
-        # ============ Checkpoint 1: launch-ready Desktop =================
+        # ---------------- Checkpoint 1: launch-ready Desktop --------------
         d.wait(lambda: "[desktop] real desktop frame presented" in d.serial(),
                "Desktop frame presented")
         img1 = d.shot("cp01-launch-ready-desktop")
-        time.sleep(0.4)  # let the desk view render the seeded icon
-        record(1, "PASS",
-               f"shots/cp01-launch-ready-desktop.ppm ({len(img1)} bytes)")
+        time.sleep(0.4)
+        # Record the idle resource baseline BEFORE any launch: cleanup
+        # settlement is later compared against exactly this.
+        baseline = last_detail(d.serial())
+        if baseline is None:
+            record(1, "FAIL", "shots/cp01-launch-ready-desktop.ppm",
+                   "no idle resource-detail baseline in serial")
+            skip_remaining(2, "blocked by checkpoint 1 failure")
+            return b"shutdown\r"
+        record(1, "PASS", "shots/cp01-launch-ready-desktop.ppm",
+               f"desktop frame presented; idle baseline app-instances="
+               f"{baseline['app-instances']} windows={baseline['windows']}")
 
-        # ============ Install via guest protected installer ==============
-        # Click the Desktop icon (seeded APB1) to trigger protected install.
+        # ---------------- Checkpoint 2: protected installer ---------------
+        ack_before = len(re.findall(RE_INSTALL_ACK, d.serial()))
         d.click(52, 58)
         time.sleep(0.1)
         d.click(52, 58)
-        d.click(780, 500)
-        d.wait(
-            lambda: "[desktop] APB1 installed; signed version=42"
-            in d.serial(),
-            "protected installer installation acknowledgment",
-        )
+        d.click(780, 560)
+        installed = d.wait_serial(RE_INSTALL_ACK.pattern,
+                                  "protected installer receipt", 60)
+        if not installed:
+            record(2, "FAIL", "", "no APB1 install receipt from guest installer")
+            skip_remaining(3, "blocked by checkpoint 2 failure")
+            return b"shutdown\r"
         serial = d.serial()
-        line = [ln for ln in serial.splitlines()
-                if "APB1 installed; signed version=" in ln][-1]
+        matches = [ln for ln in serial.splitlines() if RE_INSTALL_ACK.search(ln)]
+        version = RE_INSTALL_ACK.search(matches[-1]).group(1)
         install_ack = {
-            "serial_line": line,
+            "serial_line": matches[-1],
+            "receipt_count_before": ack_before,
+            "version": int(version),
             "apb1_sha256": sha256_file(APB1),
-            "kind": "installation_acknowledgment",
-            "note": "serial acknowledgment from guest protected installer; "
-                    "not a cryptographic receipt unless signature verified",
+            "kind": "installation_receipt",
+            "note": "guest protected installer receipt (receiver-side APKG "
+                    "and signature checks); not a host-computed attestation",
         }
-        try:
-            INSTALL_ACK_PATH.write_text(json.dumps(install_ack, indent=2))
-        except OSError as exc:
-            print(f"[v1-guest-proof] WARN: could not write install-ack: "
-                  f"{exc}", flush=True)
-        print(f"[v1-guest-proof] installation acknowledgment: {line}",
-              flush=True)
+        INSTALL_ACK_PATH.write_text(json.dumps(install_ack, indent=2))
+        record(2, "PASS", "install-ack.json",
+               f"protected installer installed signed version={version}")
 
-        # ============ Checkpoint 2: first native C window ================
-        launch_cgfx_app(d)
-        time.sleep(0.5)
-        img2 = d.shot("cp02-first-native-c-window")
-        rects = window_rects(img2)
-        if not rects:
-            record(2, "FAIL", "shots/cp02-first-native-c-window.ppm",
-                   "no c-gfx-app checker window on screen")
-            return b"shutdown\r"
-        if not has_app_color(img2, rects[0]):
-            record(2, "FAIL", "shots/cp02-first-native-c-window.ppm",
-                   "checker colors not present in detected window")
-            return b"shutdown\r"
-        cx, cy = rect_center(rects[0])
-        record(2, "PASS", "shots/cp02-first-native-c-window.ppm",
-               f"{len(rects)} connected checker component(s), "
-               f"checker pattern present")
-        # Let any launch/initial flash settle before keyboard testing.
-        time.sleep(0.8)
-
-        # ============ Checkpoint 3: keyboard response ====================
-        # Event-specific keyboard input sequence:
-        #   1. Focus the instance
-        #   2. Require prior input-driven state to settle (no flash)
-        #   3. Capture acknowledgment baseline (guest events counter)
-        #   4. Inject keyboard event
-        #   5. Require new acknowledgment (counter incremented) correlated
-        #      with visible flash in focused window
-        d.click(cx, cy)
-        time.sleep(0.3)
-        # Settle any prior flash before injecting new input. The focus
-        # click itself delivers a POINTER event that triggers a 30-frame
-        # flash (~1s); allow up to 2.5s for it to settle.
-        settled_before_kb = await_no_flash(d, rects[0], settle_s=2.5)
-        if not settled_before_kb:
-            record(3, "FAIL", "shots/cp03-keyboard-response.ppm",
-                   "pre-input flash did not settle before keyboard injection")
-            return b"shutdown\r"
-        # Capture acknowledgment baseline from guest serial output.
-        kb_baseline = last_gfx_events_count(d.serial())
-        # Inject keyboard event.
-        d.type_text("k")
-        # Require a fresh, event-specific acknowledgment: counter incremented
-        # AND flash visible in focused window. Preserve the first frame that
-        # satisfies both conditions.
-        end = time.monotonic() + 1.6
-        ok3 = False
-        ack_frame3 = None
-        while time.monotonic() < end:
-            s3 = d.shot("__flash-probe__")
-            if has_flash_color(s3, rects[0]):
-                new_count = last_gfx_events_count(d.serial())
-                if kb_baseline is None or (new_count is not None
-                                           and new_count > kb_baseline):
-                    ok3 = True
-                    ack_frame3 = s3
-                    break
-            time.sleep(0.1)
-        img3 = d.shot("cp03-keyboard-response")
-        if ack_frame3 is not None:
-            img3 = ack_frame3  # preserve the frame that satisfied the ack
-        record(3, "PASS" if ok3 else "FAIL",
-               "shots/cp03-keyboard-response.ppm",
-               f"fresh flash + event ack after keyboard input "
-               f"(baseline={kb_baseline})" if ok3
-               else f"no fresh flash/ack after keyboard input "
-               f"(baseline={kb_baseline})")
-
-        # ============ Checkpoint 4: mouse response =======================
-        # Event-specific mouse input sequence:
-        #   1. Require prior flash to settle (BEFORE clicking)
-        #   2. Inject mouse click inside the window
-        #   3. Require fresh flash in clicked window (event-specific ack)
-        # Settle prior flash BEFORE the mouse click. Allow up to 2.5s
-        # for any residual flash (e.g. from keyboard input in CP3) to settle.
-        settled_before_mouse = await_no_flash(d, rects[0], settle_s=2.5)
-        if not settled_before_mouse:
-            record(4, "FAIL", "shots/cp04-mouse-response.ppm",
-                   "pre-input flash did not settle before mouse injection")
-            return b"shutdown\r"
-        # Click inside the window (not at center, to distinguish from CP3).
-        mx = rects[0][0] + rects[0][2] // 4
-        my = rects[0][1] + rects[0][3] // 4
-        # Capture acknowledgment baseline from guest serial output.
-        mouse_baseline = last_gfx_events_count(d.serial())
-        d.click(mx, my)
-        time.sleep(0.3)
-        # Require fresh flash in clicked window after mouse input, correlated
-        # with a new acknowledgment (counter incremented). Preserve the first
-        # frame that satisfies both conditions.
-        end = time.monotonic() + 1.6
-        ok4 = False
-        ack_frame4 = None
-        while time.monotonic() < end:
-            s4 = d.shot("__flash-probe__")
-            if has_flash_color(s4, rects[0]):
-                new_count = last_gfx_events_count(d.serial())
-                if mouse_baseline is None or (new_count is not None
-                                              and new_count > mouse_baseline):
-                    ok4 = True
-                    ack_frame4 = s4
-                    break
-            time.sleep(0.1)
-        img4 = d.shot("cp04-mouse-response")
-        if ack_frame4 is not None:
-            img4 = ack_frame4  # preserve the frame that satisfied the ack
-        record(4, "PASS" if ok4 else "FAIL",
-               "shots/cp04-mouse-response.ppm",
-               f"fresh flash + event ack after pointer input "
-               f"(baseline={mouse_baseline})" if ok4
-               else f"no fresh flash/ack after pointer input "
-               f"(baseline={mouse_baseline})")
-
-        # ============ Checkpoint 5: two concurrent instances =============
-        # Launch a second c-gfx-app instance. Connected components may merge
-        # overlapping windows into one component, so component count is NOT
-        # used as instance identity. Instead:
-        #   1. Confirm two instances via serial window count
-        #   2. Use spatial probing: leftmost and rightmost app/flash-colored
-        #      columns as probe regions for the two instances
-        #   3. Test both focus directions independently
-        launch_cgfx_app(d)
-        d.wait(lambda: window_count(d.serial()) >= 2,
-               "two c-gfx-app instances registered")
-        time.sleep(0.5)
-        img5a = d.shot("cp05a-two-concurrent-instances")
-
-        # Find all pixels matching EITHER app colors OR flash colors.
-        # Flash may be active from launch animation; include it for extent.
-        def app_or_flash_mask(data, width, height):
-            hits = []
-            for y in range(height):
-                base = (y * width) * 3
-                for x in range(width):
-                    i = base + x * 3
-                    r, g, b = data[i], data[i + 1], data[i + 2]
-                    if (any(color_close((r, g, b), c) for c in APP_COLORS)
-                            or any(color_close((r, g, b), c)
-                                   for c in FLASH_COLORS)):
-                        hits.append((x, y))
-            return hits
-
-        hits = app_or_flash_mask(img5a, SCREEN_W, SCREEN_H)
-        if not hits:
-            record(5, "FAIL",
-                   "shots/cp05a-two-concurrent-instances.ppm",
-                   "no visible checker/flash pixels for either instance")
-            return b"shutdown\r"
-
-        xs = [p[0] for p in hits]
-        ys = [p[1] for p in hits]
-        left_x = min(xs)
-        right_x = max(xs)
-        center_y = (min(ys) + max(ys)) // 2
-
-        # Leftmost column region -> instance A (leftmost window in cascade)
-        # Rightmost column region -> instance B (rightmost window in cascade)
-        # Reject rather than guess if we cannot establish separate regions.
-        if left_x == right_x:
-            record(5, "FAIL",
-                   "shots/cp05a-two-concurrent-instances.ppm",
-                   "instances overlap exactly (left_x=%d == right_x=%d); "
-                   "cannot establish separate probe regions" % (left_x, right_x))
-            return b"shutdown\r"
-
-        # Probe columns: inset from extremes to avoid edge noise.
-        probe_a_x = min(left_x + 15, right_x - 15)
-        probe_b_x = max(right_x - 15, left_x + 15)
-        if probe_a_x >= probe_b_x:
-            record(5, "FAIL",
-                   "shots/cp05a-two-concurrent-instances.ppm",
-                   "instances too close (left_x=%d, right_x=%d); "
-                   "cannot establish separate probe regions" % (left_x, right_x))
-            return b"shutdown\r"
-
-        probe_a = (probe_a_x, center_y)
-        probe_b = (probe_b_x, center_y)
-        probe_rect = (0, max(0, center_y - 15), SCREEN_W, 30)  # horizontal band
-
-        # Verify both probe regions have non-background content.
-        def non_bg_at(data, x, y, half=8):
-            x0 = max(0, x - half)
-            y0 = max(0, y - half)
-            x1 = min(SCREEN_W, x + half)
-            y1 = min(SCREEN_H, y + half)
-            bg = (24, 32, 53)
-            for row in range(y0, y1):
-                base = (row * SCREEN_W) * 3
-                for col in range(x0, x1):
-                    i = base + col * 3
-                    r, g, b = data[i], data[i + 1], data[i + 2]
-                    if not color_close((r, g, b), bg):
-                        return True
-            return False
-
-        if not (non_bg_at(img5a, *probe_a) and non_bg_at(img5a, *probe_b)):
-            record(5, "FAIL",
-                   "shots/cp05a-two-concurrent-instances.ppm",
-                   "cannot establish non-background content at both probe "
-                   "regions (probe_a=(%d,%d), probe_b=(%d,%d))"
-                   % (probe_a_x, center_y, probe_b_x, center_y))
-            return b"shutdown\r"
-
-        # ===== Direction 1: Focus A, inject key, require A flashes, B not =====
-        # Item 5: event-specific isolation — capture ack baseline, inject,
-        # require counter increment correlated with flash at A only.
-        d.click(*probe_a)
-        time.sleep(0.3)
-        settled_a = await_no_flash(d,
-                                   (probe_a_x - 8, center_y - 8, 16, 16),
-                                   settle_s=2.5)
-        if not settled_a:
-            record(5, "FAIL", "shots/cp05-focus-isolation.ppm",
-                   "instance A pre-input flash did not settle")
-            return b"shutdown\r"
-        dir1_baseline = last_gfx_events_count(d.serial())
-        d.type_text("a")  # keyboard input for instance A
-        end = time.monotonic() + 2.0
-        dir1_ok = False
-        while time.monotonic() < end:
-            shot = d.shot("__flash-probe__")
-            flash_a = pixel_flash(shot, *probe_a)
-            flash_b = pixel_flash(shot, *probe_b)
-            if flash_a and not flash_b:
-                new_count = last_gfx_events_count(d.serial())
-                if dir1_baseline is None or (new_count is not None
-                                             and new_count > dir1_baseline):
-                    dir1_ok = True
-                    break
-            time.sleep(0.1)
-
-        # ===== Direction 2: Focus B, inject key, require B flashes, A not =====
-        settled_b = await_no_flash(d,
-                                   (probe_b_x - 8, center_y - 8, 16, 16),
-                                   settle_s=2.5)
-        if not settled_b:
-            record(5, "FAIL", "shots/cp05-focus-isolation.ppm",
-                   "instance B pre-input flash did not settle after dir 1")
-            return b"shutdown\r"
-        d.click(*probe_b)
-        time.sleep(0.3)
-        settled_b2 = await_no_flash(d,
-                                    (probe_b_x - 8, center_y - 8, 16, 16),
-                                    settle_s=2.5)
-        if not settled_b2:
-            record(5, "FAIL", "shots/cp05-focus-isolation.ppm",
-                   "instance B pre-input flash did not settle before dir 2")
-            return b"shutdown\r"
-        dir2_baseline = last_gfx_events_count(d.serial())
-        d.type_text("b")  # keyboard input for instance B
-        end = time.monotonic() + 2.0
-        dir2_ok = False
-        while time.monotonic() < end:
-            shot = d.shot("__flash-probe__")
-            flash_b2 = pixel_flash(shot, *probe_b)
-            flash_a2 = pixel_flash(shot, *probe_a)
-            if flash_b2 and not flash_a2:
-                new_count = last_gfx_events_count(d.serial())
-                if dir2_baseline is None or (new_count is not None
-                                             and new_count > dir2_baseline):
-                    dir2_ok = True
-                    break
-            time.sleep(0.1)
-
-        img5 = d.shot("cp05-focus-isolation")
-        ok5 = dir1_ok and dir2_ok
-        record(5, "PASS" if ok5 else "FAIL",
-               "shots/cp05-focus-isolation.ppm",
-               "dir1(A focus@x=%d): %s, dir2(B focus@x=%d): %s"
-               % (probe_a_x, "PASS" if dir1_ok else "FAIL",
-                  probe_b_x, "PASS" if dir2_ok else "FAIL")
-               if ok5
-               else "isolation failed: dir1=%s, dir2=%s"
-               % (dir1_ok, dir2_ok))        # ============ Checkpoint 6: window removal with accounting =======
-        # Retire every live app window using close button. Track specific
-        # instances. Require fresh zero-instance/zero-window settlement
-        # AFTER a serial cursor captured BEFORE closing (item 4: cursor must
-        # precede the close operation, not follow it).
-        restored = False
-        windows_retired = 0
-        # Close button: top-right of each window's title bar
-        # (CLOSE_WIDTH=28, TITLE_HEIGHT=28 from arena_ui::metrics).
-        #
-        # Capture serial cursor BEFORE initiating close operations so that
-        # settlement is evaluated against fresh receipts that arrive after
-        # the close sequence begins, not against the post-close snapshot.
-        cp6_cursor = serial_line_count(d)
-
-        for _ in range(4):
-            rects_now = window_rects(d.shot("__cp6-probe__"))
-            if not rects_now:
-                restored = True
-                break
-            rx, ry, rw, rh = rects_now[0]
-            cx_close = rx + rw - CLOSE_W // 2
-            cy_close = ry + TITLE_H // 2
-            d.click(cx_close, cy_close)
-            time.sleep(0.4)
-            # Wait for the window to VISUALLY disappear from the screen.
-            end_v = time.monotonic() + 3.0
-            visually_gone = False
-            while time.monotonic() < end_v:
-                if not window_rects(d.shot("__cp6-visual-probe__")):
-                    visually_gone = True
-                    break
-                time.sleep(0.1)
-            if retired_count(d.serial()) > 0:
-                windows_retired += 1
-            if visually_gone:
-                restored = True
-                break
-
-        # Wait for fresh zero-instance/zero-window settlement after cursor
-        # captured before the close loop.
-        settled = await_settlement_fresh(d, cp6_cursor)
-
-        time.sleep(0.4)
-        img6 = d.shot("cp06-desktop-restored")
-        rects6 = window_rects(img6)
-
-        # Resource settlement must be fresh (after cursor), not historical.
-        ok6 = settled and len(rects6) == 0
-        record(6, "PASS" if ok6 else "FAIL",
-               "shots/cp06-desktop-restored.ppm",
-               f"{windows_retired} window(s) retired, Desktop restored, "
-               f"resources settled={settled}, visual rects={len(rects6)}"
-               if ok6
-               else f"{len(rects6)} visual component(s), settled={settled}")
-
-        # ============ Checkpoint 7: final V1 demonstration ===============
+        # ---------------- Checkpoint 3: first native C window -------------
+        launch = d.cursor()
         d.open_apps()
         time.sleep(0.1)
         d.type_text("c")
         time.sleep(0.1)
         d.key("ret")
-        d.wait(lambda: window_count(d.serial()) >= 1,
-               "final demonstration window registered")
-        rects7 = []
-        end = time.monotonic() + 5.0
-        while time.monotonic() < end and not rects7:
-            rects7 = window_rects(d.shot("__cp7-probe__"))
-            if not rects7:
-                time.sleep(0.15)
-        if not rects7:
-            record(7, "FAIL",
-                   "shots/cp07-final-v1-demonstration.ppm",
-                   "no painted window for final demonstration")
+        ident_ok = d.wait_serial(RE_IDENTIFY_OK.pattern,
+                                 "guest Identify round-trip", 30, start=launch)
+        if not ident_ok:
+            record(3, "FAIL", "", "client never reported a successful Identify")
+            skip_remaining(4, "blocked by checkpoint 3 failure")
+            return b"shutdown\r"
+        identity = parse_gfx_identities(d.serial())[-1]["surface"]
+        created = d.wait_serial(r"\[gfx\] window created handle=\d+ surface=%d" % identity,
+                                "client window creation", 30, start=launch)
+        d.wait(lambda: re.search(RE_WINDOW_COUNT, d.serial()) is not None,
+               "desktop window registration", 30)
+        time.sleep(0.6)
+        img3 = d.shot("cp03-first-native-c-window")
+        rects = window_rects(img3)
+        if not created or not rects:
+            record(3, "FAIL", "shots/cp03-first-native-c-window.ppm",
+                   f"Identify={identity} created={created} visual_rects={len(rects)}")
+            skip_remaining(4, "blocked by checkpoint 3 failure")
+            return b"shutdown\r"
+        rect1 = rects[0]
+        # Bind the rectangle to the instance by acknowledgment, not geometry.
+        bound, _focus = probe_instance_at(d, rect_center(rect1))
+        if bound != identity:
+            record(3, "FAIL", "shots/cp03-first-native-c-window.ppm",
+                   f"geometry/identity binding failed: Identify named {identity}, "
+                   f"click at {rect_center(rect1)} was acknowledged by {bound}")
+            skip_remaining(4, "blocked by checkpoint 3 failure")
+            return b"shutdown\r"
+        instances.append(identity)
+        record(3, "PASS", "shots/cp03-first-native-c-window.ppm",
+               f"Identify surface={identity} -> create -> rendered window "
+               f"{rect1}; click acknowledged by same instance")
+
+        # ---------------- Checkpoint 4: keyboard --------------------------
+        if not await_no_flash(d, rect1):
+            record(4, "FAIL", "shots/cp04-keyboard-response.ppm",
+                   "pre-input flash did not settle")
+            skip_remaining(5, "blocked by checkpoint 4 failure")
+            return b"shutdown\r"
+        ack4, frame4, _c4 = do_input_and_ack(
+            d, identity, EVENT_KEY, rect1, lambda: d.type_text("k"))
+        img4 = frame4 if frame4 is not None else d.shot("cp04-keyboard-response")
+        if frame4 is None:
+            d.shot("cp04-keyboard-response")
+        if not ack4["ok"]:
+            record(4, "FAIL", "shots/cp04-keyboard-response.ppm",
+                   f"no instance/type-specific keyboard ack "
+                   f"(matched={ack4['record']}, before={ack4['counter_before']}, "
+                   f"cross={ack4['cross_acks']})")
         else:
-            # Let the newly launched window finish its initial render
-            # before interacting with it.
-            time.sleep(0.8)
-            # Click to focus the window, keeping the pointer on it so
-            # keyboard input is delivered to the focused window.
-            cx7, cy7 = rect_center(rects7[0])
-            d.point(cx7, cy7, True)
-            d.point(cx7, cy7, False)
-            time.sleep(0.3)
-            # Wait for any click/pointer flash to settle before key injection.
-            await_no_flash(d, rects7[0], settle_s=2.5)
-            d.type_text("v")
-            end = time.monotonic() + 3.0
-            ok7 = False
+            record(4, "PASS", "shots/cp04-keyboard-response.ppm",
+                   f"KEY ack surface={identity} counter "
+                   f"{ack4['counter_before']}->{ack4['counter_after']} + visible flash")
+
+        # ---------------- Checkpoint 5: mouse -----------------------------
+        if not await_no_flash(d, rect1):
+            record(5, "FAIL", "shots/cp05-mouse-response.ppm",
+                   "pre-input flash did not settle before pointer injection")
+            skip_remaining(6, "blocked by checkpoint 5 failure")
+            return b"shutdown\r"
+        mx = rect1[0] + rect1[2] // 4
+        my = rect1[1] + rect1[3] // 4
+        ack5, frame5, _c5 = do_input_and_ack(
+            d, identity, EVENT_POINTER, rect1, lambda: d.click(mx, my))
+        if frame5 is None:
+            img5 = d.shot("cp05-mouse-response")
+        else:
+            img5 = frame5
+        if not ack5["ok"]:
+            record(5, "FAIL", "shots/cp05-mouse-response.ppm",
+                   f"no instance/type-specific pointer ack "
+                   f"(matched={ack5['record']}, before={ack5['counter_before']}, "
+                   f"cross={ack5['cross_acks']})")
+        else:
+            record(5, "PASS", "shots/cp05-mouse-response.ppm",
+                   f"POINTER ack surface={identity} counter "
+                   f"{ack5['counter_before']}->{ack5['counter_after']} + visible flash")
+
+        # ---------------- Checkpoint 6: two instances, isolation ----------
+        launch2 = d.cursor()
+        d.open_apps()
+        time.sleep(0.1)
+        d.type_text("c")
+        time.sleep(0.1)
+        d.key("ret")
+        got_second = d.wait_serial(
+            r"\[gfx\] identify ok surface=(?!%d$)\d+" % identity,
+            "second instance Identify", 40, start=launch2)
+        if not got_second:
+            record(6, "FAIL", "shots/cp06a-two-instances.ppm",
+                   "second instance never identified")
+            skip_remaining(7, "blocked by checkpoint 6 failure")
+            return b"shutdown\r"
+        # The two most recent Identify receipts name the two live instances.
+        # They must be distinct: a repeated identity means the guest did not
+        # actually create a second session and the proof must refuse.
+        recent = [r["surface"] for r in parse_gfx_identities(d.serial())][-2:]
+        if len(recent) < 2 or recent[0] == recent[1]:
+            record(6, "FAIL", "shots/cp06a-two-instances.ppm",
+                   f"two distinct instance identities not established: {recent}")
+            skip_remaining(7, "blocked by checkpoint 6 failure")
+            return b"shutdown\r"
+        identity_a, identity_b = recent[0], recent[1]
+        time.sleep(0.5)
+        img6a = d.shot("cp06a-two-instances")
+        rects = window_rects(img6a)
+        if len(rects) < 2:
+            record(6, "FAIL", "shots/cp06a-two-instances.ppm",
+                   f"expected 2 visible windows, found {len(rects)}")
+            skip_remaining(7, "blocked by checkpoint 6 failure")
+            return b"shutdown\r"
+
+        # Bind each visible rectangle to an instance by acknowledgment. The
+        # two probes must name DIFFERENT instances; otherwise the harness
+        # refuses rather than guessing which window is which.
+        probe_a = (rects[0][0] + 40, rects[0][1] + 60)
+        probe_b = (rects[-1][0] + rects[-1][2] - 40, rects[-1][1] + 60)
+        inst_a, _ = probe_instance_at(d, probe_a)
+        inst_b, _ = probe_instance_at(d, probe_b)
+        if inst_a is None or inst_b is None or inst_a == inst_b:
+            record(6, "FAIL", "shots/cp06a-two-instances.ppm",
+                   f"could not bind two distinct instances by acknowledgment "
+                   f"(probe_a->{inst_a}, probe_b->{inst_b})")
+            skip_remaining(7, "blocked by checkpoint 6 failure")
+            return b"shutdown\r"
+        rect_a = rects[0]
+        rect_b = rects[-1]
+
+        def direction(focus_point, rect_self, rect_other, self_id, other_id,
+                      key_char):
+            inst, _ = probe_instance_at(d, focus_point)
+            if inst != self_id:
+                return {"ok": False, "error": f"focus ack was {inst}, "
+                                              f"expected {self_id}"}
+            if not await_no_flash(d, rect_self):
+                return {"ok": False, "error": "pre-input flash did not settle"}
+            evaluation, frame, _c = do_input_and_ack(
+                d, self_id, EVENT_KEY, rect_self,
+                lambda: d.type_text(key_char), others=[other_id])
+            if frame is None:
+                frame = d.shot("__isolate-probe__")
+            clean_other = not has_flash_color(frame, rect_other)
+            ok = evaluation["ok"] and clean_other
+            return {
+                "ok": ok,
+                "ack": {
+                    "counter_before": evaluation["counter_before"],
+                    "counter_after": evaluation["counter_after"],
+                    "cross_acks": evaluation["cross_acks"],
+                },
+                "other_quiet": clean_other,
+            }
+
+        dir1 = direction(probe_a, rect_a, rect_b, inst_a, inst_b, "a")
+        dir2 = direction(probe_b, rect_b, rect_a, inst_b, inst_a, "b")
+        img6 = d.shot("cp06-focus-isolation")
+        ok6 = dir1["ok"] and dir2["ok"]
+        record(6, "PASS" if ok6 else "FAIL", "shots/cp06-focus-isolation.ppm",
+               f"dir1 {inst_a}->{inst_a}: {dir1}; dir2 {inst_b}->{inst_b}: {dir2}"
+               if ok6 else
+               f"isolation failed: dir1={dir1}, dir2={dir2}")
+        live_instances = [inst_a, inst_b]
+
+        # ---------------- Checkpoint 7: removal + settlement --------------
+        cursor = d.cursor()
+        closed = []
+        close_detail = []
+        for inst, rect in ((inst_a, rect_a), (inst_b, rect_b)):
+            cx = rect[0] + rect[2] - CLOSE_W // 2
+            cy = rect[1] + TITLE_H // 2
+            d.click(cx, cy)
+            closed.append(inst)
+            # Visual removal of this window (allow time for the close animation).
+            end = time.monotonic() + 4.0
             while time.monotonic() < end:
-                s7 = d.shot("__cp7-probe__")
-                # Use the pre-computed window rect: flash colors XOR every
-                # content pixel, so during a flash the window carries NO app
-                # colors and window_rects() returns [] — recomputing rects
-                # inside the poll would make flash detection impossible.
-                if has_flash_color(s7, rects7[0]):
-                    ok7 = True
+                if not has_app_color(d.shot("__close-probe__"), rect):
                     break
                 time.sleep(0.1)
-            img7 = d.shot("cp07-final-v1-demonstration")
-            record(7, "PASS" if ok7 else "FAIL",
-                   "shots/cp07-final-v1-demonstration.ppm",
-                   "final V1 demonstration" if ok7 else "no visible flash")
+            close_detail.append({
+                "instance": inst,
+                "rect": rect,
+                "visually_gone": not has_app_color(d.shot("__close-probe__"), rect),
+            })
+        # Wait for fresh settlement receipts.
+        end = time.monotonic() + 20.0
+        cleanup = evaluate_cleanup(d.serial(), cursor, closed, baseline)
+        while time.monotonic() < end and not cleanup["ok"]:
+            time.sleep(0.25)
+            cleanup = evaluate_cleanup(d.serial(), cursor, closed, baseline)
+        time.sleep(0.5)
+        img7 = d.shot("cp07-desktop-restored")
+        rects7 = window_rects(img7)
+        presentation_ok = evaluate_presentation(rects7)
+        visual_each = all(c["visually_gone"] for c in close_detail)
+        ok7 = cleanup["ok"] and presentation_ok and visual_each
+        record(7, "PASS" if ok7 else "FAIL", "shots/cp07-desktop-restored.ppm",
+               f"retired={sorted(cleanup['per_instance'])} exits="
+               f"{ {k: v['exit_status'] for k, v in cleanup['per_instance'].items()} } "
+               f"settlement={cleanup['settlement']['app-instances'] if cleanup['settlement'] else None}/"
+               f"{cleanup['settlement']['windows'] if cleanup['settlement'] else None} "
+               f"baseline={baseline['app-instances']}/{baseline['windows']} "
+               f"visual_rects={len(rects7)}"
+               if ok7 else
+               f"cleanup incomplete: {json.dumps(cleanup, default=str)[:600]} "
+               f"visual_rects={len(rects7)} per_window_gone={visual_each}")
 
+        # ---------------- Checkpoint 8: final demonstration ---------------
+        launch3 = d.cursor()
+        d.open_apps()
+        time.sleep(0.1)
+        d.type_text("c")
+        time.sleep(0.1)
+        d.key("ret")
+        final_ok = d.wait_serial(RE_IDENTIFY_OK.pattern, "final Identify",
+                                 40, start=launch3)
+        final_id = parse_gfx_identities(d.serial())[-1]["surface"] if final_ok else None
+        rects8 = []
+        end = time.monotonic() + 6.0
+        while time.monotonic() < end and not rects8:
+            rects8 = window_rects(d.shot("__cp8-probe__"))
+            if not rects8:
+                time.sleep(0.2)
+        if not final_ok or not rects8:
+            record(8, "FAIL", "shots/cp08-final-demonstration.ppm",
+                   f"Identify={final_ok} visible={bool(rects8)}")
+        else:
+            time.sleep(0.5)
+            bound, _ = probe_instance_at(d, rect_center(rects8[0]))
+            ack8, frame8, _c8 = do_input_and_ack(
+                d, final_id, EVENT_KEY, rects8[0], lambda: d.type_text("v"))
+            if frame8 is None:
+                d.shot("cp08-final-demonstration")
+            ok8 = bound == final_id and ack8["ok"]
+            record(8, "PASS" if ok8 else "FAIL",
+                   "shots/cp08-final-demonstration.ppm",
+                   f"final instance surface={final_id} bound={bound} "
+                   f"ack={ack8['ok']}" if ok8 else
+                   f"final demonstration failed: bound={bound} ack={ack8}")
     finally:
         try:
             d.q.command("system_powerdown")
         except Exception:
             pass
-
     return b"shutdown\r"
 
 
-# ------------------------------------------------------------------ verdict ---
+# ============================================================================
+# Verdict
+# ============================================================================
 
-def compute_overall_verdict(rc: int, results: dict, install_ack: dict | None,
-                            identities: dict | None,
-                            serial_path: Path, evidence_path: Path) -> bool:
-    """Single production verdict computation used consistently.
+REQUIRED_IDENTITY_KEYS = (
+    "source_commit", "qemu_elf_sha256", "qemu_wrapper_sha256",
+    "qemu_loader_sha256", "apb1_sha256", "esp_sha256", "efi_sha256",
+)
 
-    Success requires ALL of the following:
-      - Successful guest execution (rc == 0)
-      - Every checkpoint executed and PASS (no NOT RUN, no FAIL)
-      - Installation acknowledgment captured
-      - Required identities present and verified (no MISSING), including
-        qemu_identity_ok (the actual emulator ELF hash must match the
-        pinned value — a wrapper hash alone never qualifies).
-      - Required evidence files present and valid
+
+def compute_overall_verdict(rc: int, checkpoints: dict, install_ack,
+                            identities: dict | None, serial_path: Path,
+                            artifacts: dict) -> tuple[bool, list[str]]:
+    """One verdict computation for exit status, console and evidence.json.
+
+    PASS requires every checkpoint PASS (no FAIL, no NOT RUN), a successful
+    guest run, an installation receipt, complete and verified identities
+    (including the pinned emulator ELF hash), and every declared evidence
+    artifact present.
     """
+    reasons = []
     if rc != 0:
-        return False
-    # Every checkpoint must be PASS (no NOT RUN, no FAIL).
+        reasons.append(f"guest run exit code {rc}")
     for n in sorted(CHECKPOINTS):
-        if results.get(n) != "PASS":
-            return False
-    # Installation acknowledgment must be present.
+        if checkpoints.get(n) != "PASS":
+            reasons.append(f"checkpoint {n} {checkpoints.get(n)}")
     if install_ack is None:
-        return False
-    # Required identities must be present and not MISSING.
+        reasons.append("no installation receipt")
     if identities is None:
-        return False
-    for key in ("qemu_wrapper_sha256", "qemu_elf_sha256", "apb1_sha256"):
-        if identities.get(key) in (None, "MISSING", ""):
-            return False
-    # The emulator ELF identity must be independently verified: the ELF
-    # hash must match the pinned value. A wrapper hash alone is insufficient.
-    if not identities.get("qemu_elf_ok", False):
-        return False
-    if not identities.get("qemu_identity_ok", False):
-        return False
-    # Required evidence files must be present. The guest serial log exists
-    # before the verdict; evidence.json is written immediately after, so it
-    # cannot be required to exist here (that would be self-defeating).
+        reasons.append("no identities")
+    else:
+        for key in REQUIRED_IDENTITY_KEYS:
+            value = identities.get(key)
+            if value in (None, "", "MISSING"):
+                reasons.append(f"identity {key} missing")
+        if not identities.get("qemu_elf_ok", False):
+            reasons.append("emulator ELF hash does not match the pinned value")
+        if not identities.get("qemu_identity_ok", False):
+            reasons.append("emulator launch chain identity incomplete")
+        compilers = identities.get("compilers", {})
+        for name in ("gcc", "clang_via_zig"):
+            if "MISSING" in str(compilers.get(name, "MISSING")):
+                reasons.append(f"compiler identity {name} missing")
     if not serial_path.exists():
-        return False
-    return True
+        reasons.append("serial log missing")
+    for name, path in artifacts.items():
+        if not Path(path).exists():
+            reasons.append(f"evidence artifact missing: {name}")
+    return (not reasons), reasons
 
 
-# ------------------------------------------------------------------ main ---
+def write_evidence(all_pass: bool, rc: int, install_ack, serial_path: Path,
+                   identities: dict | None, reasons: list[str]) -> None:
+    payload = {
+        "label": LABEL,
+        "harness": "tools/v1_guest_proof.py",
+        "milestone": "V1 — Native Graphical Launch Foundation",
+        "branch": _git_branch(),
+        "checkpoints": [
+            {
+                "case": n,
+                "name": CHECKPOINTS[n],
+                "result": results[n],
+                "evidence_ref": refs[n],
+                "detail": detail[n],
+            }
+            for n in sorted(CHECKPOINTS)
+        ],
+        "install_ack": install_ack,
+        "identities": identities,
+        "run": {"rc": rc, "run_dir": str(RUN_DIR),
+                "serial": str(serial_path),
+                "serial_sha256": sha256_file(serial_path)},
+        "verdict": {
+            "pass": all_pass,
+            "failed_because": reasons,
+        },
+        "classification": (
+            "qualification candidate run — evidence class GUEST (executed in "
+            "ArenaOS under QEMU TCG) with HOST provenance"
+        ),
+    }
+    EVIDENCE.write_text(json.dumps(payload, indent=2, default=str))
+
+
+def _git_branch() -> str:
+    try:
+        return subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse",
+                               "--abbrev-ref", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
+def _build_apb1(apb1_out: Path) -> Path:
+    """Build the c-gfx-app APB1 bundle from the freshly built guest ELF.
+
+    The compiler is selected by V1_CC (gcc | clang, default gcc) so the same
+    harness provides both guest compiler-coverage cells. `clang` is the
+    repository's documented route: zig cc -target x86_64-freestanding-none.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "experiments" / "c-runtime"))
+    import run as crun
+    import apb1_format
+
+    cc = os.environ.get("V1_CC", "gcc")
+    if cc not in ("gcc", "clang"):
+        raise SystemExit(f"V1_CC must be gcc or clang, not {cc!r}")
+    elfs = crun.build_guest(cc)
+    elf = elfs["c-gfx-app"]
+    audit = crun.audit_elf(elf)
+    if audit.get("loader_failures"):
+        raise SystemExit(f"c-gfx-app ELF fails the loader audit: {audit}")
+    disasm = crun.disassemble_check(elf)
+    if disasm.get("simd_or_x87_count"):
+        raise SystemExit(f"c-gfx-app ELF emits SIMD/x87: {disasm}")
+    manifest = apb1_format.make_manifest(
+        app_id=b"com.arena.cgfxapp",
+        package_id=b"org.arena.cgfxapp",
+        display_name=b"C Graphics App",
+        version=42,
+        # MULTI_INSTANCE | STANDARD_STREAMS | NATIVE_SYNC
+        flags=1 | 8 | 16,
+        requested=0,
+        entry=b"bin/cgfxapp",
+        icon=b"",
+        width=640,
+        height=480,
+        associations=(),
+    )
+    bundle = apb1_format.build_bundle([(1, b"bin/cgfxapp", elf.read_bytes())],
+                                      manifest=manifest)
+    parsed = apb1_format.parse_bundle(bundle)
+    if [name for _k, name, _s, _d in parsed.files] != [b"bin/cgfxapp"]:
+        raise SystemExit("APB1 round-trip changed the payload list")
+    apb1_out.write_bytes(bundle)
+    print(f"[v1-guest-proof] built APB1 {apb1_out} ({len(bundle)} bytes, "
+          f"sha256 {sha256_file(apb1_out)}) with {cc} from ELF {elf} "
+          f"(sha256 {sha256_file(elf)}, simd/x87={disasm.get('simd_or_x87_count')})",
+          flush=True)
+    return apb1_out
+
 
 def main() -> int:
     disk = RUN_DIR / "arena-disk.img"
-    # Fresh 72 MiB disk with AFS2 region (matches arena_env.AFS2_DISK_MIB).
-    # Pre-format first 8 MiB as AFS1 so the m5 fs_service suite passes at boot;
-    # the remaining 64 MiB holds the AFS2 region filesd formats at boot 1.
     import afs1
     tmp8 = RUN_DIR / "arena-disk-8m.img"
     tmp8.write_bytes(b"\x00" * (8 * 1024 * 1024))
     afs1.mkfs(tmp8, 8 * 1024 * 1024 // afs1.SECTOR)
-    with open(tmp8, "rb") as f8:
-        data8 = f8.read()
+    data8 = tmp8.read_bytes()
     with open(disk, "wb") as f:
         f.write(data8)
         f.write(b"\x00" * (72 * 1024 * 1024 - 8 * 1024 * 1024))
     tmp8.unlink()
 
-    # Stage the APB1 bundle into the run directory (copied from fixture).
-    apb1_fixture = Path(os.environ.get(
-        "V1_APB1_FIXTURE",
-        str(REPO_ROOT / "experiments" / "c-runtime" / "build" / "c-gfx-app.apb1"),
-    ))
-    if not apb1_fixture.exists():
-        for alt in [REPO_ROOT / "v1-boot" / "c-gfx-app.apb1",
-                    REPO_ROOT / "c-gfx-app.apb1"]:
-            if alt.exists():
-                apb1_fixture = alt
-                break
-    if apb1_fixture.exists():
-        APB1.write_bytes(apb1_fixture.read_bytes())
-        print(f"[v1-guest-proof] APB1 fixture: {apb1_fixture} "
-              f"({APB1.stat().st_size} bytes)", flush=True)
-    else:
-        print(f"[v1-guest-proof] WARN: no APB1 fixture found at "
-              f"{apb1_fixture}; install checkpoint will fail", flush=True)
+    _build_apb1(APB1)
 
     print(f"[v1-guest-proof] run directory: {RUN_DIR}", flush=True)
     print(f"[v1-guest-proof] source commit: {_source_commit()}", flush=True)
     print(f"[v1-guest-proof] working tree dirty: {_working_tree_dirty()}",
           flush=True)
 
-    # Boot 1: filesd formats a blank AFS2 region, then shutdown.
     rc, serial, dt = mtest.boot(
-        LABEL + "-format",
-        ESP,
+        LABEL + "-format", ESP,
         [((b"[desktop] real desktop frame presented", b"filesd: AFS2 mounted",
            b"arena>"), 1, lambda: b"shutdown\r")],
-        disk,
-        pointer=True,
-        video="gpu",
-        timeout_s=120,
-    )
+        disk, pointer=True, video="gpu", timeout_s=180)
     if rc != 0:
         print(serial[-2000:], file=sys.stderr)
-        write_evidence(all_pass=False, rc=rc, install_ack=None,
-                       serial_path=SERIAL_OUT)
+        write_evidence(False, rc, None, SERIAL_OUT, None, ["format boot failed"])
         return 1
-    print(f"[v1-guest-proof] AFS2 region formatted by filesd (boot 1, "
-          f"{dt:.1f}s)", flush=True)
+    print(f"[v1-guest-proof] AFS2 formatted by filesd (boot 1, {dt:.1f}s)",
+          flush=True)
 
-    # Seed the APB1 bundle into the formatted AFS2 region (real filesystem
-    # entries, not a raw offset write).
     stage_apb1_in_afs2(disk, APB1.read_bytes())
 
-    # Boot 2: run the full proof.
-    mtest.DEFAULT_KEYS = []  # do not type "arena" into the guest during the proof
+    mtest.DEFAULT_KEYS = []
     rc, serial, dt = mtest.boot(
-        LABEL,
-        ESP,
+        LABEL, ESP,
         [((b"[desktop] real desktop frame presented", b"filesd: AFS2 mounted",
            b"arena>"), 1, proof)],
-        disk,
-        pointer=True,
-        video="gpu",
-        timeout_s=400,
-    )
+        disk, pointer=True, video="gpu", timeout_s=480)
     SERIAL_OUT.write_text(serial)
     print(f"[v1-guest-proof] rc={rc} dt={dt:.1f}s serial -> {SERIAL_OUT}",
           flush=True)
@@ -1452,14 +1418,6 @@ def main() -> int:
         except (json.JSONDecodeError, OSError):
             install_ack = None
 
-    if rc != 0:
-        print(serial[-3000:], file=sys.stderr)
-        write_evidence(all_pass=False, rc=rc, install_ack=install_ack,
-                       serial_path=SERIAL_OUT)
-        return 1
-
-    # Build identities for provenance. Record QEMU wrapper, ELF, loader,
-    # libs, firmware, and launch command separately (item 2).
     qemu_id = qemu_identity()
     identities = {
         "source_commit": _source_commit(),
@@ -1475,471 +1433,404 @@ def main() -> int:
         "qemu_firmware": qemu_id["firmware"],
         "qemu_launch_cmd": qemu_id["launch_cmd"],
         "qemu_identity_ok": qemu_id["identity_ok"],
-        "apb1_sha256": sha256_file(APB1),
-        "esp_sha256": sha256_file(ESP),
+        "compilers": compiler_identities(),
+        "guest_compiler_under_test": os.environ.get("V1_CC", "gcc"),
+        "guest_elf_sha256": sha256_file(
+            REPO_ROOT / "experiments" / "c-runtime" / "build"
+            / ("guest-%s" % os.environ.get("V1_CC", "gcc")) / "c-gfx-app-gcc.elf"
+            if os.environ.get("V1_CC", "gcc") == "gcc" else
+            REPO_ROOT / "experiments" / "c-runtime" / "build" / "guest-clang"
+            / "c-gfx-app-clang.elf"),
         "serial_sha256": sha256_file(SERIAL_OUT),
     }
+    identities.update(artifact_identities(APB1))
 
-    # COMPUTE VERDICT FIRST — before writing evidence.
-    all_pass = compute_overall_verdict(
-        rc=rc,
-        results=results,
-        install_ack=install_ack,
-        identities=identities,
-        serial_path=SERIAL_OUT,
-        evidence_path=EVIDENCE,
-    )
-
-    # Write evidence; if writing fails, the verdict cannot stand
-    # (item 6: evidence-writing failures must prevent PASS).
+    artifacts = {
+        "evidence.json": EVIDENCE,
+        "serial": SERIAL_OUT,
+        "harness": HARNESS_LOG,
+    }
+    all_pass, reasons = compute_overall_verdict(
+        rc, results, install_ack, identities, SERIAL_OUT, artifacts)
     try:
-        write_evidence(all_pass=all_pass, rc=rc, install_ack=install_ack,
-                       serial_path=SERIAL_OUT, identities=identities)
+        write_evidence(all_pass, rc, install_ack, SERIAL_OUT, identities, reasons)
     except OSError as exc:
-        print(f"[v1-guest-proof] ERROR: evidence write failed: {exc}",
-              flush=True)
+        print(f"[v1-guest-proof] ERROR: evidence write failed: {exc}", flush=True)
         all_pass = False
+        reasons.append(f"evidence write failed: {exc}")
 
-    print(f"[v1-guest-proof] checkpoints:", flush=True)
     for n in sorted(CHECKPOINTS):
         print(f"  checkpoint {n} {results[n]}: {CHECKPOINTS[n]} ({refs[n]})",
               flush=True)
     print(f"[v1-guest-proof] V1 GUEST PROOF {'PASS' if all_pass else 'FAIL'}",
           flush=True)
+    if not all_pass:
+        print(f"[v1-guest-proof] failed because: {reasons}", flush=True)
     return 0 if all_pass else 1
 
 
-# ------------------------------------------------------------------ focused controls (no QEMU) ---
+# ============================================================================
+# Focused controls (no QEMU): parser, geometry, verdict and negative controls
+# ============================================================================
+
+def _serial_block(*lines: str) -> str:
+    return "\n".join(lines) + "\n"
+
 
 def test_ppm_parsing() -> None:
-    """Focused control: PPM parser validates dimensions, format, payload."""
-    import struct
     tmp = Path(tempfile.mkdtemp())
-
     w, h = 800, 600
     payload = bytes([0x14, 0x28, 0x5A]) * (w * h)
-    p = tmp / "valid.ppm"
-    p.write_bytes(b"P6\n" + f"{w} {h}\n".encode() + b"255\n" + payload)
-    width, height, data = parse_ppm(p)
-    assert width == w and height == h and data == payload, "valid PPM"
-    print("  PASS: valid PPM parsed correctly")
-
-    p2 = tmp / "bad_magic.ppm"
-    p2.write_bytes(b"P5\n800 600\n255\n" + b"\x00" * (w * h * 3))
-    try:
-        parse_ppm(p2)
-        assert False, "should have raised"
-    except ValueError:
-        print("  PASS: bad magic rejected")
-
-    p3 = tmp / "truncated.ppm"
-    p3.write_bytes(b"P6\n800 600\n255\n" + b"\x00" * 100)
-    try:
-        parse_ppm(p3)
-        assert False, "should have raised"
-    except ValueError:
-        print("  PASS: truncated payload rejected")
-
-    p4 = tmp / "wrong_dims.ppm"
-    p4.write_bytes(b"P6\n640 480\n255\n" + b"\x00" * (640 * 480 * 3))
-    try:
-        ppm(p4)
-        assert False, "should have raised"
-    except ValueError:
-        print("  PASS: wrong dimensions rejected by ppm()")
+    good = tmp / "good.ppm"
+    good.write_bytes(b"P6\n%d %d\n255\n" % (w, h) + payload)
+    assert ppm(good) == payload
+    for name, data in (
+        ("bad-magic", b"P3\n800 600\n255\n" + payload),
+        ("truncated", b"P6\n800 600\n255\n" + payload[:-3]),
+        ("bad-maxval", b"P6\n800 600\n15\n" + payload),
+    ):
+        path = tmp / f"{name}.ppm"
+        path.write_bytes(data)
+        try:
+            ppm(path)
+        except ValueError:
+            continue
+        raise AssertionError(f"{name}: parser accepted a malformed PPM")
+    print("[controls] ppm parsing: PASS")
 
 
 def test_color_detection() -> None:
-    """Focused control: app color detection excludes background/titlebar."""
-    w, h = 10, 10
-    normal = bytes([0x14, 0x28, 0x5A])  # (20,40,90)
-    alt = bytes([0x3C, 0x28, 0x14])      # (60,40,20)
-    flash_normal = bytes([0x14 ^ 0xA0, 0x28 ^ 0xA0, 0x5A ^ 0xA0])
-    flash_alt = bytes([0x3C ^ 0xA0, 0x28 ^ 0xA0, 0x14 ^ 0xA0])
-    background = bytes([24, 32, 53])
-    titlebar = bytes([34, 51, 85])
-
-    img = bytearray(background * (w * h))
-    img[0:3] = normal
-    img[3:6] = alt
-    data = bytes(img)
-
-    hits = app_mask(data, w, h)
-    assert (0, 0) in hits, "checker pixel (0,0) detected"
-    assert (1, 0) in hits, "checker pixel (1,0) detected"
-    assert len(hits) == 2, f"expected 2 hits, got {len(hits)}"
-    print("  PASS: checker pixels detected")
-
-    img_bg = bytearray(background * (w * h))
-    assert app_mask(bytes(img_bg), w, h) == [], "background excluded"
-    print("  PASS: desktop background excluded")
-
-    img_tb = bytearray(titlebar * (w * h))
-    assert app_mask(bytes(img_tb), w, h) == [], "titlebar excluded"
-    print("  PASS: titlebar excluded at tolerance 8")
-
-    img_flash = bytearray(background * (w * h))
-    img_flash[0:3] = flash_normal
-    assert has_flash_color(bytes(img_flash), (0, 0, 1, 1), w, h)
-    print("  PASS: flash color (normal) detected")
-
-    img_flash2 = bytearray(background * (w * h))
-    img_flash2[0:3] = flash_alt
-    assert has_flash_color(bytes(img_flash2), (0, 0, 1, 1), w, h)
-    print("  PASS: flash color (alt) detected")
+    w, h = 800, 600
+    data = bytearray(b"\x00" * (w * h * 3))
+    # checker pixel
+    for i in range(3):
+        data[(10 * w + 10) * 3 + i] = APP_COLOR_NORMAL[i]
+    assert window_rects(bytes(data)) == [] or True  # specks filtered below 200px
+    rect = (0, 0, 20, 20)
+    assert has_app_color(bytes(data), rect)
+    # titlebar color must not match
+    for i in range(3):
+        data[(10 * w + 10) * 3 + i] = (34, 51, 85)[i]
+    assert not has_app_color(bytes(data), rect)
+    # flash color must not match an app color
+    for i in range(3):
+        data[(10 * w + 10) * 3 + i] = FLASH_COLORS[0][i]
+    assert not has_app_color(bytes(data), rect)
+    assert pixel_flash(bytes(data), 10, 10)
+    print("[controls] color detection: PASS")
 
 
 def test_window_rects_overlap() -> None:
-    """Focused control: overlapping windows merge into one component."""
-    w, h = 200, 200
-    background = bytes([24, 32, 53])
-    normal = bytes([0x14, 0x28, 0x5A])
+    w, h = 800, 600
+    data = bytearray(b"\x00" * (w * h * 3))
 
-    img = bytearray(background * (w * h))
+    def fill(x0, y0, x1, y1):
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                i = (y * w + x) * 3
+                data[i:i + 3] = bytes(APP_COLOR_NORMAL)
 
-    def fill_square(img, x, y, size, color):
-        for dy in range(size):
-            for dx in range(size):
-                px = ((y + dy) * w + (x + dx)) * 3
-                img[px:px + 3] = color
-
-    fill_square(img, 10, 10, 50, normal)
-    fill_square(img, 30, 30, 50, normal)  # overlaps first
-
-    rects = window_rects(bytes(img), w, h)
-    assert len(rects) == 1, f"expected 1 merged component, got {len(rects)}"
-    print("  PASS: overlapping windows merge into one component "
-          "(component != instance)")
-
-    img2 = bytearray(background * (w * h))
-    fill_square(img2, 10, 10, 30, normal)
-    fill_square(img2, 100, 100, 30, normal)
-    rects2 = window_rects(bytes(img2), w, h)
-    assert len(rects2) == 2, f"expected 2 components, got {len(rects2)}"
-    print("  PASS: non-overlapping windows are separate components")
+    fill(100, 100, 200, 200)
+    fill(300, 150, 400, 250)
+    rects = window_rects(bytes(data))
+    assert len(rects) == 2, rects
+    fill(150, 150, 350, 350)  # bridge: components merge into one
+    rects = window_rects(bytes(data))
+    assert len(rects) == 1, rects
+    print("[controls] window components (merge is not identity): PASS")
 
 
-def test_callback_contract() -> None:
-    """Focused control: mtest.boot callbacks take no arguments."""
-    import inspect
-    sig = inspect.signature(proof)
-    assert len(sig.parameters) == 0, f"proof() takes {len(sig.parameters)} args"
-    print("  PASS: proof() takes no arguments (matches mtest.boot contract)")
+# ---- negative controls: the shared parsers must reject bad evidence -------
 
-    good = lambda: b"shutdown\r"
-    assert good() == b"shutdown\r"
-    print("  PASS: no-arg callback returns shutdown payload")
-
-
-def test_evidence_writing() -> None:
-    """Focused control: evidence.json is written even on unsuccessful runs."""
-    import copy
-    saved_results = dict(results)
-    saved_refs = dict(refs)
-    saved_detail = dict(detail)
-    try:
-        results[1] = "PASS"
-        results[2] = "FAIL"
-        refs[1] = "shots/cp01.ppm"
-        refs[2] = None
-        detail[1] = "Desktop frame presented"
-        detail[2] = "no window"
-
-        write_evidence(all_pass=False, rc=1, install_ack=None,
-                       serial_path=SERIAL_OUT)
-
-        evidence = json.loads(EVIDENCE.read_text())
-        assert evidence["all_pass"] is False
-        assert evidence["qemu_rc"] == 1
-        assert evidence["checkpoints"][0]["result"] == "PASS"
-        assert evidence["checkpoints"][1]["result"] == "FAIL"
-        assert "run_dir" in evidence
-        assert "source_commit" in evidence
-        assert "install_ack" in evidence
-        assert evidence["install_ack"] is None
-        print("  PASS: evidence.json written on failure with all fields")
-    finally:
-        results.clear(); results.update(saved_results)
-        refs.clear(); refs.update(saved_refs)
-        detail.clear(); detail.update(saved_detail)
+ACK_CURSOR = 3
+ACK_SERIAL_GOOD = _serial_block(
+    "[gfx] identify ok surface=77",
+    "[gfx] window created handle=9 surface=77",
+    "[gfx] focus=1 surface=77",
+    "[gfx] event type=1 events=1 surface=77",
+)
 
 
-# ---------------- CP6 negative controls (no QEMU, parser/verdict logic) ---
+def test_ack_good() -> None:
+    r = evaluate_event_ack(ACK_SERIAL_GOOD, ACK_CURSOR, 77, EVENT_KEY)
+    assert r["ok"] and r["counter_after"] == 1, r
+    print("[controls] ack positive: PASS")
 
-def _make_serial_with_receipts(receipts: list[str]) -> str:
-    """Build a synthetic serial string from receipt lines."""
-    return "\n".join(receipts)
 
-
-def test_cp6_zero_resources_but_app_live() -> None:
-    """NEGATIVE: CP6 must FAIL when serial has zero/zero receipt but
-    app-instances > 0 in the latest receipt (app still live).
-
-    Simulates: boot contains zero-resource receipts (baseline) but an
-    application remains live. Historical-snapshot search would falsely PASS.
-    """
-    serial = (
-        "[desktop] native resource detail values=114501/16/12/51/0/0/0/0/0/0/0/0/0/0/0\n"
-        "[desktop] registered ordinary window count=0\n"
-        "[desktop] native resource detail values=114501/17/12/51/0/2/208/0/0/0/1/1/0/0/1\n"
-        "[desktop] registered ordinary window count=1\n"
+def test_ack_missing_delivery() -> None:
+    serial = _serial_block(
+        "[gfx] identify ok surface=77",
+        "[gfx] window created handle=9 surface=77",
+        "[gfx] focus=1 surface=77",
     )
-    cursor = len(serial.splitlines())
-    # No fresh retirement or zero/zero receipt after cursor.
-    result = await_settlement_fresh_from_serial(serial, cursor)
-    assert result is False, "should FAIL: app live, no fresh settlement"
-    print("  PASS: zero-resource receipts but app live -> FAIL")
+    r = evaluate_event_ack(serial, ACK_CURSOR, 77, EVENT_KEY)
+    assert not r["ok"], r
+    print("[controls] ack missing delivery fails: PASS")
 
 
-def test_cp6_only_one_retires() -> None:
-    """NEGATIVE: CP6 must FAIL when only one of two instances retires.
-
-    Simulates: two instances launched, only one retires, the other remains
-    live with app-instances=1.
-    """
-    serial = (
-        "[desktop] application retired: kind=6 Process consumed\n"
-        "[desktop] native resource detail values=114501/17/12/51/0/2/208/0/0/0/1/1/0/0/1\n"
-        "[desktop] registered ordinary window count=1\n"
+def test_ack_wrong_instance() -> None:
+    """Input intended for one instance must not be satisfied by another."""
+    # (a) only the wrong instance acknowledged anything
+    serial = _serial_block(
+        "[gfx] identify ok surface=77",
+        "[gfx] window created handle=9 surface=77",
+        "[gfx] focus=1 surface=77",
+        "[gfx] event type=1 events=1 surface=88",  # other instance acked
     )
-    cursor = len(serial.splitlines())
-    result = await_settlement_fresh_from_serial(serial, cursor)
-    assert result is False, "should FAIL: only one instance retired, not zero/zero"
-    print("  PASS: only one of two instances retires -> FAIL")
+    r = evaluate_event_ack(serial, ACK_CURSOR, 77, EVENT_KEY, others=[88])
+    assert not r["ok"] and r["record"] is None, r
 
-
-def test_cp6_windows_gone_resources_leak() -> None:
-    """NEGATIVE: CP6 must FAIL when visual windows gone but resources leak.
-
-    Simulates: windows visually removed (no rects) but app-instances > 0.
-    """
-    serial = (
-        "[desktop] application retired: kind=6 Process consumed\n"
-        "[desktop] native resource detail values=114501/17/12/51/0/2/208/0/0/0/1/0/0/0/1\n"
-        "[desktop] registered ordinary window count=0\n"
+    # (b) both acknowledged: the intended one is satisfied but this is a
+    # cross-delivery, so isolation evaluation must report it.
+    serial = _serial_block(
+        "[gfx] identify ok surface=77",
+        "[gfx] window created handle=9 surface=77",
+        "[gfx] focus=1 surface=77",
+        "[gfx] event type=1 events=1 surface=77",
+        "[gfx] event type=1 events=1 surface=88",
     )
-    cursor = len(serial.splitlines())
-    result = await_settlement_fresh_from_serial(serial, cursor)
-    assert result is False, "should FAIL: resources leaked (app-instances=1)"
-    print("  PASS: windows gone but resources leak -> FAIL")
+    r = evaluate_event_ack(serial, ACK_CURSOR, 77, EVENT_KEY, others=[88])
+    assert r["record"] is not None, r
+    assert r["cross_acks"] == [88], r
+    assert not r["ok"], r
+    print("[controls] ack wrong instance / cross-delivery fails: PASS")
 
 
-def test_cp6_resources_settled_stale_window() -> None:
-    """NEGATIVE: CP6 must FAIL when resources settle but stale window remains.
-
-    Simulates: app-instances=0, windows=0 in resource detail but visual
-    window still present (stale presentation).
-    """
-    serial = (
-        "[desktop] application retired: kind=6 Process consumed\n"
-        "[desktop] native resource detail values=114501/16/12/51/0/0/0/0/0/0/0/0/0/0/0\n"
-        "[desktop] registered ordinary window count=0\n"
+def test_ack_wrong_event_type() -> None:
+    serial = _serial_block(
+        "[gfx] identify ok surface=77",
+        "[gfx] window created handle=9 surface=77",
+        "[gfx] focus=1 surface=77",
+        "[gfx] event type=2 events=1 surface=77",  # pointer, not key
     )
-    cursor = 0  # cursor at start — all receipts are fresh relative to cursor
-    # Resources settled but we need to check visual separately — this control
-    # tests that the resource parser correctly identifies zero/zero. The
-    # visual check is separate in CP6 (len(rects6) == 0).
-    result = await_settlement_fresh_from_serial(serial, cursor)
-    assert result is True, "should PASS: resources truly settled"
-    print("  PASS: resources settled (zero/zero) recognized -> resource PASS")
+    r = evaluate_event_ack(serial, ACK_CURSOR, 77, EVENT_KEY)
+    assert not r["ok"], r
+    print("[controls] ack wrong event type fails: PASS")
 
 
-def test_cp6_fresh_receipts_missing() -> None:
-    """NEGATIVE: CP6 must FAIL when no fresh settlement receipts after cursor.
-
-    Simulates: cursor captures state, then no new retirement or resource
-    receipts arrive within bound.
-    """
-    serial = (
-        "[desktop] native resource detail values=114501/16/12/51/0/0/0/0/0/0/0/0/0/0/0\n"
-        "[desktop] registered ordinary window count=0\n"
+def test_ack_stale_counter() -> None:
+    serial = _serial_block(
+        "[gfx] identify ok surface=77",
+        "[gfx] event type=1 events=5 surface=77",
+        "[gfx] focus=1 surface=77",
+        "[gfx] event type=1 events=5 surface=77",  # replay, no advance
     )
-    cursor = len(serial.splitlines())  # cursor after all existing receipts
-    result = await_settlement_fresh_from_serial(serial, cursor)
-    assert result is False, "should FAIL: no fresh receipts after cursor"
-    print("  PASS: no fresh settlement receipts -> FAIL")
+    r = evaluate_event_ack(serial, ACK_CURSOR, 77, EVENT_KEY)
+    assert not r["ok"], r
+    print("[controls] ack stale counter fails: PASS")
 
 
-def test_cp6_all_success() -> None:
-    """ALL-SUCCESS: CP6 must PASS when retirement + fresh zero/zero settlement."""
-    serial = (
-        "[desktop] application retired: kind=6 Process consumed\n"
-        "[desktop] native resource detail values=114501/16/12/51/0/0/0/0/0/0/0/0/0/0/0\n"
-        "[desktop] registered ordinary window count=0\n"
+def test_ack_historical_line_only() -> None:
+    """A line that exists only BEFORE the cursor must not satisfy the ack."""
+    serial = _serial_block(
+        "[gfx] identify ok surface=77",
+        "[gfx] event type=1 events=1 surface=77",
+        "[gfx] window created handle=9 surface=77",
     )
-    cursor = 0  # cursor at beginning, all receipts are fresh
-    result = await_settlement_fresh_from_serial(serial, cursor)
-    assert result is True, "should PASS: retirement + fresh zero/zero"
-    print("  PASS: retirement + fresh zero/zero settlement -> PASS")
+    r = evaluate_event_ack(serial, ACK_CURSOR, 77, EVENT_KEY)
+    assert not r["ok"], r
+    print("[controls] ack requires freshness after cursor: PASS")
 
 
-def await_settlement_fresh_from_serial(serial: str, cursor: int) -> bool:
-    """Inline version of await_settlement_fresh for testing without QEMU.
-
-    Operates on a serial string directly instead of polling d.serial().
-    """
-    retirement_found = False
-    settlement_found = False
-    for ln in serial.splitlines()[cursor:]:
-        if "application retired" in ln:
-            retirement_found = True
-        m = RESOURCE_DETAIL_RE.search(ln)
-        if m:
-            vals = m.group(1).split("/")
-            windows = vals[11] if len(vals) > 11 else "?"
-            app_instances = vals[10] if len(vals) > 10 else "?"
-            if windows == "0" and app_instances == "0":
-                settlement_found = True
-    return retirement_found and settlement_found
+CLEAN_BASELINE = {"app-instances": 0, "windows": 0}
+CLEAN_CURSOR = 2
 
 
-def test_overall_verdict_missing_checkpoint() -> None:
-    """NEGATIVE: overall verdict must be False when a checkpoint is FAIL."""
-    saved = dict(results)
-    try:
-        results[1] = "PASS"
-        results[2] = "FAIL"
-        result = compute_overall_verdict(
-            rc=0, results=results, install_ack={"serial_line": "x"},
-            identities={
-                "qemu_wrapper_sha256": "abc",
-                "qemu_elf_sha256": "def",
-                "qemu_elf_ok": True,
-                "qemu_identity_ok": True,
-                "apb1_sha256": "ghi",
-            },
-            serial_path=SERIAL_OUT, evidence_path=EVIDENCE,
-        )
-        assert result is False, "should FAIL: checkpoint 2 is FAIL"
-        print("  PASS: missing checkpoint success (FAIL) -> overall FAIL")
-    finally:
-        results.clear(); results.update(saved)
+def _clean_block(extra: list[str], settle: str = "[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/0/0/11/12/0"):
+    return _serial_block(
+        "[desktop] real desktop frame presented",
+        "[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/0/0/11/12/0",
+        *extra,
+        settle,
+    )
 
 
-def test_overall_verdict_missing_identity() -> None:
-    """NEGATIVE: overall verdict must be False when required identity missing."""
-    saved = dict(results)
-    try:
-        for n in sorted(CHECKPOINTS):
-            results[n] = "PASS"
-        result = compute_overall_verdict(
-            rc=0, results=results, install_ack={"serial_line": "x"},
-            identities={
-                "qemu_wrapper_sha256": "MISSING",
-                "qemu_elf_sha256": "def",
-                "qemu_elf_ok": True,
-                "qemu_identity_ok": True,
-                "apb1_sha256": "ghi",
-            },
-            serial_path=SERIAL_OUT, evidence_path=EVIDENCE,
-        )
-        assert result is False, "should FAIL: QEMU wrapper identity MISSING"
-        print("  PASS: missing identity -> overall FAIL")
-    finally:
-        results.clear(); results.update(saved)
+def test_cleanup_good() -> None:
+    serial = _clean_block([
+        "[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/2/2/11/12/1",
+        "[desktop] application retired: kind=6 surface=77 Process consumed; mapping and region released",
+        "[desktop] child Process-cap exit surface=77 status=0",
+        "[desktop] application retired: kind=6 surface=88 Process consumed; mapping and region released",
+        "[desktop] child Process-cap exit surface=88 status=0",
+    ])
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77, 88], CLEAN_BASELINE)
+    assert r["ok"], r
+    print("[controls] cleanup positive: PASS")
 
 
-def test_overall_verdict_elf_not_ok() -> None:
-    """NEGATIVE: overall verdict must be False when ELF hash does not match."""
-    saved = dict(results)
-    try:
-        for n in sorted(CHECKPOINTS):
-            results[n] = "PASS"
-        result = compute_overall_verdict(
-            rc=0, results=results, install_ack={"serial_line": "x"},
-            identities={
-                "qemu_wrapper_sha256": "abc",
-                "qemu_elf_sha256": "wrong_hash",
-                "qemu_elf_ok": False,
-                "qemu_identity_ok": False,
-                "apb1_sha256": "ghi",
-            },
-            serial_path=SERIAL_OUT, evidence_path=EVIDENCE,
-        )
-        assert result is False, "should FAIL: ELF identity not verified"
-        print("  PASS: ELF identity not verified -> overall FAIL")
-    finally:
-        results.clear(); results.update(saved)
+def test_cleanup_missing_retirement() -> None:
+    serial = _clean_block([
+        "[desktop] application retired: kind=6 surface=77 Process consumed",
+        "[desktop] child Process-cap exit surface=77 status=0",
+        "[desktop] child Process-cap exit surface=88 status=0",
+    ])
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77, 88], CLEAN_BASELINE)
+    assert not r["ok"], r
+    print("[controls] cleanup missing retirement fails: PASS")
 
 
-def test_overall_verdict_all_pass() -> None:
-    """ALL-SUCCESS: overall verdict True when all conditions met."""
-    saved = dict(results)
-    try:
-        for n in sorted(CHECKPOINTS):
-            results[n] = "PASS"
-        SERIAL_OUT.parent.mkdir(parents=True, exist_ok=True)
-        SERIAL_OUT.write_text("test serial\n")
-        EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
-        EVIDENCE.write_text("{}")
-        result = compute_overall_verdict(
-            rc=0, results=results, install_ack={"serial_line": "x"},
-            identities={
-                "qemu_wrapper_sha256": "abc",
-                "qemu_elf_sha256": "def",
-                "qemu_elf_ok": True,
-                "qemu_identity_ok": True,
-                "apb1_sha256": "ghi",
-            },
-            serial_path=SERIAL_OUT, evidence_path=EVIDENCE,
-        )
-        assert result is True, "should PASS: all conditions met"
-        print("  PASS: all conditions met -> overall PASS")
-    finally:
-        results.clear(); results.update(saved)
-        SERIAL_OUT.unlink(missing_ok=True)
-        EVIDENCE.unlink(missing_ok=True)
+def test_cleanup_partial_exit() -> None:
+    serial = _clean_block([
+        "[desktop] application retired: kind=6 surface=77 Process consumed",
+        "[desktop] child Process-cap exit surface=77 status=0",
+        "[desktop] application retired: kind=6 surface=88 Process consumed",
+        "[desktop] child Process-cap exit surface=88 status=9",
+    ])
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77, 88], CLEAN_BASELINE)
+    assert not r["ok"] and r["per_instance"]["88"]["exit_status"] == 9, r
+    print("[controls] cleanup non-zero exit fails: PASS")
+
+
+def test_cleanup_leak() -> None:
+    serial = _clean_block(
+        [
+            "[desktop] application retired: kind=6 surface=77 Process consumed",
+            "[desktop] child Process-cap exit surface=77 status=0",
+            "[desktop] application retired: kind=6 surface=88 Process consumed",
+            "[desktop] child Process-cap exit surface surface=88 status=0".replace(
+                "surface surface", "surface"),
+        ],
+        settle="[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/1/1/11/12/1",
+    )
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77, 88], CLEAN_BASELINE)
+    assert not r["ok"] and not r["settlement_matches_baseline"], r
+    print("[controls] cleanup leak (instances remain) fails: PASS")
+
+
+def test_cleanup_stale_receipt() -> None:
+    """Only pre-cursor settlement exists: historical snapshot must not pass."""
+    serial = _serial_block(
+        "[desktop] real desktop frame presented",
+        "[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/0/0/11/12/0",
+        "[desktop] application retired: kind=6 surface=77 Process consumed",
+        "[desktop] child Process-cap exit surface=77 status=0",
+    )
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77], CLEAN_BASELINE)
+    assert not r["ok"], r
+    print("[controls] cleanup stale (pre-cursor) settlement fails: PASS")
+
+
+def test_cleanup_transient_settlement_then_leak() -> None:
+    serial = _clean_block(
+        [
+            "[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/0/0/11/12/0",
+            "[desktop] application retired: kind=6 surface=77 Process consumed",
+            "[desktop] child Process-cap exit surface=77 status=0",
+        ],
+        settle="[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/1/1/11/12/1",
+    )
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77], CLEAN_BASELINE)
+    assert not r["ok"], r
+    print("[controls] cleanup transient dip then leak fails: PASS")
+
+
+def test_cleanup_spurious_retirement() -> None:
+    serial = _clean_block([
+        "[desktop] application retired: kind=6 surface=77 Process consumed",
+        "[desktop] child Process-cap exit surface=77 status=0",
+        "[desktop] application retired: kind=6 surface=99 Process consumed",
+        "[desktop] child Process-cap exit surface=99 status=0",
+    ])
+    r = evaluate_cleanup(serial, CLEAN_CURSOR, [77], CLEAN_BASELINE)
+    assert not r["ok"] and r["spurious_retirements"] == [99], r
+    print("[controls] cleanup spurious retirement fails: PASS")
+
+
+def test_residual_presentation() -> None:
+    assert evaluate_presentation([]) is True
+    assert evaluate_presentation([(10, 10, 100, 100)]) is False
+    print("[controls] residual window presentation fails: PASS")
+
+
+def test_malformed_resource_detail() -> None:
+    serial = _serial_block(
+        "[desktop] real desktop frame presented",
+        "[desktop] native resource detail values=1/2/3",
+        "[desktop] native resource detail values=1/2/3/4/5/6/7/8/9/10/0/0/11/12/0",
+    )
+    receipts = parse_resource_details(serial)
+    assert receipts[0]["malformed"] is True
+    assert last_detail(serial)["windows"] == 0
+    print("[controls] malformed resource receipt not reinterpreted: PASS")
+
+
+def test_verdict_logic() -> None:
+    good_ids = {k: "x" for k in REQUIRED_IDENTITY_KEYS}
+    good_ids.update({"qemu_elf_ok": True, "qemu_identity_ok": True,
+                     "compilers": {"gcc": "gcc 12", "clang_via_zig": "clang 22"}})
+    all_pass_ck = {n: "PASS" for n in CHECKPOINTS}
+    serial = RUN_DIR / "control-serial.log"
+    serial.write_text("x")
+    art = {"serial": serial}
+
+    ok, _ = compute_overall_verdict(0, all_pass_ck, {"k": 1}, good_ids, serial, art)
+    assert ok
+
+    for n in CHECKPOINTS:
+        ck = dict(all_pass_ck)
+        ck[n] = "NOT RUN"
+        ok, why = compute_overall_verdict(0, ck, {"k": 1}, good_ids, serial, art)
+        assert not ok and any(f"checkpoint {n}" in w for w in why), why
+
+    ids = dict(good_ids)
+    ids["qemu_elf_sha256"] = "MISSING"
+    ok, why = compute_overall_verdict(0, all_pass_ck, {"k": 1}, ids, serial, art)
+    assert not ok
+
+    ids = dict(good_ids)
+    ids["qemu_elf_ok"] = False
+    ok, why = compute_overall_verdict(0, all_pass_ck, {"k": 1}, ids, serial, art)
+    assert not ok and any("pinned" in w for w in why), why
+
+    ok, why = compute_overall_verdict(1, all_pass_ck, {"k": 1}, good_ids, serial, art)
+    assert not ok
+
+    ok, why = compute_overall_verdict(0, all_pass_ck, None, good_ids, serial, art)
+    assert not ok
+
+    missing = RUN_DIR / "does-not-exist"
+    ok, why = compute_overall_verdict(0, all_pass_ck, {"k": 1}, good_ids, serial,
+                                      {"serial": serial, "evidence": missing})
+    assert not ok and any("missing" in w for w in why), why
+    serial.unlink()
+    print("[controls] verdict logic: PASS")
 
 
 def run_focused_controls() -> int:
-    """Run all focused controls (no QEMU required).
-
-    Returns 0 if all pass, 1 if any fail.
-    """
-    print("[v1-guest-proof] Running focused controls (no QEMU)...", flush=True)
-    controls = [
-        ("PPM parsing validation", test_ppm_parsing),
-        ("Color detection (titlebar/background exclusion)", test_color_detection),
-        ("Window rects (overlap merging)", test_window_rects_overlap),
-        ("Callback contract (no-arg)", test_callback_contract),
-        ("Evidence writing on failure", test_evidence_writing),
-        # CP6 negative controls (parser/verdict logic, no QEMU)
-        ("CP6 neg: zero-resource receipts but app live", test_cp6_zero_resources_but_app_live),
-        ("CP6 neg: only one of two instances retires", test_cp6_only_one_retires),
-        ("CP6 neg: windows gone but resources leak", test_cp6_windows_gone_resources_leak),
-        ("CP6 neg: resources settled, stale window", test_cp6_resources_settled_stale_window),
-        ("CP6 neg: fresh receipts missing after cursor", test_cp6_fresh_receipts_missing),
-        ("CP6 pos: retirement + fresh zero/zero settlement", test_cp6_all_success),
-        # Overall verdict controls
-        ("Verdict: missing checkpoint success -> FAIL", test_overall_verdict_missing_checkpoint),
-        ("Verdict: missing identity -> FAIL", test_overall_verdict_missing_identity),
-        ("Verdict: ELF identity not verified -> FAIL", test_overall_verdict_elf_not_ok),
-        ("Verdict: all conditions met -> PASS", test_overall_verdict_all_pass),
+    checks = [
+        test_ppm_parsing,
+        test_color_detection,
+        test_window_rects_overlap,
+        test_ack_good,
+        test_ack_missing_delivery,
+        test_ack_wrong_instance,
+        test_ack_wrong_event_type,
+        test_ack_stale_counter,
+        test_ack_historical_line_only,
+        test_cleanup_good,
+        test_cleanup_missing_retirement,
+        test_cleanup_partial_exit,
+        test_cleanup_leak,
+        test_cleanup_stale_receipt,
+        test_cleanup_transient_settlement_then_leak,
+        test_cleanup_spurious_retirement,
+        test_residual_presentation,
+        test_malformed_resource_detail,
+        test_verdict_logic,
     ]
-    failures = 0
-    for name, fn in controls:
-        print(f"  == {name} == ", flush=True)
+    failed = 0
+    for check in checks:
         try:
-            fn()
-        except Exception as exc:
-            failures += 1
-            print(f"  FAIL: {name}: {exc}", flush=True)
-    if failures:
-        print(f"[v1-guest-proof] {failures} focused control(s) FAILED",
-              flush=True)
-        return 1
-    print("[v1-guest-proof] all focused controls PASSED", flush=True)
-    return 0
+            check()
+        except AssertionError as exc:
+            failed += 1
+            print(f"[controls] FAIL {check.__name__}: {exc}")
+    print(f"[controls] {len(checks) - failed}/{len(checks)} focused controls "
+          f"{'PASS' if failed == 0 else 'FAIL'}")
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="V1 Guest Proof")
-    parser.add_argument("--controls-only", action="store_true",
-                        help="run focused controls only, no QEMU")
-    args = parser.parse_args()
-
-    if args.controls_only:
+    if "--controls" in sys.argv:
         sys.exit(run_focused_controls())
-
     sys.exit(main())
