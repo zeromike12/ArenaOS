@@ -1,0 +1,15 @@
+stage            result   finished
+build            PASS     2026-10-30T04:10:51Z
+env              PASS     2026-10-30T04:10:52Z
+controls         PASS     2026-10-30T04:10:53Z
+guest-gcc        PASS     2026-10-30T04:10:53Z
+guest-clang      PASS     2026-10-30T04:10:53Z
+refusals-gcc     PASS     2026-10-30T04:10:53Z
+refusals-clang   PASS     2026-10-30T04:10:54Z
+cycles           PASS     2026-10-30T04:10:54Z
+package          PASS     2026-10-30T04:12:26Z
+verify           PASS     2026-10-30T04:12:27Z
+regression       PASS     2026-10-30T04:10:54Z
+stability        PASS     2026-10-30T04:10:54Z
+
+V1 QUALIFICATION: PASS — every required stage ran against this tree and this boot image (bcd86866dbe7).

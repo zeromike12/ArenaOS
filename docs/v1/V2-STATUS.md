@@ -59,7 +59,7 @@ artifacts, and V1 acceptance remains M's decision.
 
 | Component | Identity | Evidence |
 |---|---|---|
-| QEMU (patched, TCG) | `e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff` | `env/qemu-identities.txt` |
+| QEMU (patched, TCG) | `(see external receipt)` | `env/qemu-identities.txt` |
 | Loader | private glibc 2.40 `ld-linux-x86-64.so.2`, `63704534fba7799d…` | `env/isolated-runtime.txt` |
 | Firmware | code `7e34e3b8…`, vars `5d2ac383…` | `env/qemu-identities.txt` |
 | GCC | 12.2.0 | `env/compilers/tool-identities.txt` |
@@ -101,11 +101,11 @@ that re-execution, not from `c4d7cf1`'s run.
 
 `tools/build_phase14_pie.sh` recomputes the protected Phase-14 PIE fixture and
 refuses when the digest is not
-`d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e`. That
+`(see external receipt)`. That
 reproduction requires the **official** `rust-std` target components for
 `x86_64-unknown-none` and `x86_64-unknown-uefi`
-(`5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a`,
-`2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0`). The
+(`(see external receipt)`,
+`(see external receipt)`). The
 sandbox may only reach github.com, codeload/api.github.com,
 registry.npmjs.org and pypi.org; `static.rust-lang.org` is refused at TLS
 level. Rebuilding the sysroot from source produces a different crate
@@ -191,8 +191,8 @@ laundering 22 passes into a qualification.
 | 7 | Final review candidate + package | **DONE** (§7) | archive + `.sha256` + fresh-extraction verify |
 
 Artifact identities for this round: EFI
-`7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5`, ESP
-`d74b9773b300ada1341a81c34551df90a7389caa2b3f4ef10f7de8f282329d30`; GCC
+`(see external receipt)`, ESP
+`(see external receipt)`; GCC
 client ELF `07f9fbc5d7dc…`, APB1 `073f08f79f3b…`; Clang client APB1
 `c0da952974c6…`; refusal APB1 `841d086b3b52…` (gcc).
 
@@ -208,7 +208,7 @@ could be executed has been, and the artifacts are labelled for what they are.
 |---|---|---|
 | `docs/v1/evidence/v2-2026-10-29/` | GUEST + HOST, round 1 | unchanged, do not edit |
 | `docs/v1/evidence/v2-2026-10-29-r2/` | GUEST + HOST, round 2 | this round's runs, receipts, frames, logs |
-| `docs/v1/evidence/v2-2026-10-29-r2.tar.gz` | package | 111 files, 461 677 B, sha256 `07ff4d442871cd5c70b455b359544eaca754f6ba5a90928497cdd95808e08148`; verified from a fresh extraction, 0 problems |
+| `docs/v1/evidence/v2-2026-10-29-r2.tar.gz` | package | 111 files, 461 677 B, sha256 `(see external receipt)`; verified from a fresh extraction, 0 problems |
 | `…-r2/gate/receipts/*.json` | receipts | per-stage identity: commit, dirty paths, `code_fingerprint`, EFI/ESP digests, newest tracked source, exit code |
 | `…-r2/gate/gate-controls.txt` | controls | the gate's own rejection tests (stale code fails; docs-only edit does not) |
 
@@ -314,8 +314,8 @@ Building from the documented path (`sudo mount --bind /home/user/ArenaOS
 
 | Identity | Expected (unchanged) | Reproduced |
 |---|---|---|
-| Phase-14 PIE | `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e` | **match** |
-| Signed APB1 | `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa` | **match** |
+| Phase-14 PIE | `(see external receipt)` | **match** |
+| Signed APB1 | `(see external receipt)` | **match** |
 
 No expected digest was edited, no guard weakened, and
 `tools/build_phase16_dev.sh` was not used.
@@ -324,7 +324,7 @@ No expected digest was edited, no guard weakened, and
 
 `bash tools/build.sh --image` from `/workspace/ArenaOS`, exit **0**:
 
-* EFI `bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83`
+* EFI `(see external receipt)`
   (11 039 232 B) — **the same identity round 1 published**, i.e. an
   independent environment reproduced the canonical artifact;
 * ESP `8a34f041…` with `/EFI/BOOT/BOOTX64.EFI` byte-identical to that EFI
@@ -409,7 +409,80 @@ transcription of the expression.
 | 6 | Gate command matches the claims | **DONE** |
 | 7 | Review candidate + package without self-reference | **DONE** |
 
-### 9.8 Outstanding
+### 9.8 Formal gates on the canonical candidate
 
-`docs/v1/evidence/v2-2026-10-29-r3/regression/run-tests.log` and the
-stability loop on EFI `bcd86866…` are recorded in §10 when they finish.
+| Gate | Command | Result |
+|---|---|---|
+| Formal regression | `bash tools/run_tests.sh` | **ALL TESTS PASSED (121 test suites)**, exit 0, source `7632f54`, canonical EFI `bcd86866…` |
+| Boot stability | `bash tools/stability_loop.sh 100` | **100/100 boots fully green**, receipt `bcd86866dbe7… 100/100` |
+| Phase-15 behavioural (current candidate) | `ARENA_PHASE15_EFI=… ARENA_PHASE15_ESP=… python3 tools/test_m15_guest.py` | **PASS** under `max,+nx,+smep,+smap` and `qemu64,+nx,+smep,+smap` |
+| Phase-15 strict (historical pins) | `PHASE15_STRICT_GATE=1` | **not applicable**: pins describe the Phase-15 bytes; untouched |
+| Gate aggregate | `python3 tools/v1_gate_aggregate.py --mode full` | **V1 QUALIFICATION: PASS** on `bcd86866…` |
+
+Two attempts are preserved honestly. Attempt 1 of the regression passed all
+121 suites and was then rejected by the runner's own guard
+(`source changed during full suite`) because this session edited tracked
+files while it ran; it is kept as
+`regression/run-tests-attempt1-INVALIDATED.log` with a note, and attempt 2
+ran against a committed tree with no edits in flight. The stability loop's
+first invocation refused to start because the suite had left a `phase9`
+graphics-fixture profile in `build/`; a canonical rebuild restored both the
+artifact (`bcd86866…`) and the profile before the recorded run.
+
+### 9.9 Evidence package (no self-reference)
+
+`python3 tools/v1_evidence.py seal docs/v1/evidence/v2-2026-10-29-r3`
+packages, verifies from a fresh extraction, and writes the receipt **beside**
+the archive:
+
+* archive: 522 108 B, 78 files, sha256 recorded in the
+  **external receipt** beside it (`v2-2026-10-29-r3.tar.gz.receipt.txt`);
+  the digest is deliberately not written inside the archive, because a file
+  that states the archive's own hash cannot be correct: writing it changes
+  the archive. This is round 2's limitation 8, fixed at the root rather
+  than restated;
+* receipt: `v2-2026-10-29-r3.tar.gz.receipt.txt` — never inside the archive,
+  so it cannot describe a previous generation. This fixes round 2's
+  limitation 8 rather than restating it;
+* the `package` and `verify` gate receipts, and the full-gate aggregate that
+  prints `V1 QUALIFICATION: PASS`, are published in the sibling directory
+  `docs/v1/evidence/v2-2026-10-29-r3-packaging/`, for the same reason;
+* a seal is not byte-deterministic: `MANIFEST.json` records `created_utc`, so
+  re-sealing produces new bytes that still verify. The receipt beside the
+  archive names the current generation.
+
+### 9.10 Final qualification matrix
+
+| # | Requirement | State |
+|---|---|---|
+| 1 | Ack **and** visible response through production logic | **DONE** |
+| 2 | Successful checkpoint frames published, validated, sealed | **DONE** |
+| 3 | Cleanup compares all enforceable resources | **DONE** |
+| 4 | Guest refusal matrix, precisely classified | **DONE**, with the stated gap (§9.5) |
+| 5 | Final-artifact stability 100/100 | **DONE** on `bcd86866…` |
+| 5b | EFI rebuild reproducibility | **DONE** |
+| 5c | ESP ↔ embedded EFI identity | **DONE** |
+| 5d | Formal regression | **DONE**, 121/121 on the canonical artifact |
+| 5e | Layout page-count boundary, both sides, in the guest | **OPEN** (§9.6) |
+| 6 | Gate command matches the claims | **DONE** |
+| 7 | Review candidate + sealed package | **DONE** |
+
+**Qualification status: everything executed passes; one requirement is
+still open (5e), and one negative is covered at validator level rather than
+with a real foreign capability (§9.5). V1 acceptance remains M's decision.**
+
+### 9.11 Remaining limitations
+
+1. **5e** — the 300-page refusal is in the Rust client library, which the C
+   guest fixture cannot call; closing it needs a decision that is allowed to
+   change the kernel image (a guest-testable bounded check in a place the C
+   client can reach), after which the artifact must be re-qualified.
+2. **§9.5** — no real foreign/stale capability is presented to the kernel;
+   `foreign-identity` is a validator test over synthetic bytes.
+3. The canonical build **requires the documented path** `/workspace/ArenaOS`;
+   the protected fixture embeds it. This is a property of the protected
+   fixture, not a sandbox restriction, and is now stated in the gate's
+   failure message.
+4. ESP bytes vary per rebuild (FAT timestamps) while the embedded EFI is
+   byte-identical; ESP digests are provenance, recorded per run.
+5. Round-1 and round-2 evidence directories are unchanged.
