@@ -1,0 +1,17 @@
+--- guest ELF hashes ---
+07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f  /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-app-gcc.elf
+4996495b4382ab1e962622f0e0d75f27559e358737b23270ce5e95648b99eae2  /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-refusals-gcc.elf
+e8d763111db70fdc1b0c6fa3d00c0a45fca3a7948c7923419d019fc50db3817d  /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-native-gcc.elf
+4eff95f2fa0d4a09b9be8e28d8f9f665a19bf0d434674e0287de0cccce0be4d8  /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf
+ef93bb4d8c7caf6f3a161de9b12aa3e54a4049c764dd899c5aa53a1b66f96841  /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/crt-probe-gcc.elf
+1a207133975cb046a51a5736b9a41449e6428a2d0b72721b4f093bd9df0bcfba  /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf
+003c381b0f107d8dbe68c6affaa56ca6a1d238145364f8b2dc2c699196c7e502  /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c-gfx-app-clang.elf
+1bc37299d497ba50d6e0703c64304a785f768ad4ed1a3a21c2810ab40d552ea3  /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c-gfx-refusals-clang.elf
+62d0257a09d0b2cdd3dccabb6a0589a9f5f7bc3e2445e8959639a987536ce688  /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf
+c91428cd5e7759f4ad50e261aa45fbd01790830d92dfe03d3feaeff64bf09cec  /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c2-console-clang.elf
+a3cbc85839e6cd1b4f44952606d78b6fca6ddbc4dc8170d162732455466f0479  /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/crt-probe-clang.elf
+58b21cc9e28da92a20f59c1add2aeb05f4a8666f75398c430ac2a58c00c292ff  /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/xxhash-app-clang.elf
+--- static audit verdict ---
+compilers: {'gcc': 'gcc (Debian 12.2.0-14+deb12u1) 12.2.0'}
+static_audit_pass: None
+failed: []

@@ -1,0 +1,346 @@
+{
+  "label": "v1-guest-proof",
+  "harness": "tools/v1_guest_proof.py",
+  "milestone": "V1 \u2014 Native Graphical Launch Foundation",
+  "branch": "arena/af044828-arenaos",
+  "checkpoints": [
+    {
+      "case": 1,
+      "name": "launch-ready Desktop",
+      "result": "PASS",
+      "evidence_ref": "shots/cp01-launch-ready-desktop.png",
+      "detail": "desktop frame presented; app-instances=0 windows=0"
+    },
+    {
+      "case": 2,
+      "name": "APB1 install receipt (protected installer)",
+      "result": "PASS",
+      "evidence_ref": "install-ack.json",
+      "detail": "protected installer installed signed version=42"
+    },
+    {
+      "case": 3,
+      "name": "first native C window (Identify -> create -> render)",
+      "result": "PASS",
+      "evidence_ref": "shots/cp03-first-native-c-window.png",
+      "detail": "Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance"
+    },
+    {
+      "case": 4,
+      "name": "keyboard response (instance-specific acknowledgment)",
+      "result": "PASS",
+      "evidence_ref": "shots/cp04-keyboard-response.png",
+      "detail": "KEY ack surface=164 counter 2->3 + flash in the window, frame 02f96ff494ab"
+    },
+    {
+      "case": 5,
+      "name": "mouse response (instance-specific acknowledgment)",
+      "result": "PASS",
+      "evidence_ref": "shots/cp05-mouse-response.png",
+      "detail": "POINTER ack surface=164 counter 3->4 + flash in the window, frame 73aced1be07e"
+    },
+    {
+      "case": 6,
+      "name": "two concurrent instances: focus/input isolation, both directions",
+      "result": "PASS",
+      "evidence_ref": "shots/cp06a-focused.png, shots/cp06b-focused.png",
+      "detail": "A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=28285d9965d5; B(169) key: ack {'before': 4, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=39281cae29c7"
+    },
+    {
+      "case": 7,
+      "name": "window removal: retirements, exits, settlement, visual removal",
+      "result": "PASS",
+      "evidence_ref": "shots/cp07-desktop-restored.png",
+      "detail": "retired=['164', '169'] exits={'164': 0, '169': 0} all 21 resource fields settled to baseline visual_rects=0"
+    },
+    {
+      "case": 8,
+      "name": "final V1 demonstration",
+      "result": "PASS",
+      "evidence_ref": "shots/cp08-final-demonstration.png",
+      "detail": "final instance surface=174 placed (70, 60, 640, 480) bound=174 key ack 2->3 + visible flash, frame ccda90218cf6"
+    }
+  ],
+  "install_ack": {
+    "serial_line": "[desktop] APB1 installed; signed version=42 (no launch authority implied)",
+    "receipt_count_before": 0,
+    "version": 42,
+    "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+    "kind": "installation_receipt",
+    "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
+  },
+  "required_frames": [
+    "shots/cp01-launch-ready-desktop.png",
+    "shots/cp03-first-native-c-window.png",
+    "shots/cp04-keyboard-response.png",
+    "shots/cp05-mouse-response.png",
+    "shots/cp06a-two-instances.png",
+    "shots/cp06a-focused.png",
+    "shots/cp06b-focused.png",
+    "shots/cp07-desktop-restored.png",
+    "shots/cp08-final-demonstration.png"
+  ],
+  "frames": {
+    "shots/cp01-launch-ready-desktop.png": {
+      "tested_ppm_sha256": "6abf1ad8b8e83848582a1fc77fff25d2252113d15f37c033f2f05616ed99f4e7",
+      "published_png_sha256": "5f093b38ca7626bbccee08fd0b51019fa2ac63a7f4fbbf68d4013bf093c9dda4",
+      "raster_sha256": "e2a695f6b66ea0ed36ce7b07e3e910629b162bed5391bc3bfa9569310dff595b",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp03-first-native-c-window.png": {
+      "tested_ppm_sha256": "b3db192e8c34603de7d969db9b74ca57dc54a0f2d4283b5cbff559839aa809f4",
+      "published_png_sha256": "d86a3ccbe286c9e21ece19bd8d7d94ea13fa2ec91d5c6cf5473043ba8ec3d795",
+      "raster_sha256": "605cf2fe6952aabb22d25ba28d0cc697216aff498695cce885484b048ae7806a",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp04-keyboard-response.png": {
+      "tested_ppm_sha256": "18a562821422a617dab960f0d97b7d471ebe1ae6ed7cf6bec0a9032ee21626c1",
+      "published_png_sha256": "85294a855bdf55050aed0c6706ace9a1fb06c88fa07cc22540e90e6cc991e9a0",
+      "raster_sha256": "02f96ff494aba6a8571b3ac9b73693fbe2f2cad3241122452c39119f27e580bf",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp05-mouse-response.png": {
+      "tested_ppm_sha256": "9b6c487f5df430863e06654ebf74e0f97fee7c4b05683e7970b6ae58021025e8",
+      "published_png_sha256": "7094dbea6252e6399f42c92858c27e93494364cc8963e9bb3ea749ceb3610ca6",
+      "raster_sha256": "73aced1be07ec594dcbd023f962891def48579d544e12d8223fbec6e42496444",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp06a-two-instances.png": {
+      "tested_ppm_sha256": "fe2c68e29ace6bfad127b0c1d2ae0b43eb6dc585e9bd92125d1364ec25ffe65e",
+      "published_png_sha256": "acafbe7d1cda9dc75b2083918093ca6c6ac765457356f9c46d36f745533415b3",
+      "raster_sha256": "7147d80c818f03448adb9bb35051641db4b8a4441a4b67bcadf70fa8b03aa32e",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp06a-focused.png": {
+      "tested_ppm_sha256": "d4ce4cdf4ed0d7a55beccbbf090bfece31bb7116c67ccc340e603b30bff58508",
+      "published_png_sha256": "12a584094f1241e3e77646c5074a52525b5318c73b595147f4e3a94024a424c9",
+      "raster_sha256": "28285d9965d5cf831470bf9ece80dcd315e04a300ec970f308abef46f309e2bb",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp06b-focused.png": {
+      "tested_ppm_sha256": "6c26ff779ded6f8ffcb7ad10501ba8bd3302345ba21b7c4cf8999bc1793e0da3",
+      "published_png_sha256": "05e91b06ca6fbeb90505124c9e4a4caf1b5d0916135fe61e7b6df0db4a90d0b6",
+      "raster_sha256": "39281cae29c7aa7054dcb894dba93ca2052002fb05dd5d1c3bc28e468397f836",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp07-desktop-restored.png": {
+      "tested_ppm_sha256": "d0e0a13da23635308717d6ffb6db61b4b480fd46e95f35dddf4aebc75c82ace1",
+      "published_png_sha256": "7e3f8cc03dac57d6198bd1dd02941256a03ddbaf0ff94c06ca269e4fd2742b44",
+      "raster_sha256": "e155493690c90084c60c6fdee04ef949e59438ee36709c6f19254b737eae4fa1",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    },
+    "shots/cp08-final-demonstration.png": {
+      "tested_ppm_sha256": "e6a4f720cdf1fc73ecaf0e36afdfa08ed63a18fe4564d67ebe300335bdef42dd",
+      "published_png_sha256": "e3ecb88b99a5577220a7e1c15dea2d016e01d8679ef7aebe5cccdb5a1ece68f1",
+      "raster_sha256": "ccda90218cf6d7c320222c94af2f14e2baab4045e8ccbc8ddfb8626667ef3981",
+      "width": 800,
+      "height": 600,
+      "note": "published PNG re-encoded losslessly from the exact raster the checkpoint assertion passed on; tested_ppm_sha256 is the capture as written"
+    }
+  },
+  "identities": {
+    "source_commit": "33d1915a1b1daddc7fecd2e5b32a74c6f27e3fbe",
+    "working_tree_dirty": true,
+    "dirty_paths_excluding_evidence": [
+      "M tools/v1_guest_proof.py",
+      "M tools/v1_refusals.py"
+    ],
+    "qemu_wrapper_path": "/opt/qemu-pinned/bin/run-patched",
+    "qemu_wrapper_sha256": "32cf8694099987dd819b0a30aacd849a17ddf972de09328b3fdb935b555575cf",
+    "qemu_elf_path": "/opt/qemu-pinned/bin/qemu-system-x86_64-patched",
+    "qemu_elf_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_elf_ok": true,
+    "qemu_loader_path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+    "qemu_loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "qemu_runtime_libs": [
+      {
+        "path": "/home/user/glibc-2.40/lib/Mcrt1.o",
+        "sha256": "b138ca9618aa7ac126f744f03e57016562aa3d10901f112ad761daccea573170"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/Scrt1.o",
+        "sha256": "2f626fbdec77cc9faa3efc1d2f9787aacd06dc105bd9619e65ed3bb1b9c43e66"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/crt1.o",
+        "sha256": "780904d2afb202c6033a9ddb8f4eaab6a6e50f6ad2edecf093a39ca31ada14ed"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/crti.o",
+        "sha256": "db53e211bacee8953f9dab8ef15ea838c947f78e574778cc2d485a8cde66986f"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/crtn.o",
+        "sha256": "d0214060b5b56f557aab8dc8fcf0b5c8363ce8ef18e3b3824d405e494c912885"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/gcrt1.o",
+        "sha256": "e893e5738290bcaba8f3565fb24a9372d1233f5b546f51134b7bcec4cd53245d"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/grcrt1.o",
+        "sha256": "65172dd8568f7dc94d3948d454d89c03f73c205d976e7553c79625218ec2ee6d"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+        "sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libBrokenLocale.a",
+        "sha256": "04186bde5039dc94914360cdf819653b0a3f3d9f320862040967f17cef42073e"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libBrokenLocale.so",
+        "sha256": "3e7763a31f93302ec6d473e5b6bb3c1acd2872b618e5d49b030ec7e51a69bb6c"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libBrokenLocale.so.1",
+        "sha256": "3e7763a31f93302ec6d473e5b6bb3c1acd2872b618e5d49b030ec7e51a69bb6c"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libanl.a",
+        "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libanl.so",
+        "sha256": "0b0be0b68d96bdbb65f35193dd0d87e9f6adabf1489175921f9049059199ee7b"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libanl.so.1",
+        "sha256": "0b0be0b68d96bdbb65f35193dd0d87e9f6adabf1489175921f9049059199ee7b"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc.a",
+        "sha256": "969e39b950eaa8fc171fa512789f48eda1367045765f898d35331562bf96279e"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc.so",
+        "sha256": "9f45f8608c42a520da8452e6d5af85967acdabcc615c7cb0fbf065f5e2478eb7"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc.so.6",
+        "sha256": "eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f"
+      },
+      {
+        "path": "/home/user/glibc-2.40/lib/libc_malloc_debug.so",
+        "sha256": "710b9cf60a079f941e0bb0a55e6716f71351f79dfa223fefa984eccb225338f7"
+      },
+      {
+        "path": "/opt/qemu-pinned/lib/libglib-2.0.so.0",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d"
+      },
+      {
+        "path": "/opt/qemu-pinned/lib/libglib-2.0.so.0.8400.4",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d"
+      },
+      {
+        "path": "/opt/qemu-pinned/lib/libpixman-1.so.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd"
+      },
+      {
+        "path": "/opt/qemu-pinned/lib/libpixman-1.so.0.44.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd"
+      },
+      {
+        "path": "/opt/qemu-pinned/lib/libslirp.so.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3"
+      },
+      {
+        "path": "/opt/qemu-pinned/lib/libslirp.so.0.4.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/Mcrt1.o",
+        "sha256": "b55462ba78eba536e137cbb960489601b13b470940659e436f8dc1ca21e2a8a5"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/Scrt1.o",
+        "sha256": "476c1939cbc572be9ca35ac2592e24a57c636003dd6c2d2ed4138cecde2a2ff9"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/crt1.o",
+        "sha256": "4b46dce59ad3ab304d3f98fd370048b20c1569d6d0a9176623a6bbb0dc6d3513"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/crti.o",
+        "sha256": "78acef26a7007f5320c98633376f2903e33895e694fbc2b91d189b38addbca8a"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/crtn.o",
+        "sha256": "121f2a5f12b13471dd8c7dabe3ff334df08540c270564d1a2b3c47ecbd8d3101"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/gcrt1.o",
+        "sha256": "757914a2b17bdb29fbc2879d86c2568d59c411cafbf668b76881f79069d8ddb3"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/grcrt1.o",
+        "sha256": "3a4a4a65ac4268041b7c3528bfe969cc40404e7c1ee9b6259fc402c99b05ced2"
+      },
+      {
+        "path": "/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "sha256": "02bcda52c1a5dfc236f94d9e5255b4a0e26347d8a372a5223b650e31f291ce3c"
+      }
+    ],
+    "qemu_firmware": {
+      "code_path": "/opt/qemu-pinned/firmware/OVMF_CODE_4M.fd",
+      "code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "vars_path": "/opt/qemu-pinned/firmware/OVMF_VARS_4M.fd",
+      "vars_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    },
+    "qemu_launch_cmd": [
+      "/opt/qemu-pinned/bin/run-patched",
+      "-L",
+      "/opt/qemu-pinned/pc-bios"
+    ],
+    "qemu_identity_ok": true,
+    "compilers": {
+      "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+      "clang_via_zig": "clang version 22.1.8",
+      "zig": "0.17.0",
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+    },
+    "guest_compiler_under_test": "gcc",
+    "guest_elf_sha256": "07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f",
+    "serial_sha256": "d3487141f80787a95cc88736a24353ac0bb859ba286a0739e3f59662347fee56",
+    "apb1_sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+    "esp_sha256": "ed03ad7b9875ec0486ec4c8017008516826fdec315891da7ea8cf378bf42fe88",
+    "esp_path": "/workspace/ArenaOS/build/arena-esp.img",
+    "image": {
+      "fresh": true,
+      "image_mtime": 1793319213.0381544,
+      "newest_source": "tools/v1_guest_proof.py",
+      "newest_source_mtime": 1793319207.778128,
+      "boot_efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83"
+    },
+    "efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83",
+    "efi_size": 11039232
+  },
+  "run": {
+    "rc": 0,
+    "run_dir": "docs/v1/evidence/v2-2026-10-29-r3/guest-gcc",
+    "serial": "docs/v1/evidence/v2-2026-10-29-r3/guest-gcc/v1-guest-serial.log",
+    "serial_sha256": "d3487141f80787a95cc88736a24353ac0bb859ba286a0739e3f59662347fee56"
+  },
+  "verdict": {
+    "pass": true,
+    "failed_because": []
+  },
+  "classification": "qualification candidate run \u2014 evidence class GUEST (executed in ArenaOS under QEMU TCG) with HOST provenance"
+}

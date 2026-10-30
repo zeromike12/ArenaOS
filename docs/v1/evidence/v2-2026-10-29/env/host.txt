@@ -1,0 +1,10 @@
+date_utc: 2026-10-29T21:38:08Z
+host: Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux
+nproc: 2
+mem_total_kb: 4034452
+glibc: ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
+gcc: gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+repo_head: 3d34062296cc5e35b86416a8eab70ebaa15560b8
+repo_branch: arena/af044828-arenaos
+repo_dirty:
+   M docs/v1/evidence/v2-2026-10-29/env/host.txt

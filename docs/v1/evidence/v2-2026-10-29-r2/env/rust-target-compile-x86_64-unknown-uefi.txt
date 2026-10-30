@@ -1,0 +1,5 @@
+target: x86_64-unknown-uefi
+$ rustc --crate-type staticlib --target x86_64-unknown-uefi
+[rustc exit=0]
+-rw-r--r-- 1 user user 1024044 Oct 29 23:39 /tmp/tmp.WJFbzUJlmd/t-x86_64-unknown-uefi.a
+d8afac6f4a962ea1df5e90d1476493ca1a991cba116c5eb1eb054712b2781de8  /tmp/tmp.WJFbzUJlmd/t-x86_64-unknown-uefi.a

@@ -1,0 +1,54 @@
+{
+  "accelerator": "tcg (explicit -accel tcg)",
+  "backend_label": "locally modified QEMU TCG; source-matched unpatched QEMU control",
+  "control_efi_sha256": "dfc8290126cec91f4c98f655ae91d0044c96e55d23335f19c343bd80b764ed82",
+  "control_esp_sha256": "46c0aeb21e61b3cd392d847f225e71f3d3a33ebb68db8460c089a87d6bf7369c",
+  "patched_checks": {
+    "PASS: CR4.OSXMMEXCPT=0 selected vector 6": true,
+    "PASS: DIVSS exception preserved all 128 destination bits": true,
+    "PASS: a new unmasked ZE fault delivered vector 19 with old IE already set": true,
+    "PASS: actual saved RIP matched all six faulting opcode addresses": true,
+    "PASS: invalid SQRTSS faulted again with IE already sticky; XMM0[127:0] preserved": true,
+    "PASS: masked invalid SQRTSS sets IE without vector 19": true,
+    "PASS: old IE unmasked; valid SQRTSS did not fault and kept IE": true,
+    "PASS: packed SQRTPS exceptional lane faulted; all 128 XMM0 bits preserved": true,
+    "PASS: saved RIP matched the exact DIVSS opcode": true,
+    "PASS: saved RIP matched the exact OSXMMEXCPT-disabled opcode": true,
+    "PASS: saved RIP matched the exact unmasked SQRTSS opcode": true,
+    "PASS: sticky IE preserved with new ZE; full XMM0 destination preserved": true,
+    "PASS: unmasked DIVSS divide-by-zero delivered vector 19, ZE=1": true,
+    "PASS: unmasked scalar SQRTSS preserved all 128 XMM0 bits": true,
+    "PASS: valid SQRTSS, invalid unmasked, no fault": true,
+    "RESULT PASS: expanded independent TCG #XM controls": true
+  },
+  "patched_qemu_exit": 33,
+  "patched_qemu_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+  "patched_semantic_result": "PASS",
+  "raw_logs": {
+    "patched_serial_sha256": "3daa28b1bd86c5e5a8742f6115c36c8c060833e3735080f9167aad6822852211",
+    "patched_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unpatched_serial_sha256": "20217e166a4965dce7bf6bfdd8d13be5fc81766c4e8da052d4e3f0042122845c",
+    "unpatched_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "schema_version": 1,
+  "source_sha256": "6dac2f295ac5b19be9ca77abba900cd0cfac8630b63b9edf7702485e884a72ba",
+  "unpatched_controls_observed_fail": [
+    "FAIL: newly raised IE did not fault with IE already sticky",
+    "FAIL: unmasked invalid #XM or XMM0 preservation control",
+    "FAIL: OSXMMEXCPT-disabled control",
+    "FAIL: unmasked divide-by-zero control",
+    "FAIL: sticky IE plus new ZE did not deliver vector 19",
+    "FAIL: packed SQRTPS precise exception/destination control",
+    "FAIL: expected total vector or precise-RIP receipt count",
+    "RESULT FAIL: expanded independent TCG #XM controls; one or more controls failed"
+  ],
+  "unpatched_controls_observed_pass": [
+    "PASS: valid SQRTSS, invalid unmasked, no fault",
+    "PASS: masked invalid SQRTSS sets IE without vector 19",
+    "PASS: old IE unmasked; valid SQRTSS did not fault and kept IE",
+    "PASS: sticky IE=1 was present before the new ZE operation"
+  ],
+  "unpatched_qemu_exit": 35,
+  "unpatched_qemu_sha256": "443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284",
+  "unpatched_semantic_result": "EXPECTED FAIL: TCG did not deliver SIMD floating-point exceptions"
+}

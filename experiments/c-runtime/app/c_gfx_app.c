@@ -29,10 +29,12 @@
    static functions below can be called directly by test_runtime.c. In
    guest builds it is plain static, preserving the production contract. */
 
+#ifndef TEST_EXPORT
 #ifdef ARENA_HOSTED_TEST
 #define TEST_EXPORT
 #else
 #define TEST_EXPORT static
+#endif
 #endif
 
 /* ---------------------------------------------------------------- wire ---
@@ -88,7 +90,14 @@
 #define GFX_OFFSET_PAGES 1u              /* PIXEL_OFFSET page */
 #define GFX_TOTAL_PAGES (GFX_OFFSET_PAGES + GFX_PIXEL_PAGES) /* 301 */
 #define PIXEL_OFFSET 4096u
-#define GFX_FRAMES 300u
+/* Bounded animation lifetime. 300 frames (~10 s at 30 fps) is shorter than
+   the time a person — or a qualification harness driving real input through
+   the compositor — needs to focus the window, inject a key, inject a
+   pointer event and close it, and it made interactive proofs race the
+   client's own exit. 1200 frames (~40 s) keeps the lifetime strictly
+   bounded and the clean-shutdown path unchanged while giving interaction
+   room. The bound is a presentation choice, not an authority change. */
+#define GFX_FRAMES 1200u
 #define GFX_FRAME_US 33333u              /* ~30 fps, bounded busy sleep */
 #define GFX_FLASH_FRAMES 30u             /* visible-acknowledgment glow duration */
 
@@ -267,6 +276,29 @@ typedef struct {
     uint64_t surface_object_id;
 } identify_t;
 
+/* Validate a named identity against the authority this client already
+   holds: SYS_CAP_DESCRIBE(surface_slot) must return [kind 7, an object ID
+   equal to the one Identify named, and rights including READ|WRITE|COPY].
+   The client never trusts a name it cannot match to a capability it holds;
+   a foreign, stale or over-privileged identity is refused here. */
+
+TEST_EXPORT int identify_validate_surface(const identify_t *ident) {
+    uint64_t desc[3];
+    if (describe_slot(a.surface_slot, desc) != 0) {
+        return -1;
+    }
+    if (desc[0] != ARENA_CAP_KIND_SHARED_REGION) {
+        return -1;
+    }
+    if (desc[1] != ident->surface_object_id) {
+        return -1;
+    }
+    if ((desc[2] & GFX_SURFACE_RIGHTS) != GFX_SURFACE_RIGHTS) {
+        return -1;
+    }
+    return 0;
+}
+
 TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
     uint64_t out[3];
 
@@ -331,18 +363,9 @@ TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) 
             return -1;
         }
 
-        /* Validate the named surface against a capability the client
-           already holds: SYS_CAP_DESCRIBE(surface_slot) must return
-           [kind 7, object_id == ident->surface_object_id, rights including
-           READ|WRITE|COPY]. */
-        uint64_t desc[3];
-        if (describe_slot(a.surface_slot, desc) != 0 ||
-            desc[0] != ARENA_CAP_KIND_SHARED_REGION ||
-            desc[1] != ident->surface_object_id ||
-            (desc[2] & GFX_SURFACE_RIGHTS) != GFX_SURFACE_RIGHTS) {
+        if (identify_validate_surface(ident) != 0) {
             return -1;
         }
-
         return 0;
     }
     return -1;
@@ -418,7 +441,12 @@ TEST_EXPORT void render_frame(uint32_t *pixels, uint32_t frame, int flash) {
    otherwise. No serial/debug fallback ever. */
 
 TEST_EXPORT void log_line(const char *msg) {
-    char buf[96];
+    /* 128 bytes: every acknowledgment line below carries the instance's
+       validated surface object ID (up to 20 decimal digits) alongside the
+       event type, counter, focus bit and exit code, and must never be
+       truncated. Truncation would silently drop the instance identity the
+       qualification harness depends on. */
+    char buf[128];
     size_t n = arena_strnlen(msg, sizeof(buf) - 1u);
     arena_memcpy(buf, msg, n);
     buf[n] = '\n';
@@ -427,7 +455,7 @@ TEST_EXPORT void log_line(const char *msg) {
 
 /* ---------------------------------------------------------------- main --- */
 
-#ifndef ARENA_HOSTED_TEST
+#if !defined(ARENA_HOSTED_TEST) && !defined(GFX_NO_MAIN)
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -487,6 +515,7 @@ int main(int argc, char **argv) {
 
     uint8_t id_frame[ADSK_BYTES];
     identify_t ident;
+    char line[128];
     if (identify_exchange(id_frame, &ident) != 0) {
         log_line("[gfx] identify failed");
         if (a.mapped) {
@@ -495,8 +524,23 @@ int main(int argc, char **argv) {
         }
         arena_exit(GFX_IDENTIFY_FAILED);
     }
-    (void)ident; /* session_serial and surface_object_id validated against
-                    the held surface inside identify_exchange */
+
+    /* Instance identity for every acknowledgment below.
+
+       `surface_object_id` is the value the Desktop named in the Identify
+       reply and that this client then validated against the SharedRegion
+       capability it already held (kind 7, equal object ID, READ|WRITE|COPY).
+       It is therefore a per-session identity the guest can honestly report,
+       not a hunch about which window is which: two concurrent instances
+       have distinct surface object IDs. Emitting it makes every event
+       acknowledgment attributable to one specific instance instead of
+       relying on log ordering. It is descriptive telemetry the guest
+       chooses to publish; it grants nothing. */
+    uint64_t instance = ident.surface_object_id;
+    (void)arena_snprintf(line, sizeof(line),
+                         "[gfx] identify ok surface=%llu",
+                         (unsigned long long)instance);
+    log_line(line);
 
     uint64_t handle = create_window(GFX_W, GFX_H);
     if (handle == 0) {
@@ -508,12 +552,15 @@ int main(int argc, char **argv) {
         arena_exit(GFX_CREATE_FAILED);
     }
     a.handle = handle;
-    log_line("[gfx] window created");
+    (void)arena_snprintf(line, sizeof(line),
+                         "[gfx] window created handle=%llu surface=%llu",
+                         (unsigned long long)handle,
+                         (unsigned long long)instance);
+    log_line(line);
 
     uint32_t flash = 0;
     uint64_t events = 0;
     int focused = -1;
-    char line[96];
     int exit_code = GFX_OK;
 
     for (uint32_t f = 0; f < GFX_FRAMES; f++) {
@@ -538,15 +585,21 @@ int main(int argc, char **argv) {
             if (etype == ADSK_EVENT_FOCUS) {
                 focused = reply[29] ? 1 : 0;
                 (void)arena_snprintf(line, sizeof(line),
-                                     "[gfx] focus=%d", focused);
+                                     "[gfx] focus=%d surface=%llu",
+                                     focused,
+                                     (unsigned long long)instance);
                 log_line(line);
             } else if (etype == ADSK_EVENT_KEY || etype == ADSK_EVENT_POINTER) {
                 events++;
                 flash = GFX_FLASH_FRAMES;
+                /* Event-specific acknowledgment: event TYPE and the
+                   instance's validated surface identity travel together
+                   with the per-instance counter. */
                 (void)arena_snprintf(line, sizeof(line),
-                                     "[gfx] event type=%u events=%llu",
+                                     "[gfx] event type=%u events=%llu surface=%llu",
                                      (unsigned)etype,
-                                     (unsigned long long)events);
+                                     (unsigned long long)events,
+                                     (unsigned long long)instance);
                 log_line(line);
             } else if (etype == ADSK_EVENT_CLOSE) {
                 break;
@@ -597,8 +650,9 @@ int main(int argc, char **argv) {
     }
 
     (void)arena_snprintf(line, sizeof(line),
-                         "[gfx] exit events=%llu focused=%d code=%d",
-                         (unsigned long long)events, focused, exit_code);
+                         "[gfx] exit events=%llu focused=%d code=%d surface=%llu",
+                         (unsigned long long)events, focused, exit_code,
+                         (unsigned long long)instance);
     log_line(line);
     arena_exit(exit_code);
     return 0;

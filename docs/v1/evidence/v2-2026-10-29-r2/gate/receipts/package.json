@@ -1,0 +1,32 @@
+{
+  "stage": "package",
+  "exit": 0,
+  "qualified": true,
+  "notes": [
+    "final package: gate receipts, gate controls, stability + regression logs"
+  ],
+  "argv": [],
+  "started_epoch": 1793317355.1461265,
+  "finished_epoch": 1793317355.1461267,
+  "started_utc": "2026-10-29T23:42:35Z",
+  "finished_utc": "2026-10-29T23:42:35Z",
+  "source_commit": "c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e",
+  "code_fingerprint": "dd9a65d3fbc2ed12bf6dc1b33f75fb7697f394ea24a30702e64b6621b694c40a",
+  "dirty_paths": [
+    "ocs/v1/V2-STATUS.md",
+    "tools/v1_cycles.py",
+    "tools/v1_gate_aggregate.py",
+    "tools/v1_gate_stage.py",
+    "tools/v1_guest_proof.py",
+    "tools/v1_refusals.py"
+  ],
+  "newest_tracked": {
+    "path": "tools/v1_gate_aggregate.py",
+    "mtime": 1793317163.8315961
+  },
+  "efi_sha256": "7134acf11212ddd4845e0b29ca8058a84d3e9944d2da92b6ab7efd9588806cb5",
+  "esp_sha256": "d28aca63aa4829fc1ca505b73a27015559c77bcf2db2c3447875da55459397ae",
+  "evidence_package_sha256": "087aae774889659653baad58ad9ba1b74586ed62b271ee68aba5058a783f372f",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}
