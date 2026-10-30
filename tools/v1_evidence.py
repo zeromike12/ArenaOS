@@ -162,6 +162,81 @@ def check_frames(root: Path) -> list:
     return problems
 
 
+def check_integration_frames(root: Path) -> list:
+    """Verify actual QEMU frames recorded by 301/300 integration runs."""
+    problems = []
+    for evidence_path in sorted(root.rglob("integration-evidence.json")):
+        run_dir = evidence_path.parent.resolve()
+        rel_dir = str(evidence_path.parent.relative_to(root)) or "."
+        try:
+            payload = json.loads(evidence_path.read_text())
+        except (OSError, ValueError) as exc:
+            problems.append(f"{rel_dir}: integration-evidence.json unreadable: {exc}")
+            continue
+        fixtures = payload.get("fixtures") if isinstance(payload, dict) else None
+        if not isinstance(fixtures, dict):
+            problems.append(f"{rel_dir}: integration fixture records are missing")
+            continue
+        for pages in (301, 300):
+            fixture = fixtures.get(str(pages))
+            if not isinstance(fixture, dict):
+                if payload.get("pass") is True:
+                    problems.append(f"{rel_dir}: passing run omits {pages}-page fixture")
+                continue
+            frames = fixture.get("frames")
+            if not isinstance(frames, dict):
+                if fixture.get("pass") is True:
+                    problems.append(f"{rel_dir}: passing {pages}-page run has no frame map")
+                continue
+            required = {"prelaunch", "launcher-selection", "after-cleanup"}
+            if pages == 301:
+                required.add("rendered")
+            if fixture.get("pass") is True:
+                missing = sorted(required - set(frames))
+                if missing:
+                    problems.append(f"{rel_dir}: passing {pages}-page run omits "
+                                    f"screenshots {', '.join(missing)}")
+            for name, frame in frames.items():
+                if not isinstance(frame, dict):
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} has no identity")
+                    continue
+                raw = frame.get("png")
+                if not isinstance(raw, str) or not raw:
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} has no PNG path")
+                    continue
+                png = (run_dir / raw).resolve()
+                try:
+                    png.relative_to(run_dir)
+                except ValueError:
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} escapes its run directory")
+                    continue
+                if not png.is_file() or png.stat().st_size == 0:
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} is missing or empty")
+                    continue
+                data = png.read_bytes()
+                if sha256_bytes(data) != frame.get("png_sha256"):
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} PNG hash changed")
+                    continue
+                try:
+                    width, height, raster = png_raster(data)
+                except (ValueError, OSError) as exc:
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} cannot decode: {exc}")
+                    continue
+                if sha256_bytes(raster) != frame.get("raster_sha256"):
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} raster hash changed")
+                if (width, height) != (frame.get("width"), frame.get("height")):
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} dimensions changed")
+                if (width, height) != (800, 600):
+                    problems.append(f"{rel_dir}: {pages}-page frame {name} is not 800x600")
+                if pages == 301 and name == "rendered" \
+                        and fixture.get("pass") is True:
+                    if fixture.get("rendered_visual_assertion") is not True \
+                            or frame.get("assertion") != (
+                                "production checkerboard color present in the placed window content"):
+                        problems.append(f"{rel_dir}: passing 301 rendered screenshot lacks its visual assertion")
+    return problems
+
+
 def collect(root: Path) -> tuple:
     files = {}
     excluded = 0
@@ -242,7 +317,9 @@ scan for files that exist in the archive but not in the manifest.
 
 `package` refuses to run unless every guest run in this directory publishes
 all nine checkpoint images, each PNG still decoding to the raster digest the
-harness recorded when that checkpoint passed.
+harness recorded when that checkpoint passed. Real-grant integration PNGs are
+independently decoded and checked against their recorded QEMU raster digest;
+the 301-page rendered frame must carry its checkerboard visual assertion.
 
 PPM working copies are not shipped ({excluded} of them): a PPM is a fixed
 header plus the identical raster, so it is reproducible from the published
@@ -284,7 +361,7 @@ def package(root: Path) -> int:
     if not root.is_dir():
         print(f"[evidence] {root} is not a directory", file=sys.stderr)
         return 2
-    frame_problems = check_frames(root)
+    frame_problems = check_frames(root) + check_integration_frames(root)
     if frame_problems:
         print("[evidence] refusing to package: checkpoint frames do not match "
               "their recorded identity")
@@ -320,8 +397,9 @@ def package(root: Path) -> int:
             "required": list(REQUIRED_GUEST_FRAMES),
             "checked": "each published PNG re-decoded and compared with the "
                        "raster digest the harness recorded when the checkpoint "
-                       "assertion passed",
+                       "assertion passed; integration PNGs are also decoded",
             "runs": sum(1 for _ in root.rglob("evidence.json")),
+            "integration_runs": sum(1 for _ in root.rglob("integration-evidence.json")),
         },
         "total_bytes": sum(f["size"] for f in files.values()),
     }

@@ -508,7 +508,8 @@ pixel-write and damage milestones; retirement scans only the granted pixel
 words. The intended real-grant assertions are: 301 pages accepted and fully
 rendered; 300 pages refused by the ordinary C size check before map/write/
 window/damage, with zero pixel words changed; both children exit and Desktop
-resources settle to baseline.
+resources settle to baseline. Requirement 5g is also wired to rerun Phase 15
+against the final EFI/ESP when the full matrix is run.
 
 **Execution status: OPEN.** These edits have not yet been built or exercised
 in QEMU. There is no new canonical EFI/ESP, no real-grant receipt, no screenshot
@@ -524,9 +525,9 @@ The fresh run is reserved for
 that can silently qualify this candidate. The aggregate prints the existing
 foreign/stale limitation explicitly: `foreign-identity` remains an IDENTITY
 validator test over mutated bytes, not a real stale/foreign capability launch.
-No waiver is recorded here; any waiver remains M's decision. The aggregate
-will keep requirement 4b OPEN unless the evidence root contains an
-`M-WAIVER.json` tied to the current source commit and EFI, with
-`decision_by: "M"`, an explicit scope, timestamp and rationale, or a real
-stale/foreign-capability case is added under an authorized contract. V1
-remains OPEN for acceptance regardless of test receipts.
+Requirement 4b therefore stays OPEN without either a real case or M's recorded
+waiver; waivers are not inferred from a green validator result. A waiver must
+be an `M-WAIVER.json` in the evidence root, tied to the current source commit
+and EFI, with `decision_by: "M"`, `requirement: "4b"`, `decision: "waive"`,
+the exact limitation scope, a timestamp and a rationale. No waiver is
+recorded here. V1 remains OPEN for acceptance regardless of test receipts.
