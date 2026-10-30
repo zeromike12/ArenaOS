@@ -31,6 +31,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
+# Use the pinned V1 environment for the canonical build and every evidence
+# stage, including the private compiler's dynamic rustc_driver directory.
+if [[ -f "$REPO_ROOT/tools/dev-env/v1-env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/tools/dev-env/v1-env.sh"
+fi
+
 MODE="${V1_GATE_MODE:-guest}"
 EVIDENCE="${V1_GATE_EVIDENCE:-docs/v1/evidence/v2-2026-10-30-boundary-r1}"
 LOG_DIR="${V1_GATE_LOGS:-build/v1-gate-2026-10-30-boundary-r1}"

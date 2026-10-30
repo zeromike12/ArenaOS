@@ -19,6 +19,14 @@ export ARENA_OVMF_VARS="${ARENA_OVMF_VARS:-$ARENA_PKG/firmware/OVMF_VARS_4M.fd}"
 
 # Private Rust 1.97.0 toolchain (official bare-metal target components).
 export ARENA_RUST_BIN="${ARENA_RUST_BIN:-/opt/rust/prefix/bin}"
+# The private compiler is dynamically linked against its own rustc_driver.
+# Put that library directory first so rustc works in a clean/chrooted runner.
+if [[ -d /opt/rust/prefix/lib ]]; then
+    case "${LD_LIBRARY_PATH:-}" in
+        /opt/rust/prefix/lib|/opt/rust/prefix/lib:*) ;;
+        *) export LD_LIBRARY_PATH="/opt/rust/prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    esac
+fi
 
 # Documented Clang route: zig cc -target x86_64-freestanding-none.
 export ARENA_ZIG="${ARENA_ZIG:-/opt/zig-clang/ziglang/zig}"
