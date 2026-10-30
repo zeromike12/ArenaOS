@@ -1,0 +1,48 @@
+{
+  "stage": "refusals-clang",
+  "exit": 0,
+  "evidence_dir": "docs/v1/evidence/v2-2026-10-30-layout-boundary/development/refusals-clang",
+  "qualified": false,
+  "notes": [
+    "development-only kernel image from tools/build_phase16_dev.sh; NOT a canonical qualification build"
+  ],
+  "argv": [
+    "env",
+    "V1_CC=clang",
+    "V1_REFUSAL_TIMEOUT=120",
+    "V1_EVIDENCE_DIR=docs/v1/evidence/v2-2026-10-30-layout-boundary/development/refusals-clang",
+    "python3",
+    "tools/v1_refusals.py"
+  ],
+  "started_epoch": 1793379670.974033,
+  "finished_epoch": 1793379692.635876,
+  "started_utc": "2026-10-30T17:01:10Z",
+  "finished_utc": "2026-10-30T17:01:32Z",
+  "source_commit": "be51fcb8c6a5e9547f61952d233f7e0fc13282d8",
+  "code_fingerprint": "85ad021412b2c9f64ef8371c2bbbf39dd0af79765c007282200a089d5a6bb74f",
+  "dirty_paths": [
+    "xperiments/c-runtime/app/c_gfx_app.c",
+    "experiments/c-runtime/app/c_gfx_refusals.c",
+    "experiments/c-runtime/host/test_runtime.c",
+    "experiments/c-runtime/run.py",
+    "tools/dev-env/recover-rust-and-zig.sh",
+    "tools/v1_env_evidence.sh",
+    "tools/v1_gate.sh",
+    "tools/v1_gate_aggregate.py",
+    "tools/v1_gate_stage.py",
+    "tools/v1_guest_proof.py",
+    "tools/v1_refusals.py",
+    "docs/phase16/dependencies/rust-1.97.0/rust-std-1.97.0-x86_64-unknown-none.tar.xz",
+    "docs/phase16/dependencies/rust-1.97.0/rust-std-1.97.0-x86_64-unknown-uefi.tar.xz",
+    "tools/test_v1_gate_aggregate.py"
+  ],
+  "newest_tracked": {
+    "path": "tools/dev-env/recover-rust-and-zig.sh",
+    "mtime": 1793379209.897953
+  },
+  "efi_sha256": "a522f293c7685aa13ba5f15c8cbdbfa2b6f42acb5105a8b80900c1fb7e430e27",
+  "esp_sha256": "430039e099f7d3e8cc887dbbd42c8697a6da2c1d46099633227f57115764bd12",
+  "evidence_package_sha256": "07ff4d442871cd5c70b455b359544eaca754f6ba5a90928497cdd95808e08148",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

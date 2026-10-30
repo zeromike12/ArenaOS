@@ -38,8 +38,20 @@ mkdir -p "$LOG_DIR" "$RECEIPTS"
 
 stage_run() { # $1 = stage name; remaining = command
     local name="$1"; shift
+    local evidence_dir=""
+    case "$name" in
+        env) evidence_dir="$EVIDENCE/env" ;;
+        guest-*|refusals-*) evidence_dir="$EVIDENCE/$name" ;;
+        cycles) evidence_dir="$EVIDENCE/lifecycle-cycles" ;;
+        package|verify) evidence_dir="$EVIDENCE" ;;
+    esac
+    local evidence_opt=()
+    if [[ -n "$evidence_dir" ]]; then
+        evidence_opt=(--evidence-dir "$evidence_dir")
+    fi
     printf '\n=== %s ===\n' "$name"
-    python3 tools/v1_gate_stage.py run --stage "$name" --receipts "$RECEIPTS" -- "$@"
+    python3 tools/v1_gate_stage.py run --stage "$name" --receipts "$RECEIPTS" \
+        "${evidence_opt[@]}" -- "$@"
 }
 
 # The Phase-14 PIE guard pins the build path. Build where it is bound.
@@ -95,6 +107,10 @@ tail -1 "$LOG_DIR/env.log"
 stage_run controls python3 tools/v1_guest_proof.py --controls \
     > "$LOG_DIR/controls.log" 2>&1
 tail -1 "$LOG_DIR/controls.log"
+
+stage_run aggregate-controls python3 tools/test_v1_gate_aggregate.py \
+    > "$LOG_DIR/aggregate-controls.log" 2>&1
+tail -1 "$LOG_DIR/aggregate-controls.log"
 
 if [[ "$MODE" == "quick" ]]; then
     echo

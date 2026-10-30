@@ -144,9 +144,11 @@ CHECKPOINTS = {
 #   IDENTITY   guest execution of the production validator against a mutated
 #              identity: synthetic identity bytes, not a real foreign or
 #              stale capability.
-#   CONTROL    a genuine data path that must still succeed, so a refusal
-#              cannot pass for the wrong reason (a validator that refuses
-#              everything).
+#   CONTROL       a genuine data path that must still succeed, so a refusal
+#                 cannot pass for the wrong reason (a validator that refuses
+#                 everything).
+#   CLIENT-POLICY the production client guard exercised with explicit page
+#                 counts; those inputs are not kernel-created SharedRegions.
 REFUSAL_CLASSES = {
     "baseline-record-accepted": ("CONTROL", "the launcher-built startup record is accepted by the shipped discovery"),
     "reorder-reversed": ("DISCOVERY", "production discovery over a reversed copy of the real descriptor"),
@@ -166,8 +168,11 @@ REFUSAL_CLASSES = {
     "genuine-identity": ("CONTROL", "the same validator accepts the genuine identity"),
     "unexpected-transfer": ("IPC", "a frame carrying a capability the dispatch never asked for"),
     "transfer-surface-retained": ("KERNEL", "the client still holds its own surface capability after that transfer"),
-    "layout-pages-minimum": ("KERNEL", "the kernel-reported page count of the real granted surface region"),
-    "layout-pixel-window-fits": ("CLIENT-ARITHMETIC", "client-side comparison of the documented offset and pixel bytes (NOT production logic; see V2-STATUS §5.2)"),
+    "layout-pages-minimum": ("KERNEL", "the kernel-reported page count of the real Desktop-granted surface region, passed through the production C guard"),
+    "layout-pixel-window-fits": ("CLIENT-POLICY", "the production C size guard accepts the real kernel-reported page count and the documented 32-bit layout constants agree"),
+    "layout-301-accepted": ("CLIENT-POLICY", "the production C size guard accepts exactly 301 pages; a policy input, not a kernel-created grant"),
+    "layout-300-refused": ("CLIENT-POLICY", "the production C size guard returns GFX_SURFACE_TOO_SMALL (7) for 300 pages; a policy input, not a kernel-created grant"),
+    "layout-required-pages": ("CLIENT-POLICY", "production layout constants require exactly 301 pages for offset 4096 plus 640x480x4 bytes"),
     "layout-wrong-kind-refused": ("KERNEL", "the kernel refuses the region query on a non-region capability"),
 }
 
@@ -192,6 +197,9 @@ REFUSAL_CASES = (
     "transfer-surface-retained",
     "layout-pages-minimum",
     "layout-pixel-window-fits",
+    "layout-301-accepted",
+    "layout-300-refused",
+    "layout-required-pages",
     "layout-wrong-kind-refused",
 )
 
@@ -1261,7 +1269,7 @@ def _compiler_identity(cmd: list[str]) -> str:
 
 
 def compiler_identities() -> dict:
-    zig = os.environ.get("ARENA_ZIG", "/opt/zig-clang/pkg/ziglang/zig")
+    zig = os.environ.get("ARENA_ZIG", "/opt/zig-clang/ziglang/zig")
     return {
         "gcc": _compiler_identity(["gcc", "--version"]),
         "clang_via_zig": _compiler_identity([zig, "cc", "--version"]),

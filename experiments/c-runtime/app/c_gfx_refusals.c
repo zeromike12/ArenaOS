@@ -289,16 +289,32 @@ static void case_unexpected_transfer(void) {
 }
 
 static void case_layout(uint64_t surf, uint64_t ep) {
-    int64_t pages = arena_syscall6(ARENA_SYS_SHARED_PAGES, surf, 0, 0, 0, 0, 0);
-    int sized = pages >= (int64_t)GFX_TOTAL_PAGES;
-    report("layout-pages-minimum", (long)GFX_TOTAL_PAGES,
-           (long)(pages < 0 ? 0 : pages), sized);
+    /* The boundary cells call the exact production predicate used by
+       c_gfx_app.c before it maps, renders, or creates/publishes a window.
+       Their page counts are policy inputs—not forged kernel grants. */
+    int at_minimum = surface_pages_status(301);
+    report("layout-301-accepted", GFX_OK, at_minimum,
+           at_minimum == GFX_OK);
 
-    /* The pixel window must fit inside the granted region: offset page plus
-       300 pixel pages, using the documented 32-bit layout. */
-    int fits = pages > 0 &&
-               ((uint64_t)pages * ARENA_PAGE_SIZE) >=
-                   (uint64_t)PIXEL_OFFSET + (uint64_t)GFX_PIXEL_BYTES &&
+    int below_minimum = surface_pages_status(300);
+    report("layout-300-refused", GFX_SURFACE_TOO_SMALL, below_minimum,
+           below_minimum == GFX_SURFACE_TOO_SMALL);
+
+    report("layout-required-pages", 301, (long)GFX_TOTAL_PAGES,
+           GFX_TOTAL_PAGES == 301u);
+
+    /* This is a real kernel fact: query the SharedRegion actually granted by
+       the Desktop. Feed that result through the production policy separately
+       so the report distinguishes authority data from client-side testing. */
+    int64_t pages = arena_syscall6(ARENA_SYS_SHARED_PAGES, surf, 0, 0, 0, 0, 0);
+    int actual_sized = surface_pages_status(pages) == GFX_OK;
+    report("layout-pages-minimum", (long)GFX_TOTAL_PAGES,
+           (long)(pages < 0 ? 0 : pages),
+           pages >= (int64_t)GFX_TOTAL_PAGES && actual_sized);
+
+    /* Confirm the documented byte layout and the same production guard on
+       the real kernel-reported page count. */
+    int fits = actual_sized &&
                GFX_PIXEL_BYTES == (uint64_t)GFX_W * GFX_H * 4u &&
                PIXEL_OFFSET == ARENA_PAGE_SIZE;
     report("layout-pixel-window-fits", 1, (long)(fits ? 1 : 0), fits);

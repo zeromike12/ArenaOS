@@ -1,0 +1,1662 @@
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;031;100t[2J[001;001H[2J[001;001H[8;050;080t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[arena INFO  boot] ArenaOS boot stage v0.1.0 (release build, x86_64-unknown-uefi) — milestones 1–2
+[arena INFO  boot] firmware: vendor="Debian distribution of EDK II" revision=0x10000
+[arena INFO  boot] cpu: vendor=AuthenticAMD family=15 model=107 stepping=1 physaddr=40bit fpu=true mmx=true fxsr=true sse=true sse2=true sse3=true ssse3=false sse4.1=false sse4.2=false sse4a=false xsave=false avx=false osxsave=false nx=true longmode=true smep=true smap=true
+[arena INFO  boot] cpustate: cr0=0x80010033 cr3=0x1f401000 cr4=0x668 efer=0xd00
+[arena INFO  boot] uefi: boot services rev=0x20046 hdr_size=0x178
+[arena INFO  boot] gdt: installed own GDT (base=0x1cedb8d0, code_sel=0x8, data_sel=0x10, tss_sel=0x18)
+[arena INFO  boot] tss: installed (IST1 fault stack top=0x1c5d1d30)
+[arena INFO  boot] idt: installed own IDT (base=0x1cefc9a8, 256 vectors: 0-31 diagnostics+halt, 32-255 absorb+EOI)
+[arena INFO  boot] bootinfo: captured 122 regions (map_key=0x93d, conventional=447MiB)
+[arena INFO  boot] GOP handoff: unavailable or unsupported mode
+[arena INFO  m1] running milestone-1 self-tests
+m1:test:serial_loopback: PASS
+[arena INFO  m1] cpustate: cr0=0x80010033 cr3=0x1f401000 cr4=0x668 efer=0xd00
+m1:test:cpu_long_mode: PASS
+[arena INFO  m1] cpu: vendor=AuthenticAMD family=15 model=107 stepping=1 physaddr=40bit fpu=true mmx=true fxsr=true sse=true sse2=true sse3=true ssse3=false sse4.1=false sse4.2=false sse4a=false xsave=false avx=false osxsave=false nx=true longmode=true smep=true smap=true
+m1:test:cpuid_sane: PASS
+[arena INFO  m1] gdt: sgdt read-back base=0x1cedb8d0 limit=0x3f
+m1:test:gdt_installed: PASS
+[arena INFO  m1] idt: sidt read-back base=0x1cefc9a8 limit=0xfff
+m1:test:idt_installed: PASS
+[arena INFO  bootinfo] regions=122 desc_size=48 version=1 map_key=0x93d
+[arena INFO  bootinfo] memory: conventional=447MiB reclaimable=47MiB largest_free=419MiB@0x1780000 total_described=13059MiB (incl. reserved/MMIO spans)
+[arena INFO  bootinfo] region[0]: type=ConventionalMemory phys=0x0 pages=135 (0xf attr)
+[arena INFO  bootinfo] region[1]: type=BootServicesData phys=0x87000 pages=1 (0xf attr)
+[arena INFO  bootinfo] region[2]: type=ConventionalMemory phys=0x88000 pages=24 (0xf attr)
+[arena INFO  bootinfo] region[3]: type=ConventionalMemory phys=0x100000 pages=1792 (0xf attr)
+[arena INFO  bootinfo] region[4]: type=ACPIMemoryNVS phys=0x800000 pages=8 (0xf attr)
+[arena INFO  bootinfo] region[5]: type=ConventionalMemory phys=0x808000 pages=3 (0xf attr)
+[arena INFO  bootinfo] region[6]: type=ACPIMemoryNVS phys=0x80b000 pages=1 (0xf attr)
+[arena INFO  bootinfo] region[7]: type=ConventionalMemory phys=0x80c000 pages=6 (0xf attr)
+m1:test:memory_map: PASS
+[arena INFO  m1] wide_math: (0xdeadbeefcafebabe * 0x123456789abcdef1) / 7 = 0x2431b22219849681cde9fbfc6c0f01f
+m1:test:wide_math: PASS
+[arena INFO  m1] timer_irq: absorbed 2 hardware IRQ(s) through our IDT (EOI cycle verified, spin=47254)
+m1:test:timer_irq_absorbed: PASS
+m1: RESULT PASS (8/8)
+[arena INFO  timekeeping] tsc calibration round 1/3: window1 119382 counts/210121382 tsc = 2100090891 Hz, window2 119382/210117834 = 2100055430 Hz (16 ppm apart)
+[arena INFO  timekeeping] tsc_hz=2100073160 (2100 MHz); PIT ch0 ticking at 100 Hz (mode 3, vector 32 via IOAPIC/LAPIC)
+[arena INFO  boot] frames: managing 114275 frames (446 MiB free)
+[arena INFO  paging] address space live: cr3=0x100000 identity+direct-map(offset 0xffffffff80000000), image window [0x1c46d000,0x1cf4b000) 5 sections, skipped_high_regions=1
+[arena INFO  heap] kernel heap ready: guards=on chunk=64KiB frame-backed (arena-heap core, host-tested)
+[arena INFO  m2] running milestone-2 self-tests
+[arena INFO  m2] tss: str read-back sel=0x18; IST1 top=0x1c5d1d30 (want 0x1c5d1d30)
+m2:test:tss_installed: PASS
+[arena INFO  m2] exc_de: observed vector=0x0 error_code=0x0; resumed after faulting div
+m2:test:exc_de_recovered: PASS
+[arena INFO  m2] exc_pf: observed vector=0xe error_code=0x2 cr2=0x600000000000; resumed after faulting write
+m2:test:exc_pf_recovered: PASS
+[arena INFO  m2] pit_oneshot: status=0xb2 (OUT=true) after 10088us (spin=19833)
+m2:test:pit_oneshot: PASS
+[arena INFO  m2] tsc_frequency: window 1/3 re-measured 2100027588 Hz (2100 MHz) vs boot 2100 MHz over 119367 PIT counts — 21 ppm apart
+m2:test:tsc_frequency: PASS
+[arena INFO  m2] clock_monotonic: waited 2067us for 2000us request; cross-check best window pit=2008us clock=2004us skew=4us
+m2:test:clock_monotonic: PASS
+[arena INFO  m2] tick_rate: 10 ticks in 96895us (avg 9689us, expected ~10000us at 100 Hz)
+m2:test:tick_rate: PASS
+[arena INFO  m2] frame_allocator: managing 114275 frames (446 MiB) from 11 conventional regions; 18 frames owned by boot infrastructure (page tables)
+[arena INFO  m2] frame_allocator: stress 200x64 OK; benchmark 2048 alloc+free in 445us (~217 ns/op)
+m2:test:frame_allocator: PASS
+[arena INFO  m2] vm_address_space: cr3=0x100000 (ours 0x100000)
+[arena INFO  m2] vm_address_space: alias round-trip OK; higher-half call at 0xffffffff9c472180 returned 0x2464a0ffee005a5a
+m2:test:vm_address_space: PASS
+[arena INFO  m2] vm_write_protect: write to RO .text at 0xffffffff9c472180: vector=0xe ec=0x3 cr2=0xffffffff9c472180
+m2:test:vm_write_protect: PASS
+[arena INFO  m2] vm_nx: fetch at NX data page 0xffffffff9cefc928: vector=0xe ec=0x11 cr2=0xffffffff9cefc928
+m2:test:vm_nx: PASS
+[arena INFO  m2] heap_basics: distinct/aligned/patterned; chunks=1 reserved=64KiB
+m2:test:heap_basics: PASS
+[arena ERROR heap] free rejected: DoubleFree ptr=0x112040
+[arena ERROR heap] free rejected: RedZoneBack ptr=0x112040
+[arena ERROR heap] free rejected: NotFromHeap ptr=0x1cefc928
+[arena INFO  m2] heap_guards: DoubleFree/RedZoneBack/NotFromHeap rejected; heap usable after each
+m2:test:heap_guards: PASS
+[arena INFO  m2] heap_stress: 1920 alloc/free ops in 938us (~488 ns/op), chunks=1, reserved=64KiB, this-test allocs=961
+m2:test:heap_stress: PASS
+[arena INFO  m2] crit_section: 2 ticks delivered, 0 crossed a 25ms section entered with IF=1, resumed, RFLAGS exact
+m2:test:crit_section: PASS
+[arena INFO  m2] spinlock_basics: acquire/try_lock/drop/owner exact; heap cooperates under outer lock
+m2:test:spinlock_basics: PASS
+[arena INFO  boot] exiting UEFI boot services (M2.7 handover)
+[arena INFO  boot] restoring firmware page tables for the EBS window (cr3=0x1f401000)
+[arena INFO  boot] ExitBootServices succeeded (attempt 1, map_key=0x93d, 122 regions, conventional=447MiB)
+[arena INFO  boot] back on kernel dual-view tables (cr3=0x100000); boot services are dead
+m2:test:ebs_exited: PASS
+[arena INFO  boot] frames: post-EBS reconcile leaked 0 frame(s); 114241 free (446 MiB)
+[arena INFO  boot] heap: recycled 1 boot chunk(s); kernel-view heap armed
+[arena INFO  boot] map probe 0xfec00000: NOT DESCRIBED
+[arena INFO  boot] map probe 0xfee00000: NOT DESCRIBED
+[arena INFO  paging] kernel view built: pml4=0x112000 (direct map + image window + RT identity + MMIO/APIC aliases + PCI-window root; identity view of RAM deliberately absent)
+[arena INFO  boot] descriptors relocated to the kernel view (GDT/TSS/IDT, LAPIC EOI)
+[arena INFO  boot] idt readback: idtr=0xffffffff9cefc9a8 vec14=0xffffffff9c476120/0xffffffff9c476120 vec32=0xffffffff9c476260/0xffffffff9c476260
+[arena INFO  boot] image re-relocated for the kernel view: 361 DIR64 slot(s) +KERNEL_OFFSET, 0 other-kind skipped
+[arena INFO  boot] entering kernel proper: trampoline=0xffffffff9c486780 kmain=0xffffffff9c489610 boot-info=0xffffffff9cefff90 kernel_cr3=0x112000
+[arena INFO  cpu] feature discovery after FP setup: vendor=AuthenticAMD family=15 model=107 stepping=1 physaddr=40bit fpu=true mmx=true fxsr=true sse=true sse2=true sse3=true ssse3=false sse4.1=false sse4.2=false sse4a=false xsave=false avx=false osxsave=false nx=true longmode=true smep=true smap=true; firmware OSXSAVE was false
+[arena INFO  fpu] FXSAVE64 initialized eagerly: CR0=0x80010033 CR4=0x668 MXCSR=0x1f80 mask=0xffff XCR0=None OSXSAVE=off AVX-state=unsupported
+[arena INFO  kernel] arena kernel proper entered: boot-info v1 map_key=0x93d regions=122 conventional=447MiB tsc=2100073160Hz tick=100Hz
+[arena INFO  kernel] handover: boot m1 8/8, m2 pre-entry 17/17; post-EBS reconcile leaked 0 frame(s); 1 heap chunk(s) recycled
+[arena INFO  entropy] ADR-0110 ChaCha20 block known-answer check passed; placement entropy remains unavailable until production rngd seeds it
+[arena INFO  kernel] timer chain reclaimed: pit 100 Hz (ch0 11123 -> 6257 over 2ms); ioapic pin 2 rte 0x10000/0x0 -> 0x20; hpet gen_conf 0x0 -> 0x0; lapic svr=0x10f
+[arena INFO  kernel] console input armed: com1 rx -> ioapic pin 4 -> vector 33 (rte 0x21), line discipline live
+[arena INFO  kernel] kernel_entry: rip=0xffffffff9c48a274 rsp=0xffffffff9fb61880 cr3=0x112000 (dual was 0x100000) cr0=0x80010033 efer=0xd00
+m2:test:kernel_entry: PASS
+[arena INFO  kernel] identity_torn_down: write to 0x1000 → #PF ec=0x2 cr2=0x1000, recovered at a kernel-view RIP
+m2:test:identity_torn_down: PASS
+[arena INFO  kernel] kernel_heap_live: alloc/free at 0xffffffff80129040 (chunk #1, reserved 64KiB), frame 0x139000 round-trip
+m2:test:kernel_heap_live: PASS
+[arena INFO  kernel] kernel_irq_live: 2 ticks through the relocated IDT + kernel-alias LAPIC EOI
+m2:test:kernel_irq_live: PASS
+m2: RESULT PASS (21/21)
+[arena INFO  kernel] milestone 2 complete — starting the milestone 3 suite
+[arena INFO  pci] 00:00.0 8086:29c0 class 060000 rev 00 subsys 11001af4
+[arena INFO  pci] 00:01.0 1af4:1001 class 010000 rev 00 subsys 00021af4
+[arena INFO  pci]   bar0: base 0x6000 size 0x80 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x80047000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000000000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1001 → type 2 (block), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:02.0 1af4:1000 class 020000 rev 00 subsys 00011af4
+[arena INFO  pci]   bar0: base 0x6140 size 0x20 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x80046000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000004000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1000 → type 1 (net), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 4 entries, table bar1 + 0x0
+[arena INFO  pci] 00:03.0 1af4:1005 class 00ff00 rev 00 subsys 00041af4
+[arena INFO  pci]   bar0: base 0x6120 size 0x20 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x80045000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000008000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1005 → type 4 (entropy), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:04.0 1af4:1052 class 090000 rev 01 subsys 11001af4
+[arena INFO  pci]   bar1: base 0x80044000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc00000c000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1052 → type 18 (input), modern
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:05.0 1af4:1052 class 098000 rev 01 subsys 11001af4
+[arena INFO  pci]   bar1: base 0x80043000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000010000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1052 → type 18 (input), modern
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:06.0 1af4:1003 class 078000 rev 00 subsys 00031af4
+[arena INFO  pci]   bar0: base 0x60c0 size 0x40 (io — legacy, not driven)
+[arena INFO  pci]   bar1: base 0x80042000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000014000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1003 → type 3 (console), transitional
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 2 entries, table bar1 + 0x0
+[arena INFO  pci] 00:07.0 1af4:1050 class 038000 rev 01 subsys 11001af4
+[arena INFO  pci]   bar1: base 0x80041000 size 0x1000
+[arena INFO  pci]   bar4: base 0xc000018000 size 0x4000
+[arena INFO  pci]   command 0x0007 -> 0x0007 (MEM|BUS MASTER — DMA authorized by kernel policy)
+[arena INFO  pci]   virtio device_id 0x1050 → type 16 (gpu), modern
+[arena INFO  pci]     common: bar4 + 0x0 len 0x1000
+[arena INFO  pci]     notify: bar4 + 0x3000 len 0x1000
+[arena INFO  pci]     isr: bar4 + 0x1000 len 0x1000
+[arena INFO  pci]     device: bar4 + 0x2000 len 0x1000
+[arena INFO  pci]     notify_off_multiplier = 0x4
+[arena INFO  pci]     msix: 3 entries, table bar1 + 0x0
+[arena INFO  pci] 00:31.0 8086:2918 class 060100 rev 02 subsys 11001af4
+[arena INFO  pci] bus 0 scan complete: 9 function(s) recorded, 7 virtio
+[arena INFO  kernel] pci enumeration: 9 bus-0 function(s), 7 virtio
+[arena INFO  syscall] ring-3 boundary armed: STAR=0x20000800000000 LSTAR=0xffffffff9c4aa0e0 SFMASK=0x44700 kernel_gs_base=0xffffffff9cf2a240 smep=true smap=true (cpu: smep=true smap=true)
+[arena INFO  m3] thread_spawn_run: id 1 ran to completion and was reaped; 2 context switches; live=1
+m3:test:thread_spawn_run: PASS
+[arena INFO  m3] thread_rr_interleave: exact global order 1,2,3 × 4 passes (12 entries)
+m3:test:thread_rr_interleave: PASS
+[arena INFO  m3] thread_callee_saved: rsi/rdi/r12-r15 round-tripped through a live switch (mask 0x3f); rbx/rbp by frame symmetry
+m3:test:thread_callee_saved: PASS
+[arena INFO  m3] thread_stack_isolation: patterns survived interleaving; depth-200 recursion correct; ranges 0xffffffff80139000..0xffffffff80151000 and 0xffffffff80151000..0xffffffff80169000 disjoint
+m3:test:thread_stack_isolation: PASS
+[arena INFO  m3] thread_churn_accounting: 127 threads created/run/reaped; free frames 114218 -> 114218 (exact); heap reserved unchanged at 64 KiB; table-full refusal at MAX_THREADS=64
+m3:test:thread_churn_accounting: PASS
+[arena INFO  m3] preempt_rotation: 12 timer rotations, exact order 0->1->2->3 cycle; progress without a single yield call: 168433 / 167369 / 170759 loop iterations
+m3:test:preempt_rotation: PASS
+[arena INFO  m3] preempt_coexist: 2 threads finished 3x(15ms wait + yield) under 10ms quanta; 17 timer rotations interleaved with cooperative yields
+m3:test:preempt_coexist: PASS
+USER32-SYSWRITE-OK[arena INFO  m3] user_ring3_syscall: hand-assembled payload ran at CPL 3 — cli -> #GP(ec=0) recovered, invalid nr -> -1 seen in ring 3, SYS_DEBUG_WRITE copied 18 bytes, SYS_THREAD_EXIT(42); RSP0 exact; SMAP enforced (bare kernel read of user page -> recovered #PF); frames 114215 (teardown exact)
+m3:test:user_ring3_syscall: PASS
+USER32-SPUN-OK[arena INFO  m3] user_ring3_interrupted: ring-3 spin survived 6 ticks and 4 timer rotations (RSP0 path + mid-user preemption, resume-to-user via iretq); kernel-released flag ended the spin; SYS_DEBUG_WRITE+SYS_THREAD_EXIT(7) verified; frames 114215 (teardown exact)
+m3:test:user_ring3_interrupted: PASS
+[arena INFO  m3] process_address_spaces: same VA over distinct frames in two processes (0xAA vs 0xBB, write under procA invisible to procB, persisted in procA); kernel-half .data identical under both CR3s; unmapped VA -> recovered #PF (CR2=0x500000); teardown freed 5+5 frames, accounting exact (114215)
+m3:test:process_address_spaces: PASS
+[arena INFO  m3] process clone kernel-half check: EOI slot fffffffffee000b0 identical through both CR3s
+[arena INFO  sched] spawn(proc): id=142 slot=1 entry=ffffffff9c4c9310 cr3=139000
+[arena INFO  sched] thread_main(proc): id=142 entry=ffffffff9c4c9310 arg=0 cr3=139000
+USER32-SYSWRITE-OK[arena INFO  m3] process_accounting: 8 create/map/destroy rounds (8 frames back each) + a 64-process full-table refusal reclaimed every frame (free 114215 exact); payload A ran at ring 3 INSIDE a process address space (SYS_DEBUG_WRITE 18 bytes, SYS_THREAD_EXIT(42), RSP0 exact, CR3 restored on exit); final teardown freed 9 frames incl. the root
+m3:test:process_accounting: PASS
+[arena INFO  m3] capability_spaces: 128 slots/space, grant fills in order; copy attenuates only (amplification, COPY-less source, occupied dst all refused); move clears the source; destroy right-gated (double destroy refused); spaces isolated; full space refuses; dangling cap fails invoke while its reference remains; teardown exact (114215)
+m3:test:capability_spaces: PASS
+[arena INFO  m3] capability_invoke: READ gate returned the live root (refused without it, wrong kind refused); map_memory demanded WRITE on BOTH caps (three refusals measured); the real invoke mapped the untyped frame — 0xC3 read back under the target's CR3; dangling caps refuse cleanly; teardown exact (114215)
+m3:test:capability_invoke: PASS
+m3: RESULT PASS (13/13)
+[arena INFO  m4] elf_parse: 9104-byte rust-lld artifact — ET_EXEC entry 0x200000, 2 PT_LOADs: text RX 0x200000+0x863, data RW 0x201000+0x2000 (filesz 0x40 < memsz: NOLOAD bss), META cross-check agrees (99-byte message pinned at 0x200800, exit_ok 42)
+[arena INFO  m4] elf_parse: genuine static PIE artifact — entry 0x160, 3 PT_LOADs, 30 R_X86_64_RELATIVE records, image span 0x0..0xb000
+m4:test:elf_parse: PASS
+[arena INFO  m4] elf_reject: 25 historical ET_EXEC mutation classes plus 17 strict PIE mutations refused by the production validator
+m4:test:elf_reject: PASS
+[arena INFO  m4] elf_load: 3 pages into 'elfLoad' (7 frames spent: root+3 tables+3 leaves), PTEs W^X-exact (text RX, data/bss RW+NX), double-load refused at zero cost, dead target refused, 2147-byte text span byte-identical to the file + META + 4 KiB zeroed NOLOAD bss read under the target's CR3, teardown exact (114215)
+[arena INFO  m4] elf_load: static PIE at test bias 0x400000400000 mapped 11 pages; all 30 R_X86_64_RELATIVE values verified; RX/R/RW final PTEs exact; clear-placement accepted, owned-region and mapped-guard collisions refused; lower/upper/stack guards absent; BSS zeroed; teardown exact (114215)
+m4:test:elf_load: PASS
+ABI-V1-DEBUG-WRITE[arena INFO  m4] syscall_abi: ring-3 payload proved ABI v1 end to end — echo6 fingerprint 0x29f1d5c67195ed5f across RDI/RSI/RDX/R10/R8/R9, six callee-saved canaries survived, debug_write copied 18 bytes with 3 typed refusals observed in ring 3 (-3/-2/-2), unknown nr -> -1, thread_exit(42); frames 114215 (teardown exact)
+m4:test:syscall_abi: PASS
+[arena INFO  m4] thread_exit_abi: full-width code 0xbeefc0de0042 recorded faithfully, thread reaped through the scheduler (live count back to 1), frames 114215 (teardown exact)
+m4:test:thread_exit_abi: PASS
+[arena INFO  sched] spawn(proc): id=145 slot=1 entry=ffffffff9c4d5830 cr3=139000
+[arena INFO  sched] thread_main(proc): id=145 entry=ffffffff9c4d5830 arg=0 cr3=139000
+ARENAOS-M43-FIRST-USER-PROCESS: ELF-loaded image running in ring 3, wrote via syscall, exiting now
+[arena INFO  m4] first_process: the 9104-byte rust-lld image RAN in ring 3 inside 'm4First' (spawn_with_cr3, 8 frames) — META verified and bss found zero FROM the user side, the 99-byte pinned message arrived byte-identical to the file, stamp 0x2d534f414e455241 read back under the process CR3, thread_exit(42) recorded, thread reaped, teardown exact (114215)
+m4:test:first_process: PASS
+[arena INFO  sched] spawn(proc): id=146 slot=1 entry=ffffffff9c4d58a0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=146 entry=ffffffff9c4d58a0 arg=0 cr3=139000
+[arena INFO  sched] spawn(proc): id=147 slot=2 entry=ffffffff9c4d58a0 cr3=13a000
+[arena INFO  sched] thread_main(proc): id=147 entry=ffffffff9c4d58a0 arg=0 cr3=13a000
+[arena INFO  m4] ipc_echo: two processes talked — the server parked in recv, the client's call delivered 2 words + a Memory cap (landed rights-intact at the server's first free slot, sender kept its copy), the reply echoed both words (verified IN RING 3), notify/wait carried badge 0xbeef; 7 dispatches + 3 blocking events counted, threads reaped, frames 114215 (teardown exact)
+[arena INFO  sched] spawn(proc): id=148 slot=1 entry=ffffffff9c4dada0 cr3=139000
+[arena INFO  proc] destroy pid 87: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 4 abandoned caller slot(s))
+[arena INFO  m4] ADR-0050 four abandoned caller states cleared; staged caps discarded; late server reply typed STATUS_BAD_ARG; endpoint recycled; frames exact
+m4:test:ipc_echo: PASS
+[arena INFO  sched] spawn(proc): id=149 slot=1 entry=ffffffff9c4d58a0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=149 entry=ffffffff9c4d58a0 arg=0 cr3=139000
+[arena INFO  sched] spawn(proc): id=150 slot=2 entry=ffffffff9c4c5fc0 cr3=15c000
+[arena INFO  sched] thread_main(proc): id=150 entry=ffffffff9c4c5fc0 arg=0 cr3=15c000
+ARENAOS-M43-FIRST-USER-PROCESS: ELF-loaded image running in ring 3, wrote via syscall, exiting now
+[arena INFO  sched] spawn(proc): id=151 slot=2 entry=ffffffff9c4c5fc0 cr3=164000
+[arena INFO  sched] thread_main(proc): id=151 entry=ffffffff9c4c5fc0 arg=1 cr3=164000
+ARENAOS-M43-FIRST-USER-PROCESS: ELF-loaded image running in ring 3, wrote via syscall, exiting now
+[arena INFO  m4] spawn_restart: a ring-3 supervisor spawned the real image TWICE through SYS_SPAWN — each child inherited the attenuated Memory cap at its slot 0, ran the M4.3 program (its 99-byte message on the console twice: the restart, visible), and badged the supervisor at exit; both children exited 42, Process handles landed in order, the supervisor kept its original, counters exact (9 dispatches / 2 notifies / 2 parked waits), frames 114215 (teardown exact)
+m4:test:spawn_restart: PASS
+ab c
+
+uvwxyz
+l1
+l2
+l3
+l4
+l5
+[arena INFO  sched] spawn(proc): id=152 slot=1 entry=ffffffff9c4d58a0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=152 entry=ffffffff9c4d58a0 arg=0 cr3=139000
+hi m4
+[arena INFO  m4] console_line: the line discipline (fed through the RX ISR's own entry point) did backspace edits, refused empty lines, truncated and counted, dropped the OLDEST of five queued lines; a ring-3 reader parked on the empty queue and a fed line woke it — length and bytes verified IN RING 3; the shell image validated as registry image 1 (58968 bytes, entry 0x404006, 2 segments); counters exact, frames 114215 (teardown exact)
+m4:test:console_line: PASS
+m4: RESULT PASS (9/9)
+[arena INFO  sched] spawn(proc): id=153 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=154 slot=2 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=155 slot=3 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=153 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=154 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=155 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  m15] thread isolation: two distinct x87/MXCSR/XMM0-XMM15 workers plus a blocking joiner; yield/syscall/timer preemption (44 switches), slot 1 scrubbed and resources exact
+m15:test:thread_isolation_block_yield_preempt: PASS
+[arena INFO  sched] spawn(proc): id=156 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=157 slot=2 entry=ffffffff9c4a6ff0 cr3=144000
+[arena INFO  sched] thread_main(proc): id=156 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=157 entry=ffffffff9c4a6ff0 arg=0 cr3=144000
+[arena INFO  sched] spawn(proc): id=158 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=158 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  m15] process isolation: distinct CR3 roots retained independent FP state (23 timer switches); fresh process entered cleanly in recycled slot 1 (20 switches), teardown exact
+m15:test:process_isolation_slot_reuse: PASS
+[arena INFO  m15] optional CPUID feature reporting matches guest bits: MMX=true SSE3=true SSSE3=false SSE4.1=false SSE4.2=false SSE4a=false XSAVE=false AVX=false OSXSAVE=false
+m15:test:optional_cpu_feature_reporting: PASS
+[arena INFO  sched] spawn(proc): id=159 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=160 slot=2 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=161 slot=3 entry=ffffffff9c4a6ff0 cr3=144000
+[arena INFO  sched] thread_main(proc): id=159 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena user fault] pid=96 vector=0x13 (#XF SIMD Floating Point) rip=0x30002e cr2=0x0
+[arena INFO  sched] thread_main(proc): id=161 entry=ffffffff9c4a6ff0 arg=0 cr3=144000
+[arena INFO  sched] thread_main(proc): id=160 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  m15] minimal #XF probe receipts: fault=Some(113), sibling=Some(2a), peer=Some(2a), sibling_and_peer_survived=true, fault_slot_released=true, resource_baseline_restored=true
+[arena INFO  m15] minimal unmasked SQRTSS #XF probe delivered vector 19; same-process sibling and independent peer survived; slot 1 and resources reclaimed (20 scheduler switches)
+m15:test:xf_delivery_probe: PASS
+[arena INFO  sched] spawn(proc): id=162 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=163 slot=2 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=164 slot=3 entry=ffffffff9c4a6ff0 cr3=145000
+[arena INFO  sched] thread_main(proc): id=162 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=163 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=164 entry=ffffffff9c4a6ff0 arg=0 cr3=145000
+[arena user fault] pid=98 vector=0x10 (#MF x87 FPU Error) rip=0x3004df cr2=0x0
+[arena INFO  m15] contained CPL3 vector 0x10: fault status 0x110; sibling and separate process survived (24 timer switches)
+[arena INFO  sched] spawn(proc): id=165 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=166 slot=2 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=167 slot=3 entry=ffffffff9c4a6ff0 cr3=145000
+[arena INFO  sched] thread_main(proc): id=165 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena user fault] pid=100 vector=0x06 (#UD Invalid Opcode) rip=0x300508 cr2=0x0
+[arena INFO  sched] thread_main(proc): id=166 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=167 entry=ffffffff9c4a6ff0 arg=0 cr3=145000
+[arena INFO  m15] contained CPL3 vector 0x6: fault status 0x106; sibling and separate process survived (21 timer switches)
+m15:test:mf_ud_fault_containment: PASS
+[arena INFO  sched] spawn(proc): id=168 slot=1 entry=ffffffff9c4a6ff0 cr3=139000
+[arena INFO  sched] spawn(proc): id=169 slot=2 entry=ffffffff9c4a6ff0 cr3=143000
+[arena INFO  sched] thread_main(proc): id=168 entry=ffffffff9c4a6ff0 arg=0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=169 entry=ffffffff9c4a6ff0 arg=0 cr3=143000
+[arena INFO  m15] MMX MM0-MM7 remained distinct across timer preemption and cooperative yield (13 timer switches); EMMS and exact process teardown passed
+m15:test:mmx_state: PASS
+[arena INFO  m15] native x87/SSE/MMX state tests passed (6/6)
+m15: RESULT PASS (6/6)
+[arena INFO  m5] pci_scan: virtio-blk at 00:01.0 device_id 0x1001 (transitional) — common bar4+0x0 len 0x1000, notify bar4+0x3000 mult 0x4, isr bar4+0x1000, device bar4+0x2000, msix 2 entries table bar1+0x0; command 0x0007 (MEM|BUS MASTER by kernel policy); 9 function(s) on bus 0
+m5:test:pci_scan: PASS
+[arena INFO  sched] spawn(proc): id=170 slot=1 entry=ffffffff9c4e2af0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=170 entry=ffffffff9c4e2af0 arg=0 cr3=139000
+[arena INFO  syscall] map_memory: pid 104 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  m5] untyped_alloc: ring 3 allocated two owned frames (0x15d000, 0x15e000), self-mapped the first at 0x40000000 writable (cap consumed — the re-map refused -2 in ring 3), stamped and read back 0xdeadbeefcafe0051 through the window; the kernel destroyed the second cap (+1 frame exactly) and proc::destroy reclaimed the mapped frame — frames 114215 (teardown exact)
+m5:test:untyped_alloc: PASS
+[arena INFO  sched] spawn(proc): id=171 slot=1 entry=ffffffff9c4e2af0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=171 entry=ffffffff9c4e2af0 arg=0 cr3=139000
+[arena INFO  syscall] map_memory: pid 105 window va=0x40000000 pages=1 writable=false mmio=true
+[arena INFO  m5] mmio_user: ring 3 read the HPET main counter through a kernel-minted Mmio cap — 0x49501c → 0x4a1b44 strictly increasing across a bounded delay (kernel observed 0x13fa → 0x45fbbd), read-only window, cap survived the mapping, teardown freed exactly the RAM (device page skipped) — frames 114215
+m5:test:mmio_user: PASS
+[arena INFO  relay] vector 48 → notification 0 badge 0x51ab (owner pid 0)
+[arena WARN  relay] spurious delivery on unregistered vector 49
+[arena INFO  m5] irq_relay: vector 48 → notification 0 badge 0x51ab — a LAPIC self-IPI walked the live stub (dual EOI) into ipc::notify and woke the parked waiter with the exact badge (1 delivery, 1 notify, thread reaped); a spurious hit on unregistered vector 49 was counted and survived; register/release seams hold (range, empty badge, double-register, double-release all refused)
+m5:test:irq_relay: PASS
+[arena INFO  sched] spawn(proc): id=173 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=174 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  m5] block_service: storaged pid 106 (window bar4 phys 0xc000000000 4 pages, endpoint 0 serve side, irq notification 0), blktest pid 107 (endpoint 0 call side) — running the write/read-back cycle
+[arena INFO  sched] thread_main(proc): id=173 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+storaged: starting — ArenaOS block service (M5.2, ADR-0022)
+[arena INFO  syscall] map_memory: pid 106 window va=0x40000000 pages=4 writable=true mmio=true
+storaged: virtio-blk device_id 0x0000000000001001 (transitional) pci_index 1 dev_idx 0 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 106 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 106 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 106 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 106 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80047000
+[arena INFO  relay] vector 48 → notification 0 badge 0x9e71 (owner pid 106)
+[arena INFO  syscall] irq_relay: pid 106 dev 0 msix entry 0 → vector 48, notification 0 badge 0x9e71
+storaged: virtio-blk ready — DRIVER_OK, queue 0 size 256, desc 0x0000000000180000, avail 0x0000000000182000, used 0x0000000000184000, req 0x0000000000186000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=174 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+blktest: block-service client starting (write→read-back→verify through storaged)
+[arena INFO  syscall] map_memory: pid 107 window va=0x40000000 pages=1 writable=true mmio=false
+blktest: buffer frame 0x0000000000188000 mapped at 0x0000000040000000 (lent copy in slot 9)
+storaged: WRITE sector 16383 buf 0x0000000000188000 → status 0, device wrote 1 bytes (completion #1, used idx 1)
+blktest: WRITE sector 16383 → status OK (device wrote 1 bytes to the used ring)
+storaged: READ  sector 16383 buf 0x0000000000188000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+blktest: READ sector 16383 → status OK (device wrote 513 bytes) — all 512 bytes verified across the service boundary
+blktest: missing diagnostic authority refused by storaged
+storaged: shutdown requested after 2 interrupt-delivered completion(s) — replying and exiting
+blktest: PASS — the cycle completed and the service shut down cleanly
+[arena INFO  proc] destroy pid 106: released 1 owned IRQ relay vector(s)
+[arena INFO  m5] block_service: blktest (pid 107) drove a write→read-back→verify cycle through storaged's (pid 106) endpoint — zero-copy (the buffer frame was LENT through IPC, the device DMA'd the caller's own page), 2 interrupt-delivered completions on relay vector 48 (exactly one per request), both children exited 42, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames 114215)
+m5:test:block_service: PASS
+[arena INFO  sched] spawn(proc): id=175 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=176 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  sched] spawn(proc): id=177 slot=3 entry=ffffffff9c4c5fc0 cr3=183000
+[arena INFO  m5] fs_service: storaged pid 108 (window bar4 phys 0xc000000000, block endpoint 0), fsd pid 109 (block call side 0, fs endpoint 1), fstest pid 110 (fs call side 1, poison side 0) — running the branch probe, then create→write→verify (fresh) or read→verify (persisted)
+[arena INFO  sched] thread_main(proc): id=175 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+storaged: starting — ArenaOS block service (M5.2, ADR-0022)
+[arena INFO  syscall] map_memory: pid 108 window va=0x40000000 pages=4 writable=true mmio=true
+storaged: virtio-blk device_id 0x0000000000001001 (transitional) pci_index 1 dev_idx 0 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 108 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 108 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 108 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 108 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80047000
+[arena INFO  relay] vector 48 → notification 0 badge 0x9e71 (owner pid 108)
+[arena INFO  syscall] irq_relay: pid 108 dev 0 msix entry 0 → vector 48, notification 0 badge 0x9e71
+storaged: virtio-blk ready — DRIVER_OK, queue 0 size 256, desc 0x00000000001a7000, avail 0x00000000001a9000, used 0x00000000001ab000, req 0x00000000001ad000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=176 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+fsd: AFS1 filesystem service starting (M5.3/5.4, ADR-0023)
+[arena INFO  syscall] map_memory: pid 109 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=177 entry=ffffffff9c4c5fc0 arg=2 cr3=183000
+fstest: filesystem-service client starting (M5.3/5.4, ADR-0023)
+[arena INFO  syscall] map_memory: pid 110 window va=0x40000000 pages=1 writable=true mmio=false
+fstest: buffer frame 0x00000000001b2000 mapped at 0x0000000040000000 (lent copy in slot 9)
+storaged: READ  sector 0 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
+storaged: READ  sector 1 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+storaged: READ  sector 2 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
+storaged: READ  sector 21 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
+storaged: READ  sector 22 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
+storaged: READ  sector 23 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #6, used idx 6)
+storaged: READ  sector 24 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #7, used idx 7)
+storaged: READ  sector 25 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #8, used idx 8)
+storaged: READ  sector 26 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #9, used idx 9)
+storaged: READ  sector 27 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #10, used idx 10)
+storaged: READ  sector 28 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
+storaged: READ  sector 1 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #12, used idx 12)
+fsd: reclaimed 8 superseded metadata sector(s) from commit seq 2
+fsd: mounted AFS1 — commit seq 3, objtab@21, bitmap@25, 16384 sectors, 16363 free, 1 file(s)
+fsd: OPEN obj 0 → fh 1
+fstest: OPEN 'arena.txt' succeeded BEFORE any create — this volume PERSISTED from an earlier boot (fh 1)
+storaged: READ  sector 20 buf 0x00000000001af000 → status 0, device wrote 513 bytes (completion #13, used idx 13)
+storaged: READ  sector 19 buf 0x00000000001b2000 → status 0, device wrote 513 bytes (completion #14, used idx 14)
+fstest: READ 512 bytes → all verified byte-for-byte through fsd+storaged
+fstest: LS walk: 'arena.txt' 512 bytes present — 1 file(s) total
+fstest: fsd and storaged rejected missing/wrong-object poison markers
+fsd: shutdown requested after 14 disk operation(s) — replying and exiting
+storaged: shutdown requested after 14 interrupt-delivered completion(s) — replying and exiting
+fstest: fsd reported 14 disk operation(s); storaged reported 14 completion(s) — the contract's 14
+fstest: PASS (persisted) — the committed file SURVIVED THE REBOOT: opened, read back, verified byte-for-byte, zero writes issued
+[arena INFO  proc] destroy pid 108: released 1 owned IRQ relay vector(s)
+[arena INFO  m5] fs_service: fstest (pid 110) RE-FOUND a file committed by an EARLIER BOOT and verified it byte-for-byte with ZERO writes (the two-boot persistence proof, exit 43) through fsd (pid 109) — AFS1 mounted from the host-formatted image, metadata CoW'd per transaction, file data DMA'd end-to-end zero-copy (fstest's frame → forwarded cap → storaged (pid 108) → device), 14 interrupt-delivered block calls matching the branch's derived contract, all exit badges exact, the dead driver's relay swept, teardown frame-exact (frames 114215)
+m5:test:fs_service: PASS
+m5: RESULT PASS (6/6)
+[arena INFO  timer] timer facility ready: 32 slots, 100 Hz tick (a deadline means NOT BEFORE, ~10 ms lag), delivery by notification badge
+[arena INFO  sched] spawn(proc): id=178 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=179 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  m6] net_service: netd pid 111 (window bar4 phys 0xc000004000 4 pages, endpoint 0 serve side, irq notification 0), nettest pid 112 (endpoint 0 call side) — running the ARP link probe against the slirp gateway
+[arena INFO  sched] thread_main(proc): id=178 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 111 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 2 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 111 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 111 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 111 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 111 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 111 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80046000
+[arena INFO  relay] vector 48 → notification 0 badge 0x1 (owner pid 111)
+[arena INFO  syscall] irq_relay: pid 111 dev 1 msix entry 0 → vector 48, notification 0 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x80046000
+[arena INFO  relay] vector 49 → notification 0 badge 0x2 (owner pid 111)
+[arena INFO  syscall] irq_relay: pid 111 dev 1 msix entry 1 → vector 49, notification 0 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 48/49
+[arena INFO  sched] thread_main(proc): id=179 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+nettest: network-service client starting (ARP link probe against the slirp gateway)
+[arena INFO  syscall] map_memory: pid 112 window va=0x40000000 pages=1 writable=true mmio=false
+nettest: device MAC 52:54:00:12:34:56 (from the device-config region, through the service)
+netd: SEND 42 bytes buf 0x000000000018a000 → completion #2
+nettest: SEND 42 bytes — ARP who-has 10.0.2.2 tell 10.0.2.15 is on the wire
+nettest: RECV 64 bytes — ARP reply verified: ethertype 0x0806, opcode 2, sender 10.0.2.2, target MAC ours, sender MAC == Ethernet source
+netdtest: missing diagnostic authority refused by service
+netd: shutdown requested after 2 interrupt-delivered completion(s), 0 RX drop(s) — replying and exiting
+nettest: PASS — the ARP round trip completed (netd counted 2 interrupt-delivered completion(s)) and the service shut down cleanly
+[arena INFO  proc] destroy pid 111: released 2 owned IRQ relay vector(s)
+[arena INFO  m6] net_service: nettest (pid 112) sent a hand-built ARP request for 10.0.2.2 and verified the reply byte-for-byte through netd's (pid 111) endpoint — zero-copy TX (the frame was LENT through IPC, the device DMA'd the caller's own page behind netd's virtio header), 1 RX + 1 TX interrupt deliveries on relay vectors 48/49 (no polling), both children exited 42, both exit badges exact, the dead driver's relays were swept by proc::destroy, teardown frame-exact (frames 114215)
+m6:test:net_service: PASS
+[arena INFO  sched] spawn(proc): id=180 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=181 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  m6] rng_service: rngd pid 113 (window bar4 phys 0xc000008000 4 pages, endpoint 0 serve side, irq notification 0), rngtest pid 114 (endpoint 0 call side) — running two device-filled draws with variance checks
+[arena INFO  sched] thread_main(proc): id=180 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+rngd: starting — ArenaOS entropy service (M6.2, ADR-0025)
+[arena INFO  syscall] map_memory: pid 113 window va=0x40000000 pages=4 writable=true mmio=true
+rngd: virtio-rng device_id 0x0000000000001005 (transitional) pci_index 3 dev_idx 2 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 113 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 113 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80045000
+[arena INFO  relay] vector 48 → notification 0 badge 0x7201 (owner pid 113)
+[arena INFO  syscall] irq_relay: pid 113 dev 2 msix entry 0 → vector 48, notification 0 badge 0x7201
+rngd: virtio-rng ready — DRIVER_OK, queue 0 size 8, ring frame 0x0000000000180000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=181 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+rngtest: entropy-service client starting (two draws, variance-checked)
+[arena INFO  syscall] map_memory: pid 114 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 114 window va=0x40200000 pages=1 writable=true mmio=false
+rngd: GET 4096 bytes buf 0x0000000000184000 → device wrote 4096 (completion #1)
+rngd: GET 4096 bytes buf 0x0000000000187000 → device wrote 4096 (completion #2)
+rngtest: draw A 4fa68ee2… vs draw B b2ba2ee2… — both varied, and different
+rngdtest: missing diagnostic authority refused by service
+rngd: shutdown requested after 2 interrupt-delivered completion(s) — replying and exiting
+rngtest: PASS — two device-filled draws, both varied, mutually different, 2 interrupt-served completions
+[arena INFO  proc] destroy pid 113: released 1 owned IRQ relay vector(s)
+[arena INFO  m6] rng_service: rngtest (pid 114) drew two 4 KiB frames of device entropy through rngd's (pid 113) endpoint — the device DMA'd directly into the client's OWN pages (each frame LENT through IPC, zero copy), both draws non-zero, non-constant, and mutually different, 2 interrupt deliveries on relay vector 48 (one per draw, no polling), both children exited 42, both exit badges exact, the dead driver's relay was swept by proc::destroy, teardown frame-exact (frames 114215)
+m6:test:rng_service: PASS
+[arena INFO  sched] spawn(proc): id=182 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=183 slot=2 entry=ffffffff9c4c5fc0 cr3=160000
+[arena INFO  m6] input_service: inputd pid 115 (window bar4 phys 0xc00000c000 4 pages, endpoint 0 serve side, irq notification 0, NO console authority — service mode), inputtest pid 116 (endpoint 0 call side) — awaiting the keystrokes the harness types on the virtual keyboard
+[arena INFO  sched] thread_main(proc): id=182 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+inputd: starting — ArenaOS input service (M6.3, ADR-0026)
+[arena INFO  syscall] map_memory: pid 115 window va=0x40000000 pages=4 writable=true mmio=true
+inputd: virtio-input device_id 0x0000000000001052 pci_index 4 dev_idx 3 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 115 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80044000
+[arena INFO  relay] vector 48 → notification 0 badge 0x10000 (owner pid 115)
+[arena INFO  syscall] irq_relay: pid 115 dev 3 msix entry 0 → vector 48, notification 0 badge 0x10000
+inputd: virtio-input ready — DRIVER_OK, eventq size 64, 32 event buffers posted, ring frame 0x0000000000182000; msix entry 0 → relay vector 48
+inputd: service mode — no console authority, serving decoded keys on the endpoint
+[arena INFO  sched] thread_main(proc): id=183 entry=ffffffff9c4c5fc0 arg=1 cr3=160000
+inputtest: input-service client starting — reading keystrokes typed on the virtual keyboard
+[arena INFO  m6] input_service: nothing arrived inside the window — calling the driver's wait off (badge 0x80000); this boot simply had nobody at the other end
+inputd: the wait was called off — nobody is typing
+inputtest: nobody typed during this boot — the wait was called off
+inputtest: service refused poison without diagnostic marker
+inputd: shutdown requested after 0 interrupt-delivered batch(es), 0 event(s), 0 key byte(s), 1 abandoned wait(s) — replying and exiting
+inputtest: no keystrokes arrived (nobody was typing) — nothing to verify, and nothing claimed — exiting 68
+[arena INFO  proc] destroy pid 115: released 1 owned IRQ relay vector(s)
+[arena INFO  m6] test input_service skipped: no keystrokes arrived — nobody typed during the suite (type in the QEMU window, or see tools/qmp.py)
+m6:test:input_service: SKIP (no keystrokes arrived — nobody typed during the suite (type in the QEMU window, or see tools/qmp.py))
+[arena INFO  sched] spawn(proc): id=184 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=185 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  m6] console_service: consoled pid 117 (window bar4 phys 0xc000014000 4 pages, endpoint 0 serve side, irq notification 0, NO console authority — service mode), contest pid 118 (endpoint 0 call side) — the port's far end is the harness's socket
+[arena INFO  sched] thread_main(proc): id=184 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+consoled: starting — ArenaOS console channel service (M6.4, ADR-0027)
+[arena INFO  syscall] map_memory: pid 117 window va=0x40000000 pages=4 writable=true mmio=true
+consoled: virtio-console device_id 0x0000000000001003 (transitional) pci_index 6 dev_idx 5 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 117 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 117 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80042000
+[arena INFO  relay] vector 48 → notification 0 badge 0x10000 (owner pid 117)
+[arena INFO  syscall] irq_relay: pid 117 dev 5 msix entry 0 → vector 48, notification 0 badge 0x10000
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x80042000
+[arena INFO  relay] vector 49 → notification 0 badge 0x20000 (owner pid 117)
+[arena INFO  syscall] irq_relay: pid 117 dev 5 msix entry 1 → vector 49, notification 0 badge 0x20000
+consoled: virtio-console ready — DRIVER_OK, rx/tx size 32/32, 16 rx buffers posted; relay vectors 48/49
+consoled: service mode — no console authority, serving the port on the endpoint
+[arena INFO  sched] thread_main(proc): id=185 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+contest: console-service client starting — a port round trip through the service
+contest: wrote 28 byte(s) out the port — the harness reads them off the socket
+contest: PASS — the port carried bytes BOTH ways: 28 out, 16 back in, verified byte-for-byte
+contest: service refused poison without diagnostic marker
+consoled: poison shutdown — 28 byte(s) sent, 16 received over 1 rx batch(es), 0 dropped
+[arena INFO  proc] destroy pid 117: released 2 owned IRQ relay vector(s)
+[arena INFO  m6] console_service: contest (pid 118) drove a port ROUND TRIP through consoled's (pid 117) endpoint — bytes out the transmit queue that the harness read off the host socket, and the harness's answer back in on the receive queue, verified byte-for-byte; 2 transmit and 1 receive interrupt delivery/deliveries on relay vectors 49/48 (no polling), the driver in SERVICE mode because the suite withheld BOTH console capabilities, both children exited 42, both exit badges exact, both relays swept by proc::destroy, teardown frame-exact (frames 114215)
+m6:test:console_service: PASS
+[arena INFO  sched] spawn(proc): id=186 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=187 slot=2 entry=ffffffff9c4c5fc0 cr3=15c000
+[arena INFO  m6] service_death: faultd pid 119 (endpoint 0 serve side, hang signal 0), faulttest pid 120 (endpoint 0 call side) — the client will be blocked in a call when the server dies
+[arena INFO  sched] thread_main(proc): id=186 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+faultd: starting — the service that exists to be killed (M6.5, ADR-0028)
+[arena INFO  sched] thread_main(proc): id=187 entry=ffffffff9c4c5fc0 arg=1 cr3=15c000
+faulttest: client starting — a service is about to die under me
+faulttest: PING answered (ping #1) — the service is live; now asking it to hang
+m83: returncap PASS (136 real reply caps rejected and discarded; slot 2 empty, occupancy 2/128 exact; ordinary no-cap PING unchanged)
+faulttest: service refused hang without diagnostic marker
+faultd: holding a request and hanging on purpose (after 2 ping(s)) — kill me now
+[arena INFO  proc] destroy pid 119: 1 in-flight call(s) answered STATUS_SERVICE_GONE
+[arena INFO  proc] destroy pid 119: killed 1 live thread(s) (released 0 endpoint server slot(s), 1 notification waiter(s), 0 abandoned caller slot(s))
+faulttest: PASS — the HANG call returned STATUS_SERVICE_GONE (-5): the server died holding my request and the kernel said so, instead of leaving me blocked forever
+faulttest: a client that outlived its service, and knows it
+[arena INFO  m6] service_death: faultd (pid 119) was destroyed while holding faulttest's (pid 120) request — the kernel answered that call STATUS_SERVICE_GONE instead of leaving the caller blocked forever, the client handled it and exited 42, the ENDPOINT outlived its server (so a restart can reuse it), and teardown is frame-exact (frames 114215)
+m6:test:service_death: PASS
+[arena INFO  sched] spawn(proc): id=188 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=189 slot=2 entry=ffffffff9c4c5fc0 cr3=15c000
+[arena INFO  m6] service_restart: faultd pid 121 under supervision (endpoint 0), faulttest pid 122 — about to kill the service under its client
+[arena INFO  sched] thread_main(proc): id=188 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+faultd: starting — the service that exists to be killed (M6.5, ADR-0028)
+[arena INFO  sched] thread_main(proc): id=189 entry=ffffffff9c4c5fc0 arg=1 cr3=15c000
+faulttest: client starting — a service is about to die under me
+faulttest: PING answered (ping #1) — the service is live; now asking it to hang
+m83: returncap PASS (136 real reply caps rejected and discarded; slot 2 empty, occupancy 2/128 exact; ordinary no-cap PING unchanged)
+faulttest: service refused hang without diagnostic marker
+faultd: holding a request and hanging on purpose (after 2 ping(s)) — kill me now
+[arena INFO  proc] destroy pid 121: 1 in-flight call(s) answered STATUS_SERVICE_GONE
+[arena INFO  proc] destroy pid 121: a SUPERVISED service died — the supervisor will restart it
+[arena INFO  proc] destroy pid 121: killed 1 live thread(s) (released 0 endpoint server slot(s), 1 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  sched] spawn(proc): id=190 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  supervise] faultd: RESTARTED as pid 123 with its 4 original capability/capabilities replayed (restart 1/3) — clients keep the endpoint they already hold
+[arena INFO  sched] spawn(proc): id=191 slot=3 entry=ffffffff9c4c5fc0 cr3=17c000
+faulttest: PASS — the HANG call returned STATUS_SERVICE_GONE (-5): the server died holding my request and the kernel said so, instead of leaving me blocked forever
+faulttest: a client that outlived its service, and knows it
+[arena INFO  sched] thread_main(proc): id=190 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+faultd: starting — the service that exists to be killed (M6.5, ADR-0028)
+[arena INFO  sched] thread_main(proc): id=191 entry=ffffffff9c4c5fc0 arg=2 cr3=17c000
+faulttest: quiet mode — checking a service that was RESTARTED under its clients
+faulttest: PASS — the RESTARTED service answered on the SAME endpoint (ping #1); the capability I was granted before the crash still works
+[arena INFO  proc] destroy pid 123: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  m6] service_restart: faultd died as pid 121 holding a request and came back as pid 123 with its 4 capabilities REPLAYED — the client blocked across the crash was answered STATUS_SERVICE_GONE and exited cleanly, a new client reached the restarted instance through the SAME endpoint capability, the supervisor counted exactly 1 restart, and teardown is frame-exact across the whole cycle (frames 114215)
+m6:test:service_restart: PASS
+m6: RESULT SKIP (5/6 passed, 1 skipped — nothing to prove them against; see the skip reasons above)
+[arena INFO  sched] spawn(proc): id=192 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  m7] timer_facility: timertest pid 125 (notification 0) — measuring real deadlines against the monotonic clock
+[arena INFO  sched] thread_main(proc): id=192 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+timertest: measuring the timer facility against the monotonic clock
+timertest: PASS — 50000us timer delivered after 54122us (never early, 4122us of lag against a 10000us tick)
+timertest: PASS — a cancelled timer stayed silent, and a second cancel was refused
+timertest: PASS — two timers on one notification both delivered
+timertest: PASS — a stale id was refused and the live timer it aliased (30064771072) still fired
+timertest: PASS — all four quota timers fired, the fifth refused with STATUS_QUOTA (-7)
+timertest: leaving one timer armed for 60s on purpose — the kernel must sweep it
+[arena INFO  proc] destroy pid 125: swept 1 armed timer(s)
+[arena INFO  m7] timer_facility: timertest (pid 125) armed 12 timers and measured them against SYS_CLOCK_NOW — no deadline fired early, none lagged beyond one tick plus slack, a cancelled timer stayed silent, a second cancel was refused, two due timers merged into one wake; the kernel counted 10 firing(s) and 1 cancellation(s), swept the timer the client abandoned, and teardown is frame-exact (frames 114215)
+m7:test:timer_facility: PASS
+[arena INFO  sched] spawn(proc): id=193 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] spawn(proc): id=194 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  sched] spawn(proc): id=195 slot=3 entry=ffffffff9c4c5fc0 cr3=180000
+[arena INFO  sched] spawn(proc): id=196 slot=4 entry=ffffffff9c4c5fc0 cr3=1a7000
+[arena INFO  m7] arp_service: netd pid 126 (L2 only), netstackd pid 128 (ARP + cache, NO device cap), arptest pid 129 — resolving on the real wire
+[arena INFO  sched] thread_main(proc): id=193 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 126 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 2 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 126 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 126 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 126 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 126 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 126 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80046000
+[arena INFO  relay] vector 48 → notification 0 badge 0x1 (owner pid 126)
+[arena INFO  syscall] irq_relay: pid 126 dev 1 msix entry 0 → vector 48, notification 0 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x80046000
+[arena INFO  relay] vector 49 → notification 0 badge 0x2 (owner pid 126)
+[arena INFO  syscall] irq_relay: pid 126 dev 1 msix entry 1 → vector 49, notification 0 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 48/49
+[arena INFO  sched] thread_main(proc): id=194 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+rngd: starting — ArenaOS entropy service (M6.2, ADR-0025)
+[arena INFO  syscall] map_memory: pid 127 window va=0x40000000 pages=4 writable=true mmio=true
+rngd: virtio-rng device_id 0x0000000000001005 (transitional) pci_index 3 dev_idx 2 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 127 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 127 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 50 (addr 0xfee00000 data 0x32) at table phys 0x80045000
+[arena INFO  relay] vector 50 → notification 6 badge 0x7201 (owner pid 127)
+[arena INFO  syscall] irq_relay: pid 127 dev 2 msix entry 0 → vector 50, notification 6 badge 0x7201
+rngd: virtio-rng ready — DRIVER_OK, queue 0 size 8, ring frame 0x00000000001d9000; doorbell 0x0000000040003000, msix entry 0 → relay vector 50
+[arena INFO  sched] thread_main(proc): id=195 entry=ffffffff9c4c5fc0 arg=2 cr3=180000
+netstackd: starting — ArenaOS network stack service (M7.1, ADR-0030)
+[arena INFO  syscall] map_memory: pid 128 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=196 entry=ffffffff9c4c5fc0 arg=3 cr3=1a7000
+arptest: asking the stack to resolve an address on the real wire
+rngd: GET 64 bytes buf 0x00000000001dd000 → device wrote 64 (completion #1)
+netstackd: drew 8 unguessable UDP handles from rngd — possession of one IS the authority to use its port
+netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted
+netstackd: UDP checksum self-test PASSED 4/4 — outgoing nonzero and valid, incoming valid/nonzero accepted, corruption counted, IPv4 zero-checksum accepted
+netstackd: ready — ARP over IPv4 for 52:54:00:12:34:56, cache 8 entries, TTL 30s; netd stays L2
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #2
+netstackd: resolved 10.0.2.2 → 52:55:0a:00:02:02 on attempt 1 (cached for 30s)
+arptest: PASS — 10.0.2.2 resolved to 52:55:0a:00:02:02 through a real ARP exchange
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+arptest: PASS — the second lookup was a cache HIT (1 hit(s), wire requests still 1)
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #3
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #4
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #5
+netstackd: no ARP reply after every retry — reporting unreachable, not guessing
+arptest: PASS — a silent address came back UNREACHABLE after real deadlines (before M7.0 this call could never have returned)
+arptest: phase 1 complete — signalling the suite to kill the driver
+[arena INFO  proc] destroy pid 126: a SUPERVISED service died — the supervisor will restart it
+[arena INFO  proc] destroy pid 126: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  proc] destroy pid 126: released 2 owned IRQ relay vector(s)
+arptest: the driver has been killed and restarted — resolving through the NEW instance
+netstackd: the driver refused a call: -5
+netstackd: the driver is GONE — waiting for the supervisor, then re-establishing
+netstackd: the driver refused a call: -5
+[arena INFO  m7] arp_service: the stack has met the dead driver and is backing off — releasing the supervisor now
+[arena INFO  sched] spawn(proc): id=197 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  supervise] netd: RESTARTED as pid 130 with its 3 original capability/capabilities replayed (restart 1/3) — clients keep the endpoint they already hold
+[arena INFO  sched] thread_main(proc): id=197 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 130 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 2 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 130 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 130 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 130 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 130 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 130 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80046000
+[arena INFO  relay] vector 48 → notification 0 badge 0x1 (owner pid 130)
+[arena INFO  syscall] irq_relay: pid 130 dev 1 msix entry 0 → vector 48, notification 0 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x80046000
+[arena INFO  relay] vector 49 → notification 0 badge 0x2 (owner pid 130)
+[arena INFO  syscall] irq_relay: pid 130 dev 1 msix entry 1 → vector 49, notification 0 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 48/49
+netstackd: RE-ATTACHED to the restarted driver on attempt 2 — device facts re-acquired, nothing assumed to have survived
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #2
+netstackd: resolved 10.0.2.3 → 52:55:0a:00:02:03 on attempt 2 (cached for 30s)
+arptest: PASS — 10.0.2.3 resolved to 52:55:0a:00:02:03 through a driver that was RESTARTED under the stack
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+netd: SEND 242 bytes buf 0x00000000001dd000 → completion #4
+netstackd: echo reply from 10.0.2.2 seq 1 in 1303us — identifier, sequence and all 200 payload bytes matched across the chunked receive
+arptest: PASS — ICMP echo to 10.0.2.2 answered in 1303us (measured on the monotonic clock, identifier and sequence matched)
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #5
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #6
+netd: SEND 42 bytes buf 0x00000000001dd000 → completion #7
+netstackd: no ARP reply after every retry — reporting unreachable, not guessing
+arptest: PASS — pinging an unresolvable address failed as UNREACHABLE (no host), not NO_REPLY (a silent host) — the layers report distinctly
+arptest: PASS — the demultiplexer sorted 3 frame(s): 2 ARP, 1 IPv4, 0 dropped and counted
+netstackd: port 5353 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
+arptest: PASS — a second bind of the same port was refused, and a FORGED handle bought nothing
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+netd: SEND 71 bytes buf 0x00000000001dd000 → completion #8
+arptest: PASS — UDP round trip to 10.0.2.2:1053, 61-byte response with our transaction id 0x000000000000a7e5 and the response bit set
+arptest: PASS — UDP answer drained across IPC messages: 61/ 61 bytes, the tail contains answer data
+rngd: GET 8 bytes buf 0x00000000001dd000 → device wrote 8 (completion #2)
+netstackd: port 5353 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
+arptest: PASS — closing and rebinding rotated the bearer; the old handle stayed revoked
+rngd: GET 8 bytes buf 0x00000000001dd000 → device wrote 8 (completion #3)
+netstackd: port 5355 bound — handle issued (possession is the authority; the stack cannot say WHO holds it, and does not pretend to)
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+netd: SEND 71 bytes buf 0x00000000001dd000 → completion #10
+arptest: PASS — native UDP API bound, sent, drained the real multi-IPC response, and revoked its bearer
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+rngd: GET 2 bytes buf 0x00000000001dd000 → device wrote 2 (completion #4)
+netd: SEND 71 bytes buf 0x00000000001dd000 → completion #12
+arptest: PASS — DNS resolver returned example.com A = 93.184.215.14; a malformed name was refused BEFORE sending
+netstackd: cache HIT for 10.0.2.2 — no frame touched the wire
+rngd: GET 16 bytes buf 0x00000000001dd000 → device wrote 16 (completion #5)
+netd: SEND 58 bytes buf 0x00000000001dd000 → completion #15
+netd: SEND 54 bytes buf 0x00000000001dd000 → completion #16
+arptest: PASS — TCP active OPEN returned a bearer; POLL completed the real three-way handshake
+netd: SEND 63 bytes buf 0x00000000001dd000 → completion #20
+netd: SEND 54 bytes buf 0x00000000001dd000 → completion #21
+arptest: PASS — TCP read 200 position-dependent bytes from the host in IPC chunks without loss or reordering
+netd: SEND 54 bytes buf 0x00000000001dd000 → completion #23
+netd: SEND 54 bytes buf 0x00000000001dd000 → completion #24
+netd: SEND 54 bytes buf 0x00000000001dd000 → completion #25
+arptest: PASS — TCP FIN was acknowledged, the peer closed, and the bearer was revoked
+arptest: stack refused shutdown without diagnostic marker
+netstackd: shutdown — 8 ARP request(s) on the wire, 2 reply/replies, 6 cache hit(s), 6 timeout(s), 1 re-attach(es); demux saw 11 frame(s): 2 ARP, 9 IPv4, 0 dropped, 0 bad checksum; 9 continuation chunk(s) read, 0 oversize, 0 corrupt payload
+netstackd: UDP — 3 delivered, 0 unbound, 4 bad handle(s) refused
+arptest: done — the stack put 8 request(s) on the wire and served 6 from cache
+[arena INFO  m7] arp_service: netd died as pid 126 and came back as pid 130 with its capabilities replayed — the stack met the corpse, re-established, and carried on
+[arena INFO  proc] destroy pid 127: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  proc] destroy pid 127: released 1 owned IRQ relay vector(s)
+[arena INFO  proc] destroy pid 130: killed 1 live thread(s) (released 0 endpoint server slot(s), 0 notification waiter(s), 0 abandoned caller slot(s))
+[arena INFO  proc] destroy pid 130: released 2 owned IRQ relay vector(s)
+[arena INFO  m7] arp_service: arptest drove netstackd (pid 128) over netd (pid 126) through the whole Phase-7-so-far story — ARP resolved on the wire (15 transmit and 8 receive interrupt delivery/deliveries), a cached lookup that touched no wire, a silent address reported UNREACHABLE, the driver KILLED and re-established with, and an ICMP echo answered over IPv4 with both checksums verified and the demultiplexer sorting each frame to its protocol; the driver never parsed a protocol and the stack never touched a virtqueue; teardown frame-exact (frames 114215)
+m7:test:arp_service: PASS
+m7: RESULT PASS (2/2)
+[arena INFO  m11] bound_signal: queued CALL raised badge 0x40 on notification 0; request served exactly
+m11:test:bound_signal: PASS
+[arena INFO  m11] notif_destroy_unbinds: binding cleared at destroy; re-minted index 0 never signalled
+m11:test:notif_destroy_unbinds: PASS
+m11:test:endpoint_destroy_unbinds: PASS
+[arena INFO  m11] orphan_unbinds: server pid 131 destroyed; binding removed; takeover not signalled
+m11:test:orphan_unbinds: PASS
+[arena INFO  m11] timer_quota: 4 per process; fifth refused as Quota; other owner armed; release restored
+m11:test:timer_quota: PASS
+[arena INFO  m11] handoff_order: handoff ran ahead of another thread's earlier wake; never ahead of the caller's own earlier wake
+m11:test:handoff_order: PASS
+[arena INFO  m11] badged_endpoint: serve-side mint only; badge 0x0B0B delivered; copy/transfer kept it; stale after re-mint
+m11:test:badged_endpoint: PASS
+[arena INFO  m11] handoff_chain: bystander ran after 1910 handoff round trips (pair stopped at 1910; budget 10000 us)
+m11:test:handoff_chain: PASS
+m11: RESULT PASS (8/8)
+[arena INFO  sched] spawn(proc): id=211 slot=1 entry=ffffffff9c4c5fc0 cr3=13b000
+[arena INFO  sched] thread_main(proc): id=211 entry=ffffffff9c4c5fc0 arg=0 cr3=13b000
+m12:startup:tls: PASS
+m12:startup:handles: PASS
+[arena INFO  syscall] map_memory: pid 135 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40c00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x40e00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41000000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41a00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41c00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x41e00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42000000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42a00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42c00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x42e00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43000000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43a00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43c00000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 135 window va=0x43e00000 pages=1 writable=true mmio=false
+m12:startup:heap: PASS
+m12:startup:application: PASS
+m12:test:runtime_guest: PASS
+[arena INFO  sched] spawn(proc): id=212 slot=1 entry=ffffffff9c4c5fc0 cr3=13b000
+[arena INFO  sched] thread_main(proc): id=212 entry=ffffffff9c4c5fc0 arg=0 cr3=13b000
+arena-runtime: detail listed-cap-mismatch
+arena-runtime: startup refused
+m12:test:listed_cap_rights_red: PASS
+[arena INFO  sched] spawn(proc): id=213 slot=1 entry=ffffffff9c4c5fc0 cr3=13b000
+[arena INFO  sched] thread_main(proc): id=213 entry=ffffffff9c4c5fc0 arg=0 cr3=13b000
+arena-runtime: detail slot0-capability
+arena-runtime: startup refused
+m12:test:startup_cap_rights_red: PASS
+[arena INFO  sched] spawn(proc): id=214 slot=1 entry=ffffffff9c4c5fc0 cr3=13f000
+[arena INFO  sched] thread_main(proc): id=214 entry=ffffffff9c4c5fc0 arg=0 cr3=13f000
+arena-runtime: detail slot0-capability
+arena-runtime: startup refused
+m12:test:startup_page_count_red: PASS
+[arena INFO  sched] spawn(proc): id=215 slot=1 entry=ffffffff9c4c5fc0 cr3=13b000
+[arena INFO  sched] thread_main(proc): id=215 entry=ffffffff9c4c5fc0 arg=0 cr3=13b000
+arena-runtime: detail parse-magic
+arena-runtime: startup refused
+m12:test:malformed_record_red: PASS
+[arena INFO  sched] spawn(proc): id=216 slot=1 entry=ffffffff9c4c5fc0 cr3=13b000
+[arena INFO  sched] thread_main(proc): id=216 entry=ffffffff9c4c5fc0 arg=0 cr3=13b000
+arena-runtime: detail unexpected-capability
+arena-runtime: startup refused
+m12:test:unlisted_capability_red: PASS
+[arena INFO  sched] spawn(proc): id=217 slot=1 entry=ffffffff9c4c5fc0 cr3=13b000
+[arena INFO  sched] thread_main(proc): id=217 entry=ffffffff9c4c5fc0 arg=0 cr3=13b000
+[arena INFO  sched] spawn(proc): id=218 slot=2 entry=ffffffff9c4c5fc0 cr3=13a000
+[arena INFO  sched] thread_main(proc): id=218 entry=ffffffff9c4c5fc0 arg=1 cr3=13a000
+arena-runtime: detail describe-slot0
+arena-runtime: startup refused
+m12:startup:process-group: PASS
+m12:startup:tls: PASS
+m12:startup:handles: PASS
+m12:startup:capability-handles: PASS
+m12:startup:heap-slot-red: PASS
+m12:startup:heap: PASS
+m12:startup:application: PASS
+m12:test:heap_slot_collision_red: PASS
+[arena INFO  m12] startup/runtime: independent guest verified ABI-v2 caps/argv/env/entry/RSP/IF/DF; FS-base TLS survived checked kernel-thread/timer handoff; bounded heap reused/coalesced blocks, filled 32 mapped pages, refused page 33 without mutation, then process teardown restored frames/maps exactly; five startup RED controls refused before app entry, including an unlisted live cap; heap-slot collision preserved the attenuated Notification cap and returned OOM
+m12: RESULT PASS (7/7)
+[arena INFO  m12] IPC queue accepted exactly 32 blocked callers, refused caller 33 with STATUS_BUSY, served all accepted requests once, and restored all threads/endpoints
+m12:ipc_queue32: PASS
+[arena INFO  sched] spawn(proc): id=252 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  sched] thread_main(proc): id=252 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+[sharedprobe] truncated virtio BAR device-info refused PASS
+[sharedprobe] held SharedRegion INFO bound/refusal PASS
+[sharedprobe] exact own SharedRegion UNMAP 48x capless churn PASS
+[sharedprobe] capacity/rights/zero PASS
+[arena INFO  m9] SharedRegion guest 512-page zero/authority/capacity refusals; dead-process mapping/cap sweep frame-exact; RESULT PASS (1/1)
+[arena INFO  sched] spawn(proc): id=253 slot=1 entry=ffffffff9c4c5fc0 cr3=139000
+[arena INFO  kernel] storaged spawned: pid 150 (caps: 0=Mmio bar4 phys 0xc000000000 RW, 1=Endpoint0/R, 2=Notif0/RW) — the block service is live; fsd is its first production client
+[arena INFO  sched] spawn(proc): id=254 slot=2 entry=ffffffff9c4c5fc0 cr3=15e000
+[arena INFO  kernel] fsd spawned: pid 151 (caps: 0=Endpoint0/W 1=Endpoint1/R 2=Notif1/R) — AFS1 mount and serve from ring 3
+[arena INFO  sched] spawn(proc): id=255 slot=3 entry=ffffffff9c4c5fc0 cr3=183000
+[arena INFO  kernel] configd spawned: pid 152, image21, FS/W + cfg/R + marker/R anchor; updater separately granted
+[arena INFO  sched] spawn(proc): id=256 slot=4 entry=ffffffff9c4c5fc0 cr3=1a4000
+[arena INFO  kernel] netd spawned: pid 153 (caps: 0=Mmio bar4 phys 0xc000004000 RW, 1=Endpoint3/R, 2=Notif9/RW, 3=Notif3/W) — kernel-owned link-layer driver; signals manager when DRIVER_OK
+[arena INFO  sched] spawn(proc): id=257 slot=5 entry=ffffffff9c4c5fc0 cr3=1c6000
+[arena INFO  kernel] rngd spawned: pid 154 (caps: 0=Mmio bar4 phys 0xc000008000 RW, 1=Endpoint4/R, 2=Notif10/RW, 3=Notif4/W, 5=KernelEntropySeed/W non-copyable) — manager readiness follows DRIVER_OK and kernel CSPRNG seeding
+[arena INFO  sched] spawn(proc): id=258 slot=6 entry=ffffffff9c4c5fc0 cr3=1e8000
+[arena INFO  kernel] inputd spawned: pid 155 (caps: 0=Mmio bar4 phys 0xc00000c000 RW, 1=Endpoint5/R, 2=Notif11/RW, 3=ConsoleInput/W) — the keyboard is live; keystrokes feed the shell's line discipline beside the serial port
+[arena INFO  sched] spawn(proc): id=259 slot=7 entry=ffffffff9c4c5fc0 cr3=20c000
+[arena INFO  kernel] consoled spawned: pid 156 (caps: 0=Mmio bar4 phys 0xc000014000 RW, 1=Endpoint6/R, 2=Notif12/RW, 3=ConsoleInput/W, 4=ConsoleOutput/R) — the port is a second console; what the machine prints goes there too, and what you type there reaches the shell
+[arena INFO  kernel] milestones 5–6.5 complete (executable format + image loader + syscall ABI v1 + first user process + IPC v1.1 + spawn protocol + driver substrate + resident block service + the AFS1 filesystem service: persistence and crash consistency proven + the virtio-net link-layer service: a real ARP round trip on the wire every boot + the shared virtio core and the entropy service: device randomness DMA'd into caller frames + the virtio-input keyboard service: decoded keystrokes pushed into the console line discipline beside the serial port + the virtio-console channel service: a second console in both directions, with serial still the kernel's own + supervised restart: a destroyed service answers its callers with a typed status and comes back with its capabilities replayed) — spawning the shell
+[arena INFO  sched] spawn(proc): id=260 slot=8 entry=ffffffff9c4c5fc0 cr3=22e000
+[arena INFO  kernel] servicemgr spawned: pid 157, image19; stack endpoint Some(7); audited 22 literal caps; no device/Power/Process grants
+[arena INFO  sched] spawn(proc): id=261 slot=9 entry=ffffffff9c4c5fc0 cr3=25c000
+[arena INFO  sched] thread_main(proc): id=253 entry=ffffffff9c4c5fc0 arg=0 cr3=139000
+storaged: starting — ArenaOS block service (M5.2, ADR-0022)
+[arena INFO  syscall] map_memory: pid 150 window va=0x40000000 pages=4 writable=true mmio=true
+storaged: virtio-blk device_id 0x0000000000001001 (transitional) pci_index 1 dev_idx 0 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 150 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 150 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 150 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 150 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 48 (addr 0xfee00000 data 0x30) at table phys 0x80047000
+[arena INFO  relay] vector 48 → notification 0 badge 0x9e71 (owner pid 150)
+[arena INFO  syscall] irq_relay: pid 150 dev 0 msix entry 0 → vector 48, notification 0 badge 0x9e71
+storaged: virtio-blk ready — DRIVER_OK, queue 0 size 256, desc 0x000000000027d000, avail 0x000000000027f000, used 0x0000000000281000, req 0x0000000000283000; doorbell 0x0000000040003000, msix entry 0 → relay vector 48
+[arena INFO  sched] thread_main(proc): id=254 entry=ffffffff9c4c5fc0 arg=1 cr3=15e000
+fsd: AFS1 filesystem service starting (M5.3/5.4, ADR-0023)
+[arena INFO  syscall] map_memory: pid 151 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=255 entry=ffffffff9c4c5fc0 arg=2 cr3=183000
+configd: transactional store boot; marker-gated updates
+[arena INFO  syscall] map_memory: pid 152 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=256 entry=ffffffff9c4c5fc0 arg=3 cr3=1a4000
+netd: starting — ArenaOS network service, link layer only (M6.1, ADR-0024)
+[arena INFO  syscall] map_memory: pid 153 window va=0x40000000 pages=4 writable=true mmio=true
+netd: virtio-net device_id 0x0000000000001000 (transitional) pci_index 2 dev_idx 1 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 4
+[arena INFO  syscall] map_memory: pid 153 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 153 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 153 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 153 window va=0x40800000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 153 window va=0x40a00000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 49 (addr 0xfee00000 data 0x31) at table phys 0x80046000
+[arena INFO  relay] vector 49 → notification 9 badge 0x1 (owner pid 153)
+[arena INFO  syscall] irq_relay: pid 153 dev 1 msix entry 0 → vector 49, notification 9 badge 0x1
+[arena INFO  pci] msix entry 1 armed → vector 50 (addr 0xfee00000 data 0x32) at table phys 0x80046000
+[arena INFO  relay] vector 50 → notification 9 badge 0x2 (owner pid 153)
+[arena INFO  syscall] irq_relay: pid 153 dev 1 msix entry 1 → vector 50, notification 9 badge 0x2
+netd: virtio-net ready — DRIVER_OK, mac 52:54:00:12:34:56, queue 0/1 size 64/64, 3 RX buffers of 1526 bytes
+netd: doorbells 0x0000000040003000/0x0000000040003004, msix entries 0/1 → relay vectors 49/50
+[arena INFO  sched] thread_main(proc): id=257 entry=ffffffff9c4c5fc0 arg=4 cr3=1c6000
+rngd: starting — ArenaOS entropy service (M6.2, ADR-0025)
+[arena INFO  syscall] map_memory: pid 154 window va=0x40000000 pages=4 writable=true mmio=true
+rngd: virtio-rng device_id 0x0000000000001005 (transitional) pci_index 3 dev_idx 2 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 154 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 154 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 51 (addr 0xfee00000 data 0x33) at table phys 0x80045000
+[arena INFO  relay] vector 51 → notification 10 badge 0x7201 (owner pid 154)
+[arena INFO  syscall] irq_relay: pid 154 dev 2 msix entry 0 → vector 51, notification 10 badge 0x7201
+rngd: virtio-rng ready — DRIVER_OK, queue 0 size 8, ring frame 0x0000000000299000; doorbell 0x0000000040003000, msix entry 0 → relay vector 51
+[arena INFO  sched] thread_main(proc): id=258 entry=ffffffff9c4c5fc0 arg=5 cr3=1e8000
+inputd: starting — ArenaOS input service (M6.3, ADR-0026)
+[arena INFO  syscall] map_memory: pid 155 window va=0x40000000 pages=4 writable=true mmio=true
+inputd: virtio-input device_id 0x0000000000001052 pci_index 4 dev_idx 3 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 155 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 52 (addr 0xfee00000 data 0x34) at table phys 0x80044000
+[arena INFO  relay] vector 52 → notification 11 badge 0x10000 (owner pid 155)
+[arena INFO  syscall] irq_relay: pid 155 dev 3 msix entry 0 → vector 52, notification 11 badge 0x10000
+inputd: virtio-input ready — DRIVER_OK, eventq size 64, 32 event buffers posted, ring frame 0x000000000029f000; msix entry 0 → relay vector 52
+[arena INFO  syscall] map_memory: pid 155 window va=0x40400000 pages=4 writable=true mmio=true
+inputd: virtio-tablet device_id 0x0000000000001052 pci_index 5 dev_idx 4 — window 0x0000000040400000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 155 window va=0x40600000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 53 (addr 0xfee00000 data 0x35) at table phys 0x80043000
+[arena INFO  relay] vector 53 → notification 11 badge 0x10000 (owner pid 155)
+[arena INFO  syscall] irq_relay: pid 155 dev 4 msix entry 0 → vector 53, notification 11 badge 0x10000
+inputd: real virtio tablet ready; graphical input isolated from serial shell
+[arena INFO  sched] thread_main(proc): id=259 entry=ffffffff9c4c5fc0 arg=6 cr3=20c000
+consoled: starting — ArenaOS console channel service (M6.4, ADR-0027)
+[arena INFO  syscall] map_memory: pid 156 window va=0x40000000 pages=4 writable=true mmio=true
+consoled: virtio-console device_id 0x0000000000001003 (transitional) pci_index 6 dev_idx 5 — window 0x0000000040000000, common +0x0000000000000000, notify +0x0000000000003000 mult 4, devcfg +0x0000000000002000, msix 2
+[arena INFO  syscall] map_memory: pid 156 window va=0x40200000 pages=1 writable=true mmio=false
+[arena INFO  syscall] map_memory: pid 156 window va=0x40400000 pages=1 writable=true mmio=false
+[arena INFO  pci] msix entry 0 armed → vector 54 (addr 0xfee00000 data 0x36) at table phys 0x80042000
+[arena INFO  relay] vector 54 → notification 12 badge 0x10000 (owner pid 156)
+[arena INFO  syscall] irq_relay: pid 156 dev 5 msix entry 0 → vector 54, notification 12 badge 0x10000
+[arena INFO  pci] msix entry 1 armed → vector 55 (addr 0xfee00000 data 0x37) at table phys 0x80042000
+[arena INFO  relay] vector 55 → notification 12 badge 0x20000 (owner pid 156)
+[arena INFO  syscall] irq_relay: pid 156 dev 5 msix entry 1 → vector 55, notification 12 badge 0x20000
+consoled: virtio-console ready — DRIVER_OK, rx/tx size 32/32, 16 rx buffers posted; relay vectors 54/55
+consoled: console mode — the port is a second console (serial stays the kernel's own)
+[arena INFO  sched] thread_main(proc): id=260 entry=ffffffff9c4c5fc0 arg=7 cr3=22e000
+servicemgr: ring-3 boot (Phase 8.0 bounded-restart substrate)
+servicemgr: live caps image17 netd=3 stack=7 rngd=4
+[arena INFO  sched] thread_main(proc): id=261 entry=ffffffff9c4c5fc0 arg=8 cr3=25c000
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+storaged: READ  sector 0 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #1, used idx 1)
+rngd: submitted a device-filled 256-bit seed to the kernel CSPRNG
+configd: SET refused without receiving-service authority
+storaged: READ  sector 1 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #2, used idx 2)
+[arena INFO  sched] spawn(proc): id=262 slot=10 entry=ffffffff9c4c5fc0 cr3=2aa000
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configd: SET refused without receiving-service authority
+configread: SET absent/wrong-kind refused x20 by receiver
+[arena INFO  m8] manager-owned dependency probe pid 159: netd/W rngd/W private-notification/W audited, no privileged extras
+[arena INFO  sched] thread_main(proc): id=262 entry=ffffffff9c4c5fc0 arg=9 cr3=2aa000
+depcheck: production driver poison opcodes refused without marker
+depcheck: netd MAC answered
+[arena INFO  syscall] map_memory: pid 159 window va=0x40000000 pages=1 writable=true mmio=false
+storaged: READ  sector 2 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #3, used idx 3)
+rngd: GET 64 bytes buf 0x00000000002ca000 → device wrote 64 (completion #2)
+storaged: READ  sector 21 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #4, used idx 4)
+depcheck: rngd device completed 64 varied bytes
+storaged: READ  sector 22 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #5, used idx 5)
+servicemgr: active netd MAC and rngd entropy probes passed; worker reaped
+servicemgr: policy validated from live caps and ready drivers
+[arena INFO  sched] spawn(proc): id=263 slot=10 entry=ffffffff9c4c5fc0 cr3=2aa000
+storaged: READ  sector 23 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #6, used idx 6)
+[arena INFO  sched] thread_main(proc): id=263 entry=ffffffff9c4c5fc0 arg=9 cr3=2aa000
+netstackd: starting — ArenaOS network stack service (M7.1, ADR-0030)
+[arena INFO  syscall] map_memory: pid 160 window va=0x40000000 pages=1 writable=true mmio=false
+storaged: READ  sector 24 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #7, used idx 7)
+storaged: READ  sector 25 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #8, used idx 8)
+rngd: GET 64 bytes buf 0x00000000002d1000 → device wrote 64 (completion #3)
+netstackd: drew 8 unguessable UDP handles from rngd — possession of one IS the authority to use its port
+netstackd: receive-parser self-test PASSED 7/7 — options, fragments, short frames, bad checksums and foreign echo replies all refused, and the genuine article still accepted
+netstackd: UDP checksum self-test PASSED 4/4 — outgoing nonzero and valid, incoming valid/nonzero accepted, corruption counted, IPv4 zero-checksum accepted
+netstackd: ready — ARP over IPv4 for 52:54:00:12:34:56, cache 8 entries, TTL 30s; netd stays L2
+storaged: READ  sector 26 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #9, used idx 9)
+servicemgr: production netstackd READY pid 160
+[arena INFO  sched] spawn(proc): id=264 slot=11 entry=ffffffff9c4c5fc0 cr3=2d4000
+[arena INFO  sched] spawn(proc): id=265 slot=12 entry=ffffffff9c4c5fc0 cr3=2f6000
+storaged: READ  sector 27 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #10, used idx 10)
+[arena INFO  sched] thread_main(proc): id=264 entry=ffffffff9c4c5fc0 arg=10 cr3=2d4000
+permissiond: audited four inherited caps FS/W RNG/W mediator/R marker/R; 28 extras empty
+[arena INFO  syscall] map_memory: pid 161 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=265 entry=ffffffff9c4c5fc0 arg=11 cr3=2f6000
+storaged: READ  sector 28 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #11, used idx 11)
+storaged: READ  sector 1 buf 0x0000000000285000 → status 0, device wrote 513 bytes (completion #12, used idx 12)
+fsd: reclaimed 8 superseded metadata sector(s) from commit seq 2
+fsd: mounted AFS1 — commit seq 3, objtab@21, bitmap@25, 16384 sectors, 16363 free, 1 file(s)
+permissiond: validated durable policy generation 0 DENY
+configd: READ UNSET
+configread: READ UNSET
+configd: READ UNSET
+configread: ORDINARY READ BOUNDARY PASS (no fsd or marker grant)
+[arena INFO  kernel] configread: boot-root reader reaped; no update authority delegated
+[arena INFO  sched] spawn(proc): id=266 slot=9 entry=ffffffff9c4c5fc0 cr3=25c000
+[arena INFO  sched] thread_main(proc): id=266 entry=ffffffff9c4c5fc0 arg=8 cr3=25c000
+configup: SKIP (no trusted test intent; no SET)
+[arena INFO  kernel] configup: boot-root updater reaped; marker never delegated to shell
+[arena INFO  sched] spawn(proc): id=267 slot=9 entry=ffffffff9c4c5fc0 cr3=25c000
+[arena INFO  kernel] filesd spawned: pid 164 (caps: 0=Endpoint0/W 1=Endpoint10/R 2=Rtc/R 3=Endpoint1/W) — AFS2 file service
+[arena INFO  sched] spawn(proc): id=268 slot=13 entry=ffffffff9c4c5fc0 cr3=3bf000
+[arena INFO  kernel] displayd spawned: pid 165; GOP=false virtio-gpu=true; sole framebuffer/BAR holder
+[arena INFO  sched] thread_main(proc): id=267 entry=ffffffff9c4c5fc0 arg=8 cr3=25c000
+filesd: AFS2 file service starting (ADR-0076/0077)
+[arena INFO  syscall] map_memory: pid 164 window va=0x40000000 pages=1 writable=true mmio=false
+[arena INFO  sched] thread_main(proc): id=268 entry=ffffffff9c4c5fc0 arg=12 cr3=3bf000
+[arena INFO  syscall] map_memory: pid 165 window va=0x40000000 pages=4 writable=true mmio=true
+displayd: GPU display-info used=408 hdr=0x0000000000001101 first mode(w,h,enabled)=0x0000000000000320 0x0000000000000258 0x0000000000000001 
+[displayd] SharedRegion guest authority/zero/copy/mapping PASS
+[displayd] diagnostic shared region fully unmapped
+[displayd] ring3 virtio-gpu 2D pixels ready (staged font v2)
+[arena INFO  kernel] displayd resources at parked boundary: shared 2/96 runs, 471/36864 pages, 2/160 maps; caps 6/128; free frames 113057; live processes 13
+[arena INFO  sched] spawn(proc): id=269 slot=14 entry=ffffffff9c4c5fc0 cr3=3eb000
+storaged: BLKR4K sector 147448 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #13, used idx 13)
+[arena INFO  sched] thread_main(proc): id=269 entry=ffffffff9c4c5fc0 arg=13 cr3=3eb000
+servicemgr: permission PING result + exit before deadline; worker reaped
+servicemgr: permissiond READY (validated durable decision; bearer table fresh)
+[arena INFO  sched] spawn(proc): id=270 slot=12 entry=ffffffff9c4c5fc0 cr3=2f6000
+servicemgr: permission app SPAWNED (not grant/approval)
+[arena INFO  sched] spawn(proc): id=271 slot=15 entry=ffffffff9c4c5fc0 cr3=5e2000
+[arena INFO  sched] spawn(proc): id=272 slot=16 entry=ffffffff9c4c5fc0 cr3=637000
+storaged: BLKR4K sector 16384 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #14, used idx 14)
+[arena INFO  sched] thread_main(proc): id=270 entry=ffffffff9c4c5fc0 arg=11 cr3=2f6000
+permapp: REQUEST arena.txt READ (not authority)
+permapp: audited ONLY mediator WRITE|COPY, 127 other cap slots empty
+permapp: endpoint-only ALLOW/DENY/REVOKE refused by receiver
+permapp: malformed version/duplicate/rights/op refused by receiver x4
+[arena INFO  sched] thread_main(proc): id=271 entry=ffffffff9c4c5fc0 arg=14 cr3=5e2000
+[arena INFO  syscall] map_memory: pid 168 window va=0x40000000 pages=1 writable=true mmio=false
+packaged: observed initial cap occupancy 6
+
+packaged: boot with exact FS/W endpoint/R STAGE/R registrar/W lifecycle/R; namespace scan verified
+[arena INFO  sched] thread_main(proc): id=272 entry=ffffffff9c4c5fc0 arg=15 cr3=637000
+storaged: BLKR4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #15, used idx 15)
+permapp: ACQUIRE denied (no approval)
+servicemgr: packaged READY (full boot scan; exact PING + exit + deadline)
+servicemgr: observed cap occupancy packaged-ready=26
+
+servicemgr: extended cap occupancy [32,127)=0
+
+servicemgr: reserved APB1 slot127 descriptor=0 kind=0 rights=0
+
+servicemgr: permission app reaped through held Process cap
+storaged: BLKR4K sector 16384 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #16, used idx 16)
+storaged: BLKR4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #17, used idx 17)
+storaged: BLKR4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #18, used idx 18)
+storaged: BLKR4K sector 16592 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #19, used idx 19)
+storaged: BLKR4K sector 16576 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #20, used idx 20)
+storaged: BLKR4K sector 16544 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #21, used idx 21)
+[displayprobe] ring3 MODE/cap-refusal/PRESENT 80x drain PASS
+[arena INFO  m9] displayprobe: cap-bearing MODE/PRESENT guest; own record retired; shared/cap/PTE accounting conserved PASS
+[arena INFO  sched] spawn(proc): id=273 slot=12 entry=ffffffff9c4c5fc0 cr3=2f6000
+[arena INFO  m10] desktop broker spawned with explicit delegated grants; application Process/region ownership remains userspace
+[arena INFO  sched] spawn(proc): id=274 slot=14 entry=ffffffff9c4c5fc0 cr3=6a0000
+[arena INFO  m10] late explicit manager slot31 grant: desktop launch endpoint W|C; execution still requires a held live Image
+[arena INFO  m12] late filesd APB1 BadgedEndpoint issued to servicemgr slot127; authority remains withheld from packaged until receiver READY
+[arena INFO  kernel] shell spawned: pid 171 (caps: 0=Power/W 1=Image0/R 2=Notif13/RW 3=Endpoint1/W) — the console is live; type 'help'
+[arena INFO  m8] lifecycle protected refs shell=171 manager=157 netd=153 rngd=154; foreign placeholder READ-only
+[arena INFO  kernel] servicemgr: full fixture notification budget 64/64; sixty-fifth refused, 13 probe slots reclaimed
+[arena INFO  m8] manager-owned netstackd pid 160: five inherited child caps audited (netd/W stack/R backoff/RW rngd/W diag/R), IPC landings excluded
+[arena INFO  m8] lifecycle read-only foreign Process reference installed pid 160 slot 14
+[arena INFO  sched] thread_main(proc): id=273 entry=ffffffff9c4c5fc0 arg=11 cr3=2f6000
+[arena INFO  sched] thread_main(proc): id=274 entry=ffffffff9c4c5fc0 arg=13 cr3=6a0000
+ArenaOS shell v0.10 (M4.6 + M5.3/5.4 + M6.5, ADR-0020/0023/0028) — serial, keyboard, or console port.
+arena> servicemgr: observed cap occupancy apb1-authority-held=26
+
+servicemgr: extended cap occupancy [32,127)=0
+
+servicemgr: reserved APB1 slot127 descriptor=1 kind=12 rights=6
+
+packaged: observed cap high-water 7
+
+servicemgr: APB1 wrong-kind handoff refused kind=3 rights=5
+
+storaged: BLKR4K sector 16528 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #22, used idx 22)
+[desktop] session reservation shared/snapshot pages=471/469
+[desktop] audited 32 distinct client clocks; filesystem endpoint slot13; filesd lineage slot20; package endpoint slot43 (optional); private notification factory slot44; synchronization domain factory slot45; scratch slots125/126 free
+[arena INFO  syscall] map_memory: pid 170 window va=0x40200000 pages=1 writable=true mmio=false
+storaged: BLKR4K sector 16520 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #23, used idx 23)
+storaged: BLKR4K sector 16888 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #24, used idx 24)
+storaged: BLKR4K sector 16880 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #25, used idx 25)
+storaged: BLKR4K sector 16568 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #26, used idx 26)
+storaged: BLKR4K sector 16560 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #27, used idx 27)
+filesd: protected APB1 roots ready; abandoned staging entries removed=0
+filesd: AFS2 mounted seq 28, 16351/16384 blocks free, 14 objects; wall clock from RTC
+packaged: protected installed-app registry ready entries=0
+
+[desktop] AFS2 file service online; /Users/user granted per session
+servicemgr: APB1 install-only BadgedEndpoint handed to READY packaged in late slot5
+storaged: BLKR4K sector 16928 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #28, used idx 28)
+storaged: BLKR4K sector 16920 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #29, used idx 29)
+storaged: BLKR4K sector 16576 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #30, used idx 30)
+storaged: BLKR4K sector 16544 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #31, used idx 31)
+storaged: BLKR4K sector 16960 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #32, used idx 32)
+storaged: BLKR4K sector 16952 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #33, used idx 33)
+[desktop] AFS2 application dock favorites loaded
+storaged: BLKR4K sector 16416 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #34, used idx 34)
+storaged: BLKR4K sector 16408 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #35, used idx 35)
+[desktop] desktop surface shows /Users/user/Desktop
+[desktop] watching /Users/user/Desktop
+[desktop] real desktop frame presented; gallery launcher available
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112786/15/15/3/472/5/47
+[desktop] native resource detail fields=total-frames/threads/endpoints/notifications/timers/vm-regions/vm-committed-pages/sync-domains/sync-keys/sync-waiters/app-instances/windows/helpers/stream-sets/max-windows-per-instance
+[desktop] native resource detail values=114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0
+[desktop] measured broker cap high-water=48
+[desktop] APB1 authority boundary: ordinary Filesd capability denied protected install
+packaged: observed cap high-water 8
+
+packaged: APB1 scope proof: install-only endpoint denied generic LIST
+packaged: APB1 scope proof: same-kind capability with wrong rights denied (kind=12 rights=14)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #36, used idx 36)
+storaged: BLKR4K sector 16424 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #37, used idx 37)
+storaged: BLKR4K sector 16448 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #38, used idx 38)
+storaged: BLKR4K sector 16576 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #39, used idx 39)
+storaged: BLKR4K sector 16544 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #40, used idx 40)
+storaged: BLKR4K sector 16432 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #41, used idx 41)
+storaged: BLKR4K sector 16456 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #42, used idx 42)
+storaged: BLKR4K sector 16440 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #43, used idx 43)
+storaged: BLKR4K sector 16464 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #44, used idx 44)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #45, used idx 45)
+storaged: BLKR4K sector 16488 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #46, used idx 46)
+storaged: BLKR4K sector 16472 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #47, used idx 47)
+storaged: BLKR4K sector 16576 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #48, used idx 48)
+storaged: BLKR4K sector 16544 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #49, used idx 49)
+storaged: BLKR4K sector 16496 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #50, used idx 50)
+storaged: BLKR4K sector 16480 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #51, used idx 51)
+storaged: BLKR4K sector 16424 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #52, used idx 52)
+storaged: BLKR4K sector 16448 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #53, used idx 53)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #54, used idx 54)
+storaged: BLKR4K sector 16432 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #55, used idx 55)
+storaged: BLKR4K sector 16456 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #56, used idx 56)
+storaged: BLKR4K sector 16576 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #57, used idx 57)
+storaged: BLKR4K sector 16544 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #58, used idx 58)
+storaged: BLKR4K sector 16440 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #59, used idx 59)
+storaged: BLKR4K sector 16464 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #60, used idx 60)
+storaged: BLKR4K sector 16488 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #61, used idx 61)
+storaged: BLKR4K sector 16472 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #62, used idx 62)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #63, used idx 63)
+storaged: BLKR4K sector 16496 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #64, used idx 64)
+storaged: BLKR4K sector 16480 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #65, used idx 65)
+storaged: BLKR4K sector 16576 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #66, used idx 66)
+storaged: BLKR4K sector 16544 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #67, used idx 67)
+storaged: BLKW4K sector 16504 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #68, used idx 68)
+storaged: BLKW4K sector 16536 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #69, used idx 69)
+storaged: BLKW4K sector 16552 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #70, used idx 70)
+storaged: BLKW4K sector 16584 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #71, used idx 71)
+storaged: BLKW4K sector 16600 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #72, used idx 72)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #73, used idx 73)
+storaged: BLKR4K sector 16584 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #74, used idx 74)
+storaged: BLKR4K sector 16504 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #75, used idx 75)
+storaged: BLKW4K sector 16608 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #76, used idx 76)
+storaged: BLKW4K sector 16616 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #77, used idx 77)
+storaged: BLKW4K sector 16624 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #78, used idx 78)
+storaged: BLKW4K sector 16632 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #79, used idx 79)
+storaged: BLKW4K sector 16640 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #80, used idx 80)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #81, used idx 81)
+storaged: BLKR4K sector 16632 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #82, used idx 82)
+storaged: BLKR4K sector 16608 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #83, used idx 83)
+storaged: BLKW4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #84, used idx 84)
+storaged: BLKW4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #85, used idx 85)
+storaged: BLKW4K sector 16664 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #86, used idx 86)
+storaged: BLKW4K sector 16672 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #87, used idx 87)
+storaged: BLKW4K sector 16680 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #88, used idx 88)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #89, used idx 89)
+storaged: BLKR4K sector 16672 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #90, used idx 90)
+storaged: BLKR4K sector 16664 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #91, used idx 91)
+storaged: BLKR4K sector 16624 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #92, used idx 92)
+storaged: BLKR4K sector 16616 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #93, used idx 93)
+storaged: BLKW4K sector 16688 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #94, used idx 94)
+storaged: BLKW4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #95, used idx 95)
+storaged: BLKW4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #96, used idx 96)
+storaged: BLKW4K sector 16712 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #97, used idx 97)
+storaged: BLKW4K sector 16736 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #98, used idx 98)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #99, used idx 99)
+storaged: BLKR4K sector 16712 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #100, used idx 100)
+storaged: BLKR4K sector 16688 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #101, used idx 101)
+storaged: BLKW4K sector 16744 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #102, used idx 102)
+storaged: BLKW4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #103, used idx 103)
+storaged: BLKW4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #104, used idx 104)
+storaged: BLKW4K sector 16784 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #105, used idx 105)
+storaged: BLKW4K sector 16792 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #106, used idx 106)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #107, used idx 107)
+storaged: BLKR4K sector 16784 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #108, used idx 108)
+storaged: BLKR4K sector 16744 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #109, used idx 109)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #110, used idx 110)
+storaged: BLKR4K sector 16424 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #111, used idx 111)
+storaged: BLKR4K sector 16448 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #112, used idx 112)
+storaged: BLKW4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #113, used idx 113)
+storaged: BLKW4K sector 16808 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #114, used idx 114)
+storaged: BLKW4K sector 16816 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #115, used idx 115)
+storaged: BLKW4K sector 16824 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #116, used idx 116)
+storaged: BLKW4K sector 16832 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #117, used idx 117)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #118, used idx 118)
+storaged: BLKR4K sector 16824 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #119, used idx 119)
+storaged: BLKR4K sector 16816 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #120, used idx 120)
+storaged: BLKR4K sector 16432 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #121, used idx 121)
+storaged: BLKR4K sector 16808 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #122, used idx 122)
+storaged: BLKW4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #123, used idx 123)
+storaged: BLKW4K sector 16848 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #124, used idx 124)
+storaged: BLKW4K sector 16856 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #125, used idx 125)
+storaged: BLKW4K sector 16864 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #126, used idx 126)
+storaged: BLKW4K sector 16872 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #127, used idx 127)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #128, used idx 128)
+storaged: BLKR4K sector 16864 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #129, used idx 129)
+storaged: BLKR4K sector 16856 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #130, used idx 130)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #131, used idx 131)
+storaged: BLKR4K sector 16456 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #132, used idx 132)
+storaged: BLKR4K sector 16848 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #133, used idx 133)
+storaged: BLKW4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #134, used idx 134)
+storaged: BLKW4K sector 16904 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #135, used idx 135)
+storaged: BLKW4K sector 16912 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #136, used idx 136)
+storaged: BLKW4K sector 16936 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #137, used idx 137)
+storaged: BLKW4K sector 16944 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #138, used idx 138)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #139, used idx 139)
+storaged: BLKR4K sector 16936 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #140, used idx 140)
+storaged: BLKR4K sector 16912 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #141, used idx 141)
+storaged: BLKR4K sector 16440 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #142, used idx 142)
+storaged: BLKR4K sector 16904 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #143, used idx 143)
+storaged: BLKW4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #144, used idx 144)
+storaged: BLKW4K sector 16976 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #145, used idx 145)
+storaged: BLKW4K sector 16984 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #146, used idx 146)
+storaged: BLKW4K sector 16992 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #147, used idx 147)
+storaged: BLKW4K sector 17000 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #148, used idx 148)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #149, used idx 149)
+storaged: BLKR4K sector 16992 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #150, used idx 150)
+storaged: BLKR4K sector 16984 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #151, used idx 151)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #152, used idx 152)
+storaged: BLKR4K sector 16464 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #153, used idx 153)
+storaged: BLKR4K sector 16976 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #154, used idx 154)
+storaged: BLKW4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #155, used idx 155)
+storaged: BLKW4K sector 17016 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #156, used idx 156)
+storaged: BLKW4K sector 17024 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #157, used idx 157)
+storaged: BLKW4K sector 17032 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #158, used idx 158)
+storaged: BLKW4K sector 17040 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #159, used idx 159)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #160, used idx 160)
+storaged: BLKR4K sector 17032 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #161, used idx 161)
+storaged: BLKR4K sector 17024 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #162, used idx 162)
+storaged: BLKR4K sector 16488 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #163, used idx 163)
+storaged: BLKR4K sector 17016 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #164, used idx 164)
+storaged: BLKW4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #165, used idx 165)
+storaged: BLKW4K sector 17056 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #166, used idx 166)
+storaged: BLKW4K sector 17064 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #167, used idx 167)
+storaged: BLKW4K sector 17072 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #168, used idx 168)
+storaged: BLKW4K sector 17080 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #169, used idx 169)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #170, used idx 170)
+storaged: BLKR4K sector 17072 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #171, used idx 171)
+storaged: BLKR4K sector 17064 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #172, used idx 172)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #173, used idx 173)
+storaged: BLKR4K sector 16472 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #174, used idx 174)
+storaged: BLKR4K sector 17056 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #175, used idx 175)
+storaged: BLKW4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #176, used idx 176)
+storaged: BLKW4K sector 17096 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #177, used idx 177)
+storaged: BLKW4K sector 17104 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #178, used idx 178)
+storaged: BLKW4K sector 17112 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #179, used idx 179)
+storaged: BLKW4K sector 17120 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #180, used idx 180)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #181, used idx 181)
+storaged: BLKR4K sector 17112 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #182, used idx 182)
+storaged: BLKR4K sector 17104 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #183, used idx 183)
+storaged: BLKR4K sector 16496 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #184, used idx 184)
+storaged: BLKR4K sector 17096 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #185, used idx 185)
+storaged: BLKW4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #186, used idx 186)
+storaged: BLKW4K sector 17136 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #187, used idx 187)
+storaged: BLKW4K sector 17144 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #188, used idx 188)
+storaged: BLKW4K sector 17152 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #189, used idx 189)
+storaged: BLKW4K sector 17160 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #190, used idx 190)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #191, used idx 191)
+storaged: BLKR4K sector 17152 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #192, used idx 192)
+storaged: BLKR4K sector 17144 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #193, used idx 193)
+storaged: BLKR4K sector 16512 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #194, used idx 194)
+storaged: BLKR4K sector 16480 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #195, used idx 195)
+storaged: BLKR4K sector 17136 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #196, used idx 196)
+storaged: BLKW4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #197, used idx 197)
+storaged: BLKW4K sector 17176 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #198, used idx 198)
+storaged: BLKW4K sector 17184 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #199, used idx 199)
+storaged: BLKW4K sector 17192 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #200, used idx 200)
+storaged: BLKW4K sector 17200 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #201, used idx 201)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #202, used idx 202)
+storaged: BLKR4K sector 17192 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #203, used idx 203)
+storaged: BLKR4K sector 17184 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #204, used idx 204)
+storaged: BLKR4K sector 17176 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #205, used idx 205)
+storaged: BLKW4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #206, used idx 206)
+storaged: BLKW4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #207, used idx 207)
+storaged: BLKW4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #208, used idx 208)
+storaged: BLKW4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #209, used idx 209)
+storaged: BLKW4K sector 17240 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #210, used idx 210)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #211, used idx 211)
+storaged: BLKR4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #212, used idx 212)
+storaged: BLKR4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #213, used idx 213)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #214, used idx 214)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #215, used idx 215)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #216, used idx 216)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #217, used idx 217)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #218, used idx 218)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #219, used idx 219)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #220, used idx 220)
+storaged: BLKR4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #221, used idx 221)
+storaged: BLKR4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #222, used idx 222)
+storaged: BLKR4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #223, used idx 223)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #224, used idx 224)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #225, used idx 225)
+storaged: BLKR4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #226, used idx 226)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #227, used idx 227)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #228, used idx 228)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #229, used idx 229)
+storaged: BLKR4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #230, used idx 230)
+storaged: BLKR4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #231, used idx 231)
+storaged: BLKR4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #232, used idx 232)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #233, used idx 233)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #234, used idx 234)
+storaged: BLKR4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #235, used idx 235)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #236, used idx 236)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #237, used idx 237)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #238, used idx 238)
+storaged: BLKR4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #239, used idx 239)
+storaged: BLKR4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #240, used idx 240)
+storaged: BLKR4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #241, used idx 241)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #242, used idx 242)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #243, used idx 243)
+storaged: BLKR4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #244, used idx 244)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #245, used idx 245)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #246, used idx 246)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #247, used idx 247)
+storaged: BLKR4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #248, used idx 248)
+storaged: BLKR4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #249, used idx 249)
+storaged: BLKR4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #250, used idx 250)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #251, used idx 251)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #252, used idx 252)
+storaged: BLKR4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #253, used idx 253)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #254, used idx 254)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #255, used idx 255)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #256, used idx 256)
+storaged: BLKR4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #257, used idx 257)
+storaged: BLKR4K sector 17232 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #258, used idx 258)
+storaged: BLKR4K sector 17224 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #259, used idx 259)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #260, used idx 260)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #261, used idx 261)
+storaged: BLKR4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #262, used idx 262)
+storaged: BLKW4K sector 17248 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #263, used idx 263)
+storaged: BLKW4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #264, used idx 264)
+storaged: BLKW4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #265, used idx 265)
+storaged: BLKW4K sector 17272 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #266, used idx 266)
+storaged: BLKW4K sector 17280 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #267, used idx 267)
+storaged: BLKW4K sector 16392 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #268, used idx 268)
+storaged: BLKR4K sector 17272 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #269, used idx 269)
+storaged: BLKR4K sector 17248 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #270, used idx 270)
+storaged: BLKR4K sector 16552 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #271, used idx 271)
+storaged: BLKR4K sector 16536 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #272, used idx 272)
+storaged: BLKW4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #273, used idx 273)
+storaged: BLKW4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #274, used idx 274)
+storaged: BLKW4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #275, used idx 275)
+storaged: BLKW4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #276, used idx 276)
+storaged: BLKW4K sector 17336 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #277, used idx 277)
+storaged: BLKW4K sector 16400 buf 0x00000000003e3000 → status 0, device wrote 1 bytes (completion #278, used idx 278)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #279, used idx 279)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #280, used idx 280)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #281, used idx 281)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #282, used idx 282)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #283, used idx 283)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #284, used idx 284)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #285, used idx 285)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #286, used idx 286)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #287, used idx 287)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #288, used idx 288)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #289, used idx 289)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #290, used idx 290)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #291, used idx 291)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #292, used idx 292)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #293, used idx 293)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #294, used idx 294)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #295, used idx 295)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #296, used idx 296)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #297, used idx 297)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #298, used idx 298)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #299, used idx 299)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #300, used idx 300)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #301, used idx 301)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #302, used idx 302)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #303, used idx 303)
+storaged: BLKR4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #304, used idx 304)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #305, used idx 305)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #306, used idx 306)
+storaged: BLKR4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #307, used idx 307)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #308, used idx 308)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #309, used idx 309)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #310, used idx 310)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #311, used idx 311)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #312, used idx 312)
+storaged: BLKR4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #313, used idx 313)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #314, used idx 314)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #315, used idx 315)
+storaged: BLKR4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #316, used idx 316)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #317, used idx 317)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #318, used idx 318)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #319, used idx 319)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #320, used idx 320)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #321, used idx 321)
+storaged: BLKR4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #322, used idx 322)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #323, used idx 323)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #324, used idx 324)
+storaged: BLKR4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #325, used idx 325)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #326, used idx 326)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #327, used idx 327)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #328, used idx 328)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #329, used idx 329)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #330, used idx 330)
+storaged: BLKR4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #331, used idx 331)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #332, used idx 332)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #333, used idx 333)
+storaged: BLKR4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #334, used idx 334)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #335, used idx 335)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #336, used idx 336)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #337, used idx 337)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #338, used idx 338)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #339, used idx 339)
+storaged: BLKR4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #340, used idx 340)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #341, used idx 341)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #342, used idx 342)
+storaged: BLKR4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #343, used idx 343)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #344, used idx 344)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #345, used idx 345)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #346, used idx 346)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #347, used idx 347)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #348, used idx 348)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #349, used idx 349)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #350, used idx 350)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #351, used idx 351)
+[desktop] APB1 installed; signed version=7 (no launch authority implied)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #352, used idx 352)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #353, used idx 353)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #354, used idx 354)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #355, used idx 355)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #356, used idx 356)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #357, used idx 357)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #358, used idx 358)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #359, used idx 359)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #360, used idx 360)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #361, used idx 361)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #362, used idx 362)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #363, used idx 363)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #364, used idx 364)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #365, used idx 365)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #366, used idx 366)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #367, used idx 367)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #368, used idx 368)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #369, used idx 369)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #370, used idx 370)
+storaged: BLKR4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #371, used idx 371)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #372, used idx 372)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #373, used idx 373)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #374, used idx 374)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #375, used idx 375)
+storaged: BLKR4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #376, used idx 376)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #377, used idx 377)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #378, used idx 378)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #379, used idx 379)
+storaged: BLKR4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #380, used idx 380)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #381, used idx 381)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #382, used idx 382)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #383, used idx 383)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #384, used idx 384)
+storaged: BLKR4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #385, used idx 385)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #386, used idx 386)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #387, used idx 387)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #388, used idx 388)
+storaged: BLKR4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #389, used idx 389)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #390, used idx 390)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #391, used idx 391)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #392, used idx 392)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #393, used idx 393)
+storaged: BLKR4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #394, used idx 394)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #395, used idx 395)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #396, used idx 396)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #397, used idx 397)
+storaged: BLKR4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #398, used idx 398)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #399, used idx 399)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #400, used idx 400)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #401, used idx 401)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #402, used idx 402)
+storaged: BLKR4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #403, used idx 403)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #404, used idx 404)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #405, used idx 405)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #406, used idx 406)
+storaged: BLKR4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #407, used idx 407)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #408, used idx 408)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #409, used idx 409)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #410, used idx 410)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #411, used idx 411)
+storaged: BLKR4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #412, used idx 412)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #413, used idx 413)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #414, used idx 414)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #415, used idx 415)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #416, used idx 416)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #417, used idx 417)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #418, used idx 418)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #419, used idx 419)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #420, used idx 420)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #421, used idx 421)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #422, used idx 422)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #423, used idx 423)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #424, used idx 424)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #425, used idx 425)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #426, used idx 426)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #427, used idx 427)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #428, used idx 428)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #429, used idx 429)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #430, used idx 430)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #431, used idx 431)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #432, used idx 432)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #433, used idx 433)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #434, used idx 434)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #435, used idx 435)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #436, used idx 436)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #437, used idx 437)
+storaged: BLKR4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #438, used idx 438)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #439, used idx 439)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #440, used idx 440)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #441, used idx 441)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #442, used idx 442)
+storaged: BLKR4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #443, used idx 443)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #444, used idx 444)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #445, used idx 445)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #446, used idx 446)
+storaged: BLKR4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #447, used idx 447)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #448, used idx 448)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #449, used idx 449)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #450, used idx 450)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #451, used idx 451)
+storaged: BLKR4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #452, used idx 452)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #453, used idx 453)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #454, used idx 454)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #455, used idx 455)
+storaged: BLKR4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #456, used idx 456)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #457, used idx 457)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #458, used idx 458)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #459, used idx 459)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #460, used idx 460)
+storaged: BLKR4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #461, used idx 461)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #462, used idx 462)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #463, used idx 463)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #464, used idx 464)
+storaged: BLKR4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #465, used idx 465)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #466, used idx 466)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #467, used idx 467)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #468, used idx 468)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #469, used idx 469)
+storaged: BLKR4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #470, used idx 470)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #471, used idx 471)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #472, used idx 472)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #473, used idx 473)
+storaged: BLKR4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #474, used idx 474)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #475, used idx 475)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #476, used idx 476)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #477, used idx 477)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #478, used idx 478)
+storaged: BLKR4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #479, used idx 479)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #480, used idx 480)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #481, used idx 481)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #482, used idx 482)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #483, used idx 483)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #484, used idx 484)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #485, used idx 485)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #486, used idx 486)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #487, used idx 487)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #488, used idx 488)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #489, used idx 489)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #490, used idx 490)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #491, used idx 491)
+storaged: BLKR4K sector 17264 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #492, used idx 492)
+storaged: BLKR4K sector 17256 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #493, used idx 493)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #494, used idx 494)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #495, used idx 495)
+storaged: BLKR4K sector 17320 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #496, used idx 496)
+storaged: BLKR4K sector 17312 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #497, used idx 497)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #498, used idx 498)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #499, used idx 499)
+storaged: BLKR4K sector 16656 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #500, used idx 500)
+storaged: BLKR4K sector 16648 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #501, used idx 501)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #502, used idx 502)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #503, used idx 503)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #504, used idx 504)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #505, used idx 505)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #506, used idx 506)
+storaged: BLKR4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #507, used idx 507)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #508, used idx 508)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #509, used idx 509)
+storaged: BLKR4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #510, used idx 510)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #511, used idx 511)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #512, used idx 512)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #513, used idx 513)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #514, used idx 514)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #515, used idx 515)
+storaged: BLKR4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #516, used idx 516)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #517, used idx 517)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #518, used idx 518)
+storaged: BLKR4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #519, used idx 519)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #520, used idx 520)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #521, used idx 521)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #522, used idx 522)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #523, used idx 523)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #524, used idx 524)
+storaged: BLKR4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #525, used idx 525)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #526, used idx 526)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #527, used idx 527)
+storaged: BLKR4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #528, used idx 528)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #529, used idx 529)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #530, used idx 530)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #531, used idx 531)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #532, used idx 532)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #533, used idx 533)
+storaged: BLKR4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #534, used idx 534)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #535, used idx 535)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #536, used idx 536)
+storaged: BLKR4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #537, used idx 537)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #538, used idx 538)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #539, used idx 539)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #540, used idx 540)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #541, used idx 541)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #542, used idx 542)
+storaged: BLKR4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #543, used idx 543)
+storaged: BLKR4K sector 16704 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #544, used idx 544)
+storaged: BLKR4K sector 16696 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #545, used idx 545)
+storaged: BLKR4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #546, used idx 546)
+storaged: BLKR4K sector 16776 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #547, used idx 547)
+storaged: BLKR4K sector 16768 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #548, used idx 548)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #549, used idx 549)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #550, used idx 550)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #551, used idx 551)
+storaged: BLKR4K sector 16800 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #552, used idx 552)
+storaged: BLKR4K sector 16840 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #553, used idx 553)
+storaged: BLKR4K sector 16896 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #554, used idx 554)
+storaged: BLKR4K sector 16968 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #555, used idx 555)
+storaged: BLKR4K sector 17008 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #556, used idx 556)
+storaged: BLKR4K sector 17048 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #557, used idx 557)
+storaged: BLKR4K sector 17328 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #558, used idx 558)
+storaged: BLKR4K sector 17304 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #559, used idx 559)
+storaged: BLKR4K sector 17216 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #560, used idx 560)
+storaged: BLKR4K sector 17088 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #561, used idx 561)
+storaged: BLKR4K sector 17128 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #562, used idx 562)
+storaged: BLKR4K sector 17168 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #563, used idx 563)
+storaged: BLKR4K sector 17208 buf 0x00000000003e3000 → status 0, device wrote 4097 bytes (completion #564, used idx 564)
+[arena INFO  sched] spawn(proc): id=275 slot=16 entry=ffffffff9c4c5fc0 cr3=1b31000
+[desktop] measured broker cap high-water=53
+[desktop] real application spawned; ABI-v2 held Process, unique badge and surface bound
+[arena INFO  sched] thread_main(proc): id=275 entry=ffffffff9c4c5fc0 arg=15 cr3=1b31000
+[desktop] measured frames/records/processes/regions/pages/maps/caps=111582/16/16/6/1413/8/51
+[desktop] native resource detail fields=total-frames/threads/endpoints/notifications/timers/vm-regions/vm-committed-pages/sync-domains/sync-keys/sync-waiters/app-instances/windows/helpers/stream-sets/max-windows-per-instance
+[desktop] native resource detail values=114275/17/12/51/0/2/208/1/0/0/1/0/0/1/0
+[desktop] child Process-cap exit status=14
+[desktop] AppInstance ProcessGroup teardown members=1; final members=0
+filesd: lineage retired: 1 record(s) now stale
+[desktop] application retired: kind=6 Process consumed; mapping and region released
+[desktop] measured frames/records/processes/regions/pages/maps/caps=112781/15/15/3/472/5/47
+[desktop] native resource detail fields=total-frames/threads/endpoints/notifications/timers/vm-regions/vm-committed-pages/sync-domains/sync-keys/sync-waiters/app-instances/windows/helpers/stream-sets/max-windows-per-instance
+[desktop] native resource detail values=114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0

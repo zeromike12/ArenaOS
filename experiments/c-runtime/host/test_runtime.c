@@ -749,14 +749,7 @@ extern int libc_host_checks;
 
 #define GFX_W_TEST 640u
 #define GFX_H_TEST 480u
-
 #define GFX_CAP_NONE ((uint64_t)0xFFFFFFFFFFFFFFFFull)
-
-/* Surface-layout constants mirrored from c_gfx_app.c (file-scoped there). */
-#define PIXEL_OFFSET_TEST 4096u
-#define GFX_PIXEL_BYTES_TEST (640ull * 480ull * 4ull)
-#define GFX_PIXEL_PAGES_TEST ((GFX_PIXEL_BYTES_TEST + 4095ull) / 4096ull)
-#define GFX_TOTAL_PAGES_TEST (1ull + GFX_PIXEL_PAGES_TEST)
 
 /* Mocked syscall boundary (defined in host_main.c). */
 extern void arena_host_mock_push(int64_t rax, uint64_t out0,
@@ -783,6 +776,7 @@ extern int exchange(uint8_t opcode, uint64_t handle, uint16_t w, uint16_t h,
                     uint8_t frame[ADSK_BYTES_TEST], uint64_t *result_out);
 extern uint64_t create_window(uint16_t w, uint16_t h);
 extern int describe_slot(uint64_t slot, uint64_t out[3]);
+extern int surface_pages_status(int64_t pages);
 extern int discover(const arena_startup_t *s, uint64_t *ep, uint64_t *surf);
 extern void render_frame(uint32_t *pixels, uint32_t frame, int flash);
 extern void log_line(const char *msg);
@@ -979,22 +973,15 @@ static void test_gfx_discover_refusals(void) {
 }
 
 static void test_gfx_surface_layout_boundary(void) {
-    /* The V1 surface convention: 640x480 u32 pixels at byte offset 4096 in a
-       SharedRegion of at least 301 pages. The boundary is exercised through
-       the production main-path predicates (constants + page arithmetic). */
-    CHECK(ARENA_PAGE_SIZE == 4096u, "layout: page size 4096");
-    CHECK(PIXEL_OFFSET_TEST == 4096u, "layout: pixel offset is one page (4096)");
-    CHECK(GFX_W_TEST == 640u && GFX_H_TEST == 480u, "layout: 640x480");
-    CHECK(GFX_PIXEL_BYTES_TEST == 1228800u,
-          "layout: 640*480*4 == 1228800 bytes");
-    CHECK(GFX_PIXEL_PAGES_TEST == 300u, "layout: pixels span exactly 300 pages");
-    CHECK(GFX_TOTAL_PAGES_TEST == 301u,
-          "layout: offset page + 300 pixel pages == 301 (the minimum accepted)");
-    CHECK(GFX_TOTAL_PAGES_TEST - 1u < GFX_TOTAL_PAGES_TEST,
-          "layout: 300 pages must be refused (surface too small)");
-    /* 32-bit pixels: one u32 per pixel, no padding between rows. */
-    CHECK(GFX_PIXEL_BYTES_TEST == (uint64_t)GFX_W_TEST * GFX_H_TEST * 4u,
-          "layout: 32-bit pixels, no row padding");
+    /* Independent expected values call the exact production policy used by
+       c_gfx_app.c's main path. These are client-policy inputs, not mock or
+       kernel-grant claims. */
+    CHECK(surface_pages_status(301) == GFX_OK,
+          "layout: production guard accepts exactly 301 pages");
+    CHECK(surface_pages_status(300) == 7,
+          "layout: production guard refuses 300 pages with exit 7");
+    CHECK(surface_pages_status(-1) == 7,
+          "layout: production guard refuses an invalid page-query result");
 }
 
 

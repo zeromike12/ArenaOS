@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""V1 guest refusal matrix — cases 11–17 executed inside ArenaOS.
+"""V1 guest refusal matrix — 24 classified cases executed inside ArenaOS.
 
 The main proof (`tools/v1_guest_proof.py`) shows the positive path: a signed
 application discovers its endpoint and surface, identifies itself, gets a
@@ -29,11 +29,11 @@ What runs in the guest (see experiments/c-runtime/app/c_gfx_refusals.c):
                                            must refuse it AND dispose of it,
                                            and the client must still hold a
                                            working surface afterwards
-  17  surface-layout boundaries            the real granted page count, the
-                                           documented 32-bit pixel window, and
-                                           a real kernel refusal when the page
-                                           query is aimed at a capability that
-                                           is not a SharedRegion
+  17  surface-layout boundaries            production client guard accepts
+                                           exactly 301 pages and refuses 300;
+                                           the actual kernel-granted region is
+                                           checked separately, plus a real
+                                           wrong-capability kernel refusal
 
 Nothing privileged is added, no permission is weakened, and no product
 syscall is introduced. A refusal is a *typed refusal*: the kernel delivered

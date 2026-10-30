@@ -12,9 +12,9 @@
 #      /opt/rust/prefix. Verifies that rustc, cargo and the two
 #      official bare-metal target libs are present.
 #   2. Zig 0.17.0 from PyPI `ziglang==0.17.0`, extracted to
-#      /opt/zig-clang/pkg/ziglang. experiments/c-runtime/run.py drives the
+#      /opt/zig-clang/ziglang. experiments/c-runtime/run.py drives the
 #      supported Clang route as `zig cc -target x86_64-freestanding-none`
-#      and reads ARENA_ZIG (default /opt/zig-clang/pkg/ziglang/zig).
+#      and reads ARENA_ZIG (default /opt/zig-clang/ziglang/zig).
 #
 # Nothing is installed over host tools: everything lands under /opt in
 # private prefixes. Idempotent: each stage skips when already satisfied.

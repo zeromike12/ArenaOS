@@ -1,0 +1,6 @@
+[v1-refusals] built APB1 docs/v1/evidence/v2-2026-10-30-layout-boundary/refusals-gcc/c-gfx-refusals.apb1 (40936 bytes, sha256 9f98c1b03a567dd07ac566cf80d8a3a481c901c42e007ec03e1c1f95dfab0447) with gcc from ELF /home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-refusals-gcc.elf (sha256 c7d276cb02db40283c85ea6a490785b3e4bf430416ccbddedbcaa608cccdb266)
+[v1-refusals] run directory: docs/v1/evidence/v2-2026-10-30-layout-boundary/refusals-gcc
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (40936 bytes)
+[v1-refusals] FATAL: refusal client never completed the matrix within 90s of external supervision
+[v1-refusals] rc=0 dt=100.4s cases=0 -> FAIL
+[gate-stage] refusals-gcc: exit 1 -> docs/v1/evidence/v2-2026-10-30-layout-boundary/gate/receipts/refusals-gcc.json

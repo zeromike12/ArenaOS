@@ -125,6 +125,17 @@ enum gfx_exit {
     GFX_IDENTIFY_FAILED = 14,
 };
 
+/* This is the production page-count policy used by main() before mapping the
+   surface or creating/publishing a window. The guest refusal fixture calls
+   this exact function with boundary inputs 301 and 300; those inputs exercise
+   client policy and are not represented as kernel-created grants. */
+TEST_EXPORT int surface_pages_status(int64_t pages) {
+    if (pages < 0 || (uint64_t)pages < (uint64_t)GFX_TOTAL_PAGES) {
+        return GFX_SURFACE_TOO_SMALL;
+    }
+    return GFX_OK;
+}
+
 /* Capability kinds/rights as granted by the ADR-0090 desktop profile.
    Role OTHER descriptors are unconstrained in the record, so any number
    of them may be present; kind+rights counting is an existence check
@@ -495,9 +506,10 @@ int main(int argc, char **argv) {
     }
 
     int64_t pages = arena_syscall6(ARENA_SYS_SHARED_PAGES, surf, 0, 0, 0, 0, 0);
-    if (pages < 0 || (uint64_t)pages < GFX_TOTAL_PAGES) {
+    int size_status = surface_pages_status(pages);
+    if (size_status != GFX_OK) {
         log_line("[gfx] surface too small");
-        arena_exit(GFX_SURFACE_TOO_SMALL);
+        arena_exit((enum gfx_exit)size_status);
     }
 
     int64_t va = arena_syscall6(ARENA_SYS_SHARED_MAP, surf, 1u, 0, 0, 0, 0);

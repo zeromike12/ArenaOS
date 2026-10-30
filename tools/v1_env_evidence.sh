@@ -121,7 +121,7 @@ say rust-targets
 
 # ------------------------------------------------------------- compilers ---
 mkdir -p "$OUT/compilers"
-export ARENA_ZIG="${ARENA_ZIG:-/opt/zig-clang/pkg/ziglang/zig}"
+export ARENA_ZIG="${ARENA_ZIG:-/opt/zig-clang/ziglang/zig}"
 {
     gcc --version | head -1
     "$ARENA_ZIG" version

@@ -136,11 +136,13 @@ def code_fingerprint() -> str:
 
 
 def receipt(stage: str, exit_code: int, notes: list, argv: list,
-            started: float, finished: float, qualified: bool = True) -> dict:
+            started: float, finished: float, qualified: bool = True,
+            evidence_dir: str | None = None) -> dict:
     package = REPO_ROOT / "docs/v1/evidence/v2-2026-10-29-r2.tar.gz"
     return {
         "stage": stage,
         "exit": exit_code,
+        "evidence_dir": evidence_dir,
         # False for a stage that could only run through a documented
         # development substitute (see docs/v1/V2-STATUS.md §B1). Such a
         # receipt never supports a qualification claim, whatever its exit
@@ -180,6 +182,7 @@ def parse(argv: list) -> tuple:
     mode = argv[1]
     stage, receipts, notes, code = None, DEFAULT_RECEIPTS, [], 0
     qualified = True
+    evidence_dir = None
     rest = argv[2:]
     i = 0
     while i < len(rest):
@@ -189,6 +192,9 @@ def parse(argv: list) -> tuple:
             i += 2
         elif arg == "--receipts":
             receipts = Path(rest[i + 1])
+            i += 2
+        elif arg == "--evidence-dir":
+            evidence_dir = rest[i + 1]
             i += 2
         elif arg == "--note":
             notes.append(rest[i + 1])
@@ -206,11 +212,11 @@ def parse(argv: list) -> tuple:
             raise SystemExit(f"unknown argument {arg!r}")
     if stage is None:
         raise SystemExit("--stage is required")
-    return mode, stage, receipts, notes, code, qualified, rest[i:]
+    return mode, stage, receipts, notes, code, qualified, evidence_dir, rest[i:]
 
 
 def main(argv: list) -> int:
-    mode, stage, receipts, notes, code, qualified, command = parse(argv)
+    mode, stage, receipts, notes, code, qualified, evidence_dir, command = parse(argv)
     started = time.time()
     if mode == "run":
         if not command:
@@ -218,7 +224,8 @@ def main(argv: list) -> int:
         completed = subprocess.run(command, cwd=REPO_ROOT)
         code = completed.returncode
     finished = time.time()
-    data = receipt(stage, code, notes, command, started, finished, qualified)
+    data = receipt(stage, code, notes, command, started, finished, qualified,
+                   evidence_dir)
     path = write(receipts, data)
     print(f"[gate-stage] {stage}: exit {code} -> {path}")
     return code
