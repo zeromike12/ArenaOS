@@ -86,6 +86,22 @@ say qemu-version
 say qemu-accel-help
 
 # --------------------------------------------------------------- rust ------
+RUST_COMPONENTS="$REPO/docs/phase16/dependencies/rust-1.97.0"
+{
+    echo "component directory: $RUST_COMPONENTS"
+    echo "--- official archive hashes ---"
+    ( cd "$RUST_COMPONENTS" && sha256sum --check SHA256SUMS ) 2>&1 || {
+        echo "error: official rust-std archive checksum mismatch" >&2
+        exit 1
+    }
+    echo "--- reassembled parts hashes ---"
+    ( cd "$RUST_COMPONENTS" && sha256sum --check PARTS-SHA256SUMS ) 2>&1 || {
+        echo "error: rust-std archive part checksum mismatch" >&2
+        exit 1
+    }
+} > "$OUT/rust-component-checksums.txt" 2>&1
+say rust-component-checksums
+
 {
     /opt/rust/prefix/bin/rustc --version --verbose 2>&1
     /opt/rust/prefix/bin/cargo --version 2>&1
