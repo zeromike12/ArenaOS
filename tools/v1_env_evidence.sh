@@ -29,8 +29,24 @@ record() { # record <name> <command...>
     echo "mem_total_kb: $(awk '/MemTotal/{print $2}' /proc/meminfo)"
     echo "glibc: $(ldd --version | head -1)"
     echo "gcc: $(gcc --version | head -1)"
+    echo "repo_path: $REPO"
     echo "repo_head: $(git -C "$REPO" rev-parse HEAD)"
     echo "repo_branch: $(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
+    echo "repo_identity: $(stat -c 'device=%d inode=%i uid=%u gid=%g mode=%a' "$REPO")"
+    if [[ -d /workspace/ArenaOS ]]; then
+        echo "canonical_build_path: /workspace/ArenaOS"
+        echo "canonical_build_identity: $(stat -c 'device=%d inode=%i uid=%u gid=%g mode=%a' /workspace/ArenaOS)"
+        if [[ -d /home/user/ArenaOS ]]; then
+            home_identity="$(stat -c '%d:%i' /home/user/ArenaOS)"
+            canonical_identity="$(stat -c '%d:%i' /workspace/ArenaOS)"
+            echo "canonical_is_inspected_home_checkout: $([[ "$home_identity" == "$canonical_identity" ]] && echo true || echo false)"
+        fi
+        if command -v findmnt >/dev/null 2>&1; then
+            findmnt -T /workspace/ArenaOS -n -o TARGET,SOURCE,FSTYPE,OPTIONS
+        fi
+    else
+        echo "canonical_build_path: MISSING"
+    fi
     echo "repo_dirty:"; git -C "$REPO" status --porcelain | sed 's/^/  /'
 } > "$OUT/host.txt" 2>&1
 say host
