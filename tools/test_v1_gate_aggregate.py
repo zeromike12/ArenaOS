@@ -29,6 +29,13 @@ class AggregateRequirementTests(unittest.TestCase):
                 "verdict": "PASS",
             }
             classes[name] = {"kind": contract["kind"], "description": "fixture"}
+        cases["foreign-identity"] = {
+            "count": 1, "want": 0, "got": 0, "verdict": "PASS",
+        }
+        classes["foreign-identity"] = {
+            "kind": "IDENTITY",
+            "description": "production identity validator over an object id one above the real one",
+        }
         apb1 = root / "c-gfx-refusals.apb1"
         apb1.write_bytes(f"synthetic APB1 for {stage}".encode())
         evidence = {
@@ -137,6 +144,75 @@ class AggregateRequirementTests(unittest.TestCase):
         self.assertTrue(aggregate.layout_evidence_problems({}, "refusals-gcc"))
         self.assertTrue(aggregate.layout_evidence_problems(
             {"evidence_dir": "../../outside"}, "refusals-gcc"))
+
+    def test_4b_keeps_synthetic_foreign_identity_open_without_m_waiver(self):
+        with tempfile.TemporaryDirectory(prefix=".v1-aggregate-", dir=ROOT) as tmp:
+            root = Path(tmp)
+            receipts = {stage: {"exit": 0, "qualified": True}
+                        for stage in aggregate.STAGES["full"]}
+            for stage in ("refusals-gcc", "refusals-clang"):
+                receipt = self._evidence(root / stage, stage)
+                errors, waived = aggregate.foreign_capability_evidence_problems(
+                    receipt, stage)
+                self.assertEqual([], errors)
+                self.assertFalse(waived)
+                receipts[stage].update(receipt)
+            statuses, _errors = aggregate.evaluate_requirements(
+                "full", receipts, set(), set())
+            foreign = next(item for item in statuses if item["id"] == "4b")
+            self.assertEqual("OPEN", foreign["status"])
+
+    def test_4b_does_not_accept_a_waiver_not_recorded_by_m(self):
+        with tempfile.TemporaryDirectory(prefix=".v1-aggregate-", dir=ROOT) as tmp:
+            root = Path(tmp)
+            receipt = self._evidence(root / "refusals-gcc", "refusals-gcc")
+            receipt["efi_sha256"] = "candidate-efi"
+            (root / "M-WAIVER.json").write_text(json.dumps({
+                "kind": "m_recorded_v1_coverage_waiver",
+                "requirement": "4b",
+                "decision": "waive",
+                "decision_by": "someone-else",
+                "scope": "no real stale/foreign capability is presented to the kernel",
+                "source_commit": "test-source-commit",
+                "efi_sha256": "candidate-efi",
+                "recorded_utc": "2026-10-30T00:00:00Z",
+                "rationale": "test fixture only",
+            }))
+            errors, waived = aggregate.foreign_capability_evidence_problems(
+                receipt, "refusals-gcc")
+            self.assertFalse(waived)
+            self.assertTrue(any("decision_by" in error for error in errors))
+
+    def test_5f_is_a_required_real_grant_stage_for_full_mode(self):
+        receipts = {stage: {"exit": 0, "qualified": True}
+                    for stage in aggregate.STAGES["full"]}
+        for stage in ("layout-integration-gcc", "layout-integration-clang"):
+            receipts.pop(stage)
+        statuses, errors = aggregate.evaluate_requirements(
+            "full", receipts,
+            {"layout-integration-gcc", "layout-integration-clang"}, set())
+        real_grant = next(item for item in statuses if item["id"] == "5f")
+        self.assertEqual("FAIL", real_grant["status"])
+        self.assertIn("missing layout-integration-gcc, layout-integration-clang",
+                      real_grant["detail"])
+        self.assertTrue(errors)
+
+    def test_5f_rejects_predicate_only_evidence(self):
+        with tempfile.TemporaryDirectory(prefix=".v1-aggregate-", dir=ROOT) as tmp:
+            root = Path(tmp) / "layout-integration-gcc"
+            root.mkdir()
+            (root / "integration-evidence.json").write_text(json.dumps({
+                "kind": "predicate_only_policy_proof",
+                "guest_compiler_under_test": "gcc",
+                "pass": True,
+                "rc": 0,
+            }))
+            receipt = {"evidence_dir": str(root.relative_to(ROOT)),
+                       "source_commit": "test-source-commit"}
+            errors = aggregate.layout_integration_evidence_problems(
+                receipt, "layout-integration-gcc")
+            self.assertTrue(any("not real SharedRegion integration" in error
+                                for error in errors))
 
     def test_full_requirement_evaluation_fails_without_5e_case_evidence(self):
         receipts = {stage: {"exit": 0, "qualified": True}

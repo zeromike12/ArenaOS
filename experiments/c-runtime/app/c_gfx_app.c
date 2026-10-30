@@ -505,13 +505,21 @@ int main(int argc, char **argv) {
         arena_exit(GFX_WRONG_RIGHTS);
     }
 
+    char line[128];
     int64_t pages = arena_syscall6(ARENA_SYS_SHARED_PAGES, surf, 0, 0, 0, 0, 0);
     int size_status = surface_pages_status(pages);
+    (void)arena_snprintf(line, sizeof(line),
+                         "[gfx] surface pages=%lld required=%llu",
+                         (long long)pages,
+                         (unsigned long long)GFX_TOTAL_PAGES);
+    log_line(line);
     if (size_status != GFX_OK) {
-        log_line("[gfx] surface too small");
+        log_line("[gfx] size-check refused before map/window/damage; exit=7");
         arena_exit((enum gfx_exit)size_status);
     }
 
+    log_line("[gfx] size-check accepted; map request next");
+    log_line("[gfx] shared-map syscall");
     int64_t va = arena_syscall6(ARENA_SYS_SHARED_MAP, surf, 1u, 0, 0, 0, 0);
     if (va <= 0) {
         log_line("[gfx] map failed");
@@ -520,6 +528,7 @@ int main(int argc, char **argv) {
     a.framebuffer = (uint8_t *)(uintptr_t)va;
     a.mapped = 1;
     uint32_t *pixels = (uint32_t *)(a.framebuffer + PIXEL_OFFSET);
+    log_line("[gfx] surface mapped");
 
     /* Perform the ADR-0114 Identify round-trip before any graphical
        request. Identify is mandatory — failure means fail closed, never
@@ -527,7 +536,6 @@ int main(int argc, char **argv) {
 
     uint8_t id_frame[ADSK_BYTES];
     identify_t ident;
-    char line[128];
     if (identify_exchange(id_frame, &ident) != 0) {
         log_line("[gfx] identify failed");
         if (a.mapped) {
@@ -554,6 +562,7 @@ int main(int argc, char **argv) {
                          (unsigned long long)instance);
     log_line(line);
 
+    log_line("[gfx] create-window request after Identify");
     uint64_t handle = create_window(GFX_W, GFX_H);
     if (handle == 0) {
         log_line("[gfx] create failed");
@@ -577,12 +586,18 @@ int main(int argc, char **argv) {
 
     for (uint32_t f = 0; f < GFX_FRAMES; f++) {
         render_frame(pixels, f, flash > 0 ? 1 : 0);
+        if (f == 0) {
+            log_line("[gfx] first frame pixels written=307200");
+        }
         if (flash > 0) flash--;
 
         if (!damage(handle)) {
             log_line("[gfx] damage failed");
             exit_code = GFX_DAMAGE_FAILED;
             break;
+        }
+        if (f == 0) {
+            log_line("[gfx] first damage published");
         }
 
         uint8_t reply[ADSK_BYTES];

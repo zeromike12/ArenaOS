@@ -2961,6 +2961,26 @@ fn launch_with_document(
     )
 }
 
+/// The two installed IDs below are a narrowly scoped layout integration
+/// fixture. They do not change launch authority: the normal signed catalog
+/// resolution, Image capability, startup record, Identify exchange, and child
+/// capability grants remain unchanged. The fixture only shapes the Desktop's
+/// existing SharedRegion allocation to the exact boundary requested by the
+/// test, using the already-held POOL capability.
+fn layout_fixture_shared_pages(application_id: &[u8; 32]) -> Option<u64> {
+    let matches = |expected: &[u8]| {
+        application_id.get(..expected.len()) == Some(expected)
+            && application_id[expected.len()..].iter().all(|byte| *byte == 0)
+    };
+    if matches(b"com.arena.layout301") {
+        Some(301)
+    } else if matches(b"com.arena.layout300") {
+        Some(300)
+    } else {
+        None
+    }
+}
+
 /// Launch a descriptive installed-catalog selection through packaged's
 /// fresh receiver-side revalidation. The registry row and app ID never enter
 /// SYS_SPAWN as authority; the exact returned Image capability does.
@@ -3007,14 +3027,27 @@ fn launch_installed_application(
         destroy(image.capability);
         return launched;
     }
+    let fixture_pages = layout_fixture_shared_pages(application_id);
+    if let Some(pages) = fixture_pages {
+        log(b"[desktop] layout fixture console precreation suppressed app=");
+        log(if pages == 301 {
+            b"com.arena.layout301" as &[u8]
+        } else {
+            b"com.arena.layout300" as &[u8]
+        });
+        log(b"\n");
+    }
     // Phase 16 console window: a windowed stream application gets its
     // primary window pre-created at spawn (manifest default size), so it
     // is focusable and can receive granted-stdin keyboard input without
     // first speaking the graphics protocol. The app's own Create request
-    // later returns this same window (see the service dispatch).
+    // later returns this same window (see the service dispatch). The exact
+    // layout-boundary fixtures retain standard streams but suppress only
+    // this pre-creation, so the ordinary C size check runs before any window.
     unsafe {
         PENDING_CONSOLE = (0, 0, [0; 32]);
-        if app_flags & manifest::FLAG_STANDARD_STREAMS != 0
+        if fixture_pages.is_none()
+            && app_flags & manifest::FLAG_STANDARD_STREAMS != 0
             && let Some(slot) = (&*(&raw const INSTALLED_APPS))
                 .iter()
                 .position(|e| e.is_some_and(|a| a.application_id == *application_id))
@@ -3040,6 +3073,7 @@ fn launch_installed_application(
         image.load_base,
         app_flags,
         read_only,
+        fixture_pages,
     );
     destroy(image.capability);
     launched
@@ -3461,6 +3495,7 @@ fn launch_image_v2_with_document(
         arena_desktop::apps::APPLICATION_LOAD_BASE,
         FLAG_MULTI_INSTANCE,
         read_only,
+        None,
     )
 }
 
@@ -3479,6 +3514,7 @@ fn launch_image_v2_for_app_with_document(
     load_base: u64,
     app_flags: u32,
     document_read_only: bool,
+    shared_pages_override: Option<u64>,
 ) -> Result<(), i64> {
     use arena_startup_abi::startup as startup_abi;
 
@@ -3534,12 +3570,17 @@ fn launch_image_v2_for_app_with_document(
     }
 
     let reserve = unsafe { RESERVE };
+    if shared_pages_override.is_some_and(|pages| pages != 300 && pages != 301) {
+        log_launch_refusal(b"layout-fixture-pages", STATUS_BAD_ARG);
+        return Err(STATUS_BAD_ARG);
+    }
+    let shared_pages = shared_pages_override.unwrap_or(reserve.shared_pages);
     let mut out = [0; 3];
     let rc = unsafe {
         syscall6(
             SYS_SHARED_CREATE,
             POOL,
-            reserve.shared_pages,
+            shared_pages,
             out.as_mut_ptr() as u64,
             0,
             0,
@@ -3552,6 +3593,34 @@ fn launch_image_v2_for_app_with_document(
     }
     let region = out[0];
     let id = out[1];
+    if let Some(expected_pages) = shared_pages_override {
+        let actual_pages = unsafe { syscall6(SYS_SHARED_PAGES, region, 0, 0, 0, 0, 0) };
+        if actual_pages != expected_pages as i64 {
+            log(b"[desktop] layout fixture SharedRegion size mismatch expected=");
+            log_number(expected_pages);
+            log(b" actual=");
+            if actual_pages < 0 {
+                log(b"-");
+                log_number(actual_pages.unsigned_abs());
+            } else {
+                log_number(actual_pages as u64);
+            }
+            log(b"\n");
+            destroy(region);
+            return Err(STATUS_BAD_ARG);
+        }
+        log(b"[desktop] layout fixture SharedRegion allocated app=");
+        log(if expected_pages == 301 {
+            b"com.arena.layout301" as &[u8]
+        } else {
+            b"com.arena.layout300" as &[u8]
+        });
+        log(b" pages=");
+        log_number(actual_pages as u64);
+        log(b" surface=");
+        log_number(id);
+        log(b"\n");
+    }
     let va = unsafe { syscall2(SYS_SHARED_MAP, region, 1) };
     if va <= 0 {
         log_launch_refusal(b"shared-map", va);
@@ -4360,6 +4429,35 @@ fn retire(index: usize, _force: bool) {
     }
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
+    }
+    if let Some(pages) = layout_fixture_shared_pages(&s.application_id) {
+        // The normal C client writes a nonzero checkerboard to all 307,200
+        // pixels only after its page guard, SharedRegion map, Identify, and
+        // Create. For the 300-page refusal, inspect every pixel word that
+        // actually fits after the 4-KiB protocol page; the absent final page
+        // is deliberately never read. The child has exited, so this mapping
+        // is stable until the following unmap.
+        let available = pages
+            .saturating_mul(4096)
+            .saturating_sub(PIXEL_OFFSET as u64)
+            .min(640 * 480 * 4);
+        let words = (available / 4) as usize;
+        let pixels = (s.va + PIXEL_OFFSET as u64) as *const u32;
+        let mut nonzero = 0u64;
+        for word in 0..words {
+            if unsafe { core::ptr::read_volatile(pixels.add(word)) } != 0 {
+                nonzero += 1;
+            }
+        }
+        log(b"[desktop] layout fixture pixels surface=");
+        log_number(s.id);
+        log(b" pages=");
+        log_number(pages);
+        log(b" words=");
+        log_number(words as u64);
+        log(b" nonzero=");
+        log_number(nonzero);
+        log(b"\n");
     }
     if s.va != 0 && unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0 {
         die(86)

@@ -208,13 +208,17 @@ def readme(root: Path, manifest: dict) -> str:
     shots = [f for f in files if f.endswith((".ppm", ".png"))]
     snippet = VERIFY_SNIPPET % {"root": root.name}
     excluded = manifest.get("excluded_from_package", {}).get("count", 0)
-    return f"""# {root.name} — V1 qualification evidence
+    return f"""# {root.name} — V1 evidence package
 
 Produced {manifest["created_utc"]} from commit
 `{manifest["source_commit"]}` on branch `{manifest["branch"]}`
 (working tree dirty: `{manifest["working_tree_dirty"]}`).
 
 ## What is here
+
+This package records evidence and classifications; it does not declare V1
+accepted or qualified. Read the current aggregate and status note before using
+any result.
 
 | Kind | Count | Notes |
 |---|---|---|
@@ -251,9 +255,22 @@ PNG, and each tested PPM's own SHA-256 is recorded in its run's
   checkpoints; `evidence.json` is the run's own verdict, `harness-output.log`
   is the transcript, `v1-guest-serial.log` is the guest serial, `shots/` are
   the frames, `qemu-stderr.log` is the emulator's stderr.
+- `phase15/`: `tools/test_m15_guest.py` — both final-ESP CPU profiles, with
+  serial logs and QEMU stderr tied to the exact EFI/ESP identities in the gate
+  receipts.
+- `layout-integration-gcc/`, `layout-integration-clang/`:
+  `tools/v1_layout_integration.py` — each cell records real Desktop grants of
+  301 and 300 pages, the ordinary C client's map/Identify/window/write/damage
+  order or pre-map refusal, retirement pixel scans, cleanup settlement, and
+  QEMU screenshots tied to the recorded EFI/ESP, compiler, ELF, APB1, and
+  emulator identities. These runs are distinct from the predicate-only
+  `refusals-*` matrix.
 - `lifecycle-cycles/`: `tools/v1_cycles.py` — ten launch/close cycles, each
   with its own cursor, instance-specific retirement and exit receipts,
   settlement against the pre-cycle baseline, and visual removal.
+- `gate/`: the command transcript, stage receipts, and relevant host logs
+  included before packaging; the `package`/`verify` receipts and final aggregate
+  live in the sibling `*-packaging/` directory to avoid recursive self-reference.
 - `env/`: environment recovery receipts (emulator identity, loader, TCG
   acceleration, toolchain versions, protected guards).
 

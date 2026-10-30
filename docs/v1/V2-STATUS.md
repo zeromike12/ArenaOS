@@ -486,3 +486,47 @@ with a real foreign capability (§9.5). V1 acceptance remains M's decision.**
 4. ESP bytes vary per rebuild (FAT timestamps) while the embedded EFI is
    byte-identical; ESP digests are provenance, recorded per run.
 5. Round-1 and round-2 evidence directories are unchanged.
+
+### 9.12 Real-grant layout boundary follow-up (2026-10-30)
+
+This section supersedes the **current** 5e status above for the new boundary
+work only; the Round-3 receipts and their historical classifications remain
+unchanged. Requirement 5e still exercises the 301/300 boundary through the
+production C page-check predicate; its separate `layout-pages-minimum` KERNEL
+case observes a 471-page grant, not either exact boundary grant. A new
+requirement 5f is now wired into the aggregate and gate runner for actual
+Desktop-granted 301/300-page SharedRegions under both GCC and Clang.
+
+The source-only fixture uses the exact installed IDs
+`com.arena.layout301` and `com.arena.layout300`. Through the ordinary signed
+catalog/Image launch, the Desktop uses its existing `POOL` authority and
+`SYS_SHARED_CREATE`, verifies the grant with existing `SYS_SHARED_PAGES`, and
+suppresses only the fixture's console-window precreation. It adds no syscall,
+child capability, permission request, or launch authority. The normal C
+client logs the actual page query, map boundary, Identify, window, first
+pixel-write and damage milestones; retirement scans only the granted pixel
+words. The intended real-grant assertions are: 301 pages accepted and fully
+rendered; 300 pages refused by the ordinary C size check before map/write/
+window/damage, with zero pixel words changed; both children exit and Desktop
+resources settle to baseline.
+
+**Execution status: OPEN.** These edits have not yet been built or exercised
+in QEMU. There is no new canonical EFI/ESP, no real-grant receipt, no screenshot
+or evidence package, and no new qualification result. The integration stage
+must remain distinct from the predicate-only `layout-pages-minimum` and
+`layout-300-refused` cases. If the existing launch and syscall contract cannot
+produce the exact grants without new authority, record the specific missing
+operation and the smallest proposal; do not add the operation to make the test
+pass.
+
+The fresh run is reserved for
+`docs/v1/evidence/v2-2026-10-30-boundary-r1/`; prior evidence is not an input
+that can silently qualify this candidate. The aggregate prints the existing
+foreign/stale limitation explicitly: `foreign-identity` remains an IDENTITY
+validator test over mutated bytes, not a real stale/foreign capability launch.
+No waiver is recorded here; any waiver remains M's decision. The aggregate
+will keep requirement 4b OPEN unless the evidence root contains an
+`M-WAIVER.json` tied to the current source commit and EFI, with
+`decision_by: "M"`, an explicit scope, timestamp and rationale, or a real
+stale/foreign-capability case is added under an authorized contract. V1
+remains OPEN for acceptance regardless of test receipts.
