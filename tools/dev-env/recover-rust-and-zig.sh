@@ -40,13 +40,16 @@ have_rust() {
 if have_rust; then
     log "rust $RUST_VER present at $RUST_PREFIX"
 else
-    log "downloading arena-rust-toolchain wheels ($RUST_VER) from PyPI"
+    log "downloading hash-pinned arena-rust-toolchain wheels ($RUST_VER) from PyPI"
     WHL_DIR="$(mktemp -d)"
-    pip3 download --no-deps -q -d "$WHL_DIR" \
-        "arena-rust-toolchain==$RUST_VER" \
-        "arena-rust-toolchain-data1==$RUST_VER" \
-        "arena-rust-toolchain-data2==$RUST_VER" \
-        "arena-rust-toolchain-data3==$RUST_VER"
+    cat > "$WHL_DIR/requirements.txt" <<'REQ'
+arena-rust-toolchain==1.97.0 --hash=sha256:6e6b05c89b97bafaf1cbf57d3a47acf56a526646bb60569211f889e109ce1153
+arena-rust-toolchain-data1==1.97.0 --hash=sha256:d449884dec227a6e11a05f234b077173ec8577e6e721526ed8f0c938aeec9459
+arena-rust-toolchain-data2==1.97.0 --hash=sha256:8d141cae480e2ced3a37b679a7f45f39db93f8c770459aef875a397bfadfb4b7
+arena-rust-toolchain-data3==1.97.0 --hash=sha256:3a072ae64760773ea6b71dc8cc25c824bdc2d663b26e8dda5814bdaeb39147d7
+REQ
+    pip3 download --no-deps --require-hashes -q -d "$WHL_DIR" \
+        -r "$WHL_DIR/requirements.txt"
     if ! python3 -c "import zstandard" 2>/dev/null; then
         pip3 install --user --break-system-packages -q zstandard
     fi
