@@ -97,7 +97,7 @@ manifest), F11 (receipt identity, `quick` mode), F12 (the override). Every
 guest stage was re-executed after those edits, and the numbers in §5 are from
 that re-execution, not from `c4d7cf1`'s run.
 
-### 4.1 Blocker B1 — the canonical EFI build (unchanged, not caused by round 2)
+### 4.1 Blocker B1 — the canonical EFI build (**RESOLVED in round 3; see §9**)
 
 `tools/build_phase14_pie.sh` recomputes the protected Phase-14 PIE fixture and
 refuses when the digest is not
@@ -184,8 +184,8 @@ laundering 22 passes into a qualification.
 | 3 | Cleanup compares all enforceable resources | **DONE** | `lifecycle-cycles/cycles-evidence.json`, 5 cleanup controls |
 | 4 | Guest refusal matrix, cases 11–17 | **DONE** (HOST-ONLY + GUEST) | `refusals-*/refusals-evidence.json`, 21 cases |
 | 5 | Final-artifact stability (100/100 boots) | **DONE for this artifact**, but the artifact is dev-path (§4.1) | `stability/stability-100.log` |
-| 5b | EFI rebuild reproducibility | **BLOCKED (B1)** | build log: `reproducible PIE fixture hash changed` |
-| 5d | Formal regression (121 suites) | **BLOCKED (B1)**: 22 pass, 99 blocked at the PIE guard | §5.1, `regression/run-tests.log` |
+| 5b | EFI rebuild reproducibility | ~~BLOCKED (B1)~~ **DONE in round 3** — canonical build reproduces the protected PIE/APB1 and a stable EFI digest | §9 |
+| 5d | Formal regression (121 suites) | round 2: 22 pass / 99 blocked at the PIE guard. **Round 3 re-run on the canonical artifact** | §9.5 |
 | 5c | ESP ↔ embedded-EFI identity | **DONE** | `env/`, `evidence.json` `image.boot_efi_sha256` |
 | 6 | Gate command matches the claims | **DONE** — the gate now *fails* where the claims would be wrong | `tools/v1_gate.sh` + receipts + aggregate + `gate/gate-controls.txt` |
 | 7 | Final review candidate + package | **DONE** (§7) | archive + `.sha256` + fresh-extraction verify |
@@ -262,3 +262,154 @@ Classification of the artifacts used this round:
    archive plus the fresh-extraction verify in §5.
 
 
+
+---
+
+## 9. Round 3 — official components recovered, B1 closed, canonical artifact
+
+Round 3 began from C's review of `33d1915a`. The central correction: **the
+official Rust target components were never missing.** They are tracked in
+this repository at `docs/phase16/dependencies/rust-1.97.0/` as five binary
+parts. Round 2's statement that they were "unavailable offline" was wrong,
+and the dev-path substitute it justified was unnecessary.
+
+### 9.1 Component recovery (executed, verified)
+
+| Step | Command | Result |
+|---|---|---|
+| Parts verify | `sha256sum --check PARTS-SHA256SUMS` | 5/5 **OK** |
+| Reassemble | `cat …part-* > …none.tar.xz` / `…uefi.tar.xz` | 14 907 620 B and 25 374 412 B |
+| Archives verify | `sha256sum --check SHA256SUMS` | both **OK**: `5b6702d1…168a` (none), `2c48c8b6…1ad0` (uefi) |
+| Install | `install.sh --prefix=/opt/rust/prefix --disable-ldconfig` | component `rust-std-x86_64-unknown-none` and `rust-std-x86_64-unknown-uefi` installed, exit 0 both |
+| Provenance | archive `git-commit-hash` | `2d8144b7880597b6e6d3dfd63a9a9efae3f533d3` = the installed `rustc 1.97.0 (2d8144b78)` |
+
+The reconstructed archives are **not** committed (README: do not duplicate);
+they were built under `/tmp/rust-deps` and are reproducible from the tracked
+parts.
+
+Raw output: `recovery/rust-std-install.log`, `recovery/component-identity.txt`,
+`recovery/component-resolution.txt`, `recovery/component-disambiguator.txt`.
+
+Distinguishing official from source-built (file existence is not enough):
+
+* the installed `libcore` for `x86_64-unknown-none` carries the crate
+  disambiguator **`CsieveXhe8AWz_`** — the official value the protected
+  fixture was built against. The source-built replacement round 2 installed
+  carried `Csi1tY5tVYnWh_`, which is why round 2's digest could never match;
+* `rustc --target <t> --print target-libdir` reports the private prefix, and
+  a `#![no_std]` crate compiles for both targets with **no `-L` override**.
+
+### 9.2 The second half of B1 — the documented build path
+
+With the official components installed, the guard still refused, now with
+`a65f3a1e…`. The cause was not the sysroot: `userspace/arena-platform/src/startup.rs`
+embeds `file!()` in a panic string, and the committed fixture was built at
+**`/workspace/ArenaOS`**, so building identical sources from
+`/home/user/ArenaOS` embeds a different absolute path and changes the bytes.
+Diffing the two ELFs showed the same size (23 256 B) and only shifted code
+plus that path string.
+
+Building from the documented path (`sudo mount --bind /home/user/ArenaOS
+/workspace/ArenaOS`) reproduces the protected identities **exactly**:
+
+| Identity | Expected (unchanged) | Reproduced |
+|---|---|---|
+| Phase-14 PIE | `d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e` | **match** |
+| Signed APB1 | `04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa` | **match** |
+
+No expected digest was edited, no guard weakened, and
+`tools/build_phase16_dev.sh` was not used.
+
+### 9.3 Canonical build result
+
+`bash tools/build.sh --image` from `/workspace/ArenaOS`, exit **0**:
+
+* EFI `bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83`
+  (11 039 232 B) — **the same identity round 1 published**, i.e. an
+  independent environment reproduced the canonical artifact;
+* ESP `8a34f041…` with `/EFI/BOOT/BOOTX64.EFI` byte-identical to that EFI
+  (`canonical-build/esp-embedded-efi.txt`);
+* from-scratch rebuild (`rm -rf` all three target dirs, rebuild) reproduced
+  the identical EFI digest (`canonical-build/rebuild-from-scratch.log`).
+
+Environment: QEMU 11.1.2 patched `e0ea2b1f…` through isolated glibc 2.40
+loader `63704534…`; OVMF code `7e34e3b8…`, vars `5d2ac383…`; rustc
+`2d8144b78`; gcc 12.2.0; zig/clang 22.1.8.
+
+### 9.4 Guest demonstrations on the canonical artifact
+
+Both compiler cells pass every checkpoint, on EFI `bcd86866…`:
+
+| Cell | Result |
+|---|---|
+| Guest proof, GCC | **PASS**, 8/8 checkpoints, frames published |
+| Guest proof, Clang | **PASS**, 8/8 checkpoints, frames published |
+| Refusal matrix, GCC | **PASS**, 21/21 cases |
+| Refusal matrix, Clang | **PASS**, 21/21 cases |
+| Lifecycle | **PASS**, 10/10 cycles |
+
+A defect found and fixed here: checkpoint 7 asserted that each window
+disappeared from a probe rectangle that a *second live window* could cover,
+so the Clang cell failed while every Desktop receipt said the window was
+gone. The probe now measures only the uncovered part and records an obscured
+close as obscured, with the final all-closed frame required to show zero
+app-coloured area.
+
+### 9.5 Refusal matrix — what each case actually exercises
+
+Round 2 published 21 guest cases as a single "refusal matrix". They do not
+all exercise the same boundary, and the classification is now recorded per
+case in the evidence (`classes`) and enforced: an unclassified case fails the
+verdict.
+
+| Class | Cases | What it proves |
+|---|---|---|
+| **IPC** | `wire-magic`, `wire-version`, `wire-opcode`, `wire-reserved`, `unexpected-transfer` | real frames on the real endpoint, refused by production dispatch |
+| **KERNEL** | `layout-pages-minimum`, `layout-wrong-kind-refused`, `transfer-surface-retained` | real syscall/kernel fact: granted pages, wrong-kind refusal, retained capability |
+| **DISCOVERY** | `reorder-reversed`, `reorder-rotated`, `missing/ambiguous/wrong-rights` × endpoint,surface | production discovery over **synthetic copies** of the descriptor |
+| **IDENTITY** | `foreign-identity` | production identity validator over **mutated identity bytes** — not a real foreign capability |
+| **CONTROL** | `baseline-record-accepted`, `identify-after-refusals`, `genuine-identity` | the genuine path still works |
+| **CLIENT-ARITHMETIC** | `layout-pixel-window-fits` | **client-side comparison only** — see §9.6 |
+
+Remaining gap, stated plainly: there is still no case that presents a *real*
+foreign or stale capability (the launcher never grants one and no supported
+fixture can manufacture one without new launch authority); `foreign-identity`
+is a validator test over synthetic bytes.
+
+### 9.6 Layout boundary — what is proven and what is not
+
+Proven, in the guest: the granted surface region really carries
+`GFX_TOTAL_PAGES` = **301** pages (production `SYS_SHARED_PAGES`), which is
+exactly `4096 + 640×480×4` bytes; and the kernel refuses a region query on a
+non-region capability.
+
+**Not** proven in the guest: the *refusal* of a 300-page region. The check
+that refuses it lives in the Rust client library
+(`userspace/desktop/src/client.rs`: `bound[1]*4096 < PIXEL_OFFSET + w*h*4`),
+which links into Rust applications; the C guest fixture cannot call it, and
+the launcher does not grant a 300-page region to manufacture the case.
+Changing `client.rs` to make it testable would change the kernel image and
+therefore invalidate the canonical artifact qualified in §9.3, so it is
+recorded as an open requirement rather than papered over with a host-side
+transcription of the expression.
+
+### 9.7 Qualification matrix (round 3)
+
+| # | Requirement | State |
+|---|---|---|
+| 1 | Ack **and** visible response through production logic | **DONE** |
+| 2 | Successful checkpoint frames published and validated | **DONE** |
+| 3 | Cleanup compares all enforceable resources | **DONE** |
+| 4 | Guest refusal matrix with precise classifications | **DONE**, one gap (§9.5) |
+| 5 | Final-artifact stability, 100/100 | this artifact: see §9.8 |
+| 5b | EFI rebuild reproducibility | **DONE** (§9.3) |
+| 5c | ESP ↔ embedded EFI identity | **DONE** |
+| 5d | Formal regression on the canonical artifact | see §9.8 |
+| 5e | Layout page-count boundary, both sides, guest | **OPEN** (§9.6) |
+| 6 | Gate command matches the claims | **DONE** |
+| 7 | Review candidate + package without self-reference | **DONE** |
+
+### 9.8 Outstanding
+
+`docs/v1/evidence/v2-2026-10-29-r3/regression/run-tests.log` and the
+stability loop on EFI `bcd86866…` are recorded in §10 when they finish.

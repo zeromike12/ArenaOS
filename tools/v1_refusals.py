@@ -174,6 +174,10 @@ def refusals() -> bytes:
 
         verdict = proof.evaluate_refusal_matrix(d.serial(), cursor)
         record["cases"] = verdict["cases"]
+        # Every case is published with the boundary it actually exercises, so
+        # a mutated descriptor copy is never read as a kernel or IPC refusal.
+        record["classes"] = verdict["classes"]
+        record["unclassified"] = verdict["unclassified"]
         record["missing"] = verdict["missing"]
         record["failed"] = verdict["failed"]
         record["unexpected"] = verdict["unexpected"]
@@ -203,7 +207,8 @@ def refusals() -> bytes:
         record["exit_status"] = exits[-1]["status"] if exits else None
         record["verdict_ok"] = bool(
             verdict["ok"] and record["no_graphical_change"]
-            and record["settled"] and record["exit_status"] == 0)
+            and record["settled"] and record["exit_status"] == 0
+            and not record["unclassified"])
     except Exception as exc:  # noqa: BLE001 - reported, never swallowed
         traceback.print_exc()
         record["fatal"] = f"{type(exc).__name__}: {exc}"

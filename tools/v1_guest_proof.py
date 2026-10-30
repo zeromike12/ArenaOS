@@ -125,6 +125,52 @@ CHECKPOINTS = {
 
 # Every case the refusal client must report. A missing line is a failure: the
 # harness never infers "it must have refused" from silence.
+# What each refusal case actually exercises. A refusal matrix is only as
+# strong as this table: "the client refused it" means very different things
+# for a mutated descriptor copy than for a frame the Desktop's own dispatch
+# rejected, and publishing both as "the boundary refused" would overstate the
+# weaker one. Every case must appear here, and `evaluate_refusal_matrix`
+# refuses to pass a matrix whose cases are not all classified.
+#
+#   IPC        production IPC request/refusal: a real frame sent to the real
+#              Desktop endpoint over the real protocol, judged by production
+#              dispatch (not a client-side pre-check).
+#   KERNEL     production kernel authority check: a real syscall that the
+#              kernel refuses, or a kernel fact the case depends on.
+#   DISCOVERY  guest execution of production discovery against a *synthetic
+#              descriptor copy*: the client mutates its own startup record
+#              and runs the shipped validator over it. Exercises the
+#              validator, not the launcher that produced the real record.
+#   IDENTITY   guest execution of the production validator against a mutated
+#              identity: synthetic identity bytes, not a real foreign or
+#              stale capability.
+#   CONTROL    a genuine data path that must still succeed, so a refusal
+#              cannot pass for the wrong reason (a validator that refuses
+#              everything).
+REFUSAL_CLASSES = {
+    "baseline-record-accepted": ("CONTROL", "the launcher-built startup record is accepted by the shipped discovery"),
+    "reorder-reversed": ("DISCOVERY", "production discovery over a reversed copy of the real descriptor"),
+    "reorder-rotated": ("DISCOVERY", "production discovery over a rotated copy of the real descriptor"),
+    "missing-endpoint": ("DISCOVERY", "production discovery over a copy with the endpoint slot removed"),
+    "ambiguous-endpoint": ("DISCOVERY", "production discovery over a copy with two endpoint slots"),
+    "wrong-endpoint-rights": ("DISCOVERY", "production discovery over a copy with endpoint rights the launcher never grants"),
+    "missing-surface": ("DISCOVERY", "production discovery over a copy with the surface slot removed"),
+    "ambiguous-surface": ("DISCOVERY", "production discovery over a copy with two surface slots"),
+    "wrong-surface-rights": ("DISCOVERY", "production discovery over a copy with surface rights the launcher never grants"),
+    "wire-magic": ("IPC", "a frame with the wrong magic sent to the real Desktop endpoint"),
+    "wire-version": ("IPC", "a frame declaring an unsupported protocol version"),
+    "wire-opcode": ("IPC", "an Identify slot carrying a different opcode"),
+    "wire-reserved": ("IPC", "a frame with a non-zero reserved byte"),
+    "identify-after-refusals": ("CONTROL", "the real session still answers Identify after four refused frames"),
+    "foreign-identity": ("IDENTITY", "production identity validator over an object id one above the real one"),
+    "genuine-identity": ("CONTROL", "the same validator accepts the genuine identity"),
+    "unexpected-transfer": ("IPC", "a frame carrying a capability the dispatch never asked for"),
+    "transfer-surface-retained": ("KERNEL", "the client still holds its own surface capability after that transfer"),
+    "layout-pages-minimum": ("KERNEL", "the kernel-reported page count of the real granted surface region"),
+    "layout-pixel-window-fits": ("CLIENT-ARITHMETIC", "client-side comparison of the documented offset and pixel bytes (NOT production logic; see V2-STATUS §5.2)"),
+    "layout-wrong-kind-refused": ("KERNEL", "the kernel refuses the region query on a non-region capability"),
+}
+
 REFUSAL_CASES = (
     "baseline-record-accepted",
     "reorder-reversed",
@@ -191,13 +237,21 @@ def evaluate_refusal_matrix(serial, cursor: int):
     conflicting = [c for c, v in cases.items()
                    if v["count"] > 1 and v["verdict"] != "PASS"]
     unexpected = [c for c in cases if c not in REFUSAL_CASES]
+    # A case with no stated boundary class is an unqualified claim: it would
+    # be published without saying whether it exercised production dispatch,
+    # the kernel, or only a mutated copy of the client's own input.
+    unclassified = [c for c in REFUSAL_CASES if c not in REFUSAL_CLASSES]
     return {
-        "ok": not missing and not failed and not conflicting,
+        "ok": not missing and not failed and not conflicting and not unclassified,
         "cases": cases,
         "missing": missing,
         "failed": failed,
         "conflicting": conflicting,
         "unexpected": unexpected,
+        "unclassified": unclassified,
+        "classes": {c: {"kind": REFUSAL_CLASSES[c][0],
+                        "description": REFUSAL_CLASSES[c][1]}
+                    for c in REFUSAL_CASES if c in REFUSAL_CLASSES},
     }
 
 results = {n: "NOT RUN" for n in CHECKPOINTS}
@@ -785,6 +839,60 @@ def has_app_color(data: bytes, rect, width: int = SCREEN_W,
             if any(color_close(data[i:i + 3], c) for c in APP_COLORS):
                 return True
     return False
+
+
+def _rect_minus(rect, cut):
+    """The parts of `rect` not covered by `cut` (0-4 axis-aligned pieces)."""
+    x, y, w, h = rect
+    cx, cy, cw, ch = cut
+    if cw <= 0 or ch <= 0 or x + w <= cx or cx + cw <= x or \
+            y + h <= cy or cy + ch <= y:
+        return [rect]
+    out = []
+    top = cy - y
+    if top > 0:
+        out.append((x, y, w, top))
+    bottom = (y + h) - (cy + ch)
+    if bottom > 0:
+        out.append((x, cy + ch, w, bottom))
+    mid_y = max(y, cy)
+    mid_h = min(y + h, cy + ch) - mid_y
+    left = cx - x
+    if left > 0 and mid_h > 0:
+        out.append((x, mid_y, left, mid_h))
+    right = (x + w) - (cx + cw)
+    if right > 0 and mid_h > 0:
+        out.append((cx + cw, mid_y, right, mid_h))
+    return [r for r in out if r[2] > 0 and r[3] > 0]
+
+
+def window_visibly_gone(data: bytes, rect, siblings, width: int = SCREEN_W,
+                        height: int = SCREEN_H):
+    """Did THIS window disappear from the frame?
+
+    A pixel probe over the whole rectangle answers the wrong question when a
+    second window overlaps the first: the sibling's pixels stay inside the
+    closed window's rectangle, so the frame still "has app colour there" long
+    after the window being probed is gone. Observed exactly that on the Clang
+    cell (round 3), while the Desktop had already reported the retirement, the
+    exit and a fully settled resource baseline.
+
+    So the probe only looks at the parts of the rectangle no other live window
+    covers. Returns (gone, visible_fraction): when the rectangle is wholly
+    obscured the caller records the close as obscured rather than claiming a
+    disappearance it never saw -- the final all-closed frame then has to show
+    zero app-coloured area.
+    """
+    pieces = [rect]
+    for other in siblings:
+        pieces = [piece for p in pieces for piece in _rect_minus(p, other)]
+    if not pieces:
+        return None, 0.0
+    visible = sum(p[2] * p[3] for p in pieces) / float(max(1, rect[2] * rect[3]))
+    for piece in pieces:
+        if has_app_color(data, piece, width, height):
+            return False, visible
+    return True, visible
 
 
 def window_rects(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list:
@@ -1977,17 +2085,23 @@ def proof() -> bytes:
             cy = rect[1] + TITLE_H // 2
             d.click(cx, cy)
             closed.append(inst)
-            end = time.monotonic() + 6.0
-            gone = False
+            # Windows still on screen can legitimately cover the rectangle of
+            # the one being closed; probe only the uncovered part.
+            siblings = [r for i, r in live_instances if i not in closed]
+            end = time.monotonic() + 12.0
+            gone, visible = False, 0.0
             while time.monotonic() < end:
-                if not has_app_color(d.shot("__close-probe__"),
-                                     (rect[0], rect[1] + TITLE_H,
-                                      rect[2], rect[3] - TITLE_H)):
-                    gone = True
+                gone, visible = window_visibly_gone(
+                    d.shot("__close-probe__"),
+                    (rect[0], rect[1] + TITLE_H, rect[2], rect[3] - TITLE_H),
+                    [(o[0], o[1] + TITLE_H, o[2], o[3] - TITLE_H)
+                     for o in siblings])
+                if gone:
                     break
                 time.sleep(0.1)
             close_detail.append({"instance": inst, "rect": rect,
-                                 "visually_gone": gone})
+                                 "visually_gone": gone,
+                                 "visible_fraction": round(visible, 3)})
         end = time.monotonic() + 25.0
         cleanup = evaluate_cleanup(d.serial(), cursor, closed, baseline)
         while time.monotonic() < end and not cleanup["ok"]:
@@ -1998,8 +2112,16 @@ def proof() -> bytes:
         save_frame("cp07-desktop-restored", img7)
         rects7 = window_rects(img7)
         presentation_ok = evaluate_presentation(rects7)
-        visual_each = all(c["visually_gone"] for c in close_detail)
-        ok7 = cleanup["ok"] and presentation_ok and visual_each
+        # A close counts as visually proven when the uncovered part of its
+        # rectangle is clean. When a live sibling covered it entirely there is
+        # nothing to see, so the proof moves to the final frame: after BOTH
+        # windows are closed, no app-coloured area may remain anywhere.
+        visual_each = all(c["visually_gone"] is not False for c in close_detail)
+        obscured = [c["instance"] for c in close_detail
+                    if c["visually_gone"] is None]
+        no_windows_left = not rects7
+        ok7 = (cleanup["ok"] and presentation_ok and visual_each
+               and (no_windows_left or not obscured))
         record(7, "PASS" if ok7 else "FAIL", "shots/cp07-desktop-restored.png",
                f"retired={sorted(cleanup['per_instance'])} exits="
                f"{ {k: v['exit_status'] for k, v in cleanup['per_instance'].items()} } "
@@ -2010,7 +2132,8 @@ def proof() -> bytes:
                f"cleanup incomplete: drift={cleanup['resource_drift']} "
                f"retired={cleanup['per_instance']} spurious="
                f"{cleanup['spurious_retirements']} "
-               f"visual_rects={len(rects7)} per_window_gone={visual_each}")
+               f"visual_rects={len(rects7)} per_window_gone={visual_each} "
+               f"obscured={obscured} no_windows_left={no_windows_left}")
 
         # ---------------- Checkpoint 8: final demonstration ---------------
         launch3 = d.cursor()

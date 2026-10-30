@@ -66,14 +66,22 @@ if [[ $build_rc -eq 0 ]]; then
 else
     echo "canonical build refused (exit $build_rc):"
     grep -E "reproducible PIE fixture hash changed|error:" "$LOG_DIR/build.log" | tail -2
-    echo "falling back to the documented dev build (B1); receipt is unqualified"
+    # Two documented causes, and no third: (1) the official rust-std target
+    # components are missing from the private prefix, or (2) the tree is not
+    # at the documented build path. The protected fixture embeds the build
+    # path in a string, so building the same sources from another directory
+    # produces a different digest. Both are recoverable; neither may be
+    # recorded as "unavailable" (docs/phase16/dependencies/rust-1.97.0).
+    echo "  if PARTS are missing from the prefix: docs/phase16/dependencies/rust-1.97.0/README.md"
+    echo "  if PWD is not /workspace/ArenaOS: the protected fixture embeds that path"
+    echo "falling back to the documented dev build; receipt is unqualified"
     ( cd "$BUILD_ROOT" && bash tools/build_phase16_dev.sh \
         && python3 tools/espimg.py build/arena-boot.efi build/arena-esp.img ) \
         >> "$LOG_DIR/build.log" 2>&1
     dev_rc=$?
     python3 tools/v1_gate_stage.py record --stage build --receipts "$RECEIPTS" \
         --exit "$dev_rc" --unqualified \
-        --note "dev-path build (tools/build_phase16_dev.sh): canonical PIE guard blocked by blocker B1 (official rust-std target components unavailable offline)" \
+        --note "dev-path build (tools/build_phase16_dev.sh): canonical PIE guard refused (see build.log: components or documented build path)" \
         --note "committed Phase-14 fixture verified, not rebuilt" \
         --note "efi $(sha256sum build/arena-boot.efi | cut -d' ' -f1)" > /dev/null
 fi

@@ -1,0 +1,28 @@
+=== source ===
+commit: 33d1915a1b1daddc7fecd2e5b32a74c6f27e3fbe
+tree clean (excluding evidence): yes
+build path: /workspace/ArenaOS
+
+=== compiler ===
+rustc 1.97.0 (2d8144b78 2026-07-07)
+binary: rustc
+commit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3
+commit-date: 2026-07-07
+host: x86_64-unknown-linux-gnu
+release: 1.97.0
+LLVM version: 22.1.6
+
+=== target components installed (rust-installer manifests) ===
+x86_64-unknown-none: installed, 6 files, libcore=6b75c5188dca46c9
+x86_64-unknown-uefi: installed, 56 files, libcore=a7de36b0262b7d94
+
+=== protected Phase-14 identities (reproduced) ===
+PIE  : d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e
+APB1 : 04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa
+
+=== canonical build artifacts ===
+EFI  : bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83 11039232 bytes
+ESP  : 8a34f04153041dcffedfe45001197d623aaefe3caaa9f024af739bb329d3ed60 16777216 bytes
+
+=== ESP-embedded EFI identity ===
+AttributeError: 'PyFat' object has no attribute 'read'

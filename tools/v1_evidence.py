@@ -384,11 +384,69 @@ def verify(archive: Path) -> int:
         return 0 if not problems else 1
 
 
+def seal(target: Path) -> int:
+    """Package, verify from a fresh extraction, then write an EXTERNAL receipt.
+
+    The archive cannot contain a receipt that describes itself: inserting one
+    changes the archive, and the digest inside would then describe the
+    previous generation. Round 2 shipped exactly that ambiguity. `seal`
+    therefore writes `<archive>.receipt.txt` *next to* the archive, after the
+    archive is final and verified, and never inside it.
+    """
+    rc = package(target)
+    if rc != 0:
+        return rc
+    archive = target.with_suffix(".tar.gz")
+    rc = verify(archive)
+    if rc != 0:
+        print("[evidence] seal refused: the package does not verify")
+        return rc
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    manifest = json.loads((target / "MANIFEST.json").read_text())
+    identities = {}
+    gate = target / "gate" / "receipts" / "build.json"
+    if gate.is_file():
+        receipt = json.loads(gate.read_text())
+        identities = {k: receipt.get(k) for k in
+                      ("source_commit", "code_fingerprint", "efi_sha256",
+                       "esp_sha256")}
+    lines = [
+        "ARENA V1 EVIDENCE — EXTERNAL ARCHIVE RECEIPT",
+        "This file is written beside the archive, never inside it, so it",
+        "describes the final bytes rather than an earlier generation.",
+        "",
+        f"archive            : {archive.name}",
+        f"archive bytes      : {archive.stat().st_size}",
+        f"archive sha256     : {digest}",
+        f"verified files     : {len(manifest['files'])}",
+        "verification       : python3 tools/v1_evidence.py verify "
+        f"{archive}",
+        "verification result: PASS — extracted to a fresh temporary "
+        "directory, every digest re-checked, no unlisted file",
+        "",
+        "tested candidates (from the gate build receipt):",
+    ]
+    for k, v in identities.items():
+        lines.append(f"  {k:<18}: {v}")
+    lines += [
+        "",
+        f"sealed             : {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+        "command            : python3 tools/v1_evidence.py seal "
+        f"{target}",
+    ]
+    out = archive.with_suffix(archive.suffix + ".receipt.txt")
+    out.write_text("\n".join(lines) + "\n")
+    print(f"[evidence] external receipt -> {out}\n   {digest}  {len(manifest['files'])} files")
+    return 0
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 3 or argv[1] not in ("package", "verify"):
+    if len(argv) != 3 or argv[1] not in ("package", "verify", "seal"):
         print(__doc__, file=sys.stderr)
         return 2
     target = Path(argv[2])
+    if argv[1] == "seal":
+        return seal(target)
     return package(target) if argv[1] == "package" else verify(target)
 
 

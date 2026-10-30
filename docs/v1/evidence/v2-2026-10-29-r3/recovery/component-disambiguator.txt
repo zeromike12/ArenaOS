@@ -1,0 +1,8 @@
+=== crate disambiguator in installed libcore (official vs source-built) ===
+--- x86_64-unknown-none ---
+CsieveXhe8AWz_4core10intrinsics11rotate_leftyEB4_
+CsieveXhe8AWz_4core10intrinsics11rotate_leftyEB4_rotate_left_RNvMs7_NtCsieveXhe8AWz_4core3numy11rotate_left_RNvMs4_NtCsieveXhe8AWz_4core3numh12wrapping_sublibrary
+--- x86_64-unknown-uefi ---
+
+expected official disambiguator prefix: CsieveXhe8AWz_
+source-built replacement produced:      Csi1tY5tVYnWh_
