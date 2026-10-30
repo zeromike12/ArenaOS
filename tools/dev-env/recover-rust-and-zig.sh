@@ -85,6 +85,18 @@ with open(combined, "rb") as f, dctx.stream_reader(f) as reader:
 print("extracted", len(parts), "parts to", target)
 PYEOF
     rm -rf "$WHL_DIR"
+    # The PyPI wheel's tar.zst payload contains the toolchain files but
+    # strips their executable mode bits. Restore executable modes only for
+    # the known command directories; libraries and target archives remain
+    # non-executable. This is required before rustc/cargo can be verified.
+    find "$RUST_PREFIX/bin" -maxdepth 1 -type f -exec chmod 0755 {} +
+    for executable_dir in \
+        "$RUST_PREFIX/libexec" \
+        "$RUST_PREFIX/lib/rustlib/x86_64-unknown-linux-gnu/bin"; do
+        if [[ -d "$executable_dir" ]]; then
+            find "$executable_dir" -type f -exec chmod 0755 {} +
+        fi
+    done
     chmod -R u+w /opt/rust
 fi
 "$RUST_PREFIX/bin/rustc" --version
