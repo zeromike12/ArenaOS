@@ -44,8 +44,8 @@ say host
     echo "--- committed sidecar ---"
     cat "$REPO"/docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz.sha256
     echo "--- verification ---"
-    ( cd "$REPO/docs/phase15/artifacts" && sha256sum --check \
-        phase15-patched-tcg-qualification.tar.gz.sha256 ) 2>&1
+    ( cd "$REPO" && sha256sum --check \
+        docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz.sha256 ) 2>&1
 } > "$OUT/qemu-package.txt" 2>&1
 say qemu-package
 
