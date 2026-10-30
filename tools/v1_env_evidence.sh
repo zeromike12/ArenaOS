@@ -144,6 +144,35 @@ export ARENA_ZIG="${ARENA_ZIG:-/opt/zig-clang/ziglang/zig}"
     "$ARENA_ZIG" cc --version | head -3
 } > "$OUT/compilers/tool-identities.txt" 2>&1
 
+{
+    record_binary() {
+        local name="$1" path resolved
+        path="$(command -v "$name")" || {
+            echo "error: compiler command not found: $name"
+            exit 1
+        }
+        resolved="$(readlink -f "$path")"
+        [[ -f "$resolved" ]] || {
+            echo "error: compiler binary is missing: $resolved"
+            exit 1
+        }
+        echo "$name path: $path"
+        echo "$name resolved: $resolved"
+        sha256sum "$resolved"
+    }
+    record_binary gcc
+    cc1="$(gcc -print-prog-name=cc1)"
+    if [[ "$cc1" != /* ]]; then cc1="$(command -v "$cc1" || true)"; fi
+    [[ -f "$cc1" ]] || { echo "error: GCC cc1 binary is missing: $cc1"; exit 1; }
+    echo "gcc cc1: $cc1"
+    sha256sum "$cc1"
+    echo "zig/clang path: $ARENA_ZIG"
+    sha256sum "$(readlink -f "$ARENA_ZIG")"
+    echo "rustc path: /opt/rust/prefix/bin/rustc"
+    sha256sum /opt/rust/prefix/bin/rustc /opt/rust/prefix/bin/cargo
+} > "$OUT/compilers/compiler-binary-identities.txt" 2>&1
+say compiler-binaries
+
 ( cd "$REPO/experiments/c-runtime" && \
   ARENA_ZIG="$ARENA_ZIG" python3 run.py build --cc gcc --cc clang && \
   ARENA_ZIG="$ARENA_ZIG" python3 run.py audit ) \
