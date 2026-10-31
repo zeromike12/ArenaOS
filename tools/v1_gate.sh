@@ -44,6 +44,8 @@ LOG_DIR="${V1_GATE_LOGS:-build/v1-gate-2026-10-30-boundary-r1}"
 RECEIPTS="${V1_GATE_RECEIPTS:-$LOG_DIR/receipts}"
 STABILITY_BOOTS="${V1_STABILITY_BOOTS:-100}"
 PACKAGING="${EVIDENCE}-packaging"
+# Stage receipts bind their package digest to this run, never a historical archive.
+export V1_GATE_EVIDENCE="$EVIDENCE"
 if [[ -e "$EVIDENCE" || -e "$EVIDENCE.tar.gz" || \
       -e "$EVIDENCE.tar.gz.sha256" || -e "$PACKAGING" || \
       -e "$LOG_DIR" || -e "$RECEIPTS" ]]; then
@@ -183,8 +185,18 @@ else
         cp -f build/qemu-stderr-phase15-avx.log build/qemu-stderr-phase15-qemu64.log \
             "$EVIDENCE/phase15/" 2>/dev/null || true
 
-        stage_run regression bash tools/run_tests.sh > "$LOG_DIR/regression.log" 2>&1
-        grep -E "ALL TESTS PASSED|test suites FAILED" "$LOG_DIR/regression.log" | tail -1
+        # Suites build alternate Phase-9 and mutation images as fixtures. Rebuild
+        # the shipping desktop candidate after the suite and require exact
+        # identity with the image the full gate started with before recording
+        # regression or running stability.
+        regression_efi_sha="$(sha256sum "$BUILD_ROOT/build/arena-boot.efi" | cut -d' ' -f1)"
+        regression_esp_sha="$(sha256sum "$BUILD_ROOT/build/arena-esp.img" | cut -d' ' -f1)"
+        stage_run regression bash tools/v1_gate_regression_restore.sh \
+            "$regression_efi_sha" "$regression_esp_sha" \
+            "$LOG_DIR/regression-restore-build.log" \
+            > "$LOG_DIR/regression.log" 2>&1
+        grep -E "ALL TESTS PASSED|test suites FAILED|\[v1-regression-restore\]" \
+            "$LOG_DIR/regression.log" | tail -3
         stage_run stability bash tools/stability_loop.sh "$STABILITY_BOOTS" \
             > "$LOG_DIR/stability.log" 2>&1
         tail -2 "$LOG_DIR/stability.log"

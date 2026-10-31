@@ -217,7 +217,11 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
         "frames": {},
     }
 
-    def run(desktop: proof.V1Desktop) -> bytes:
+    def run() -> bytes:
+        # mtest.boot invokes callable feed payloads with no arguments. Connect
+        # to this boot's real QMP socket here, after the readiness markers have
+        # fired, rather than declaring an argument the feeder cannot supply.
+        desktop = proof.V1Desktop(label)
         try:
             desktop.wait(
                 lambda: "[desktop] real desktop frame presented" in desktop.serial()
@@ -506,6 +510,8 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
                 desktop.q.command("system_powerdown")
             except Exception:
                 pass
+            finally:
+                desktop.q.close()
         return b"shutdown\r"
 
     ready = ((b"[desktop] real desktop frame presented", b"filesd: AFS2 mounted",

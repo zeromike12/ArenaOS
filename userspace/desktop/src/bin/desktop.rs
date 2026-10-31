@@ -2970,7 +2970,9 @@ fn launch_with_document(
 fn layout_fixture_shared_pages(application_id: &[u8; 32]) -> Option<u64> {
     let matches = |expected: &[u8]| {
         application_id.get(..expected.len()) == Some(expected)
-            && application_id[expected.len()..].iter().all(|byte| *byte == 0)
+            && application_id[expected.len()..]
+                .iter()
+                .all(|byte| *byte == 0)
     };
     if matches(b"com.arena.layout301") {
         Some(301)

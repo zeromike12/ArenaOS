@@ -60,7 +60,9 @@ def git(*args: str) -> str:
     try:
         out = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True,
                              text=True, check=False, timeout=60)
-        return out.stdout.strip()
+        # Preserve leading status-column spaces from `git status --porcelain`;
+        # stripping the whole output shifts the first path left by one byte.
+        return out.stdout.rstrip("\n")
     except (OSError, subprocess.SubprocessError):
         return "unavailable"
 
@@ -138,7 +140,13 @@ def code_fingerprint() -> str:
 def receipt(stage: str, exit_code: int, notes: list, argv: list,
             started: float, finished: float, qualified: bool = True,
             evidence_dir: str | None = None) -> dict:
-    package = REPO_ROOT / "docs/v1/evidence/v2-2026-10-29-r2.tar.gz"
+    evidence_root = os.environ.get("V1_GATE_EVIDENCE")
+    package = Path(f"{evidence_root}.tar.gz") if evidence_root else None
+    if package is not None and not package.is_absolute():
+        package = REPO_ROOT / package
+    package_sha256 = (sha256_file(package)
+                      if package is not None and package.is_file()
+                      else "MISSING")
     return {
         "stage": stage,
         "exit": exit_code,
@@ -161,8 +169,7 @@ def receipt(stage: str, exit_code: int, notes: list, argv: list,
         "newest_tracked": newest_tracked(),
         "efi_sha256": sha256_file(REPO_ROOT / "build" / "arena-boot.efi"),
         "esp_sha256": sha256_file(REPO_ROOT / "build" / "arena-esp.img"),
-        "evidence_package_sha256": (sha256_file(package) if package.is_file()
-                                    else "MISSING"),
+        "evidence_package_sha256": package_sha256,
         "host": os.uname().nodename,
         "python": sys.version.split()[0],
     }
