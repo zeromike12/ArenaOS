@@ -451,28 +451,14 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
                 raise AssertionError(f"wrong child exit status for {pages} pages: {child_exit}")
             if retire is None or int(retire["surface"]) != int(allocated["surface"]):
                 raise AssertionError("Desktop did not retire the exact integration surface")
-
-            after_detail, after_receipt = proof.wait_settle_snapshot(
-                desktop.serial, start=launch_cursor, timeout=30)
-            record["after"] = {"detail": after_detail, "receipt": after_receipt}
-            drift, warmup = proof.compare_resources(
-                after_detail, after_receipt, before_detail, before_receipt)
-            record["resource_drift"] = drift
-            record["frame_warmup"] = warmup
-            record["settled"] = bool(after_detail is not None
-                                     and after_receipt is not None
-                                     and drift == {})
-            record["no_window_after_cleanup"] = bool(
-                after_detail is not None
-                and after_detail["windows"] == before_detail["windows"] == 0
-                and after_detail["app-instances"] == before_detail["app-instances"] == 0)
-            if not record["settled"] or not record["no_window_after_cleanup"]:
-                raise AssertionError(
-                    f"cleanup did not return to the boot baseline: drift={drift}, "
-                    f"detail={after_detail}")
-
-            record["frames"]["after-cleanup"] = _save_frame(
-                desktop, f"{label}-after-cleanup")
+            retire_line = _line_index(
+                serial_now,
+                f"[desktop] application retired: kind=6 surface={allocated['surface']}",
+                launch_cursor,
+            )
+            if retire_line is None:
+                raise AssertionError("exact-surface retirement has no serial line identity")
+            record["cleanup_retire_line"] = retire_line
             record["allocated_pages"] = int(allocated["got"])
             record["client_reported_pages"] = int(client_page_match["got"])
             record["retired_pages"] = int(pixels["pages"])
@@ -495,6 +481,30 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
                     "[gfx] first damage published")))
             record["precreation_suppressed"] = True
             record["launch_cursor"] = launch_cursor
+
+            # Require a resource receipt emitted after exact-surface retirement;
+            # an earlier launch-time snapshot can still show the live client.
+            after_detail, after_receipt = proof.wait_settle_snapshot(
+                desktop.serial, start=retire_line + 1, timeout=30)
+            record["after"] = {"detail": after_detail, "receipt": after_receipt}
+            drift, warmup = proof.compare_resources(
+                after_detail, after_receipt, before_detail, before_receipt)
+            record["resource_drift"] = drift
+            record["frame_warmup"] = warmup
+            record["settled"] = bool(after_detail is not None
+                                     and after_receipt is not None
+                                     and drift == {})
+            record["no_window_after_cleanup"] = bool(
+                after_detail is not None
+                and after_detail["windows"] == before_detail["windows"] == 0
+                and after_detail["app-instances"] == before_detail["app-instances"] == 0)
+            if not record["settled"] or not record["no_window_after_cleanup"]:
+                raise AssertionError(
+                    f"cleanup did not return to the boot baseline: drift={drift}, "
+                    f"detail={after_detail}")
+
+            record["frames"]["after-cleanup"] = _save_frame(
+                desktop, f"{label}-after-cleanup")
             record["pass"] = True
         except Exception as exc:  # noqa: BLE001 - preserve a failing receipt
             record["pass"] = False
