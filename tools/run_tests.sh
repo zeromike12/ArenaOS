@@ -77,6 +77,18 @@ else
     echo "!! host-side networking API tests FAILED"
 fi
 
+# The canonical EFI System Partition must be a reproducible artifact, not
+# merely contain an unchanged EFI payload; the full gate compares the exact
+# ESP identity when restoring the candidate after mutation suites.
+echo "== deterministic FAT16 EFI System Partition image"
+if (cd "$REPO_ROOT" && python3 tools/test_espimg_determinism.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! deterministic EFI System Partition image test FAILED"
+fi
+
 # ADR-0052: the independently linked userspace rlib is tested on the
 # host AND compiled for the actual bare-metal guest target. The guest
 # fixture exercises two separate FS and two separate network consumers.
