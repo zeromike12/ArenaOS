@@ -309,22 +309,36 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
                 rect = placement["rect"]
                 content = (rect[0], rect[1] + proof.TITLE_H,
                            rect[2], rect[3] - proof.TITLE_H)
+                x, y, width, height = content
+                band_height = height // 3
+                visual_bands = {
+                    "top": (x, y, width, band_height),
+                    "middle": (x, y + band_height, width, band_height),
+                    "bottom": (x, y + 2 * band_height, width,
+                               height - 2 * band_height),
+                }
                 rendered = b""
-                visual = False
+                band_assertions = {name: False for name in visual_bands}
                 for _attempt in range(30):
                     rendered = desktop.shot(f"{label}-rendered")
-                    visual = proof.has_app_color(rendered, content)
-                    if visual:
+                    band_assertions = {
+                        name: proof.has_app_color(rendered, band)
+                        for name, band in visual_bands.items()
+                    }
+                    if all(band_assertions.values()):
                         break
                     time.sleep(0.1)
+                visual = all(band_assertions.values())
                 record["frames"]["rendered"] = {
                     **_save_raster(f"{label}-rendered", rendered),
-                    "assertion": "production checkerboard color present in the placed window content",
+                    "assertion": "production checkerboard color present in top, middle, and bottom window-content bands",
                 }
                 record["rendered_visual_assertion"] = visual
+                record["rendered_visual_bands"] = band_assertions
                 record["placement"] = placement
                 if not visual:
-                    raise AssertionError("QEMU frame does not show the C client's checkerboard")
+                    raise AssertionError(
+                        "QEMU frame does not show the C client's checkerboard across the full window content")
                 sequence_markers = (
                     "[gfx] surface pages=301 required=301",
                     "[gfx] size-check accepted; map request next",
