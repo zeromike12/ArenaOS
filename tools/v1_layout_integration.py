@@ -266,7 +266,9 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
             launch_cursor = desktop.cursor()
             desktop.open_apps()
             time.sleep(0.1)
-            desktop.type_text(f"layout {pages}")
+            launcher_query = f"layout boundary {pages}"
+            record["launcher_query"] = launcher_query
+            desktop.type_text(launcher_query)
             time.sleep(0.5)
             record["frames"]["launcher-selection"] = _save_frame(
                 desktop, f"{label}-launcher-selection")
