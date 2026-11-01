@@ -531,3 +531,70 @@ be an `M-WAIVER.json` in the evidence root, tied to the current source commit
 and EFI, with `decision_by: "M"`, `requirement: "4b"`, `decision: "waive"`,
 the exact limitation scope, a timestamp and a rationale. No waiver is
 recorded here. V1 remains OPEN for acceptance regardless of test receipts.
+
+## 10. Round 6 — failed canonical run preserved; investigation active (2026-10-31)
+
+Round 6 used source checkpoint `64efe9b858f8dce10b186ce7f80b8f47d041292d` on `arena/af044828-arenaos`; the local and remote branch heads matched that SHA at run time. The full gate was kept active through completion and exited **1**. This section preserves that result as a failure; it does not accept V1, merge, or release it.
+
+### 10.1 Diagnostic package (not a qualification package)
+
+A separate diagnostic-only packager now handles failed/incomplete runs without relaxing `tools/v1_evidence.py` qualification checks:
+
+- Archive: `docs/v1/evidence/v2-2026-10-31-boundary-r6-diagnostic.tar.gz`
+- External checksum: `docs/v1/evidence/v2-2026-10-31-boundary-r6-diagnostic.tar.gz.sha256`
+- External receipt: `docs/v1/evidence/v2-2026-10-31-boundary-r6-diagnostic.tar.gz.receipt.txt`
+- SHA-256: `146f2af7f88b1ce29d035a48ad329b9286954e199413b58e18a4c5747adfff4e`
+- 7,113,203 archive bytes; 352 manifested files; 247,178,175 original bytes; 112 raw PPM captures included verbatim.
+- Fresh local extraction/integrity check: PASS. This verifies the diagnostic archive only; no qualification claim is made.
+
+The package includes the original r6 run tree, final package/verify/aggregate logs, original GCC probe and pre-input captures, Clang pass frames, both GCC/Clang 301/300 integrations, all 30 recovered Phase 13 progress PPMs, serial/virtconsole/QEMU/fixture logs, source snapshots from commit 64, and omitted-input identities. It records all six absent GCC checkpoint files; it does not synthesize them. The actual Phase 13 AFS2 scratch disk was not preserved by the old test harness. Its later replacement at `build/scratch.img` has SHA-256 `ad8f7b94565799c0e005121163e930cafdf8a5eb2b8a6a3ebff263d94e1a8211` and was modified after the timeout, so it is explicitly **not** claimed as the failed run's input.
+
+### 10.2 Gate and requirement verdicts
+
+| Stage | R6 verdict |
+|---|---|
+| Build, environment, controls, aggregate controls | PASS |
+| GCC guest proof | **FAIL** — checkpoint 5 visual response not proven; 6–8 blocked |
+| Clang guest proof | PASS |
+| Cycles | PASS — 10/10 |
+| GCC/Clang refusal matrices | PASS — 24/24 each |
+| GCC/Clang real-grant integration | PASS — distinct from predicate-only proof |
+| Stability | PASS — 100/100 boots |
+| Phase 15 | PASS |
+| Regression | **FAIL** — 1 of 122 suites; Phase 13 exceeded the existing 600-second bound |
+| Qualification package | **FAIL** — missing GCC frames and stale prose assertion in integration validator |
+| Qualification archive verification | **FAIL** — exit 2 because no archive existed |
+| Full gate | **FAIL — exit 1** |
+
+Requirement matrix: **1 FAIL; 2 FAIL; 3 PASS; 4 PASS; 4b OPEN; 5 PASS; 5b PASS; 5c PASS; 5d FAIL; 5e PASS; 5f PASS; 5g PASS; 6 PASS; 7 FAIL.** Requirements 5e (C predicate) and 5f (real grant) remain separate. Requirement 4b remains open: the existing `foreign-identity` case mutates an object ID and is not a genuine capability launch. There is no M-recorded waiver.
+
+### 10.3 GCC mouse failure retained as a failure
+
+R6 records `ack_ok=True`, `visual_ok=False`, `residual=False`. The pointer event was acknowledged by the identified application, but no visible response was proven. The pre-input frame and available probe frames are retained. The required files still absent are:
+
+- `guest-gcc/shots/cp05-mouse-response.png`
+- `guest-gcc/shots/cp06a-two-instances.png`
+- `guest-gcc/shots/cp06a-focused.png`
+- `guest-gcc/shots/cp06b-focused.png`
+- `guest-gcc/shots/cp07-desktop-restored.png`
+- `guest-gcc/shots/cp08-final-demonstration.png`
+
+The last `__ack-probe__.ppm` is not a passing response capture. The current `do_input_and_ack()` timeout path discards the last sampled frame when it evaluates the final verdict with `frame=None`; this is an evidence-capture defect to investigate, not justification to weaken the visual assertion. A focused reproduction must retain timestamped samples and continue to require both the instance/event ACK and a post-input visible flash.
+
+### 10.4 Phase 13 timeout retained; QMP cause unknown
+
+The original timeout report, raw serial snapshots, virtconsole transcript, QEMU stderr, two setup-boot channels, and all 30 main-run progress PPMs are under `regression/phase13/` in the diagnostic package. At timeout the last visible lifecycle transition included process exit/teardown for surface 382 and a resource decrease from 24 instances/30 windows to 23/29. Filesd logged three lineage records stale at retirement. This is not enough to determine whether stale cleanup was expected or causal, or which host action remained blocked.
+
+The old QMP timeout helper recorded `TimeoutError('timed out')` but not the specific QMP handshake/command; it captured no CPU/RIP sample. The r6 record therefore does **not** establish whether QEMU's QMP loop was blocked/starved or the diagnostic client timed out elsewhere. The original 600-second bound remains unchanged. The actual timed-out AFS2 scratch disk was later overwritten and its run-time digest is unknown.
+
+### 10.5 Packaging producer/validator mismatch
+
+The producer records `rendered_visual_assertion: true` and top/middle/bottom bands true for both 301-page rendered integrations. The old strict validator expected an obsolete literal description, so it rejected valid structured records. The diagnostic report preserves both sides of this mismatch and the package failure. The planned correction is to validate required boolean assertion, all required bands, geometry, artifact identities, and capture existence/digests—without making acceptance depend on prose or accepting a bare pass flag. Missing GCC guest captures will remain an independent blocker.
+
+### 10.6 Historical refusal-capture reconciliation
+
+The four tracked historical PPM paths were preserved byte-for-byte in the diagnostic tree along with the committed originals and binary diff. Their working-tree bytes were exact UTF-8 `errors="replace"` decode/re-encodes of the committed PPMs, not new QEMU images; the transformed files had extra trailing bytes and no longer matched their P6 raster lengths. The committed images' raster hashes match their historical evidence JSON. The receipts show the old `development/` and `development-final/` outputs were intentional runs on commit `be51fcb8c6a5e9547f61952d233f7e0fc13282d8`; current tracked source has no references to those output paths, and r6 used its own unique root. The exact process that performed the text transformation is not recorded. Only after preserving working-tree bytes, committed bytes, blob IDs, hashes, and `git diff --binary` were the four paths restored from HEAD. No distinct newer capture was discarded.
+
+### 10.7 Active next steps; acceptance still pending
+
+The immediate work is limited to focused diagnostics and fixes: (1) instrument and reproduce GCC pointer event/focus/content geometry, event/ACK/capture/damage timing without weakening the visible response; (2) instrument a focused Phase 13 reproduction to identify the exact wait and QMP command stage, preserving the old timeout; (3) update and test the structured integration-evidence contract; (4) use existing authorized capability mechanisms for a genuine foreign candidate surface while leaving Identify's CAP_NONE/badge contract unchanged; and (5) keep any genuine foreign-live, genuinely stale, and synthetic identity-mutation results separately classified. An OPEN 4b must independently prevent aggregate qualification PASS. Use a new, unique evidence root for every attempt. Re-run the affected GCC/Clang stages and focused regression first; defer the full regression and 100-boot stability rerun until their prerequisites are resolved.

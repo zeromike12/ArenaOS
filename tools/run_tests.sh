@@ -89,6 +89,15 @@ else
     echo "!! deterministic EFI System Partition image test FAILED"
 fi
 
+echo "== V1 diagnostic archive preserves failed-run evidence without qualification"
+if (cd "$REPO_ROOT" && python3 tools/test_v1_diagnostic_evidence.py); then
+    ran=$((ran+1))
+else
+    ran=$((ran+1))
+    failures=$((failures+1))
+    echo "!! V1 diagnostic evidence controls FAILED"
+fi
+
 # ADR-0052: the independently linked userspace rlib is tested on the
 # host AND compiled for the actual bare-metal guest target. The guest
 # fixture exercises two separate FS and two separate network consumers.
