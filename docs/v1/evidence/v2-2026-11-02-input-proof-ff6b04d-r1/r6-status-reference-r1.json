@@ -1,0 +1,35 @@
+{
+  "candidate_qualified": false,
+  "diagnostic_archive": {
+    "classification": "DIAGNOSTIC ONLY \u2014 NOT A QUALIFICATION PACKAGE",
+    "path": "docs/v1/evidence/v2-2026-10-31-boundary-r6-diagnostic.tar.gz",
+    "receipt_path": "r6-reference/diagnostic-archive-receipt.txt",
+    "receipt_sha256": "e3e4ab8571ad3e875b2fb14f69795d2c1ec923f9c1a1de4d5f6e667d97c02d14",
+    "sha256": "146f2af7f88b1ce29d035a48ad329b9286954e199413b58e18a4c5747adfff4e"
+  },
+  "full_gate_aggregate": {
+    "archive_sha256_sidecar_copy": "r6-reference/diagnostic-archive.sha256",
+    "failed_stages": [
+      "guest-gcc",
+      "package",
+      "verify",
+      "regression"
+    ],
+    "reference_copy": "r6-reference/final-aggregate.log",
+    "requirement_4b": "OPEN",
+    "requirement_4b_detail": "Only IDENTITY-class validator mutation was recorded; no genuine stale/foreign capability launch and no M-WAIVER.json.",
+    "sha256": "9baeec31172d0908390941fbc49141be7e325b5d6ed3c8f86835712bd1a3e221",
+    "sha256_sidecar_copy_hash": "a98bbb2c1e427e65294bfbea547c2ae697d5c96c8d2466cf3e72970d4ddb577d"
+  },
+  "phase13": {
+    "expected_behavior_preserved": true,
+    "r6_recorded_result": "FAIL/timeout under the existing 600-second limit",
+    "timeout_increased_or_skipped": false,
+    "timeout_seconds": 600
+  },
+  "policy": "This separate input-proof package does not modify or replace the r6 verdict. No waiver, acceptance, merge, or release claim is made.",
+  "qualification_status": "FAIL",
+  "recorded_at_utc": "2026-11-02T13:51:46Z",
+  "schema": "arena.v1.r6-status-reference/v1",
+  "v1_accepted": false
+}

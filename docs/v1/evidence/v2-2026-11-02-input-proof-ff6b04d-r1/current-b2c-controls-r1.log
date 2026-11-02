@@ -1,0 +1,99 @@
+schema=arena.v1.current-source-control-results/v1
+recorded_at_utc=2026-11-02T13:47:57Z
+branch=arena/af044828-arenaos
+source_commit=b2c23fb5cf35dae29ff845bec82eb2c001028c3f
+python=Python 3.11.2
+qualification=NOT CLAIMED; these are tooling controls and unit tests only
+== scanner controls ==
+[controls] ppm parsing: PASS
+[controls] color detection: PASS
+[controls] window components (merge is not identity): PASS
+[controls] ack positive: PASS
+[controls] ack missing delivery fails: PASS
+[controls] ack wrong instance / cross-delivery fails: PASS
+[controls] ack wrong event type fails: PASS
+[controls] ack stale counter fails: PASS
+[controls] ack requires freshness after cursor: PASS
+[controls] input proof: ack + flash passes: PASS
+[controls] input proof: ack without visible response fails: PASS
+[controls] input proof: ack with no captured frame fails: PASS
+[controls] input proof: missing clean pre-input frame fails: PASS
+[controls] input proof: invalid window geometry fails: PASS
+[controls] scanner rejects malformed RGB raster: PASS
+[controls] input proof: visible response without ack fails: PASS
+[controls] input proof: wrong-instance ack fails: PASS
+[controls] input proof: wrong-event ack fails: PASS
+[controls] input proof: stale/residual flash fails: PASS
+[controls] input proof: flash outside the window fails: PASS
+[controls] cleanup positive (all 21 fields settle): PASS
+[controls] cleanup missing retirement fails: PASS
+[controls] cleanup non-zero exit fails: PASS
+[controls] cleanup leak (instances remain) fails: PASS
+[controls] cleanup leaked thread (counts settled) fails: PASS
+[controls] cleanup leaked frames beyond the warm-up bound fails: PASS
+[controls] frame warm-up is bounded and one-directional: PASS
+[controls] cleanup leaked capability fails: PASS
+[controls] cleanup missing receipt fails: PASS
+[controls] cleanup stale (pre-cursor) settlement fails: PASS
+[controls] cleanup transient dip then leak fails: PASS
+[controls] cleanup spurious retirement fails: PASS
+[controls] residual window presentation fails: PASS
+[controls] malformed resource receipt not reinterpreted: PASS
+[controls] verdict logic: PASS
+[v1-guest-proof] input cp05-mouse-response: PASS; 1 timestamped samples
+[controls] input sampling: timestamped exact success frame: PASS
+[v1-guest-proof] input cp05-mouse-response: FAIL; 1 timestamped samples; visible response without an acknowledgment for this instance and event type
+[controls] input sampling: failed last probe retained, not PASS: PASS
+[controls] 40/40 focused controls PASS
+== strict evidence tests ==
+test_all_three_band_assertions_are_required (__main__.IntegrationEvidenceTests.test_all_three_band_assertions_are_required) ... ok
+test_boolean_cannot_stand_in_for_zero_exit_or_capability_count (__main__.IntegrationEvidenceTests.test_boolean_cannot_stand_in_for_zero_exit_or_capability_count) ... ok
+test_capture_pixels_are_independently_checked_in_each_band (__main__.IntegrationEvidenceTests.test_capture_pixels_are_independently_checked_in_each_band) ... ok
+test_embedded_efi_identity_must_match_captured_efi (__main__.IntegrationEvidenceTests.test_embedded_efi_identity_must_match_captured_efi) ... ok
+test_frame_hash_mismatch_is_rejected (__main__.IntegrationEvidenceTests.test_frame_hash_mismatch_is_rejected) ... ok
+test_frame_path_cannot_escape_run_directory (__main__.IntegrationEvidenceTests.test_frame_path_cannot_escape_run_directory) ... ok
+test_geometry_must_be_on_screen_and_bound_to_identify (__main__.IntegrationEvidenceTests.test_geometry_must_be_on_screen_and_bound_to_identify) ... ok
+test_malformed_but_correctly_hashed_png_is_reported_not_raised (__main__.IntegrationEvidenceTests.test_malformed_but_correctly_hashed_png_is_reported_not_raised) ... ok
+test_missing_300_fixture_is_rejected (__main__.IntegrationEvidenceTests.test_missing_300_fixture_is_rejected) ... ok
+test_valid_structured_visual_contract_does_not_depend_on_prose (__main__.IntegrationEvidenceTests.test_valid_structured_visual_contract_does_not_depend_on_prose) ... ok
+test_visual_assertion_is_required (__main__.IntegrationEvidenceTests.test_visual_assertion_is_required) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.954s
+
+OK
+== aggregate gate tests ==
+test_4b_does_not_accept_a_waiver_not_recorded_by_m (__main__.AggregateRequirementTests.test_4b_does_not_accept_a_waiver_not_recorded_by_m) ... ok
+test_4b_keeps_synthetic_foreign_identity_open_without_m_waiver (__main__.AggregateRequirementTests.test_4b_keeps_synthetic_foreign_identity_open_without_m_waiver) ... ok
+test_5e_accepts_both_compiler_cells_with_production_policy_cases (__main__.AggregateRequirementTests.test_5e_accepts_both_compiler_cells_with_production_policy_cases) ... ok
+test_5e_rejects_a_substituted_apb1_payload (__main__.AggregateRequirementTests.test_5e_rejects_a_substituted_apb1_payload) ... ok
+test_5e_rejects_absent_300_page_refusal_even_if_stage_passed (__main__.AggregateRequirementTests.test_5e_rejects_absent_300_page_refusal_even_if_stage_passed) ... ok
+test_5e_rejects_evidence_from_a_different_source_commit (__main__.AggregateRequirementTests.test_5e_rejects_evidence_from_a_different_source_commit) ... ok
+test_5e_rejects_evidence_from_the_wrong_compiler_cell (__main__.AggregateRequirementTests.test_5e_rejects_evidence_from_the_wrong_compiler_cell) ... ok
+test_5e_rejects_kernel_misclassification_of_synthetic_policy_input (__main__.AggregateRequirementTests.test_5e_rejects_kernel_misclassification_of_synthetic_policy_input) ... ok
+test_5e_rejects_wrong_300_page_result (__main__.AggregateRequirementTests.test_5e_rejects_wrong_300_page_result) ... ok
+test_5e_requires_a_repo_local_evidence_directory (__main__.AggregateRequirementTests.test_5e_requires_a_repo_local_evidence_directory) ... ok
+test_5f_is_a_required_real_grant_stage_for_full_mode (__main__.AggregateRequirementTests.test_5f_is_a_required_real_grant_stage_for_full_mode) ... ok
+test_5f_rejects_missing_rendered_band_assertion_even_if_json_passes (__main__.AggregateRequirementTests.test_5f_rejects_missing_rendered_band_assertion_even_if_json_passes) ... ok
+test_5f_rejects_predicate_only_evidence (__main__.AggregateRequirementTests.test_5f_rejects_predicate_only_evidence) ... ok
+test_full_mode_is_derived_from_all_requirement_stages (__main__.AggregateRequirementTests.test_full_mode_is_derived_from_all_requirement_stages) ... ok
+test_full_requirement_evaluation_fails_without_5e_case_evidence (__main__.AggregateRequirementTests.test_full_requirement_evaluation_fails_without_5e_case_evidence) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.011s
+
+OK
+V1 AGGREGATE CONTROLS: 15/15 PASS
+== diagnostic packaging tests ==
+test_archive_verifier_rejects_payload_digest_mismatch (__main__.DiagnosticArchiveTests.test_archive_verifier_rejects_payload_digest_mismatch) ... ok
+test_archive_verifier_rejects_unlisted_member (__main__.DiagnosticArchiveTests.test_archive_verifier_rejects_unlisted_member) ... ok
+test_failed_run_does_not_require_qualification_frame_set_to_be_complete (__main__.DiagnosticArchiveTests.test_failed_run_does_not_require_qualification_frame_set_to_be_complete) ... ok
+test_failed_run_packages_and_missing_capture_remains_fail (__main__.DiagnosticArchiveTests.test_failed_run_packages_and_missing_capture_remains_fail) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.540s
+
+OK
+== syntax compile ==
+py_compile=PASS
+exit_status=0

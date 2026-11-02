@@ -1,0 +1,1011 @@
+{
+  "acceptance_preservation": {
+    "no_merge_release_or_v1_acceptance_claim": true,
+    "no_waiver_or_acceptance_authority_exercised": true,
+    "phase13": {
+      "expected_behavior_preserved": true,
+      "r6_recorded_result": "FAIL/timeout under the existing 600-second limit",
+      "timeout_increased_or_skipped": false,
+      "timeout_seconds": 600
+    },
+    "r6_full_gate": {
+      "candidate_qualified": false,
+      "diagnostic_archive": {
+        "classification": "DIAGNOSTIC ONLY \u2014 NOT A QUALIFICATION PACKAGE",
+        "path": "docs/v1/evidence/v2-2026-10-31-boundary-r6-diagnostic.tar.gz",
+        "receipt_path": "r6-reference/diagnostic-archive-receipt.txt",
+        "receipt_sha256": "e3e4ab8571ad3e875b2fb14f69795d2c1ec923f9c1a1de4d5f6e667d97c02d14",
+        "sha256": "146f2af7f88b1ce29d035a48ad329b9286954e199413b58e18a4c5747adfff4e"
+      },
+      "full_gate_aggregate": {
+        "archive_sha256_sidecar_copy": "r6-reference/diagnostic-archive.sha256",
+        "failed_stages": [
+          "guest-gcc",
+          "package",
+          "verify",
+          "regression"
+        ],
+        "reference_copy": "r6-reference/final-aggregate.log",
+        "requirement_4b": "OPEN",
+        "requirement_4b_detail": "Only IDENTITY-class validator mutation was recorded; no genuine stale/foreign capability launch and no M-WAIVER.json.",
+        "sha256": "9baeec31172d0908390941fbc49141be7e325b5d6ed3c8f86835712bd1a3e221",
+        "sha256_sidecar_copy_hash": "a98bbb2c1e427e65294bfbea547c2ae697d5c96c8d2466cf3e72970d4ddb577d"
+      },
+      "phase13": {
+        "expected_behavior_preserved": true,
+        "r6_recorded_result": "FAIL/timeout under the existing 600-second limit",
+        "timeout_increased_or_skipped": false,
+        "timeout_seconds": 600
+      },
+      "policy": "This separate input-proof package does not modify or replace the r6 verdict. No waiver, acceptance, merge, or release claim is made.",
+      "qualification_status": "FAIL",
+      "recorded_at_utc": "2026-11-02T13:51:46Z",
+      "schema": "arena.v1.r6-status-reference/v1",
+      "v1_accepted": false
+    },
+    "requirement_4b": "OPEN independently prevents full qualification PASS; no M waiver is present.",
+    "strict_qualification_validation_of_this_archive": "NOT RUN; this is separate diagnostic packaging. The archive integrity verifier does not evaluate qualification."
+  },
+  "artifact_map": {
+    "attempts": [
+      "guest-run/",
+      "guest-run-retry1/",
+      "guest-run-retry2/"
+    ],
+    "build_input_copies": "build-inputs/",
+    "capture_restoration": "capture-restoration-verification-r1.json",
+    "current_build": "current-source-build-identities-b2c-r1.json",
+    "missing_frames": "missing-frames-r1.json",
+    "r6_reference": "r6-reference/",
+    "raw_inventory": "raw-evidence-inventory-r2.json",
+    "source_reconciliation": "source-identity-reconciliation-r1.json"
+  },
+  "attempts": [
+    {
+      "attempt_dir": "guest-run",
+      "checkpoints": [
+        {
+          "case": 1,
+          "detail": "desktop frame presented; app-instances=0 windows=0",
+          "evidence_ref": "shots/cp01-launch-ready-desktop.png",
+          "name": "launch-ready Desktop",
+          "result": "PASS"
+        },
+        {
+          "case": 2,
+          "detail": "protected installer installed signed version=42",
+          "evidence_ref": "install-ack.json",
+          "name": "APB1 install receipt (protected installer)",
+          "result": "PASS"
+        },
+        {
+          "case": 3,
+          "detail": "Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance",
+          "evidence_ref": "shots/cp03-first-native-c-window.png",
+          "name": "first native C window (Identify -> create -> render)",
+          "result": "PASS"
+        },
+        {
+          "case": 4,
+          "detail": "KEY ack surface=164 counter 2->3 + flash in the window, frame 902a6058ee51",
+          "evidence_ref": "shots/cp04-keyboard-response.png",
+          "name": "keyboard response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 5,
+          "detail": "pointer input not proven: acknowledgment but no visible flash in the window (ack_ok=True visual_ok=False residual=False)",
+          "evidence_ref": "shots/cp05-mouse-response.png",
+          "name": "mouse response (instance-specific acknowledgment)",
+          "result": "FAIL"
+        },
+        {
+          "case": 6,
+          "detail": "blocked by checkpoint 5 failure",
+          "evidence_ref": "",
+          "name": "two concurrent instances: focus/input isolation, both directions",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 7,
+          "detail": "blocked by checkpoint 5 failure",
+          "evidence_ref": "",
+          "name": "window removal: retirements, exits, settlement, visual removal",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 8,
+          "detail": "blocked by checkpoint 5 failure",
+          "evidence_ref": "",
+          "name": "final V1 demonstration",
+          "result": "NOT RUN"
+        }
+      ],
+      "classification": "qualification candidate run \u2014 evidence class GUEST (executed in ArenaOS under QEMU TCG) with HOST provenance",
+      "cp05_mouse_response": {
+        "pre_input_frame": {
+          "capture": {
+            "png": "shots/cp05-mouse-response-pre.png",
+            "png_sha256": "5d208d8aa582c0157fc0a75e128844f88afc97146a5ac84f2584d78a800a9c9f",
+            "ppm": "shots/cp05-mouse-response-pre.ppm",
+            "ppm_sha256": "482e33d87511c4980ae651dc9517d3eb85259299e22d68701839f7909d3bd443",
+            "raster_sha256": "424e7da3a86f3a19fd99bd72d06b1c91d1e5531506c1bfe44dc7f71f8fe90078"
+          },
+          "clear_wait_succeeded": true,
+          "recorded_utc": "2026-11-02T04:43:47.475136280Z",
+          "valid": true
+        },
+        "reason": "acknowledgment but no visible flash in the window",
+        "result": "FAIL",
+        "samples": [
+          {
+            "ack_ok": false,
+            "capture": "shots/cp05-mouse-response-samples/sample-001-2026-11-02T044347.511445813Z.png",
+            "counter_after": null,
+            "counter_before": 3,
+            "fresh_acks": 0,
+            "index": 1,
+            "monotonic_start_ns": 3676862417900,
+            "passed": false,
+            "utc_start": "2026-11-02T04:43:47.511445813Z",
+            "visual_ok": false
+          },
+          {
+            "ack_ok": true,
+            "capture": "shots/cp05-mouse-response-samples/sample-002-2026-11-02T044349.298711307Z.png",
+            "counter_after": 4,
+            "counter_before": 3,
+            "fresh_acks": 2,
+            "index": 2,
+            "monotonic_start_ns": 3678649684518,
+            "passed": false,
+            "utc_start": "2026-11-02T04:43:49.298711307Z",
+            "visual_ok": false
+          },
+          {
+            "ack_ok": true,
+            "capture": "shots/cp05-mouse-response-samples/sample-003-2026-11-02T044350.791045408Z.png",
+            "counter_after": 4,
+            "counter_before": 3,
+            "fresh_acks": 2,
+            "index": 3,
+            "monotonic_start_ns": 3680142017396,
+            "passed": false,
+            "utc_start": "2026-11-02T04:43:50.791045408Z",
+            "visual_ok": false
+          }
+        ],
+        "timeout_seconds": 4.0,
+        "window_rect": [
+          70,
+          60,
+          640,
+          480
+        ]
+      },
+      "execution": {
+        "attempt_note": null,
+        "command": "python3 tools/v1_guest_proof.py",
+        "environment": {
+          "ARENA_OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+          "ARENA_OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+          "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+          "V1_CC": "gcc",
+          "V1_EVIDENCE_DIR": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run",
+          "V1_INPUT_SAMPLE_TRACE": "*"
+        },
+        "note": "Command and environment values are transcribed from the preserved attempt log; the attempt evidence.json records QEMU/runtime identities.",
+        "numpy": null,
+        "python": null,
+        "qemu_launch_wrapper_as_recorded_in_run_identity": [
+          "/home/user/phase16-backend/qemu-patched"
+        ],
+        "recorded_at_utc": "2026-11-02T04:43:14Z",
+        "runner_rc_reported_in_transcript": 0,
+        "transcript": "guest-proof-attempt-r1.log",
+        "transcript_sha256": "1f03612e8214507c3e48d4f0461ed1ad930b734b70c70cfa3e8adb7900398ebb"
+      },
+      "guest_proof_process_exit_code": 1,
+      "identities": {
+        "apb1_sha256": "cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0",
+        "efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+        "qemu_elf_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+        "qemu_loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+        "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+      },
+      "image_freshness_recorded_by_run": {
+        "boot_efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "fresh": true,
+        "image_mtime": 1793594514.1697485,
+        "newest_source": "tools/v1_guest_proof.py",
+        "newest_source_mtime": 1793593832.206304
+      },
+      "qemu_runner_return_code": 0,
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "source_commit_recorded_by_run": "ff6b04d791aeabd3e5875194460153c42580f742",
+      "source_tree_dirty_recorded_by_run": false,
+      "standalone_guest_verdict_pass": false,
+      "started_utc_from_run_label": "20261102T044314Z"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoints": [
+        {
+          "case": 1,
+          "detail": "desktop frame presented; app-instances=0 windows=0",
+          "evidence_ref": "shots/cp01-launch-ready-desktop.png",
+          "name": "launch-ready Desktop",
+          "result": "PASS"
+        },
+        {
+          "case": 2,
+          "detail": "protected installer installed signed version=42",
+          "evidence_ref": "install-ack.json",
+          "name": "APB1 install receipt (protected installer)",
+          "result": "PASS"
+        },
+        {
+          "case": 3,
+          "detail": "Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance",
+          "evidence_ref": "shots/cp03-first-native-c-window.png",
+          "name": "first native C window (Identify -> create -> render)",
+          "result": "PASS"
+        },
+        {
+          "case": 4,
+          "detail": "KEY ack surface=164 counter 2->3 + flash in the window, frame 4d520c788e67",
+          "evidence_ref": "shots/cp04-keyboard-response.png",
+          "name": "keyboard response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 5,
+          "detail": "pointer input not proven: acknowledgment but no visible flash in the window (ack_ok=True visual_ok=False residual=False)",
+          "evidence_ref": "shots/cp05-mouse-response.png",
+          "name": "mouse response (instance-specific acknowledgment)",
+          "result": "FAIL"
+        },
+        {
+          "case": 6,
+          "detail": "blocked by checkpoint 5 failure",
+          "evidence_ref": "",
+          "name": "two concurrent instances: focus/input isolation, both directions",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 7,
+          "detail": "blocked by checkpoint 5 failure",
+          "evidence_ref": "",
+          "name": "window removal: retirements, exits, settlement, visual removal",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 8,
+          "detail": "blocked by checkpoint 5 failure",
+          "evidence_ref": "",
+          "name": "final V1 demonstration",
+          "result": "NOT RUN"
+        }
+      ],
+      "classification": "qualification candidate run \u2014 evidence class GUEST (executed in ArenaOS under QEMU TCG) with HOST provenance",
+      "cp05_mouse_response": {
+        "pre_input_frame": {
+          "capture": {
+            "png": "shots/cp05-mouse-response-pre.png",
+            "png_sha256": "76cd8a8470b5646f8852a46c1720a34b6378dbcbb88c519ec7e25299285c48b5",
+            "ppm": "shots/cp05-mouse-response-pre.ppm",
+            "ppm_sha256": "1b18daf1bc3cee77153d628f7c8e745292ca8360abe5f6ef0bf785b4d32c0bed",
+            "raster_sha256": "ca83a3f09e68495e3c91b5fa7f0f9ceffd942b7d3473949ae0d552b2d4d872b5"
+          },
+          "clear_wait_succeeded": true,
+          "recorded_utc": "2026-11-02T04:48:41.315393707Z",
+          "valid": true
+        },
+        "reason": "acknowledgment but no visible flash in the window",
+        "result": "FAIL",
+        "samples": [
+          {
+            "ack_ok": false,
+            "capture": "shots/cp05-mouse-response-samples/sample-001-2026-11-02T044841.347671126Z.png",
+            "counter_after": null,
+            "counter_before": 3,
+            "fresh_acks": 0,
+            "index": 1,
+            "monotonic_start_ns": 3970698643453,
+            "passed": false,
+            "utc_start": "2026-11-02T04:48:41.347671126Z",
+            "visual_ok": false
+          },
+          {
+            "ack_ok": true,
+            "capture": "shots/cp05-mouse-response-samples/sample-002-2026-11-02T044843.451798642Z.png",
+            "counter_after": 4,
+            "counter_before": 3,
+            "fresh_acks": 2,
+            "index": 2,
+            "monotonic_start_ns": 3972802772133,
+            "passed": false,
+            "utc_start": "2026-11-02T04:48:43.451798642Z",
+            "visual_ok": false
+          }
+        ],
+        "timeout_seconds": 4.0,
+        "window_rect": [
+          70,
+          60,
+          640,
+          480
+        ]
+      },
+      "execution": {
+        "attempt_note": "retry1; unique output path; no predicate or timeout changes",
+        "command": "python3 tools/v1_guest_proof.py",
+        "environment": {
+          "ARENA_OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+          "ARENA_OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+          "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+          "V1_CC": "gcc",
+          "V1_EVIDENCE_DIR": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run-retry1",
+          "V1_INPUT_SAMPLE_TRACE": "*"
+        },
+        "note": "Command and environment values are transcribed from the preserved attempt log; the attempt evidence.json records QEMU/runtime identities.",
+        "numpy": null,
+        "python": null,
+        "qemu_launch_wrapper_as_recorded_in_run_identity": [
+          "/home/user/phase16-backend/qemu-patched"
+        ],
+        "recorded_at_utc": "2026-11-02T04:48:06Z",
+        "runner_rc_reported_in_transcript": 0,
+        "transcript": "guest-proof-retry1.log",
+        "transcript_sha256": "ba4783860c65098d09c8a93f45d561fc49b839a578740e008767777bdeb21b87"
+      },
+      "guest_proof_process_exit_code": 1,
+      "identities": {
+        "apb1_sha256": "cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0",
+        "efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+        "qemu_elf_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+        "qemu_loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+        "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+      },
+      "image_freshness_recorded_by_run": {
+        "boot_efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "fresh": true,
+        "image_mtime": 1793594514.1697485,
+        "newest_source": "tools/v1_guest_proof.py",
+        "newest_source_mtime": 1793593832.206304
+      },
+      "qemu_runner_return_code": 0,
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "source_commit_recorded_by_run": "ff6b04d791aeabd3e5875194460153c42580f742",
+      "source_tree_dirty_recorded_by_run": false,
+      "standalone_guest_verdict_pass": false,
+      "started_utc_from_run_label": "20261102T044806Z"
+    },
+    {
+      "attempt_dir": "guest-run-retry2",
+      "checkpoints": [
+        {
+          "case": 1,
+          "detail": "desktop frame presented; app-instances=0 windows=0",
+          "evidence_ref": "shots/cp01-launch-ready-desktop.png",
+          "name": "launch-ready Desktop",
+          "result": "PASS"
+        },
+        {
+          "case": 2,
+          "detail": "protected installer installed signed version=42",
+          "evidence_ref": "install-ack.json",
+          "name": "APB1 install receipt (protected installer)",
+          "result": "PASS"
+        },
+        {
+          "case": 3,
+          "detail": "Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance",
+          "evidence_ref": "shots/cp03-first-native-c-window.png",
+          "name": "first native C window (Identify -> create -> render)",
+          "result": "PASS"
+        },
+        {
+          "case": 4,
+          "detail": "KEY ack surface=164 counter 1->3 + flash in the window, frame 84f989b5cb4a",
+          "evidence_ref": "shots/cp04-keyboard-response.png",
+          "name": "keyboard response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 5,
+          "detail": "POINTER ack surface=164 counter 3->4 + flash in the window, frame f1b8bf516194",
+          "evidence_ref": "shots/cp05-mouse-response.png",
+          "name": "mouse response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 6,
+          "detail": "A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=68fec7f6023d; B(169) key: ack {'before': 2, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=46ea75e995d5",
+          "evidence_ref": "shots/cp06a-focused.png, shots/cp06b-focused.png",
+          "name": "two concurrent instances: focus/input isolation, both directions",
+          "result": "PASS"
+        },
+        {
+          "case": 7,
+          "detail": "retired=['164', '169'] exits={'164': 0, '169': 0} all 21 resource fields settled to baseline visual_rects=0",
+          "evidence_ref": "shots/cp07-desktop-restored.png",
+          "name": "window removal: retirements, exits, settlement, visual removal",
+          "result": "PASS"
+        },
+        {
+          "case": 8,
+          "detail": "final instance surface=174 placed (70, 60, 640, 480) bound=174 key ack 0->3 + visible flash, frame 43316f413919",
+          "evidence_ref": "shots/cp08-final-demonstration.png",
+          "name": "final V1 demonstration",
+          "result": "PASS"
+        }
+      ],
+      "classification": "qualification candidate run \u2014 evidence class GUEST (executed in ArenaOS under QEMU TCG) with HOST provenance",
+      "cp05_mouse_response": {
+        "pre_input_frame": {
+          "capture": {
+            "png": "shots/cp05-mouse-response-pre.png",
+            "png_sha256": "927f54cb9d8bfed5a15d3471943f211bdd44705aaaffa7ebacecc62b8976814b",
+            "ppm": "shots/cp05-mouse-response-pre.ppm",
+            "ppm_sha256": "d824c2dff0498eb60282eaad8298f84b3c28af7b93cb6cdaf2e8fd4cb17af824",
+            "raster_sha256": "adaf500f6f0187f96d9a5cb27157f39250f8125666182d5ca6ed712c9c46d870"
+          },
+          "clear_wait_succeeded": true,
+          "recorded_utc": "2026-11-02T04:51:42.663295226Z",
+          "valid": true
+        },
+        "reason": null,
+        "result": "PASS",
+        "samples": [
+          {
+            "ack_ok": false,
+            "capture": "shots/cp05-mouse-response-samples/sample-001-2026-11-02T045142.691443005Z.png",
+            "counter_after": null,
+            "counter_before": 3,
+            "fresh_acks": 0,
+            "index": 1,
+            "monotonic_start_ns": 4152042414572,
+            "passed": false,
+            "utc_start": "2026-11-02T04:51:42.691443005Z",
+            "visual_ok": false
+          },
+          {
+            "ack_ok": true,
+            "capture": "shots/cp05-mouse-response-samples/sample-002-2026-11-02T045142.836239751Z.png",
+            "counter_after": 4,
+            "counter_before": 3,
+            "fresh_acks": 2,
+            "index": 2,
+            "monotonic_start_ns": 4152187211642,
+            "passed": true,
+            "utc_start": "2026-11-02T04:51:42.836239751Z",
+            "visual_ok": true
+          }
+        ],
+        "timeout_seconds": 4.0,
+        "window_rect": [
+          70,
+          60,
+          640,
+          480
+        ]
+      },
+      "execution": {
+        "attempt_note": "retry2; unique output path; NumPy vectorized raster path available; no predicate or timeout changes",
+        "command": "python3 tools/v1_guest_proof.py",
+        "environment": {
+          "ARENA_OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+          "ARENA_OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+          "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+          "V1_CC": "gcc",
+          "V1_EVIDENCE_DIR": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run-retry2",
+          "V1_INPUT_SAMPLE_TRACE": "*"
+        },
+        "note": "Command and environment values are transcribed from the preserved attempt log; the attempt evidence.json records QEMU/runtime identities.",
+        "numpy": "2.4.6",
+        "python": "/home/user/ArenaOS/build/v1-canonical-python/bin/python3",
+        "qemu_launch_wrapper_as_recorded_in_run_identity": [
+          "/home/user/phase16-backend/qemu-patched"
+        ],
+        "recorded_at_utc": "2026-11-02T04:51:13Z",
+        "runner_rc_reported_in_transcript": 0,
+        "transcript": "guest-proof-retry2.log",
+        "transcript_sha256": "4f3a86bcd869a366aec487ef94da3bd789407829d1c1b1e3f368c4dde6fd7db5"
+      },
+      "guest_proof_process_exit_code": 0,
+      "identities": {
+        "apb1_sha256": "cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0",
+        "efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+        "qemu_elf_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+        "qemu_loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+        "qemu_wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1"
+      },
+      "image_freshness_recorded_by_run": {
+        "boot_efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "fresh": true,
+        "image_mtime": 1793594514.1697485,
+        "newest_source": "tools/v1_guest_proof.py",
+        "newest_source_mtime": 1793593832.206304
+      },
+      "qemu_runner_return_code": 0,
+      "run_label": "v1-guest-proof-20261102T045113Z-104375",
+      "source_commit_recorded_by_run": "ff6b04d791aeabd3e5875194460153c42580f742",
+      "source_tree_dirty_recorded_by_run": false,
+      "standalone_guest_verdict_pass": true,
+      "started_utc_from_run_label": "20261102T045113Z"
+    }
+  ],
+  "candidate_qualified": false,
+  "captures_and_logs": {
+    "attempt_file_count": 98,
+    "attempt_original_bytes": 72270847,
+    "inventory": "raw-evidence-inventory-r2.json",
+    "inventory_sha256": "3d18f527b7be2b1175fbf5ba606fdad8b8ecd97fdd4dc94b9ef2393c478fa48c",
+    "png_count": 44,
+    "ppm_count": 26,
+    "ppm_restoration": {
+      "all_restored_ppm_match_original_recorded_sha256": true,
+      "error_count": 0,
+      "note": "All 26 PPMs were reconstructed only from retained lossless PNG rasters and accepted only when matching the original recorded PPM SHA-256. Missing required checkpoint PNGs remain absent.",
+      "record": "capture-restoration-verification-r1.json",
+      "verified_count": 26
+    },
+    "raw_qemu_stream_completeness": "Initial attempt has raw boot streams; retry1/retry2 retain harness serials and evidence, but no raw-boots directories are present for them.",
+    "raw_serial_mismatch": {
+      "byte_identical": false,
+      "harness_serial": {
+        "path": "guest-run/v1-guest-serial.log",
+        "sha256": "796ff60f3f79662755187afd54bd1be87a3d97bf5780e5713bd34c87d77fd930",
+        "size": 202041
+      },
+      "note": "The raw QEMU proof-boot serial and harness-captured serial are retained separately; the content mismatch is preserved and is not normalized or explained without supporting evidence.",
+      "raw_proof_boot": {
+        "path": "guest-run/raw-boots/proof-boot/serial.log",
+        "sha256": "9c9fed631d862d99d2641bc93658a125f45d8b5813181e4de0108ca94c526f88",
+        "size": 203866
+      }
+    }
+  },
+  "commands_and_execution_records": {
+    "archive_integrity_verification": {
+      "command": "python3 tools/v1_diagnostic_evidence.py verify v2-2026-11-02-input-proof-ff6b04d-r1-diagnostic.tar.gz",
+      "log": "v2-2026-11-02-input-proof-ff6b04d-r1-diagnostic.verify.log",
+      "result": "PASS",
+      "scope": "diagnostic archive integrity only; no qualification validation"
+    },
+    "fresh_current_source_builds": [
+      {
+        "label": "first canonical full build (ESP failure)",
+        "log": "fresh-current-source-b2c-canonical-build-r1.log",
+        "log_sha256": "955988ce8f7a1ec2e1b7f606bb2ffb29d601e142769c68fa10f356371e0b0616",
+        "recorded_header": {
+          "branch": "arena/af044828-arenaos",
+          "build_outputs_before": "ABSENT build/arena-boot.efi; ABSENT build/arena-esp.img",
+          "command": "source tools/dev-env/v1-env.sh; env -u ARENA_GRAPHICS_FIXTURE -u ARENA_TEST_BUILD_CACHE CARGO_NET_OFFLINE=true PYTHONPATH=build/v1-build-python-b2c-r1 bash tools/build.sh --image",
+          "logical_repo": "/workspace/ArenaOS",
+          "resolved_repo": "/workspace/ArenaOS",
+          "schema": "arena.v1.current-source-canonical-build/v1",
+          "source_commit": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f"
+        }
+      },
+      {
+        "label": "successful canonical --image build",
+        "log": "fresh-current-source-b2c-canonical-build-r2.log",
+        "log_sha256": "aab807a53df0fd5811be7390fc3d344002c562de1bae737882f408aa1629bbf7",
+        "recorded_header": {
+          "branch": "arena/af044828-arenaos",
+          "build_outputs_before": "EFI present from successful canonical kernel/ISA stage; unique preserved copy under build-inputs/current-b2c-esp-build-attempt1; ESP absent",
+          "command": "source tools/dev-env/v1-env.sh; env -u ARENA_GRAPHICS_FIXTURE -u ARENA_TEST_BUILD_CACHE CARGO_NET_OFFLINE=true PYTHONPATH=/workspace/ArenaOS/build/v1-build-python-b2c-r1 bash tools/build.sh --image",
+          "logical_repo": "/workspace/ArenaOS",
+          "repair": "absolute PYTHONPATH avoids cwd-relative import loss after tools/build.sh changes directory to kernel",
+          "resolved_repo": "/workspace/ArenaOS",
+          "schema": "arena.v1.current-source-canonical-build/v1",
+          "source_commit": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f"
+        }
+      }
+    ],
+    "standalone_guest_proof_attempts": [
+      {
+        "attempt_dir": "guest-run",
+        "attempt_note": null,
+        "command": "python3 tools/v1_guest_proof.py",
+        "environment": {
+          "ARENA_OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+          "ARENA_OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+          "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+          "V1_CC": "gcc",
+          "V1_EVIDENCE_DIR": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run",
+          "V1_INPUT_SAMPLE_TRACE": "*"
+        },
+        "guest_proof_process_exit_code": 1,
+        "note": "Command and environment values are transcribed from the preserved attempt log; the attempt evidence.json records QEMU/runtime identities.",
+        "numpy": null,
+        "python": null,
+        "qemu_launch_wrapper_as_recorded_in_run_identity": null,
+        "qemu_runner_return_code": 0,
+        "recorded_at_utc": "2026-11-02T04:43:14Z",
+        "runner_rc_reported_in_transcript": 0,
+        "standalone_guest_verdict_pass": false,
+        "transcript": "guest-proof-attempt-r1.log",
+        "transcript_sha256": "1f03612e8214507c3e48d4f0461ed1ad930b734b70c70cfa3e8adb7900398ebb"
+      },
+      {
+        "attempt_dir": "guest-run-retry1",
+        "attempt_note": "retry1; unique output path; no predicate or timeout changes",
+        "command": "python3 tools/v1_guest_proof.py",
+        "environment": {
+          "ARENA_OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+          "ARENA_OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+          "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+          "V1_CC": "gcc",
+          "V1_EVIDENCE_DIR": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run-retry1",
+          "V1_INPUT_SAMPLE_TRACE": "*"
+        },
+        "guest_proof_process_exit_code": 1,
+        "note": "Command and environment values are transcribed from the preserved attempt log; the attempt evidence.json records QEMU/runtime identities.",
+        "numpy": null,
+        "python": null,
+        "qemu_launch_wrapper_as_recorded_in_run_identity": null,
+        "qemu_runner_return_code": 0,
+        "recorded_at_utc": "2026-11-02T04:48:06Z",
+        "runner_rc_reported_in_transcript": 0,
+        "standalone_guest_verdict_pass": false,
+        "transcript": "guest-proof-retry1.log",
+        "transcript_sha256": "ba4783860c65098d09c8a93f45d561fc49b839a578740e008767777bdeb21b87"
+      },
+      {
+        "attempt_dir": "guest-run-retry2",
+        "attempt_note": "retry2; unique output path; NumPy vectorized raster path available; no predicate or timeout changes",
+        "command": "python3 tools/v1_guest_proof.py",
+        "environment": {
+          "ARENA_OVMF_CODE": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+          "ARENA_OVMF_VARS": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+          "ARENA_QEMU": "/home/user/phase16-backend/qemu-patched",
+          "V1_CC": "gcc",
+          "V1_EVIDENCE_DIR": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run-retry2",
+          "V1_INPUT_SAMPLE_TRACE": "*"
+        },
+        "guest_proof_process_exit_code": 0,
+        "note": "Command and environment values are transcribed from the preserved attempt log; the attempt evidence.json records QEMU/runtime identities.",
+        "numpy": "2.4.6",
+        "python": "/home/user/ArenaOS/build/v1-canonical-python/bin/python3",
+        "qemu_launch_wrapper_as_recorded_in_run_identity": null,
+        "qemu_runner_return_code": 0,
+        "recorded_at_utc": "2026-11-02T04:51:13Z",
+        "runner_rc_reported_in_transcript": 0,
+        "standalone_guest_verdict_pass": true,
+        "transcript": "guest-proof-retry2.log",
+        "transcript_sha256": "4f3a86bcd869a366aec487ef94da3bd789407829d1c1b1e3f368c4dde6fd7db5"
+      }
+    ]
+  },
+  "controls": {
+    "aggregate_gate_tests": "15/15 PASS",
+    "classification": "tool controls/unit tests only; not guest qualification",
+    "diagnostic_archive_tests": "4/4 PASS",
+    "log": "current-b2c-controls-r1.log",
+    "log_sha256": "613f5dd0637ee11e17885210ec0644defcb655bbe490b37128a5d785ed59bb97",
+    "py_compile": "PASS",
+    "scanner_controls": "40/40 PASS",
+    "strict_evidence_tests": "11/11 PASS"
+  },
+  "created_at_utc": "2026-11-02T13:53:12Z",
+  "failed_build_recovery_attempts": {
+    "all_attempt_logs_and_preservation_archives_included": true,
+    "canonical_bind_phase14": "phase14-canonical-bind-rebuild-b2c-r1.log (Phase-14 protected hashes reproduced)",
+    "final_full_build": "fresh-current-source-b2c-canonical-build-r2.log (full --image build and ISA audit PASS; absolute PYTHONPATH; EFI and ESP identities exactly match recorded run)",
+    "first_full_build": "fresh-current-source-b2c-canonical-build-r1.log (EFI/ISA audit succeeded; ESP tool could not import pyfatfs due relative PYTHONPATH; EFI copy preserved uniquely)",
+    "first_home_alias_build": "fresh-build-current-b2c-r1.log (Phase-14 protected hash mismatch; mismatch artifact preserved and guard unchanged)",
+    "symlink_alias_attempt": "phase14-canonical-rebuild-b2c-r1.log (Cargo canonicalized symlink to /home/user and reproduced mismatch)"
+  },
+  "fresh_current_source_build": {
+    "bit_identical_to_prior_fresh_build": {
+      "efi": true,
+      "esp": true
+    },
+    "branch": "arena/af044828-arenaos",
+    "build_command": "source tools/dev-env/v1-env.sh; env -u ARENA_GRAPHICS_FIXTURE -u ARENA_TEST_BUILD_CACHE CARGO_NET_OFFLINE=true PYTHONPATH=/workspace/ArenaOS/build/v1-build-python-b2c-r1 bash tools/build.sh --image",
+    "build_log": "fresh-current-source-b2c-canonical-build-r2.log",
+    "build_log_sha256": "aab807a53df0fd5811be7390fc3d344002c562de1bae737882f408aa1629bbf7",
+    "caveat": "The new current-source commit b2c23fb is not the run commit ff6b04d. The original commit object is unavailable, but this fresh current-source build reproduced the exact EFI and ESP SHA-256 identities recorded for the captured QEMU run. This is artifact identity continuity, not a replacement source-commit identity or a new guest qualification run.",
+    "full_build_result": "PASS: tools/build.sh --image exited 0; protected Phase-14 PIE guard and APB1 identity matched; kernel ISA audit and negative controls passed; 16 MiB ESP generated.",
+    "historical_run_build_identities": {
+      "efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+      "esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551"
+    },
+    "image_freshness": {
+      "boot_efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+      "fresh": true,
+      "image_mtime": 1793627230.189434,
+      "newest_source": "tools/v1_diagnostic_evidence.py",
+      "newest_source_mtime": 1793626053.5394886
+    },
+    "protected_phase14_pie": {
+      "mtime_ns": 1793626042535432893,
+      "path": "/workspace/ArenaOS/userspace/phase14-pie/fixture.elf",
+      "sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+      "size": 23256
+    },
+    "protected_signed_phase14_apb1": {
+      "mtime_ns": 1793626042535432893,
+      "path": "/workspace/ArenaOS/userspace/phase14-pie/phase14-pie.apb1",
+      "sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa",
+      "size": 24040
+    },
+    "qemu_result": "NO NEW QEMU RUN in resumed checkout. Historical genuine QEMU attempts and captures remain under guest-run, guest-run-retry1, guest-run-retry2; diagnostic qualification status is unchanged.",
+    "recorded_at_utc": "2026-11-02T13:47:44Z",
+    "repo_build_artifacts": {
+      "efi": {
+        "mtime_ns": 1793627228829427138,
+        "path": "/workspace/ArenaOS/build/arena-boot.efi",
+        "sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "size": 11039232
+      },
+      "esp": {
+        "mtime_ns": 1793627230189434011,
+        "path": "/workspace/ArenaOS/build/arena-esp.img",
+        "sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+        "size": 16777216
+      }
+    },
+    "run_source_commit_object_present_now": false,
+    "run_source_commit_reported_in_prior_evidence": "ff6b04d791aeabd3e5875194460153c42580f742",
+    "rust_lld_path": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld",
+    "rust_lld_sha256": "8e5130a02d8f3473ed4c4b971d43c301205c89854bb467257e64eafe4bf21ca8",
+    "rustc_sha256": "df13f58759c0662831983e3a6501c63c1fc12ea60ec4e1d1ac35e5fe43c500c0",
+    "rustc_version": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "schema": "arena.v1.current-source-build-identities/v1",
+    "source_commit": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f",
+    "source_path_scope": "tools, kernel, userspace, experiments",
+    "source_path_scope_dirty": false,
+    "source_tree": "aedec742eb7b97819dc76eeeb749360cefc158b9",
+    "unique_preserved_build_inputs": {
+      "efi": {
+        "mtime_ns": 1793627264161605674,
+        "path": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/build-inputs/current-b2c-final-r1/arena-boot.efi",
+        "sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+        "size": 11039232
+      },
+      "esp": {
+        "mtime_ns": 1793627264173605734,
+        "path": "/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/build-inputs/current-b2c-final-r1/arena-esp.img",
+        "sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+        "size": 16777216
+      }
+    }
+  },
+  "identity_and_scope": {
+    "artifact_hash_match_does_not_replace_original_git_commit_identity": true,
+    "authority_or_capability_policy_changed": false,
+    "both_hashes_match_recorded_guest_run": true,
+    "current_build_efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+    "current_build_esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+    "current_source_commit": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f",
+    "fresh_build_from_current_committed_source": true,
+    "phase13_timeout_changed_or_skipped": false,
+    "protected_hash_guards_changed": false,
+    "protected_phase14_pie_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+    "protected_signed_phase14_apb1_sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa",
+    "qemu_run_in_resumed_checkout": false,
+    "reason_no_new_qemu_run": "Pinned QEMU wrapper/ELF, isolated glibc loader, and OVMF files are absent; their original identities remain recorded. Existing genuine QEMU attempt evidence is preserved.",
+    "reported_commit_object_available": false,
+    "reported_guest_source_commit": "ff6b04d791aeabd3e5875194460153c42580f742"
+  },
+  "limitations": [
+    "No new QEMU run occurred in this resumed checkout.",
+    "The original run source commit ff6b04d is unavailable as a Git object; no replacement identity is asserted.",
+    "The original run-era ESP binary and old Phase-15 EFI/ESP inputs are absent; a fresh current-source build recreated EFI/ESP bytes exactly matching the recorded current run identities, but is not represented as the lost original physical file.",
+    "Retry1/retry2 per-boot raw QEMU stderr/TCP/UDP/VCon streams are not present; existing harness serials, images, identities and transcripts are retained.",
+    "The PPM restoration verifier reports zero expected missing PPMs because it covers present PPM reconstruction; the separate missing-frames-r1 inventory correctly records 12 missing required checkpoint PNGs in the two failed runs."
+  ],
+  "missing_frames": {
+    "all_paths_absent_at_inventory_time": true,
+    "count": 12,
+    "inventory": "missing-frames-r1.json",
+    "inventory_sha256": "74baa84f13893a2c05186ed1370089362091434d2069d894584e200bbc6a6f6c",
+    "retry2_has_all_required_checkpoint_frames": true,
+    "summary": "Original run and retry1 failed checkpoint 5; each consequently lacks six required checkpoint PNGs (cp05 through cp08, including the three cp06 image entries). Retry2 passed and contains all required checkpoint PNGs. The individual cp05 sample captures from failed attempts remain preserved and are not substitutes for the missing required summary frame."
+  },
+  "omitted_inputs": "omitted-inputs-r1.json",
+  "overall_status": "NOT ACCEPTED. The full r6 gate remains FAIL. Retry2 is a PASS for the standalone eight-checkpoint guest-proof harness only; it is not a full V1 qualification.",
+  "package_classification": "diagnostic-only",
+  "predicate_and_timing": {
+    "analysis_file": "runtime-scan-analysis-r1.json",
+    "analysis_sha256": "5aca02a7b3bbad34f924307232748f83d18a42528a7f2598b1a7c4f505316900",
+    "approx_flash_duration_seconds": 0.99999,
+    "captured_ack_timestamp_on_retry2": "2026-11-02T04:51:42.836239751Z",
+    "evaluation_timings": [
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.028936385999941194,
+        "numpy_verdict": false,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 1.025304856000048,
+        "pure_verdict": false,
+        "reason": "no acknowledgment and no visible response",
+        "recorded_verdict": false,
+        "run": "guest-run",
+        "sample": 1,
+        "sample_ack_ok": false,
+        "sample_start_gap_ms": null,
+        "sample_visual_ok": false,
+        "utc_start": "2026-11-02T04:43:47.511445813Z"
+      },
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.030150430999924538,
+        "numpy_verdict": false,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 1.0223284009999816,
+        "pure_verdict": false,
+        "reason": "acknowledgment but no visible flash in the window",
+        "recorded_verdict": false,
+        "run": "guest-run",
+        "sample": 2,
+        "sample_ack_ok": true,
+        "sample_start_gap_ms": 1787.266618,
+        "sample_visual_ok": false,
+        "utc_start": "2026-11-02T04:43:49.298711307Z"
+      },
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.02700639800002591,
+        "numpy_verdict": false,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 1.0898228020000715,
+        "pure_verdict": false,
+        "reason": "acknowledgment but no visible flash in the window",
+        "recorded_verdict": false,
+        "run": "guest-run",
+        "sample": 3,
+        "sample_ack_ok": true,
+        "sample_start_gap_ms": 1492.332878,
+        "sample_visual_ok": false,
+        "utc_start": "2026-11-02T04:43:50.791045408Z"
+      },
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.026825572000007014,
+        "numpy_verdict": false,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 0.9902863009999692,
+        "pure_verdict": false,
+        "reason": "no acknowledgment and no visible response",
+        "recorded_verdict": false,
+        "run": "guest-run-retry1",
+        "sample": 1,
+        "sample_ack_ok": false,
+        "sample_start_gap_ms": null,
+        "sample_visual_ok": false,
+        "utc_start": "2026-11-02T04:48:41.347671126Z"
+      },
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.02701538500002698,
+        "numpy_verdict": false,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 1.0227847200000042,
+        "pure_verdict": false,
+        "reason": "acknowledgment but no visible flash in the window",
+        "recorded_verdict": false,
+        "run": "guest-run-retry1",
+        "sample": 2,
+        "sample_ack_ok": true,
+        "sample_start_gap_ms": 2104.12868,
+        "sample_visual_ok": false,
+        "utc_start": "2026-11-02T04:48:43.451798642Z"
+      },
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.027059805000021697,
+        "numpy_verdict": false,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 1.0192476219999662,
+        "pure_verdict": false,
+        "reason": "no acknowledgment and no visible response",
+        "recorded_verdict": false,
+        "run": "guest-run-retry2",
+        "sample": 1,
+        "sample_ack_ok": false,
+        "sample_start_gap_ms": null,
+        "sample_visual_ok": false,
+        "utc_start": "2026-11-02T04:51:42.691443005Z"
+      },
+      {
+        "numpy_2_4_6_evaluate_seconds": 0.020487643000024036,
+        "numpy_verdict": true,
+        "predicates_identical": true,
+        "pure_python_evaluate_seconds": 0.5542199390000633,
+        "pure_verdict": true,
+        "reason": "",
+        "recorded_verdict": true,
+        "run": "guest-run-retry2",
+        "sample": 2,
+        "sample_ack_ok": true,
+        "sample_start_gap_ms": 144.79707,
+        "sample_visual_ok": true,
+        "utc_start": "2026-11-02T04:51:42.836239751Z"
+      }
+    ],
+    "flash_frames": 30,
+    "frame_period_microseconds": 33333,
+    "interpretation": "The unchanged pure-Python raster evaluator took about 1.0\u20131.14 s on failed-attempt probes, producing sparse samples; the NumPy 2.4.6 path took about 0.028 s on those same no-flash probes. Every pure and NumPy verdict matched the recorded predicate result. These timings support a sampling-latency explanation, but do not prove when an unseen guest flash began. No timeout was increased and no capture was synthesized.",
+    "mouse_window_rect": [
+      70,
+      60,
+      640,
+      480
+    ],
+    "no_flash_sample_gaps_ms": {
+      "original": [
+        1787.267,
+        1492.333
+      ],
+      "retry1": [
+        2104.129
+      ],
+      "retry2": [
+        144.797
+      ]
+    },
+    "predicate": "fresh same-instance/same-event acknowledgment AND visible response inside the target window AND clean pre-input frame; unchanged production predicate",
+    "timeout_increased": false,
+    "timeout_seconds": 4.0
+  },
+  "qualification_claim": "NONE",
+  "report_updated_at_utc": "2026-11-02T14:00:15Z",
+  "report_version": 1,
+  "schema": "arena.v1.input-proof-diagnostic-report/v1",
+  "selected_current_source_snapshot": "source-snapshot-current-b2c-r1.json (selected snapshot from current commit b2c23fb; not asserted identical to original run commit ff6b04d)",
+  "source_identity_reconciliation": {
+    "git_facts": "The reported run commit object was not found after reconciling this resumed checkout. No object was fabricated or substituted.",
+    "historical_workspace_note": "The prior run artifacts refer to /workspace/ArenaOS and external build/runtime paths that are absent in the resumed checkout. Source-commit identity is preserved exactly as recorded in the run evidence.",
+    "reconciliation": {
+      "current_commit_is_reported_run_commit": false,
+      "current_source_patch_files": [
+        {
+          "git_blob": "0f1ce41d975560ae8eeae3445596e87ef6c05839",
+          "path": "tools/test_v1_evidence.py",
+          "sha256": "712b83b4c9580c7fabfe76e0f4e6432187cd904c96cfef417b23586efac8f41b",
+          "size": 13288
+        },
+        {
+          "git_blob": "870509cf5e0638dcc73ae38f3b3552e3f009dde6",
+          "path": "tools/test_v1_gate_aggregate.py",
+          "sha256": "fff6b2cc173474cb49c1e2f0a73812e589fc12d46b1273890a1c94729a328e92",
+          "size": 13477
+        },
+        {
+          "git_blob": "f609997d5e4772a3e6fd7dc0011c234c0f9cb212",
+          "path": "tools/v1_evidence.py",
+          "sha256": "a8ffa854721933dd98d1aa3b7008ac9c4c52d559c015cdaeb65d959b6a439bf3",
+          "size": 45518
+        },
+        {
+          "git_blob": "091df7cc4016f797d24056ceb8eb312c4929db1d",
+          "path": "tools/v1_gate_aggregate.py",
+          "sha256": "7eae78289d46cb8906273fde4520e3506731984e768c2d1f4395360c665f9132",
+          "size": 45520
+        },
+        {
+          "git_blob": "d4bd73d00f20991dfad46b93684127365853db94",
+          "path": "tools/v1_guest_proof.py",
+          "sha256": "1ff6634046f6f2c0ecce907fc330e7187fd9142cce81f4e927bb00ddb3147fbc",
+          "size": 157174
+        }
+      ],
+      "current_source_tree": "aedec742eb7b97819dc76eeeb749360cefc158b9",
+      "fast_forward_base": "bfa4e85564a8e7840b862c7fdc89794190a34158",
+      "prior_local_head": "bfa4e85564a8e7840b862c7fdc89794190a34158",
+      "qualification_freshness_note": "The guest run records a fresh build at the reported source commit and EFI/ESP identities. No new build or QEMU run was performed from the new current commit in this resumed checkout. The matching source files were re-committed for preservation, but this new commit is not substituted for the recorded run identity; full-tree equivalence to the unavailable run commit is unverified.",
+      "remote_head_at_reconciliation": "9d20e620e484ba51af6876633e54e6e0fe438a77",
+      "source_patch_commit_parent": "9d20e620e484ba51af6876633e54e6e0fe438a77",
+      "source_patch_recommitted_as": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f"
+    },
+    "recorded_at_utc": "2026-11-02T13:39:20Z",
+    "recorded_source_tree_dirty": false,
+    "reported_guest_run_branch": "arena/af044828-arenaos",
+    "reported_guest_run_source_commit": "ff6b04d791aeabd3e5875194460153c42580f742",
+    "reported_run_commit_object_present_in_resumed_repository": false,
+    "schema": "arena.v1.source-identity-reconciliation/v1"
+  },
+  "v1_accepted": false
+}

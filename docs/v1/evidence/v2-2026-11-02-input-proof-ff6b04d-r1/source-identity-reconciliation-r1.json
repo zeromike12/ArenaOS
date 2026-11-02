@@ -1,0 +1,52 @@
+{
+  "git_facts": "The reported run commit object was not found after reconciling this resumed checkout. No object was fabricated or substituted.",
+  "historical_workspace_note": "The prior run artifacts refer to /workspace/ArenaOS and external build/runtime paths that are absent in the resumed checkout. Source-commit identity is preserved exactly as recorded in the run evidence.",
+  "reconciliation": {
+    "current_commit_is_reported_run_commit": false,
+    "current_source_patch_files": [
+      {
+        "git_blob": "0f1ce41d975560ae8eeae3445596e87ef6c05839",
+        "path": "tools/test_v1_evidence.py",
+        "sha256": "712b83b4c9580c7fabfe76e0f4e6432187cd904c96cfef417b23586efac8f41b",
+        "size": 13288
+      },
+      {
+        "git_blob": "870509cf5e0638dcc73ae38f3b3552e3f009dde6",
+        "path": "tools/test_v1_gate_aggregate.py",
+        "sha256": "fff6b2cc173474cb49c1e2f0a73812e589fc12d46b1273890a1c94729a328e92",
+        "size": 13477
+      },
+      {
+        "git_blob": "f609997d5e4772a3e6fd7dc0011c234c0f9cb212",
+        "path": "tools/v1_evidence.py",
+        "sha256": "a8ffa854721933dd98d1aa3b7008ac9c4c52d559c015cdaeb65d959b6a439bf3",
+        "size": 45518
+      },
+      {
+        "git_blob": "091df7cc4016f797d24056ceb8eb312c4929db1d",
+        "path": "tools/v1_gate_aggregate.py",
+        "sha256": "7eae78289d46cb8906273fde4520e3506731984e768c2d1f4395360c665f9132",
+        "size": 45520
+      },
+      {
+        "git_blob": "d4bd73d00f20991dfad46b93684127365853db94",
+        "path": "tools/v1_guest_proof.py",
+        "sha256": "1ff6634046f6f2c0ecce907fc330e7187fd9142cce81f4e927bb00ddb3147fbc",
+        "size": 157174
+      }
+    ],
+    "current_source_tree": "aedec742eb7b97819dc76eeeb749360cefc158b9",
+    "fast_forward_base": "bfa4e85564a8e7840b862c7fdc89794190a34158",
+    "prior_local_head": "bfa4e85564a8e7840b862c7fdc89794190a34158",
+    "qualification_freshness_note": "The guest run records a fresh build at the reported source commit and EFI/ESP identities. No new build or QEMU run was performed from the new current commit in this resumed checkout. The matching source files were re-committed for preservation, but this new commit is not substituted for the recorded run identity; full-tree equivalence to the unavailable run commit is unverified.",
+    "remote_head_at_reconciliation": "9d20e620e484ba51af6876633e54e6e0fe438a77",
+    "source_patch_commit_parent": "9d20e620e484ba51af6876633e54e6e0fe438a77",
+    "source_patch_recommitted_as": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f"
+  },
+  "recorded_at_utc": "2026-11-02T13:39:20Z",
+  "recorded_source_tree_dirty": false,
+  "reported_guest_run_branch": "arena/af044828-arenaos",
+  "reported_guest_run_source_commit": "ff6b04d791aeabd3e5875194460153c42580f742",
+  "reported_run_commit_object_present_in_resumed_repository": false,
+  "schema": "arena.v1.source-identity-reconciliation/v1"
+}

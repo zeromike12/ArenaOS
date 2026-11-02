@@ -1,0 +1,15 @@
+ARENA V1 DIAGNOSTIC ARCHIVE RECEIPT
+Classification: DIAGNOSTIC ONLY — NOT A QUALIFICATION PACKAGE
+Observed full gate result: FAIL
+Candidate qualified: False
+Source commit: 64efe9b858f8dce10b186ce7f80b8f47d041292d
+Branch: arena/af044828-arenaos
+Archive: v2-2026-10-31-boundary-r6-diagnostic.tar.gz
+Archive size: 7113203 bytes
+Archive SHA-256: 146f2af7f88b1ce29d035a48ad329b9286954e199413b58e18a4c5747adfff4e
+Manifest files: 352
+Raw PPM captures included: 112
+Missing required captures recorded: 6
+Fresh local extraction verification: PASS (every listed digest checked; no unlisted files)
+Verification command: python3 tools/v1_diagnostic_evidence.py verify v2-2026-10-31-boundary-r6-diagnostic.tar.gz
+Sealed UTC: 2026-11-01T01:11:28.701875+00:00

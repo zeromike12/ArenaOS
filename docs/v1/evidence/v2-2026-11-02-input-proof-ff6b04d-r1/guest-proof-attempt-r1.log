@@ -1,0 +1,42 @@
+recorded_at_utc=2026-11-02T04:43:14Z
+repo=/workspace/ArenaOS
+branch=arena/af044828-arenaos
+source_commit=ff6b04d791aeabd3e5875194460153c42580f742
+command=python3 tools/v1_guest_proof.py
+V1_CC=gcc
+V1_INPUT_SAMPLE_TRACE=*
+V1_EVIDENCE_DIR=/workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run
+ARENA_QEMU=/home/user/phase16-backend/qemu-patched
+ARENA_OVMF_CODE=/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd
+ARENA_OVMF_VARS=/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd
+[v1-guest-proof] built APB1 /workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run/c-gfx-app.apb1 (40472 bytes, sha256 cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0) with gcc from ELF /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-app-gcc.elf (sha256 3c7047afa517b5123b3de54eac25b4f767f018636a5ad1707e67eb9acbfc15ad, simd/x87=0)
+[v1-guest-proof] run directory: /workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run
+[v1-guest-proof] source commit: ff6b04d791aeabd3e5875194460153c42580f742
+[v1-guest-proof] working tree dirty: False
+[v1-guest-proof] AFS2 formatted by filesd (boot 1, 9.4s)
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (40472 bytes)
+[v1-guest-proof] checkpoint 1 PASS: launch-ready Desktop desktop frame presented; app-instances=0 windows=0
+[v1-guest-proof] checkpoint 2 PASS: APB1 install receipt (protected installer) protected installer installed signed version=42
+[v1-guest-proof] primed instance 159 at (70, 60, 640, 480); frame warm-up 5 of at most 32; settled receipt 112781/15/15/3/472/5/47
+[v1-guest-proof] checkpoint 3 PASS: first native C window (Identify -> create -> render) Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance
+[v1-guest-proof] input cp04-keyboard-response: PASS; 1 timestamped samples
+[v1-guest-proof] checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) KEY ack surface=164 counter 2->3 + flash in the window, frame 902a6058ee51
+[v1-guest-proof] input cp05-mouse-response: FAIL; 3 timestamped samples; acknowledgment but no visible flash in the window
+[v1-guest-proof] checkpoint 5 FAIL: mouse response (instance-specific acknowledgment) pointer input not proven: acknowledgment but no visible flash in the window (ack_ok=True visual_ok=False residual=False)
+[v1-guest-proof] checkpoint 6 NOT RUN: two concurrent instances: focus/input isolation, both directions blocked by checkpoint 5 failure
+[v1-guest-proof] checkpoint 7 NOT RUN: window removal: retirements, exits, settlement, visual removal blocked by checkpoint 5 failure
+[v1-guest-proof] checkpoint 8 NOT RUN: final V1 demonstration blocked by checkpoint 5 failure
+[v1-guest-proof] rc=0 dt=24.1s serial -> /workspace/ArenaOS/docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run/v1-guest-serial.log
+/home/user/ArenaOS/build/v1-canonical-python/lib/python3.11/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+  checkpoint 1 PASS: launch-ready Desktop (shots/cp01-launch-ready-desktop.png)
+  checkpoint 2 PASS: APB1 install receipt (protected installer) (install-ack.json)
+  checkpoint 3 PASS: first native C window (Identify -> create -> render) (shots/cp03-first-native-c-window.png)
+  checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) (shots/cp04-keyboard-response.png)
+  checkpoint 5 FAIL: mouse response (instance-specific acknowledgment) (shots/cp05-mouse-response.png)
+  checkpoint 6 NOT RUN: two concurrent instances: focus/input isolation, both directions ()
+  checkpoint 7 NOT RUN: window removal: retirements, exits, settlement, visual removal ()
+  checkpoint 8 NOT RUN: final V1 demonstration ()
+[v1-guest-proof] V1 GUEST PROOF FAIL
+[v1-guest-proof] failed because: ['checkpoint 5 FAIL', 'checkpoint 6 NOT RUN', 'checkpoint 7 NOT RUN', 'checkpoint 8 NOT RUN', 'required checkpoint frame missing: checkpoint 5: shots/cp05-mouse-response.png', 'required checkpoint frame missing: checkpoint 6: shots/cp06a-two-instances.png', 'required checkpoint frame missing: checkpoint 6: shots/cp06a-focused.png', 'required checkpoint frame missing: checkpoint 6: shots/cp06b-focused.png', 'required checkpoint frame missing: checkpoint 7: shots/cp07-desktop-restored.png', 'required checkpoint frame missing: checkpoint 8: shots/cp08-final-demonstration.png']
+GUEST_PROOF_EXIT=1
