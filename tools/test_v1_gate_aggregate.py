@@ -214,6 +214,36 @@ class AggregateRequirementTests(unittest.TestCase):
             self.assertTrue(any("not real SharedRegion integration" in error
                                 for error in errors))
 
+    def test_5f_rejects_missing_rendered_band_assertion_even_if_json_passes(self):
+        with tempfile.TemporaryDirectory(prefix=".v1-aggregate-", dir=ROOT) as tmp:
+            root = Path(tmp) / "layout-integration-gcc"
+            root.mkdir()
+            (root / "integration-evidence.json").write_text(json.dumps({
+                "kind": "real_shared_region_layout_integration",
+                "guest_compiler_under_test": "gcc",
+                "source_commit": "a" * 40,
+                "pass": True,
+                "rc": 0,
+                "identities": {},
+                "artifacts": {},
+                "fixtures": {
+                    "301": {
+                        "pass": True,
+                        "rendered_visual_assertion": True,
+                        "rendered_visual_bands": {
+                            "top": True, "middle": True, "bottom": False,
+                        },
+                        "frames": {},
+                    },
+                },
+            }))
+            receipt = {"evidence_dir": str(root.relative_to(ROOT)),
+                       "source_commit": "a" * 40}
+            errors = aggregate.layout_integration_evidence_problems(
+                receipt, "layout-integration-gcc")
+            self.assertTrue(any("top/middle/bottom visual-band assertions are incomplete" in error
+                                for error in errors), errors)
+
     def test_full_requirement_evaluation_fails_without_5e_case_evidence(self):
         receipts = {stage: {"exit": 0, "qualified": True}
                     for stage in aggregate.STAGES["full"]}

@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+from v1_evidence import check_integration_frames
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RECEIPTS = Path("build/v1-gate/receipts")
 
@@ -386,6 +388,8 @@ def layout_integration_evidence_problems(receipt: dict, stage: str) -> list[str]
         return [f"{label}: evidence root is not an object"]
 
     errors: list[str] = []
+    for issue in check_integration_frames(evidence_dir):
+        errors.append(f"{label}: {issue}")
     as_dict = lambda value: value if isinstance(value, dict) else {}
     expected_compiler = stage.rsplit("-", 1)[-1]
     if data.get("kind") != "real_shared_region_layout_integration":
@@ -435,11 +439,19 @@ def layout_integration_evidence_problems(receipt: dict, stage: str) -> list[str]
         "elf_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
         "loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
     }
-    if qemu.get("identity_ok") is not True:
+    if qemu.get("identity_ok") is not True or qemu.get("elf_ok") is not True:
         errors.append(f"{label}: QEMU backend identity is incomplete")
     for key, expected_hash in backend_hashes.items():
         if qemu.get(key) != expected_hash:
             errors.append(f"{label}: QEMU {key} is {qemu.get(key)!r}, expected {expected_hash}")
+    firmware = as_dict(qemu.get("firmware"))
+    expected_firmware = {
+        "code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+        "vars_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+    }
+    for key, expected_hash in expected_firmware.items():
+        if firmware.get(key) != expected_hash:
+            errors.append(f"{label}: QEMU firmware {key} is {firmware.get(key)!r}, expected {expected_hash}")
     runtime_libs = qemu.get("runtime_libs")
     if not isinstance(runtime_libs, list) or not any(
             isinstance(item, dict)
@@ -621,6 +633,21 @@ def layout_integration_evidence_problems(receipt: dict, stage: str) -> list[str]
                     or fixture.get("rendered_visual_assertion") is not True \
                     or fixture.get("pixel_nonzero_words") != 307200:
                 errors.append(f"{label}: 301 success, Identify, render, or damage assertions are missing")
+            bands = as_dict(fixture.get("rendered_visual_bands"))
+            if any(bands.get(name) is not True for name in ("top", "middle", "bottom")):
+                errors.append(f"{label}: 301 top/middle/bottom visual bands are not all asserted")
+            placement = as_dict(fixture.get("placement"))
+            rect = placement.get("rect")
+            geometry_ok = (isinstance(rect, (list, tuple)) and len(rect) == 4
+                           and all(type(value) is int for value in rect))
+            if geometry_ok:
+                x, y, width, height = rect
+                geometry_ok = (x >= 0 and y >= 0 and width > 0 and height > 28
+                               and x + width <= 800 and y + height <= 600)
+            if not geometry_ok or placement.get("surface") != surface \
+                    or type(placement.get("handle")) is not int \
+                    or placement.get("handle") <= 0:
+                errors.append(f"{label}: 301 placement geometry/identity is invalid")
             if re.search(r"\[gfx\] exit events=\d+ focused=-?\d+ code=0 "
                          rf"surface={surface}", serial) is None:
                 errors.append(f"{label}: 301 C client did not report clean exit")

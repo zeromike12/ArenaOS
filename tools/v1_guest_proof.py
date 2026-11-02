@@ -65,19 +65,33 @@ import arena_env  # noqa: E402
 import mtest  # noqa: E402
 import afs2  # noqa: E402
 
-LABEL = "v1-guest-proof"
+# QEMU serial, stderr and QMP paths are label-derived under build/. Give each
+# invocation a distinct label as well as a distinct evidence root so a retry
+# cannot replace a previous run's host-side captures.
+LABEL = os.environ.get("V1_GUEST_LABEL") or (
+    f"v1-guest-proof-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-"
+    f"{os.getpid()}"
+)
 
 # Evidence goes to a per-invocation temporary directory by default. Setting
 # V1_EVIDENCE_DIR points the run at a durable package directory instead, so a
 # published run's artifacts are written where the verdict says they are —
 # not copied there afterwards by hand, which is how a stale file becomes
 # indistinguishable from a fresh one.
-RUN_DIR = Path(
-    os.environ.get("V1_EVIDENCE_DIR")
-    or tempfile.mkdtemp(prefix=f"v1-guest-proof-{int(time.monotonic())}-")
-)
+_evidence_dir = os.environ.get("V1_EVIDENCE_DIR")
+if _evidence_dir:
+    RUN_DIR = Path(_evidence_dir).resolve()
+    if RUN_DIR.exists():
+        if not RUN_DIR.is_dir() or any(RUN_DIR.iterdir()):
+            raise SystemExit(
+                f"refusing to reuse non-empty V1_EVIDENCE_DIR: {RUN_DIR}")
+    else:
+        RUN_DIR.mkdir(parents=True, exist_ok=False)
+else:
+    RUN_DIR = Path(tempfile.mkdtemp(
+        prefix=f"v1-guest-proof-{int(time.monotonic())}-")).resolve()
 SHOTS = RUN_DIR / "shots"
-SHOTS.mkdir(parents=True, exist_ok=True)
+SHOTS.mkdir(parents=True, exist_ok=False)
 EVIDENCE = RUN_DIR / "evidence.json"
 SERIAL_OUT = RUN_DIR / "v1-guest-serial.log"
 INSTALL_ACK_PATH = RUN_DIR / "install-ack.json"
@@ -85,6 +99,9 @@ HARNESS_LOG = RUN_DIR / "harness-output.log"
 
 ESP = arena_env.build_dir() / "arena-esp.img"
 APB1 = RUN_DIR / "c-gfx-app.apb1"
+# Per-input timestamps, verdict components and exact frame identities. This is
+# diagnostic provenance; it does not relax any checkpoint predicate.
+INPUT_PROOFS: list[dict] = []
 
 SCREEN_W, SCREEN_H = 800, 600
 
@@ -832,6 +849,8 @@ def app_mask(data: bytes, width: int = SCREEN_W, height: int = SCREEN_H) -> list
 
 def has_app_color(data: bytes, rect, width: int = SCREEN_W,
                   height: int = SCREEN_H) -> bool:
+    if not isinstance(data, (bytes, bytearray)) or len(data) != width * height * 3:
+        return False
     x, y, w, h = rect
     x0, y0 = max(0, x), max(0, y)
     x1, y1 = min(x + w, width), min(y + h, height)
@@ -996,8 +1015,27 @@ def pixel_flash(data: bytes, x: int, y: int, width: int = SCREEN_W,
     return any(color_close(data[i:i + 3], c) for c in FLASH_COLORS)
 
 
+def valid_rgb_frame(data, width: int = SCREEN_W,
+                    height: int = SCREEN_H) -> bool:
+    """A screen sample is usable only when it is a complete RGB raster."""
+    return isinstance(data, (bytes, bytearray)) and len(data) == width * height * 3
+
+
+def valid_window_rect(rect, width: int = SCREEN_W,
+                      height: int = SCREEN_H) -> bool:
+    """Require an integer, positive, wholly on-screen window rectangle."""
+    if not isinstance(rect, (tuple, list)) or len(rect) != 4 \
+            or any(type(value) is not int for value in rect):
+        return False
+    x, y, w, h = rect
+    return (x >= 0 and y >= 0 and w > 0 and h > TITLE_H
+            and x + w <= width and y + h <= height)
+
+
 def has_flash_color(data: bytes, rect, width: int = SCREEN_W,
                     height: int = SCREEN_H) -> bool:
+    if not isinstance(data, (bytes, bytearray)) or len(data) != width * height * 3:
+        return False
     x, y, w, h = rect
     x0, y0 = max(0, x), max(0, y)
     x1, y1 = min(x + w, width), min(y + h, height)
@@ -1496,20 +1534,24 @@ def evaluate_input_proof(ack_eval, pre_frame, frame, rect):
       * a fresh acknowledgment for the expected instance *and* event type,
         with the per-instance counter advanced and no cross-instance
         acknowledgment (all decided by `evaluate_event_ack`);
-      * a captured frame in which the instance's own flash is visible inside
-        the window rectangle the window manager gave it;
-      * no residual flash in the frame captured immediately BEFORE the input
-        — otherwise "visible response" would be satisfied by whatever was
-        already on screen.
+      * a valid, wholly on-screen window rectangle;
+      * a complete captured frame in which the instance's flash is visible
+        inside that rectangle; and
+      * a complete, flash-free frame captured immediately BEFORE the input.
 
     Acknowledgment alone proves delivery, not that anything was shown. A
     flash alone proves pixels, not that this instance received this event.
-    Neither is accepted on its own, and a missing frame fails.
+    Neither is accepted on its own. Missing, malformed, stale, or geometrically
+    invalid frame evidence fails closed.
     """
     ack_ok = bool(ack_eval) and bool(ack_eval.get("ok"))
-    residual = pre_frame is not None and has_flash_color(pre_frame, rect)
-    visual_ok = (frame is not None and not residual
-                 and has_flash_color(frame, rect))
+    rect_ok = valid_window_rect(rect)
+    pre_present = valid_rgb_frame(pre_frame)
+    frame_present = valid_rgb_frame(frame)
+    residual = bool(pre_present and rect_ok and has_flash_color(pre_frame, rect))
+    clean_pre = bool(pre_present and rect_ok and not residual)
+    visual_ok = bool(frame_present and clean_pre
+                     and has_flash_color(frame, rect))
     if ack_ok and visual_ok:
         reason = ""
     elif not ack_ok and not visual_ok:
@@ -1517,10 +1559,14 @@ def evaluate_input_proof(ack_eval, pre_frame, frame, rect):
     elif not ack_ok:
         reason = ("visible response without an acknowledgment for this "
                   "instance and event type")
-    elif frame is None:
-        reason = "acknowledgment without a captured visible response"
+    elif not rect_ok:
+        reason = "window rectangle is invalid or outside the captured screen"
+    elif not pre_present:
+        reason = "no valid clean pre-input frame"
     elif residual:
         reason = "flash was already present before the input (stale)"
+    elif not frame_present:
+        reason = "acknowledgment without a valid captured response frame"
     else:
         reason = "acknowledgment but no visible flash in the window"
     return {
@@ -1528,7 +1574,10 @@ def evaluate_input_proof(ack_eval, pre_frame, frame, rect):
         "ack_ok": ack_ok,
         "visual_ok": visual_ok,
         "residual_flash": residual,
-        "frame_present": frame is not None,
+        "pre_frame_present": pre_present,
+        "clean_pre_frame": clean_pre,
+        "frame_present": frame_present,
+        "rect_valid": rect_ok,
         "reason": reason,
         "ack": ack_eval,
     }
@@ -1547,10 +1596,56 @@ def wait_flash_clear(d: V1Desktop, rect, timeout_s: float = 6.0):
     frame = None
     while time.monotonic() < end:
         frame = d.shot("__ack-clear__")
-        if not has_flash_color(frame, rect):
+        if valid_rgb_frame(frame) and valid_window_rect(rect) \
+                and not has_flash_color(frame, rect):
             return frame, True
         time.sleep(0.1)
     return frame, False
+
+
+def _utc_timestamp(ns: int) -> str:
+    seconds, nanos = divmod(ns, 1_000_000_000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(seconds)) \
+        + f".{nanos:09d}Z"
+
+
+def _input_sample_trace_enabled(save_as: str | None) -> bool:
+    setting = os.environ.get("V1_INPUT_SAMPLE_TRACE", "")
+    names = {name.strip() for name in setting.split(",") if name.strip()}
+    return bool(names.intersection({"1", "*", save_as or ""}))
+
+
+def _save_input_sample(save_as: str, index: int, timestamp: str,
+                       raster: bytes) -> dict:
+    """Save one timestamped, lossless PNG without creating a large PPM copy."""
+    if not valid_rgb_frame(raster):
+        raise ValueError("cannot save an invalid input-probe raster")
+    folder = SHOTS / f"{save_as}-samples"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = re.sub(r"[^A-Za-z0-9._-]", "", timestamp)
+    path = folder / f"sample-{index:03d}-{stamp}.png"
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite input sample {path}")
+    png = raster_to_png(SCREEN_W, SCREEN_H, raster)
+    if png_raster(png) != (SCREEN_W, SCREEN_H, raster):
+        raise RuntimeError("timestamped input sample PNG does not round-trip")
+    path.write_bytes(png)
+    return {
+        "path": str(path.relative_to(RUN_DIR)),
+        "png_sha256": sha256_file(path),
+        "raster_sha256": hashlib.sha256(raster).hexdigest(),
+    }
+
+
+def _ack_sample_identity(ack_eval) -> dict:
+    ack_eval = ack_eval if isinstance(ack_eval, dict) else {}
+    return {
+        "ok": bool(ack_eval.get("ok")),
+        "counter_before": ack_eval.get("counter_before"),
+        "counter_after": ack_eval.get("counter_after"),
+        "cross_acks": ack_eval.get("cross_acks", []),
+        "fresh_acks": ack_eval.get("fresh_acks", []),
+    }
 
 
 def do_input_and_ack(d: V1Desktop, instance: int, event_type: int,
@@ -1558,36 +1653,163 @@ def do_input_and_ack(d: V1Desktop, instance: int, event_type: int,
                      timeout_s: float = 4.0):
     """Inject `action` and return the production input verdict.
 
-    The frame that satisfied BOTH conditions is saved under `save_as` (when
-    given) and returned, so the published checkpoint image IS the frame the
-    assertion was made on. The pre-input frame that established the clean
-    baseline is saved beside it as `<save_as>-pre` for the same reason.
+    The predicate is unchanged: a fresh instance/event acknowledgment, a
+    visible in-window flash, and a valid flash-free pre-input frame are all
+    required. Every sample is timestamped. Opt-in sample tracing saves each
+    sampled raster as a lossless PNG; on failure the last sample is saved
+    under an explicitly diagnostic name, never as the required success frame.
     """
     pre_frame, clear = wait_flash_clear(d, rect)
-    if save_as:
-        save_frame(f"{save_as}-pre", pre_frame)
+    pre_recorded_ns = time.time_ns()
+    pre_valid = valid_rgb_frame(pre_frame)
+    pre_capture = None
+    if save_as and pre_valid:
+        pre_png = save_frame(f"{save_as}-pre", pre_frame)
+        pre_ppm = pre_png.with_suffix(".ppm")
+        pre_capture = {
+            "png": str(pre_png.relative_to(RUN_DIR)),
+            "png_sha256": sha256_file(pre_png),
+            "ppm": str(pre_ppm.relative_to(RUN_DIR)),
+            "ppm_sha256": sha256_file(pre_ppm),
+            "raster_sha256": hashlib.sha256(pre_frame).hexdigest(),
+        }
     cursor = d.cursor()
     action()
     end = time.monotonic() + timeout_s
-    verdict = None
+    trace_samples = _input_sample_trace_enabled(save_as)
+    samples = []
+    last_frame = None
+    last_verdict = None
+    last_capture = None
     while time.monotonic() < end:
+        sample_start_ns = time.time_ns()
+        sample_mono_start_ns = time.monotonic_ns()
         ack_eval = evaluate_event_ack(d.serial(), cursor, instance,
                                       event_type, others=others)
         frame = d.shot("__ack-probe__")
+        sample_end_ns = time.time_ns()
+        sample_mono_end_ns = time.monotonic_ns()
         verdict = evaluate_input_proof(ack_eval, pre_frame, frame, rect)
+        sample = {
+            "index": len(samples) + 1,
+            "utc_start": _utc_timestamp(sample_start_ns),
+            "utc_end": _utc_timestamp(sample_end_ns),
+            "monotonic_start_ns": sample_mono_start_ns,
+            "monotonic_end_ns": sample_mono_end_ns,
+            "frame_valid": valid_rgb_frame(frame),
+            "frame_raster_sha256": (hashlib.sha256(frame).hexdigest()
+                                     if valid_rgb_frame(frame) else "MISSING"),
+            "ack": _ack_sample_identity(ack_eval),
+            "ack_ok": verdict["ack_ok"],
+            "visual_ok": verdict["visual_ok"],
+            "pre_frame_present": verdict["pre_frame_present"],
+            "clean_pre_frame": verdict["clean_pre_frame"],
+            "residual_flash": verdict["residual_flash"],
+            "rect_valid": verdict["rect_valid"],
+            "passed": verdict["ok"],
+            "reason": verdict["reason"],
+        }
+        if trace_samples and valid_rgb_frame(frame):
+            sample["capture"] = _save_input_sample(
+                save_as or "input", sample["index"], sample["utc_start"], frame)
+        samples.append(sample)
+        last_frame = frame
+        last_verdict = verdict
         if verdict["ok"]:
+            frame_capture = None
             if save_as:
-                save_frame(save_as, frame)
+                png_path = save_frame(save_as, frame)
+                ppm_path = png_path.with_suffix(".ppm")
+                frame_capture = {
+                    "png": str(png_path.relative_to(RUN_DIR)),
+                    "png_sha256": sha256_file(png_path),
+                    "ppm": str(ppm_path.relative_to(RUN_DIR)),
+                    "ppm_sha256": sha256_file(ppm_path),
+                    "raster_sha256": hashlib.sha256(frame).hexdigest(),
+                    "width": SCREEN_W,
+                    "height": SCREEN_H,
+                }
+            input_record = {
+                "label": save_as,
+                "instance": instance,
+                "event_type": event_type,
+                "window_rect": list(rect) if isinstance(rect, (tuple, list)) else None,
+                "ack_cursor": cursor,
+                "timeout_seconds": timeout_s,
+                "pre_input": {
+                    "recorded_utc": _utc_timestamp(pre_recorded_ns),
+                    "clear_wait_succeeded": clear,
+                    "valid": pre_valid,
+                    "capture": pre_capture,
+                },
+                "sample_trace_enabled": trace_samples,
+                "samples": samples,
+                "result": "PASS",
+                "frame": frame_capture,
+            }
+            INPUT_PROOFS.append(input_record)
             verdict["frame"] = frame
-            verdict["frame_path"] = f"shots/{save_as}.png" if save_as else None
-            verdict["frame_ppm_sha256"] = hashlib.sha256(frame).hexdigest()
+            verdict["frame_path"] = frame_capture["png"] if frame_capture else None
+            verdict["frame_raster_sha256"] = hashlib.sha256(frame).hexdigest()
+            verdict["frame_ppm_sha256"] = (frame_capture["ppm_sha256"]
+                                            if frame_capture else "MISSING")
+            verdict["frame_capture"] = frame_capture
+            verdict["sample_count"] = len(samples)
+            print(f"[v1-guest-proof] input {save_as or instance}: PASS; "
+                  f"{len(samples)} timestamped samples", flush=True)
             return verdict
         time.sleep(0.08)
-    # Timed out: report what the serial said at the end, with no frame.
-    final_ack = evaluate_event_ack(d.serial(), cursor, instance, event_type,
-                                   others=others)
-    verdict = evaluate_input_proof(final_ack, pre_frame, None, rect)
-    return verdict
+
+    # Preserve the final evaluated sample rather than replacing it with None.
+    # It is diagnostic only and never written to the required success path.
+    if last_frame is not None and valid_rgb_frame(last_frame) and save_as:
+        failed_png = save_frame(f"{save_as}-failed-last-probe", last_frame)
+        failed_ppm = failed_png.with_suffix(".ppm")
+        last_capture = {
+            "png": str(failed_png.relative_to(RUN_DIR)),
+            "png_sha256": sha256_file(failed_png),
+            "ppm": str(failed_ppm.relative_to(RUN_DIR)),
+            "ppm_sha256": sha256_file(failed_ppm),
+            "raster_sha256": hashlib.sha256(last_frame).hexdigest(),
+            "width": SCREEN_W,
+            "height": SCREEN_H,
+        }
+    if last_verdict is None:
+        final_ack = evaluate_event_ack(d.serial(), cursor, instance, event_type,
+                                       others=others)
+        last_verdict = evaluate_input_proof(final_ack, pre_frame, None, rect)
+    input_record = {
+        "label": save_as,
+        "instance": instance,
+        "event_type": event_type,
+        "window_rect": list(rect) if isinstance(rect, (tuple, list)) else None,
+        "ack_cursor": cursor,
+        "timeout_seconds": timeout_s,
+        "pre_input": {
+            "recorded_utc": _utc_timestamp(pre_recorded_ns),
+            "clear_wait_succeeded": clear,
+            "valid": pre_valid,
+            "capture": pre_capture,
+        },
+        "sample_trace_enabled": trace_samples,
+        "samples": samples,
+        "result": "FAIL",
+        "reason": last_verdict["reason"],
+        "last_probe": last_capture,
+    }
+    INPUT_PROOFS.append(input_record)
+    last_verdict["frame"] = last_frame
+    last_verdict["frame_capture"] = last_capture
+    last_verdict["frame_path"] = last_capture["png"] if last_capture else None
+    last_verdict["frame_raster_sha256"] = (
+        last_capture["raster_sha256"] if last_capture else "MISSING")
+    last_verdict["frame_ppm_sha256"] = (
+        last_capture["ppm_sha256"] if last_capture else "MISSING")
+    last_verdict["sample_count"] = len(samples)
+    print(f"[v1-guest-proof] input {save_as or instance}: FAIL; "
+          f"{len(samples)} timestamped samples; {last_verdict['reason']}",
+          flush=True)
+    return last_verdict
 
 
 def ppm_bytes_from_raster(width: int, height: int, raster: bytes) -> bytes:
@@ -2362,6 +2584,7 @@ def write_evidence(all_pass: bool, rc: int, install_ack, serial_path: Path,
                             "tested_ppm_sha256 is the capture as written")
             for name, entry in frame_digests().items()
         },
+        "input_proofs": INPUT_PROOFS,
         "identities": identities,
         "run": {"rc": rc, "run_dir": str(RUN_DIR),
                 "serial": str(serial_path),
@@ -2591,7 +2814,7 @@ def test_color_detection() -> None:
     # checker pixel
     for i in range(3):
         data[(10 * w + 10) * 3 + i] = APP_COLOR_NORMAL[i]
-    assert window_rects(bytes(data)) == [] or True  # specks filtered below 200px
+    assert window_rects(bytes(data)) == []  # specks filtered below 200px
     rect = (0, 0, 20, 20)
     assert has_app_color(bytes(data), rect)
     # titlebar color must not match
@@ -3219,6 +3442,35 @@ def test_input_proof_ack_without_frame_fails() -> None:
     print("[controls] input proof: ack with no captured frame fails: PASS")
 
 
+def test_input_proof_missing_clean_pre_frame_fails() -> None:
+    """A post-input flash cannot substitute for a missing pre-input capture."""
+    frame = _frame_with(RECT_A, flash=True)
+    r = evaluate_input_proof(_ack_ok_eval(), None, frame, RECT_A)
+    assert not r["ok"] and r["ack_ok"] and r["visual_ok"] is False, r
+    assert not r["pre_frame_present"] and not r["clean_pre_frame"], r
+    assert "pre-input" in r["reason"], r
+    print("[controls] input proof: missing clean pre-input frame fails: PASS")
+
+
+def test_input_proof_invalid_geometry_fails() -> None:
+    """Clipped/off-screen geometry must not make a partial scan pass."""
+    pre = _frame_with(RECT_A, flash=False)
+    frame = _frame_with(RECT_A, flash=True)
+    invalid = (750, 550, 120, 80)
+    r = evaluate_input_proof(_ack_ok_eval(), pre, frame, invalid)
+    assert not r["ok"] and r["ack_ok"] and not r["visual_ok"], r
+    assert not r["rect_valid"], r
+    print("[controls] input proof: invalid window geometry fails: PASS")
+
+
+def test_scanner_rejects_malformed_rgb_raster() -> None:
+    malformed = bytes(120)
+    assert not valid_rgb_frame(malformed)
+    assert not has_app_color(malformed, RECT_A)
+    assert not has_flash_color(malformed, RECT_A)
+    print("[controls] scanner rejects malformed RGB raster: PASS")
+
+
 def test_input_proof_visual_without_ack_fails() -> None:
     """Pixels changed, but no acknowledgment: must fail."""
     pre = _frame_with(RECT_A, flash=False)
@@ -3276,6 +3528,102 @@ def test_input_proof_flash_outside_window_fails() -> None:
     print("[controls] input proof: flash outside the window fails: PASS")
 
 
+def test_input_sample_trace_records_exact_timestamped_frame() -> None:
+    """The passing sample's metadata and PNG bind to the exact raster."""
+    global RUN_DIR, SHOTS, INPUT_PROOFS
+    saved_dir, saved_shots, saved_proofs = RUN_DIR, SHOTS, INPUT_PROOFS
+    saved_trace = os.environ.get("V1_INPUT_SAMPLE_TRACE")
+    try:
+        with tempfile.TemporaryDirectory(prefix="v1-input-trace-control-") as tmp:
+            RUN_DIR = Path(tmp) / "run"
+            RUN_DIR.mkdir()
+            SHOTS = RUN_DIR / "shots"
+            SHOTS.mkdir()
+            INPUT_PROOFS = []
+            os.environ["V1_INPUT_SAMPLE_TRACE"] = "cp05-mouse-response"
+            clean = _frame_with(RECT_A, flash=False)
+            flashed = _frame_with(RECT_A, flash=True)
+
+            class FakeDesktop:
+                def cursor(self):
+                    return 0
+
+                def serial(self):
+                    return _serial_block(
+                        "[gfx] identify ok surface=77",
+                        "[gfx] event type=2 events=1 surface=77")
+
+                def shot(self, name):
+                    return clean if name == "__ack-clear__" else flashed
+
+            result = do_input_and_ack(
+                FakeDesktop(), 77, EVENT_POINTER, RECT_A, lambda: None,
+                save_as="cp05-mouse-response", timeout_s=0.1)
+            assert result["ok"] and result["sample_count"] == 1, result
+            proof = INPUT_PROOFS[-1]
+            assert proof["result"] == "PASS" and proof["sample_trace_enabled"]
+            sample = proof["samples"][0]
+            assert sample["utc_start"].endswith("Z") and sample["utc_end"].endswith("Z")
+            sample_path = RUN_DIR / sample["capture"]["path"]
+            width, height, raster = png_raster(sample_path.read_bytes())
+            assert (width, height, raster) == (SCREEN_W, SCREEN_H, flashed)
+            assert hashlib.sha256(raster).hexdigest() == sample["frame_raster_sha256"]
+            success_path = RUN_DIR / proof["frame"]["png"]
+            assert png_raster(success_path.read_bytes()) == (SCREEN_W, SCREEN_H, flashed)
+        print("[controls] input sampling: timestamped exact success frame: PASS")
+    finally:
+        RUN_DIR, SHOTS, INPUT_PROOFS = saved_dir, saved_shots, saved_proofs
+        if saved_trace is None:
+            os.environ.pop("V1_INPUT_SAMPLE_TRACE", None)
+        else:
+            os.environ["V1_INPUT_SAMPLE_TRACE"] = saved_trace
+
+
+def test_input_failure_preserves_last_probe_without_success_label() -> None:
+    """A visible frame without a fresh ACK stays FAIL but remains inspectable."""
+    global RUN_DIR, SHOTS, INPUT_PROOFS
+    saved_dir, saved_shots, saved_proofs = RUN_DIR, SHOTS, INPUT_PROOFS
+    saved_trace = os.environ.get("V1_INPUT_SAMPLE_TRACE")
+    try:
+        with tempfile.TemporaryDirectory(prefix="v1-input-failure-control-") as tmp:
+            RUN_DIR = Path(tmp) / "run"
+            RUN_DIR.mkdir()
+            SHOTS = RUN_DIR / "shots"
+            SHOTS.mkdir()
+            INPUT_PROOFS = []
+            os.environ["V1_INPUT_SAMPLE_TRACE"] = ""
+            clean = _frame_with(RECT_A, flash=False)
+            flashed = _frame_with(RECT_A, flash=True)
+
+            class FakeDesktop:
+                def cursor(self):
+                    return 0
+
+                def serial(self):
+                    return _serial_block("[gfx] identify ok surface=77")
+
+                def shot(self, name):
+                    return clean if name == "__ack-clear__" else flashed
+
+            result = do_input_and_ack(
+                FakeDesktop(), 77, EVENT_POINTER, RECT_A, lambda: None,
+                save_as="cp05-mouse-response", timeout_s=0.001)
+            assert not result["ok"] and result["visual_ok"] and not result["ack_ok"], result
+            proof = INPUT_PROOFS[-1]
+            assert proof["result"] == "FAIL" and proof["last_probe"], proof
+            assert proof["last_probe"]["png"] != "shots/cp05-mouse-response.png"
+            failed_path = RUN_DIR / proof["last_probe"]["png"]
+            assert png_raster(failed_path.read_bytes()) == (SCREEN_W, SCREEN_H, flashed)
+            assert not (SHOTS / "cp05-mouse-response.png").exists()
+        print("[controls] input sampling: failed last probe retained, not PASS: PASS")
+    finally:
+        RUN_DIR, SHOTS, INPUT_PROOFS = saved_dir, saved_shots, saved_proofs
+        if saved_trace is None:
+            os.environ.pop("V1_INPUT_SAMPLE_TRACE", None)
+        else:
+            os.environ["V1_INPUT_SAMPLE_TRACE"] = saved_trace
+
+
 def run_focused_controls() -> int:
     checks = [
         test_ppm_parsing,
@@ -3290,6 +3638,9 @@ def run_focused_controls() -> int:
         test_input_proof_valid_passes,
         test_input_proof_ack_without_visual_fails,
         test_input_proof_ack_without_frame_fails,
+        test_input_proof_missing_clean_pre_frame_fails,
+        test_input_proof_invalid_geometry_fails,
+        test_scanner_rejects_malformed_rgb_raster,
         test_input_proof_visual_without_ack_fails,
         test_input_proof_wrong_instance_fails,
         test_input_proof_wrong_event_type_fails,
@@ -3313,6 +3664,8 @@ def run_focused_controls() -> int:
         test_packaging_requires_checkpoint_frames,
         test_frame_digests_bind_ppm_and_png,
         test_verdict_logic,
+        test_input_sample_trace_records_exact_timestamped_frame,
+        test_input_failure_preserves_last_probe_without_success_label,
     ]
     failed = 0
     for check in checks:
