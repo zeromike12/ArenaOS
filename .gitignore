@@ -4,8 +4,20 @@ kernel/target/
 *.img
 *.efi
 *.pdb
-*.log
 target/
+
+# Serial/harness logs are evidence for V1 runs and ARE committed under
+# docs/v1/evidence/. Only the scratch logs written by ad-hoc local runs are
+# ignored, and they live in build/ (already ignored) or a temp dir. Keep the
+# generic rule from swallowing published transcripts:
+!docs/v1/evidence/**/*.log
+!docs/v1/evidence/**/*.stderr
+!docs/v1/evidence/**/*.txt
+
+# PPM screendumps are working intermediates: a fixed header plus the exact
+# raster of the published PNG, with the tested digest recorded in the run's
+# evidence.json. Publishing them again in Git would add 1.4 MB per frame.
+docs/v1/evidence/**/shots/*.ppm
 
 # Editor/OS noise
 .DS_Store

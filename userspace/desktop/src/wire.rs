@@ -118,7 +118,9 @@ pub fn identify_request_decode(b: &[u8]) -> Result<IdentifyRequest, Error> {
         return Err(Error::Invalid);
     }
     Ok(IdentifyRequest {
-        client_protocol_version: u16::from_le_bytes(b[8..10].try_into().map_err(|_| Error::Invalid)?),
+        client_protocol_version: u16::from_le_bytes(
+            b[8..10].try_into().map_err(|_| Error::Invalid)?,
+        ),
     })
 }
 
@@ -129,12 +131,20 @@ mod identify_tests {
     #[test]
     fn identify_request_round_trip() {
         let b = identify_request_encode(CLIENT_PROTOCOL_VERSION);
-        assert_eq!(identify_request_decode(&b).unwrap().client_protocol_version, CLIENT_PROTOCOL_VERSION);
+        assert_eq!(
+            identify_request_decode(&b).unwrap().client_protocol_version,
+            CLIENT_PROTOCOL_VERSION
+        );
     }
 
     #[test]
     fn identify_reply_round_trip() {
-        let b = identify_reply_encode(0x1234_5678_9abc_def0, IDENTIFY_SURFACE_KIND, IDENTIFY_SURFACE_RIGHTS, 0x0fed_cba9_8765_4321);
+        let b = identify_reply_encode(
+            0x1234_5678_9abc_def0,
+            IDENTIFY_SURFACE_KIND,
+            IDENTIFY_SURFACE_RIGHTS,
+            0x0fed_cba9_8765_4321,
+        );
         let r = identify_reply_decode(&b).unwrap();
         assert_eq!(r.session_serial, 0x1234_5678_9abc_def0);
         assert_eq!(r.surface_kind, IDENTIFY_SURFACE_KIND);

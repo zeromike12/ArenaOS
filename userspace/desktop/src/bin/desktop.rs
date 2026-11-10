@@ -871,6 +871,34 @@ fn observe_resource_detail() -> ResourceDetail {
         max_windows_per_instance,
     ]
 }
+/// Authoritative placement receipt for one ordinary window: which screen
+/// rectangle the window manager gave it. The title bar occupies the top
+/// `arena_ui::metrics::TITLE_HEIGHT` rows of this rect (see
+/// `model::title_button`), so a reader can locate that exact window's own
+/// close button instead of guessing from pixels. Descriptive telemetry only:
+/// it reveals geometry the user can already see and grants no authority.
+fn log_placement(handle: u64, surface: u64) {
+    let placed = unsafe { &*(&raw const WM) }
+        .windows()
+        .find(|w| w.handle == handle)
+        .map(|w| (w.x, w.y, w.width, w.height));
+    let Some((x, y, width, height)) = placed else {
+        return;
+    };
+    log(b"[desktop] ordinary window placed handle=");
+    log_number(handle);
+    log(b" surface=");
+    log_number(surface);
+    log(b" x=");
+    log_number(x as u64);
+    log(b" y=");
+    log_number(y as u64);
+    log(b" w=");
+    log_number(u64::from(width));
+    log(b" h=");
+    log_number(u64::from(height));
+    log(b"\n");
+}
 fn log_resource_receipt(prefix: &[u8], receipt: ResourceReceipt) {
     let mut line = perf::Line::new();
     line.push(prefix);
@@ -2933,6 +2961,28 @@ fn launch_with_document(
     )
 }
 
+/// The two installed IDs below are a narrowly scoped layout integration
+/// fixture. They do not change launch authority: the normal signed catalog
+/// resolution, Image capability, startup record, Identify exchange, and child
+/// capability grants remain unchanged. The fixture only shapes the Desktop's
+/// existing SharedRegion allocation to the exact boundary requested by the
+/// test, using the already-held POOL capability.
+fn layout_fixture_shared_pages(application_id: &[u8; 32]) -> Option<u64> {
+    let matches = |expected: &[u8]| {
+        application_id.get(..expected.len()) == Some(expected)
+            && application_id[expected.len()..]
+                .iter()
+                .all(|byte| *byte == 0)
+    };
+    if matches(b"com.arena.layout301") {
+        Some(301)
+    } else if matches(b"com.arena.layout300") {
+        Some(300)
+    } else {
+        None
+    }
+}
+
 /// Launch a descriptive installed-catalog selection through packaged's
 /// fresh receiver-side revalidation. The registry row and app ID never enter
 /// SYS_SPAWN as authority; the exact returned Image capability does.
@@ -2979,14 +3029,27 @@ fn launch_installed_application(
         destroy(image.capability);
         return launched;
     }
+    let fixture_pages = layout_fixture_shared_pages(application_id);
+    if let Some(pages) = fixture_pages {
+        log(b"[desktop] layout fixture console precreation suppressed app=");
+        log(if pages == 301 {
+            b"com.arena.layout301" as &[u8]
+        } else {
+            b"com.arena.layout300" as &[u8]
+        });
+        log(b"\n");
+    }
     // Phase 16 console window: a windowed stream application gets its
     // primary window pre-created at spawn (manifest default size), so it
     // is focusable and can receive granted-stdin keyboard input without
     // first speaking the graphics protocol. The app's own Create request
-    // later returns this same window (see the service dispatch).
+    // later returns this same window (see the service dispatch). The exact
+    // layout-boundary fixtures retain standard streams but suppress only
+    // this pre-creation, so the ordinary C size check runs before any window.
     unsafe {
         PENDING_CONSOLE = (0, 0, [0; 32]);
-        if app_flags & manifest::FLAG_STANDARD_STREAMS != 0
+        if fixture_pages.is_none()
+            && app_flags & manifest::FLAG_STANDARD_STREAMS != 0
             && let Some(slot) = (&*(&raw const INSTALLED_APPS))
                 .iter()
                 .position(|e| e.is_some_and(|a| a.application_id == *application_id))
@@ -3012,6 +3075,7 @@ fn launch_installed_application(
         image.load_base,
         app_flags,
         read_only,
+        fixture_pages,
     );
     destroy(image.capability);
     launched
@@ -3433,6 +3497,7 @@ fn launch_image_v2_with_document(
         arena_desktop::apps::APPLICATION_LOAD_BASE,
         FLAG_MULTI_INSTANCE,
         read_only,
+        None,
     )
 }
 
@@ -3451,6 +3516,7 @@ fn launch_image_v2_for_app_with_document(
     load_base: u64,
     app_flags: u32,
     document_read_only: bool,
+    shared_pages_override: Option<u64>,
 ) -> Result<(), i64> {
     use arena_startup_abi::startup as startup_abi;
 
@@ -3506,12 +3572,17 @@ fn launch_image_v2_for_app_with_document(
     }
 
     let reserve = unsafe { RESERVE };
+    if shared_pages_override.is_some_and(|pages| pages != 300 && pages != 301) {
+        log_launch_refusal(b"layout-fixture-pages", STATUS_BAD_ARG);
+        return Err(STATUS_BAD_ARG);
+    }
+    let shared_pages = shared_pages_override.unwrap_or(reserve.shared_pages);
     let mut out = [0; 3];
     let rc = unsafe {
         syscall6(
             SYS_SHARED_CREATE,
             POOL,
-            reserve.shared_pages,
+            shared_pages,
             out.as_mut_ptr() as u64,
             0,
             0,
@@ -3524,6 +3595,34 @@ fn launch_image_v2_for_app_with_document(
     }
     let region = out[0];
     let id = out[1];
+    if let Some(expected_pages) = shared_pages_override {
+        let actual_pages = unsafe { syscall6(SYS_SHARED_PAGES, region, 0, 0, 0, 0, 0) };
+        if actual_pages != expected_pages as i64 {
+            log(b"[desktop] layout fixture SharedRegion size mismatch expected=");
+            log_number(expected_pages);
+            log(b" actual=");
+            if actual_pages < 0 {
+                log(b"-");
+                log_number(actual_pages.unsigned_abs());
+            } else {
+                log_number(actual_pages as u64);
+            }
+            log(b"\n");
+            destroy(region);
+            return Err(STATUS_BAD_ARG);
+        }
+        log(b"[desktop] layout fixture SharedRegion allocated app=");
+        log(if expected_pages == 301 {
+            b"com.arena.layout301" as &[u8]
+        } else {
+            b"com.arena.layout300" as &[u8]
+        });
+        log(b" pages=");
+        log_number(actual_pages as u64);
+        log(b" surface=");
+        log_number(id);
+        log(b"\n");
+    }
     let va = unsafe { syscall2(SYS_SHARED_MAP, region, 1) };
     if va <= 0 {
         log_launch_refusal(b"shared-map", va);
@@ -4333,6 +4432,35 @@ fn retire(index: usize, _force: bool) {
     if s.handle != 0 {
         unsafe { (&mut *(&raw mut WM)).retire(s.handle) }.unwrap_or_else(|_| die(85));
     }
+    if let Some(pages) = layout_fixture_shared_pages(&s.application_id) {
+        // The normal C client writes a nonzero checkerboard to all 307,200
+        // pixels only after its page guard, SharedRegion map, Identify, and
+        // Create. For the 300-page refusal, inspect every pixel word that
+        // actually fits after the 4-KiB protocol page; the absent final page
+        // is deliberately never read. The child has exited, so this mapping
+        // is stable until the following unmap.
+        let available = pages
+            .saturating_mul(4096)
+            .saturating_sub(PIXEL_OFFSET as u64)
+            .min(640 * 480 * 4);
+        let words = (available / 4) as usize;
+        let pixels = (s.va + PIXEL_OFFSET as u64) as *const u32;
+        let mut nonzero = 0u64;
+        for word in 0..words {
+            if unsafe { core::ptr::read_volatile(pixels.add(word)) } != 0 {
+                nonzero += 1;
+            }
+        }
+        log(b"[desktop] layout fixture pixels surface=");
+        log_number(s.id);
+        log(b" pages=");
+        log_number(pages);
+        log(b" words=");
+        log_number(words as u64);
+        log(b" nonzero=");
+        log_number(nonzero);
+        log(b"\n");
+    }
     if s.va != 0 && unsafe { syscall6(SYS_SHARED_UNMAP, s.va, 0, 0, 0, 0, 0) } != 0 {
         die(86)
     }
@@ -4360,8 +4488,16 @@ fn retire(index: usize, _force: bool) {
         APP_GROUPS[index] = None;
         WOKEN[index] = false;
     }
+    // Instance-specific retirement receipt: `kind` plus the session's
+    // SharedRegion object ID. That object ID is the same value the session's
+    // Identify reply names (ADSK v2 opcode 13, session.id), so a retirement
+    // is attributable to exactly one graphical instance instead of to
+    // whichever window happened to disappear from the screen. Descriptive
+    // telemetry only; it grants no authority.
     log(b"[desktop] application retired: kind=");
     log_number(s.kind as u64);
+    log(b" surface=");
+    log_number(s.id);
     log(b" Process consumed; mapping and region released\n");
 }
 fn sweep() -> bool {
@@ -4371,7 +4507,16 @@ fn sweep() -> bool {
         if s.id != 0 && !child_live(i, s.process.unwrap_or_else(|| die(83))) {
             if !s.ending {
                 let status = child_exit_status(i, s.process.unwrap_or_else(|| die(83)));
+                // Existing line kept byte-identical: several authoritative
+                // suites parse it with an anchored ^...$ regex.
                 log(b"[desktop] child Process-cap exit status=");
+                log_number(status);
+                log(b"\n");
+                // Additive instance-attributed exit receipt (same facts,
+                // named session). Nothing anchors on this line yet.
+                log(b"[desktop] child Process-cap exit surface=");
+                log_number(s.id);
+                log(b" status=");
                 log_number(status);
                 log(b"\n");
             }
@@ -6262,10 +6407,9 @@ extern "C" fn main() -> ! {
         // The reply carries CAP_NONE (no capability transfer).
         // session.id is the SharedRegion object ID from SYS_SHARED_CREATE
         // at session creation — it is the client's surface identity.
-        } else if let (Some(index), Ok(_identify_req)) = (
-            authenticated_session,
-            wire::identify_request_decode(&bytes),
-        ) {
+        } else if let (Some(index), Ok(_identify_req)) =
+            (authenticated_session, wire::identify_request_decode(&bytes))
+        {
             let session = unsafe { SESSIONS[index] };
             // Identify must not carry a transferred capability.
             if landed != CAP_NONE {
@@ -6370,6 +6514,7 @@ extern "C" fn main() -> ! {
                                 unsafe { WOKEN[i] = false };
                                 result = s.handle;
                                 status = 0;
+                                log_placement(s.handle, id);
                             }
                             Frame::Create { width, height }
                                 if s.handle == 0
@@ -6379,6 +6524,7 @@ extern "C" fn main() -> ! {
                                 if let Ok(handle) = state.create(id, width, height) {
                                     s.handle = handle;
                                     s.surface = (width, height);
+                                    log_placement(s.handle, id);
                                     s.reveal.retarget(
                                         i32::from(height),
                                         arena_desktop::app_client::now(),
