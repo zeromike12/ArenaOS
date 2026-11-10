@@ -499,7 +499,19 @@ def interaction(disk):
             != crop(desktop_before_menu, 100, 160, 120, 24),
         )
         d.click(72, 172)
+        # A QMP command response only confirms that the click was queued; it
+        # does not prove Desktop has opened the modal yet. Wait for the real
+        # chooser frame before typing, then drain the search keys before the
+        # Ctrl+D default action so it cannot overtake the query.
+        open_with_default_empty = d.shot(
+            "open-with-default-empty-search",
+            lambda p: crop(p, 224, 120, 392, 356)
+            != crop(desktop_before_menu, 224, 120, 392, 356),
+        )
+        empty_search_field = crop(open_with_default_empty, 190, 154, 420, 22)
         d.q.type_text("phase13", gap_s=0.025)
+        wait_search_field_settled(
+            d, "open-with-default-search-settled", empty_search_field)
         before_default = tuple(map(int, COUNTERS.findall(d.serial())[-1]))
         send_chord(d, "d")
         d.wait(lambda: "[desktop] AFS2 application handler default saved" in d.serial(),

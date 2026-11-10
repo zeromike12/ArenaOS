@@ -356,6 +356,23 @@ def _scenario(compiler: str, pages: int, fixture: dict) -> dict:
                         or sequence != sorted(sequence):
                     raise AssertionError(f"301 production path order is incomplete or wrong: {sequence}")
                 record["first_frame_sequence"] = dict(zip(sequence_markers, sequence))
+                # This C fixture deliberately runs a long ordinary redraw
+                # loop. Close the already-identified, visibly rendered window
+                # through its native title-bar control so retirement and the
+                # full pixel receipt are requested by ordinary user input,
+                # not by changing the guest or relaxing the existing waits.
+                close_point = (
+                    rect[0] + rect[2] - proof.CLOSE_W // 2,
+                    rect[1] + proof.TITLE_H // 2,
+                )
+                record["close_input"] = {
+                    "action": "QMP left-click on the identified window close control",
+                    "target_surface": int(early_allocated["surface"]),
+                    "screen_point": list(close_point),
+                    "after": "three-band live QEMU visual assertion and first-damage sequence",
+                    "before": "existing 60-second Desktop pixel receipt wait",
+                }
+                desktop.click(*close_point)
                 if not desktop.wait_serial(
                         rf"\[desktop\] layout fixture pixels surface=\d+ pages=301 ",
                         "Desktop 301-page pixel receipt after process exit", 60,
