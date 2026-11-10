@@ -144,18 +144,47 @@ say qemu-accel-help
 
 # --------------------------------------------------------------- rust ------
 RUST_COMPONENTS="$REPO/docs/phase16/dependencies/rust-1.97.0"
+RUST_ARCHIVE_TMP="$(mktemp -d)"
+trap 'rm -rf "$RUST_ARCHIVE_TMP"' EXIT
 {
     echo "component directory: $RUST_COMPONENTS"
-    echo "--- official archive hashes ---"
-    ( cd "$RUST_COMPONENTS" && sha256sum --check SHA256SUMS ) 2>&1 || {
-        echo "error: official rust-std archive checksum mismatch" >&2
-        exit 1
-    }
-    echo "--- reassembled parts hashes ---"
+    echo "temporary reassembly directory: $RUST_ARCHIVE_TMP"
+    echo "--- committed part hashes ---"
     ( cd "$RUST_COMPONENTS" && sha256sum --check PARTS-SHA256SUMS ) 2>&1 || {
         echo "error: rust-std archive part checksum mismatch" >&2
         exit 1
     }
+    echo "--- reassemble official archive bytes from committed parts ---"
+    for archive in \
+        rust-std-1.97.0-x86_64-unknown-none.tar.xz \
+        rust-std-1.97.0-x86_64-unknown-uefi.tar.xz; do
+        parts=( "$RUST_COMPONENTS/$archive.part-"* )
+        if [[ ! -f "${parts[0]}" ]]; then
+            echo "error: no committed parts found for $archive" >&2
+            exit 1
+        fi
+        cat "${parts[@]}" > "$RUST_ARCHIVE_TMP/$archive" || {
+            echo "error: cannot reassemble $archive" >&2
+            exit 1
+        }
+        actual_bytes="$(stat -c%s "$RUST_ARCHIVE_TMP/$archive")"
+        case "$archive" in
+            rust-std-1.97.0-x86_64-unknown-none.tar.xz) expected_bytes=14907620 ;;
+            rust-std-1.97.0-x86_64-unknown-uefi.tar.xz) expected_bytes=25374412 ;;
+        esac
+        echo "$archive bytes: $actual_bytes (expected $expected_bytes)"
+        if [[ "$actual_bytes" != "$expected_bytes" ]]; then
+            echo "error: reconstructed size mismatch for $archive" >&2
+            exit 1
+        fi
+    done
+    echo "--- official reconstructed archive hashes ---"
+    ( cd "$RUST_ARCHIVE_TMP" && \
+      sha256sum --check "$RUST_COMPONENTS/SHA256SUMS" ) 2>&1 || {
+        echo "error: reconstructed official rust-std archive checksum mismatch" >&2
+        exit 1
+    }
+    ( cd "$RUST_ARCHIVE_TMP" && sha256sum *.tar.xz ) 2>&1
 } > "$OUT/rust-component-checksums.txt" 2>&1
 say rust-component-checksums
 
