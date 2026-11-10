@@ -51,6 +51,47 @@ record() { # record <name> <command...>
 } > "$OUT/host.txt" 2>&1
 say host
 
+# --------------------------------------------------------- actual Python ----
+# Bind the FAT/ESP and archive tools to the real qualification interpreter,
+# not a similarly named system/venv Python with an accidental dependency set.
+PYTHON_BIN="/usr/bin/python3"
+if ! "$PYTHON_BIN" - <<'PYEOF' > "$OUT/python-imports.txt" 2>&1
+import importlib.metadata
+import pathlib
+import site
+import sys
+
+expected_executable = pathlib.Path("/usr/bin/python3").resolve()
+expected_versions = {
+    "pyfatfs": "1.1.0",
+    "zstandard": "0.25.0",
+    "setuptools": "80.10.2",
+    "fs": "2.4.16",
+    "appdirs": "1.4.4",
+    "six": "1.17.0",
+}
+assert pathlib.Path(sys.executable).resolve() == expected_executable, sys.executable
+assert sys.version_info[:3] == (3, 11, 2), sys.version
+import pyfatfs  # noqa: F401,E402
+import zstandard  # noqa: F401,E402
+for distribution, expected in expected_versions.items():
+    actual = importlib.metadata.version(distribution)
+    assert actual == expected, f"{distribution}: {actual}, expected {expected}"
+print(f"executable: {sys.executable}")
+print(f"version: {sys.version}")
+print(f"user_site_enabled: {site.ENABLE_USER_SITE}")
+print(f"user_site: {site.getusersitepackages()}")
+print(f"pyfatfs_module: {pyfatfs.__file__}")
+print(f"zstandard_module: {zstandard.__file__}")
+for distribution, expected in expected_versions.items():
+    print(f"{distribution}=={expected}")
+PYEOF
+then
+    say "python dependency/interpreter preflight FAILED; see $OUT/python-imports.txt"
+    exit 1
+fi
+say python-imports
+
 # --------------------------------------------------- tracked QEMU package ----
 {
     echo "archive: $ARCHIVE"
