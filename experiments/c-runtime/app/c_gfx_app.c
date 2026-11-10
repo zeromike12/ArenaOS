@@ -287,14 +287,16 @@ typedef struct {
     uint64_t surface_object_id;
 } identify_t;
 
-/* Set only after a complete successful Identify exchange whose request used
-   CAP_NONE and whose reply landed no capability. The guest refusal fixture
-   reports this separately from its deliberately non-CAP_NONE transfer case. */
+/* Test fixtures record the verified transfer separately from their
+   deliberately non-CAP_NONE negative case. Do not include this test-only
+   accessor in the ordinary production app. */
+#if defined(ARENA_HOSTED_TEST) || defined(GFX_NO_MAIN)
 static int identify_cap_none_verified;
 
 TEST_EXPORT int identify_cap_none_was_verified(void) {
     return identify_cap_none_verified;
 }
+#endif
 
 /* Validate a named identity against the authority this client already
    holds: SYS_CAP_DESCRIBE(surface_slot) must return [kind 7, an object ID
@@ -322,7 +324,9 @@ TEST_EXPORT int identify_validate_surface(const identify_t *ident) {
 TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) {
     uint64_t out[3];
     const uint64_t request_cap = GFX_CAP_NONE;
+#if defined(ARENA_HOSTED_TEST) || defined(GFX_NO_MAIN)
     identify_cap_none_verified = 0;
+#endif
 
     /* Build the Identify request: ADSK v2, opcode 13, client protocol
        version 1, all other bytes zero. */
@@ -391,7 +395,9 @@ TEST_EXPORT int identify_exchange(uint8_t frame[ADSK_BYTES], identify_t *ident) 
         if (request_cap != GFX_CAP_NONE || out[2] != GFX_CAP_NONE) {
             return -1;
         }
+#if defined(ARENA_HOSTED_TEST) || defined(GFX_NO_MAIN)
         identify_cap_none_verified = 1;
+#endif
         return 0;
     }
     return -1;
