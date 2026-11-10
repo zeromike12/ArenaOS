@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Real installed APB1 discovery, launch, UI and teardown proof."""
 from pathlib import Path
+import hashlib
+import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
+import traceback
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import afs1
@@ -14,7 +19,24 @@ import arena_env
 import mtest
 from test_m10_apps import Desktop, crop
 
-LABEL = "phase13-registry"
+def _phase13_run_id():
+    run_id = os.environ.get("ARENA_PHASE13_RUN_ID")
+    if not run_id:
+        run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + f"-{os.getpid()}"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,47}", run_id):
+        raise ValueError(f"unsafe ARENA_PHASE13_RUN_ID: {run_id!r}")
+    return run_id
+
+
+RUN_ID = _phase13_run_id()
+LABEL = f"phase13-registry-{RUN_ID}"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+WORK_DIR = Path(arena_env.build_dir()) / f"phase13-work-{RUN_ID}"
+_run_dir = Path(os.environ.get(
+    "V1_PHASE13_EVIDENCE_DIR",
+    Path(arena_env.build_dir()) / f"phase13-evidence-{RUN_ID}",
+))
+RUN_DIR = _run_dir if _run_dir.is_absolute() else REPO_ROOT / _run_dir
 BASE = arena_env.AFS2_BASE_SECTOR * 512
 SOURCE = b"phase13.apb1"
 HEADLESS_SOURCE = b"zz-headless.apb1"
@@ -261,13 +283,138 @@ def resource_details(d):
 
 
 def wait_detail(d, predicate, description, timeout_s=45):
-    end = time.monotonic() + timeout_s
-    while time.monotonic() < end:
+    latest = [None]
+
+    def ready():
         details = resource_details(d)
-        if predicate(details[-1]):
-            return details[-1]
-        time.sleep(0.05)
-    raise AssertionError((description, resource_details(d)[-1]))
+        if not details:
+            return False
+        latest[0] = details[-1]
+        return predicate(latest[0])
+
+    d.wait(ready, description, timeout_s=timeout_s, poll_interval_s=0.05)
+    return latest[0]
+
+
+class Phase13Desktop(Desktop):
+    """The existing Phase 13 desktop with append-only wait/QMP diagnostics."""
+
+    def __init__(self, label):
+        self._qmp_trace_installed = False
+        self._wait_index = 0
+        self.qmp_trace_path = RUN_DIR / f"{label}-qmp-trace.jsonl"
+        self.wait_trace_path = RUN_DIR / f"{label}-wait-trace.jsonl"
+        super().__init__(label)
+
+    @staticmethod
+    def _append_jsonl(path, record):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+
+    def _install_qmp_trace(self):
+        if self._qmp_trace_installed or not hasattr(self, "q"):
+            return
+        original = self.q.command
+        self._append_jsonl(self.qmp_trace_path, {
+            "event": "qmp-connected",
+            "socket": str(Path(arena_env.build_dir()) / f"qmp-{self.label}.sock"),
+            "monotonic": time.monotonic(),
+        })
+
+        def traced(execute, **arguments):
+            started = time.monotonic()
+            record = {
+                "event": "qmp-command",
+                "execute": execute,
+                "arguments": arguments,
+                "monotonic_start": started,
+            }
+            try:
+                result = original(execute, **arguments)
+                record["result"] = result
+                return result
+            except Exception as exc:
+                record["exception"] = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                record["elapsed_s"] = round(time.monotonic() - started, 6)
+                self._append_jsonl(self.qmp_trace_path, record)
+
+        self.q.command = traced
+        self._qmp_trace_installed = True
+
+    def wait(self, predicate, description, timeout_s=10, poll_interval_s=0.04):
+        self._install_qmp_trace()
+        self._wait_index += 1
+        wait_id = self._wait_index
+        started = time.monotonic()
+        deadline = started + timeout_s
+        self._append_jsonl(self.wait_trace_path, {
+            "event": "wait-start", "wait_id": wait_id,
+            "description": description, "timeout_s": timeout_s,
+            "monotonic": started,
+        })
+        next_progress = started + 10.0
+        while time.monotonic() < deadline:
+            if predicate():
+                self._append_jsonl(self.wait_trace_path, {
+                    "event": "wait-pass", "wait_id": wait_id,
+                    "elapsed_s": round(time.monotonic() - started, 6),
+                })
+                return
+            now = time.monotonic()
+            if now >= next_progress:
+                serial = self.serial()
+                self._append_jsonl(self.wait_trace_path, {
+                    "event": "wait-progress", "wait_id": wait_id,
+                    "elapsed_s": round(now - started, 6),
+                    "serial_bytes": len(serial.encode()),
+                    "serial_lines": len(serial.splitlines()),
+                    "counter_records": len(COUNTERS.findall(serial)),
+                    "detail_records": len(DETAILS.findall(serial)),
+                    "serial_tail": serial[-1200:],
+                })
+                next_progress += 10.0
+            time.sleep(poll_interval_s)
+
+        serial = self.serial()
+        diagnostic = {
+            "wait_id": wait_id,
+            "description": description,
+            "timeout_s": timeout_s,
+            "elapsed_s": round(time.monotonic() - started, 6),
+            "serial_bytes": len(serial.encode()),
+            "serial_lines": len(serial.splitlines()),
+            "counter_records": COUNTERS.findall(serial)[-10:],
+            "detail_records": DETAILS.findall(serial)[-10:],
+            "serial_tail": serial[-8000:],
+            "qmp": {},
+        }
+        if hasattr(self, "q"):
+            old_timeout = self.q.sock.gettimeout()
+            try:
+                self.q.sock.settimeout(1.0)
+                for key, command, arguments in (
+                    ("status", "query-status", {}),
+                    ("registers", "human-monitor-command",
+                     {"command-line": "info registers"}),
+                ):
+                    try:
+                        diagnostic["qmp"][key] = self.q.command(command, **arguments)
+                    except Exception as exc:
+                        diagnostic["qmp"][key] = f"{type(exc).__name__}: {exc}"
+            finally:
+                self.q.sock.settimeout(old_timeout)
+        diag_path = RUN_DIR / f"{self.label}-wait-{wait_id:03d}-timeout.json"
+        diag_path.write_text(json.dumps(diagnostic, indent=2, sort_keys=True, default=str) + "\n")
+        self._append_jsonl(self.wait_trace_path, {
+            "event": "wait-timeout", "wait_id": wait_id,
+            "diagnostic": str(diag_path),
+            "elapsed_s": diagnostic["elapsed_s"],
+        })
+        raise AssertionError(
+            f"{description} (waited {timeout_s}s; diagnostics: {diag_path})")
 
 
 def wait_stream_proof(d, expected):
@@ -287,7 +434,7 @@ def wait_stream_proof(d, expected):
 
 
 def interaction(disk):
-    d = Desktop(LABEL)
+    d = Phase13Desktop(LABEL)
     try:
         baseline_rows = COUNTERS.findall(d.serial())
         assert baseline_rows, "native resource baseline is missing"
@@ -831,7 +978,7 @@ def interaction(disk):
 
 
 def verify_favorites_reload(disk):
-    d = Desktop(LABEL + "-favorites-reload")
+    d = Phase13Desktop(LABEL + "-favorites-reload")
     try:
         assert "[desktop] AFS2 application dock favorites loaded" in d.serial(), \
             "Desktop did not reload favorites from the existing AFS2 image"
@@ -850,24 +997,75 @@ def verify_favorites_reload(disk):
         d.dispose()
 
 
-def main():
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _save_serial(label, serial):
+    path = RUN_DIR / "serial" / f"{label}.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(serial)
+    return {"path": str(path.relative_to(RUN_DIR)),
+            "sha256": _sha256(path), "bytes": path.stat().st_size}
+
+
+def _make_phase13_scratch_disk():
+    disk = WORK_DIR / "arena-disk.img"
+    with disk.open("wb") as stream:
+        stream.truncate(arena_env.SCRATCH_MIB * 1024 * 1024)
+    afs1.mkfs(disk, arena_env.SCRATCH_MIB * 1024 * 1024 // afs1.SECTOR)
+    return disk
+
+
+def _copy_candidate_artifacts(esp):
+    artifact_dir = RUN_DIR / "artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for source in (Path(esp), Path(arena_env.build_dir()) / "arena-boot.efi"):
+        if not source.is_file():
+            raise FileNotFoundError(f"Phase 13 candidate artifact is missing: {source}")
+        destination = artifact_dir / source.name
+        shutil.copy2(source, destination)
+        outputs.append({
+            "path": str(destination.relative_to(RUN_DIR)),
+            "sha256": _sha256(destination),
+            "bytes": destination.stat().st_size,
+        })
+    return outputs
+
+
+def _run_phase13(receipt):
     bundle = app_bundle()
     headless = headless_bundle()
-    for image in arena_env.build_dir().glob(f"{LABEL}-*.ppm"):
-        image.unlink()
     esp = mtest.build(LABEL, desktop=True)
-    disk = arena_env.make_scratch_disk()
-    rc, serial, _ = mtest.boot(
+    receipt["artifacts"] = _copy_candidate_artifacts(esp)
+    _write_run_receipt(receipt)
+    disk = _make_phase13_scratch_disk()
+    rc, serial, seed_elapsed = mtest.boot(
         LABEL + "-seed", esp, [(b"arena>", 1, b"shutdown\r")], disk, pointer=True
     )
+    receipt["seed_boot"] = {
+        "exit": rc, "elapsed_s": round(seed_elapsed, 3),
+        "serial": _save_serial(LABEL + "-seed", serial),
+    }
+    _write_run_receipt(receipt)
     assert rc == 0 and "no AFS2 region" in serial
     with disk.open("r+b") as f:
         f.truncate(arena_env.AFS2_DISK_MIB * 1024 * 1024)
     assert not afs1.audit(disk)
-    rc, serial, _ = mtest.boot(
+    rc, serial, afs2_elapsed = mtest.boot(
         LABEL + "-afs2", esp,
         [(b"filesd: AFS2 mounted", 1, b"shutdown\r")], disk, pointer=True
     )
+    receipt["afs2_boot"] = {
+        "exit": rc, "elapsed_s": round(afs2_elapsed, 3),
+        "serial": _save_serial(LABEL + "-afs2", serial),
+    }
+    _write_run_receipt(receipt)
     assert rc == 0 and "filesd: AFS2 mounted" in serial
     seed_bundle(disk, bundle, headless)
     assert tree(disk)[f"/Users/user/Desktop/{SOURCE.decode()}"] == bundle
@@ -877,6 +1075,11 @@ def main():
     ]
     rc, serial, elapsed = mtest.boot(LABEL, esp, feed, disk, pointer=True, timeout_s=600)
     (arena_env.build_dir() / f"serial-{LABEL}.log").write_text(serial)
+    receipt["main_boot"] = {
+        "exit": rc, "elapsed_s": round(elapsed, 3), "timeout_s": 600,
+        "serial": _save_serial(LABEL, serial),
+    }
+    _write_run_receipt(receipt)
     assert rc == 0, serial[-5000:]
     assert serial.count(SERIAL_APPS) == 4
     assert serial.count(SERIAL_MULTIWINDOW) == 4
@@ -925,6 +1128,12 @@ def main():
         pointer=True,
         timeout_s=90,
     )
+    receipt["favorites_reload"] = {
+        "exit": rc, "elapsed_s": round(reload_elapsed, 3),
+        "timeout_s": 90,
+        "serial": _save_serial(LABEL + "-favorites-reload", reload_serial),
+    }
+    _write_run_receipt(receipt)
     assert rc == 0, reload_serial[-3000:]
     print(
         f"[{LABEL}] verified APB1 install -> registry -> keyboard/search/pointer launch of the signed native ELF; "
@@ -935,6 +1144,90 @@ def main():
         f"reload {reload_elapsed:.1f}s PASS",
         flush=True,
     )
+
+
+def _git_output(*args):
+    return subprocess.run(
+        ["git", *args], cwd=REPO_ROOT, check=True, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ).stdout.strip()
+
+
+def _write_run_receipt(receipt):
+    receipt["updated_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    (RUN_DIR / "run.json").write_text(
+        json.dumps(receipt, indent=2, sort_keys=True, default=str) + "\n")
+
+
+def main():
+    if RUN_DIR.exists():
+        raise FileExistsError(f"refusing to overwrite Phase 13 evidence: {RUN_DIR}")
+    if WORK_DIR.exists():
+        raise FileExistsError(f"refusing to reuse Phase 13 work directory: {WORK_DIR}")
+    RUN_DIR.mkdir(parents=True, exist_ok=False)
+    WORK_DIR.mkdir(parents=True, exist_ok=False)
+    attempt_dir = Path(os.environ.get(
+        "ARENA_TEST_ATTEMPT_DIR", RUN_DIR / "attempts"))
+    if not attempt_dir.is_absolute():
+        attempt_dir = REPO_ROOT / attempt_dir
+    os.environ["ARENA_TEST_ATTEMPT_DIR"] = str(attempt_dir)
+    try:
+        stat = REPO_ROOT.stat()
+        receipt = {
+            "schema_version": 1,
+            "stage": "Phase 13 registry regression",
+            "run_id": RUN_ID,
+            "label": LABEL,
+            "status": "RUNNING",
+            "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "command": [sys.executable, str(Path(__file__).resolve())],
+            "timeouts_s": {
+                "seed_boot_default": mtest.TIMEOUT_S,
+                "afs2_boot_default": mtest.TIMEOUT_S,
+                "main_boot": 600,
+                "favorites_reload": 90,
+            },
+            "evidence_dir": str(RUN_DIR),
+            "work_dir": str(WORK_DIR),
+            "attempt_evidence_dir": str(attempt_dir),
+            "repository": {
+                "path": str(REPO_ROOT), "device": stat.st_dev,
+                "inode": stat.st_ino, "branch": _git_output("branch", "--show-current"),
+                "commit": _git_output("rev-parse", "HEAD"),
+                "tracked_changes": _git_output("status", "--porcelain",
+                                                "--untracked-files=no"),
+            },
+            "python": {
+                "executable": sys.executable,
+                "version": sys.version,
+                "implementation": sys.implementation.name,
+            },
+            "qemu_instrumentation": {
+                "qmp_trace": "append-only per-Desktop command/response JSONL",
+                "wait_trace": "append-only waits with 10-second serial progress and timeout diagnostics",
+            },
+        }
+        (RUN_DIR / "commands.txt").write_text(
+            "Command: " + " ".join(receipt["command"]) + "\n"
+            "Main Phase 13 boot timeout: 600 seconds (unchanged).\n"
+            f"Favorites reload boot timeout: {receipt['timeouts_s']['favorites_reload']} seconds.\n"
+            f"Seed and AFS2 initialization boot default: {mtest.TIMEOUT_S} seconds.\n")
+        _write_run_receipt(receipt)
+        try:
+            _run_phase13(receipt)
+        except BaseException as exc:
+            receipt["status"] = "FAIL"
+            receipt["error"] = f"{type(exc).__name__}: {exc}"
+            receipt["traceback"] = traceback.format_exc()
+            receipt["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            _write_run_receipt(receipt)
+            raise
+        receipt["status"] = "PASS"
+        receipt["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        _write_run_receipt(receipt)
+    except BaseException:
+        # Keep the created unique run directory and any raw logs intact.
+        raise
 
 
 if __name__ == "__main__":
