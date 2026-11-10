@@ -31,6 +31,15 @@ def _phase13_run_id():
 RUN_ID = _phase13_run_id()
 LABEL = f"phase13-registry-{RUN_ID}"
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# This checkout is mounted at /workspace/ArenaOS for canonical builds but
+# Path.resolve() follows that symlink to /home/user/ArenaOS. Preserve the
+# canonical lexical root when both paths identify the same checkout: Rust
+# embeds source paths in the protected Phase-14 PIE fixture, whose guard is
+# intentionally tied to the canonical build path.
+CANONICAL_REPO_ROOT = Path("/workspace/ArenaOS")
+if CANONICAL_REPO_ROOT.is_dir() and CANONICAL_REPO_ROOT.samefile(REPO_ROOT):
+    REPO_ROOT = CANONICAL_REPO_ROOT
+    arena_env.REPO_ROOT = REPO_ROOT
 WORK_DIR = Path(arena_env.build_dir()) / f"phase13-work-{RUN_ID}"
 _run_dir = Path(os.environ.get(
     "V1_PHASE13_EVIDENCE_DIR",
@@ -111,7 +120,7 @@ def tree(disk):
 
 
 def app_bundle():
-    root = Path(__file__).resolve().parents[1]
+    root = REPO_ROOT
     crate = root / "userspace/phase13-app"
     subprocess.run(
         ["cargo", "build", "--release"],
@@ -166,7 +175,7 @@ def app_bundle():
 
 
 def headless_bundle():
-    root = Path(__file__).resolve().parents[1]
+    root = REPO_ROOT
     crate = root / "userspace/phase13-headless"
     subprocess.run(
         ["cargo", "build", "--release"],
