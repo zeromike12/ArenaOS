@@ -1,0 +1,8 @@
+{
+  "serial_line": "[desktop] APB1 installed; signed version=42 (no launch authority implied)",
+  "receipt_count_before": 0,
+  "version": 42,
+  "apb1_sha256": "1db228addca3c7b98f3b3886617dffb0087cf627d7ce65c4fc1900f019870361",
+  "kind": "installation_receipt",
+  "note": "guest protected installer receipt (receiver-side APKG and signature checks); not a host-computed attestation"
+}

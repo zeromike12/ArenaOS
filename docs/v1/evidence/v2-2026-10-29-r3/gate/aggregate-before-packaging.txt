@@ -1,0 +1,17 @@
+stage            result   finished
+build            PASS     2026-10-30T04:10:51Z
+env              PASS     2026-10-30T04:10:52Z
+controls         PASS     2026-10-30T04:10:53Z
+guest-gcc        PASS     2026-10-30T04:10:53Z
+guest-clang      PASS     2026-10-30T04:10:53Z
+refusals-gcc     PASS     2026-10-30T04:10:53Z
+refusals-clang   PASS     2026-10-30T04:10:54Z
+cycles           PASS     2026-10-30T04:10:54Z
+package          MISSING  -
+verify           MISSING  -
+regression       PASS     2026-10-30T04:10:54Z
+stability        PASS     2026-10-30T04:10:54Z
+
+V1 GATE (full): FAIL
+  - package: no receipt (stage did not run)
+  - verify: no receipt (stage did not run)

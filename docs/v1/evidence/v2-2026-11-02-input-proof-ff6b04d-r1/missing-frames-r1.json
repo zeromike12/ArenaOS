@@ -1,0 +1,220 @@
+{
+  "all_expected_missing_paths_absent": true,
+  "attempts_examined": [
+    {
+      "path": "guest-run",
+      "recorded_verdict": false
+    },
+    {
+      "path": "guest-run-retry1",
+      "recorded_verdict": false
+    },
+    {
+      "path": "guest-run-retry2",
+      "recorded_verdict": true
+    }
+  ],
+  "classification": "diagnostic packaging inventory only; not a qualification verdict",
+  "evidence_root": "v2-2026-11-02-input-proof-ff6b04d-r1",
+  "missing_expected_frame_count": 12,
+  "missing_frames": [
+    {
+      "attempt_dir": "guest-run",
+      "checkpoint": 5,
+      "checkpoint_name": "mouse response (instance-specific acknowledgment)",
+      "checkpoint_result": "FAIL",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run/shots/cp05-mouse-response.png",
+      "present_at_inventory_time": false,
+      "reason": "Checkpoint 5 failed its unchanged acknowledgment + visible-in-window response + clean-pre-input-frame predicate. Timestamped sample probes are retained separately; the required checkpoint summary frame was not produced.",
+      "related_probe_pngs": [
+        {
+          "path": "shots/cp05-mouse-response-samples/sample-001-2026-11-02T044347.511445813Z.png",
+          "sha256": "be4b93ca1bc1b82f3c2284f130733df4a7b3f3bb457799e5c523b4bf4c8a59d8",
+          "size": 8430
+        },
+        {
+          "path": "shots/cp05-mouse-response-samples/sample-002-2026-11-02T044349.298711307Z.png",
+          "sha256": "0205a18c778a132a906a8adae5a9f38ff810f8633edd62f808aaf4b04cb7b9ce",
+          "size": 8428
+        },
+        {
+          "path": "shots/cp05-mouse-response-samples/sample-003-2026-11-02T044350.791045408Z.png",
+          "sha256": "090daa6f115291f4ea6da9b5b632e899fe93f3b4e6e58ec6fc309145ea92c21b",
+          "size": 8423
+        }
+      ],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run",
+      "checkpoint": 6,
+      "checkpoint_name": "two concurrent instances: focus/input isolation, both directions",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run/shots/cp06a-two-instances.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run",
+      "checkpoint": 6,
+      "checkpoint_name": "two concurrent instances: focus/input isolation, both directions",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run/shots/cp06a-focused.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run",
+      "checkpoint": 6,
+      "checkpoint_name": "two concurrent instances: focus/input isolation, both directions",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run/shots/cp06b-focused.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run",
+      "checkpoint": 7,
+      "checkpoint_name": "window removal: retirements, exits, settlement, visual removal",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run/shots/cp07-desktop-restored.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run",
+      "checkpoint": 8,
+      "checkpoint_name": "final V1 demonstration",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run/shots/cp08-final-demonstration.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoint": 5,
+      "checkpoint_name": "mouse response (instance-specific acknowledgment)",
+      "checkpoint_result": "FAIL",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run-retry1/shots/cp05-mouse-response.png",
+      "present_at_inventory_time": false,
+      "reason": "Checkpoint 5 failed its unchanged acknowledgment + visible-in-window response + clean-pre-input-frame predicate. Timestamped sample probes are retained separately; the required checkpoint summary frame was not produced.",
+      "related_probe_pngs": [
+        {
+          "path": "shots/cp05-mouse-response-samples/sample-001-2026-11-02T044841.347671126Z.png",
+          "sha256": "8a3e98b194e35b7fc734716c3bdd01e4701957fbe5c47d6819194f89733b69bd",
+          "size": 8428
+        },
+        {
+          "path": "shots/cp05-mouse-response-samples/sample-002-2026-11-02T044843.451798642Z.png",
+          "sha256": "b5f4bc47ac6f74792f00338c264baafe0e1251ad12cb449396580fff6d8a5819",
+          "size": 8423
+        }
+      ],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoint": 6,
+      "checkpoint_name": "two concurrent instances: focus/input isolation, both directions",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run-retry1/shots/cp06a-two-instances.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoint": 6,
+      "checkpoint_name": "two concurrent instances: focus/input isolation, both directions",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run-retry1/shots/cp06a-focused.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoint": 6,
+      "checkpoint_name": "two concurrent instances: focus/input isolation, both directions",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run-retry1/shots/cp06b-focused.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoint": 7,
+      "checkpoint_name": "window removal: retirements, exits, settlement, visual removal",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run-retry1/shots/cp07-desktop-restored.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    },
+    {
+      "attempt_dir": "guest-run-retry1",
+      "checkpoint": 8,
+      "checkpoint_name": "final V1 demonstration",
+      "checkpoint_result": "NOT RUN",
+      "expected_png_sha256": "MISSING",
+      "path": "guest-run-retry1/shots/cp08-final-demonstration.png",
+      "present_at_inventory_time": false,
+      "reason": "Harness recorded checkpoint as NOT RUN because checkpoint 5 failed; no checkpoint frame was produced.",
+      "related_probe_pngs": [],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "status": "EXPECTED_BUT_NOT_CAPTURED",
+      "tested_ppm_sha256": "MISSING"
+    }
+  ],
+  "rule": "Inventory each required_frames PNG whose recorded published_png_sha256 is MISSING. Do not synthesize or infer content for it.",
+  "schema": "arena.v1.guest-proof-missing-frame-inventory/v1",
+  "summary": "Original run and retry1 failed checkpoint 5; each consequently lacks six required checkpoint PNGs (cp05 through cp08, including the three cp06 image entries). Retry2 passed and contains all required checkpoint PNGs. The individual cp05 sample captures from failed attempts remain preserved and are not substitutes for the missing required summary frame."
+}

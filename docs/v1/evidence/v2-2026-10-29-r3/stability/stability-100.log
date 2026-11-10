@@ -1,0 +1,26 @@
+expectation derived from boot 1:
+    m11: RESULT PASS (8/8
+    m12: RESULT PASS (7/7
+    m15: RESULT PASS (6/6
+    m1: RESULT PASS (8/8
+    m2: RESULT PASS (21/21
+    m3: RESULT PASS (13/13
+    m4: RESULT PASS (9/9
+    m5: RESULT PASS (6/6
+    m6: RESULT PASS (6/6
+    m7: RESULT PASS (2/2
+progress: 10/100 boots (pass=10 fail=0, 98s)
+progress: 20/100 boots (pass=20 fail=0, 196s)
+progress: 30/100 boots (pass=30 fail=0, 296s)
+progress: 40/100 boots (pass=40 fail=0, 394s)
+progress: 50/100 boots (pass=50 fail=0, 494s)
+progress: 60/100 boots (pass=60 fail=0, 592s)
+progress: 70/100 boots (pass=70 fail=0, 690s)
+progress: 80/100 boots (pass=80 fail=0, 788s)
+progress: 90/100 boots (pass=90 fail=0, 887s)
+progress: 100/100 boots (pass=100 fail=0, 986s)
+==============================================
+stability: 100/100 boots fully green in 986s (fail=0)
+receipt: build/stability-receipt.txt (bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83 100/100)
+STABILITY: PASS
+EXIT=0

@@ -1,0 +1,15 @@
+--- guest ELF hashes ---
+07f9fbc5d7dc0891bf36be73304c20f55a3995868481e3b9a4eae57275fe2f4f  /home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-app-gcc.elf
+e8d763111db70fdc1b0c6fa3d00c0a45fca3a7948c7923419d019fc50db3817d  /home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c-native-gcc.elf
+4eff95f2fa0d4a09b9be8e28d8f9f665a19bf0d434674e0287de0cccce0be4d8  /home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c2-console-gcc.elf
+ef93bb4d8c7caf6f3a161de9b12aa3e54a4049c764dd899c5aa53a1b66f96841  /home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/crt-probe-gcc.elf
+1a207133975cb046a51a5736b9a41449e6428a2d0b72721b4f093bd9df0bcfba  /home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/xxhash-app-gcc.elf
+30cab76f2c94f0a3b6fd81296937c380514e91de4b8a714a981ecf2ebe8fb664  /home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-gfx-app-clang.elf
+62d0257a09d0b2cdd3dccabb6a0589a9f5f7bc3e2445e8959639a987536ce688  /home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-native-clang.elf
+c91428cd5e7759f4ad50e261aa45fbd01790830d92dfe03d3feaeff64bf09cec  /home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c2-console-clang.elf
+a3cbc85839e6cd1b4f44952606d78b6fca6ddbc4dc8170d162732455466f0479  /home/user/ArenaOS/experiments/c-runtime/build/guest-clang/crt-probe-clang.elf
+58b21cc9e28da92a20f59c1add2aeb05f4a8666f75398c430ac2a58c00c292ff  /home/user/ArenaOS/experiments/c-runtime/build/guest-clang/xxhash-app-clang.elf
+--- static audit verdict ---
+compilers: {'clang': 'clang version 22.1.8', 'gcc': 'gcc (Debian 12.2.0-14+deb12u1) 12.2.0'}
+static_audit_pass: None
+failed: []

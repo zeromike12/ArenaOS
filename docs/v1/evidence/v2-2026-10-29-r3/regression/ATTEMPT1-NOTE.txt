@@ -1,0 +1,8 @@
+ATTEMPT 1 — INVALIDATED, preserved not deleted.
+
+All 121 suites passed; the runner then reported "source changed during
+full suite" because this session edited tracked files (V2-STATUS.md and
+three tools) while the suite was executing. The guard did its job: a run
+describing two different trees is not a result.
+Attempt 2 (run-tests.log) ran against a committed tree with no edits in
+flight.

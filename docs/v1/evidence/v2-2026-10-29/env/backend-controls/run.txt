@@ -1,0 +1,4 @@
+patched controls PASS; unpatched baseline failed expected exception cases; receipt=/home/user/ArenaOS/build/backend-controls/xm-verify.json
+[backend-controls] patched: qemu exit 33
+[backend-controls] unpatched: qemu exit 35
+[backend-controls] verifier exit 0; evidence in /home/user/ArenaOS/build/backend-controls

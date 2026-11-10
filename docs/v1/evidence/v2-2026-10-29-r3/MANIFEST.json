@@ -1,0 +1,341 @@
+{
+  "created_utc": "2026-10-30T04:12:37Z",
+  "source_commit": "7632f54c0e9b9ec3f4c26181cd7041c5a5014bf9",
+  "branch": "arena/af044828-arenaos",
+  "working_tree_dirty": true,
+  "files": {
+    "V2-STATUS.md": {
+      "sha256": "095f5594ffb7222c4327f21b002684b2ad8327e190706834b6ebd11ef9234e0e",
+      "size": 30696
+    },
+    "canonical-build/artifact-identities.txt": {
+      "sha256": "878e5ffeeeef7ef37e2bffbd9fd128b300323bd38d76822a42dc13fc2a2fa45a",
+      "size": 1038
+    },
+    "canonical-build/build-image.log": {
+      "sha256": "459f7fe375a9c5670e731918904febe57dc65279c4257db8acbb89ee9fe50d4f",
+      "size": 21319
+    },
+    "canonical-build/esp-embedded-efi.txt": {
+      "sha256": "71673375c35a707e9e6cf3bec5b1f57becdd77f6df6033019b60680592e5af43",
+      "size": 220
+    },
+    "canonical-build/rebuild-from-scratch.log": {
+      "sha256": "fab7b46d573bb91d7328f4f0a81607cdc1358d49c3f727625882252b7e1f8680",
+      "size": 22059
+    },
+    "gate/aggregate-before-packaging.txt": {
+      "sha256": "b7de1e623a71ad1bd24df72bf23b2870abc8c23f8bf7ffe4a3a7cea4c8c72997",
+      "size": 670
+    },
+    "gate/receipts/build.json": {
+      "sha256": "a2c848a0d5a81ae8336e4dea557507d6632d54251efaab30a0bc7d42dcb7b8fe",
+      "size": 1103
+    },
+    "gate/receipts/controls.json": {
+      "sha256": "7b13fa4501be4ea76a9f254a0e46106bbabe76855208205971679971db99b1f0",
+      "size": 973
+    },
+    "gate/receipts/cycles.json": {
+      "sha256": "1496d2e84409e4d6201bf4784ca1f5342f69c1973e3cfb45b66f36a89b79edfd",
+      "size": 1002
+    },
+    "gate/receipts/env.json": {
+      "sha256": "cf7d1c01b9ecb314ee3a6c176d318553cafe3142aa8a1e490ca34d9a99965ffa",
+      "size": 1026
+    },
+    "gate/receipts/guest-clang.json": {
+      "sha256": "db0ea5bbd9696f765445ecc30f2d5193854a729aa0e63731617f0b476c9e156e",
+      "size": 1011
+    },
+    "gate/receipts/guest-gcc.json": {
+      "sha256": "bc9b9d32680240fc40c3228d00b51a72435559843c6730fedf34b2830891f541",
+      "size": 1008
+    },
+    "gate/receipts/refusals-clang.json": {
+      "sha256": "06b5788552a13dafde8ae2c11e8cd761bb488e392eda4e460d7ac24a9c486458",
+      "size": 1036
+    },
+    "gate/receipts/refusals-gcc.json": {
+      "sha256": "b1aa8272f0ff9148043527b2b8276cdd36e55f88c1074db28124a898f24ca786",
+      "size": 1031
+    },
+    "gate/receipts/regression.json": {
+      "sha256": "4e4a2ebfec4cd0b5aa0fe0098fc843afbf576ec3a36f01dd030e695b266363dd",
+      "size": 1060
+    },
+    "gate/receipts/stability.json": {
+      "sha256": "2e4f88800097e70763d77ae8c127c18a7c4616c9b174f861ec8c81aea039a7ce",
+      "size": 1032
+    },
+    "guest-clang/c-gfx-app.apb1": {
+      "sha256": "1db228addca3c7b98f3b3886617dffb0087cf627d7ce65c4fc1900f019870361",
+      "size": 53144
+    },
+    "guest-clang/evidence.json": {
+      "sha256": "ed99835dd9df9b4f576b0cc07a35dcabe82324aeb766f115f82b03c329e000ec",
+      "size": 15892
+    },
+    "guest-clang/harness-output.log": {
+      "sha256": "540600d66e9b4ea932f3099c9f80f945c3f744c3bc0d2db1be2e5281ddb5efea",
+      "size": 1610
+    },
+    "guest-clang/install-ack.json": {
+      "sha256": "29a06f4b8fc0ddef5a37ede3cb3482319008d874dc51b638f233a6ae904feed3",
+      "size": 383
+    },
+    "guest-clang/shots/cp01-launch-ready-desktop.png": {
+      "sha256": "5f093b38ca7626bbccee08fd0b51019fa2ac63a7f4fbbf68d4013bf093c9dda4",
+      "size": 5708
+    },
+    "guest-clang/shots/cp03-first-native-c-window.png": {
+      "sha256": "d86a3ccbe286c9e21ece19bd8d7d94ea13fa2ec91d5c6cf5473043ba8ec3d795",
+      "size": 8659
+    },
+    "guest-clang/shots/cp04-keyboard-response-pre.png": {
+      "sha256": "9e4d7f88e6d14a1508ea541210ca452efece4b5a008124713b338b4d08e81e7e",
+      "size": 8416
+    },
+    "guest-clang/shots/cp04-keyboard-response.png": {
+      "sha256": "85294a855bdf55050aed0c6706ace9a1fb06c88fa07cc22540e90e6cc991e9a0",
+      "size": 8417
+    },
+    "guest-clang/shots/cp05-mouse-response-pre.png": {
+      "sha256": "927f54cb9d8bfed5a15d3471943f211bdd44705aaaffa7ebacecc62b8976814b",
+      "size": 8422
+    },
+    "guest-clang/shots/cp05-mouse-response.png": {
+      "sha256": "7094dbea6252e6399f42c92858c27e93494364cc8963e9bb3ea749ceb3610ca6",
+      "size": 8420
+    },
+    "guest-clang/shots/cp06a-focused-pre.png": {
+      "sha256": "959824ee61a7f90087614215cf096bce17b7fa68088b70dbaacc5d9962615aa4",
+      "size": 8717
+    },
+    "guest-clang/shots/cp06a-focused.png": {
+      "sha256": "364b99b3f2e62fcfe4cf2335888aa196bfa508358aae02a2ae69dab94e9e699b",
+      "size": 8680
+    },
+    "guest-clang/shots/cp06a-two-instances.png": {
+      "sha256": "cc9ce7179654e0c43cae059d07633d7748e64777cf9337311e9e78f485473315",
+      "size": 8847
+    },
+    "guest-clang/shots/cp06b-focused-pre.png": {
+      "sha256": "26261a5c4d8e2e6cf49f5204c57e7521fe0a81f5cd93a1f8e307352b64d99d2c",
+      "size": 8842
+    },
+    "guest-clang/shots/cp06b-focused.png": {
+      "sha256": "7b1318fd2c428c3b76f78b084d40e0d36a65bec1cd57c7c4872cc3264e2a69cf",
+      "size": 8937
+    },
+    "guest-clang/shots/cp07-desktop-restored.png": {
+      "sha256": "50c2c64cf956f9d23aa35b3078bbb346dc87f83d8a152072ed1e744e3b940708",
+      "size": 5792
+    },
+    "guest-clang/shots/cp08-final-demonstration-pre.png": {
+      "sha256": "e3cdab52db8b64641219695bea4267e5088d430842313038d1f984d43d70028a",
+      "size": 8427
+    },
+    "guest-clang/shots/cp08-final-demonstration.png": {
+      "sha256": "098b3f3e0f2737fc7bde36be8e5d7ca545ce4bea203c6f13cd0e5bace3bb21d5",
+      "size": 8428
+    },
+    "guest-clang/v1-guest-serial.log": {
+      "sha256": "42415b96d5a0450b2bbd140f6094956f1d03808a3b068f2ea69f48dde4c00c95",
+      "size": 285616
+    },
+    "guest-gcc/c-gfx-app.apb1": {
+      "sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+      "size": 40472
+    },
+    "guest-gcc/evidence.json": {
+      "sha256": "e016cafa6fbc8fd5691505a95681d8bee4382909affd28cc0eb1c187b0dd2a7d",
+      "size": 15886
+    },
+    "guest-gcc/harness-output.log": {
+      "sha256": "8a38b91e34906478fea689e15d7d155f17def58d97ca399d7e3b61c50a48e12b",
+      "size": 1606
+    },
+    "guest-gcc/install-ack.json": {
+      "sha256": "4a286c4d02164c6c1a115e58eec853794e7da440e6c4d9667bfd54cbe5275b8e",
+      "size": 383
+    },
+    "guest-gcc/shots/cp01-launch-ready-desktop.png": {
+      "sha256": "5f093b38ca7626bbccee08fd0b51019fa2ac63a7f4fbbf68d4013bf093c9dda4",
+      "size": 5708
+    },
+    "guest-gcc/shots/cp03-first-native-c-window.png": {
+      "sha256": "d86a3ccbe286c9e21ece19bd8d7d94ea13fa2ec91d5c6cf5473043ba8ec3d795",
+      "size": 8659
+    },
+    "guest-gcc/shots/cp04-keyboard-response-pre.png": {
+      "sha256": "9e4d7f88e6d14a1508ea541210ca452efece4b5a008124713b338b4d08e81e7e",
+      "size": 8416
+    },
+    "guest-gcc/shots/cp04-keyboard-response.png": {
+      "sha256": "85294a855bdf55050aed0c6706ace9a1fb06c88fa07cc22540e90e6cc991e9a0",
+      "size": 8417
+    },
+    "guest-gcc/shots/cp05-mouse-response-pre.png": {
+      "sha256": "927f54cb9d8bfed5a15d3471943f211bdd44705aaaffa7ebacecc62b8976814b",
+      "size": 8422
+    },
+    "guest-gcc/shots/cp05-mouse-response.png": {
+      "sha256": "7094dbea6252e6399f42c92858c27e93494364cc8963e9bb3ea749ceb3610ca6",
+      "size": 8420
+    },
+    "guest-gcc/shots/cp06a-focused-pre.png": {
+      "sha256": "2923d9c3d9f51f8814aef7c80ac16174b9b635a96e9c4954bb6b6c4d12ccad3a",
+      "size": 8714
+    },
+    "guest-gcc/shots/cp06a-focused.png": {
+      "sha256": "12a584094f1241e3e77646c5074a52525b5318c73b595147f4e3a94024a424c9",
+      "size": 8678
+    },
+    "guest-gcc/shots/cp06a-two-instances.png": {
+      "sha256": "acafbe7d1cda9dc75b2083918093ca6c6ac765457356f9c46d36f745533415b3",
+      "size": 8844
+    },
+    "guest-gcc/shots/cp06b-focused-pre.png": {
+      "sha256": "8150ce2402cb0b85601b9c15969112f00c047241a75dcb0bd2466962cdc9adf1",
+      "size": 8852
+    },
+    "guest-gcc/shots/cp06b-focused.png": {
+      "sha256": "05e91b06ca6fbeb90505124c9e4a4caf1b5d0916135fe61e7b6df0db4a90d0b6",
+      "size": 8933
+    },
+    "guest-gcc/shots/cp07-desktop-restored.png": {
+      "sha256": "7e3f8cc03dac57d6198bd1dd02941256a03ddbaf0ff94c06ca269e4fd2742b44",
+      "size": 5795
+    },
+    "guest-gcc/shots/cp08-final-demonstration-pre.png": {
+      "sha256": "7fc7b7dc6b26f4d332e334e96e73a72933e061c1da3ca24c35e18a317a88eb59",
+      "size": 7838
+    },
+    "guest-gcc/shots/cp08-final-demonstration.png": {
+      "sha256": "e3ecb88b99a5577220a7e1c15dea2d016e01d8679ef7aebe5cccdb5a1ece68f1",
+      "size": 8427
+    },
+    "guest-gcc/v1-guest-serial.log": {
+      "sha256": "d3487141f80787a95cc88736a24353ac0bb859ba286a0739e3f59662347fee56",
+      "size": 261795
+    },
+    "lifecycle-cycles/c-gfx-app.apb1": {
+      "sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+      "size": 40472
+    },
+    "lifecycle-cycles/cycles-evidence.json": {
+      "sha256": "409d10c40979319c33c6120547e25e38277aed9005d1f766483349d6f65fa03a",
+      "size": 14014
+    },
+    "lifecycle-cycles/v1-cycles-serial.log": {
+      "sha256": "2032468428357d6adcaa73cae4a17af3fe67b9dcc5bf7503908aa015a993f466",
+      "size": 439817
+    },
+    "phase15/SEPARATION.md": {
+      "sha256": "0b48e8d10ef688243f7e0839f48f7b5cc05622324cb154ef3fbd00b18afaaffe",
+      "size": 1747
+    },
+    "phase15/m15-current-candidate.log": {
+      "sha256": "295848aa6073a742169e31d6fb2a3bfcd4313ced48700f3d91aca629f980ea14",
+      "size": 2406
+    },
+    "recovery/component-disambiguator.txt": {
+      "sha256": "725c849daee2a21b6a3e75f55efea34b394566df10b527069f5955850c6401f5",
+      "size": 456
+    },
+    "recovery/component-identity.txt": {
+      "sha256": "6ea4015e1d4a51677e66dda15b160f009aac984b35d9ea07db6888535538fd90",
+      "size": 1119
+    },
+    "recovery/component-resolution.txt": {
+      "sha256": "9db6289600cc57f17ee4f237c10dc57e6f65965f644aa71124bb696d43e72b18",
+      "size": 343
+    },
+    "recovery/rust-std-install.log": {
+      "sha256": "03f7e0e2d9e97bc8e6b966754d8090236a975a278fa47e3f8089c171e1e85177",
+      "size": 486
+    },
+    "refusals-clang/c-gfx-refusals.apb1": {
+      "sha256": "b79a7da11bc9eb50fc3841eb5404b51cd4b5a3f07da48c429dbe0adfea002336",
+      "size": 61720
+    },
+    "refusals-clang/refusals-evidence.json": {
+      "sha256": "b4c63ce7e1cda6f8b564c1a1d6376ecacdb3c253cb109c98c367972d42f227ea",
+      "size": 10347
+    },
+    "refusals-clang/refusals-serial.log": {
+      "sha256": "f66df277819fa323c9a7eb346445a8d42a757b897e8970d406921fc3bafbf2eb",
+      "size": 194649
+    },
+    "refusals-clang/shots/cp09-launcher-selection.png": {
+      "sha256": "14c4a8cbb8f7dd3d21303be8d71e572955d744055a72a1b8c1fcc64a1a093577",
+      "size": 6759
+    },
+    "refusals-clang/shots/cp09-refusal-matrix.png": {
+      "sha256": "c2409ab180ce5396c96c0f545b1b42ee8d1154d6b14a7bae8c5745050bdf5623",
+      "size": 6052
+    },
+    "refusals-gcc/c-gfx-refusals.apb1": {
+      "sha256": "aab1f0ca5b8e7116d4aa38e8fe38436bb11ef09f75585113ea04e1b1a1f5886d",
+      "size": 40888
+    },
+    "refusals-gcc/refusals-evidence.json": {
+      "sha256": "8497ae0d3edda3fa78d237101b88b92de772a3dac074ffdc3f8bbbc93763cb7e",
+      "size": 10345
+    },
+    "refusals-gcc/refusals-serial.log": {
+      "sha256": "92c51caaab1f2ab0577c71da2f4bbd7953c34c762af5fbe3d9b67e72c45f7545",
+      "size": 173953
+    },
+    "refusals-gcc/shots/cp09-launcher-selection.png": {
+      "sha256": "14c4a8cbb8f7dd3d21303be8d71e572955d744055a72a1b8c1fcc64a1a093577",
+      "size": 6759
+    },
+    "refusals-gcc/shots/cp09-refusal-matrix.png": {
+      "sha256": "c2409ab180ce5396c96c0f545b1b42ee8d1154d6b14a7bae8c5745050bdf5623",
+      "size": 6052
+    },
+    "regression/ATTEMPT1-NOTE.txt": {
+      "sha256": "b6a66d8d318c1f24c176b2b4e5d72bdbc494d9f986da8de86a821bcacd491568",
+      "size": 395
+    },
+    "regression/run-tests-attempt1-INVALIDATED.log": {
+      "sha256": "a35c36909f45808a1ed76b9057ab7000d8e508b580748a61b3834bdbc434b755",
+      "size": 240503
+    },
+    "regression/run-tests.log": {
+      "sha256": "d88f9f570b5a81894534e1a50ff0ff2e0a941a50a9fda25b6ba260620398df49",
+      "size": 235293
+    },
+    "stability/stability-100.log": {
+      "sha256": "a1232371967ffff41617db1c3a8a3d57461cc68cc0d7f59f6a4e7ad821c4dde5",
+      "size": 987
+    },
+    "stability/stability-receipt.txt": {
+      "sha256": "11cbeedc5ea4fa9af727ca252d3b676fdf8684525ceb6632fc2e1c44cd308930",
+      "size": 73
+    }
+  },
+  "excluded_from_package": {
+    "count": 70,
+    "pattern": "*.ppm",
+    "reason": "PPM screendumps are a fixed header plus the exact raster of the published PNG; their SHA-256 is recorded in each run's evidence.json"
+  },
+  "checkpoint_frames": {
+    "required": [
+      "shots/cp01-launch-ready-desktop.png",
+      "shots/cp03-first-native-c-window.png",
+      "shots/cp04-keyboard-response.png",
+      "shots/cp05-mouse-response.png",
+      "shots/cp06a-two-instances.png",
+      "shots/cp06a-focused.png",
+      "shots/cp06b-focused.png",
+      "shots/cp07-desktop-restored.png",
+      "shots/cp08-final-demonstration.png"
+    ],
+    "checked": "each published PNG re-decoded and compared with the raster digest the harness recorded when the checkpoint assertion passed",
+    "runs": 2
+  },
+  "total_bytes": 2487541
+}

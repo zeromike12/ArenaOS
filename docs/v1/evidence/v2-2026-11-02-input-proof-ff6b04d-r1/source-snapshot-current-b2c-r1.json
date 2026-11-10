@@ -1,0 +1,127 @@
+{
+  "directory": "source-snapshot/current-b2c23fb",
+  "file_count": 19,
+  "files": [
+    {
+      "git_blob": "d4bd73d00f20991dfad46b93684127365853db94",
+      "path": "tools/v1_guest_proof.py",
+      "sha256": "1ff6634046f6f2c0ecce907fc330e7187fd9142cce81f4e927bb00ddb3147fbc",
+      "size": 157174
+    },
+    {
+      "git_blob": "f609997d5e4772a3e6fd7dc0011c234c0f9cb212",
+      "path": "tools/v1_evidence.py",
+      "sha256": "a8ffa854721933dd98d1aa3b7008ac9c4c52d559c015cdaeb65d959b6a439bf3",
+      "size": 45518
+    },
+    {
+      "git_blob": "091df7cc4016f797d24056ceb8eb312c4929db1d",
+      "path": "tools/v1_gate_aggregate.py",
+      "sha256": "7eae78289d46cb8906273fde4520e3506731984e768c2d1f4395360c665f9132",
+      "size": 45520
+    },
+    {
+      "git_blob": "4c68473fae4464383c8cfc0c7eef98d30a7a0544",
+      "path": "tools/v1_diagnostic_evidence.py",
+      "sha256": "eba8437654ff85cd029a4245a298016cb5f26d28e5da76d5a578b2c6d65f33da",
+      "size": 37015
+    },
+    {
+      "git_blob": "0f1ce41d975560ae8eeae3445596e87ef6c05839",
+      "path": "tools/test_v1_evidence.py",
+      "sha256": "712b83b4c9580c7fabfe76e0f4e6432187cd904c96cfef417b23586efac8f41b",
+      "size": 13288
+    },
+    {
+      "git_blob": "870509cf5e0638dcc73ae38f3b3552e3f009dde6",
+      "path": "tools/test_v1_gate_aggregate.py",
+      "sha256": "fff6b2cc173474cb49c1e2f0a73812e589fc12d46b1273890a1c94729a328e92",
+      "size": 13477
+    },
+    {
+      "git_blob": "55599cc97e7239ee2cf23c2b0a7fea47da2809a3",
+      "path": "tools/test_v1_diagnostic_evidence.py",
+      "sha256": "8cff6321663796ee1cc7be38d5a8f02b91c4eff4e03b90d59b1c437afab3cd68",
+      "size": 7794
+    },
+    {
+      "git_blob": "4f40491a64a26de64440aec11862291def818e07",
+      "path": "tools/arena_env.py",
+      "sha256": "98a7bb667fac85ed9733a8db7088d72be6388b8fe58dfca3c706555896499b79",
+      "size": 11346
+    },
+    {
+      "git_blob": "39d5152f93257ff97659684775d88a7e6bfef934",
+      "path": "tools/qmp.py",
+      "sha256": "7bccddca9183c819f4cdc8d53f3acfa07b27368c5b1c5baac8424d89dfaec2fc",
+      "size": 7032
+    },
+    {
+      "git_blob": "93bb936fb80c3b10d39c791752f344d16e440f9c",
+      "path": "tools/mtest.py",
+      "sha256": "d9331d63de9ce0c278ec4e9f6d5f82e78adbd2006f0e8d8b8ce413c50ba2b446",
+      "size": 41077
+    },
+    {
+      "git_blob": "bc0295173d9d446828971d95ee6e58cd20b234c3",
+      "path": "tools/build.sh",
+      "sha256": "c4d47b7d0a6fe25825348c341f2d0255e5f7c062db0ac4d9bf89a803257e6d0d",
+      "size": 16990
+    },
+    {
+      "git_blob": "d806dbc5f47ad065e7893fa99c2d90ab9706fd51",
+      "path": "tools/build_phase14_pie.sh",
+      "sha256": "e44d2bc5ce8a5fe1e6954f2dfcaed67e4d9f0633afe6810561009884ec2112a1",
+      "size": 1972
+    },
+    {
+      "git_blob": "afb1815cab2833e60abe4518e71ed8b7f5896a04",
+      "path": "tools/build_phase14_bundle.py",
+      "sha256": "76cfa25285144a51ee986a1dc8d32cd35bf3c548906f855fccdad35d53e02f9c",
+      "size": 1831
+    },
+    {
+      "git_blob": "454f76029298782713338531afec753e9e910c20",
+      "path": "tools/espimg.py",
+      "sha256": "d2ec0660ee95fabbb58a3de7101875379dfdab23284b06d0230e7a14a8d99a53",
+      "size": 3621
+    },
+    {
+      "git_blob": "b06bd1f6b14d03ebf16e5ed8699395268b9082b9",
+      "path": "tools/audit_kernel_isa.py",
+      "sha256": "4e688e46b38a23e60e17e92153bf402b771f938a4ce618547825f560ffa91acf",
+      "size": 15221
+    },
+    {
+      "git_blob": "60b7ba557832fcbbdabac86e1de2f8ba27ecc24e",
+      "path": "tools/dev-env/v1-env.sh",
+      "sha256": "894f5996d452848d0f6a0d2ed65302fb7f9cd2aa6b05f0eadd4a6985c8f798f5",
+      "size": 1826
+    },
+    {
+      "git_blob": "0081ec456dd35bd6b96d7e19d3ba988fb53bae6e",
+      "path": "tools/dev-env/recover-rust-and-zig.sh",
+      "sha256": "201929412d1db3d2ebef2ee082efd1a8b870eecfd0a5f3b51fc7e4ef1135ff68",
+      "size": 6140
+    },
+    {
+      "git_blob": "898007105a2d3dd69709d0c6ef07fbf831661cb0",
+      "path": "experiments/c-runtime/app/c_gfx_app.c",
+      "sha256": "3be3e44a2ac440cbaddf840681a103574bed23108c8479cae2a5a7c0f17aaaf5",
+      "size": 26615
+    },
+    {
+      "git_blob": "7c960e734e23c86005dd36ad465dc4314dfd0fc9",
+      "path": "userspace/desktop/src/bin/desktop.rs",
+      "sha256": "19951cea482e2bec3c4fde4e8754184f1e15702b911c8cc8ea03cadf266b07c5",
+      "size": 264965
+    }
+  ],
+  "not_run_source_caveat": "The QEMU attempt records identify source commit ff6b04d791aeabd3e5875194460153c42580f742, whose Git object is absent from this resumed checkout. This selected snapshot is from b2c23fb and is not claimed to be the original run source or a replacement for that identity.",
+  "recorded_at_utc": "2026-11-02T13:50:08Z",
+  "schema": "arena.v1.selected-current-source-snapshot/v1",
+  "scope": "Selected harness, gate, build, audit, C app, and desktop source files from the current committed tree. This is not a full repository snapshot.",
+  "source_commit": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f",
+  "source_tree": "aedec742eb7b97819dc76eeeb749360cefc158b9",
+  "total_bytes": 718422
+}

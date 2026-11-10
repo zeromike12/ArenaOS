@@ -1,0 +1,16 @@
+prefix: /home/user/glibc-2.40
+eef95f26903e6f9ac6b8cb92df9ba5306ff01b4058ddf7f9ad6aaa986bb7f35f  /home/user/glibc-2.40/lib/libc.so.6
+63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458  /home/user/glibc-2.40/lib/ld-linux-x86-64.so.2
+--- wrappers ---
+92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1  /home/user/phase16-backend/qemu-patched
+284bdab88795a88be553a7419caafe1524a9a671497f4add58511ae1c74b3f56  /home/user/phase16-backend/qemu-unpatched
+--- /home/user/phase16-backend/qemu-patched ---
+#!/bin/sh
+exec "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2" \
+  --library-path "/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/usr/lib/x86_64-linux-gnu" \
+  "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched" -accel tcg -L "/home/user/phase15-pkg/backend/pc-bios" "$@"
+--- /home/user/phase16-backend/qemu-unpatched ---
+#!/bin/sh
+exec "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2" \
+  --library-path "/home/user/glibc-2.40/lib:/home/user/phase15-pkg/backend/runtime/lib:/usr/lib/x86_64-linux-gnu" \
+  "/home/user/phase15-pkg/backend/qemu-system-x86_64-unpatched" -accel tcg -L "/home/user/phase15-pkg/backend/pc-bios" "$@"

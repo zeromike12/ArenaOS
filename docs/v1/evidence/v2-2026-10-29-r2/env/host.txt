@@ -1,0 +1,57 @@
+date_utc: 2026-10-29T23:39:47Z
+host: Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux
+nproc: 2
+mem_total_kb: 4034452
+glibc: ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
+gcc: gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+repo_head: c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e
+repo_branch: arena/af044828-arenaos
+repo_dirty:
+   M docs/v1/evidence/v2-2026-10-29-r2.tar.gz
+   M docs/v1/evidence/v2-2026-10-29-r2.tar.gz.sha256
+   M docs/v1/evidence/v2-2026-10-29-r2/MANIFEST.json
+   M docs/v1/evidence/v2-2026-10-29-r2/README.md
+   M docs/v1/evidence/v2-2026-10-29-r2/env/host.txt
+   M docs/v1/evidence/v2-2026-10-29-r2/env/rust-target-compile-x86_64-unknown-none.txt
+   M docs/v1/evidence/v2-2026-10-29-r2/env/rust-target-compile-x86_64-unknown-uefi.txt
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/evidence.json
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/harness-console.log
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/harness-output.log
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp04-keyboard-response.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp05-mouse-response-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp06a-focused-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp06a-focused.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp06a-two-instances.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp06b-focused-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp06b-focused.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp08-final-demonstration-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/shots/cp08-final-demonstration.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-clang/v1-guest-serial.log
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/evidence.json
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/harness-console.log
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/harness-output.log
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp05-mouse-response-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp05-mouse-response.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp06a-focused-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp06a-focused.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp06a-two-instances.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp06b-focused-pre.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp06b-focused.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/shots/cp08-final-demonstration.png
+   M docs/v1/evidence/v2-2026-10-29-r2/guest-gcc/v1-guest-serial.log
+   M docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/cycles-evidence.json
+   M docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/harness-console.log
+   M docs/v1/evidence/v2-2026-10-29-r2/lifecycle-cycles/v1-cycles-serial.log
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-clang/harness-console.log
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-clang/refusals-evidence.json
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-clang/refusals-serial.log
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-clang/shots/cp09-launcher-selection.png
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-clang/shots/cp09-refusal-matrix.png
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-gcc/refusals-evidence.json
+   M docs/v1/evidence/v2-2026-10-29-r2/refusals-gcc/refusals-serial.log
+   M docs/v1/evidence/v2-2026-10-29-r2/regression/run-tests.log
+   M tools/v1_cycles.py
+   M tools/v1_gate_aggregate.py
+   M tools/v1_gate_stage.py
+   M tools/v1_guest_proof.py
+   M tools/v1_refusals.py

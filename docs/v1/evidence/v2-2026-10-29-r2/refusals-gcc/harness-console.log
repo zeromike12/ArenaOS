@@ -1,0 +1,7 @@
+
+=== refusals-gcc ===
+[v1-refusals] built APB1 docs/v1/evidence/v2-2026-10-29-r2/refusals-gcc/c-gfx-refusals.apb1 (40888 bytes, sha256 aab1f0ca5b8e7116d4aa38e8fe38436bb11ef09f75585113ea04e1b1a1f5886d) with gcc from ELF /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-refusals-gcc.elf (sha256 4996495b4382ab1e962622f0e0d75f27559e358737b23270ce5e95648b99eae2)
+[v1-refusals] run directory: docs/v1/evidence/v2-2026-10-29-r2/refusals-gcc
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (40888 bytes)
+[v1-refusals] rc=0 dt=11.6s cases=21 -> PASS
+[gate-stage] refusals-gcc: exit 0 -> build/v1-gate/receipts/refusals-gcc.json

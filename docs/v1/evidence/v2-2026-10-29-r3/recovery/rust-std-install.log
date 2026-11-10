@@ -1,0 +1,14 @@
+########## rust-std-1.97.0-x86_64-unknown-none ##########
+install: creating uninstall script at /opt/rust/prefix/lib/rustlib/uninstall.sh
+install: installing component 'rust-std-x86_64-unknown-none'
+
+    rust std installed.
+
+install.sh exit=0
+########## rust-std-1.97.0-x86_64-unknown-uefi ##########
+install: creating uninstall script at /opt/rust/prefix/lib/rustlib/uninstall.sh
+install: installing component 'rust-std-x86_64-unknown-uefi'
+
+    rust std installed.
+
+install.sh exit=0

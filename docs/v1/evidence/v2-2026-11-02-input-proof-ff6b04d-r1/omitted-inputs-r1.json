@@ -1,0 +1,131 @@
+{
+  "omitted_inputs": [
+    {
+      "expected_sha256": null,
+      "expected_size": null,
+      "identity_source": "fresh-build-identities-r1.json and all three run evidence.json files",
+      "name": "reported run source commit Git object",
+      "path": "ff6b04d791aeabd3e5875194460153c42580f742",
+      "present_in_resumed_checkout": false,
+      "reason": "Object is absent in the resumed repository. The source patch was preserved in a new commit b2c23fb; no commit object was fabricated."
+    },
+    {
+      "expected_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+      "expected_size": 11038208,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "historical Phase-15 EFI input",
+      "path": "/home/user/phase15-pkg/artifacts/arena-boot.efi",
+      "present_in_resumed_checkout": false,
+      "reason": "External /home/user/phase15-pkg path is absent; identity is retained as historical input and no replacement is claimed."
+    },
+    {
+      "expected_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+      "expected_size": 16777216,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "historical Phase-15 ESP input",
+      "path": "/home/user/phase15-pkg/artifacts/arena-esp.img",
+      "present_in_resumed_checkout": false,
+      "reason": "External /home/user/phase15-pkg path is absent; identity is retained as historical input and no replacement is claimed."
+    },
+    {
+      "expected_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+      "expected_size": 16777216,
+      "identity_source": "fresh-build-identities-r1.json and build-input-restoration-r1.json",
+      "name": "run-era freshly built ESP copy",
+      "path": "docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/build-inputs/arena-esp.img",
+      "present_in_resumed_checkout": false,
+      "reason": "The original copied ESP binary is absent from the resumed snapshot. A new current-source build copy is separately included and has the same SHA-256; it is not represented as the old physical file."
+    },
+    {
+      "expected_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+      "expected_size": 11039232,
+      "identity_source": "fresh-build-identities-r1.json and build-input-restoration-r1.json",
+      "name": "run-era extracted EFI copy",
+      "path": "docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/build-inputs/arena-boot.efi",
+      "present_in_resumed_checkout": true,
+      "reason": "The exact EFI bytes were restored from retry2 BOOTX64.EFI and are available under build-inputs/arena-boot.efi; the prior copy path itself was not present."
+    },
+    {
+      "expected_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+      "expected_size": null,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "pinned QEMU wrapper",
+      "path": "/home/user/phase16-backend/qemu-patched",
+      "present_in_resumed_checkout": false,
+      "reason": "External backend path absent; no new QEMU run was performed."
+    },
+    {
+      "expected_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+      "expected_size": null,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "pinned patched QEMU ELF",
+      "path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+      "present_in_resumed_checkout": false,
+      "reason": "External backend path absent; no new QEMU run was performed."
+    },
+    {
+      "expected_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+      "expected_size": null,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "isolated glibc loader",
+      "path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+      "present_in_resumed_checkout": false,
+      "reason": "External runtime path absent; no new QEMU run was performed."
+    },
+    {
+      "expected_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "expected_size": null,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "OVMF code firmware",
+      "path": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+      "present_in_resumed_checkout": false,
+      "reason": "External Phase-15 package path absent; no new QEMU run was performed."
+    },
+    {
+      "expected_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+      "expected_size": null,
+      "identity_source": "fresh-build-identities-r1.json",
+      "name": "OVMF vars firmware template",
+      "path": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+      "present_in_resumed_checkout": false,
+      "reason": "External Phase-15 package path absent; no new QEMU run was performed."
+    },
+    {
+      "expected_sha256": null,
+      "expected_size": null,
+      "identity_source": "raw-evidence-inventory-r2.json",
+      "name": "per-boot raw QEMU stream copies for retry1 and retry2",
+      "path": "guest-run-retry1/raw-boots/ and guest-run-retry2/raw-boots/",
+      "present_in_resumed_checkout": false,
+      "reason": "The harness serials, evidence JSON, logs, EFI/APB1, timestamped screenshots, and PPMs are preserved; no raw-boots directories for these attempts are present. Do not infer or fabricate missing QEMU streams."
+    }
+  ],
+  "present_identity_continuity": {
+    "both_match_recorded_run_artifact_identities": true,
+    "current_efi_copy": "build-inputs/current-b2c-final-r1/arena-boot.efi",
+    "current_esp_copy": "build-inputs/current-b2c-final-r1/arena-esp.img",
+    "current_source_commit": "b2c23fb5cf35dae29ff845bec82eb2c001028c3f",
+    "fresh_current_source_efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+    "fresh_current_source_esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+    "qualification_effect": "Artifact identity continuity only; original run commit object remains unavailable and no new QEMU run or qualification PASS is claimed."
+  },
+  "recorded_at_utc": "2026-11-02T13:51:46Z",
+  "recorded_fresh_run_efi_copy": {
+    "expected_fresh_build_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+    "note": "Exact byte copy of the EFI extracted from the captured QEMU run; hash matches the fresh build identity.",
+    "restored_path": "docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/build-inputs/arena-boot.efi",
+    "sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+    "size": 11039232,
+    "source_path": "docs/v1/evidence/v2-2026-11-02-input-proof-ff6b04d-r1/guest-run-retry2/BOOTX64.EFI",
+    "verified": true
+  },
+  "recorded_fresh_run_esp_restoration": {
+    "binary_present_in_resumed_checkout": false,
+    "expected_path": "build/arena-esp.img",
+    "note": "No ESP image binary is present in the resumed workspace snapshot. The recorded identity is retained; no image was synthesized.",
+    "sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+    "size": 16777216
+  },
+  "schema": "arena.v1.input-proof-omitted-inputs/v1",
+  "scope": "Transparent inventory of source and external build/run inputs that cannot be recovered from this resumed checkout; absence is not repaired by substituting an inferred artifact."
+}

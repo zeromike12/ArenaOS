@@ -1,0 +1,16 @@
+test_5e_accepts_both_compiler_cells_with_production_policy_cases (__main__.AggregateRequirementTests.test_5e_accepts_both_compiler_cells_with_production_policy_cases) ... ok
+test_5e_rejects_a_substituted_apb1_payload (__main__.AggregateRequirementTests.test_5e_rejects_a_substituted_apb1_payload) ... ok
+test_5e_rejects_absent_300_page_refusal_even_if_stage_passed (__main__.AggregateRequirementTests.test_5e_rejects_absent_300_page_refusal_even_if_stage_passed) ... ok
+test_5e_rejects_evidence_from_a_different_source_commit (__main__.AggregateRequirementTests.test_5e_rejects_evidence_from_a_different_source_commit) ... ok
+test_5e_rejects_evidence_from_the_wrong_compiler_cell (__main__.AggregateRequirementTests.test_5e_rejects_evidence_from_the_wrong_compiler_cell) ... ok
+test_5e_rejects_kernel_misclassification_of_synthetic_policy_input (__main__.AggregateRequirementTests.test_5e_rejects_kernel_misclassification_of_synthetic_policy_input) ... ok
+test_5e_rejects_wrong_300_page_result (__main__.AggregateRequirementTests.test_5e_rejects_wrong_300_page_result) ... ok
+test_5e_requires_a_repo_local_evidence_directory (__main__.AggregateRequirementTests.test_5e_requires_a_repo_local_evidence_directory) ... ok
+test_full_mode_is_derived_from_all_requirement_stages (__main__.AggregateRequirementTests.test_full_mode_is_derived_from_all_requirement_stages) ... ok
+test_full_requirement_evaluation_fails_without_5e_case_evidence (__main__.AggregateRequirementTests.test_full_requirement_evaluation_fails_without_5e_case_evidence) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.008s
+
+OK
+V1 AGGREGATE CONTROLS: 10/10 PASS

@@ -1,0 +1,27 @@
+{
+  "backend_label": "locally modified QEMU TCG; not upstream-QEMU or hardware-backed",
+  "file_hashes_verified": 2319,
+  "final_source_checks": {
+    "canonical_build": "PASS",
+    "host_tests": "PASS",
+    "host_tests_detail": "Passed within the registered 121-suite full regression; full-suite run recorded zero failures.",
+    "kernel_isa_audit": "PASS",
+    "kernel_isa_instruction_count": 120911,
+    "pie_sha256": "d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e",
+    "signed_apb1_sha256": "04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa"
+  },
+  "independent_controls": "PASS patched; expected failures observed unpatched",
+  "package_manifest_sha256": "c49b63fb894781714cba456569b14e0bb06a86b1332f835d53e99d90ec12dc21",
+  "phase15_acceptance": "qualification candidate pending M/C review",
+  "registered_regression": {
+    "suite_count": 121,
+    "verdict": "PASS"
+  },
+  "schema_version": 1,
+  "strict_stability": {
+    "T2": "PASS",
+    "T3": "PASS",
+    "T4": "PASS"
+  },
+  "strict_two_profile": "PASS"
+}

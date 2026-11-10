@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-10-30T17:06:45.454174+00:00",
+  "branch": "arena/af044828-arenaos",
+  "source_commit_at_test": "be51fcb8c6a5e9547f61952d233f7e0fc13282d8",
+  "purpose": "Boundary-matrix guest test environment only; this is not a V1 qualification run.",
+  "boot_build": {
+    "command": "bash tools/build_phase16_dev.sh --image",
+    "result": "PASS; DEVELOPMENT BUILD \u2014 NOT QUALIFIED (B1)",
+    "canonical_tools_build": "NOT RUN (protected canonical build path /workspace/ArenaOS absent)",
+    "efi_path": "/home/user/ArenaOS/build/arena-boot.efi",
+    "efi_sha256": "a522f293c7685aa13ba5f15c8cbdbfa2b6f42acb5105a8b80900c1fb7e430e27",
+    "efi_bytes": 11038720,
+    "esp_path": "/home/user/ArenaOS/build/arena-esp.img",
+    "esp_sha256": "430039e099f7d3e8cc887dbbd42c8697a6da2c1d46099633227f57115764bd12",
+    "esp_bytes": 16777216,
+    "esp_embedded_efi_matches": true
+  },
+  "pinned_qemu_backend": {
+    "label": "locally modified QEMU TCG; not upstream-QEMU or hardware-backed",
+    "archive_path": "/home/user/ArenaOS/docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz",
+    "archive_bytes": 95562916,
+    "archive_sha256": "63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73",
+    "manifest_sha256": "c49b63fb894781714cba456569b14e0bb06a86b1332f835d53e99d90ec12dc21",
+    "package_manifest_verified_files": 2319,
+    "package_historical_receipts_verified": {
+      "strict_two_profile": "PASS",
+      "strict_stability": {
+        "T2": "PASS",
+        "T3": "PASS",
+        "T4": "PASS"
+      },
+      "registered_regression": {
+        "suite_count": 121,
+        "verdict": "PASS"
+      }
+    },
+    "wrapper_path": "/home/user/phase16-backend/qemu-patched",
+    "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+    "qemu_path": "/home/user/phase15-pkg/backend/qemu-system-x86_64-patched",
+    "qemu_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+    "qemu_version": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+    "qemu_accelerators": [
+      "tcg"
+    ],
+    "accel_tcg_requested": true,
+    "accel_tcg_qmp_smoke_pass": true,
+    "loader_path": "/home/user/glibc-2.40/lib/ld-linux-x86-64.so.2",
+    "loader_sha256": "63704534fba7799d309e9e16992ea7d11e709906bd44b72060c007461b970458",
+    "runtime_libraries": [
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libglib-2.0.so.0",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d",
+        "bytes": 1404320
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libglib-2.0.so.0.8400.4",
+        "sha256": "980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d",
+        "bytes": 1404320
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libpixman-1.so.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd",
+        "bytes": 706576
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libpixman-1.so.0.44.0",
+        "sha256": "806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd",
+        "bytes": 706576
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libslirp.so.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3",
+        "bytes": 149336
+      },
+      {
+        "path": "/home/user/phase15-pkg/backend/runtime/lib/libslirp.so.0.4.0",
+        "sha256": "12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3",
+        "bytes": 149336
+      }
+    ],
+    "rom_dir": "/home/user/phase15-pkg/backend/pc-bios",
+    "firmware": {
+      "ovmf_code_path": "/home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd",
+      "ovmf_code_sha256": "7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94",
+      "ovmf_vars_path": "/home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd",
+      "ovmf_vars_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    }
+  },
+  "compiler_toolchain": {
+    "rustc": {
+      "command": [
+        "/opt/rust/prefix/bin/rustc",
+        "--version"
+      ],
+      "exit": 0,
+      "output": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+    },
+    "cargo": {
+      "command": [
+        "/opt/rust/prefix/bin/cargo",
+        "--version"
+      ],
+      "exit": 0,
+      "output": "cargo 1.97.0 (c980f4866 2026-06-30)"
+    },
+    "rust_targets": {
+      "x86_64-unknown-none": {
+        "libdir": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-none/lib",
+        "libcore_present": true,
+        "rust_std_archive_sha256": "5b6702d1ce758d4d01fc3861085bbf1ee19eb9d7f7dc69e066c299ee9606168a"
+      },
+      "x86_64-unknown-uefi": {
+        "libdir": "/opt/rust/prefix/lib/rustlib/x86_64-unknown-uefi/lib",
+        "libcore_present": true,
+        "rust_std_archive_sha256": "2c48c8b659d65ec74e916e44e5ecac8e77f4c1abce51d01d661f133233641ad0"
+      }
+    },
+    "rust_toolchain_pypi_wheel_sha256": {
+      "arena_rust_toolchain-1.97.0-py3-none-any.whl": "6e6b05c89b97bafaf1cbf57d3a47acf56a526646bb60569211f889e109ce1153",
+      "arena_rust_toolchain_data1-1.97.0-py3-none-any.whl": "d449884dec227a6e11a05f234b077173ec8577e6e721526ed8f0c938aeec9459",
+      "arena_rust_toolchain_data2-1.97.0-py3-none-any.whl": "8d141cae480e2ced3a37b679a7f45f39db93f8c770459aef875a397bfadfb4b7",
+      "arena_rust_toolchain_data3-1.97.0-py3-none-any.whl": "3a072ae64760773ea6b71dc8cc25c824bdc2d663b26e8dda5814bdaeb39147d7"
+    },
+    "zig": {
+      "command": [
+        "/opt/zig-clang/ziglang/zig",
+        "version"
+      ],
+      "exit": 0,
+      "output": "0.17.0"
+    },
+    "zig_wheel_sha256": "97079827064a7492cce5541ceb438ae8003ce1e54e399676da2d62fb7a5dc08b",
+    "pyfatfs": "1.1.0 (temporary isolated Python venv)"
+  },
+  "initial_incompatible_boot_fixture_attempt": {
+    "efi_sha256": "bbbc63df271c3d7d5109789369f72e093b02ef77c77ebe25273b6da4c00d238e",
+    "esp_sha256": "631cc6452ecbacf58b2418e54b9c509bb717cc2211580ebef63f9aa4c13d866f",
+    "result": "refusal process exited with status 14 (Identify failed) before the 24-case matrix; preserved under ../refusals-gcc and excluded from acceptance evidence"
+  },
+  "source_code_fingerprint_at_guest_test": "45547159c74bc0396dbba5bd5d43eb7da4e5455d71e9744fbf634a28352aafc7",
+  "stage_receipts": {
+    "directory": "development-final/gate/receipts",
+    "both_guest_stages_exit_0": true,
+    "both_guest_stages_qualified": false,
+    "note": "qualified is false for both receipts by design: the dev-only boot image is not a canonical build"
+  }
+}

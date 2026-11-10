@@ -1,0 +1,11 @@
+== control A: a receipt whose code fingerprint does not match the tree ==
+exit=1
+V1 GATE (guest): FAIL
+  - guest-gcc: ran against code 000000000000 (commit c4d7cf13e2a9), candidate is dd9a65d3fbc2 (commit c4d7cf13e2a9)
+
+== control B: documentation staged (HEAD unchanged, prose edited) ==
+exit=3
+V1 QUALIFICATION: BLOCKED — the stages below ran, but only through a documented substitute, so they cannot support a qualification claim:
+
+Control A must be FAIL/exit 1 (stale code cannot qualify).
+Control B must be BLOCKED/exit 3 for this candidate, i.e. receipts still accepted (doc edits do not invalidate a run); a docs-only commit therefore does not force a re-run.

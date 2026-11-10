@@ -1,0 +1,386 @@
+{
+  "label": "v1-refusals",
+  "kind": "guest_refusal_matrix",
+  "pass": true,
+  "record": {
+    "cases": {
+      "baseline-record-accepted": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=baseline-record-accepted want=0 got=0 verdict=PASS"
+      },
+      "reorder-reversed": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=reorder-reversed want=0 got=0 verdict=PASS"
+      },
+      "reorder-rotated": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=reorder-rotated want=0 got=0 verdict=PASS"
+      },
+      "missing-endpoint": {
+        "count": 1,
+        "want": 2,
+        "got": 2,
+        "verdict": "PASS",
+        "line": "[refuse] case=missing-endpoint want=2 got=2 verdict=PASS"
+      },
+      "ambiguous-endpoint": {
+        "count": 1,
+        "want": 3,
+        "got": 3,
+        "verdict": "PASS",
+        "line": "[refuse] case=ambiguous-endpoint want=3 got=3 verdict=PASS"
+      },
+      "wrong-endpoint-rights": {
+        "count": 1,
+        "want": 6,
+        "got": 6,
+        "verdict": "PASS",
+        "line": "[refuse] case=wrong-endpoint-rights want=6 got=6 verdict=PASS"
+      },
+      "missing-surface": {
+        "count": 1,
+        "want": 4,
+        "got": 4,
+        "verdict": "PASS",
+        "line": "[refuse] case=missing-surface want=4 got=4 verdict=PASS"
+      },
+      "ambiguous-surface": {
+        "count": 1,
+        "want": 5,
+        "got": 5,
+        "verdict": "PASS",
+        "line": "[refuse] case=ambiguous-surface want=5 got=5 verdict=PASS"
+      },
+      "wrong-surface-rights": {
+        "count": 1,
+        "want": 6,
+        "got": 6,
+        "verdict": "PASS",
+        "line": "[refuse] case=wrong-surface-rights want=6 got=6 verdict=PASS"
+      },
+      "wire-magic": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=wire-magic want=1 got=1 verdict=PASS"
+      },
+      "wire-version": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=wire-version want=1 got=1 verdict=PASS"
+      },
+      "wire-opcode": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=wire-opcode want=1 got=1 verdict=PASS"
+      },
+      "wire-reserved": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=wire-reserved want=1 got=1 verdict=PASS"
+      },
+      "identify-after-refusals": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=identify-after-refusals want=0 got=0 verdict=PASS"
+      },
+      "foreign-identity": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=foreign-identity want=0 got=0 verdict=PASS"
+      },
+      "genuine-identity": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=genuine-identity want=0 got=0 verdict=PASS"
+      },
+      "unexpected-transfer": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=unexpected-transfer want=1 got=1 verdict=PASS"
+      },
+      "transfer-surface-retained": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=transfer-surface-retained want=1 got=1 verdict=PASS"
+      },
+      "layout-301-accepted": {
+        "count": 1,
+        "want": 0,
+        "got": 0,
+        "verdict": "PASS",
+        "line": "[refuse] case=layout-301-accepted want=0 got=0 verdict=PASS"
+      },
+      "layout-300-refused": {
+        "count": 1,
+        "want": 7,
+        "got": 7,
+        "verdict": "PASS",
+        "line": "[refuse] case=layout-300-refused want=7 got=7 verdict=PASS"
+      },
+      "layout-required-pages": {
+        "count": 1,
+        "want": 301,
+        "got": 301,
+        "verdict": "PASS",
+        "line": "[refuse] case=layout-required-pages want=301 got=301 verdict=PASS"
+      },
+      "layout-pages-minimum": {
+        "count": 1,
+        "want": 301,
+        "got": 471,
+        "verdict": "PASS",
+        "line": "[refuse] case=layout-pages-minimum want=301 got=471 verdict=PASS"
+      },
+      "layout-pixel-window-fits": {
+        "count": 1,
+        "want": 1,
+        "got": 1,
+        "verdict": "PASS",
+        "line": "[refuse] case=layout-pixel-window-fits want=1 got=1 verdict=PASS"
+      },
+      "layout-wrong-kind-refused": {
+        "count": 1,
+        "want": -1,
+        "got": -1,
+        "verdict": "PASS",
+        "line": "[refuse] case=layout-wrong-kind-refused want=-1 got=-1 verdict=PASS"
+      }
+    },
+    "notes": [],
+    "before": {
+      "detail": {
+        "line": 1111,
+        "malformed": false,
+        "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+        "total-frames": 114275,
+        "threads": 16,
+        "endpoints": 12,
+        "notifications": 51,
+        "timers": 0,
+        "vm-regions": 0,
+        "vm-committed-pages": 0,
+        "sync-domains": 0,
+        "sync-keys": 0,
+        "sync-waiters": 0,
+        "app-instances": 0,
+        "windows": 0,
+        "helpers": 0,
+        "stream-sets": 0,
+        "max-windows-per-instance": 0
+      },
+      "receipt": {
+        "line": 1109,
+        "malformed": false,
+        "raw": "112786/15/15/3/472/5/47",
+        "free-frames": 112786,
+        "spawn-records": 15,
+        "processes": 15,
+        "regions": 3,
+        "pages": 472,
+        "maps": 5,
+        "caps": 47
+      }
+    },
+    "install_receipt": "[desktop] APB1 installed; signed version=7 (no launch authority implied)",
+    "screenshot": "shots/cp09-refusal-matrix.png",
+    "screenshot_ppm_sha256": "13f2b5c3a139af8b24933c5c8845039f7b56351e3b5d7ce49b57882867b53169",
+    "classes": {
+      "baseline-record-accepted": {
+        "kind": "CONTROL",
+        "description": "the launcher-built startup record is accepted by the shipped discovery"
+      },
+      "reorder-reversed": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a reversed copy of the real descriptor"
+      },
+      "reorder-rotated": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a rotated copy of the real descriptor"
+      },
+      "missing-endpoint": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a copy with the endpoint slot removed"
+      },
+      "ambiguous-endpoint": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a copy with two endpoint slots"
+      },
+      "wrong-endpoint-rights": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a copy with endpoint rights the launcher never grants"
+      },
+      "missing-surface": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a copy with the surface slot removed"
+      },
+      "ambiguous-surface": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a copy with two surface slots"
+      },
+      "wrong-surface-rights": {
+        "kind": "DISCOVERY",
+        "description": "production discovery over a copy with surface rights the launcher never grants"
+      },
+      "wire-magic": {
+        "kind": "IPC",
+        "description": "a frame with the wrong magic sent to the real Desktop endpoint"
+      },
+      "wire-version": {
+        "kind": "IPC",
+        "description": "a frame declaring an unsupported protocol version"
+      },
+      "wire-opcode": {
+        "kind": "IPC",
+        "description": "an Identify slot carrying a different opcode"
+      },
+      "wire-reserved": {
+        "kind": "IPC",
+        "description": "a frame with a non-zero reserved byte"
+      },
+      "identify-after-refusals": {
+        "kind": "CONTROL",
+        "description": "the real session still answers Identify after four refused frames"
+      },
+      "foreign-identity": {
+        "kind": "IDENTITY",
+        "description": "production identity validator over an object id one above the real one"
+      },
+      "genuine-identity": {
+        "kind": "CONTROL",
+        "description": "the same validator accepts the genuine identity"
+      },
+      "unexpected-transfer": {
+        "kind": "IPC",
+        "description": "a frame carrying a capability the dispatch never asked for"
+      },
+      "transfer-surface-retained": {
+        "kind": "KERNEL",
+        "description": "the client still holds its own surface capability after that transfer"
+      },
+      "layout-pages-minimum": {
+        "kind": "KERNEL",
+        "description": "the kernel-reported page count of the real Desktop-granted surface region, passed through the production C guard"
+      },
+      "layout-pixel-window-fits": {
+        "kind": "CLIENT-POLICY",
+        "description": "the production C size guard accepts the real kernel-reported page count and the documented 32-bit layout constants agree"
+      },
+      "layout-301-accepted": {
+        "kind": "CLIENT-POLICY",
+        "description": "the production C size guard accepts exactly 301 pages; a policy input, not a kernel-created grant"
+      },
+      "layout-300-refused": {
+        "kind": "CLIENT-POLICY",
+        "description": "the production C size guard returns GFX_SURFACE_TOO_SMALL (7) for 300 pages; a policy input, not a kernel-created grant"
+      },
+      "layout-required-pages": {
+        "kind": "CLIENT-POLICY",
+        "description": "production layout constants require exactly 301 pages for offset 4096 plus 640x480x4 bytes"
+      },
+      "layout-wrong-kind-refused": {
+        "kind": "KERNEL",
+        "description": "the kernel refuses the region query on a non-region capability"
+      }
+    },
+    "unclassified": [],
+    "missing": [],
+    "failed": [],
+    "unexpected": [],
+    "after": {
+      "detail": {
+        "line": 1863,
+        "malformed": false,
+        "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+        "total-frames": 114275,
+        "threads": 16,
+        "endpoints": 12,
+        "notifications": 51,
+        "timers": 0,
+        "vm-regions": 0,
+        "vm-committed-pages": 0,
+        "sync-domains": 0,
+        "sync-keys": 0,
+        "sync-waiters": 0,
+        "app-instances": 0,
+        "windows": 0,
+        "helpers": 0,
+        "stream-sets": 0,
+        "max-windows-per-instance": 0
+      },
+      "receipt": {
+        "line": 1861,
+        "malformed": false,
+        "raw": "112781/15/15/3/472/5/47",
+        "free-frames": 112781,
+        "spawn-records": 15,
+        "processes": 15,
+        "regions": 3,
+        "pages": 472,
+        "maps": 5,
+        "caps": 47
+      }
+    },
+    "resource_drift": {},
+    "frame_warmup": {
+      "free-frames": {
+        "baseline": 112786,
+        "settled": 112781,
+        "spent": 5,
+        "bound": 32
+      }
+    },
+    "no_graphical_change": true,
+    "settled": true,
+    "exit_status": 0,
+    "verdict_ok": true
+  },
+  "source_commit": "be51fcb8c6a5e9547f61952d233f7e0fc13282d8",
+  "working_tree_dirty": true,
+  "dirty_paths_excluding_evidence": [
+    "M experiments/c-runtime/app/c_gfx_app.c",
+    "M experiments/c-runtime/app/c_gfx_refusals.c",
+    "M experiments/c-runtime/host/test_runtime.c",
+    "M experiments/c-runtime/run.py",
+    "M tools/dev-env/recover-rust-and-zig.sh",
+    "M tools/v1_env_evidence.sh",
+    "M tools/v1_gate.sh",
+    "M tools/v1_gate_aggregate.py",
+    "M tools/v1_gate_stage.py",
+    "M tools/v1_guest_proof.py",
+    "M tools/v1_refusals.py",
+    "?? docs/phase16/dependencies/rust-1.97.0/rust-std-1.97.0-x86_64-unknown-none.tar.xz",
+    "?? docs/phase16/dependencies/rust-1.97.0/rust-std-1.97.0-x86_64-unknown-uefi.tar.xz",
+    "?? tools/test_v1_gate_aggregate.py"
+  ],
+  "guest_compiler_under_test": "clang",
+  "apb1_sha256": "c71934d4d6582c27bc879dd6514eaaa478b814acea4da50702b3a95bccaa8bdf",
+  "serial_sha256": "83d5e87139f20cd93f8c131d108c59ee2049cd3de51046e54f61ea3ec3d111e4",
+  "rc": 0
+}

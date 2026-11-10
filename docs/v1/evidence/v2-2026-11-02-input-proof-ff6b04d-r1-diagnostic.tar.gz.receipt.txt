@@ -1,0 +1,25 @@
+ARENA V1 INPUT-PROOF DIAGNOSTIC ARCHIVE RECEIPT
+Classification: DIAGNOSTIC ONLY — NOT A QUALIFICATION PACKAGE
+Qualification claim: NONE
+Candidate qualified: False
+V1 accepted: False
+Existing r6 full-gate result: FAIL (unchanged)
+Requirement 4b: OPEN (no genuine stale/foreign capability launch and no M-recorded waiver)
+Standalone guest-proof attempts: original FAIL cp5; retry1 FAIL cp5; retry2 PASS for eight standalone checkpoints only
+Source commit recorded by QEMU attempts: ff6b04d791aeabd3e5875194460153c42580f742 (Git object unavailable in resumed checkout)
+Current source build commit: b2c23fb5cf35dae29ff845bec82eb2c001028c3f
+Fresh current-source EFI SHA-256: b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a
+Fresh current-source ESP SHA-256: a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551
+Current build freshness: PASS; EFI and ESP hashes exactly match the identities recorded for all three QEMU attempts
+New QEMU run in resumed checkout: No
+Archive: v2-2026-11-02-input-proof-ff6b04d-r1-diagnostic.tar.gz
+Archive size: 8470960 bytes
+Archive SHA-256: 774687bb41797b7699814c290675425281900910db17535270eabc7f35ec6b48
+Manifest files: 232
+Original file bytes: 124278066
+Raw PPM captures included: 26
+Missing required checkpoint PNGs explicitly inventoried: 12
+Fresh local extraction verification: PASS (all listed file sizes/digests verified; no unlisted files)
+Verification command: python3 tools/v1_diagnostic_evidence.py verify v2-2026-11-02-input-proof-ff6b04d-r1-diagnostic.tar.gz
+Verification log: v2-2026-11-02-input-proof-ff6b04d-r1-diagnostic.verify.log
+Sealed UTC: 2026-11-02T14:01:26Z

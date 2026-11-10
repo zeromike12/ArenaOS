@@ -1,0 +1,10 @@
+archive: /home/user/ArenaOS/docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz
+bytes: 95562916
+expected_bytes: 95562916
+63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73  /home/user/ArenaOS/docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz
+--- committed sidecar ---
+63b36649b4498d4e6be693a619ae3c04ff1fc53fdc62008d6ef9c3cbf4c01f73  docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz
+--- verification ---
+sha256sum: docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz: No such file or directory
+docs/phase15/artifacts/phase15-patched-tcg-qualification.tar.gz: FAILED open or read
+sha256sum: WARNING: 1 listed file could not be read

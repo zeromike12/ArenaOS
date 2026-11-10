@@ -1,0 +1,27 @@
+{
+  "stage": "refusals-clang",
+  "exit": 0,
+  "qualified": true,
+  "notes": [
+    "21/21 refusal cases PASS with per-case classification; docs/v1/evidence/v2-2026-10-29-r3/refusals-clang"
+  ],
+  "argv": [],
+  "started_epoch": 1793333454.1588798,
+  "finished_epoch": 1793333454.1588802,
+  "started_utc": "2026-10-30T04:10:54Z",
+  "finished_utc": "2026-10-30T04:10:54Z",
+  "source_commit": "7632f54c0e9b9ec3f4c26181cd7041c5a5014bf9",
+  "code_fingerprint": "2fbc875829d1ac84e08d6838e2cbec79b080ccea37de5f3c5db01daa5cec8287",
+  "dirty_paths": [
+    "ocs/v1/evidence/v2-2026-10-29-r3/regression/run-tests.log"
+  ],
+  "newest_tracked": {
+    "path": "kernel/kernel/src/arch/x86_64/syscall.rs",
+    "mtime": 1793332321.9483683
+  },
+  "efi_sha256": "bcd86866dbe7c15420eec958bff3024f66963d5d1dd39945513a58da750d5d83",
+  "esp_sha256": "fb76cfa8bc89d7d2a5876a4e1071d14cb4c6e20a0ecc3f05f6d28a49762935b3",
+  "evidence_package_sha256": "07ff4d442871cd5c70b455b359544eaca754f6ba5a90928497cdd95808e08148",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-10-30T17:07:09.245688+00:00",
+  "scope": "Targeted requirement-5e check only; not a full V1 aggregate run.",
+  "case_evidence_validation": "PASS",
+  "case_errors": {
+    "refusals-gcc": [],
+    "refusals-clang": []
+  },
+  "observed_boundary": {
+    "required_pages": 301,
+    "production_guard_301_result": 0,
+    "production_guard_300_result": 7,
+    "actual_kernel_grant_pages": 471,
+    "compilers": [
+      "gcc",
+      "clang"
+    ]
+  },
+  "aggregate_requirement_5e": {
+    "id": "5e",
+    "label": "Guest production C layout policy: 301 accepted, 300 refused",
+    "status": "BLOCKED",
+    "detail": "unqualified stage(s): refusals-gcc, refusals-clang"
+  },
+  "blocked_because": "Both guest refusal stages were run against the documented Phase 16 development-only image, not a canonical qualification build.",
+  "qualified_stage_receipts": {
+    "refusals-gcc": false,
+    "refusals-clang": false
+  },
+  "stage_identity_checks": {
+    "refusals-gcc": {
+      "code_fingerprint_matches_current_source": true,
+      "efi_sha256_matches_current_dev_image": true,
+      "source_commit_matches_guest_evidence": true
+    },
+    "refusals-clang": {
+      "code_fingerprint_matches_current_source": true,
+      "efi_sha256_matches_current_dev_image": true,
+      "source_commit_matches_guest_evidence": true
+    }
+  },
+  "code_fingerprint": "45547159c74bc0396dbba5bd5d43eb7da4e5455d71e9744fbf634a28352aafc7",
+  "development_efi_sha256": "a522f293c7685aa13ba5f15c8cbdbfa2b6f42acb5105a8b80900c1fb7e430e27",
+  "source_commit_at_test": "be51fcb8c6a5e9547f61952d233f7e0fc13282d8"
+}

@@ -1,0 +1,18 @@
+expected_patched_elf: e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff
+e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff  /home/user/phase15-pkg/backend/qemu-system-x86_64-patched
+443c81fc9482493297ae7a3f37300bef3a82a2873e428f72884cf52d16e27284  /home/user/phase15-pkg/backend/qemu-system-x86_64-unpatched
+--- runtime libraries ---
+980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d  /home/user/phase15-pkg/backend/runtime/lib/libglib-2.0.so.0
+980ab64e995225de1543779e3bafafac9d705904d42ca3b5eb76e7a336cc5e1d  /home/user/phase15-pkg/backend/runtime/lib/libglib-2.0.so.0.8400.4
+806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd  /home/user/phase15-pkg/backend/runtime/lib/libpixman-1.so.0
+806ef6cd6ff8dace4332b8d611afe2f1c5ec0c1b743ea7ed0ebd48ed307618cd  /home/user/phase15-pkg/backend/runtime/lib/libpixman-1.so.0.44.0
+12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3  /home/user/phase15-pkg/backend/runtime/lib/libslirp.so.0
+12ee83fb069a5be30b9e450f69a5e07eec4861f2e9b574c46a4052f086c341f3  /home/user/phase15-pkg/backend/runtime/lib/libslirp.so.0.4.0
+--- pc-bios (firmware) ---
+ae6f6aa973aaccc143f57aa960fb035fd9de4daee4ad0cd713322f8c259e7650  /home/user/phase15-pkg/backend/pc-bios/bios-256k.bin
+f4d7c29fccb5e1d4d851eaddc41a5c4feec7de96ca7ad9bbf96f4d09838ef973  /home/user/phase15-pkg/backend/pc-bios/edk2-x86_64-code.fd.bz2
+total 4096
+-rw------- 1 user user 3653632 Oct 24 00:00 OVMF_CODE_4M.fd
+-rw------- 1 user user  540672 Oct 24 00:00 OVMF_VARS_4M.fd
+7e34e3b83224968bb0714c0ebc88f75c5c37b4cc892c902e511ccc7a7c107f94  /home/user/phase15-pkg/firmware/OVMF_CODE_4M.fd
+5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e  /home/user/phase15-pkg/firmware/OVMF_VARS_4M.fd

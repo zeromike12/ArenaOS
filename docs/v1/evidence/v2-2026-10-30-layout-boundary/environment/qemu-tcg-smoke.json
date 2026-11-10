@@ -1,0 +1,30 @@
+{
+  "command": [
+    "/home/user/phase16-backend/qemu-patched",
+    "-machine",
+    "q35",
+    "-m",
+    "64M",
+    "-cpu",
+    "qemu64,+nx,+smep,+smap",
+    "-nodefaults",
+    "-display",
+    "none",
+    "-serial",
+    "none",
+    "-monitor",
+    "none",
+    "-S",
+    "-qmp",
+    "stdio"
+  ],
+  "wrapper_sha256": "92ec1c12cc174d549dfdbedf921984784252d66630bdeca32d248085b42c76a1",
+  "qemu_binary_sha256": "e0ea2b1f5ae2a5aa65a455eb232e46e1743b5c327c48ca678630c214c69f26ff",
+  "qemu_version": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+  "accelerator_help": "Accelerators supported in QEMU binary:\ntcg\n",
+  "accelerator_requested_by_wrapper": "-accel tcg",
+  "accelerator_initialized": true,
+  "hardware_acceleration": false,
+  "qmp_smoke_exit": 0,
+  "qmp_smoke_output": "{\"QMP\": {\"version\": {\"qemu\": {\"micro\": 2, \"minor\": 1, \"major\": 11}, \"package\": \"\"}, \"capabilities\": [\"oob\"]}}\n{\"return\": {}}\n{\"timestamp\": {\"seconds\": 1793380005, \"microseconds\": 214435}, \"event\": \"SHUTDOWN\", \"data\": {\"guest\": false, \"reason\": \"host-qmp-quit\"}}\n{\"return\": {}}\n"
+}

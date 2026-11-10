@@ -1,0 +1,165 @@
+{
+  "all_predicates_match": true,
+  "analysis": "Same captured pre-frame and input sample passed through the unchanged production predicate with pure-Python scanner and NumPy 2.4.6 scanner. The booleans match for every sample. Pure-Python no-flash scans consume a large fraction of the 4 s window and create sparse probes; accelerated scanning does not enlarge the timeout or relax the predicate.",
+  "approx_flash_duration_seconds": 0.99999,
+  "flash_frames": 30,
+  "frame_period_microseconds": 33333,
+  "limitations": "This supports the sampling-latency explanation; it does not reconstruct an unseen guest frame or prove when the guest glow began.",
+  "numpy_module": "/home/user/ArenaOS/build/v1-scan-numpy-2.4.6/numpy/__init__.py",
+  "numpy_version": "2.4.6",
+  "python": "/usr/bin/python3",
+  "recorded_at_utc": "2026-11-02T13:37:24Z",
+  "runs": [
+    {
+      "result": "FAIL",
+      "run": "guest-run",
+      "samples": 3,
+      "timeout_seconds": 4.0
+    },
+    {
+      "result": "FAIL",
+      "run": "guest-run",
+      "samples": 3,
+      "timeout_seconds": 4.0
+    },
+    {
+      "result": "FAIL",
+      "run": "guest-run",
+      "samples": 3,
+      "timeout_seconds": 4.0
+    },
+    {
+      "result": "FAIL",
+      "run": "guest-run-retry1",
+      "samples": 2,
+      "timeout_seconds": 4.0
+    },
+    {
+      "result": "FAIL",
+      "run": "guest-run-retry1",
+      "samples": 2,
+      "timeout_seconds": 4.0
+    },
+    {
+      "result": "PASS",
+      "run": "guest-run-retry2",
+      "samples": 2,
+      "timeout_seconds": 4.0
+    },
+    {
+      "result": "PASS",
+      "run": "guest-run-retry2",
+      "samples": 2,
+      "timeout_seconds": 4.0
+    }
+  ],
+  "samples": [
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.028936385999941194,
+      "numpy_verdict": false,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 1.025304856000048,
+      "pure_verdict": false,
+      "reason": "no acknowledgment and no visible response",
+      "recorded_verdict": false,
+      "run": "guest-run",
+      "sample": 1,
+      "sample_ack_ok": false,
+      "sample_start_gap_ms": null,
+      "sample_visual_ok": false,
+      "utc_start": "2026-11-02T04:43:47.511445813Z"
+    },
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.030150430999924538,
+      "numpy_verdict": false,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 1.0223284009999816,
+      "pure_verdict": false,
+      "reason": "acknowledgment but no visible flash in the window",
+      "recorded_verdict": false,
+      "run": "guest-run",
+      "sample": 2,
+      "sample_ack_ok": true,
+      "sample_start_gap_ms": 1787.266618,
+      "sample_visual_ok": false,
+      "utc_start": "2026-11-02T04:43:49.298711307Z"
+    },
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.02700639800002591,
+      "numpy_verdict": false,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 1.0898228020000715,
+      "pure_verdict": false,
+      "reason": "acknowledgment but no visible flash in the window",
+      "recorded_verdict": false,
+      "run": "guest-run",
+      "sample": 3,
+      "sample_ack_ok": true,
+      "sample_start_gap_ms": 1492.332878,
+      "sample_visual_ok": false,
+      "utc_start": "2026-11-02T04:43:50.791045408Z"
+    },
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.026825572000007014,
+      "numpy_verdict": false,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 0.9902863009999692,
+      "pure_verdict": false,
+      "reason": "no acknowledgment and no visible response",
+      "recorded_verdict": false,
+      "run": "guest-run-retry1",
+      "sample": 1,
+      "sample_ack_ok": false,
+      "sample_start_gap_ms": null,
+      "sample_visual_ok": false,
+      "utc_start": "2026-11-02T04:48:41.347671126Z"
+    },
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.02701538500002698,
+      "numpy_verdict": false,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 1.0227847200000042,
+      "pure_verdict": false,
+      "reason": "acknowledgment but no visible flash in the window",
+      "recorded_verdict": false,
+      "run": "guest-run-retry1",
+      "sample": 2,
+      "sample_ack_ok": true,
+      "sample_start_gap_ms": 2104.12868,
+      "sample_visual_ok": false,
+      "utc_start": "2026-11-02T04:48:43.451798642Z"
+    },
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.027059805000021697,
+      "numpy_verdict": false,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 1.0192476219999662,
+      "pure_verdict": false,
+      "reason": "no acknowledgment and no visible response",
+      "recorded_verdict": false,
+      "run": "guest-run-retry2",
+      "sample": 1,
+      "sample_ack_ok": false,
+      "sample_start_gap_ms": null,
+      "sample_visual_ok": false,
+      "utc_start": "2026-11-02T04:51:42.691443005Z"
+    },
+    {
+      "numpy_2_4_6_evaluate_seconds": 0.020487643000024036,
+      "numpy_verdict": true,
+      "predicates_identical": true,
+      "pure_python_evaluate_seconds": 0.5542199390000633,
+      "pure_verdict": true,
+      "reason": "",
+      "recorded_verdict": true,
+      "run": "guest-run-retry2",
+      "sample": 2,
+      "sample_ack_ok": true,
+      "sample_start_gap_ms": 144.79707,
+      "sample_visual_ok": true,
+      "utc_start": "2026-11-02T04:51:42.836239751Z"
+    }
+  ],
+  "schema": "arena.v1-input-proof-scan-performance/v1",
+  "timeout_seconds": 4.0
+}

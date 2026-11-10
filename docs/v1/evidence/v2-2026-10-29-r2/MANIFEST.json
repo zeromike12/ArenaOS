@@ -1,0 +1,473 @@
+{
+  "created_utc": "2026-10-29T23:42:41Z",
+  "source_commit": "c4d7cf13e2a958e5e8e28a2f91aff143f0d79c7e",
+  "branch": "arena/af044828-arenaos",
+  "working_tree_dirty": true,
+  "files": {
+    "env/backend-controls/exit-patched.txt": {
+      "sha256": "19b8d5c59e421f037fe563007c7254eb8d98bc221b278c3db3e5fdbbfd52e273",
+      "size": 3
+    },
+    "env/backend-controls/exit-unpatched.txt": {
+      "sha256": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+      "size": 3
+    },
+    "env/backend-controls/ovmf-vars-patched.fd": {
+      "sha256": "95b93e364f14063ba20170562b4a01bc8761a3aaff3821315d69269b5f5bc843",
+      "size": 540672
+    },
+    "env/backend-controls/ovmf-vars-unpatched.fd": {
+      "sha256": "95b93e364f14063ba20170562b4a01bc8761a3aaff3821315d69269b5f5bc843",
+      "size": 540672
+    },
+    "env/backend-controls/qemu-stderr-patched.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "env/backend-controls/qemu-stderr-unpatched.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "env/backend-controls/run.txt": {
+      "sha256": "4202b01eba982660bfe6a17a01a2a6a83b1252ba8cd296414391128390286a09",
+      "size": 314
+    },
+    "env/backend-controls/serial-patched.log": {
+      "sha256": "3daa28b1bd86c5e5a8742f6115c36c8c060833e3735080f9167aad6822852211",
+      "size": 1368
+    },
+    "env/backend-controls/serial-unpatched.log": {
+      "sha256": "20217e166a4965dce7bf6bfdd8d13be5fc81766c4e8da052d4e3f0042122845c",
+      "size": 1001
+    },
+    "env/backend-controls/xm-verify.json": {
+      "sha256": "8ea2caa09205ac60141d1c5b28f6d0c761946ab7d14253a3076714200ecc0f58",
+      "size": 3247
+    },
+    "env/compilers/c-runtime-build-audit.txt": {
+      "sha256": "f82d878d25347ce3dfe8268ec8212ba28e6a7a66faf7ed4aa1b7cece1cb374a0",
+      "size": 1221
+    },
+    "env/compilers/guest-elf-identities.txt": {
+      "sha256": "d7960c5d2bc472d5c75ac0d8d8ce54e97cf2977149c17b8c05389393d584ca21",
+      "size": 1877
+    },
+    "env/compilers/host-suite.txt": {
+      "sha256": "f82d878d25347ce3dfe8268ec8212ba28e6a7a66faf7ed4aa1b7cece1cb374a0",
+      "size": 1221
+    },
+    "env/compilers/tool-identities.txt": {
+      "sha256": "e66c7233dd464e8c9da506408680781db2b0b1f84d39ebe83ec60d81bfc3deaa",
+      "size": 226
+    },
+    "env/guards/guards.txt": {
+      "sha256": "d78ce34e13bf06fe2e03b8be6343a9a6bc305a4357f6691efbc71749949641e7",
+      "size": 777
+    },
+    "env/guards/phase14-reproduction.txt": {
+      "sha256": "a84755514f8894f15aee3fa23336ab78c4659c405f0f027b29aa896011d50ceb",
+      "size": 479
+    },
+    "env/host.txt": {
+      "sha256": "2ad61cb6c0489b1cc653323c7e44e3fb738f9c2a6ccb562961a40a57b09d93ea",
+      "size": 3661
+    },
+    "env/isolated-runtime.txt": {
+      "sha256": "92e71fd349698a2b8dd27b55d65a9cbf523571dbaee5488c5c62005e636917e7",
+      "size": 2146
+    },
+    "env/qemu-accel-help.txt": {
+      "sha256": "de00fa0d92a5c37a15c2fe57fd91d064f92ffdeae4c413a2f09af2ead77f4f82",
+      "size": 52
+    },
+    "env/qemu-identities.txt": {
+      "sha256": "ae805682d2a074720b122b370454378dc6abfeb6f913cb44fa86f8728665eb11",
+      "size": 1763
+    },
+    "env/qemu-package-listing.txt": {
+      "sha256": "b14fa35ae925c47d76081da78b06b48641ee60ad02a709083ee3206a2f8827cc",
+      "size": 136143
+    },
+    "env/qemu-package.txt": {
+      "sha256": "8b22e26e13c70475289156080d5f9d431b01a3f773c6d0a655ed3624fd012524",
+      "size": 698
+    },
+    "env/qemu-version.txt": {
+      "sha256": "2a60b6efb05a619981698e5b45deead266c716c786b07b133c468da29b406010",
+      "size": 110
+    },
+    "env/rust-cargo-version.txt": {
+      "sha256": "834da5baea702601bf2f6d2c00ba64c21c2195abf64d575b531e23df30601e8a",
+      "size": 762
+    },
+    "env/rust-target-compile-x86_64-unknown-none.txt": {
+      "sha256": "c44d507a083e83a007ef20eedb50f92e55f1190c573cab8adffca07c25248738",
+      "size": 300
+    },
+    "env/rust-target-compile-x86_64-unknown-uefi.txt": {
+      "sha256": "820f73234547737f8498355172ceb037d26d8b3dc91e7ea36428c1a1a69e9d5e",
+      "size": 301
+    },
+    "gate/boot-efi.sha256": {
+      "sha256": "725092337e5fbffabff18efb0dae9ea2bab9810ac69e89a98df9ee0f2ef1e0fb",
+      "size": 106
+    },
+    "gate/build.log": {
+      "sha256": "8763e9e088e0ac33aa89b4c0737114c1f662cfc1659ad7feff006e24077918eb",
+      "size": 23240
+    },
+    "gate/controls.log": {
+      "sha256": "1e5915ba1615b97338ec422b5ec9c62d336940efe08c9f85359dd8e279dd0766",
+      "size": 1795
+    },
+    "gate/cycles.log": {
+      "sha256": "29cba8fb5d8a8e4c033ab95467398c861763e9682801e2fcbec84eeb78d50217",
+      "size": 1634
+    },
+    "gate/env.log": {
+      "sha256": "2b77e595c19edeabd6a57e1413493511b5da1acb6516ac21d2c5e1872f2f5e00",
+      "size": 525
+    },
+    "gate/gate-controls.txt": {
+      "sha256": "b7590e4e4987986dc477c70dd14f3867f9006ed3e298f051ea800502ce92d825",
+      "size": 669
+    },
+    "gate/package.log": {
+      "sha256": "939ccc9f6b14a09488203c041ffde6de07adccd2a9718806965d7af4e5fa6f7d",
+      "size": 281
+    },
+    "gate/proof-clang.log": {
+      "sha256": "50e71e03730ed08667501009dfe1ea17095f89eb992631947777b65b54727243",
+      "size": 3343
+    },
+    "gate/proof-gcc.log": {
+      "sha256": "02220291beac6a834b531e88818126e06ebc6a7e04a0ce27c320e85318ca8b51",
+      "size": 3326
+    },
+    "gate/receipts/build.json": {
+      "sha256": "94d6b29ebc58a426ec3965403eb784412b078f766db01ec181363b3113a4ff07",
+      "size": 1317
+    },
+    "gate/receipts/controls.json": {
+      "sha256": "6e79d6a1534b27b30e68e820c629c8f87eaa1ad21f40f56c86a052e9ef1de428",
+      "size": 1099
+    },
+    "gate/receipts/cycles.json": {
+      "sha256": "450fc2d90a92a5c1592466a44b9dd2cce70ad0ca5d04c28934d025d0164f7e7d",
+      "size": 1180
+    },
+    "gate/receipts/env.json": {
+      "sha256": "ad99789b9fef34f1502ba9ed5b1ee32e5213afebabc2bbd66fb862fb30d1c654",
+      "size": 1119
+    },
+    "gate/receipts/guest-clang.json": {
+      "sha256": "953276a5662ae376b24c3fcb9399f7ebe4d8fc9fd499f9aaacb8a12d4d9b9521",
+      "size": 1184
+    },
+    "gate/receipts/guest-gcc.json": {
+      "sha256": "d989a7a511c907e20d601f0a58872e181a1e8b06bced2c94b66e0ffae2116733",
+      "size": 1178
+    },
+    "gate/receipts/package.json": {
+      "sha256": "355d9a6db16e2abda0e8bc6d26c25056cb9efa17ac0cbd6d74d86a1fe7ca70ae",
+      "size": 1095
+    },
+    "gate/receipts/refusals-clang.json": {
+      "sha256": "616d86077f65f28b1271279a0f0531d33c1fad70076cf638956ce08a45585337",
+      "size": 1185
+    },
+    "gate/receipts/refusals-gcc.json": {
+      "sha256": "1a323af49a4b0410e91fe9fed4912d69ecc5f858de4c7003ee0ba519b4547cf8",
+      "size": 1181
+    },
+    "gate/receipts/regression.json": {
+      "sha256": "3ddc345e8f72d2606619a0b4a140027535cf2fed06f8c16cc5cdeda35d845f31",
+      "size": 1278
+    },
+    "gate/receipts/stability.json": {
+      "sha256": "90ebdfdbe453a350ba25344c055218f626a888a273d5347c0031bf6452496999",
+      "size": 1490
+    },
+    "gate/receipts/verify.json": {
+      "sha256": "573d460e0a54aaa27258d9db1ab70cfe4a9aae44042decbfb62c3b87ee16a1aa",
+      "size": 1066
+    },
+    "gate/refusals-clang.log": {
+      "sha256": "0e42570133a860e6bdac437ac6e91910604c9e92f71a9db7d1b7e78a7f569b31",
+      "size": 669
+    },
+    "gate/refusals-gcc.log": {
+      "sha256": "b4921b3b1784e59e5fe0802683e9f0e6cd9f5dace888774d2790d7a88b1ee1b4",
+      "size": 653
+    },
+    "gate/verify.log": {
+      "sha256": "20abc39be8fd6862b5d756f004b65f3edebccb178dd0f5c342699760ab07b835",
+      "size": 218
+    },
+    "guest-clang/c-gfx-app.apb1": {
+      "sha256": "1db228addca3c7b98f3b3886617dffb0087cf627d7ce65c4fc1900f019870361",
+      "size": 53144
+    },
+    "guest-clang/evidence.json": {
+      "sha256": "ec3d8cf48a135bb58c480e3080d12dbd2323fbbd3875346011f0d31abdd8c076",
+      "size": 15563
+    },
+    "guest-clang/harness-console.log": {
+      "sha256": "50e71e03730ed08667501009dfe1ea17095f89eb992631947777b65b54727243",
+      "size": 3343
+    },
+    "guest-clang/harness-output.log": {
+      "sha256": "f77ae84418d12ea478836d237a1da1ae481c36d03bcdd1fbab7167d6a2b9b0c2",
+      "size": 1609
+    },
+    "guest-clang/install-ack.json": {
+      "sha256": "29a06f4b8fc0ddef5a37ede3cb3482319008d874dc51b638f233a6ae904feed3",
+      "size": 383
+    },
+    "guest-clang/qemu-stderr.log": {
+      "sha256": "b92e5492b62cd8224afe23e6dc53204d194b79af6d66d3b4f5c948c8fb298d75",
+      "size": 307
+    },
+    "guest-clang/shots/cp01-launch-ready-desktop.png": {
+      "sha256": "5f093b38ca7626bbccee08fd0b51019fa2ac63a7f4fbbf68d4013bf093c9dda4",
+      "size": 5708
+    },
+    "guest-clang/shots/cp03-first-native-c-window.png": {
+      "sha256": "d86a3ccbe286c9e21ece19bd8d7d94ea13fa2ec91d5c6cf5473043ba8ec3d795",
+      "size": 8659
+    },
+    "guest-clang/shots/cp04-keyboard-response-pre.png": {
+      "sha256": "d86a3ccbe286c9e21ece19bd8d7d94ea13fa2ec91d5c6cf5473043ba8ec3d795",
+      "size": 8659
+    },
+    "guest-clang/shots/cp04-keyboard-response.png": {
+      "sha256": "7c7043959f4d6b2c375f9e7cf3723157000c5f2a7b044f824a0ed06d8d3fec2b",
+      "size": 8660
+    },
+    "guest-clang/shots/cp05-mouse-response-pre.png": {
+      "sha256": "b673576ed1f8ad58029172b47a506be6615e440d79fef93f8c8614dfb1785ca4",
+      "size": 8415
+    },
+    "guest-clang/shots/cp05-mouse-response.png": {
+      "sha256": "85294a855bdf55050aed0c6706ace9a1fb06c88fa07cc22540e90e6cc991e9a0",
+      "size": 8417
+    },
+    "guest-clang/shots/cp06a-focused-pre.png": {
+      "sha256": "2b401449a179f6872bf5231046baa7e4add282c93e80e2fd2261754bff88a1d0",
+      "size": 8662
+    },
+    "guest-clang/shots/cp06a-focused.png": {
+      "sha256": "d84b15658e552ffaa402fc3160c99c24f44ef6249dd7513a93ba60d891257882",
+      "size": 8794
+    },
+    "guest-clang/shots/cp06a-two-instances.png": {
+      "sha256": "2e613a97cd0828b83549f34cbccf4d0175ba93cb45dd28acdf5fa56a57542565",
+      "size": 8933
+    },
+    "guest-clang/shots/cp06b-focused-pre.png": {
+      "sha256": "3167b710cc443cfb6f25cd9f2a2c613a21b6164aac77fbe16034c6612493ba57",
+      "size": 8967
+    },
+    "guest-clang/shots/cp06b-focused.png": {
+      "sha256": "f73a1370f089fcef570a3513dea84ad06478ebea8379332cedce847ce5517fb8",
+      "size": 8844
+    },
+    "guest-clang/shots/cp07-desktop-restored.png": {
+      "sha256": "c1cba9bcfa4b8043f01fd8c38d0ac91814796d00056506d7a9ac5cbb1b35d9ff",
+      "size": 5785
+    },
+    "guest-clang/shots/cp08-final-demonstration-pre.png": {
+      "sha256": "76cd8a8470b5646f8852a46c1720a34b6378dbcbb88c519ec7e25299285c48b5",
+      "size": 8413
+    },
+    "guest-clang/shots/cp08-final-demonstration.png": {
+      "sha256": "87083fb5f1c06a2a7bba356fde8e0aede4bb845918fa98d28dc64994ea54407e",
+      "size": 8414
+    },
+    "guest-clang/v1-guest-serial.log": {
+      "sha256": "4b7fa0c7b049fe81355ad3fd3b8bb8f325a0ef800a3301039fe580b741b69b65",
+      "size": 284791
+    },
+    "guest-gcc/c-gfx-app.apb1": {
+      "sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+      "size": 40472
+    },
+    "guest-gcc/evidence.json": {
+      "sha256": "73822e0a9fa906638a1f402bb2facc7fe856e800f29844f9f9f55d3f70f1097a",
+      "size": 15558
+    },
+    "guest-gcc/harness-console.log": {
+      "sha256": "02220291beac6a834b531e88818126e06ebc6a7e04a0ce27c320e85318ca8b51",
+      "size": 3326
+    },
+    "guest-gcc/harness-output.log": {
+      "sha256": "26d4eb8aac18cc5dfcf8b5babcb5bd04560cb2544c31a945e569a2b5cf384506",
+      "size": 1606
+    },
+    "guest-gcc/install-ack.json": {
+      "sha256": "4a286c4d02164c6c1a115e58eec853794e7da440e6c4d9667bfd54cbe5275b8e",
+      "size": 383
+    },
+    "guest-gcc/qemu-stderr.log": {
+      "sha256": "b92e5492b62cd8224afe23e6dc53204d194b79af6d66d3b4f5c948c8fb298d75",
+      "size": 307
+    },
+    "guest-gcc/shots/cp01-launch-ready-desktop.png": {
+      "sha256": "5f093b38ca7626bbccee08fd0b51019fa2ac63a7f4fbbf68d4013bf093c9dda4",
+      "size": 5708
+    },
+    "guest-gcc/shots/cp03-first-native-c-window.png": {
+      "sha256": "6f72745637d45ce46f05dca81408c0ab2e51b3dc58110b234f16053973d964c8",
+      "size": 8659
+    },
+    "guest-gcc/shots/cp04-keyboard-response-pre.png": {
+      "sha256": "d86a3ccbe286c9e21ece19bd8d7d94ea13fa2ec91d5c6cf5473043ba8ec3d795",
+      "size": 8659
+    },
+    "guest-gcc/shots/cp04-keyboard-response.png": {
+      "sha256": "7c7043959f4d6b2c375f9e7cf3723157000c5f2a7b044f824a0ed06d8d3fec2b",
+      "size": 8660
+    },
+    "guest-gcc/shots/cp05-mouse-response-pre.png": {
+      "sha256": "b673576ed1f8ad58029172b47a506be6615e440d79fef93f8c8614dfb1785ca4",
+      "size": 8415
+    },
+    "guest-gcc/shots/cp05-mouse-response.png": {
+      "sha256": "4c2fecb81ff4f3116da8c456e771fe381429ea473167cc6e0f067938e058ab3c",
+      "size": 8417
+    },
+    "guest-gcc/shots/cp06a-focused-pre.png": {
+      "sha256": "2b401449a179f6872bf5231046baa7e4add282c93e80e2fd2261754bff88a1d0",
+      "size": 8662
+    },
+    "guest-gcc/shots/cp06a-focused.png": {
+      "sha256": "4203986fe430d7220f356223dbef11e5824283329c5fe60a2d3dbce2efae926f",
+      "size": 8799
+    },
+    "guest-gcc/shots/cp06a-two-instances.png": {
+      "sha256": "b0397ec683045bc2d2d43195e3782998c6ca5896503822dff18ece6ec8498a2e",
+      "size": 8933
+    },
+    "guest-gcc/shots/cp06b-focused-pre.png": {
+      "sha256": "a9c1a23e2593dba4e94d5336db2788daee725424e9588df672fee6693055e983",
+      "size": 8971
+    },
+    "guest-gcc/shots/cp06b-focused.png": {
+      "sha256": "370d7d7a717f92a753768ab55309cfb13b2536cdde76ae0e1a426980c14afd0e",
+      "size": 8844
+    },
+    "guest-gcc/shots/cp07-desktop-restored.png": {
+      "sha256": "3bf964b4deb2ef9add5120f8f9a18c1778b496ded2fcadaff5d00f4b6cca06a6",
+      "size": 5787
+    },
+    "guest-gcc/shots/cp08-final-demonstration-pre.png": {
+      "sha256": "bcdf3399ed281de617e098c026fa46bb5ca36825ba782d8a57e6670c9c4269d8",
+      "size": 8410
+    },
+    "guest-gcc/shots/cp08-final-demonstration.png": {
+      "sha256": "87083fb5f1c06a2a7bba356fde8e0aede4bb845918fa98d28dc64994ea54407e",
+      "size": 8414
+    },
+    "guest-gcc/v1-guest-serial.log": {
+      "sha256": "30faf307ce99f6f6317c40f785bab9fba75699a8defeb3e694661b8711e653ab",
+      "size": 261771
+    },
+    "lifecycle-cycles/c-gfx-app.apb1": {
+      "sha256": "073f08f79f3b3e06f4c4db42434825c50d179f2f752a45190ff171a5540162f3",
+      "size": 40472
+    },
+    "lifecycle-cycles/cycles-evidence.json": {
+      "sha256": "5f137506c4d9ab7adde3988d7d8a96b5b61b75090f57c05bca8784ada32d6630",
+      "size": 14014
+    },
+    "lifecycle-cycles/harness-console.log": {
+      "sha256": "29cba8fb5d8a8e4c033ab95467398c861763e9682801e2fcbec84eeb78d50217",
+      "size": 1634
+    },
+    "lifecycle-cycles/qemu-stderr.log": {
+      "sha256": "d313012b64f44eab0ddf5e144922b282edfe46185c3cb8d68ea3d53de1d26e9d",
+      "size": 297
+    },
+    "lifecycle-cycles/v1-cycles-serial.log": {
+      "sha256": "e26e542f22d459fe5d97d3dc9a99752a76c586561f9ab54e0270b17afd3b9c6f",
+      "size": 439813
+    },
+    "refusals-clang/c-gfx-refusals.apb1": {
+      "sha256": "b79a7da11bc9eb50fc3841eb5404b51cd4b5a3f07da48c429dbe0adfea002336",
+      "size": 61720
+    },
+    "refusals-clang/harness-console.log": {
+      "sha256": "0e42570133a860e6bdac437ac6e91910604c9e92f71a9db7d1b7e78a7f569b31",
+      "size": 669
+    },
+    "refusals-clang/refusals-evidence.json": {
+      "sha256": "64d556c222db6442002bc61bcbe85dfe6d6069ffbc8379bde365ee77750cc9cc",
+      "size": 7133
+    },
+    "refusals-clang/refusals-serial.log": {
+      "sha256": "c959354387f67b51ce62897725ce18d842b22f3291ebac2e0f5fb4d4e2b52273",
+      "size": 194652
+    },
+    "refusals-clang/shots/cp09-launcher-selection.png": {
+      "sha256": "ec3b1e2753874ae92389ee7f6ffdb848a87716792ea628f994129dcd4e6e51b1",
+      "size": 6774
+    },
+    "refusals-clang/shots/cp09-refusal-matrix.png": {
+      "sha256": "2f5f85e0fc5e551de44efeb3c3ac7ded0df25ebd1cbf757632bfce4ab9d7b427",
+      "size": 6041
+    },
+    "refusals-gcc/c-gfx-refusals.apb1": {
+      "sha256": "aab1f0ca5b8e7116d4aa38e8fe38436bb11ef09f75585113ea04e1b1a1f5886d",
+      "size": 40888
+    },
+    "refusals-gcc/harness-console.log": {
+      "sha256": "b4921b3b1784e59e5fe0802683e9f0e6cd9f5dace888774d2790d7a88b1ee1b4",
+      "size": 653
+    },
+    "refusals-gcc/refusals-evidence.json": {
+      "sha256": "423838c2775d03d4d18634865ce192e4576e21797f06c2f88f434f25ad9119ca",
+      "size": 7131
+    },
+    "refusals-gcc/refusals-serial.log": {
+      "sha256": "5650d7c113d48971d262a59fc7e8a818137f08794a75fecb5fcd87fff8e0d4db",
+      "size": 173952
+    },
+    "refusals-gcc/shots/cp09-launcher-selection.png": {
+      "sha256": "14c4a8cbb8f7dd3d21303be8d71e572955d744055a72a1b8c1fcc64a1a093577",
+      "size": 6759
+    },
+    "refusals-gcc/shots/cp09-refusal-matrix.png": {
+      "sha256": "c2409ab180ce5396c96c0f545b1b42ee8d1154d6b14a7bae8c5745050bdf5623",
+      "size": 6052
+    },
+    "regression/run-tests.log": {
+      "sha256": "400a3b42e74306d0548b17a8e1e256a7acfe1f73aed509d84b7f42393418137a",
+      "size": 161697
+    },
+    "stability/stability-100.log": {
+      "sha256": "5383d143e83a1757b582b5b25f6f051b48b52828797fc9c8e3762a620a0c002e",
+      "size": 983
+    }
+  },
+  "excluded_from_package": {
+    "count": 70,
+    "pattern": "*.ppm",
+    "reason": "PPM screendumps are a fixed header plus the exact raster of the published PNG; their SHA-256 is recorded in each run's evidence.json"
+  },
+  "checkpoint_frames": {
+    "required": [
+      "shots/cp01-launch-ready-desktop.png",
+      "shots/cp03-first-native-c-window.png",
+      "shots/cp04-keyboard-response.png",
+      "shots/cp05-mouse-response.png",
+      "shots/cp06a-two-instances.png",
+      "shots/cp06a-focused.png",
+      "shots/cp06b-focused.png",
+      "shots/cp07-desktop-restored.png",
+      "shots/cp08-final-demonstration.png"
+    ],
+    "checked": "each published PNG re-decoded and compared with the raster digest the harness recorded when the checkpoint assertion passed",
+    "runs": 2
+  },
+  "total_bytes": 3374413
+}

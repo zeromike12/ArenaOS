@@ -1,0 +1,36 @@
+
+=== controls ===
+[controls] ppm parsing: PASS
+[controls] color detection: PASS
+[controls] window components (merge is not identity): PASS
+[controls] ack positive: PASS
+[controls] ack missing delivery fails: PASS
+[controls] ack wrong instance / cross-delivery fails: PASS
+[controls] ack wrong event type fails: PASS
+[controls] ack stale counter fails: PASS
+[controls] ack requires freshness after cursor: PASS
+[controls] input proof: ack + flash passes: PASS
+[controls] input proof: ack without visible response fails: PASS
+[controls] input proof: ack with no captured frame fails: PASS
+[controls] input proof: visible response without ack fails: PASS
+[controls] input proof: wrong-instance ack fails: PASS
+[controls] input proof: wrong-event ack fails: PASS
+[controls] input proof: stale/residual flash fails: PASS
+[controls] input proof: flash outside the window fails: PASS
+[controls] cleanup positive (all 21 fields settle): PASS
+[controls] cleanup missing retirement fails: PASS
+[controls] cleanup non-zero exit fails: PASS
+[controls] cleanup leak (instances remain) fails: PASS
+[controls] cleanup leaked thread (counts settled) fails: PASS
+[controls] cleanup leaked frames beyond the warm-up bound fails: PASS
+[controls] frame warm-up is bounded and one-directional: PASS
+[controls] cleanup leaked capability fails: PASS
+[controls] cleanup missing receipt fails: PASS
+[controls] cleanup stale (pre-cursor) settlement fails: PASS
+[controls] cleanup transient dip then leak fails: PASS
+[controls] cleanup spurious retirement fails: PASS
+[controls] residual window presentation fails: PASS
+[controls] malformed resource receipt not reinterpreted: PASS
+[controls] verdict logic: PASS
+[controls] 35/35 focused controls PASS
+[gate-stage] controls: exit 0 -> build/v1-gate/receipts/controls.json

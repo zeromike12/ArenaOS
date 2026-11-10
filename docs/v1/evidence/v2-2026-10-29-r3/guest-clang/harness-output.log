@@ -1,0 +1,12 @@
+run_dir=docs/v1/evidence/v2-2026-10-29-r3/guest-clang
+source_commit=33d1915a1b1daddc7fecd2e5b32a74c6f27e3fbe
+working_tree_dirty=True
+guest_compiler=clang
+[v1-guest-proof] checkpoint 1 PASS: launch-ready Desktop desktop frame presented; app-instances=0 windows=0
+[v1-guest-proof] checkpoint 2 PASS: APB1 install receipt (protected installer) protected installer installed signed version=42
+[v1-guest-proof] checkpoint 3 PASS: first native C window (Identify -> create -> render) Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance
+[v1-guest-proof] checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) KEY ack surface=164 counter 2->3 + flash in the window, frame 02f96ff494ab
+[v1-guest-proof] checkpoint 5 PASS: mouse response (instance-specific acknowledgment) POINTER ack surface=164 counter 3->4 + flash in the window, frame 73aced1be07e
+[v1-guest-proof] checkpoint 6 PASS: two concurrent instances: focus/input isolation, both directions A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=db15679cbffe; B(169) key: ack {'before': 4, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=a4b20c8ef04b
+[v1-guest-proof] checkpoint 7 PASS: window removal: retirements, exits, settlement, visual removal retired=['164', '169'] exits={'164': 0, '169': 0} all 21 resource fields settled to baseline visual_rects=0
+[v1-guest-proof] checkpoint 8 PASS: final V1 demonstration final instance surface=174 placed (70, 60, 640, 480) bound=174 key ack 2->3 + visible flash, frame 337606203e0b

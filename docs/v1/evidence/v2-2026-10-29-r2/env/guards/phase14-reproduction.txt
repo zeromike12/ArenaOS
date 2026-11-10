@@ -1,0 +1,6 @@
+build_root: /workspace/ArenaOS
+    Finished `release` profile [optimized] target(s) in 0.01s
+b8636bd4029ae764227116f0f264b2c1c9b201d71154db5fa7fe03ea8c2bd3b8  target/x86_64-unknown-none/release/arena-phase14-pie
+expected_pie: d7b0a8cf9c735c3898a867d824563f06b0d949df80fa1a9c96f9180a395fea2e
+Phase-14 signed APB1: 24040 bytes, SHA-256 04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa
+expected_apb1: 04add54f09042353fc42511978c82f8b8efb87f7d5f0657f9116f456276b3dfa

@@ -1,0 +1,781 @@
+{
+  "attempts": [
+    {
+      "checkpoint_5": "FAIL",
+      "checkpoint_results": [
+        {
+          "case": 1,
+          "name": "launch-ready Desktop",
+          "result": "PASS"
+        },
+        {
+          "case": 2,
+          "name": "APB1 install receipt (protected installer)",
+          "result": "PASS"
+        },
+        {
+          "case": 3,
+          "name": "first native C window (Identify -> create -> render)",
+          "result": "PASS"
+        },
+        {
+          "case": 4,
+          "name": "keyboard response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 5,
+          "name": "mouse response (instance-specific acknowledgment)",
+          "result": "FAIL"
+        },
+        {
+          "case": 6,
+          "name": "two concurrent instances: focus/input isolation, both directions",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 7,
+          "name": "window removal: retirements, exits, settlement, visual removal",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 8,
+          "name": "final V1 demonstration",
+          "result": "NOT RUN"
+        }
+      ],
+      "file_count": 32,
+      "path": "guest-run",
+      "raw_qemu_boot_files": [
+        "raw-boots/format-boot/qemu-stderr.log",
+        "raw-boots/format-boot/serial.log",
+        "raw-boots/format-boot/tcp.log",
+        "raw-boots/format-boot/udp-dns.log",
+        "raw-boots/format-boot/vcon.txt",
+        "raw-boots/proof-boot/qemu-stderr.log",
+        "raw-boots/proof-boot/serial.log",
+        "raw-boots/proof-boot/tcp.log",
+        "raw-boots/proof-boot/udp-dns.log",
+        "raw-boots/proof-boot/vcon.txt"
+      ],
+      "run_label": "v1-guest-proof-20261102T044314Z-103832",
+      "total_bytes": 20502422,
+      "verdict_pass": false
+    },
+    {
+      "checkpoint_5": "FAIL",
+      "checkpoint_results": [
+        {
+          "case": 1,
+          "name": "launch-ready Desktop",
+          "result": "PASS"
+        },
+        {
+          "case": 2,
+          "name": "APB1 install receipt (protected installer)",
+          "result": "PASS"
+        },
+        {
+          "case": 3,
+          "name": "first native C window (Identify -> create -> render)",
+          "result": "PASS"
+        },
+        {
+          "case": 4,
+          "name": "keyboard response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 5,
+          "name": "mouse response (instance-specific acknowledgment)",
+          "result": "FAIL"
+        },
+        {
+          "case": 6,
+          "name": "two concurrent instances: focus/input isolation, both directions",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 7,
+          "name": "window removal: retirements, exits, settlement, visual removal",
+          "result": "NOT RUN"
+        },
+        {
+          "case": 8,
+          "name": "final V1 demonstration",
+          "result": "NOT RUN"
+        }
+      ],
+      "file_count": 22,
+      "path": "guest-run-retry1",
+      "raw_qemu_boot_files": [],
+      "run_label": "v1-guest-proof-20261102T044806Z-104093",
+      "total_bytes": 20027855,
+      "verdict_pass": false
+    },
+    {
+      "checkpoint_5": "PASS",
+      "checkpoint_results": [
+        {
+          "case": 1,
+          "name": "launch-ready Desktop",
+          "result": "PASS"
+        },
+        {
+          "case": 2,
+          "name": "APB1 install receipt (protected installer)",
+          "result": "PASS"
+        },
+        {
+          "case": 3,
+          "name": "first native C window (Identify -> create -> render)",
+          "result": "PASS"
+        },
+        {
+          "case": 4,
+          "name": "keyboard response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 5,
+          "name": "mouse response (instance-specific acknowledgment)",
+          "result": "PASS"
+        },
+        {
+          "case": 6,
+          "name": "two concurrent instances: focus/input isolation, both directions",
+          "result": "PASS"
+        },
+        {
+          "case": 7,
+          "name": "window removal: retirements, exits, settlement, visual removal",
+          "result": "PASS"
+        },
+        {
+          "case": 8,
+          "name": "final V1 demonstration",
+          "result": "PASS"
+        }
+      ],
+      "file_count": 44,
+      "path": "guest-run-retry2",
+      "raw_qemu_boot_files": [],
+      "run_label": "v1-guest-proof-20261102T045113Z-104375",
+      "total_bytes": 31740570,
+      "verdict_pass": true
+    }
+  ],
+  "completeness_note": "All files currently present under all three attempt roots are listed with byte size and SHA-256. The initial attempt includes raw qemu-stderr, serial, TCP, UDP/DNS, and virtconsole files for its format and proof boots. Retry1/retry2 retain harness serial, evidence JSON, screenshots, app/EFI files, and transcripts, but no per-boot raw-boots directory is present in this resumed evidence tree; this inventory does not imply those extra raw QEMU streams were preserved.",
+  "evidence_root": "v2-2026-11-02-input-proof-ff6b04d-r1",
+  "file_count": 98,
+  "files": [
+    {
+      "category": "raw-run-file",
+      "path": "guest-run/BOOTX64.EFI",
+      "sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+      "size": 11039232
+    },
+    {
+      "category": "tested-signed-application-bundle",
+      "path": "guest-run/c-gfx-app.apb1",
+      "sha256": "cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0",
+      "size": 40472
+    },
+    {
+      "category": "structured-run-verdict-and-identities",
+      "path": "guest-run/evidence.json",
+      "sha256": "15b8f57e3156306834f6c431912d8f4b47cae2a00654394fe8ddf6dab8a3089b",
+      "size": 22755
+    },
+    {
+      "category": "harness-transcript",
+      "path": "guest-run/harness-output.log",
+      "sha256": "95d025b22cf79b9b3376ef411b96f8737becb821b22ef5a5f7a26f6ecee4da9e",
+      "size": 1355
+    },
+    {
+      "category": "installer-acknowledgment-receipt",
+      "path": "guest-run/install-ack.json",
+      "sha256": "22dca6b27267cb565fbf8ef4c3a15b848951a358e5728b70526db52ac8f97866",
+      "size": 383
+    },
+    {
+      "category": "raw-qemu-stderr",
+      "path": "guest-run/raw-boots/format-boot/qemu-stderr.log",
+      "sha256": "f476016acdcc270df7694d973754d128373968023bbbb039762fe84456f1ee39",
+      "size": 369
+    },
+    {
+      "category": "raw-qemu-serial",
+      "path": "guest-run/raw-boots/format-boot/serial.log",
+      "sha256": "1e9b68ca98063683af479f93c67f974aaa7cbcd069d5b6458737b6ce8e5b169a",
+      "size": 125410
+    },
+    {
+      "category": "raw-qemu-tcp-log",
+      "path": "guest-run/raw-boots/format-boot/tcp.log",
+      "sha256": "511611c8e6cb584101014d4b5372a698914d69db907b07d9a17e4356b28f09a8",
+      "size": 54
+    },
+    {
+      "category": "raw-qemu-udp-dns-log",
+      "path": "guest-run/raw-boots/format-boot/udp-dns.log",
+      "sha256": "ec27208e90bd453daf076a16a4693ef38d235ca4ea9aa6d64311d8749a6f859b",
+      "size": 255
+    },
+    {
+      "category": "raw-qemu-virtconsole-log",
+      "path": "guest-run/raw-boots/format-boot/vcon.txt",
+      "sha256": "a6de16cffc995d0ce30a7d50928ad3d39df8f131ce04f403292690ea11e29cee",
+      "size": 31168
+    },
+    {
+      "category": "raw-qemu-stderr",
+      "path": "guest-run/raw-boots/proof-boot/qemu-stderr.log",
+      "sha256": "aadaee464d0f4fe9513455ac21edf5a6aceac101271868050fad39b7836c9025",
+      "size": 355
+    },
+    {
+      "category": "raw-qemu-serial",
+      "path": "guest-run/raw-boots/proof-boot/serial.log",
+      "sha256": "9c9fed631d862d99d2641bc93658a125f45d8b5813181e4de0108ca94c526f88",
+      "size": 203866
+    },
+    {
+      "category": "raw-qemu-tcp-log",
+      "path": "guest-run/raw-boots/proof-boot/tcp.log",
+      "sha256": "511611c8e6cb584101014d4b5372a698914d69db907b07d9a17e4356b28f09a8",
+      "size": 54
+    },
+    {
+      "category": "raw-qemu-udp-dns-log",
+      "path": "guest-run/raw-boots/proof-boot/udp-dns.log",
+      "sha256": "bfbb1cbd2784a9522368eacdadae04ee246b8e8b68c7bf3d0c8c14178a0bbf85",
+      "size": 255
+    },
+    {
+      "category": "raw-qemu-virtconsole-log",
+      "path": "guest-run/raw-boots/proof-boot/vcon.txt",
+      "sha256": "5b714696a85fb06a585338c21b0542538853648b3b556bc67d12ab619e1487e0",
+      "size": 112805
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp01-launch-ready-desktop.png",
+      "sha256": "5f093b38ca7626bbccee08fd0b51019fa2ac63a7f4fbbf68d4013bf093c9dda4",
+      "size": 5708
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run/shots/cp01-launch-ready-desktop.ppm",
+      "sha256": "6abf1ad8b8e83848582a1fc77fff25d2252113d15f37c033f2f05616ed99f4e7",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp03-first-native-c-window.png",
+      "sha256": "b673576ed1f8ad58029172b47a506be6615e440d79fef93f8c8614dfb1785ca4",
+      "size": 8415
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run/shots/cp03-first-native-c-window.ppm",
+      "sha256": "2be70b0200800d16de3836ed11afa21a73aaf1e17ddcb91b7a5f10bd0d92d627",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp04-keyboard-response-pre.png",
+      "sha256": "2bd5040cdfde8803ebae1949effc9385bf29c8577312561c064de3cbe146e74f",
+      "size": 8419
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run/shots/cp04-keyboard-response-pre.ppm",
+      "sha256": "b16498f265380927fde0be11efbe561f141badc00a91010afd9bf2bbd42e2d5e",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp04-keyboard-response-samples/sample-001-2026-11-02T044344.766196098Z.png",
+      "sha256": "c51fc9a948251b8902c896f0933d96e75275ebdc82ae8443fa6d2b5eb5ecfb5b",
+      "size": 8419
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp04-keyboard-response.png",
+      "sha256": "c51fc9a948251b8902c896f0933d96e75275ebdc82ae8443fa6d2b5eb5ecfb5b",
+      "size": 8419
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run/shots/cp04-keyboard-response.ppm",
+      "sha256": "902a6058ee514c0fb6ad84385486bc2d1100e1fdca3ef595e02f351b31b0d84b",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp05-mouse-response-failed-last-probe.png",
+      "sha256": "090daa6f115291f4ea6da9b5b632e899fe93f3b4e6e58ec6fc309145ea92c21b",
+      "size": 8423
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run/shots/cp05-mouse-response-failed-last-probe.ppm",
+      "sha256": "22bf0d74c7e61e96834570939d88606cafb77a13e3f193016fcc5ccd2ea82f80",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp05-mouse-response-pre.png",
+      "sha256": "5d208d8aa582c0157fc0a75e128844f88afc97146a5ac84f2584d78a800a9c9f",
+      "size": 8419
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run/shots/cp05-mouse-response-pre.ppm",
+      "sha256": "482e33d87511c4980ae651dc9517d3eb85259299e22d68701839f7909d3bd443",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp05-mouse-response-samples/sample-001-2026-11-02T044347.511445813Z.png",
+      "sha256": "be4b93ca1bc1b82f3c2284f130733df4a7b3f3bb457799e5c523b4bf4c8a59d8",
+      "size": 8430
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp05-mouse-response-samples/sample-002-2026-11-02T044349.298711307Z.png",
+      "sha256": "0205a18c778a132a906a8adae5a9f38ff810f8633edd62f808aaf4b04cb7b9ce",
+      "size": 8428
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run/shots/cp05-mouse-response-samples/sample-003-2026-11-02T044350.791045408Z.png",
+      "sha256": "090daa6f115291f4ea6da9b5b632e899fe93f3b4e6e58ec6fc309145ea92c21b",
+      "size": 8423
+    },
+    {
+      "category": "harness-captured-guest-serial",
+      "path": "guest-run/v1-guest-serial.log",
+      "sha256": "796ff60f3f79662755187afd54bd1be87a3d97bf5780e5713bd34c87d77fd930",
+      "size": 202041
+    },
+    {
+      "category": "raw-run-file",
+      "path": "guest-run-retry1/BOOTX64.EFI",
+      "sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+      "size": 11039232
+    },
+    {
+      "category": "tested-signed-application-bundle",
+      "path": "guest-run-retry1/c-gfx-app.apb1",
+      "sha256": "cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0",
+      "size": 40472
+    },
+    {
+      "category": "structured-run-verdict-and-identities",
+      "path": "guest-run-retry1/evidence.json",
+      "sha256": "4578a40e2309ae0197efd4ddccb229ffb29054da32528802a2d63a977f2c792e",
+      "size": 22802
+    },
+    {
+      "category": "harness-transcript",
+      "path": "guest-run-retry1/harness-output.log",
+      "sha256": "1f113c3a62616595e267b992935cd56792a47c932fd82e68d8148568c06b9d63",
+      "size": 1362
+    },
+    {
+      "category": "installer-acknowledgment-receipt",
+      "path": "guest-run-retry1/install-ack.json",
+      "sha256": "22dca6b27267cb565fbf8ef4c3a15b848951a358e5728b70526db52ac8f97866",
+      "size": 383
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp01-launch-ready-desktop.png",
+      "sha256": "bb8056b5c979d24e3f62b60c04f07f9a3b3f33cc3a09672119e9a5fce151c810",
+      "size": 5709
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry1/shots/cp01-launch-ready-desktop.ppm",
+      "sha256": "54c2cf017a98d6ed74baefdc8a84d267d6f641b30fb65fb0232a58237a6fa677",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp03-first-native-c-window.png",
+      "sha256": "2bd5040cdfde8803ebae1949effc9385bf29c8577312561c064de3cbe146e74f",
+      "size": 8419
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry1/shots/cp03-first-native-c-window.ppm",
+      "sha256": "b16498f265380927fde0be11efbe561f141badc00a91010afd9bf2bbd42e2d5e",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp04-keyboard-response-pre.png",
+      "sha256": "4d670a4db5954f7ebc4d9c480de6b3ca65f999b8c944ca013791155ff3986c5c",
+      "size": 8418
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry1/shots/cp04-keyboard-response-pre.ppm",
+      "sha256": "06a618886700c100640fb9a57a9163ba3aca26e81858e7f0975942fbbf67a5c1",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp04-keyboard-response-samples/sample-001-2026-11-02T044838.575284783Z.png",
+      "sha256": "eaccf68ffa725e693de97aa06a498ad258a0971465f4c236b74e5f3a79648096",
+      "size": 8420
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp04-keyboard-response-samples/sample-002-2026-11-02T044839.315269940Z.png",
+      "sha256": "7399d615dca723b803fb23d8b7850333593d904167c8988a7e256d6a619ae6c2",
+      "size": 8411
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp04-keyboard-response.png",
+      "sha256": "7399d615dca723b803fb23d8b7850333593d904167c8988a7e256d6a619ae6c2",
+      "size": 8411
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry1/shots/cp04-keyboard-response.ppm",
+      "sha256": "4d520c788e67ace6e50b1a3e3bf62e4213829bcc666a6a25b25eaaa881febbb2",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp05-mouse-response-failed-last-probe.png",
+      "sha256": "b5f4bc47ac6f74792f00338c264baafe0e1251ad12cb449396580fff6d8a5819",
+      "size": 8423
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry1/shots/cp05-mouse-response-failed-last-probe.ppm",
+      "sha256": "cb793de5a9c863de7a49919b250a3c70450f566304d65c8997dc07b2adda8066",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp05-mouse-response-pre.png",
+      "sha256": "76cd8a8470b5646f8852a46c1720a34b6378dbcbb88c519ec7e25299285c48b5",
+      "size": 8413
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry1/shots/cp05-mouse-response-pre.ppm",
+      "sha256": "1b18daf1bc3cee77153d628f7c8e745292ca8360abe5f6ef0bf785b4d32c0bed",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp05-mouse-response-samples/sample-001-2026-11-02T044841.347671126Z.png",
+      "sha256": "8a3e98b194e35b7fc734716c3bdd01e4701957fbe5c47d6819194f89733b69bd",
+      "size": 8428
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry1/shots/cp05-mouse-response-samples/sample-002-2026-11-02T044843.451798642Z.png",
+      "sha256": "b5f4bc47ac6f74792f00338c264baafe0e1251ad12cb449396580fff6d8a5819",
+      "size": 8423
+    },
+    {
+      "category": "harness-captured-guest-serial",
+      "path": "guest-run-retry1/v1-guest-serial.log",
+      "sha256": "33d0f25da655d202cbec0f5bb19039709d6df93990a26b546c452596aedf47c0",
+      "size": 202039
+    },
+    {
+      "category": "raw-run-file",
+      "path": "guest-run-retry2/BOOTX64.EFI",
+      "sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+      "size": 11039232
+    },
+    {
+      "category": "tested-signed-application-bundle",
+      "path": "guest-run-retry2/c-gfx-app.apb1",
+      "sha256": "cedb9591938a935caa90a0f0bf4ed9accc8eff7f4e37e663ad2b3d8482a431e0",
+      "size": 40472
+    },
+    {
+      "category": "structured-run-verdict-and-identities",
+      "path": "guest-run-retry2/evidence.json",
+      "sha256": "2d5e0afb89fae1453ddf506a2dc9e2871b51a06233c5652c421abfac800aad23",
+      "size": 34241
+    },
+    {
+      "category": "harness-transcript",
+      "path": "guest-run-retry2/harness-output.log",
+      "sha256": "fb59baf52f9870c179f2b1a5499efb3126af54098b7ea25fd6c4cd0507d55e6c",
+      "size": 1653
+    },
+    {
+      "category": "installer-acknowledgment-receipt",
+      "path": "guest-run-retry2/install-ack.json",
+      "sha256": "22dca6b27267cb565fbf8ef4c3a15b848951a358e5728b70526db52ac8f97866",
+      "size": 383
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp01-launch-ready-desktop.png",
+      "sha256": "bb8056b5c979d24e3f62b60c04f07f9a3b3f33cc3a09672119e9a5fce151c810",
+      "size": 5709
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp01-launch-ready-desktop.ppm",
+      "sha256": "54c2cf017a98d6ed74baefdc8a84d267d6f641b30fb65fb0232a58237a6fa677",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp03-first-native-c-window.png",
+      "sha256": "12583657fd31129af7d016f534a117c019104ae3665c5674b5d45b59a56e5ea3",
+      "size": 8664
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp03-first-native-c-window.ppm",
+      "sha256": "bfa9cef25d28df392bc2230d96c1400c6e8e92cd1fc7736a56048bdb5f28b29d",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp04-keyboard-response-pre.png",
+      "sha256": "25697dceecb676e3bf642ab0a84c934f491ea4d19f195664bb456c3fc82927c9",
+      "size": 8665
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp04-keyboard-response-pre.ppm",
+      "sha256": "e656b7809bc67632ad67cf7a174b03f31cb529511708d752d6173e815c2027c8",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp04-keyboard-response-samples/sample-001-2026-11-02T045141.122967318Z.png",
+      "sha256": "f1080e7fe0a367408f905392aaed193d3262433634976c7066e708f2414d3bdd",
+      "size": 8666
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp04-keyboard-response-samples/sample-002-2026-11-02T045141.260822237Z.png",
+      "sha256": "7145513407be0c153408704d90d221a73b73663bf4d98054e6bf56a34bf2b04f",
+      "size": 8666
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp04-keyboard-response.png",
+      "sha256": "7145513407be0c153408704d90d221a73b73663bf4d98054e6bf56a34bf2b04f",
+      "size": 8666
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp04-keyboard-response.ppm",
+      "sha256": "84f989b5cb4a15e3d2efccdba739d43f1e7c4cccda39c7f7442e32b944786519",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp05-mouse-response-pre.png",
+      "sha256": "927f54cb9d8bfed5a15d3471943f211bdd44705aaaffa7ebacecc62b8976814b",
+      "size": 8422
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp05-mouse-response-pre.ppm",
+      "sha256": "d824c2dff0498eb60282eaad8298f84b3c28af7b93cb6cdaf2e8fd4cb17af824",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp05-mouse-response-samples/sample-001-2026-11-02T045142.691443005Z.png",
+      "sha256": "1cb6b15f891ef081843d8bc6d05c677d04d6c872c4b528d33fe7a9f06343f58e",
+      "size": 8369
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp05-mouse-response-samples/sample-002-2026-11-02T045142.836239751Z.png",
+      "sha256": "a1fb8ee1970404ea3e9e81846711ff2de9ebdcb3535256be7c844318f3f6b4e0",
+      "size": 8423
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp05-mouse-response.png",
+      "sha256": "a1fb8ee1970404ea3e9e81846711ff2de9ebdcb3535256be7c844318f3f6b4e0",
+      "size": 8423
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp05-mouse-response.ppm",
+      "sha256": "f1b8bf5161947941dc689195556b042d8ee999e0796533ecd70fdb23c2602db8",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06a-focused-pre.png",
+      "sha256": "54ee3f2499305251ebcb1506504906a75c0a113dd547540acb40b728cfabc4ae",
+      "size": 8676
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp06a-focused-pre.ppm",
+      "sha256": "df872858814b7ada797d471bceafdd3549510a22d1169145fea649083252a4e4",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06a-focused-samples/sample-001-2026-11-02T045146.847018676Z.png",
+      "sha256": "37a4574ec6c657f119b5d511195da5c84c9213d1de6930e009664fdba0acce7e",
+      "size": 8676
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06a-focused-samples/sample-002-2026-11-02T045146.987640173Z.png",
+      "sha256": "295a3c5e8ee4a8a5cc9fcbe89e3465a187d6b4a42909f0f9a55303fcd3d51e6c",
+      "size": 8794
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06a-focused.png",
+      "sha256": "295a3c5e8ee4a8a5cc9fcbe89e3465a187d6b4a42909f0f9a55303fcd3d51e6c",
+      "size": 8794
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp06a-focused.ppm",
+      "sha256": "68fec7f6023d7b3f4f12acb4e11053b9747c7f66d0f8faeab620df9af5bb03e5",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06a-two-instances.png",
+      "sha256": "ce962ca67bd0cb948bd6073f845d7023db101db6a4185ec35a854a715f16b4fc",
+      "size": 8930
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp06a-two-instances.ppm",
+      "sha256": "1a308c65bf3277a9999afbae9c7c183caecb31a0d60071c2e2361a06dbe923a3",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06b-focused-pre.png",
+      "sha256": "6ef6d0a29144202d83295adceca10f7d12354e841178c4de83a6083b76709288",
+      "size": 8969
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp06b-focused-pre.ppm",
+      "sha256": "908b437da4102741d2d568ff7b6f6832c6b4129dba381f2191e4152fff60c005",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06b-focused-samples/sample-001-2026-11-02T045147.224615710Z.png",
+      "sha256": "9c762671493ca696885ec785bf8f0daf46e15800983e7be57fdc085163287962",
+      "size": 8924
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06b-focused-samples/sample-002-2026-11-02T045147.359015874Z.png",
+      "sha256": "6874bbb893d2f3b12430e181384b7363316e14f15b950137a84f0c7e13ec3bb5",
+      "size": 8840
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp06b-focused.png",
+      "sha256": "6874bbb893d2f3b12430e181384b7363316e14f15b950137a84f0c7e13ec3bb5",
+      "size": 8840
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp06b-focused.ppm",
+      "sha256": "46ea75e995d54062a18ca86dd15872fec172706f54b5fb289e934293b2140893",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp07-desktop-restored.png",
+      "sha256": "458ea3ec9e4347d881da775b9da21fc5c285b2745148b430b04a4945825551e1",
+      "size": 5800
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp07-desktop-restored.ppm",
+      "sha256": "082ea975466833b963a84348b9dc105bbb71bbfe422e930c8a96f4b4f4373bba",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp08-final-demonstration-pre.png",
+      "sha256": "5bc4b7b75398e8da15981e32b45a82662638c095828160f8dd8a233ce383fc2b",
+      "size": 8452
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp08-final-demonstration-pre.ppm",
+      "sha256": "1d14061171a32be86a02e7f24578985ae7da7db2f3475d773cc191fbf4cc8c4a",
+      "size": 1440015
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp08-final-demonstration-samples/sample-001-2026-11-02T045149.354311110Z.png",
+      "sha256": "e63d7f5fe26ff846df81e8cabec8ccf297105f23e4aec0158b072e7a4ef8345c",
+      "size": 8426
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp08-final-demonstration-samples/sample-002-2026-11-02T045149.506209849Z.png",
+      "sha256": "3a1bac4824031652ee607178141ad988fc29df9859cccaf609bfec212f2e6d26",
+      "size": 8428
+    },
+    {
+      "category": "lossless QEMU screenshot PNG; per-capture UTC is recorded in evidence.json/probe filenames where available",
+      "path": "guest-run-retry2/shots/cp08-final-demonstration.png",
+      "sha256": "3a1bac4824031652ee607178141ad988fc29df9859cccaf609bfec212f2e6d26",
+      "size": 8428
+    },
+    {
+      "category": "lossless-PPM-restored from saved PNG; checked against its original recorded PPM SHA-256",
+      "path": "guest-run-retry2/shots/cp08-final-demonstration.ppm",
+      "sha256": "43316f413919dde32feb78183d7ebba6e2cd594615c0f5c7e53e2873eef78d2e",
+      "size": 1440015
+    },
+    {
+      "category": "harness-captured-guest-serial",
+      "path": "guest-run-retry2/v1-guest-serial.log",
+      "sha256": "a1be932f578eb322129e11a734d58afab16d18abfa06af17e1a6d55fd3630bdd",
+      "size": 262729
+    }
+  ],
+  "png_count": 44,
+  "ppm_count": 26,
+  "raw_serial_comparison": {
+    "byte_identical": false,
+    "harness_serial": {
+      "path": "guest-run/v1-guest-serial.log",
+      "sha256": "796ff60f3f79662755187afd54bd1be87a3d97bf5780e5713bd34c87d77fd930",
+      "size": 202041
+    },
+    "note": "The raw QEMU proof-boot serial and harness-captured serial are retained separately; the content mismatch is preserved and is not normalized or explained without supporting evidence.",
+    "raw_proof_boot": {
+      "path": "guest-run/raw-boots/proof-boot/serial.log",
+      "sha256": "9c9fed631d862d99d2641bc93658a125f45d8b5813181e4de0108ca94c526f88",
+      "size": 203866
+    }
+  },
+  "recorded_at_utc": "2026-11-02T13:51:09Z",
+  "schema": "arena.v1.guest-proof-raw-evidence-inventory/v2",
+  "supersedes": "raw-evidence-inventory-r1.json (summary-only; r2 adds exact per-file records)",
+  "total_bytes": 72270847
+}

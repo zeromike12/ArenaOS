@@ -1,0 +1,50 @@
+stage                 result   finished
+build                 PASS     2026-10-31T21:37:21Z
+env                   PASS     2026-10-31T21:37:57Z
+controls              PASS     2026-10-31T21:38:03Z
+aggregate-controls    PASS     2026-10-31T21:38:04Z
+guest-gcc             FAIL     2026-10-31T21:38:50Z
+guest-clang           PASS     2026-10-31T21:42:03Z
+package               FAIL     2026-11-01T00:22:54Z
+verify                FAIL     2026-11-01T00:22:55Z
+cycles                PASS     2026-10-31T21:45:19Z
+refusals-gcc          PASS     2026-10-31T21:39:20Z
+refusals-clang        PASS     2026-10-31T21:42:28Z
+stability             PASS     2026-11-01T00:22:54Z
+regression            FAIL     2026-11-01T00:04:23Z
+layout-integration-gcc PASS     2026-10-31T21:41:10Z
+layout-integration-clang PASS     2026-10-31T21:44:17Z
+phase15               PASS     2026-10-31T21:45:47Z
+
+requirement  result     coverage
+1            FAIL       Acknowledgment and visible response through production logic
+             detail: invalid guest-gcc
+2            FAIL       Successful checkpoint frames published and verified
+             detail: invalid guest-gcc, package, verify
+3            PASS       Cleanup returns enforceable resources to baseline
+4            PASS       Guest refusal matrix under both compilers
+4b           OPEN       Real stale/foreign capability case or M-recorded waiver
+             detail: foreign-identity remains an IDENTITY validator test over mutated bytes; no real stale/foreign capability or M-WAIVER.json is recorded
+5            PASS       Final-artifact runtime stability (100/100 boots)
+5b           PASS       Canonical protected build and reproducible artifact identity
+5c           PASS       ESP embedded EFI identity
+5d           FAIL       Formal 121-suite regression on the candidate
+             detail: invalid regression
+5e           PASS       C layout boundary predicates (exact-grant proof is separate)
+5f           PASS       Real-grant C integration: 301 accepted, 300 refused before map/write/window/damage
+5g           PASS       Phase-15 FP/SIMD/exception regression on the final EFI/ESP
+6            PASS       Gate controls prevent partial or unsupported qualification claims
+7            FAIL       Review evidence package sealed and fresh-extraction verified
+             detail: invalid package, verify
+
+OPEN LIMITATION: foreign-identity is an IDENTITY-class validator test over mutated identity bytes, not a real stale/foreign capability launch. No M-recorded waiver is present in this gate evidence.
+
+V1 GATE (full): FAIL
+  - guest-gcc: stage failed (exit 1)
+  - package: stage failed (exit 1)
+  - verify: stage failed (exit 2)
+  - regression: stage failed (exit 1)
+  - requirement 1: invalid guest-gcc
+  - requirement 2: invalid guest-gcc, package, verify
+  - requirement 5d: invalid regression
+  - requirement 7: invalid package, verify

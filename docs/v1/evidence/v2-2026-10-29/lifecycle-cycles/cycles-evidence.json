@@ -1,0 +1,469 @@
+{
+  "label": "v1-cycles",
+  "cycles_requested": 10,
+  "baseline": {
+    "line": 1111,
+    "malformed": false,
+    "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+    "total-frames": 114275,
+    "threads": 16,
+    "endpoints": 12,
+    "notifications": 51,
+    "timers": 0,
+    "vm-regions": 0,
+    "vm-committed-pages": 0,
+    "sync-domains": 0,
+    "sync-keys": 0,
+    "sync-waiters": 0,
+    "app-instances": 0,
+    "windows": 0,
+    "helpers": 0,
+    "stream-sets": 0,
+    "max-windows-per-instance": 0
+  },
+  "records": [
+    {
+      "cycle": 1,
+      "result": "PASS",
+      "detail": "surface=159 exited=0 settled=0/0 visual_gone=True",
+      "surface": 159,
+      "identify_line": 1656,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 1672,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 1669
+        },
+        "settlement": {
+          "line": 1675,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 2,
+      "result": "PASS",
+      "detail": "surface=164 exited=0 settled=0/0 visual_gone=True",
+      "surface": 164,
+      "identify_line": 1902,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 1918,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 1915
+        },
+        "settlement": {
+          "line": 1921,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 3,
+      "result": "PASS",
+      "detail": "surface=169 exited=0 settled=0/0 visual_gone=True",
+      "surface": 169,
+      "identify_line": 2146,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 2162,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 2159
+        },
+        "settlement": {
+          "line": 2165,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 4,
+      "result": "PASS",
+      "detail": "surface=174 exited=0 settled=0/0 visual_gone=True",
+      "surface": 174,
+      "identify_line": 2392,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 2408,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 2405
+        },
+        "settlement": {
+          "line": 2411,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 5,
+      "result": "PASS",
+      "detail": "surface=179 exited=0 settled=0/0 visual_gone=True",
+      "surface": 179,
+      "identify_line": 2636,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 2652,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 2649
+        },
+        "settlement": {
+          "line": 2655,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 6,
+      "result": "PASS",
+      "detail": "surface=184 exited=0 settled=0/0 visual_gone=True",
+      "surface": 184,
+      "identify_line": 2882,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 2898,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 2895
+        },
+        "settlement": {
+          "line": 2901,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 7,
+      "result": "PASS",
+      "detail": "surface=189 exited=0 settled=0/0 visual_gone=True",
+      "surface": 189,
+      "identify_line": 3126,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 3142,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 3139
+        },
+        "settlement": {
+          "line": 3145,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 8,
+      "result": "PASS",
+      "detail": "surface=194 exited=0 settled=0/0 visual_gone=True",
+      "surface": 194,
+      "identify_line": 3372,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 3388,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 3385
+        },
+        "settlement": {
+          "line": 3391,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 9,
+      "result": "PASS",
+      "detail": "surface=199 exited=0 settled=0/0 visual_gone=True",
+      "surface": 199,
+      "identify_line": 3616,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 3632,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 3629
+        },
+        "settlement": {
+          "line": 3635,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    },
+    {
+      "cycle": 10,
+      "result": "PASS",
+      "detail": "surface=204 exited=0 settled=0/0 visual_gone=True",
+      "surface": 204,
+      "identify_line": 3862,
+      "rect": [
+        70,
+        60,
+        640,
+        480
+      ],
+      "cleanup": {
+        "retired": {
+          "retired": true,
+          "retire_line": 3878,
+          "exit_ok": true,
+          "exit_status": 0,
+          "exit_line": 3875
+        },
+        "settlement": {
+          "line": 3881,
+          "malformed": false,
+          "raw": "114275/16/12/51/0/0/0/0/0/0/0/0/0/0/0",
+          "total-frames": 114275,
+          "threads": 16,
+          "endpoints": 12,
+          "notifications": 51,
+          "timers": 0,
+          "vm-regions": 0,
+          "vm-committed-pages": 0,
+          "sync-domains": 0,
+          "sync-keys": 0,
+          "sync-waiters": 0,
+          "app-instances": 0,
+          "windows": 0,
+          "helpers": 0,
+          "stream-sets": 0,
+          "max-windows-per-instance": 0
+        },
+        "matches_baseline": true
+      },
+      "visual_gone": true
+    }
+  ],
+  "pass": true,
+  "serial_sha256": "e1918327d7f6bc1f0fc63f47c2b3d7bfe96aaf13f1419924b3f3b475cc366159",
+  "rc": 0
+}

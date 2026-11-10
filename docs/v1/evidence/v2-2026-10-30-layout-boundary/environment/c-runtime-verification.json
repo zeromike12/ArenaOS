@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-10-30T17:07:09.191158+00:00",
+  "host_suite": {
+    "result": "PASS",
+    "checks": 1767
+  },
+  "gcc_guest_refusals": {
+    "elf_path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-refusals-gcc.elf",
+    "elf_sha256": "c7d276cb02db40283c85ea6a490785b3e4bf430416ccbddedbcaa608cccdb266",
+    "loader_failures": [],
+    "simd_or_x87_count": 0,
+    "instructions": 6827
+  },
+  "clang_guest_refusals": {
+    "elf_path": "/home/user/ArenaOS/experiments/c-runtime/build/guest-clang/c-gfx-refusals-clang.elf",
+    "elf_sha256": "2ca873dd58d9bbe4478f6c78853070bf8ed1d3e2d5fd018f620c837079d62661",
+    "loader_failures": [],
+    "simd_or_x87_count": 0,
+    "instructions": 12157
+  },
+  "compiler_versions": {
+    "gcc": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+    "zig": "0.17.0",
+    "clang_via_zig": "clang version 22.1.8"
+  },
+  "focused_guest_proof_controls": "35/35 PASS",
+  "requirement_aggregate_controls": "10/10 PASS"
+}
