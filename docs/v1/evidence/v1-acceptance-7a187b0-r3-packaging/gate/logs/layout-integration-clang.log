@@ -1,0 +1,8 @@
+
+=== layout-integration-clang ===
+/home/user/.local/lib/python3.11/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/layout-301.apb1 (57240 bytes)
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/layout-300.apb1 (57240 bytes)
+[v1-layout-integration] compiler=clang pass=True rc=0 evidence=docs/v1/evidence/v1-acceptance-7a187b0-r3/layout-integration-clang/integration-evidence.json
+[gate-stage] layout-integration-clang: exit 0 -> build/v1-gate-7a187b0-r3/receipts/layout-integration-clang.json

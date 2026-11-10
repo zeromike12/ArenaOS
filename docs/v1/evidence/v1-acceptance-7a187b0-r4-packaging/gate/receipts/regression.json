@@ -1,0 +1,30 @@
+{
+  "stage": "regression",
+  "exit": 0,
+  "evidence_dir": null,
+  "qualified": true,
+  "notes": [],
+  "argv": [
+    "bash",
+    "tools/v1_gate_regression_restore.sh",
+    "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+    "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+    "build/v1-gate-7a187b0-r4/regression-restore-build.log"
+  ],
+  "started_epoch": 1794327242.857628,
+  "finished_epoch": 1794334786.3569014,
+  "started_utc": "2026-11-10T16:14:02Z",
+  "finished_utc": "2026-11-10T18:19:46Z",
+  "source_commit": "7a187b06099013d280c004116971ff1c926bfb7b",
+  "code_fingerprint": "9ab1ebaf85c06023cce66bf9c1ae01fb18491a27b6659cb43e843a54f04da2c8",
+  "dirty_paths": [],
+  "newest_tracked": {
+    "path": "kernel/kernel/src/arch/x86_64/syscall.rs",
+    "mtime": 1794334750.3874886
+  },
+  "efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+  "esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+  "evidence_package_sha256": "MISSING",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

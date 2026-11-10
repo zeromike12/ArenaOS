@@ -1,0 +1,8 @@
+cd /workspace/ArenaOS
+source tools/dev-env/v1-env.sh
+export CARGO_NET_OFFLINE=true
+export V1_GATE_MODE=guest
+export V1_GATE_EVIDENCE=docs/v1/evidence/v1-acceptance-7a187b0-r2
+export V1_GATE_LOGS=build/v1-gate-7a187b0-r2
+export V1_GATE_RECEIPTS=build/v1-gate-7a187b0-r2/receipts
+bash tools/v1_gate.sh

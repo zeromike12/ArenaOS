@@ -1,0 +1,27 @@
+{
+  "stage": "build",
+  "exit": 1,
+  "evidence_dir": null,
+  "qualified": false,
+  "notes": [
+    "canonical build refused; no guest tests or dev fallback were run",
+    "see build/v1-gate-7a187b0-r2/build.log"
+  ],
+  "argv": [],
+  "started_epoch": 1794325945.0679903,
+  "finished_epoch": 1794325945.0679908,
+  "started_utc": "2026-11-10T15:52:25Z",
+  "finished_utc": "2026-11-10T15:52:25Z",
+  "source_commit": "7a187b06099013d280c004116971ff1c926bfb7b",
+  "code_fingerprint": "9ab1ebaf85c06023cce66bf9c1ae01fb18491a27b6659cb43e843a54f04da2c8",
+  "dirty_paths": [],
+  "newest_tracked": {
+    "path": "userspace/desktop/src/bin/desktop.rs",
+    "mtime": 1794325145.6709
+  },
+  "efi_sha256": "MISSING",
+  "esp_sha256": "MISSING",
+  "evidence_package_sha256": "MISSING",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

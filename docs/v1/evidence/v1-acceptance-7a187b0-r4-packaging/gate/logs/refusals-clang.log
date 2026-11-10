@@ -1,0 +1,7 @@
+
+=== refusals-clang ===
+[v1-refusals] built APB1 docs/v1/evidence/v1-acceptance-7a187b0-r4/refusals-clang/c-gfx-refusals.apb1 (66032 bytes, sha256 7853b1626b0806e8dd09d083df296e2e41175f53e0bcac62816ce1060d41809e) with clang from ELF /workspace/ArenaOS/experiments/c-runtime/build/guest-clang/c-gfx-refusals-clang.elf (sha256 78b7cee9e6b47ab07c4bc5491e7e988d73de4fc0afb624d46db0684aca9f8fcf)
+[v1-refusals] run directory: docs/v1/evidence/v1-acceptance-7a187b0-r4/refusals-clang
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (66032 bytes)
+[v1-refusals] rc=0 dt=12.6s cases=26 -> PASS
+[gate-stage] refusals-clang: exit 0 -> build/v1-gate-7a187b0-r4/receipts/refusals-clang.json

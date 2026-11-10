@@ -1,0 +1,4 @@
+
+=== package ===
+[evidence] packaged 155 files, 27051453 bytes -> /workspace/ArenaOS/docs/v1/evidence/v1-acceptance-7a187b0-r3.tar.gz (2770734 bytes, sha256 471ab93f67a045bf790bdb07218d64fa396a67f4af49bcc5c04b6c4c273392d5)
+[gate-stage] package: exit 0 -> build/v1-gate-7a187b0-r3/receipts/package.json

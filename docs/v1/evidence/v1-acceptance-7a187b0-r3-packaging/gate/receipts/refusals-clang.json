@@ -1,0 +1,30 @@
+{
+  "stage": "refusals-clang",
+  "exit": 0,
+  "evidence_dir": "docs/v1/evidence/v1-acceptance-7a187b0-r3/refusals-clang",
+  "qualified": true,
+  "notes": [],
+  "argv": [
+    "env",
+    "V1_EVIDENCE_DIR=docs/v1/evidence/v1-acceptance-7a187b0-r3/refusals-clang",
+    "V1_CC=clang",
+    "python3",
+    "tools/v1_refusals.py"
+  ],
+  "started_epoch": 1794326329.7043798,
+  "finished_epoch": 1794326351.327887,
+  "started_utc": "2026-11-10T15:58:49Z",
+  "finished_utc": "2026-11-10T15:59:11Z",
+  "source_commit": "7a187b06099013d280c004116971ff1c926bfb7b",
+  "code_fingerprint": "9ab1ebaf85c06023cce66bf9c1ae01fb18491a27b6659cb43e843a54f04da2c8",
+  "dirty_paths": [],
+  "newest_tracked": {
+    "path": "userspace/desktop/src/bin/desktop.rs",
+    "mtime": 1794325145.6709
+  },
+  "efi_sha256": "b2fc4a295bfa5ef33c141f2fcfd099af5a761c25250592371996a02d6eba377a",
+  "esp_sha256": "a2f9821206c8efb22f13a6b3bcb92d5c6bd30b4bd60cef9bf3673b6280950551",
+  "evidence_package_sha256": "MISSING",
+  "host": "e2b.local",
+  "python": "3.11.2"
+}

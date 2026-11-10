@@ -1,0 +1,7 @@
+1a1421f6e9802ededf4ada44eb721371209277132cf4adf614ff02ea46cd34e1  ./README.md
+9923a8d13aa9512bd4cb4d477de24d296539a87e5ddc055c93aa18ceb1c84ada  ./build-receipt.json
+798e280aba76b69a17fd131fc3006b11c529ea263349991d0359834c4c5b521c  ./canonical-build.log
+eb3c1a99c3845bd6fc7d90c6edd9c9cf678d5e61cd2d73aea14d02f17a377d06  ./commands.txt
+29cf7a165ec18f873970bea19df8c9b6093448b1ea0b7d1568861ef0a62d6dca  ./gate-runner.stdout.log
+a65f3a1e9bc29158b509e5c267cbbacf53ae6ba0a39b2b5972f1cad56e086c05  ./generated-phase14-pie.elf
+1404f97d2a41bae8741ee16a305fe2aaa1f4e0af427e873dbae1aa7beb15b8dd  ./identity.txt

@@ -1,0 +1,47 @@
+ARENA V1 BOUNDARY EVIDENCE PUBLICATION
+archive: v1-acceptance-7a187b0-r4.tar.gz
+external checksum:
+5ec849d1951fd70031ff93707912b892fdf46e459fb94ab037727d1d94ec2ee4  v1-acceptance-7a187b0-r4.tar.gz
+fresh-retrieval verification:
+[evidence] files checked: 208, problems: 0
+[gate-stage] verify: exit 0 -> build/v1-gate-7a187b0-r4/receipts/verify.json
+final aggregate:
+stage                 result   finished
+build                 PASS     2026-11-10T16:08:57Z
+env                   PASS     2026-11-10T16:09:20Z
+controls              PASS     2026-11-10T16:09:25Z
+aggregate-controls    PASS     2026-11-10T16:09:26Z
+guest-gcc             PASS     2026-11-10T16:10:03Z
+guest-clang           PASS     2026-11-10T16:11:51Z
+package               PASS     2026-11-10T18:37:40Z
+verify                PASS     2026-11-10T18:37:41Z
+cycles                PASS     2026-11-10T16:13:45Z
+refusals-gcc          PASS     2026-11-10T16:10:29Z
+refusals-clang        PASS     2026-11-10T16:12:14Z
+stability             PASS     2026-11-10T18:37:37Z
+regression            PASS     2026-11-10T18:19:46Z
+layout-integration-gcc PASS     2026-11-10T16:11:17Z
+layout-integration-clang PASS     2026-11-10T16:13:00Z
+phase15               PASS     2026-11-10T16:14:02Z
+
+requirement  result     coverage
+1            PASS       Acknowledgment and visible response through production logic
+2            PASS       Successful checkpoint frames published and verified
+3            PASS       Cleanup returns enforceable resources to baseline
+4            PASS       Guest refusal matrix under both compilers
+4b           OPEN       Real stale/foreign capability case or M-recorded waiver
+             detail: the live same-process StandardStreamSet identity and synthetic ID control are rejected, but no other-session surface fixture or M-WAIVER.json is recorded
+5            PASS       Final-artifact runtime stability (100/100 boots)
+5b           PASS       Canonical protected build and reproducible artifact identity
+5c           PASS       ESP embedded EFI identity
+5d           PASS       Formal 121-suite regression on the candidate
+5e           PASS       C layout boundary predicates (exact-grant proof is separate)
+5f           PASS       Real-grant C integration: 301 accepted, 300 refused before map/write/window/damage
+5g           PASS       Phase-15 FP/SIMD/exception regression on the final EFI/ESP
+6            PASS       Gate controls prevent partial or unsupported qualification claims
+7            PASS       Review evidence package sealed and fresh-extraction verified
+
+OPEN LIMITATION: the live StandardStreamSet is rejected as a distinct same-process SharedRegion, but no other-session surface or stale-capability fixture was presented. No M-recorded waiver is present.
+
+V1 QUALIFICATION: BLOCKED — required coverage remains OPEN or needs M's recorded waiver:
+  - requirement 4b: the live same-process StandardStreamSet identity and synthetic ID control are rejected, but no other-session surface fixture or M-WAIVER.json is recorded

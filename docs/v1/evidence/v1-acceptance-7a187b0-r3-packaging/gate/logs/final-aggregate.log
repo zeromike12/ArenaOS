@@ -1,0 +1,36 @@
+stage                 result   finished
+build                 PASS     2026-11-10T15:55:52Z
+env                   PASS     2026-11-10T15:56:17Z
+controls              PASS     2026-11-10T15:56:22Z
+aggregate-controls    PASS     2026-11-10T15:56:23Z
+guest-gcc             PASS     2026-11-10T15:56:59Z
+guest-clang           PASS     2026-11-10T15:58:49Z
+refusals-gcc          PASS     2026-11-10T15:57:24Z
+refusals-clang        PASS     2026-11-10T15:59:11Z
+layout-integration-gcc PASS     2026-11-10T15:58:13Z
+layout-integration-clang PASS     2026-11-10T15:59:56Z
+cycles                PASS     2026-11-10T16:00:41Z
+package               PASS     2026-11-10T16:00:43Z
+verify                PASS     2026-11-10T16:00:44Z
+
+requirement  result     coverage
+1            PASS       Acknowledgment and visible response through production logic
+2            PASS       Successful checkpoint frames published and verified
+3            PASS       Cleanup returns enforceable resources to baseline
+4            PASS       Guest refusal matrix under both compilers
+4b           OPEN       Real stale/foreign capability case or M-recorded waiver
+             detail: the live same-process StandardStreamSet identity and synthetic ID control are rejected, but no other-session surface fixture or M-WAIVER.json is recorded
+5            NOT RUN    Final-artifact runtime stability (100/100 boots)
+5b           PASS       Canonical protected build and reproducible artifact identity
+5c           PASS       ESP embedded EFI identity
+5d           NOT RUN    Formal 121-suite regression on the candidate
+5e           PASS       C layout boundary predicates (exact-grant proof is separate)
+5f           PASS       Real-grant C integration: 301 accepted, 300 refused before map/write/window/damage
+5g           NOT RUN    Phase-15 FP/SIMD/exception regression on the final EFI/ESP
+6            PASS       Gate controls prevent partial or unsupported qualification claims
+7            PASS       Review evidence package sealed and fresh-extraction verified
+
+OPEN LIMITATION: the live StandardStreamSet is rejected as a distinct same-process SharedRegion, but no other-session surface or stale-capability fixture was presented. No M-recorded waiver is present.
+
+V1 GATE (guest): PASS — PARTIAL. This is not a V1 qualification result.
+  Not run (required for full qualification): stability (runtime boot-stability loop), regression (formal regression suite (tools/run_tests.sh)), phase15 (Phase-15 guest validation on the final EFI/ESP)

@@ -1,0 +1,35 @@
+
+=== guest-gcc ===
+[v1-guest-proof] built APB1 /workspace/ArenaOS/docs/v1/evidence/v1-acceptance-7a187b0-r3/guest-gcc/c-gfx-app.apb1 (40472 bytes, sha256 e54c59ee2a7386557105d28688d6b6438343f33e29a43f0213f030bfacbd9889) with gcc from ELF /workspace/ArenaOS/experiments/c-runtime/build/guest-gcc/c-gfx-app-gcc.elf (sha256 cf17cf404dbe2c69b14b0be2a9084d2bef53417a3807e184e2a85308b7e8a1bc, simd/x87=0)
+[v1-guest-proof] run directory: /workspace/ArenaOS/docs/v1/evidence/v1-acceptance-7a187b0-r3/guest-gcc
+[v1-guest-proof] source commit: 7a187b06099013d280c004116971ff1c926bfb7b
+[v1-guest-proof] working tree dirty: False
+[v1-guest-proof] AFS2 formatted by filesd (boot 1, 8.6s)
+[v1-guest-proof] APB1 staged at /Users/user/Desktop/c-gfx-app.apb1 (40472 bytes)
+[v1-guest-proof] checkpoint 1 PASS: launch-ready Desktop desktop frame presented; app-instances=0 windows=0
+[v1-guest-proof] checkpoint 2 PASS: APB1 install receipt (protected installer) protected installer installed signed version=42
+[v1-guest-proof] primed instance 159 at (70, 60, 640, 480); frame warm-up 5 of at most 32; settled receipt 112781/15/15/3/472/5/47
+[v1-guest-proof] checkpoint 3 PASS: first native C window (Identify -> create -> render) Identify surface=164 -> create -> rendered window (70, 60, 640, 480); click acknowledged by same instance
+[v1-guest-proof] input cp04-keyboard-response: PASS; 2 timestamped samples
+[v1-guest-proof] checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) KEY ack surface=164 counter 1->3 + flash in the window, frame f1b8bf516194
+[v1-guest-proof] input cp05-mouse-response: PASS; 3 timestamped samples
+[v1-guest-proof] checkpoint 5 PASS: mouse response (instance-specific acknowledgment) POINTER ack surface=164 counter 3->4 + flash in the window, frame e5ffbacb47d2
+[v1-guest-proof] input cp06a-focused: PASS; 2 timestamped samples
+[v1-guest-proof] input cp06b-focused: PASS; 2 timestamped samples
+[v1-guest-proof] checkpoint 6 PASS: two concurrent instances: focus/input isolation, both directions A(164) key: ack {'before': 9, 'after': 10, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=7b2b2d7e538c; B(169) key: ack {'before': 3, 'after': 5, 'cross_acks': [], 'fresh_acks': 1} visual=True frame=60578175073d
+[v1-guest-proof] checkpoint 7 PASS: window removal: retirements, exits, settlement, visual removal retired=['164', '169'] exits={'164': 0, '169': 0} all 21 resource fields settled to baseline visual_rects=0
+[v1-guest-proof] input cp08-final-demonstration: PASS; 2 timestamped samples
+[v1-guest-proof] checkpoint 8 PASS: final V1 demonstration final instance surface=174 placed (70, 60, 640, 480) bound=174 key ack 1->3 + visible flash, frame 17354e55760f
+[v1-guest-proof] rc=0 dt=23.5s serial -> /workspace/ArenaOS/docs/v1/evidence/v1-acceptance-7a187b0-r3/guest-gcc/v1-guest-serial.log
+/home/user/.local/lib/python3.11/site-packages/fs/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+  checkpoint 1 PASS: launch-ready Desktop (shots/cp01-launch-ready-desktop.png)
+  checkpoint 2 PASS: APB1 install receipt (protected installer) (install-ack.json)
+  checkpoint 3 PASS: first native C window (Identify -> create -> render) (shots/cp03-first-native-c-window.png)
+  checkpoint 4 PASS: keyboard response (instance-specific acknowledgment) (shots/cp04-keyboard-response.png)
+  checkpoint 5 PASS: mouse response (instance-specific acknowledgment) (shots/cp05-mouse-response.png)
+  checkpoint 6 PASS: two concurrent instances: focus/input isolation, both directions (shots/cp06a-focused.png, shots/cp06b-focused.png)
+  checkpoint 7 PASS: window removal: retirements, exits, settlement, visual removal (shots/cp07-desktop-restored.png)
+  checkpoint 8 PASS: final V1 demonstration (shots/cp08-final-demonstration.png)
+[v1-guest-proof] V1 GUEST PROOF PASS
+[gate-stage] guest-gcc: exit 0 -> build/v1-gate-7a187b0-r3/receipts/guest-gcc.json

@@ -1,0 +1,28 @@
+
+=== aggregate-controls ===
+test_4b_accepts_only_an_explicit_scoped_m_waiver_fixture (__main__.AggregateRequirementTests.test_4b_accepts_only_an_explicit_scoped_m_waiver_fixture) ... ok
+test_4b_does_not_accept_a_waiver_not_recorded_by_m (__main__.AggregateRequirementTests.test_4b_does_not_accept_a_waiver_not_recorded_by_m) ... ok
+test_4b_rejects_a_candidate_claimed_to_be_cross_session (__main__.AggregateRequirementTests.test_4b_rejects_a_candidate_claimed_to_be_cross_session) ... ok
+test_4b_remains_open_without_cross_session_case_or_m_waiver (__main__.AggregateRequirementTests.test_4b_remains_open_without_cross_session_case_or_m_waiver) ... ok
+test_4b_requires_structured_identify_cap_none_case (__main__.AggregateRequirementTests.test_4b_requires_structured_identify_cap_none_case) ... ok
+test_4b_structured_classification_does_not_depend_on_description_prose (__main__.AggregateRequirementTests.test_4b_structured_classification_does_not_depend_on_description_prose) ... ok
+test_5e_accepts_both_compiler_cells_with_production_policy_cases (__main__.AggregateRequirementTests.test_5e_accepts_both_compiler_cells_with_production_policy_cases) ... ok
+test_5e_rejects_a_substituted_apb1_payload (__main__.AggregateRequirementTests.test_5e_rejects_a_substituted_apb1_payload) ... ok
+test_5e_rejects_absent_300_page_refusal_even_if_stage_passed (__main__.AggregateRequirementTests.test_5e_rejects_absent_300_page_refusal_even_if_stage_passed) ... ok
+test_5e_rejects_evidence_from_a_different_source_commit (__main__.AggregateRequirementTests.test_5e_rejects_evidence_from_a_different_source_commit) ... ok
+test_5e_rejects_evidence_from_the_wrong_compiler_cell (__main__.AggregateRequirementTests.test_5e_rejects_evidence_from_the_wrong_compiler_cell) ... ok
+test_5e_rejects_kernel_misclassification_of_synthetic_policy_input (__main__.AggregateRequirementTests.test_5e_rejects_kernel_misclassification_of_synthetic_policy_input) ... ok
+test_5e_rejects_wrong_300_page_result (__main__.AggregateRequirementTests.test_5e_rejects_wrong_300_page_result) ... ok
+test_5e_requires_a_repo_local_evidence_directory (__main__.AggregateRequirementTests.test_5e_requires_a_repo_local_evidence_directory) ... ok
+test_5f_is_a_required_real_grant_stage_for_full_mode (__main__.AggregateRequirementTests.test_5f_is_a_required_real_grant_stage_for_full_mode) ... ok
+test_5f_rejects_missing_rendered_band_assertion_even_if_json_passes (__main__.AggregateRequirementTests.test_5f_rejects_missing_rendered_band_assertion_even_if_json_passes) ... ok
+test_5f_rejects_predicate_only_evidence (__main__.AggregateRequirementTests.test_5f_rejects_predicate_only_evidence) ... ok
+test_full_mode_is_derived_from_all_requirement_stages (__main__.AggregateRequirementTests.test_full_mode_is_derived_from_all_requirement_stages) ... ok
+test_full_requirement_evaluation_fails_without_5e_case_evidence (__main__.AggregateRequirementTests.test_full_requirement_evaluation_fails_without_5e_case_evidence) ... ok
+
+----------------------------------------------------------------------
+Ran 19 tests in 0.025s
+
+OK
+V1 AGGREGATE CONTROLS: 19/19 PASS
+[gate-stage] aggregate-controls: exit 0 -> build/v1-gate-7a187b0-r4/receipts/aggregate-controls.json

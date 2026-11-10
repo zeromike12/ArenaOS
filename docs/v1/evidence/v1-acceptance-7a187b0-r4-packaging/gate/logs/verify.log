@@ -1,0 +1,5 @@
+
+=== verify ===
+[evidence] extracted to a fresh directory: /tmp/v1-evidence-verify-sf5niepc/v1-acceptance-7a187b0-r4
+[evidence] files checked: 208, problems: 0
+[gate-stage] verify: exit 0 -> build/v1-gate-7a187b0-r4/receipts/verify.json
