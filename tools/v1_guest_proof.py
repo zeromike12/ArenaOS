@@ -123,6 +123,25 @@ FLASH_COLORS = (
 # (34,51,85) from app-color matches while catching exact checker pixels.
 COLOR_TOL = 8
 
+
+def _rgb_tolerance_pattern(colors, tolerance: int):
+    """Compile the exact per-channel RGB tolerance predicate for bytes regex."""
+    def channel_range(value: int) -> bytes:
+        lo, hi = max(0, value - tolerance), min(255, value + tolerance)
+        if lo == hi:
+            return b"\\x%02x" % lo
+        return b"[\\x%02x-\\x%02x]" % (lo, hi)
+
+    alternatives = [b"".join(channel_range(channel) for channel in color)
+                    for color in colors]
+    return re.compile(b"(?:" + b"|".join(alternatives) + b")")
+
+
+# The no-NumPy scanner uses the same inclusive, per-channel tolerance as
+# color_close(), but lets the C regex engine search RGB rows instead of doing
+# millions of Python-level pixel/channel comparisons for every sample.
+_FLASH_RGB_PATTERN = _rgb_tolerance_pattern(FLASH_COLORS, COLOR_TOL)
+
 CLOSE_W, TITLE_H = 28, 28
 
 # ADSK event types emitted by the guest client.
@@ -1072,6 +1091,28 @@ def valid_window_rect(rect, width: int = SCREEN_W,
             and x + w <= width and y + h <= height)
 
 
+def _has_flash_color_regex(data, x0: int, y0: int, x1: int, y1: int,
+                           width: int) -> bool:
+    """Scan RGB rows with the same tolerant, pixel-aligned predicate.
+
+    `re` searches each row in C. A match beginning between RGB triplets is
+    ignored, and the next search starts one byte later so an unaligned match
+    cannot hide an overlapping pixel-aligned one.
+    """
+    for row in range(y0, y1):
+        row_start = (row * width + x0) * 3
+        row_end = (row * width + x1) * 3
+        pos = row_start
+        while pos < row_end:
+            match = _FLASH_RGB_PATTERN.search(data, pos, row_end)
+            if match is None:
+                break
+            if (match.start() - row_start) % 3 == 0:
+                return True
+            pos = match.start() + 1
+    return False
+
+
 def has_flash_color(data: bytes, rect, width: int = SCREEN_W,
                     height: int = SCREEN_H) -> bool:
     if not isinstance(data, (bytes, bytearray)) or len(data) != width * height * 3:
@@ -1084,13 +1125,7 @@ def has_flash_color(data: bytes, rect, width: int = SCREEN_W,
     if _np is not None:
         img = _np_image(data, width, height)[y0:y1, x0:x1]
         return bool(any(_np_color_match(img, c).any() for c in FLASH_COLORS))
-    for row in range(y0, y1):
-        base = (row * width) * 3
-        for col in range(x0, x1):
-            i = base + col * 3
-            if any(color_close(data[i:i + 3], c) for c in FLASH_COLORS):
-                return True
-    return False
+    return _has_flash_color_regex(data, x0, y0, x1, y1, width)
 
 
 def await_no_flash(d, rect, settle_s: float = 2.5) -> bool:
@@ -2869,6 +2904,87 @@ def test_color_detection() -> None:
     print("[controls] color detection: PASS")
 
 
+def _reference_has_flash_color(data, rect, width, height):
+    """The original per-pixel scan, retained as a small-frame test oracle."""
+    if not isinstance(data, (bytes, bytearray)) or len(data) != width * height * 3:
+        return False
+    x, y, w, h = rect
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(x + w, width), min(y + h, height)
+    for row in range(y0, y1):
+        base = row * width * 3
+        for col in range(x0, x1):
+            i = base + col * 3
+            if any(color_close(data[i:i + 3], color) for color in FLASH_COLORS):
+                return True
+    return False
+
+
+def test_flash_color_regex_preserves_pixel_predicate() -> None:
+    import random
+
+    def check(data, rect, width, height):
+        expected = _reference_has_flash_color(data, rect, width, height)
+        actual = has_flash_color(data, rect, width, height)
+        assert actual == expected, (rect, width, height, actual, expected)
+        x, y, w, h = rect
+        bounds = (max(0, x), max(0, y), min(x + w, width), min(y + h, height))
+        direct = _has_flash_color_regex(
+            data, bounds[0], bounds[1], bounds[2], bounds[3], width)
+        assert direct == expected, (rect, width, height, direct, expected)
+
+    width, height = 19, 11
+    for color in FLASH_COLORS:
+        pixels = (
+            (bytes(color), True),
+            (bytes(max(0, channel - COLOR_TOL) for channel in color), True),
+            (bytes(min(255, channel + COLOR_TOL) for channel in color), True),
+            (bytes((color[0] + COLOR_TOL + 1, color[1], color[2])), False),
+        )
+        for rgb, expected in pixels:
+            data = bytearray(width * height * 3)
+            offset = (5 * width + 7) * 3
+            data[offset:offset + 3] = rgb
+            check(data, (7, 5, 1, 1), width, height)
+            assert has_flash_color(data, (7, 5, 1, 1), width, height) is expected
+
+    # A target-colored byte sequence between pixel boundaries is not a pixel.
+    data = bytearray(4 * 3)
+    data[1:4] = bytes(FLASH_COLORS[0])
+    check(data, (0, 0, 4, 1), 4, 1)
+    assert not has_flash_color(data, (0, 0, 4, 1), 4, 1)
+
+    # Clipping and row boundaries must not manufacture a match.
+    data = bytearray(5 * 4 * 3)
+    data[:3] = bytes(FLASH_COLORS[1])
+    check(data, (-1, -1, 2, 2), 5, 4)
+    assert has_flash_color(data, (-1, -1, 2, 2), 5, 4)
+    check(data, (1, 0, 1, 1), 5, 4)
+    split = bytearray(2 * 3)
+    split[:2] = bytes(FLASH_COLORS[0])[:2]
+    split[3] = FLASH_COLORS[0][2]
+    check(split, (0, 0, 1, 2), 1, 2)
+    assert not has_flash_color(split, (0, 0, 1, 2), 1, 2)
+
+    # Deterministic arbitrary bytes exercise aligned matches, near matches,
+    # clipped rectangles and unaligned decoys against the original predicate.
+    rng = random.Random(0xA12F)
+    for case in range(64):
+        w, h = rng.randint(1, 31), rng.randint(1, 17)
+        data = bytearray(rng.getrandbits(8) for _ in range(w * h * 3))
+        if case % 2 == 0:
+            px, py = rng.randrange(w), rng.randrange(h)
+            color = rng.choice(FLASH_COLORS)
+            delta = tuple(rng.randint(-COLOR_TOL, COLOR_TOL) for _ in range(3))
+            offset = (py * w + px) * 3
+            data[offset:offset + 3] = bytes(
+                max(0, min(255, c + d)) for c, d in zip(color, delta))
+        rect = (rng.randint(-3, w), rng.randint(-3, h),
+                rng.randint(0, w + 4), rng.randint(0, h + 4))
+        check(data, rect, w, h)
+    print("[controls] optimized flash scan matches tolerant RGB predicate: PASS")
+
+
 def test_window_rects_overlap() -> None:
     w, h = 800, 600
     data = bytearray(b"\x00" * (w * h * 3))
@@ -3668,6 +3784,7 @@ def run_focused_controls() -> int:
     checks = [
         test_ppm_parsing,
         test_color_detection,
+        test_flash_color_regex_preserves_pixel_predicate,
         test_window_rects_overlap,
         test_ack_good,
         test_ack_missing_delivery,
